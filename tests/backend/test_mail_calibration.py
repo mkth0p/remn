@@ -122,7 +122,8 @@ def test_domain_in_url_path_is_not_a_com_executable():
     engage = analyze_url("https://engage.cloud.microsoft/main/contoso.com?trk_event=x&trk_sig=y")
     assert "executable_download" not in engage["flags"]
     assert "executable_download" in analyze_url("http://x.com/a/b/setup.exe")["flags"]
-    assert "executable_download" in analyze_url("http://x.com/dl/invoice.com")["flags"]  # single label: still a .com file
+    assert "executable_download" not in analyze_url("http://x.com/u/contoso.com")["flags"]  # a tenant domain in the path
+    assert "executable_download" in analyze_url("http://x.com/dl/invoice.pdf.com")["flags"]  # double extension trick
     assert "executable_download" in analyze_url("http://x.com/dl/report.zip")["flags"]
 
 

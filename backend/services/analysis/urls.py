@@ -60,9 +60,11 @@ URL_REWRITERS = (
 EXEC_EXT_RE = re.compile(
     r"(?i)\.(exe|scr|msi|msp|bat|cmd|com|pif|vbs|vbe|js|jse|wsf|wsh|hta|ps1|jar|cpl|dll|lnk|iso|img|vhd|vhdx|zip|rar|7z|ace|cab|gz|tgz|bz2|docm|xlsm|pptm|dotm|xlam|one|xll|reg|url|chm|apk)(?:$|[?#])"
 )
-# Last path segment that is a host name (engage.cloud.microsoft/main/contoso.com, clickup
-# link-inbox redirects): ".com" there is a TLD, not a DOS executable extension.
-_DOMAIN_LIKE_SEGMENT_RE = re.compile(r"(?i)(?:^|/)[a-z0-9-]+(?:\.[a-z0-9-]+)+\.(?:com|one)$")
+# A path ending in ".com" / ".one" is almost always a host name carried in the path
+# (engage.cloud.microsoft/main/contoso.com, redirector "/u/example.com"), not a DOS executable.
+# Only the double-extension trick (invoice.pdf.com) keeps the executable_download flag.
+_TLD_LIKE_SEGMENT_RE = re.compile(r"(?i)\.(?:com|one)$")
+_DOUBLE_EXT_COM_RE = re.compile(r"(?i)\.(?:pdf|docx?|xlsx?|pptx?|zip|rar|7z|jpe?g|png|gif|txt|html?|csv)\.(?:com|one)$")
 CRED_KEYWORDS = (
     "login", "signin", "sign-in", "logon", "verify", "verification", "password", "passwd",
     "credential", "account", "secure", "update", "confirm", "auth", "sso", "webmail", "owa",
@@ -330,7 +332,7 @@ def analyze_url(url: str, text: str | None = None, source: str = "text", _depth:
     lowered = (path + "?" + query).lower()
     if "%25" in lowered or ("%" in lowered and "%" in unquote(lowered)):
         flags.append("double_encoded")
-    if EXEC_EXT_RE.search(path) and not _DOMAIN_LIKE_SEGMENT_RE.search(path):
+    if EXEC_EXT_RE.search(path) and not (_TLD_LIKE_SEGMENT_RE.search(path) and not _DOUBLE_EXT_COM_RE.search(path)):
         flags.append("executable_download")
     pq = unquote(lowered)
     if any(k in pq for k in CRED_KEYWORDS) and dom and dom not in FILE_HOSTING and "form_saas" not in flags:
