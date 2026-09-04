@@ -1,6 +1,6 @@
 from django.urls import path
 
-from api.views import ai, health, ingest, meta, reputation, store, upload
+from api.views import ai, health, ingest, meta, reputation, rules, store, upload
 
 urlpatterns = [
     path("health", health.health),
@@ -9,6 +9,9 @@ urlpatterns = [
     path("ingest/evtx", ingest.ingest_evtx),
     path("ingest/mail", ingest.ingest_mail),
     path("analyze/attachment", ingest.analyze_single_attachment),
+    # rule-format converters (Sigma -> REMN DSL)
+    path("rules/convert/sigma", rules.convert_sigma),
+    path("rules/convert/sublime", rules.convert_sublime),
     # chunked uploads (large files)
     path("upload/init", upload.init),
     path("upload/<str:upload_id>/chunk", upload.chunk),

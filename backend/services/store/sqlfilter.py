@@ -14,7 +14,8 @@ from services.parsers.mail.common import normalize_name
 from services.store.casestore import EVENT_COLUMNS, EVENT_INT, MAIL_COLUMNS, MAIL_INT, MAIL_LIST, q
 
 OPS = {"eq", "ne", "in", "nin", "contains", "not_contains", "contains_any", "contains_all", "startswith", "not_startswith",
-       "endswith", "not_endswith", "re", "not_re", "gt", "gte", "lt", "lte", "exists", "empty", "in_setting", "nin_setting"}
+       "endswith", "not_endswith", "re", "not_re", "gt", "gte", "lt", "lte", "exists", "empty", "in_setting", "nin_setting",
+       "levenshtein"}
 
 EVENT_COLS = {n for n, _ in EVENT_COLUMNS}
 MAIL_COLS = {n for n, _ in MAIL_COLUMNS}
@@ -89,6 +90,11 @@ def resolve(field_name: str, ctx: Ctx) -> Expr:
     if tbl == "mails":
         if f in MAIL_ALIASES:
             f = MAIL_ALIASES[f]
+        # sub-fields of the address lists (JSON columns): to.domain, cc.name, replyTo.domain ...
+        m_sub = re.match(r"^(to|cc|bcc|replyTo)\.(domain|name|addr)$", f)
+        if m_sub:
+            col, sub = m_sub.groups()
+            return Expr(f"CAST(json_extract({a}\"{col}\", '$[*].{sub}') AS VARCHAR[])", "list")
         if f in MAIL_COLS:
             kind = "list" if f in MAIL_LIST else ("num" if f in MAIL_INT else "text")
             return Expr(f"{a}{q(f)}", kind)
@@ -222,6 +228,14 @@ def compile_condition(field_name: str, op: str, value: Any, ctx: Ctx) -> str:
     if op in ("in_setting", "nin_setting"):
         cond = _setting_condition(sql, low, str(value), ctx)
         return f"NOT coalesce({cond}, FALSE)" if op == "nin_setting" else f"coalesce({cond}, FALSE)"
+    if op == "levenshtein":
+        # value = [needle, max_distance]: edit distance between the lower-cased field and the needle
+        if not isinstance(value, list) or len(value) != 2:
+            raise FilterError("levenshtein expects [needle, max_distance]")
+        needle, dist = _norm(value[0]), _num(value[1])
+        if dist is None:
+            raise FilterError("levenshtein max_distance must be a number")
+        return f"coalesce(levenshtein(lower(CAST({sql} AS VARCHAR)), {ctx.p(needle)}) <= {ctx.p(int(dist))}, FALSE)"
     raise FilterError(f"unsupported operator {op}")
 
 

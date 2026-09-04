@@ -1,0 +1,41 @@
+id: sigma-11111111-1111-1111-1111-111111111111
+title: Suspicious Certutil Download
+description: Detects certutil.exe used to download a file over HTTP.
+severity: high
+source: events
+attack:
+- T1105
+tags:
+- sigma
+- process_creation
+- command-and-control
+references:
+- https://example.org/certutil
+where:
+  any_of:
+  - channel|contains: sysmon
+    eventId: 1
+  - channel: Security
+    eventId: 4688
+  any_of_2:
+  - image|endswith: \certutil.exe
+  - processName|endswith: \certutil.exe
+  - originalFileName: CertUtil.exe
+  commandLine|contains_all:
+  - -urlcache
+  - http
+  not:
+    any_of:
+    - parentImage|endswith: \explorer.exe
+    - parentProcessName|endswith: \explorer.exe
+sigma:
+  id: 11111111-1111-1111-1111-111111111111
+  status: test
+  author: REMN tests
+  date: 2024/01/01
+  level: high
+  logsource:
+    category: process_creation
+    product: windows
+  falsepositives:
+  - Administrator activity

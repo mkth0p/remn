@@ -123,6 +123,35 @@ entity (user, host, IP…) with a count, instead of thousands of identical alert
    Interrupted chunked uploads resume automatically when the same file is
    dropped again.
 
+## Importing community rules (Sigma, Sublime)
+
+The Rules view has two import buttons. Both send the files to the local API,
+translate what can be expressed exactly in the REMN DSL, and store the result
+as custom rules (both engines run them). Anything that cannot be translated
+without changing what the rule detects is listed as skipped with the reason;
+approximations are listed as warnings on the rule.
+
+* **Sigma** (`import Sigma`): one `.yml` or a `.zip` of the SigmaHQ / Chainsaw
+  / Hayabusa rules folder. Windows logsources map to channel + event id
+  (Sysmon 1 and Security 4688 for `process_creation`, ...), fields map to the
+  parser's flattened columns (`Image` matches both Sysmon and 4688), unmapped
+  EventData fields are reachable as `data.<Field>`, globs become the right
+  operator or an anchored regex, `1 of x*` / `all of them` become `any_of` /
+  `all_of`. On the SigmaHQ master branch, 2,490 of 2,538 real Windows rules
+  translate; the remainder use base64 / utf16 / fieldref modifiers, placeholder
+  expansion, aggregations or IPv6 CIDRs. `POST /api/rules/convert/sigma`.
+* **Sublime Security** (`import Sublime`): one `.yml` or a `.zip` of the
+  MIT-licensed `sublime-rules` repository. The structural subset of MQL
+  translates: sender / subject / header comparisons, `strings.*` and `regex.*`
+  matchers, `any(body.links | attachments | recipients.* | headers.reply_to)`,
+  `length()` counts, `$org_domains` / `$org_vips` (case settings), the common
+  `$lists` (built-in), `strings.ilevenshtein` (new `levenshtein` operator in
+  both engines), `1 of (...)`, `all()` with negated predicates. Rules that rely
+  on Sublime-only features (ML classifiers, link analysis, logo detection,
+  sender profiles, file explosion, screenshots, nested lambdas with `..`) are
+  skipped: about 160 of 1,226 rules translate today, and every skipped rule
+  names the feature it needs. `POST /api/rules/convert/sublime`.
+
 ## Test data (public)
 
 * **EVTX**: [EVTX-ATTACK-SAMPLES](https://github.com/sbousseaden/EVTX-ATTACK-SAMPLES)

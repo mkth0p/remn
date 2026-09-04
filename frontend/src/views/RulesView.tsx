@@ -4,6 +4,7 @@ import { loadRules, parseRuleYaml, type LoadedRule } from '../data/rules'
 import { getDb } from '../db/schema'
 import { toast, useStore } from '../state/store'
 import { Badge, Modal, Spinner, Toggle } from '../components/ui'
+import { RuleImport } from '../components/RuleImport'
 import { IconAi, IconEdit, IconPlus, IconTrash } from '../components/Icons'
 import type { RuleDiag } from '../rules/engine'
 import { fmtTs } from '../util/format'
@@ -117,6 +118,8 @@ export function RulesView() {
         {lastRun && lastRun.diagnostics.some((d) => d.reason === 'missing_setting') && (
           <button className="btn sm" onClick={() => useStore.getState().setView('settings')} title="rules referencing empty settings lists are disarmed">⚠ configure Settings to arm {lastRun.diagnostics.filter((d) => d.reason === 'missing_setting').length} rule(s)</button>
         )}
+        <RuleImport kind="sigma" />
+        <RuleImport kind="sublime" />
         <button className="btn sm primary" onClick={() => setEdit({ yaml: TEMPLATE })}><IconPlus /> new rule</button>
       </div>
       <div className="row" style={{ padding: '8px 16px', borderBottom: '1px solid var(--line)', gap: 8 }}>

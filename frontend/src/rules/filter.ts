@@ -5,7 +5,7 @@
 export type Op =
   | 'eq' | 'ne' | 'in' | 'nin' | 'contains' | 'not_contains' | 'contains_any' | 'contains_all'
   | 'startswith' | 'not_startswith' | 'endswith' | 'not_endswith' | 're' | 'not_re'
-  | 'gt' | 'gte' | 'lt' | 'lte' | 'exists' | 'empty' | 'in_setting' | 'nin_setting'
+  | 'gt' | 'gte' | 'lt' | 'lte' | 'exists' | 'empty' | 'in_setting' | 'nin_setting' | 'levenshtein'
 
 export interface Condition {
   field: string
@@ -71,6 +71,20 @@ export function getPath(row: unknown, path: string): unknown {
 }
 
 const norm = (v: unknown): string => (v == null ? '' : typeof v === 'object' ? JSON.stringify(v).toLowerCase() : String(v).toLowerCase())
+
+/** Edit distance (insert / delete / substitute), used by the `levenshtein` operator. */
+export function levenshtein(a: string, b: string): number {
+  if (a === b) return 0
+  if (!a.length) return b.length
+  if (!b.length) return a.length
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i)
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i]
+    for (let j = 1; j <= b.length; j++) cur.push(Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)))
+    prev = cur
+  }
+  return prev[b.length]
+}
 
 function toArray(v: unknown): unknown[] {
   if (v === undefined || v === null) return []
@@ -246,6 +260,14 @@ export function matchCondition(row: Row, c: Condition, settings?: SettingsLike):
       return actStr.some((a) => wantStr.some((w) => a.endsWith(w)))
     case 'not_endswith':
       return !actStr.some((a) => wantStr.some((w) => a.endsWith(w)))
+    case 'levenshtein': {
+      // wanted = [needle, maxDistance]
+      if (!Array.isArray(wanted) || wanted.length !== 2 || actual == null) return false
+      const needle = norm(wanted[0])
+      const max = numeric(wanted[1])
+      if (max === null) return false
+      return actStr.some((a) => levenshtein(a, needle) <= max)
+    }
     case 're':
     case 'not_re': {
       const patterns = wantArr.map((w) => compileRegex(String(w), 'i')).filter((r): r is RegExp => !!r)
