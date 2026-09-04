@@ -1,0 +1,193 @@
+id: win-service-installed-suspicious
+title: Suspicious service installed (7045 / 4697)
+description: New service whose binary path points to a temp/user folder, a script host, cmd/powershell, a UNC path or a well-known remote-execution service (PsExec, PAExec, WinRM...).
+severity: high
+source: events
+attack: [T1543.003, T1569.002]
+tags: [persistence, lateral-movement]
+where:
+  eventId|in: [7045, 4697]
+  any_of:
+    - serviceFile|contains: ["\\temp\\", "\\tmp\\", "\\appdata\\", "\\users\\public\\", "\\programdata\\", "\\downloads\\", "\\perflogs\\", "\\recycle", "\\windows\\tasks\\", "\\windows\\debug\\"]
+    - serviceFile|contains: [cmd.exe, cmd /c, powershell, pwsh, mshta, rundll32, regsvr32, wscript, cscript, certutil, bitsadmin, msiexec /q, "%comspec%", "\\\\", "-enc", "-e ", "iex", "downloadstring", "base64", "ADMIN$", "C$"]
+    - serviceName|contains: [PSEXESVC, PAExec, csexecsvc, winexesvc, RemComSvc, BTOBTO, smbexec, mssecsvc, wmiexec, atexec, sysmon64bak, "\\\\"]
+    - serviceFile|re: "(?i)^[a-z]:\\\\[a-z0-9]{6,}\\.exe$"
+    - serviceName|re: "^[A-Za-z0-9]{8}$"
+---
+id: win-service-installed-any
+title: New service installed (inventory)
+description: Every new service installation, for review against known software deployments.
+severity: info
+source: events
+attack: [T1543.003]
+tags: [persistence, inventory]
+where:
+  eventId|in: [7045, 4697]
+---
+id: win-psexec-pattern
+title: PsExec-style remote execution (PSEXESVC on ADMIN$)
+description: Service named PSEXESVC (or similar) or a file written to ADMIN$ share followed by service creation from the same host.
+severity: high
+source: events
+attack: [T1569.002, T1021.002]
+tags: [lateral-movement]
+where:
+  any_of:
+    - { eventId|in: [7045, 4697, 7036], serviceName|contains: [PSEXESVC, PAExec, RemCom, csexec] }
+    - { eventId: 5145, shareName|contains: "ADMIN$", relativeTargetName|endswith: [.exe, .dll, .bat, .ps1] }
+group_by: [computer]
+threshold: ">= 1"
+---
+id: win-admin-share-access
+title: Administrative share access from the network (ADMIN$, C$, IPC$)
+description: Network access to administrative shares (5140/5145) by a user account from a remote address - typical lateral movement (PsExec, WMI, SMB copy).
+severity: medium
+source: events
+attack: [T1021.002]
+tags: [lateral-movement, share]
+where:
+  eventId|in: [5140, 5145]
+  shareName|contains: ["ADMIN$", "C$", "IPC$", "D$"]
+  subjectUser|not_endswith: "$"
+  ipAddress|exists: true
+  ipAddress|nin: ["127.0.0.1", "::1"]
+group_by: [ipAddress, subjectUser, computer]
+threshold: ">= 1"
+---
+id: win-scheduled-task-created
+title: Scheduled task created or updated
+description: 4698/4702 (Security) or 106/140 (TaskScheduler) - persistence or remote execution (at, schtasks /s).
+severity: medium
+source: events
+attack: [T1053.005]
+tags: [persistence]
+where:
+  any_of:
+    - { eventId|in: [4698, 4702] }
+    - { eventId|in: [106, 140], provider|contains: TaskScheduler }
+  taskName|not_contains: ["\\Microsoft\\Windows\\", "\\Microsoft\\Office\\", "OneDrive", "GoogleUpdate", "MicrosoftEdgeUpdate", "Adobe", "Mozilla", "Firefox", "Brave", "Opera", "Dropbox", "npcap", "Intel", "NVIDIA", "Lenovo", "Dell", "HP"]
+---
+id: win-scheduled-task-suspicious-content
+title: Scheduled task with suspicious command
+description: Task XML (4698/4702) references cmd, powershell, mshta, script hosts, temp folders or encoded commands.
+severity: high
+source: events
+attack: [T1053.005]
+tags: [persistence, execution]
+where:
+  eventId|in: [4698, 4702]
+  taskContent|contains: [powershell, pwsh, cmd.exe, cmd /c, mshta, wscript, cscript, rundll32, regsvr32, certutil, bitsadmin, "\\temp\\", "\\appdata\\", "\\users\\public\\", "\\programdata\\", "-enc", "-w hidden", "hidden", downloadstring, iex, "http", ".vbs", ".js", ".hta", ".ps1", ".bat"]
+---
+id: win-user-account-created
+title: User account created
+description: 4720 - new local or domain user. Backdoor accounts are a classic persistence step.
+severity: medium
+source: events
+attack: [T1136.001, T1136.002]
+tags: [persistence, account]
+where:
+  eventId: 4720
+---
+id: win-user-added-privileged-group
+title: Member added to a privileged group
+description: 4728/4732/4756 into Administrators, Domain Admins, Enterprise Admins, Schema Admins, Remote Desktop Users, Backup Operators, DnsAdmins, Account Operators...
+severity: high
+source: events
+attack: [T1098, T1078]
+tags: [persistence, privilege]
+where:
+  eventId|in: [4728, 4732, 4756]
+  groupName|contains: [Administrators, Administrateurs, "Domain Admins", "Admins du domaine", "Enterprise Admins", "Administrateurs de l'entreprise", "Schema Admins", "Remote Desktop Users", "Utilisateurs du Bureau", "Backup Operators", "Opérateurs de sauvegarde", DnsAdmins, "Account Operators", "Server Operators", "Print Operators", "Group Policy Creator", "Hyper-V Administrators", "Remote Management Users"]
+---
+id: win-account-lifecycle-short
+title: Account created then deleted shortly after
+description: A user account created (4720) and deleted (4726) within 24 hours - throwaway account.
+severity: high
+source: events
+attack: [T1136, T1070]
+tags: [persistence, cleanup]
+where:
+  eventId: 4720
+group_by: [targetUser]
+threshold: ">= 1"
+then:
+  where: { eventId: 4726 }
+  join: [targetUser]
+  within: 24h
+  severity: critical
+  title: Account created and deleted within 24 hours
+---
+id: win-password-reset-by-other
+title: Password reset by another account (4724)
+description: An account's password was reset by a different account. Review outside of helpdesk activity.
+severity: low
+source: events
+attack: [T1098]
+tags: [account]
+where:
+  eventId: 4724
+  subjectUser|not_endswith: "$"
+---
+id: win-winrm-remote-shell
+title: WinRM remote shell / PowerShell remoting
+description: WinRM 91 (shell request), 169 (auth) or PowerShell 24577 remote session opened on this host.
+severity: medium
+source: events
+attack: [T1021.006]
+tags: [lateral-movement, remote]
+where:
+  any_of:
+    - { eventId|in: [91, 168, 169], provider|contains: WinRM }
+    - { eventId: 24577, provider|contains: PowerShell }
+    - { eventId: 4104, path|contains: "wsmprovhost" }
+---
+id: win-wmi-persistence
+title: WMI event subscription (fileless persistence)
+description: Sysmon 19/20/21 or WMI-Activity 5861 - permanent event consumer/filter binding.
+severity: high
+source: events
+attack: [T1546.003]
+tags: [persistence, wmi]
+where:
+  any_of:
+    - { eventId|in: [19, 20, 21], provider|contains: Sysmon }
+    - { eventId: 5861, provider|contains: WMI-Activity }
+---
+id: win-registry-run-key
+title: Run / RunOnce registry persistence (Sysmon 13 / 4657)
+description: Value written under a Run, RunOnce, Winlogon, Services or Image File Execution Options key.
+severity: high
+source: events
+attack: [T1547.001, T1546.012]
+tags: [persistence, registry]
+where:
+  any_of:
+    - { eventId: 13, provider|contains: Sysmon }
+    - { eventId: 4657 }
+  any_of_2:
+    - targetObject|contains: ["\\CurrentVersion\\Run", "\\CurrentVersion\\RunOnce", "\\Winlogon\\Shell", "\\Winlogon\\Userinit", "\\Image File Execution Options\\", "\\CurrentVersion\\Explorer\\Shell Folders", "\\Policies\\Explorer\\Run", "\\Windows\\CurrentVersion\\Policies\\", "\\AppInit_DLLs", "\\Services\\", "\\Print\\Monitors\\", "\\SilentProcessExit\\", "\\Terminal Server\\WinStations\\RDP-Tcp\\", "\\Lsa\\Security Packages", "\\Lsa\\Notification Packages", "\\WDigest\\UseLogonCredential", "\\DisableAntiSpyware", "\\DisableRealtimeMonitoring"]
+    - objectName|contains: ["\\CurrentVersion\\Run", "\\CurrentVersion\\RunOnce", "\\Winlogon\\", "\\Image File Execution Options\\", "\\WDigest", "\\Lsa\\"]
+---
+id: win-new-firewall-rule
+title: Firewall rule added or all rules deleted
+description: 2004 (rule added), 2033 (all rules deleted) or 4946/4948 - attackers open ports for C2/RDP or wipe the firewall.
+severity: medium
+source: events
+attack: [T1562.004]
+tags: [defense-evasion, firewall]
+where:
+  any_of:
+    - { eventId|in: [2004, 2033], provider|contains: Firewall }
+    - { eventId|in: [4946, 4948] }
+---
+id: win-rdp-enabled-registry
+title: RDP enabled / hardening changed via registry
+description: fDenyTSConnections or UserAuthentication changed (Sysmon 13 / 4657), or Remote Desktop Users group changed.
+severity: medium
+source: events
+attack: [T1021.001, T1562]
+tags: [persistence, rdp]
+where:
+  any_of:
+    - { eventId|in: [13, 4657], targetObject|contains: [fDenyTSConnections, "\\Terminal Server\\WinStations\\RDP-Tcp\\UserAuthentication", "\\Terminal Server\\WinStations\\RDP-Tcp\\PortNumber"] }
+    - { eventId|in: [13, 4657], objectName|contains: [fDenyTSConnections, "\\Terminal Server\\"] }

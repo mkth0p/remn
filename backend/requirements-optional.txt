@@ -1,0 +1,11 @@
+# Optional capabilities. Install what you need into the same venv:
+#   .venv\Scripts\python.exe -m pip install -r backend\requirements-optional.txt
+#
+# PST/OST mailbox support (libpff bindings). Two options:
+#   1. Build from source (needs Visual Studio C++ build tools):  pip install libpff-python
+#   2. Community wheel (verify the uploader on PyPI first):      pip install libpff-python-windows
+libpff-python
+
+# YARA scanning of attachments with rules dropped in backend/data/yara/*.yar
+# (wheels exist up to CPython 3.13)
+yara-python>=4.5.4

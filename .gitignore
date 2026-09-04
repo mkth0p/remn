@@ -1,0 +1,33 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+backend/tmp/
+backend/data/cases/
+backend/data/lists/*.csv
+backend/data/lists/*.txt
+backend/data/geoip/*.mmdb
+
+# Node / Vite
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Secrets and local config
+.env
+.claude/settings.local.json
+
+# Evidence samples (never commit real evidence)
+samples/*.evtx
+samples/*.pst
+samples/*.ost
+samples/*.msg
+samples/*.mbox
+!samples/synthetic/
+
+# Editors
+.idea/
+.vscode/
+*.swp
+frontend/public/_samples/

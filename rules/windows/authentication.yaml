@@ -1,0 +1,298 @@
+# Windows authentication rules. Fields refer to the flattened event columns.
+# DSL: where (field[|op]: value, any_of/all_of/not), group_by, window, threshold,
+#      distinct, then (follow-up), time (business hours), exclude.
+id: win-bruteforce-4625-by-ip
+title: Brute force - burst of failed logons from one source IP
+description: Five or more failed logons (4625) from the same IP address within 5 minutes.
+severity: high
+source: events
+attack: [T1110.001]
+tags: [authentication, brute-force]
+where:
+  eventId: 4625
+  ipAddress|exists: true
+group_by: [ipAddress]
+window: 5m
+threshold: ">= 5"
+then:
+  where: { eventId: 4624, logonType|in: [3, 10, 2, 7] }
+  join: [ipAddress]
+  within: 15m
+  severity: critical
+  title: Successful logon after a brute-force burst
+---
+id: win-bruteforce-4625-by-account
+title: Brute force - repeated failed logons against one account
+description: Ten or more failed logons (4625) against the same account within 10 minutes, from any source.
+severity: medium
+source: events
+attack: [T1110.001]
+tags: [authentication, brute-force]
+where:
+  eventId: 4625
+  targetUser|exists: true
+  targetUser|not_endswith: "$"
+group_by: [targetUser]
+window: 10m
+threshold: ">= 10"
+then:
+  where: { eventId: 4624 }
+  join: [targetUser]
+  within: 15m
+  severity: high
+  title: Account logged on after repeated failures
+---
+id: win-password-spraying
+title: Password spraying - one source, many accounts
+description: A single IP address fails to authenticate against 8 or more distinct accounts within 30 minutes.
+severity: high
+source: events
+attack: [T1110.003]
+tags: [authentication, spraying]
+where:
+  eventId: 4625
+  ipAddress|exists: true
+group_by: [ipAddress]
+window: 30m
+distinct: targetUser
+threshold: ">= 8"
+---
+id: win-username-enumeration
+title: Username enumeration (unknown user names)
+description: Many failed logons with status 0xC0000064 (user does not exist) from the same source.
+severity: medium
+source: events
+attack: [T1087]
+tags: [authentication, recon]
+where:
+  eventId: 4625
+  any_of:
+    - subStatus|contains: "c0000064"
+    - status|contains: "c0000064"
+group_by: [ipAddress, workstation]
+window: 30m
+threshold: ">= 5"
+---
+id: win-kerberos-preauth-bruteforce
+title: Kerberos pre-authentication failures burst (4771)
+description: Ten or more Kerberos pre-auth failures (4771, wrong password 0x18) from the same client within 10 minutes.
+severity: high
+source: events
+attack: [T1110.001]
+tags: [authentication, kerberos]
+where:
+  eventId: 4771
+group_by: [ipAddress]
+window: 10m
+threshold: ">= 10"
+---
+id: win-kerberos-user-enumeration
+title: Kerberos user enumeration (4768 / 4771 with unknown principal 0x6)
+description: TGT requests for non-existent accounts (KDC error 0x6) from the same client.
+severity: medium
+source: events
+attack: [T1087.002]
+tags: [authentication, kerberos, recon]
+where:
+  eventId|in: [4768, 4771]
+  status|contains: "0x6"
+group_by: [ipAddress]
+window: 30m
+threshold: ">= 5"
+---
+id: win-ntlm-bruteforce-4776
+title: NTLM validation failures burst (4776)
+description: Ten or more NTLM credential validation failures for the same account or workstation within 10 minutes.
+severity: high
+source: events
+attack: [T1110.001]
+tags: [authentication, ntlm]
+where:
+  eventId: 4776
+  status|ne: "0x0"
+  status|exists: true
+group_by: [targetUser, workstation]
+window: 10m
+threshold: ">= 10"
+---
+id: win-account-lockouts
+title: Account lockouts (4740)
+description: An account was locked out. Multiple lockouts in a short period usually mark the tail of a brute-force or spraying campaign.
+severity: medium
+source: events
+attack: [T1110]
+tags: [authentication]
+where:
+  eventId: 4740
+group_by: [targetUser]
+threshold: ">= 1"
+---
+id: win-logon-outside-business-hours
+title: Interactive / remote logon outside business hours
+description: Successful interactive, unlock, RDP or cached logon outside the configured business hours (Settings).
+severity: medium
+source: events
+attack: [T1078]
+tags: [authentication, anomaly]
+where:
+  eventId: 4624
+  logonType|in: [2, 7, 10, 11, 12, 13]
+  targetUser|not_endswith: "$"
+  targetUser|nin: [SYSTEM, "LOCAL SERVICE", "NETWORK SERVICE", DWM-1, DWM-2, DWM-3, UMFD-0, UMFD-1, UMFD-2, "ANONYMOUS LOGON"]
+  targetUser|not_startswith: [DWM-, UMFD-]
+time:
+  outside_business_hours: true
+exclude:
+  targetUser|in_setting: service_accounts
+---
+id: win-logon-weekend
+title: Interactive / remote logon during the weekend
+description: Successful user logon on a weekend day (Settings define which days are the weekend).
+severity: low
+source: events
+attack: [T1078]
+tags: [authentication, anomaly]
+where:
+  eventId: 4624
+  logonType|in: [2, 7, 10, 11]
+  targetUser|not_endswith: "$"
+  targetUser|not_startswith: [DWM-, UMFD-]
+time:
+  weekend: true
+exclude:
+  targetUser|in_setting: service_accounts
+---
+id: win-rdp-logon-external
+title: RDP logon from a non-internal address
+description: Remote interactive logon (4624 type 10, 1149 or TerminalServices 21/25) whose source IP is not in the internal ranges configured in Settings.
+severity: high
+source: events
+attack: [T1021.001, T1133]
+tags: [rdp, lateral-movement]
+where:
+  any_of:
+    - { eventId: 4624, logonType: 10 }
+    - { eventId: 1149 }
+    - { eventId|in: [21, 25], provider|contains: TerminalServices-LocalSessionManager }
+  ipAddress|exists: true
+  ipAddress|nin: ["127.0.0.1", "::1", "LOCAL"]
+exclude:
+  ipAddress|in_setting: internal_ips
+---
+id: win-rdp-logon-any
+title: RDP session logons (inventory)
+description: Every RDP logon / reconnection with user and source address, for timeline building.
+severity: info
+source: events
+attack: [T1021.001]
+tags: [rdp, inventory]
+where:
+  any_of:
+    - { eventId: 4624, logonType: 10 }
+    - { eventId: 1149 }
+    - { eventId|in: [21, 25], provider|contains: TerminalServices-LocalSessionManager }
+---
+id: win-rdp-bruteforce-rdpcorets
+title: RDP brute force without Security log (RdpCoreTS 140 / 131)
+description: Many RDP connection failures (RdpCoreTS 140) or accepted TCP connections (131) from the same client IP.
+severity: medium
+source: events
+attack: [T1110.001]
+tags: [rdp, brute-force]
+where:
+  provider|contains: RdpCoreTS
+  eventId|in: [140, 131]
+group_by: [ipAddress]
+window: 10m
+threshold: ">= 10"
+---
+id: win-explicit-credentials-4648
+title: Logon with explicit credentials (runas / lateral movement tools)
+description: 4648 events where a user supplies other credentials, excluding the noisy system pattern (same subject and target).
+severity: low
+source: events
+attack: [T1078, T1021]
+tags: [authentication, lateral-movement]
+where:
+  eventId: 4648
+  subjectUser|not_endswith: "$"
+  targetUser|not_endswith: "$"
+  processName|not_contains: [svchost.exe, winlogon.exe, lsass.exe, taskhostw.exe, consent.exe]
+group_by: [subjectUser, targetUser, targetServer]
+threshold: ">= 1"
+---
+id: win-special-privileges-non-admin
+title: Special privileges assigned to a non-administrative account
+description: 4672 (admin-equivalent privileges) for an account that is not in the admin list of Settings and not a system account.
+severity: medium
+source: events
+attack: [T1078.002]
+tags: [privilege]
+where:
+  eventId: 4672
+  subjectUser|not_endswith: "$"
+  subjectUser|nin: [SYSTEM, "LOCAL SERVICE", "NETWORK SERVICE", "ANONYMOUS LOGON"]
+  subjectUser|not_startswith: [DWM-, UMFD-]
+exclude:
+  subjectUser|in_setting: admin_accounts
+group_by: [subjectUser, computer]
+threshold: ">= 1"
+---
+id: win-anonymous-logon
+title: ANONYMOUS LOGON network sessions
+description: Successful network logons (4624 type 3) by ANONYMOUS LOGON from a remote address, seen in NTLM relay / null-session activity.
+severity: medium
+source: events
+attack: [T1021.002]
+tags: [authentication, ntlm]
+where:
+  eventId: 4624
+  logonType: 3
+  targetUser|contains: "ANONYMOUS LOGON"
+  ipAddress|exists: true
+  ipAddress|nin: ["127.0.0.1", "::1"]
+group_by: [ipAddress]
+threshold: ">= 1"
+---
+id: win-pass-the-hash-hint
+title: Pass-the-hash pattern (NTLM network logon, LogonType 9 or NTLM with empty key)
+description: 4624 with LogonType 9 (NewCredentials, e.g. mimikatz sekurlsa::pth) or NTLM type 3 logon with KeyLength 0 from a workstation.
+severity: medium
+source: events
+attack: [T1550.002]
+tags: [authentication, ntlm, lateral-movement]
+where:
+  eventId: 4624
+  any_of:
+    - { logonType: 9, logonProcess|contains: seclogo }
+    - { logonType: 3, authPackage|contains: NTLM, keyLength: "0", targetUser|not_endswith: "$", targetUser|not_contains: ANONYMOUS }
+---
+id: win-kerberoasting
+title: Kerberoasting - many RC4 service tickets requested by one account
+description: One account requests service tickets (4769) with RC4 encryption (0x17) for 5 or more distinct services within an hour.
+severity: high
+source: events
+attack: [T1558.003]
+tags: [kerberos, credential-access]
+where:
+  eventId: 4769
+  ticketEncryption|contains: "0x17"
+  serviceName|not_endswith: "$"
+  serviceName|not_contains: krbtgt
+group_by: [targetUser]
+window: 1h
+distinct: serviceName
+threshold: ">= 5"
+---
+id: win-asrep-roasting
+title: AS-REP roasting - TGT without pre-authentication in RC4
+description: 4768 with PreAuthType 0 (no pre-auth) and RC4 encryption for a user account.
+severity: high
+source: events
+attack: [T1558.004]
+tags: [kerberos, credential-access]
+where:
+  eventId: 4768
+  preAuthType: "0"
+  ticketEncryption|contains: "0x17"
+  targetUser|not_endswith: "$"

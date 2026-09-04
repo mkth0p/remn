@@ -1,0 +1,140 @@
+# Mail rules. Fields refer to the parsed mail rows (flags, fromDomain, fromNameNorm, risk...).
+id: mail-same-name-different-domain
+title: Same display name used with different sender domains
+description: The same display name (normalised) appears with two or more distinct registrable domains in the mailbox - classic display-name spoofing of a colleague or supplier.
+severity: high
+source: mails
+attack: [T1566.002, T1656]
+tags: [spoofing, display-name]
+where:
+  fromNameNorm|exists: true
+  fromNameNorm|ne: ""
+  fromNameNorm|not_contains: [noreply, no reply, notification, notifications, support, team, newsletter, info, admin, alert, alerts, mailer, daemon, system, service, security, billing, sales, marketing, contact, hello, news, update, updates, do not reply, donotreply]
+group_by: [fromNameNorm]
+distinct: fromRegistrable
+threshold: ">= 2"
+exclude:
+  any_of:
+    - flags|contains: trusted_sender
+    - fromRegistrable|in_setting: trusted_senders
+    - fromAddr|in_setting: trusted_senders
+entities: [fromNameNorm, fromRegistrable, fromAddr]
+---
+id: mail-vip-impersonation
+title: Internal VIP name used from an external domain
+description: The display name matches a VIP (Settings) but the sender domain is not one of the organisation's domains.
+severity: critical
+source: mails
+attack: [T1566.002, T1656]
+tags: [spoofing, bec, vip]
+where:
+  fromNameNorm|in_setting: vip_names
+  fromRegistrable|nin_setting: internal_domains
+exclude:
+  any_of:
+    - flags|contains: trusted_sender
+    - fromRegistrable|in_setting: trusted_senders
+    - fromAddr|in_setting: trusted_senders
+---
+id: mail-internal-name-external-domain
+title: Known internal sender name now writing from an external domain
+description: A display name that appears with an internal domain elsewhere in the mailbox is also used with an external domain.
+severity: high
+source: mails
+attack: [T1566.002]
+tags: [spoofing, display-name]
+where:
+  fromNameNorm|exists: true
+  fromNameNorm|ne: ""
+group_by: [fromNameNorm]
+distinct: fromRegistrable
+threshold: ">= 2"
+require_setting: internal_domains
+any_in_group:
+  fromRegistrable|in_setting: internal_domains
+exclude:
+  any_of:
+    - flags|contains: trusted_sender
+    - fromRegistrable|in_setting: trusted_senders
+    - fromAddr|in_setting: trusted_senders
+entities: [fromNameNorm, fromRegistrable]
+---
+id: mail-lookalike-internal-domain
+title: Sender domain imitates an organisation domain
+description: Typosquatting, homoglyph, TLD swap, subdomain trick or brand embedding against an internal domain configured in Settings.
+severity: critical
+source: mails
+attack: [T1566, T1583.001]
+tags: [spoofing, lookalike]
+where:
+  any_of:
+    - flags|contains: sender_lookalike_internal
+    - flags|contains: replyto_lookalike_internal
+---
+id: mail-lookalike-brand-domain
+title: Sender domain imitates a well-known brand
+description: Sender or Reply-To domain resembles a popular brand (Microsoft, DHL, bank names...).
+severity: medium
+source: mails
+attack: [T1566, T1583.001]
+tags: [spoofing, lookalike]
+where:
+  any_of:
+    - flags|contains: sender_lookalike_brand
+    - flags|contains: replyto_lookalike_brand
+---
+id: mail-punycode-or-mixed-script-sender
+title: Punycode / mixed-script sender domain or display name
+description: Sender domain uses an internationalised (xn--) form, mixes Unicode scripts, or the display name mixes Latin and Cyrillic letters.
+severity: high
+source: mails
+attack: [T1566]
+tags: [spoofing, homoglyph]
+where:
+  flags|contains_any: [sender_punycode, sender_mixed_script, sender_confusable, mixed_script_display_name]
+---
+id: mail-display-name-contains-email
+title: Display name contains a different e-mail address
+description: The display name shows an address (e.g. "ceo@company.com") that is not the real sender address.
+severity: high
+source: mails
+attack: [T1566.002]
+tags: [spoofing, display-name]
+where:
+  flags|contains: display_name_email_mismatch
+---
+id: mail-replyto-diverted
+title: Reply-To diverted to another domain
+description: Replies would go to a different domain than the visible sender - typical of BEC and advance-fee fraud, especially when it is a free webmail address.
+severity: medium
+source: mails
+attack: [T1566.002]
+tags: [spoofing, bec]
+where:
+  flags|contains: replyto_mismatch
+  flags|not_contains: bulk_mailer
+then_flags:
+  - replyto_webmail: high
+---
+id: mail-returnpath-mismatch-unauthenticated
+title: Return-Path mismatch with failed or missing authentication
+description: Envelope sender domain differs from From and SPF/DKIM/DMARC did not pass - spoofed From address.
+severity: high
+source: mails
+attack: [T1566.002]
+tags: [spoofing, authentication]
+where:
+  flags|contains: returnpath_mismatch
+  flags|contains_any: [spf_fail, dkim_fail, dmarc_fail, spf_none, dmarc_none, compauth_fail]
+  flags|not_contains: bulk_mailer
+---
+id: mail-internal-domain-from-outside
+title: Mail claiming an internal sender domain but failing authentication
+description: From domain is one of the organisation's domains, yet SPF/DKIM/DMARC failed or the origin IP is external and unauthenticated - direct spoofing of the company domain.
+severity: critical
+source: mails
+attack: [T1566.002]
+tags: [spoofing, authentication]
+where:
+  fromRegistrable|in_setting: internal_domains
+  flags|contains_any: [spf_fail, dkim_fail, dmarc_fail, compauth_fail]

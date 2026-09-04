@@ -1,0 +1,289 @@
+id: win-audit-log-cleared
+title: Security audit log cleared (1102)
+description: The Security log was cleared. Almost always anti-forensics when it is not a planned maintenance.
+severity: critical
+source: events
+attack: [T1070.001]
+tags: [defense-evasion, log-tampering]
+where:
+  eventId: 1102
+---
+id: win-event-log-cleared
+title: Event log cleared (104)
+description: A System/Application/other log was cleared (Eventlog 104).
+severity: high
+source: events
+attack: [T1070.001]
+tags: [defense-evasion, log-tampering]
+where:
+  eventId: 104
+  provider|contains: Eventlog
+---
+id: win-event-log-service-stopped
+title: Event log service stopped or logging shut down
+description: 1100 (logging service shut down) or 6006 outside a normal reboot sequence; attackers stop logging before acting.
+severity: medium
+source: events
+attack: [T1562.002]
+tags: [defense-evasion, log-tampering]
+where:
+  any_of:
+    - { eventId: 1100 }
+    - { eventId: 6006, provider|contains: Eventlog }
+---
+id: win-audit-policy-changed
+title: Audit policy changed (4719)
+description: System audit policy modified - can reduce visibility (disable success/failure auditing).
+severity: medium
+source: events
+attack: [T1562.002]
+tags: [defense-evasion, policy]
+where:
+  eventId: 4719
+---
+id: win-defender-disabled
+title: Windows Defender protection disabled or configuration changed
+description: Defender 5001/5010/5012 (protection disabled), 5007 (configuration/exclusion change) or 5013 (tamper protection blocked a change).
+severity: high
+source: events
+attack: [T1562.001]
+tags: [defense-evasion, defender]
+where:
+  provider|contains: Defender
+  any_of:
+    - { eventId|in: [5001, 5010, 5012, 5013] }
+    - { eventId: 5007, any_of: [ { oldValue|contains: [Exclusions, DisableRealtimeMonitoring, DisableAntiSpyware, DisableBehaviorMonitoring, DisableIOAVProtection, DisableScriptScanning, SubmitSamplesConsent, SpynetReporting] }, { newValue|contains: [Exclusions, DisableRealtimeMonitoring, DisableAntiSpyware, DisableBehaviorMonitoring, DisableIOAVProtection, DisableScriptScanning, SubmitSamplesConsent, SpynetReporting] }, { message|contains: [Exclusions, DisableRealtimeMonitoring, DisableAntiSpyware] } ] }
+---
+id: win-defender-detection
+title: Windows Defender detected malware
+description: Defender 1006/1015/1116/1117/1118/1119/1121 - threat detected or action taken/failed. Check the threat name, path and whether remediation succeeded.
+severity: high
+source: events
+attack: [T1204]
+tags: [defender, malware]
+where:
+  provider|contains: Defender
+  eventId|in: [1006, 1007, 1008, 1015, 1116, 1117, 1118, 1119, 1121]
+---
+id: win-powershell-suspicious-scriptblock
+title: Suspicious PowerShell script block (4104)
+description: Script block logging contains download cradles, encoded commands, AMSI bypass, credential dumping or offensive tooling keywords.
+severity: high
+source: events
+attack: [T1059.001, T1027, T1562.001]
+tags: [execution, powershell]
+where:
+  eventId: 4104
+  scriptBlockText|contains: [-encodedcommand, "-enc ", "-e ", frombase64string, downloadstring, downloadfile, "net.webclient", "invoke-webrequest", "iwr ", "iex ", "invoke-expression", "start-bitstransfer", "bitsadmin", "invoke-mimikatz", "mimikatz", "invoke-shellcode", "invoke-dllinjection", "invoke-reflectivepeinjection", "invoke-wmimethod", "invoke-command", "amsiutils", "amsiinitfailed", "amsi.dll", "system.management.automation.amsi", "bypass", "-nop ", "-noprofile", "-w hidden", "-windowstyle hidden", "hidden", "sekurlsa", "lsadump", "kerberos::", "get-keystrokes", "powersploit", "powerview", "get-netuser", "get-netgroup", "get-domainuser", "invoke-kerberoast", "rubeus", "sharphound", "bloodhound", "nishang", "empire", "covenant", "sliver", "cobalt", "beacon", "shellcode", "virtualalloc", "createthread", "memcpy", "kernel32", "reflection.assembly", "add-type", "dllimport", "compress-archive", "rundll32", "certutil", "vssadmin", "wbadmin", "bcdedit", "cipher /w", "reg save", "ntdsutil", "comsvcs", "minidump", "procdump", "lsass", "schtasks /create", "new-service", "sc create", "net user", "net localgroup", "net group", "wmic", "psexec", "sysinternals", "set-mppreference", "add-mppreference", "disablerealtimemonitoring", "exclusionpath", "-xor", "char[]", "[char]", "-join", "replace(", ".invoke(", "gzipstream", "deflatestream", "memorystream", "securestring", "convertto-securestring", "get-credential", "-credential", "clipboard", "get-wmiobject win32_", "get-ciminstance", "shadowcopy", "invoke-obfuscation"]
+  scriptBlockText|not_contains: ["Microsoft.PowerShell.Utility", "PSReadLine", "Set-StrictMode -Version", "# Copyright (c) Microsoft Corporation", "$PSScriptRoot\\", "chocolatey", "winget", "Windows Defender Advanced Threat Protection"]
+---
+id: win-powershell-encoded-command
+title: PowerShell launched with an encoded / hidden command line
+description: 4688 or Sysmon 1 process creation of powershell/pwsh with -EncodedCommand, -w hidden, -nop, download cradle or IEX.
+severity: high
+source: events
+attack: [T1059.001, T1027]
+tags: [execution, powershell]
+where:
+  any_of:
+    - { eventId: 4688 }
+    - { eventId: 1, provider|contains: Sysmon }
+  processName|contains: [powershell.exe, pwsh.exe, powershell_ise.exe]
+  commandLine|contains: [-enc, "-e ", "-ec ", "-encodedcommand", "-w hidden", "-windowstyle hidden", "-nop", "-noprofile", "-noni", "-noninteractive", "-ep bypass", "-exec bypass", "-executionpolicy bypass", "iex", "invoke-expression", "downloadstring", "downloadfile", "net.webclient", "invoke-webrequest", "frombase64string", "bitstransfer", "http://", "https://"]
+---
+id: win-lolbin-suspicious-commandline
+title: Living-off-the-land binary with suspicious arguments
+description: 4688 / Sysmon 1 - certutil, bitsadmin, mshta, regsvr32, rundll32, wmic, msiexec, cscript/wscript, curl, forfiles, installutil, msbuild, cmstp, odbcconf, regasm... used with URLs, decode, scrobj, javascript or remote paths.
+severity: high
+source: events
+attack: [T1218, T1105, T1140]
+tags: [execution, lolbin]
+where:
+  any_of:
+    - { eventId: 4688 }
+    - { eventId: 1, provider|contains: Sysmon }
+  any_of_2:
+    - { processName|endswith: certutil.exe, commandLine|contains: [-urlcache, -decode, -encode, -decodehex, -verifyctl, "http", "split", "-f "] }
+    - { processName|endswith: bitsadmin.exe, commandLine|contains: [/transfer, /addfile, /create, /setnotifycmdline, /resume, "http"] }
+    - { processName|endswith: mshta.exe, commandLine|contains: ["javascript:", "vbscript:", "http", ".hta", "about:"] }
+    - { processName|endswith: regsvr32.exe, commandLine|contains: [scrobj.dll, /i:http, /u /n, "http", ".sct", "/s /i"] }
+    - { processName|endswith: rundll32.exe, commandLine|contains: ["javascript:", "shell32.dll,Control_RunDLL", "url.dll,", "advpack.dll", "zipfldr.dll", "pcwutl.dll", "comsvcs.dll", "MiniDump", "\\temp\\", "\\appdata\\", "\\users\\public\\", "http", ".txt", ".dat", ".png", ".jpg"] }
+    - { processName|endswith: wmic.exe, commandLine|contains: [process call create, /node:, "shadowcopy delete", "os get", "/format:", "http", "antivirusproduct", "product get"] }
+    - { processName|endswith: msiexec.exe, commandLine|contains: ["http", "/q", "/quiet", "\\temp\\", "\\appdata\\", ".png", ".jpg", ".txt"] }
+    - { processName|endswith: [cscript.exe, wscript.exe], commandLine|contains: ["\\temp\\", "\\appdata\\", "\\users\\public\\", "\\downloads\\", "//e:", "/e:", ".js", ".jse", ".vbs", ".vbe", ".wsf", "http"] }
+    - { processName|endswith: [curl.exe, wget.exe], commandLine|contains: ["http", "-o ", "-O ", "--output"] }
+    - { processName|endswith: [forfiles.exe, pcalua.exe, installutil.exe, msbuild.exe, cmstp.exe, odbcconf.exe, regasm.exe, regsvcs.exe, ieexec.exe, presentationhost.exe, xwizard.exe, control.exe, wuauclt.exe, mavinject.exe, msconfig.exe, ftp.exe, esentutl.exe, expand.exe, extrac32.exe, findstr.exe, makecab.exe, print.exe, replace.exe, sc.exe, scriptrunner.exe, syncappvpublishingserver.exe, vbc.exe, csc.exe, jsc.exe, dnscmd.exe, diskshadow.exe, wsl.exe, bash.exe, hh.exe, at.exe, atbroker.exe, bginfo.exe, cdb.exe, dfsvc.exe, dxcap.exe, gpscript.exe, ie4uinit.exe, infdefaultinstall.exe, mmc.exe, msdt.exe, ttdinject.exe, tttracer.exe, wab.exe, winrm.vbs, pubprn.vbs, slmgr.vbs, manage-bde.wsf, launch-vsdevshell.ps1] , commandLine|contains: ["http", "\\temp\\", "\\appdata\\", "\\users\\public\\", "/c ", "-c ", "/p:", "/u ", ".sct", ".dll", "javascript"] }
+---
+id: win-office-spawns-shell
+title: Office / PDF reader spawned a shell or script host
+description: 4688 / Sysmon 1 where the parent is Word, Excel, PowerPoint, Outlook, Acrobat, OneNote or a browser and the child is cmd, powershell, wscript, mshta, rundll32, regsvr32, certutil, msiexec, bitsadmin, curl...
+severity: critical
+source: events
+attack: [T1204.002, T1566.001]
+tags: [execution, phishing, initial-access]
+where:
+  any_of:
+    - { eventId: 4688 }
+    - { eventId: 1, provider|contains: Sysmon }
+  any_of_2:
+    - parentProcessName|contains: [winword.exe, excel.exe, powerpnt.exe, outlook.exe, onenote.exe, msaccess.exe, mspub.exe, visio.exe, acrord32.exe, acrobat.exe, foxit, sumatrapdf.exe, wordpad.exe, notepad.exe, teams.exe, thunderbird.exe, eqnedt32.exe, fltldr.exe]
+    - parentImage|contains: [winword.exe, excel.exe, powerpnt.exe, outlook.exe, onenote.exe, msaccess.exe, mspub.exe, visio.exe, acrord32.exe, acrobat.exe, foxit, sumatrapdf.exe, wordpad.exe, teams.exe, thunderbird.exe, eqnedt32.exe, fltldr.exe]
+  processName|contains: [cmd.exe, powershell.exe, pwsh.exe, wscript.exe, cscript.exe, mshta.exe, rundll32.exe, regsvr32.exe, certutil.exe, msiexec.exe, bitsadmin.exe, curl.exe, wmic.exe, schtasks.exe, control.exe, explorer.exe, conhost.exe, forfiles.exe, msbuild.exe, installutil.exe, regasm.exe, odbcconf.exe, hh.exe, bash.exe, wsl.exe, python, node.exe, java.exe, javaw.exe]
+---
+id: win-process-from-suspicious-path
+title: Process executed from a temp / download / public folder
+description: 4688 / Sysmon 1 where the image lives in Temp, AppData\Local\Temp, Downloads, Users\Public, ProgramData, Recycle Bin, PerfLogs or Windows\Tasks.
+severity: medium
+source: events
+attack: [T1204.002, T1036]
+tags: [execution]
+where:
+  any_of:
+    - { eventId: 4688 }
+    - { eventId: 1, provider|contains: Sysmon }
+  processName|contains: ["\\temp\\", "\\tmp\\", "\\downloads\\", "\\users\\public\\", "\\programdata\\", "$recycle.bin", "\\perflogs\\", "\\windows\\tasks\\", "\\windows\\debug\\", "\\windows\\fonts\\", "\\windows\\help\\", "\\appdata\\roaming\\", "\\appdata\\local\\", "\\music\\", "\\videos\\", "\\pictures\\"]
+  processName|not_contains: ["\\appdata\\local\\microsoft\\", "\\appdata\\local\\programs\\", "\\appdata\\local\\google\\", "\\appdata\\local\\mozilla\\", "\\appdata\\local\\slack\\", "\\appdata\\local\\discord\\", "\\appdata\\local\\zoom\\", "\\appdata\\local\\teams\\", "\\appdata\\local\\webex\\", "\\appdata\\local\\1password\\", "\\appdata\\local\\brave", "\\appdata\\local\\vivaldi", "\\appdata\\local\\ollama", "\\appdata\\local\\anthropic", "\\appdata\\local\\claude", "\\programdata\\microsoft\\", "\\programdata\\package cache\\", "\\programdata\\chocolatey\\", "\\programdata\\lenovo\\", "\\programdata\\dell\\", "\\programdata\\hp\\", "\\programdata\\intel\\", "\\programdata\\nvidia", "\\programdata\\adobe\\", "\\programdata\\oracle\\", "\\programdata\\docker", "\\appdata\\local\\temp\\pip-", "\\appdata\\local\\temp\\chocolatey", "\\appdata\\local\\temp\\is-", "\\appdata\\local\\temp\\7z", "\\appdata\\local\\temp\\rar", "\\appdata\\local\\temp\\{", "\\appdata\\local\\temp\\msi", "\\appdata\\local\\temp\\nvidia", "\\appdata\\local\\temp\\lenovo", "\\appdata\\local\\temp\\dell", "\\appdata\\local\\temp\\hp", "\\appdata\\local\\temp\\squirrel", "\\appdata\\local\\squirreltemp"]
+---
+id: win-credential-dumping
+title: Credential dumping indicators (LSASS access, ntds.dit, SAM)
+description: Sysmon 10 on lsass.exe with dangerous access masks, procdump/comsvcs/mimikatz command lines, ESENT 325/327 (ntds.dit copy), vssadmin/ntdsutil/reg save usage, or 4663 on SAM/SECURITY hives.
+severity: critical
+source: events
+attack: [T1003.001, T1003.002, T1003.003]
+tags: [credential-access]
+where:
+  any_of:
+    - { eventId: 10, provider|contains: Sysmon, targetImage|endswith: lsass.exe, grantedAccess|in: ["0x1010", "0x1410", "0x1438", "0x143a", "0x1fffff", "0x1f0fff", "0x1f1fff", "0x1f2fff", "0x1f3fff", "0x40", "0x1400", "0x1000", "0x1FFFFF", "0x1F0FFF", "0x1F1FFF"], sourceImage|not_contains: ["\\windows\\system32\\", "\\program files\\", "\\program files (x86)\\", "msmpeng", "csrss", "wininit", "wmiprvse", "taskmgr", "procexp", "vmtoolsd", "sysmon"] }
+    - { eventId|in: [4688, 1], commandLine|contains: ["sekurlsa", "lsadump", "mimikatz", "procdump", "-ma lsass", "comsvcs.dll, MiniDump", "comsvcs.dll MiniDump", "rundll32.exe comsvcs", "ntdsutil", "ifm", "create full", "reg save hklm\\sam", "reg save hklm\\system", "reg save hklm\\security", "reg.exe save", "vssadmin create shadow", "wmic shadowcopy", "diskshadow", "esentutl /y", "esentutl.exe /y", "ntds.dit", "sam.hive", "system.hive", "lsass.dmp", "lsass.exe", "dumpert", "nanodump", "pypykatz", "lazagne", "sharpdump", "handlekatz", "dumpsec", "secretsdump", "invoke-mimikatz", "pwdump", "gsecdump", "wce.exe", "fgdump", "cachedump", "vaultcmd /list", "cmdkey /list", "rubeus", "kekeo"] }
+    - { eventId|in: [325, 327], provider|contains: ESENT, any_of: [ { message|contains: ntds.dit }, { data|contains: ntds.dit }, { raw|contains: ntds.dit } ] }
+    - { eventId: 4663, objectName|contains: ["\\config\\sam", "\\config\\security", "\\config\\system", "ntds.dit"], processName|not_contains: [lsass.exe, services.exe, svchost.exe] }
+    - { eventId: 6155, provider|contains: LSA }
+---
+id: win-shadow-copy-deletion
+title: Shadow copies deleted / recovery disabled (ransomware precursor)
+description: vssadmin delete shadows, wmic shadowcopy delete, bcdedit recoveryenabled no, wbadmin delete catalog, cipher /w - typical before ransomware encryption.
+severity: critical
+source: events
+attack: [T1490]
+tags: [impact, ransomware]
+where:
+  any_of:
+    - { eventId: 4688 }
+    - { eventId: 1, provider|contains: Sysmon }
+    - { eventId: 4104 }
+  any_of_2:
+    - commandLine|contains: ["vssadmin delete shadows", "vssadmin.exe delete", "shadowcopy delete", "shadowcopy where", "bcdedit /set {default} recoveryenabled no", "recoveryenabled no", "bootstatuspolicy ignoreallfailures", "wbadmin delete catalog", "wbadmin delete systemstatebackup", "cipher /w", "vssadmin resize shadowstorage", "wmic.exe shadowcopy", "Get-WmiObject Win32_Shadowcopy", "Win32_ShadowCopy"]
+    - scriptBlockText|contains: ["Win32_ShadowCopy", "vssadmin delete", "recoveryenabled no", "wbadmin delete"]
+---
+id: win-time-changed
+title: System time changed (4616 / Kernel-General 1)
+description: Manual time change by a non-system account, anti-forensics or timestomping context.
+severity: low
+source: events
+attack: [T1070.006]
+tags: [defense-evasion]
+where:
+  any_of:
+    - { eventId: 4616, subjectUser|not_endswith: "$", subjectUser|nin: ["LOCAL SERVICE", "SYSTEM", "NETWORK SERVICE"], processName|not_contains: [svchost.exe, vmtoolsd.exe, w32tm.exe, "VBoxService"] }
+    - { eventId: 1, provider|contains: Kernel-General, reason|nin: ["2", "3"] }
+---
+id: win-usb-mass-storage
+title: USB / removable device connected
+description: 6416 (new external device), Kernel-PnP 400/410 USBSTOR, DriverFrameworks-UserMode 2003/2100, Partition 1006, VHDMP 1/12 (ISO/VHD mounted) - data exfiltration or ISO-based initial access.
+severity: low
+source: events
+attack: [T1091, T1052.001, T1553.005]
+tags: [device, exfiltration, initial-access]
+where:
+  any_of:
+    - { eventId: 6416, any_of: [ { deviceDescription|contains: [USB, Disk, Storage, Drive, "Mass", SanDisk, Kingston, Samsung, Seagate, WD, Toshiba, Lexar, Verbatim, Transcend, Corsair, Phone, Android, iPhone, Camera] }, { className|contains: [DiskDrive, USB, WPD, Image, Media, Volume] } ] }
+    - { eventId|in: [400, 410], provider|contains: Kernel-PnP, any_of: [ { data|contains: USBSTOR }, { raw|contains: USBSTOR } ] }
+    - { eventId|in: [2003, 2100, 2101, 2102], provider|contains: DriverFrameworks-UserMode }
+    - { eventId: 1006, provider|contains: Partition }
+    - { eventId|in: [1, 12], provider|contains: VHDMP }
+---
+id: win-bits-download
+title: BITS transfer from an external URL
+description: Bits-Client 59/60 job transferring from http(s) - living-off-the-land download.
+severity: medium
+source: events
+attack: [T1197, T1105]
+tags: [execution, download]
+where:
+  eventId|in: [59, 60, 3]
+  provider|contains: Bits-Client
+  any_of:
+    - url|contains: ["http://", "https://"]
+    - raw|contains: ["http://", "https://"]
+  raw|not_contains: [windowsupdate.com, microsoft.com, windows.com, msedge, office.com, office.net, mozilla, google.com, gvt1.com, adobe.com, nvidia.com, intel.com, lenovo.com, dell.com, hp.com, apple.com, steampowered, epicgames, discord, slack, zoom.us, teams.microsoft, digicert, verisign, symantec, mcafee, sophos, kaspersky, eset, avast, avg, bitdefender, trendmicro, crowdstrike, sentinelone, cylance, carbonblack, ollama]
+---
+id: win-applocker-codeintegrity-block
+title: AppLocker / Code Integrity / SmartScreen block
+description: AppLocker 8004/8007 (blocked), CodeIntegrity 3077, SmartScreen 1002, Exploit protection 10 - something tried to run and was stopped.
+severity: medium
+source: events
+attack: [T1204]
+tags: [execution, blocked]
+where:
+  any_of:
+    - { eventId|in: [8004, 8007], provider|contains: AppLocker }
+    - { eventId|in: [3077, 3033], provider|contains: CodeIntegrity }
+    - { eventId: 1002, provider|contains: SmartScreen }
+    - { eventId: 10, provider|contains: Security-Mitigations }
+---
+id: win-suspicious-dns-sysmon
+title: Suspicious DNS query (Sysmon 22)
+description: Process resolved a dynamic-DNS, pastebin, tunnelling, TOR-proxy or raw free-hosting domain.
+severity: medium
+source: events
+attack: [T1071.004, T1568]
+tags: [network, c2]
+where:
+  eventId: 22
+  provider|contains: Sysmon
+  query|contains: [ngrok, duckdns, no-ip, ddns.net, hopto.org, zapto.org, sytes.net, serveo, localtunnel, loca.lt, trycloudflare.com, pastebin.com, paste.ee, hastebin, ghostbin, transfer.sh, anonfiles, gofile.io, file.io, mega.nz, discordapp.com/attachments, cdn.discordapp.com, tor2web, onion.ws, onion.to, "onion.", ipfs, telegram.org, api.telegram, ".xyz", ".top", ".club", ".icu", ".buzz", ".cam", ".rest", ".sbs", ".cfd", ".bond", ".pw", ".tk", ".ml", ".ga", ".cf", ".gq", "afraid.org", "dyndns", "freedns", "workers.dev", "web.app", "firebaseapp.com", "glitch.me", "repl.co", "herokuapp.com", "ngrok-free.app", "requestbin", "burpcollaborator", "oast.", "interact.sh", "canarytokens", "dnslog", "ceye.io"]
+---
+id: win-sysmon-network-lolbin
+title: Network connection by a script host, LOLBin or Office process (Sysmon 3)
+description: powershell, mshta, wscript, cscript, rundll32, regsvr32, certutil, bitsadmin, msiexec, Office apps or notepad initiating an outbound connection.
+severity: medium
+source: events
+attack: [T1071, T1105]
+tags: [network, execution]
+where:
+  eventId: 3
+  provider|contains: Sysmon
+  initiated|in: [true, "true", "True"]
+  image|contains: [powershell.exe, pwsh.exe, mshta.exe, wscript.exe, cscript.exe, rundll32.exe, regsvr32.exe, certutil.exe, bitsadmin.exe, msiexec.exe, winword.exe, excel.exe, powerpnt.exe, outlook.exe, notepad.exe, calc.exe, mspaint.exe, wmic.exe, cmd.exe, conhost.exe, schtasks.exe, control.exe, hh.exe, msbuild.exe, installutil.exe, regasm.exe, odbcconf.exe, cmstp.exe, forfiles.exe]
+  destinationIp|nin: ["127.0.0.1", "::1"]
+  destinationIp|not_startswith: ["10.", "192.168.", "172.16.", "172.17.", "172.18.", "172.19.", "172.2", "172.30.", "172.31.", "169.254.", "fe80:", "fc00:", "fd"]
+  destinationPort|nin: [53, 5985, 5986, 135, 445, 389, 636, 88]
+---
+id: win-remote-thread-injection
+title: Remote thread / process access injection (Sysmon 8 / 10)
+description: CreateRemoteThread into another process, or process access with full rights from an unusual source.
+severity: high
+source: events
+attack: [T1055]
+tags: [defense-evasion, injection]
+where:
+  provider|contains: Sysmon
+  any_of:
+    - { eventId: 8, sourceImage|not_contains: ["\\windows\\system32\\csrss.exe", "\\windows\\system32\\wininit.exe", "\\windows\\system32\\services.exe", "\\windows\\system32\\svchost.exe", "\\windows\\system32\\lsass.exe", "\\program files\\", "\\program files (x86)\\", "msmpeng", "vmtoolsd", "sysmon"] }
+    - { eventId: 25 }
+---
+id: win-unsigned-driver-loaded
+title: Unsigned or suspicious driver loaded (Sysmon 6)
+description: Driver loaded without a valid signature, or from a temp/user path - BYOVD (bring your own vulnerable driver) technique.
+severity: high
+source: events
+attack: [T1014, T1068]
+tags: [defense-evasion, driver]
+where:
+  eventId: 6
+  provider|contains: Sysmon
+  any_of:
+    - signed|in: [false, "false", "False"]
+    - signatureStatus|not_contains: Valid
+    - imageLoaded|contains: ["\\temp\\", "\\appdata\\", "\\users\\", "\\programdata\\", "\\downloads\\"]
+    - imageLoaded|contains: [rtcore64, gdrv.sys, dbutil, aswarpot, procexp, mhyprot, iqvw64, asrdrv, atillk64, kprocesshacker, ene.sys, capcom.sys, speedfan, vboxdrv.sys, wnbios, zam64, truesight, viragt64, hwrfsc, cpuz]
