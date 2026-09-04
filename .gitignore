@@ -25,6 +25,7 @@ samples/*.ost
 samples/*.msg
 samples/*.mbox
 !samples/synthetic/
+samples/m365/
 
 # Editors
 .idea/

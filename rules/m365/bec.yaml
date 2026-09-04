@@ -1,0 +1,417 @@
+# Microsoft 365 / Entra ID rules for business-email-compromise investigations.
+# Rows come from Unified Audit Log and Entra sign-in exports (services/parsers/m365.py):
+# provider / channel (workload) / category / operation / subjectUser / targetUser / ipAddress /
+# status, and every AuditData field under data.<Name> (Parameters, ModifiedProperties ...).
+id: m365-inbox-rule-forwarding
+title: Inbox rule forwards or redirects mail
+description: New-InboxRule / Set-InboxRule with ForwardTo, ForwardAsAttachmentTo or RedirectTo. The classic BEC persistence - the attacker keeps reading the victim's mail after the password is reset.
+severity: high
+source: events
+attack: [T1114.003, T1564.008]
+tags: [m365, bec, exchange, inbox-rule]
+where:
+  operation|in: [New-InboxRule, Set-InboxRule, UpdateInboxRules]
+  any_of:
+    - data.ForwardTo|exists: true
+    - data.ForwardAsAttachmentTo|exists: true
+    - data.RedirectTo|exists: true
+entities: [subjectUser, ipAddress, objectName]
+---
+id: m365-inbox-rule-hiding
+title: Inbox rule hides messages (delete / move / mark read) with financial or security keywords
+description: Inbox rules that delete, archive or mark as read messages whose subject or body mentions invoices, payments, banks, passwords or security alerts hide the attacker's conversation from the victim.
+severity: high
+source: events
+attack: [T1564.008]
+tags: [m365, bec, exchange, inbox-rule]
+where:
+  operation|in: [New-InboxRule, Set-InboxRule, UpdateInboxRules]
+  any_of:
+    - data.DeleteMessage|in: ["True", "true"]
+    - data.SoftDeleteMessage|in: ["True", "true"]
+    - data.MarkAsRead|in: ["True", "true"]
+    - data.MoveToFolder|re: "(?i)rss|archive|deleted|junk|conversation history|notes"
+  any_of_2:
+    - data.SubjectContainsWords|re: "(?i)invoice|facture|payment|paiement|virement|wire|bank|iban|rib|password|mot de passe|security|sécurité|hacked|phish|suspicious|urgent|mfa|2fa|verification"
+    - data.BodyContainsWords|re: "(?i)invoice|facture|payment|paiement|virement|wire|bank|iban|rib|password|mot de passe|security|sécurité|hacked|phish|suspicious|urgent|mfa|2fa|verification"
+    - data.SubjectOrBodyContainsWords|re: "(?i)invoice|facture|payment|paiement|virement|wire|bank|iban|rib|password|mot de passe|security|sécurité|hacked|phish|suspicious|urgent|mfa|2fa|verification"
+    - data.FromAddressContainsWords|exists: true
+entities: [subjectUser, ipAddress, objectName]
+---
+id: m365-inbox-rule-any
+title: Inbox rule created or changed (context for the rules above)
+description: Every inbox-rule change from a mailbox under investigation. Low on its own; look at the client IP and the timing against sign-ins and phishing mail.
+severity: low
+source: events
+attack: [T1564.008]
+tags: [m365, bec, exchange, inbox-rule]
+where:
+  operation|in: [New-InboxRule, Set-InboxRule, Remove-InboxRule, Enable-InboxRule, Disable-InboxRule, UpdateInboxRules]
+entities: [subjectUser, ipAddress]
+---
+id: m365-mailbox-forwarding
+title: Mailbox-level forwarding set (Set-Mailbox ForwardingSmtpAddress / ForwardingAddress)
+description: Server-side forwarding of the whole mailbox to another address. Almost always attacker persistence or data exfiltration when set from an unusual IP.
+severity: critical
+source: events
+attack: [T1114.003]
+tags: [m365, bec, exchange, forwarding]
+where:
+  operation: Set-Mailbox
+  any_of:
+    - data.ForwardingSmtpAddress|exists: true
+    - data.ForwardingAddress|exists: true
+    - data.DeliverToMailboxAndForward|in: ["True", "true"]
+entities: [subjectUser, targetUser, ipAddress]
+---
+id: m365-transport-rule-exfil
+title: Transport rule that blind-copies or redirects mail
+description: New-TransportRule / Set-TransportRule with BlindCopyTo, RedirectMessageTo or AddToRecipients - organisation-wide mail exfiltration.
+severity: critical
+source: events
+attack: [T1114.003]
+tags: [m365, bec, exchange, transport-rule]
+where:
+  operation|in: [New-TransportRule, Set-TransportRule]
+  any_of:
+    - data.BlindCopyTo|exists: true
+    - data.RedirectMessageTo|exists: true
+    - data.AddToRecipients|exists: true
+    - data.CopyTo|exists: true
+entities: [subjectUser, ipAddress, objectName]
+---
+id: m365-transport-rule-change
+title: Transport rule created or changed
+severity: high
+source: events
+attack: [T1114.003]
+tags: [m365, exchange, transport-rule]
+where:
+  operation|in: [New-TransportRule, Set-TransportRule, Remove-TransportRule, Disable-TransportRule, Enable-TransportRule]
+entities: [subjectUser, ipAddress, objectName]
+---
+id: m365-mailbox-permission
+title: Mailbox or folder permission granted
+description: Add-MailboxPermission / Add-RecipientPermission (FullAccess, SendAs) or Add-MailboxFolderPermission - a delegate is added, often to a mailbox the attacker controls.
+severity: high
+source: events
+attack: [T1098.002]
+tags: [m365, bec, exchange, delegation]
+where:
+  operation|in: [Add-MailboxPermission, Add-RecipientPermission, Add-MailboxFolderPermission, Set-MailboxFolderPermission, Add-ADPermission]
+entities: [subjectUser, targetUser, ipAddress]
+---
+id: m365-mailbox-folder-anonymous
+title: Mailbox folder shared with Anonymous or Default
+severity: critical
+source: events
+attack: [T1098.002]
+tags: [m365, bec, exchange, delegation]
+where:
+  operation|in: [Add-MailboxFolderPermission, Set-MailboxFolderPermission]
+  data.User|in: [Anonymous, Default]
+entities: [subjectUser, targetUser, ipAddress]
+---
+id: m365-mailitemsaccessed-burst
+title: Mailbox enumeration - burst of MailItemsAccessed from one client
+description: 25 or more MailItemsAccessed records for one mailbox from one IP within 30 minutes. Attackers who obtain a token read the mailbox in bulk (Sync access, Graph/EWS clients).
+severity: medium
+source: events
+attack: [T1114.002]
+tags: [m365, bec, exchange, mailbox-access]
+where:
+  operation: MailItemsAccessed
+group_by: [targetUser, ipAddress]
+window: 30m
+threshold: ">= 25"
+entities: [targetUser, ipAddress, subjectUser]
+---
+id: m365-mailitemsaccessed-sync-delegate
+title: Mailbox synced by a delegate or admin logon
+description: "MailItemsAccessed with MailAccessType Sync by a non-owner logon (LogonType 1 admin / 2 delegate): someone else pulled the mailbox content."
+severity: high
+source: events
+attack: [T1114.002]
+tags: [m365, bec, exchange, mailbox-access]
+where:
+  operation: MailItemsAccessed
+  data.MailAccessType: Sync
+  data.LogonType|in: ["1", "2"]
+entities: [targetUser, subjectUser, ipAddress]
+---
+id: m365-app-consent
+title: OAuth consent or permission grant to an application
+description: Consent to application / Add OAuth2PermissionGrant / app role assignment. Consent phishing gives an attacker mailbox access that survives password resets and MFA.
+severity: high
+source: events
+attack: [T1528, T1098.003]
+tags: [m365, entra, oauth, consent]
+where:
+  operation|in: ["Consent to application.", "Add OAuth2PermissionGrant.", "Add app role assignment grant to user.", "Add delegated permission grant."]
+entities: [subjectUser, ipAddress, objectName]
+---
+id: m365-app-registered
+title: Application or service principal added / credentials added
+severity: medium
+source: events
+attack: [T1098.001, T1098.003]
+tags: [m365, entra, oauth]
+where:
+  operation|in: ["Add application.", "Add service principal.", "Add service principal credentials.", "Update application – Certificates and secrets management ", "Update application - Certificates and secrets management", "Add owner to application.", "Add owner to service principal."]
+entities: [subjectUser, ipAddress, objectName]
+---
+id: m365-privileged-role-assigned
+title: Privileged directory role assigned
+description: Add member to role. for Global Administrator, Exchange Administrator, Privileged Role Administrator, Security Administrator, Conditional Access Administrator, Application Administrator ...
+severity: critical
+source: events
+attack: [T1098]
+tags: [m365, entra, privilege]
+where:
+  operation|in: ["Add member to role.", "Add eligible member to role.", "Add member to role in PIM completed (permanent)", "Add member to role in PIM completed (timebound)"]
+  data.Role.DisplayName|re: "(?i)global admin|company admin|privileged role|exchange admin|security admin|conditional access admin|application admin|cloud application admin|authentication admin|user admin|helpdesk admin|sharepoint admin|global reader|intune admin"
+entities: [subjectUser, targetUser, ipAddress]
+---
+id: m365-role-assigned-any
+title: Directory role membership changed
+severity: medium
+source: events
+attack: [T1098]
+tags: [m365, entra, privilege]
+where:
+  operation|in: ["Add member to role.", "Remove member from role.", "Add eligible member to role.", "Add member to role in PIM completed (permanent)", "Add member to role in PIM completed (timebound)"]
+entities: [subjectUser, targetUser, ipAddress]
+---
+id: m365-mfa-or-password-change
+title: MFA method, security info or password changed for a user
+description: Update user. touching StrongAuthentication properties, security info registration, password resets. After a compromise the attacker registers their own authenticator to keep access.
+severity: high
+source: events
+attack: [T1098.005, T1556.006]
+tags: [m365, entra, mfa, persistence]
+where:
+  any_of:
+    - operation|in: ["User registered security info.", "User registered all required security info.", "Disable Strong Authentication.", "Admin registered security info.", "User changed default security info.", "User deleted security info.", "Reset user password.", "Reset password (by admin).", "Change user password.", "Update StsRefreshTokenValidFrom Timestamp.", "Admin updated security info."]
+    - operation: "Update user."
+      any_of:
+        - data.StrongAuthenticationMethod|exists: true
+        - data.StrongAuthenticationPhoneAppDetail|exists: true
+        - data.StrongAuthenticationUserDetails|exists: true
+        - data.StrongAuthenticationRequirement|exists: true
+entities: [subjectUser, targetUser, ipAddress]
+---
+id: m365-conditional-access-change
+title: Conditional access policy changed or deleted
+severity: high
+source: events
+attack: [T1562.007]
+tags: [m365, entra, defense-evasion]
+where:
+  operation|in: ["Update conditional access policy.", "Delete conditional access policy.", "Add conditional access policy.", "Update policy.", "Delete policy."]
+entities: [subjectUser, ipAddress, objectName]
+---
+id: m365-audit-disabled
+title: Mailbox or organisation auditing disabled
+description: Set-Mailbox AuditEnabled false, Set-AdminAuditLogConfig UnifiedAuditLogIngestionEnabled false, Set-OrganizationConfig AuditDisabled true - anti-forensics.
+severity: critical
+source: events
+attack: [T1562.008]
+tags: [m365, exchange, defense-evasion]
+where:
+  any_of:
+    - operation: Set-Mailbox
+      data.AuditEnabled|in: ["False", "false"]
+    - operation: Set-AdminAuditLogConfig
+      data.UnifiedAuditLogIngestionEnabled|in: ["False", "false"]
+    - operation: Set-OrganizationConfig
+      data.AuditDisabled|in: ["True", "true"]
+entities: [subjectUser, targetUser, ipAddress]
+---
+id: m365-legacy-protocol-enabled
+title: IMAP / POP / SMTP AUTH enabled on a mailbox
+description: Set-CASMailbox enabling ImapEnabled, PopEnabled or SmtpClientAuthenticationDisabled=false re-opens legacy authentication that bypasses MFA.
+severity: high
+source: events
+attack: [T1562.001]
+tags: [m365, exchange, legacy-auth]
+where:
+  operation: Set-CASMailbox
+  any_of:
+    - data.ImapEnabled|in: ["True", "true"]
+    - data.PopEnabled|in: ["True", "true"]
+    - data.SmtpClientAuthenticationDisabled|in: ["False", "false"]
+entities: [subjectUser, targetUser, ipAddress]
+---
+id: m365-junk-config-changed
+title: Junk mail configuration changed (safe senders / blocked senders)
+description: Set-MailboxJunkEmailConfiguration adding TrustedSendersAndDomains lets the attacker's domain bypass the junk filter.
+severity: medium
+source: events
+attack: [T1562.001]
+tags: [m365, exchange, evasion]
+where:
+  operation: Set-MailboxJunkEmailConfiguration
+entities: [subjectUser, targetUser, ipAddress]
+---
+id: m365-ediscovery-search
+title: eDiscovery / content search created or exported
+severity: medium
+source: events
+attack: [T1114.002, T1213]
+tags: [m365, compliance, collection]
+where:
+  operation|in: [SearchCreated, SearchStarted, SearchExported, SearchExportDownloaded, ViewedSearchExported, New-ComplianceSearch, New-ComplianceSearchAction, Start-ComplianceSearch, SearchRemoved, New-MailboxSearch]
+entities: [subjectUser, ipAddress, objectName]
+---
+id: m365-mass-download
+title: Mass file download (SharePoint / OneDrive)
+description: 50 or more FileDownloaded / FileSyncDownloadedFull records by one user within 10 minutes.
+severity: medium
+source: events
+attack: [T1530]
+tags: [m365, sharepoint, exfiltration]
+where:
+  operation|in: [FileDownloaded, FileSyncDownloadedFull, FileSyncDownloadedPartial]
+group_by: [subjectUser]
+window: 10m
+threshold: ">= 50"
+entities: [subjectUser, ipAddress]
+---
+id: m365-anonymous-sharing
+title: Anonymous or company-wide sharing link created
+severity: medium
+source: events
+attack: [T1567]
+tags: [m365, sharepoint, exfiltration]
+where:
+  operation|in: [AnonymousLinkCreated, AnonymousLinkUsed, CompanyLinkCreated, SharingSet, SharingInvitationCreated, SecureLinkCreated, AddedToSecureLink]
+entities: [subjectUser, ipAddress, objectName]
+---
+id: m365-signin-risky
+title: Entra risky sign-in (identity protection)
+description: Sign-in with riskLevelDuringSignIn / riskLevelAggregated medium or high, or a riskState of atRisk / confirmedCompromised.
+severity: high
+source: events
+attack: [T1078.004]
+tags: [m365, entra, sign-in, risk]
+where:
+  category: Entra sign-in
+  any_of:
+    - data.riskLevelDuringSignIn|in: [medium, high]
+    - data.riskLevelAggregated|in: [medium, high]
+    - data.riskState|in: [atRisk, confirmedCompromised]
+entities: [targetUser, ipAddress]
+---
+id: m365-signin-legacy-auth
+title: Successful sign-in with a legacy authentication protocol
+description: IMAP4 / POP3 / SMTP / Exchange ActiveSync / EWS / "Other clients" bypass modern authentication and MFA.
+severity: medium
+source: events
+attack: [T1078.004, T1110]
+tags: [m365, entra, sign-in, legacy-auth]
+where:
+  category: Entra sign-in
+  status: "0"
+  data.clientAppUsed|re: "(?i)^(other clients|imap|pop|smtp|authenticated smtp|exchange activesync|exchange web services|exchange online powershell|other clients; .*)$"
+entities: [targetUser, ipAddress]
+---
+id: m365-signin-unexpected-country
+title: Successful sign-in from a country outside the expected list
+description: Set the expected countries (ISO codes, e.g. FR, DE, US) in Settings. Every successful Entra sign-in from elsewhere is reported.
+severity: high
+source: events
+attack: [T1078.004]
+tags: [m365, entra, sign-in, geo]
+require_setting: expected_countries
+where:
+  category: Entra sign-in
+  status: "0"
+  data.country|exists: true
+  data.country|nin_setting: expected_countries
+entities: [targetUser, ipAddress]
+---
+id: m365-signin-two-countries-24h
+title: One account signed in from two countries within 24 hours
+description: Impossible-travel lite - the same account authenticated successfully from two different countries within a day.
+severity: high
+source: events
+attack: [T1078.004]
+tags: [m365, entra, sign-in, geo]
+where:
+  category: Entra sign-in
+  status: "0"
+  data.country|exists: true
+group_by: [targetUser]
+window: 24h
+distinct: data.country
+threshold: ">= 2"
+entities: [targetUser]
+---
+id: m365-signin-password-spray
+title: Password spray - many accounts failing from one IP
+description: Eight or more distinct accounts with failed sign-ins (wrong password / locked / blocked) from one IP within 15 minutes.
+severity: high
+source: events
+attack: [T1110.003]
+tags: [m365, entra, sign-in, brute-force]
+where:
+  any_of:
+    - category: Entra sign-in
+      status|in: ["50126", "50053", "50055", "50056", "50057", "50076", "50074", "50079", "53003", "-1"]
+    - operation: UserLoginFailed
+  ipAddress|exists: true
+group_by: [ipAddress]
+window: 15m
+distinct: targetUser
+threshold: ">= 8"
+entities: [ipAddress]
+---
+id: m365-signin-bruteforce-account
+title: Brute force - repeated failed sign-ins against one account, then success
+description: Ten or more failed sign-ins against one account within 15 minutes. Escalated to critical when a successful sign-in follows within an hour.
+severity: medium
+source: events
+attack: [T1110.001]
+tags: [m365, entra, sign-in, brute-force]
+where:
+  any_of:
+    - category: Entra sign-in
+      status|in: ["50126", "50053", "50055", "50056", "50057", "50076", "50074", "50079", "53003", "-1"]
+    - operation: UserLoginFailed
+group_by: [targetUser]
+window: 15m
+threshold: ">= 10"
+then:
+  where:
+    any_of:
+      - category: Entra sign-in
+        status: "0"
+      - operation: UserLoggedIn
+  join: [targetUser]
+  within: 60m
+  severity: critical
+  title: Successful sign-in after a brute-force burst
+entities: [targetUser]
+---
+id: m365-signin-mfa-failed-then-success
+title: MFA denied or interrupted, then a successful sign-in
+description: Error 500121 (MFA denied / not completed) followed within an hour by a successful sign-in for the same account - MFA fatigue or a stolen session.
+severity: high
+source: events
+attack: [T1621]
+tags: [m365, entra, sign-in, mfa]
+where:
+  category: Entra sign-in
+  status|in: ["500121", "50074", "50076"]
+group_by: [targetUser]
+window: 60m
+threshold: ">= 3"
+then:
+  where:
+    category: Entra sign-in
+    status: "0"
+  join: [targetUser]
+  within: 60m
+  severity: critical
+  title: Successful sign-in after repeated MFA failures
+entities: [targetUser, ipAddress]

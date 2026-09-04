@@ -37,6 +37,13 @@ class FilterError(ValueError):
     pass
 
 
+def _json_path(key: str) -> str:
+    """A JSON path literal for one (possibly dotted) key: $."Role.DisplayName". Inlined rather
+    than bound, because operators such as exists/empty repeat the column expression in SQL."""
+    k = key.replace("\\", "\\\\").replace('"', '\\"').replace("'", "''")
+    return "'$.\"" + k + "\"'"
+
+
 @dataclass
 class Expr:
     sql: str
@@ -85,8 +92,8 @@ def resolve(field_name: str, ctx: Ctx) -> Expr:
         if f in EVENT_COLS:
             return Expr(f"{a}{q(f)}", "num" if f in EVENT_INT else "text")
         if f.startswith("data."):
-            return Expr(f"json_extract_string({a}\"data\", {ctx.p('$.' + f[5:])})", "text")
-        return Expr(f"json_extract_string({a}\"data\", {ctx.p('$.' + f)})", "text")
+            return Expr(f"json_extract_string({a}\"data\", {_json_path(f[5:])})", "text")
+        return Expr(f"json_extract_string({a}\"data\", {_json_path(f)})", "text")
     if tbl == "mails":
         if f in MAIL_ALIASES:
             f = MAIL_ALIASES[f]
@@ -101,18 +108,18 @@ def resolve(field_name: str, ctx: Ctx) -> Expr:
         if f in BODY_COLS:
             return Expr(f"(SELECT b.{q(f)} FROM mail_bodies b WHERE b.\"mailId\" = {a or 'mails.'}id)", "text")
         if f.startswith("auth."):
-            return Expr(f"json_extract_string({a}\"auth\", {ctx.p('$.' + f[5:])})", "text")
+            return Expr(f"json_extract_string({a}\"auth\", {_json_path(f[5:])})", "text")
         if f.startswith("lookalike."):
-            return Expr(f"json_extract_string({a}\"lookalike\", {ctx.p('$.' + f[10:])})", "text")
+            return Expr(f"json_extract_string({a}\"lookalike\", {_json_path(f[10:])})", "text")
         if f.startswith("htmlInfo."):
-            return Expr(f"json_extract_string({a}\"htmlInfo\", {ctx.p('$.' + f[9:])})", "text")
+            return Expr(f"json_extract_string({a}\"htmlInfo\", {_json_path(f[9:])})", "text")
         if f.startswith("keywordHits."):
-            return Expr(f"json_extract_string({a}\"keywordHits\", {ctx.p('$.' + f[12:])})", "text")
+            return Expr(f"json_extract_string({a}\"keywordHits\", {_json_path(f[12:])})", "text")
         raise FilterError(f"unknown mail field {field_name!r}")
     if tbl == "attachments":
         if f in ATT_COLS:
             return Expr(f"{a}{q(f)}", "list" if f == "flags" else ("bool" if f == "inline" else ("num" if f in ATT_INT else "text")))
-        return Expr(f"json_extract_string({a}\"details\", {ctx.p('$.' + f)})", "text")
+        return Expr(f"json_extract_string({a}\"details\", {_json_path(f)})", "text")
     if tbl == "urls":
         if f in URL_COLS:
             return Expr(f"{a}{q(f)}", "list" if f == "flags" else ("num" if f == "date" else "text"))

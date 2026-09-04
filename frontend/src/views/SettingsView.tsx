@@ -212,6 +212,7 @@ export function SettingsView() {
             <div className="panel-h">windows context</div>
             <div className="panel-b col">
               <label className="field"><span>internal IP ranges (CIDR) - RDP/share rules exclude them</span><ListInput mono value={s.internalIps} onChange={(v) => patch({ internalIps: v })} /></label>
+              <label className="field"><span>expected sign-in countries (ISO codes) - Entra / M365 sign-in rules flag the rest</span><ListInput mono value={s.expectedCountries ?? []} onChange={(v) => patch({ expectedCountries: v.map((x) => x.trim().toUpperCase()).filter(Boolean) })} placeholder={'FR\nDE\nUS'} /></label>
               <label className="field"><span>admin accounts (expected to have special privileges)</span><ListInput mono value={s.adminAccounts} onChange={(v) => patch({ adminAccounts: v })} placeholder={'admin.jdoe\nsvc_backup'} /></label>
               <label className="field"><span>service accounts (excluded from out-of-hours rules)</span><ListInput mono value={s.serviceAccounts} onChange={(v) => patch({ serviceAccounts: v })} placeholder={'svc_sql\nsvc_scan'} /></label>
             </div>

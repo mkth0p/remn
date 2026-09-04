@@ -64,6 +64,7 @@ export function settingsForRules(kase: Case): SettingsLike {
   const s = kase.settings
   return {
     internal_domains: s.internalDomains,
+    expected_countries: (s.expectedCountries ?? []).map((c) => c.trim().toUpperCase()).filter(Boolean),
     vip_names: s.vipNames,
     admin_accounts: s.adminAccounts,
     service_accounts: s.serviceAccounts,

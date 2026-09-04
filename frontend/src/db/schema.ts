@@ -7,6 +7,8 @@ export type EvidenceStatus = 'hashing' | 'uploading' | 'parsing' | 'done' | 'err
 
 export interface CaseSettings {
   internalDomains: string[]
+  /** ISO country codes where sign-ins are expected (M365 / Entra rules) */
+  expectedCountries?: string[]
   vipNames: string[]
   adminAccounts: string[]
   serviceAccounts: string[]
@@ -27,6 +29,7 @@ export interface CaseSettings {
 
 export const defaultSettings = (): CaseSettings => ({
   internalDomains: [],
+  expectedCountries: [],
   vipNames: [],
   adminAccounts: [],
   serviceAccounts: [],

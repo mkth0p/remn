@@ -100,7 +100,7 @@ export function EventsView() {
   const columns: Column<EventRow>[] = useMemo(
     () => [
       { key: 'ts', label: 'time (UTC)', width: 160, render: (r) => fmtTs(r.ts) },
-      { key: 'eventId', label: 'id', width: 60, click: (r) => toggleFacet('eventId', String(r.eventId)), render: (r) => <Badge sev="accent">{r.eventId}</Badge> },
+      { key: 'eventId', label: 'id', width: 60, click: (r) => toggleFacet('eventId', String(r.eventId)), render: (r) => <Badge sev="accent">{r.eventId ?? (r.operation ? String(r.operation).replace(/\.$/, '').slice(0, 22) : '')}</Badge> },
       { key: 'computer', label: 'computer', width: 130, click: (r) => toggleFacet('computer', String(r.computer)) },
       { key: 'targetUser', label: 'user', width: 130, click: (r) => toggleFacet('targetUser', String(r.targetUser)), render: (r) => String(r.targetUser ?? r.subjectUser ?? '') },
       { key: 'ipAddress', label: 'ip', width: 120, click: (r) => toggleFacet('ipAddress', String(r.ipAddress)) },

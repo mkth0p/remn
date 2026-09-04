@@ -26,6 +26,8 @@ export interface Filter {
 
 export interface SettingsLike {
   internal_domains?: string[]
+  expected_countries?: string[]
+  expectedCountries?: string[]
   internalDomains?: string[]
   vip_names?: string[]
   vipNames?: string[]
@@ -51,7 +53,10 @@ export function getPath(row: unknown, path: string): unknown {
   if (!path.includes('.')) return (row as Row)[path]
   const parts = path.split('.')
   let cur: unknown[] = [row]
-  for (const p of parts) {
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i]
+    // flat dotted keys ("Role.DisplayName" inside data) take precedence over nesting
+    const rest = parts.slice(i).join('.')
     const next: unknown[] = []
     for (const c of cur) {
       if (c == null) continue
@@ -60,6 +65,10 @@ export function getPath(row: unknown, path: string): unknown {
           if (item != null && typeof item === 'object') next.push((item as Row)[p])
         }
       } else if (typeof c === 'object') {
+        if (i > 0 && rest !== p && Object.prototype.hasOwnProperty.call(c, rest)) {
+          const flat = (c as Row)[rest]
+          return Array.isArray(flat) && flat.length === 1 ? flat[0] : flat
+        }
         next.push((c as Row)[p])
       }
     }

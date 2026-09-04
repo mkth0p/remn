@@ -16,6 +16,7 @@ from typing import Any, Callable, Iterator
 
 from services.common import sha256_file
 from services.parsers import evtx_parser
+from services.parsers import m365
 from services.parsers.mail import mbox as mbox_mod
 from services.parsers.mail import pst as pst_mod
 from services.parsers.mail.common import ParseContext, parse_message_bytes
@@ -80,7 +81,7 @@ def detect_evtx_format(name: str, head: bytes) -> str:
     arc = detect_archive(name, head)
     if arc:
         return arc
-    return "evtx"
+    return m365.detect_format(name, head) or "evtx"
 
 
 # ---------------------------------------------------------------------------
@@ -163,19 +164,45 @@ class EvtxSource:
             src: Any = self.path if self.path else io.BytesIO(self.data or b"")
             yield from self._iter_one(src, self.name)
             return
+        if self.format in m365.FORMATS:
+            yield from self._iter_m365(self.path, self.data, self.format, self.name)
+            return
         for member in iter_archive(self.path, self.data, self.format):
-            if not member.name.lower().endswith(".evtx"):
+            low = member.name.lower()
+            if low.endswith(".evtx"):
+                suffix, fmt = ".evtx", "evtx"
+            elif low.endswith((".csv", ".json", ".jsonl", ".ndjson")):
+                with member.open() as fh:
+                    head = fh.read(512)
+                fmt = m365.detect_format(member.name, head) or ""
+                if not fmt:
+                    continue
+                suffix = ".member"
+            else:
                 continue
-            tmp_path, sha = member_to_tempfile(member, self.tmp_dir, ".evtx")
+            tmp_path, sha = member_to_tempfile(member, self.tmp_dir, suffix)
             try:
                 before = self.stats.count
-                yield from self._iter_one(tmp_path, member.name)
-                self.files.append({"name": member.name, "size": member.size, "sha256": sha, "count": self.stats.count - before})
+                if fmt == "evtx":
+                    yield from self._iter_one(tmp_path, member.name)
+                else:
+                    yield from self._iter_m365(tmp_path, None, fmt, member.name)
+                self.files.append({"name": member.name, "size": member.size, "sha256": sha, "count": self.stats.count - before, "format": fmt})
             finally:
                 try:
                     os.unlink(tmp_path)
                 except OSError:
                     pass
+
+    def _iter_m365(self, path: str | None, data: bytes | None, fmt: str, source_file: str) -> Iterator[dict[str, Any]]:
+        try:
+            for row in m365.iter_records(path, data, fmt, stats=self.stats, include_raw=self.include_raw):
+                row["sourceFile"] = source_file
+                yield row
+        except Exception as exc:  # noqa: BLE001
+            log.warning("m365 export %s failed: %s", source_file, exc)
+            self.stats.errors += 1
+            self.files.append({"name": source_file, "error": str(exc)[:200]})
 
     def _iter_one(self, src: Any, source_file: str) -> Iterator[dict[str, Any]]:
         try:

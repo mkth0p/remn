@@ -11,6 +11,8 @@ let jobSeq = 1
 export function detectKind(file: File): 'evtx' | 'mail' {
   const n = file.name.toLowerCase()
   if (n.endsWith('.evtx')) return 'evtx'
+  // Microsoft 365 audit / Entra sign-in exports ride the event pipeline (format sniffed server-side)
+  if (/\.(csv|json|jsonl|ndjson)$/.test(n)) return 'evtx'
   if (isArchive(file) && /evtx|winevt|eventlog|event[-_ ]?logs?|sysmon|security[-_ ]?log/i.test(n)) return 'evtx'
   return 'mail'
 }
