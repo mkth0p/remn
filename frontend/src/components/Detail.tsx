@@ -7,6 +7,7 @@ import { useStore } from '../state/store'
 import { fmtBytes, fmtTs } from '../util/format'
 import { IconAi, IconClose, IconPivot } from './Icons'
 import { Badge, CopyButton, Dot, Flag, JsonView, KV, Risk, Sev, Tabs } from './ui'
+import { AddToTimeline } from './AddToTimeline'
 
 const SEV_ORDER = ['critical', 'high', 'medium', 'low', 'info']
 
@@ -88,7 +89,7 @@ export function EventDetail({ row: initial, onClose }: { row: EventRow; onClose:
     <Drawer
       title={<span className="mono"><Badge sev="accent">{row.eventId}</Badge> {row.description || row.provider} · {fmtTs(row.ts)}</span>}
       onClose={onClose}
-      actions={<button className="btn sm primary" onClick={explain}><IconAi /> explain</button>}
+      actions={<><AddToTimeline ts={initial.ts} text={String(initial.summary ?? `event ${initial.eventId ?? initial.operation ?? ''}`)} link={{ source: 'events', id: initial.id!, label: `#${initial.id}` }} /><button className="btn sm primary" onClick={explain}><IconAi /> explain</button></>}
     >
       <div className="card glow">
         <div className="mono" style={{ color: 'var(--fg-1)' }}>{row.summary}</div>
@@ -310,6 +311,7 @@ export function MailDetail({ row: initialRaw, onClose, layout = 'drawer' }: { ro
           </div>
         </div>
         {worstFinding && <Sev sev={worstFinding}>{findings.length} finding{findings.length === 1 ? '' : 's'}</Sev>}
+        <AddToTimeline ts={row.date} text={`Mail "${row.subject || '(no subject)'}" from ${row.fromAddr} to ${row.to.map((t) => t.addr).slice(0, 2).join(', ')}`} link={{ source: 'mails', id: row.id!, label: row.subject || `#${row.id}` }} severity={row.risk >= 80 ? 'critical' : row.risk >= 60 ? 'high' : row.risk >= 40 ? 'medium' : 'info'} />
         <button className="btn sm" onClick={explain} title="ask the local model"><IconAi /> analyse</button>
         <button className="btn icon ghost sm" onClick={onClose} title="close (Esc)"><IconClose /></button>
       </div>

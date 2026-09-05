@@ -346,6 +346,22 @@ export interface KV {
   value: unknown
 }
 
+/** Analyst-authored case material (Case notes view): timeline entries, tasks and notes. */
+export interface CaseNote {
+  id?: number
+  caseId: number
+  kind: 'note' | 'task' | 'timeline'
+  text: string
+  /** event time for timeline entries; creation time otherwise */
+  ts: number
+  createdAt: number
+  updatedAt: number
+  done?: boolean
+  severity?: string
+  /** the row, finding or chain a timeline entry was added from */
+  link?: { source: 'events' | 'mails' | 'findings' | 'chains'; id: number | string; label?: string }
+}
+
 export class RemnDB extends Dexie {
   cases!: Table<Case, number>
   evidence!: Table<Evidence, number>
@@ -361,6 +377,7 @@ export class RemnDB extends Dexie {
   savedSearches!: Table<SavedSearch, number>
   customRules!: Table<CustomRule, number>
   kv!: Table<KV, string>
+  caseNotes!: Table<CaseNote, number>
 
   constructor(name = 'remn') {
     super(name)
@@ -382,6 +399,7 @@ export class RemnDB extends Dexie {
       customRules: '++id, caseId, ruleId',
       kv: 'key',
     })
+    this.version(2).stores({ caseNotes: '++id, caseId, kind, ts, [caseId+kind], [caseId+ts]' })
   }
 }
 
@@ -399,8 +417,8 @@ export function setDb(db: RemnDB | null): void {
 export const CASE_KV_KEYS = (caseId: number) => ['chains', 'ruleDiags', 'baseline', 'mail-calibration', 'report-summary', 'finding-reviews'].map((p) => `${p}-${caseId}`)
 
 export async function deleteCaseData(db: RemnDB, caseId: number): Promise<void> {
-  await db.transaction('rw', [db.events, db.mails, db.mailBodies, db.attachments, db.urls, db.findings, db.iocs, db.facets, db.aiSessions, db.savedSearches, db.evidence, db.kv], async () => {
-    for (const t of [db.events, db.mails, db.mailBodies, db.attachments, db.urls, db.findings, db.iocs, db.facets, db.aiSessions, db.savedSearches, db.evidence]) {
+  await db.transaction('rw', [db.events, db.mails, db.mailBodies, db.attachments, db.urls, db.findings, db.iocs, db.facets, db.aiSessions, db.savedSearches, db.evidence, db.caseNotes, db.kv], async () => {
+    for (const t of [db.events, db.mails, db.mailBodies, db.attachments, db.urls, db.findings, db.iocs, db.facets, db.aiSessions, db.savedSearches, db.evidence, db.caseNotes]) {
       await (t as Table<{ caseId: number }, number>).where('caseId').equals(caseId).delete()
     }
     await db.kv.bulkDelete(CASE_KV_KEYS(caseId))  // chain snapshot, diagnostics, calibration state, archived reviews

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { runAgent } from '../ai/chat'
 import { getSource } from '../data/source'
-import { getDb, type Evidence, type Finding, type Ioc } from '../db/schema'
+import { getDb, type CaseNote, type Evidence, type Finding, type Ioc } from '../db/schema'
+import { listNotes } from '../data/caseNotes'
 import { toast, useStore } from '../state/store'
 import { defang, escapeHtml, fmtBytes, fmtNum, fmtTs, renderMarkdown } from '../util/format'
 import { downloadBlob, exportCaseBundle, importCaseBundle } from '../util/export'
@@ -17,6 +18,7 @@ export function ReportView() {
   const [evidence, setEvidence] = useState<Evidence[]>([])
   const [findings, setFindings] = useState<Finding[]>([])
   const [iocs, setIocs] = useState<Ioc[]>([])
+  const [notes, setNotes] = useState<CaseNote[]>([])
   const [summary, setSummary] = useState<string>('')
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState('')
@@ -28,9 +30,13 @@ export function ReportView() {
     db.findings.where('caseId').equals(kase.id).toArray().then((f) => setFindings(f.sort((a, b) => ORDER.indexOf(a.severity) - ORDER.indexOf(b.severity) || (a.ts ?? 0) - (b.ts ?? 0))))
     getSource(kase).listIocs({ onlyBad: true, limit: 500 }).then((r) => setIocs(r.rows)).catch(() => setIocs([]))
     db.kv.get(`report-summary-${kase.id}`).then((k) => setSummary((k?.value as string) ?? ''))
+    listNotes(kase.id).then(setNotes)
   }, [kase, rulesVersion])
   if (!kase) return null
   const shown = findings.filter((f) => includeFp || f.status !== 'false_positive')
+  const curated = notes.filter((n) => n.kind === 'timeline').sort((a, b) => a.ts - b.ts)
+  const tasks = notes.filter((n) => n.kind === 'task').sort((a, b) => Number(a.done ?? false) - Number(b.done ?? false) || a.createdAt - b.createdAt)
+  const analystNotes = notes.filter((n) => n.kind === 'note').sort((a, b) => a.createdAt - b.createdAt)
   const bySev = shown.reduce((acc, f) => ((acc[f.severity] = (acc[f.severity] ?? 0) + 1), acc), {} as Record<string, number>)
   const generateSummary = async () => {
     if (useStore.getState().aiStatus.reachable !== true) return toast('err', 'Ollama is not reachable (check the AI section in Settings)')
@@ -61,6 +67,9 @@ ${summary ? `<h2>Executive summary</h2><div>${renderMarkdown(summary)}</div>` : 
 <table><tr><th>severity</th><th>finding</th><th>entities</th><th>count</th><th>first</th><th>last</th><th>ATT&amp;CK</th><th>status</th><th>notes</th></tr>${rows(shown.map((f) => [`<span class="sev-${f.severity}">${f.severity}</span>`, escapeHtml(f.title) + (f.escalation ? `<br><span class="muted">${escapeHtml(f.escalation)}</span>` : ''), `<code>${escapeHtml(Object.entries(f.entities).map(([k, v]) => `${k}=${v}`).join('; '))}</code>`, String(f.count), fmtTs(f.ts), fmtTs(f.tsEnd ?? null), f.attack.join(' '), f.status, escapeHtml(f.notes ?? '')]))}</table>
 <h2>Indicators of compromise (flagged by reputation)</h2>
 ${iocs.length ? `<table><tr><th>kind</th><th>indicator (defanged)</th><th>verdict</th><th>tags</th><th>seen</th></tr>${rows(iocs.map((i) => [i.kind, `<code>${escapeHtml(defang(i.value))}</code>`, i.verdict ?? '', (i.tags ?? []).join(' '), `${i.count} (${i.sources.join(', ')})`]))}</table>` : '<p class="muted">No indicator flagged (reputation checks not run, or nothing malicious).</p>'}
+${curated.length ? `<h2>Case timeline</h2><table><tr><th>time (UTC)</th><th>severity</th><th>entry</th><th>source</th></tr>${rows(curated.map((n) => [fmtTs(n.ts), `<span class="sev-${n.severity ?? 'info'}">${n.severity ?? 'info'}</span>`, escapeHtml(n.text), n.link ? escapeHtml(`${n.link.source} ${n.link.label ?? n.link.id}`) : '']))}</table>` : ''}
+${tasks.length ? `<h2>Tasks</h2><table><tr><th>status</th><th>task</th><th>updated</th></tr>${rows(tasks.map((t) => [t.done ? 'done' : '<b>open</b>', escapeHtml(t.text), fmtTs(t.updatedAt)]))}</table>` : ''}
+${analystNotes.length ? `<h2>Analyst notes</h2>${analystNotes.map((n) => `<div><p class="muted">${fmtTs(n.createdAt)}</p>${renderMarkdown(n.text)}</div>`).join('<hr>')}` : ''}
 <h2>Timeline of findings</h2>
 <table><tr><th>time (UTC)</th><th>severity</th><th>finding</th><th>entities</th></tr>${rows([...shown].filter((f) => f.ts).sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0)).map((f) => [fmtTs(f.ts), `<span class="sev-${f.severity}">${f.severity}</span>`, escapeHtml(f.title), `<code>${escapeHtml(Object.values(f.entities).slice(0, 3).join(' · '))}</code>`]))}</table>
 <h2>Case settings</h2>
@@ -71,7 +80,7 @@ ${iocs.length ? `<table><tr><th>kind</th><th>indicator (defanged)</th><th>verdic
     <div className="view">
       <div className="view-header">
         <h1>Report</h1>
-        <span className="sub">{shown.length} finding(s) · {iocs.length} flagged IOC(s) · {evidence.length} evidence file(s)</span>
+        <span className="sub">{shown.length} finding(s) · {iocs.length} flagged IOC(s) · {evidence.length} evidence file(s) · {curated.length} timeline entr{curated.length === 1 ? 'y' : 'ies'} · {tasks.filter((t) => !t.done).length} open task(s) · {analystNotes.length} note(s)</span>
         <span className="spacer" />
         <label className="checkbox small"><input type="checkbox" checked={includeFp} onChange={(e) => setIncludeFp(e.target.checked)} /> include false positives</label>
         <button className="btn sm" onClick={generateSummary} disabled={busy}>{busy ? <Spinner /> : <IconAi />} AI executive summary</button>

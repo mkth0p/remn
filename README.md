@@ -519,6 +519,18 @@ flyout over the current view: first and last seen, counts, a merged timeline of 
 entity's findings, mails and events, insights (what else the entity was seen with,
 sender history), and pivots to the filtered Events or Mails lists or to the analyst.
 
+Chains are read as stories: the left list ranks them by severity and score, the
+middle column is the ordered narrative (time and offset from the seed mail, source
+icon for mailbox / Microsoft 365 / host, what happened, and the artifact or finding
+that tied the step to the seed), and the right column details the selected step and
+opens its rows. `j` / `k` move between steps.
+
+Case notes hold what the analyst decides to keep: a curated timeline (entries added
+with the "timeline" button on findings, mails, events and chain steps, each linked
+back to its row, or typed by hand), a task checklist and markdown notes. The three
+are stored with the case, travel in the case bundle, and are printed in the report
+before the automatic timeline of findings.
+
 ## Security model
 
 * Server binds to `127.0.0.1`, keeps no database and deletes upload temp files at

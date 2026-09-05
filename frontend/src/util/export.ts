@@ -84,7 +84,7 @@ export async function exportCaseBundle(kase: Case, onProgress?: (msg: string) =>
   const id = kase.id!
   const bundle: Record<string, unknown> = { format: 'remn-case', version: 1, exportedAt: new Date().toISOString(), case: kase }
   const isServer = kase.storage === 'server' && !!kase.serverKey
-  const tables = ['evidence', 'events', 'mails', 'mailBodies', 'attachments', 'urls', 'findings', 'iocs', 'facets', 'aiSessions', 'savedSearches'] as const
+  const tables = ['evidence', 'events', 'mails', 'mailBodies', 'attachments', 'urls', 'findings', 'iocs', 'facets', 'aiSessions', 'savedSearches', 'caseNotes'] as const
   for (const t of tables) {
     onProgress?.(`reading ${t}…`)
     bundle[t] = await (db[t] as unknown as { where: (k: string) => { equals: (v: number) => { toArray: () => Promise<unknown[]> } } }).where('caseId').equals(id).toArray()
@@ -189,7 +189,7 @@ export async function importCaseBundle(file: File, onProgress?: (msg: string) =>
     for (let i = 0; i < rows.length; i += 5000) await (db[t] as unknown as AnyTable).bulkAdd(rows.slice(i, i + 5000))
   }
   onProgress?.('findings, iocs, facets…')
-  for (const t of ['findings', 'iocs', 'facets', 'aiSessions', 'savedSearches'] as const) {
+  for (const t of ['findings', 'iocs', 'facets', 'aiSessions', 'savedSearches', 'caseNotes'] as const) {
     const rows = ((b[t] as { id?: number; caseId: number }[]) ?? []).map((r) => {
       const { id, ...rest } = r
       void id

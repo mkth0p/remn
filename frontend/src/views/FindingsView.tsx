@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { VirtualTable, type Column } from '../components/VirtualTable'
 import { usePivot } from '../components/Detail'
 import { entityKind } from '../components/EntityPanel'
+import { AddToTimeline } from '../components/AddToTimeline'
 import { Badge, Dot, Flyout, JsonView, Kpi, Progress, Sev, SevBar, Tabs } from '../components/ui'
 import { IconCircle, IconFindings, IconInfo, IconPlay, IconSearch, IconTarget } from '../components/Icons'
 import { RescoreButton } from '../components/RescoreButton'
@@ -340,6 +341,7 @@ export function FindingsView() {
                 tabs={<Tabs tabs={[{ id: 'overview', label: 'Overview' }, { id: 'table', label: 'Table' }, { id: 'json', label: 'JSON' }]} active={flyTab} onChange={setFlyTab} />}
                 onClose={() => setSelected(null)}
                 footer={<>
+                  <AddToTimeline ts={selected.ts} text={selected.title} link={{ source: 'findings', id: selected.id!, label: selected.ruleId }} severity={selected.severity} />
                   <span className="small muted">status</span>
                   <div className="segmented">{STATUSES.map((s) => <button key={s} className={classNames(selected.status === s && 'active')} onClick={() => setStatusFor([selected.id!], s)}>{STATUS_LABEL[s]}</button>)}</div>
                   <span className="spacer" />
