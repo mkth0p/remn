@@ -128,6 +128,8 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any]) -
     where = _where_sql(rule, settings, ctx, ts_field)
     base = {"ruleId": rule["id"], "title": rule.get("title") or rule["id"], "description": rule.get("description"), "severity": rule.get("severity", "medium"),
             "source": source, "attack": list(rule.get("attack") or []), "tags": list(rule.get("tags") or [])}
+    if rule.get("confidence"):
+        base["confidence"] = rule["confidence"]
     entity_fields = _default_entities(rule)
     group_by = list(rule.get("group_by") or [])
     threshold = parse_threshold(rule.get("threshold"))
@@ -145,7 +147,6 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any]) -
             grouped = dict(rule)
             grouped["group_by"] = [f for f in entity_fields if f in _GROUPABLE.get(source, entity_fields)] or entity_fields[:2]
             grouped["threshold"] = ">= 1"
-            grouped.pop("then_flags", None)
             grouped["_collapsed"] = True
             out = run_rule(store, grouped, settings)
             for f in out:
@@ -184,6 +185,12 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any]) -
         select = gkeys + [f"any_value({e})" for _, e in gexprs] + ["count(*)", f"count(DISTINCT {dexpr})" if dexpr else "count(*)", f"min({q(ts_field)})", f"max({q(ts_field)})",
                           f"list(id ORDER BY {q(ts_field)})[1:{MAX_REFS}]", f"list_distinct(list({dexpr}))[1:8]" if dexpr else "[]",
                           f"bool_or({any_sql})" if any_sql else "TRUE"] + [f"any_value({e})" for _, e in eexprs]
+        if then_flags and source == "mails":
+            select.append("list_distinct(flatten(list(flags)))")
+            # Keep a reference to the strongest evidence even when refs are capped.
+            cases = " ".join("WHEN list_contains(flags, '" + flag.replace("'", "''") + "') THEN " + str(sev_rank(severity) * (len(then_flags) + 1) + len(then_flags) - i)
+                             for i, (flag, severity) in enumerate(sorted(then_flags, key=lambda item: sev_rank(item[1]), reverse=True)))
+            select.append(f"arg_max(id, CASE {cases} ELSE 0 END)")
         having = []
         if threshold:
             having.append(f"{'count(DISTINCT ' + dexpr + ')' if dexpr else 'count(*)'} {threshold[0].replace('==', '=')} {threshold[1]}")
@@ -203,24 +210,34 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any]) -
             ents.update(_clean_entities([(eexprs[i][0], rec[2 * ng + 7 + i]) for i in range(len(eexprs))]))
             if dexpr:  # the distinct values are the point of the finding: never let any_value() overwrite them
                 ents[rule["distinct"]] = ", ".join(str(x) for x in (dvals or []) if x)
-            findings.append({**base, "key": f"{rule['id']}|{''.join(str(k) for k in keyvals)}", "ts": first, "tsEnd": last, "entities": ents,
-                             "count": int(d if dexpr else n), "refs": list(ids or [])})
+            escalation = {}
+            refs = list(ids or [])
+            if then_flags and source == "mails":
+                for flag, severity in then_flags:
+                    if flag in (rec[-2] or []) and sev_rank(severity) > sev_rank(escalation.get("severity", base["severity"])):
+                        escalation = {"severity": severity, "escalation": flag}
+                if escalation and rec[-1] not in refs:
+                    refs = refs[:MAX_REFS - 1] + [rec[-1]]
+            findings.append({**base, **escalation, "key": f"{rule['id']}|{''.join(str(k) for k in keyvals)}", "ts": first, "tsEnd": last, "entities": ents,
+                             "count": int(d if dexpr else n), "refs": refs})
     else:
         # streaming burst detection per group
         select = ["id", q(ts_field)] + gkeys + [e for _, e in gexprs] + ([dexpr] if dexpr else []) + ([any_sql] if any_sql else []) + [e for _, e in eexprs]
+        if then_flags and source == "mails":
+            select.append("flags")
         order = ", ".join(gkeys + [q(ts_field)]) if gkeys else q(ts_field)
         cur.execute(f"SELECT {', '.join(select)} FROM {source} WHERE {where} AND {q(ts_field)} IS NOT NULL ORDER BY {order}", ctx.params)
         ng = len(gexprs)
         thr = threshold or (">=", 1)
         cur_key: tuple | None = None
-        win: list[tuple[int, int, Any]] = []
+        win: list[tuple[int, int, Any, list[str]]] = []
         open_burst: dict[str, Any] | None = None
         group_any = False
         buffered: list[dict[str, Any]] = []
         first_disp: tuple = ()
         first_extra: tuple = ()
 
-        def distinct_count(items: list[tuple[int, int, Any]]) -> int:
+        def distinct_count(items: list[tuple[int, int, Any, list[str]]]) -> int:
             return len({x[2] for x in items if x[2] not in (None, "")}) if dexpr else len(items)
 
         def close_burst() -> None:
@@ -232,13 +249,23 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any]) -
             ents = _clean_entities([(gexprs[i][0], first_disp[i]) for i in range(ng)])
             if dexpr:
                 seen: list[str] = []
-                for _, _, dv in b["rows"]:
+                for _, _, dv, _ in b["rows"]:
                     if dv not in (None, "") and dv not in seen:
                         seen.append(dv)
                 ents[rule["distinct"]] = ", ".join(seen[:8])
             ents.update(_clean_entities([(eexprs[i][0], first_extra[i]) for i in range(len(eexprs))]))
-            buffered.append({**base, "key": f"{rule['id']}|{''.join(str(k) for k in (cur_key or ()))}|{b['start'] // 60000}", "ts": b["start"], "tsEnd": b["last"],
-                             "entities": ents, "count": len(b["rows"]), "refs": [r[0] for r in b["rows"][:MAX_REFS]]})
+            escalation = {}
+            flags = {f for r in b["rows"] for f in r[3]}
+            for flag, severity in then_flags:
+                if flag in flags and sev_rank(severity) > sev_rank(escalation.get("severity", base["severity"])):
+                    escalation = {"severity": severity, "escalation": flag}
+            refs = [r[0] for r in b["rows"][:MAX_REFS]]
+            if escalation:
+                supporting = next(r[0] for r in b["rows"] if escalation["escalation"] in r[3])
+                if supporting not in refs:
+                    refs = refs[:MAX_REFS - 1] + [supporting]
+            buffered.append({**base, **escalation, "key": f"{rule['id']}|{''.join(str(k) for k in (cur_key or ()))}|{b['start'] // 60000}", "ts": b["start"], "tsEnd": b["last"],
+                             "entities": ents, "count": len(b["rows"]), "refs": refs})
 
         def flush_group() -> None:
             nonlocal win, open_burst, group_any
@@ -264,6 +291,7 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any]) -
                 anyv = rec[pos] if any_sql else True
                 pos += 1 if any_sql else 0
                 extra = tuple(rec[pos:pos + len(eexprs)])
+                flags = (rec[-1] or []) if then_flags and source == "mails" else []
                 if key != cur_key:
                     if cur_key is not None:
                         flush_group()
@@ -275,12 +303,12 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any]) -
                     continue
                 if anyv:
                     group_any = True
-                win.append((rid, ts, dv))
+                win.append((rid, ts, dv, flags))
                 while win and ts - win[0][1] > window:
                     win.pop(0)
                 if open_burst is not None:
                     if ts - open_burst["last"] <= window:
-                        open_burst["rows"].append((rid, ts, dv))
+                        open_burst["rows"].append((rid, ts, dv, flags))
                         open_burst["last"] = ts
                         continue
                     close_burst()

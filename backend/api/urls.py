@@ -20,6 +20,7 @@ urlpatterns = [
     path("chains/build", chains.build),
     # enrichment passes (sender baseline, campaigns)
     path("enrich/mails", enrich.mails),
+    path("enrich/mails/rescore", enrich.rescore),
     # chunked uploads (large files)
     path("upload/init", upload.init),
     path("upload/<str:upload_id>/chunk", upload.chunk),

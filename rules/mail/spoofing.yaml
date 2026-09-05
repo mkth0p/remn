@@ -2,7 +2,8 @@
 id: mail-same-name-different-domain
 title: Same display name used with different sender domains
 description: The same display name (normalised) appears with two or more distinct registrable domains in the mailbox - classic display-name spoofing of a colleague or supplier.
-severity: high
+severity: low
+confidence: low
 source: mails
 attack: [T1566.002, T1656]
 tags: [spoofing, display-name]
@@ -23,7 +24,8 @@ entities: [fromNameNorm, fromRegistrable, fromAddr]
 id: mail-vip-impersonation
 title: Internal VIP name used from an external domain
 description: The display name matches a VIP (Settings) but the sender domain is not one of the organisation's domains.
-severity: critical
+severity: medium
+confidence: low
 source: mails
 attack: [T1566.002, T1656]
 tags: [spoofing, bec, vip]
@@ -35,11 +37,15 @@ exclude:
     - flags|contains: trusted_sender
     - fromRegistrable|in_setting: trusted_senders
     - fromAddr|in_setting: trusted_senders
+then_flags:
+  - mail_corroborated: high
+
 ---
 id: mail-internal-name-external-domain
 title: Known internal sender name now writing from an external domain
 description: A display name that appears with an internal domain elsewhere in the mailbox is also used with an external domain.
-severity: high
+severity: low
+confidence: low
 source: mails
 attack: [T1566.002]
 tags: [spoofing, display-name]
@@ -86,12 +92,16 @@ where:
 id: mail-punycode-or-mixed-script-sender
 title: Punycode / mixed-script sender domain or display name
 description: Sender domain uses an internationalised (xn--) form, mixes Unicode scripts, or the display name mixes Latin and Cyrillic letters.
-severity: high
+severity: low
+confidence: low
 source: mails
 attack: [T1566]
 tags: [spoofing, homoglyph]
 where:
   flags|contains_any: [sender_punycode, sender_mixed_script, sender_confusable, mixed_script_display_name]
+then_flags:
+  - mail_corroborated: high
+
 ---
 id: mail-display-name-contains-email
 title: Display name contains a different e-mail address
@@ -114,7 +124,7 @@ where:
   flags|contains: replyto_mismatch
   flags|not_contains: bulk_mailer
 then_flags:
-  - replyto_webmail: high
+  - mail_corroborated: high
 ---
 id: mail-returnpath-mismatch-unauthenticated
 title: Return-Path mismatch with failed or missing authentication

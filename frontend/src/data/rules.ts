@@ -5,6 +5,7 @@ import { log, toast, useStore } from '../state/store'
 import type { RunRequest } from '../workers/rules.worker'
 import type { SettingsLike } from '../rules/filter'
 import { enabledPackIds, getPackRules } from './packs'
+import { replaceFindings } from './findingReviews'
 
 export interface LoadedRule {
   rule: Rule
@@ -35,8 +36,9 @@ export function parseRuleYaml(text: string): { rules: Rule[]; errors: string[] }
   return { rules, errors }
 }
 
-export async function loadRules(caseId: number | null): Promise<LoadedRule[]> {
+export async function loadRules(caseId: number | null, strict = false): Promise<LoadedRule[]> {
   const meta = useStore.getState().meta
+  if (strict && !meta) throw new Error('Rule metadata is unavailable; reconnect to the backend and retry')
   const out: LoadedRule[] = []
   const db = getDb()
   const disabled = new Set<string>(((await db.kv.get('disabledRules'))?.value as string[]) ?? [])
@@ -59,6 +61,7 @@ export async function loadRules(caseId: number | null): Promise<LoadedRule[]> {
       pr = await getPackRules(p.id)
     } catch (e) {
       log('err', `rule pack ${p.id}: ${(e as Error).message}`)
+      if (strict) throw new Error(`Could not load enabled rule pack ${p.id}: ${(e as Error).message}`)
       continue
     }
     for (const r of pr.rules) {
@@ -82,6 +85,7 @@ export async function loadRules(caseId: number | null): Promise<LoadedRule[]> {
       else out.push(entry)
     } else out.push({ rule: { id: c.ruleId, title: c.ruleId, severity: 'info', source: 'events' }, yaml: c.yaml, file: `custom:${c.id}`, origin: 'custom', error: errors.join('; '), enabled: false })
   }
+  if (strict && out.some((r) => r.error)) throw new Error('Some rules could not be loaded. See Rules diagnostics, correct them, and retry.')
   return out
 }
 
@@ -103,18 +107,7 @@ export function settingsForRules(kase: Case): SettingsLike {
 
 /** Replace the findings of the given rules, preserving analyst status/notes on findings whose key still exists. */
 export async function persistFindings(caseId: number, ruleIds: string[], findings: Record<string, unknown>[]): Promise<number> {
-  const db = getDb()
-  const ids = new Set(ruleIds)
-  const old = await db.findings.where('caseId').equals(caseId).filter((f) => ids.has(f.ruleId)).toArray()
-  const oldByKey = new Map(old.map((f) => [f.key, f]))
-  await db.findings.where('caseId').equals(caseId).filter((f) => ids.has(f.ruleId)).delete()
-  const now = Date.now()
-  const rows = findings.map((f) => {
-    const prev = oldByKey.get(String(f.key))
-    return { ...(f as object), caseId, createdAt: prev?.createdAt ?? now, status: prev?.status ?? 'new', notes: prev?.notes } as never
-  })
-  for (let i = 0; i < rows.length; i += 2000) await db.findings.bulkAdd(rows.slice(i, i + 2000))
-  return rows.length
+  return replaceFindings(caseId, ruleIds, findings)
 }
 
 export interface RuleRunSummary {
@@ -144,7 +137,8 @@ export async function runRulesFor(kase: Case, rules: Rule[], onProgress?: (done:
     const { getSource } = await import('./source')
     log('info', `running ${rules.length} rule(s) on the server store…`)
     const r = await getSource(kase).runRules(rules, onProgress)
-    const n = await persistFindings(kase.id!, rules.map((x) => x.id), r.findings)
+    const completed = rules.map((x) => x.id).filter((id) => !r.errors.some((e) => e.startsWith(`${id}:`)))
+    const n = await persistFindings(kase.id!, completed, r.findings.filter((f) => completed.includes(String(f.ruleId))))
     for (const e of r.errors) log('err', e)
     log('ok', `rules done: ${n} finding(s)`)
     toast('ok', `${n} finding(s) from ${rules.length} rule(s)`)

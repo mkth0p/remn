@@ -215,9 +215,14 @@ export function MailDetail({ row: initialRaw, onClose }: { row: MailRow; onClose
         {Object.keys(row.keywordHits ?? {}).length > 0 && (
           <div className="small dim">lexicon: {Object.entries(row.keywordHits).map(([k, v]) => `${k} → ${v.slice(0, 4).join(', ')}`).join(' · ')}</div>
         )}
-        {meta?.mailWeights && (row.flags ?? []).length > 0 && (
+        {row.assessment ? <div className="small dim">
+          <div>Attack evidence: <strong>{row.assessment.confidence}</strong> · calibration {row.assessment.version}{row.assessment.expectedSender ? ' · expected correspondent' : ''}</div>
+          <div>Signal families: {Object.entries(row.assessment.groups).filter(([, w]) => w > 0).map(([g, w]) => `${g} (${w})`).join(' · ')} · attachment risk {row.assessment.attachmentRisk}</div>
+          <div>Related flags contribute once per family. The score is a review priority, not a probability of compromise.</div>
+          {row.assessment.limitations.map((s) => <div key={s} style={{ color: 'var(--warn)' }}>{s}</div>)}
+        </div> : meta?.mailWeights && (row.flags ?? []).length > 0 && (
           <div className="small dim" title="flag weights driving the risk score; * marks strong indicators that carry the score on their own">
-            score drivers: {(row.flags ?? [])
+            Legacy score — use “rescore + refresh findings” to apply current calibration. Previous drivers: {(row.flags ?? [])
               .map((f) => ({ f, w: meta.mailWeights![f] ?? 5, s: meta.mailStrongFlags?.includes(f) }))
               .sort((a, b) => b.w - a.w)
               .slice(0, 6)

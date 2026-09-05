@@ -1,6 +1,7 @@
 import { apiPost } from '../api/client'
 import { getDb, type Case, type Finding, type Severity } from '../db/schema'
 import { settingsForRules } from './rules'
+import { replaceFindings } from './findingReviews'
 
 export interface ChainStep {
   kind: 'mail' | 'event'
@@ -94,7 +95,8 @@ export async function buildChains(kase: Case, opts: ChainOptions = {}): Promise<
     for (const f of findings) if (f.source === 'mails') for (const r of f.refs) refIds.add(r)
     const allMails = await db.mails.where('caseId').equals(caseId).toArray()
     const seeds = allMails.filter((m) => m.date != null && (m.risk >= seedMinRisk || (m.id != null && refIds.has(m.id))))
-    if (!seeds.length) return { chains: [], stats: { seeds: 0, identities: 0, events: 0, mails: 0, chains: 0 } }
+    // no seed left (evidence removed, threshold raised): the empty result must still replace the stored snapshot
+    if (!seeds.length) return persistChainResult(caseId, { chains: [], stats: { seeds: 0, identities: 0, events: 0, mails: 0, chains: 0 } })
     const idents = new Set<string>()
     for (const m of seeds) for (const r of [...m.to, ...m.cc, ...m.bcc]) { const k = identityKey(r.addr); if (k) idents.add(k) }
     const tMin = Math.min(...seeds.map((m) => m.date!)) - 5 * 60_000
@@ -118,16 +120,19 @@ export async function buildChains(kase: Case, opts: ChainOptions = {}): Promise<
     }))
     result = await apiPost<ChainResult>('/api/chains/build', { mails, events, findings, settings, seedMinRisk, windowHours })
   }
+  return persistChainResult(caseId, result)
+}
+
+/** Store the snapshot the Chains view reads on load and mirror the chains as findings. */
+async function persistChainResult(caseId: number, result: ChainResult): Promise<ChainResult> {
   result.builtAt = Date.now()
-  await db.kv.put({ key: `chains-${caseId}`, value: result })
+  await getDb().kv.put({ key: `chains-${caseId}`, value: result })
   await persistChainFindings(caseId, result.chains)
   return result
 }
 
 /** Chains are also findings (ruleId "chain") so they show in Findings, the report and the AI summary. */
 async function persistChainFindings(caseId: number, chains: Chain[]): Promise<void> {
-  const db = getDb()
-  await db.findings.where('[caseId+ruleId]').equals([caseId, 'chain']).delete()
   const now = Date.now()
   const rows: Finding[] = chains.map((c) => ({
     caseId, ruleId: 'chain', key: `chain|${c.identity}|${c.seed.id}`, title: `Attack chain: ${c.identityLabel} — ${c.steps.length} step(s) after "${c.seed.subject.slice(0, 60)}"`,
@@ -135,7 +140,7 @@ async function persistChainFindings(caseId: number, chains: Chain[]): Promise<vo
     entities: { user: c.entities.user, ip: c.entities.ips.slice(0, 3).join(', '), host: c.entities.hosts.slice(0, 3).join(', '), attacker: c.entities.attackerAddresses.slice(0, 3).join(', ') },
     count: c.steps.length, refs: [c.seed.id], attack: ['T1566', 'T1114', 'T1078'], tags: ['chain', 'cross-source'], status: 'new', createdAt: now,
   }))
-  if (rows.length) await db.findings.bulkAdd(rows)
+  await replaceFindings(caseId, ['chain'], rows as unknown as Record<string, unknown>[])  // analyst status / notes survive a rebuild
 }
 
 export async function loadChains(caseId: number): Promise<ChainResult | null> {

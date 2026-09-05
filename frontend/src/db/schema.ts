@@ -154,6 +154,16 @@ export interface AttachmentSummary {
   category?: string | null
   inline?: boolean
   details?: Record<string, unknown>
+  rescoreLimited?: boolean
+}
+
+export interface MailAssessment {
+  version: string
+  confidence: 'low' | 'medium' | 'high'
+  groups: Record<string, number>
+  attachmentRisk: number
+  expectedSender: boolean
+  limitations: string[]
 }
 
 export interface UrlEntry {
@@ -218,13 +228,14 @@ export interface MailRow {
   senderPriorCount?: number
   senderFirstSeen?: number
   senderDaysKnown?: number
-  senderSolicited?: boolean
+  senderSolicited?: boolean | null
   senderAuthRegression?: boolean
   campaignId?: string
   campaignSize?: number
   campaignSenders?: number
   flags: string[]
   risk: number
+  assessment?: MailAssessment
   size?: number | null
   reputation?: { originIp?: { verdict: string }; worst?: string; checkedAt?: number }
   [key: string]: unknown
@@ -264,6 +275,7 @@ export interface Finding {
   title: string
   description?: string
   severity: Severity
+  confidence?: 'low' | 'medium' | 'high'
   source: 'events' | 'mails'
   ts: number | null
   tsEnd?: number | null
@@ -383,11 +395,15 @@ export function setDb(db: RemnDB | null): void {
   _db = db
 }
 
+/** kv keys that belong to one case (mirrors CASE_KV_PREFIXES in data/caseState.ts, kept here to avoid a schema -> data import). */
+export const CASE_KV_KEYS = (caseId: number) => ['chains', 'ruleDiags', 'baseline', 'mail-calibration', 'report-summary', 'finding-reviews'].map((p) => `${p}-${caseId}`)
+
 export async function deleteCaseData(db: RemnDB, caseId: number): Promise<void> {
-  await db.transaction('rw', [db.events, db.mails, db.mailBodies, db.attachments, db.urls, db.findings, db.iocs, db.facets, db.aiSessions, db.savedSearches, db.evidence], async () => {
+  await db.transaction('rw', [db.events, db.mails, db.mailBodies, db.attachments, db.urls, db.findings, db.iocs, db.facets, db.aiSessions, db.savedSearches, db.evidence, db.kv], async () => {
     for (const t of [db.events, db.mails, db.mailBodies, db.attachments, db.urls, db.findings, db.iocs, db.facets, db.aiSessions, db.savedSearches, db.evidence]) {
       await (t as Table<{ caseId: number }, number>).where('caseId').equals(caseId).delete()
     }
+    await db.kv.bulkDelete(CASE_KV_KEYS(caseId))  // chain snapshot, diagnostics, calibration state, archived reviews
   })
 }
 

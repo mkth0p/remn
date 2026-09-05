@@ -69,7 +69,8 @@ export interface DataSource {
   listIocs(opts: IocListOptions): Promise<IocList>
   setIocReputation(items: { kind: string; value: string; verdict: string; tags: string[]; summary: unknown; verdicts: unknown; checkedAt: number }[]): Promise<void>
   runRules(rules: Rule[], onProgress?: (done: number, total: number, ruleId: string, findings: number) => void): Promise<RuleRunResult>
-  deleteEvidence(evidenceId: number): Promise<void>
+  /** Removes the rows and the derived state they fed (findings, chain snapshot, diagnostics). */
+  deleteEvidence(evidenceId: number): Promise<{ findings: number; chains: number }>
   sql?(sql: string, limit?: number): Promise<{ rows: Record<string, unknown>[]; columns: string[]; truncated: boolean }>
 }
 
@@ -153,8 +154,9 @@ class BrowserSource implements DataSource {
   }
   async deleteEvidence(evidenceId: number) {
     const { deleteEvidenceData } = await import('../db/schema')
+    const { clearDerivedState } = await import('./caseState')
     await deleteEvidenceData(getDb(), this.id, evidenceId)
-    await getDb().facets.where('caseId').equals(this.id).delete()
+    return clearDerivedState(this.id)
   }
 }
 
@@ -264,8 +266,11 @@ class ServerSource implements DataSource {
     return { findings: res.findings ?? [], byRule: res.byRule ?? {}, errors: (res.errors ?? []).map((e) => `${e.ruleId}: ${e.error}`), diagnostics: res.diagnostics ?? [] }
   }
   async deleteEvidence(evidenceId: number) {
-    await fetch(`/api/store/${this.key}/evidence/${evidenceId}`, { method: 'DELETE', headers: API_HEADERS })
+    const res = await fetch(`/api/store/${this.key}/evidence/${evidenceId}`, { method: 'DELETE', headers: API_HEADERS })
+    if (!res.ok) throw new Error(`server refused the deletion (HTTP ${res.status})`)
     await getDb().evidence.delete(evidenceId)
+    const { clearDerivedState } = await import('./caseState')
+    return clearDerivedState(this.kase.id!)
   }
   sql(sql: string, limit = 200) {
     return this.post<{ rows: Record<string, unknown>[]; columns: string[]; truncated: boolean }>('sql', { sql, limit })

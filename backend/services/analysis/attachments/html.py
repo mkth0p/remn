@@ -8,7 +8,6 @@ from typing import Any
 from services.analysis.urls import extract_urls
 
 _B64_RE = re.compile(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{1000,}={0,2}")
-_B64_ANY_RE = re.compile(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{200,}={0,2}")
 _SMUGGLE_API = (
     ("atob(", "atob"), ("msSaveOrOpenBlob", "msSaveOrOpenBlob"), ("msSaveBlob", "msSaveBlob"),
     ("createObjectURL", "createObjectURL"), ("new Blob(", "Blob"), ("new File(", "File"),
@@ -35,6 +34,33 @@ _BRAND_TITLE = re.compile(r"(?i)(microsoft|office ?365|outlook|onedrive|sharepoi
 _LONG_STRING = re.compile(r"[\"'][A-Za-z0-9+/=%\\x]{5000,}[\"']")
 _HEX_ESC = re.compile(r"(?:\\x[0-9a-fA-F]{2}){40,}|(?:\\u[0-9a-fA-F]{4}){30,}|(?:%[0-9a-fA-F]{2}){40,}")
 _TEL_LURE = re.compile(r"(?i)(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}|\b0[1-9](?:[\s.-]?\d{2}){4}\b")
+
+
+def smuggling_flags(details: dict[str, Any]) -> set[str]:
+    """Classify retained facts too, so existing cases can use the same policy.
+
+    File construction APIs are capabilities, not proof of smuggling. Require a
+    suspicious payload/output, or reconstruction plus concealment and delivery.
+    """
+    apis = set(details.get("apis") or [])
+    types = set(details.get("decodedBlobTypes") or [])
+    delivery = bool(apis & {"download_attr", "msSaveBlob", "msSaveOrOpenBlob"})
+    construction = bool(apis & {"Blob", "File", "createObjectURL", "msSaveBlob", "msSaveOrOpenBlob"})
+    reconstruction = bool(apis & {"atob", "fromCharCode", "charCodeAt", "aes_decrypt", "cryptojs", "rc4", "reverse_string"})
+    dangerous = bool(types & {"exe", "zip", "archive", "ole", "rtf"}) or bool(details.get("dangerousDownload")) or bool(apis & {"exe_mime", "zip_mime"})
+    concealed = bool(details.get("obfuscated")) or bool(apis & {"eval", "unescape", "aes_decrypt", "rc4", "reverse_string"})
+    flags: set[str] = set()
+    if dangerous and construction and delivery or construction and delivery and reconstruction and concealed:
+        flags.add("html_smuggling")
+    elif dangerous or construction and delivery and reconstruction:
+        flags.add("html_smuggling_possible")
+    if types & {"exe", "zip", "archive", "ole", "rtf", "html"}:
+        flags.add("html_embedded_payload")
+    if types & {"image", "pdf"}:
+        flags.add("html_embedded_document")
+    if construction and delivery:
+        flags.add("html_file_download")
+    return flags
 
 
 def _decode(data: bytes) -> str:
@@ -68,7 +94,6 @@ def analyze_html(data: bytes, ext: str) -> dict[str, Any]:
     blobs = _B64_RE.findall(text)
     out["base64Blobs"] = len(blobs)
     out["base64Bytes"] = sum(len(b) for b in blobs)
-    small_blobs = len(_B64_ANY_RE.findall(text))
     for b in blobs[:5]:
         try:
             raw = base64.b64decode(b[: 4 * 64] + "=" * (-len(b[: 4 * 64]) % 4), validate=False)
@@ -93,27 +118,10 @@ def analyze_html(data: bytes, ext: str) -> dict[str, Any]:
             out["decodedBlobTypes"].append("archive")
         else:
             out["decodedBlobTypes"].append("unknown")
-    smuggle_score = 0
-    for tag in apis:
-        smuggle_score += {"atob": 2, "msSaveOrOpenBlob": 3, "msSaveBlob": 3, "createObjectURL": 2, "Blob": 2, "File": 1,
-                          "download_attr": 2, "Uint8Array": 1, "charCodeAt": 1, "fromCharCode": 1, "unescape": 1,
-                          "eval": 1, "document_write": 1, "octet_stream": 2, "zip_mime": 2, "exe_mime": 3,
-                          "reverse_string": 2, "aes_decrypt": 2, "cryptojs": 2, "rc4": 2, "xor": 1, "wasm": 2}.get(tag, 0)
-    if out["base64Bytes"] > 20_000:
-        smuggle_score += 3
-    elif out["base64Bytes"] > 2_000:
-        smuggle_score += 2
-    elif small_blobs:
-        smuggle_score += 1
-    if any(t in ("zip", "exe", "ole", "archive", "rtf") for t in out["decodedBlobTypes"]):
-        smuggle_score += 4
-    if smuggle_score >= 5:
-        flags.add("html_smuggling")
-    elif smuggle_score >= 3:
-        flags.add("html_smuggling_possible")
-    if out["decodedBlobTypes"]:
-        flags.add("html_embedded_payload")
-    if _LONG_STRING.search(text) or _HEX_ESC.search(text):
+    out["dangerousDownload"] = bool(re.search(r"(?i)(?:\.download\s*=|download\s*=)\s*['\"][^'\"]*\.(?:exe|dll|scr|js|vbs|hta|lnk|iso|img|zip|docm|xlsm)['\"]", text))
+    out["obfuscated"] = bool(_LONG_STRING.search(text) or _HEX_ESC.search(text))
+    flags.update(smuggling_flags(out))
+    if out["obfuscated"]:
         flags.add("html_obfuscated")
     if "eval" in apis or "Function" in apis or "unescape" in apis:
         flags.add("html_dynamic_code")

@@ -63,7 +63,8 @@ export function FindingsView() {
     setView(f.source)
   }
   const columns: Column<Finding>[] = [
-    { key: 'severity', label: 'sev', width: 90, render: (r) => <Badge sev={r.severity}>{r.severity}</Badge> },
+    { key: 'severity', label: 'priority', width: 90, render: (r) => <Badge sev={r.severity}>{r.severity}</Badge> },
+    { key: 'confidence', label: 'evidence', width: 85, render: (r) => <span title="Rule confidence: support for the attack hypothesis, separate from priority. Not specified means the rule has not declared confidence.">{r.confidence ?? 'unspecified'}</span> },
     { key: 'title', label: 'finding', width: 'minmax(260px, 1.4fr)', render: (r) => <span>{r.title}{r.escalation ? <span className="muted"> · {r.escalation}</span> : null}</span> },
     { key: 'entities', label: 'entities', width: 'minmax(220px, 1fr)', render: (r) => Object.entries(r.entities).map(([k, v]) => `${k}=${v}`).join(' · ') },
     { key: 'count', label: 'n', width: 60, render: (r) => fmtNum(r.count) },

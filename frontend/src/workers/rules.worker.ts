@@ -2,9 +2,10 @@
 /**
  * Rule worker: runs the YAML rules against IndexedDB and stores findings.
  */
-import { getDb, type Finding, type MailRow } from '../db/schema'
+import { getDb, type MailRow } from '../db/schema'
 import { compileCond, ruleEventIds, ruleFields, runRule, type Rule, type RuleDiag } from '../rules/engine'
 import type { Row, SettingsLike } from '../rules/filter'
+import { replaceFindings } from '../data/findingReviews'
 
 export interface RunRequest {
   cmd: 'run'
@@ -100,15 +101,9 @@ async function run(req: RunRequest): Promise<void> {
   const { caseId, rules, settings } = req
   mailCache = null
   joinedCache = null
-  const ruleIds = new Set(rules.map((r) => r.id))
-  // preserve analyst decisions on findings that still exist after the re-run
-  const old = await db.findings.where('caseId').equals(caseId).filter((f) => ruleIds.has(f.ruleId)).toArray()
-  const oldByKey = new Map(old.map((f) => [f.key, f]))
-  await db.findings.where('caseId').equals(caseId).filter((f) => ruleIds.has(f.ruleId)).delete()
   let total = 0
   const byRule: Record<string, number> = {}
   const diagnostics: RuleDiag[] = []
-  const now = Date.now()
   // Rules that read the same event subset (same pinned eventIds) run back to back and share one
   // IndexedDB read: with the community packs, ~1,500 process-creation rules would otherwise each
   // re-read every Sysmon 1 / 4688 row. Heavy columns (raw XML, EventData) are kept only when a
@@ -165,14 +160,10 @@ async function run(req: RunRequest): Promise<void> {
         }
       }
       const found = runRule(rule, { rows, settings, thenRows: thenRows ? () => thenRows!() : undefined, onDiag: (d) => diagnostics.push(d) })
-      const toAdd: Finding[] = found.map((f) => {
-        const prev = oldByKey.get(f.key)
-        return { ...f, caseId, createdAt: prev?.createdAt ?? now, status: prev?.status ?? 'new', notes: prev?.notes }
-      })
-      if (toAdd.length) await db.findings.bulkAdd(toAdd)
-      byRule[rule.id] = toAdd.length
-      total += toAdd.length
-      post({ type: 'progress', index: i + 1, total: rules.length, ruleId: rule.id, findings: toAdd.length, ms: Date.now() - t0, rows: rows.length })
+      const count = await replaceFindings(caseId, [rule.id], found.map((f) => ({ ...f })))
+      byRule[rule.id] = count
+      total += count
+      post({ type: 'progress', index: i + 1, total: rules.length, ruleId: rule.id, findings: count, ms: Date.now() - t0, rows: rows.length })
     } catch (e) {
       post({ type: 'rule-error', ruleId: rule.id, error: (e as Error).message || String(e), index: i + 1, total: rules.length })
     }

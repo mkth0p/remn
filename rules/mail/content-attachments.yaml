@@ -11,7 +11,8 @@ where:
 id: mail-dmarc-fail-with-lure
 title: DMARC failure combined with a social-engineering lure
 description: DMARC or composite authentication failed and the body contains urgency / credential / financial wording.
-severity: high
+severity: medium
+confidence: low
 source: mails
 attack: [T1566.002]
 tags: [authentication, phishing]
@@ -19,41 +20,71 @@ where:
   all_of:
     - flags|contains_any: [dmarc_fail, compauth_fail]
     - flags|contains_any: [lexicon_urgency, lexicon_credentials, lexicon_financial, lexicon_gift_card, credential_phishing_pattern, bec_pattern]
+then_flags:
+  - mail_corroborated: high
 ---
 id: mail-executable-attachment
-title: Executable, script, shortcut or disk-image attachment
-description: Attachment is a native executable, installer, script, .lnk/.url shortcut, .chm, .xll, OneNote or ISO/IMG/VHD image (directly or inside an archive).
-severity: critical
+title: Executable, script or shortcut attachment
+description: Attachment is a native executable, installer, script, .lnk/.url shortcut, .chm or .xll, directly or inside a container. Generic OneNote and disk-image files have a separate review rule.
+severity: high
+confidence: medium
 source: mails
 attack: [T1566.001, T1204.002]
 tags: [attachment, malware]
 where:
-  flags|contains_any: [att_executable, att_installer, att_script, att_shortcut, att_help, att_xll, att_onenote, att_disk_image, att_archive_contains_executable, att_archive_contains_script, att_archive_contains_shortcut, att_archive_contains_disk_image, att_archive_contains_onenote, att_disk_image_contains_executable, att_disk_image_contains_shortcut, att_archive_single_executable, att_extension_mismatch_executable, att_nested_executable, att_nested_script]
+  flags|contains_any: [att_executable, att_installer, att_script, att_shortcut, att_help, att_xll, att_archive_contains_executable, att_archive_contains_script, att_archive_contains_shortcut, att_disk_image_contains_executable, att_disk_image_contains_shortcut, att_archive_single_executable, att_extension_mismatch_executable, att_nested_executable, att_nested_script]
+then_flags:
+  - att_extension_mismatch_executable: critical
+  - att_yara_match: critical
+  - mail_corroborated: critical
+---
+id: mail-container-attachment-review
+title: OneNote or disk-image attachment (review)
+description: A container can carry active content; the format alone does not establish a malicious payload.
+severity: medium
+confidence: low
+source: mails
+attack: [T1566.001]
+tags: [attachment, review]
+where:
+  flags|contains_any: [att_onenote, att_disk_image, att_archive_contains_onenote, att_archive_contains_disk_image]
 ---
 id: mail-macro-document
 title: Office document with macros / XLM / DDE / remote template
 description: Attachment carries a VBA project, Excel 4.0 macros, a DDE field, a remote template, an external OLE object or Equation Editor objects.
-severity: high
+severity: medium
+confidence: low
 source: mails
 attack: [T1566.001, T1204.002, T1221]
 tags: [attachment, macro]
 where:
   flags|contains_any: [att_office_macro, att_office_xlm, att_office_dde, att_office_external_template, att_office_external_object, att_rtf_equation_editor, att_rtf_objupdate, att_rtf_package, att_office_iqy_remote, att_csv_formula_injection, att_archive_contains_office_macro]
 then_flags:
-  - att_macro_autoexec: critical
-  - att_macro_suspicious: critical
-  - att_macro_obfuscated: critical
+  - att_macro_autoexec: medium
+  - att_macro_suspicious: high
+  - att_macro_obfuscated: high
   - att_macro_vba_stomping: critical
+  - att_office_external_template: high
+  - att_office_dde: high
+  - att_office_xlm: high
+  - att_office_external_object: high
+  - att_rtf_equation_editor: critical
+  - att_rtf_objupdate: high
+  - att_office_iqy_remote: high
 ---
 id: mail-pdf-active-content
-title: PDF with active content (JavaScript, launch, embedded file, auto action)
-description: PDF attachment contains JavaScript, /Launch, /OpenAction, embedded files, rich media or XFA, or is obfuscated / encrypted.
-severity: high
+title: PDF with interactive or embedded content (review)
+description: JavaScript, embedded documents, forms and encryption can be legitimate PDF capabilities. Review the content; capability alone does not establish an attack.
+severity: low
+confidence: low
 source: mails
 attack: [T1566.001, T1204.002]
 tags: [attachment, pdf]
 where:
   flags|contains_any: [att_pdf_javascript, att_pdf_launch, att_pdf_embedded_file, att_pdf_rich_media, att_pdf_submit_form, att_pdf_remote_goto, att_pdf_encrypted_empty_password, att_pdf_header_offset]
+then_flags:
+  - att_pdf_launch: high
+  - mail_corroborated: high
 ---
 id: mail-pdf-link-lure
 title: One-page PDF that is essentially a link (click-me lure)
@@ -67,23 +98,40 @@ where:
 ---
 id: mail-encrypted-archive
 title: Password-protected archive attachment
-description: Encrypted zip/rar/7z (password usually given in the body) defeats gateway scanning.
-severity: high
+description: Encrypted archive or Office content cannot be fully inspected. A password-protected business document is not, by itself, evidence of an attack.
+severity: low
+confidence: low
 source: mails
 attack: [T1027, T1566.001]
 tags: [attachment, archive]
 where:
   flags|contains_any: [att_encrypted_archive, att_office_encrypted]
+then_flags:
+  - mail_corroborated: high
 ---
 id: mail-html-smuggling
 title: HTML attachment with smuggling or credential form
-description: HTML/SVG attachment reconstructs a payload in the browser (atob/Blob/download) or contains a login form / brand lure.
+description: HTML attachment reconstructs a suspicious payload for download or collects credentials for an external destination. Generic HTML, export buttons and embedded images do not satisfy this rule.
 severity: critical
+confidence: high
 source: mails
 attack: [T1027.006, T1566.001]
 tags: [attachment, html-smuggling, phishing]
 where:
-  flags|contains_any: [att_html_smuggling, att_html_embedded_payload, att_html_credential_harvest, att_html_password_form, att_svg_script, att_html_redirect_only, att_archive_contains_html]
+  flags|contains_any: [att_html_smuggling, att_html_credential_harvest, att_nested_html_smuggling, att_nested_html_credential_harvest]
+---
+id: mail-html-capabilities-review
+title: HTML attachment with downloads, scripts or embedded content (review)
+description: HTML capabilities or an HTML file in an archive warrant inspection; they are not sufficient evidence of smuggling.
+severity: low
+confidence: low
+source: mails
+attack: [T1566.001]
+tags: [attachment, html, review]
+where:
+  flags|contains_any: [att_archive_contains_html, att_html_file_download, att_html_embedded_payload, att_html_smuggling_possible, att_html_password_form, att_svg_script, att_html_redirect_only]
+then_flags:
+  - mail_corroborated: high
 ---
 id: mail-html-attachment
 title: HTML attachment
@@ -98,12 +146,17 @@ where:
 id: mail-attachment-disguised
 title: Attachment disguised (double extension, RTLO, type mismatch)
 description: File name tricks (invoice.pdf.exe, RTLO character, padded name) or real content type different from the extension.
-severity: high
+severity: medium
+confidence: low
 source: mails
 attack: [T1036.007, T1036]
 tags: [attachment, masquerading]
 where:
   flags|contains_any: [att_double_extension, att_rtlo_filename, att_padded_filename, att_extension_mismatch, att_extension_mismatch_executable, att_zero_width_filename, att_mixed_script_filename, att_archive_entry_double_extension, att_archive_entry_rtlo_filename]
+then_flags:
+  - att_extension_mismatch_executable: critical
+  - att_rtlo_filename: high
+  - mail_corroborated: high
 ---
 id: mail-yara-match
 title: Attachment matched a YARA rule
@@ -149,27 +202,29 @@ where:
   any_of:
     - flags|contains: credential_phishing_pattern
     - flags|contains: html_form_password
-    - flags|contains: html_form_external
-    - { flags|contains: lexicon_credentials, flags|contains_any: [url_credential_keywords, url_text_href_mismatch, url_free_hosting, url_shortener] }
+    - { flags|contains: html_form_external, flags|contains_any: [url_credential_keywords, url_text_href_mismatch] }
+    - { flags|contains_all: [lexicon_credentials, mail_corroborated], flags|contains_any: [url_credential_keywords, url_text_href_mismatch] }
 ---
 id: mail-bec-pattern
 title: Business Email Compromise pattern
-description: Authority impersonation + money/gift card request + urgency, secrecy or "cannot talk" excuse; often with Reply-To diverted to webmail.
-severity: critical
+description: Financial request plus authority and pressure wording, corroborated by deceptive identity/link evidence or authentication regression. Webmail and an invoice alone are insufficient.
+severity: high
+confidence: medium
 source: mails
 attack: [T1566.002, T1656]
 tags: [bec, fraud]
 where:
-  any_of:
-    - flags|contains: bec_pattern
-    - { flags|contains: lexicon_gift_card, flags|contains_any: [lexicon_urgency, lexicon_secrecy, lexicon_availability, replyto_webmail] }
-    - flags|contains_all: [lexicon_financial, replyto_webmail]
-    - { flags|contains_all: [lexicon_financial, lexicon_authority], flags|contains_any: [sender_lookalike_internal, display_name_email_mismatch, from_webmail] }
+  flags|contains: bec_pattern
+then_flags:
+  - internal_spoof: critical
+  - sender_lookalike_internal: critical
+  - replyto_lookalike_internal: critical
 ---
 id: mail-bank-detail-change
-title: Bank details / IBAN change request
-description: Body mentions a change of bank details (RIB, IBAN, new account) - invoice-redirection fraud.
-severity: high
+title: Bank details / IBAN change request (verify independently)
+description: Bank-change wording is a review signal, including legitimate supplier updates. Escalates only with corroborating identity, link or authentication-regression evidence.
+severity: low
+confidence: low
 source: mails
 attack: [T1656]
 tags: [bec, fraud, invoice]
@@ -178,6 +233,8 @@ where:
     - bodyText|re: "(?i)(chang|nouveau|nouvelle|mise à jour|update|new)\\s+(de\\s+|d[e']\\s*)?(rib|iban|coordonn[ée]es bancaires|bank (account|details)|banking (details|information)|account number|beneficiary|bénéficiaire)"
     - visibleText|re: "(?i)(chang|nouveau|nouvelle|mise à jour|update|new)\\s+(de\\s+|d[e']\\s*)?(rib|iban|coordonn[ée]es bancaires|bank (account|details)|banking (details|information)|account number|beneficiary|bénéficiaire)"
     - subject|re: "(?i)(nouveau|new|chang|update|mise à jour).*(rib|iban|bank|banc|coordonn)"
+then_flags:
+  - mail_corroborated: high
 ---
 id: mail-hidden-or-obfuscated-content
 title: Hidden text, zero-width characters or obfuscated HTML

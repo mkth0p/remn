@@ -19,42 +19,90 @@ log = logging.getLogger(__name__)
 
 MAX_ANALYZE_BYTES = 60 * 1024 * 1024
 
-# Flag -> weight used for the risk score (max of weights + small bonus per extra flag)
+# Flag -> weight; correlated observations contribute once per feature family.
 WEIGHTS: dict[str, int] = {
-    "executable": 95, "installer": 85, "script": 90, "shortcut": 85, "help": 80, "onenote": 75, "disk_image": 80,
+    "executable": 95, "installer": 85, "script": 90, "shortcut": 85, "help": 80, "onenote": 40, "disk_image": 50,
     "xll": 90, "double_extension": 60, "rtlo_filename": 85, "padded_filename": 50, "extension_mismatch": 45,
     "extension_mismatch_executable": 95, "zero_width_filename": 40, "mixed_script_filename": 35,
-    "office_macro": 70, "macro_autoexec": 80, "macro_suspicious": 82, "macro_ioc": 85, "macro_obfuscated": 85,
+    "office_macro": 40, "macro_autoexec": 50, "macro_suspicious": 82, "macro_ioc": 65, "macro_obfuscated": 75,
     "macro_vba_stomping": 90, "office_xlm": 85, "office_dde": 85, "office_external_template": 85,
     "office_external_object": 80, "office_external_relation": 45, "office_remote_image": 30, "office_ole_object": 60,
     "office_activex": 50, "office_encrypted": 55, "office_iqy_remote": 85, "csv_formula_injection": 70,
     "rtf_object": 65, "rtf_equation_editor": 95, "rtf_objupdate": 85, "rtf_package": 80,
-    "pdf_javascript": 70, "pdf_auto_action": 55, "pdf_launch": 90, "pdf_embedded_file": 65, "pdf_rich_media": 55,
-    "pdf_xfa": 40, "pdf_submit_form": 50, "pdf_remote_goto": 55, "pdf_encrypted": 35, "pdf_encrypted_empty_password": 45,
+    "pdf_javascript": 35, "pdf_auto_action": 25, "pdf_launch": 90, "pdf_embedded_file": 30, "pdf_rich_media": 30,
+    "pdf_xfa": 25, "pdf_submit_form": 35, "pdf_remote_goto": 35, "pdf_encrypted": 20, "pdf_encrypted_empty_password": 20,
     "pdf_obfuscated_names": 35, "pdf_header_offset": 45, "pdf_trailing_data": 30, "pdf_link_lure": 45,
     "pdf_image_only": 25, "pdf_form": 20, "pdf_parse_error": 25, "pdf_jbig2": 30, "pdf_incremental_updates": 10,
-    "encrypted_archive": 70, "archive_contains_executable": 90, "archive_contains_script": 88,
-    "archive_contains_shortcut": 85, "archive_contains_disk_image": 80, "archive_contains_office_macro": 70,
-    "archive_contains_legacy_office": 40, "archive_contains_html": 55, "archive_contains_onenote": 75,
-    "nested_archive": 50, "archive_single_executable": 92, "archive_single_lure": 55, "zip_bomb": 80,
+    "encrypted_archive": 35, "archive_contains_executable": 90, "archive_contains_script": 88,
+    "archive_contains_shortcut": 85, "archive_contains_disk_image": 60, "archive_contains_office_macro": 40,
+    "archive_contains_legacy_office": 25, "archive_contains_html": 25, "archive_contains_onenote": 40,
+    "nested_archive": 30, "archive_single_executable": 92, "archive_single_lure": 25, "zip_bomb": 80,
     "archive_path_traversal": 70, "archive_many_entries": 20, "archive_corrupt": 30, "unsupported_archive_format": 35,
     "disk_image_contains_executable": 90, "disk_image_contains_shortcut": 90, "archive_partially_analyzed": 5,
-    "html_smuggling": 90, "html_smuggling_possible": 60, "html_embedded_payload": 85, "html_obfuscated": 60,
+    "html_smuggling": 90, "html_smuggling_possible": 45, "html_embedded_payload": 75, "html_obfuscated": 55,
     "html_dynamic_code": 50, "html_script": 35, "html_event_handler": 30, "html_password_form": 70,
     "html_credential_harvest": 90, "html_email_form": 45, "html_brand_lure": 40, "html_prefilled_email": 60,
-    "html_meta_refresh": 55, "html_js_redirect": 55, "html_hidden_iframe": 65, "svg_script": 80,
-    "html_redirect_only": 70, "html_script_only": 60, "html_callback_lure": 60, "html_attachment": 30,
+    "html_meta_refresh": 55, "html_js_redirect": 55, "html_hidden_iframe": 65, "svg_script": 40,
+    "html_redirect_only": 40, "html_script_only": 35, "html_callback_lure": 40, "html_attachment": 20,
+    "html_file_download": 25, "html_embedded_document": 15,
     "nested_mail": 25, "empty_file": 15, "yara_match": 90, "calendar_lure": 20, "archive": 25, "office_legacy": 30,
     "rtf": 25, "mail": 15, "vcard": 5, "large_attachment": 5, "office_parse_error": 20,
 }
 
 
+def _base_flag(flag: str) -> str:
+    for prefix in ("nested_", "archive_entry_", "archive_contains_", "disk_image_contains_"):
+        if flag.startswith(prefix):
+            return _base_flag(flag[len(prefix):])
+    return flag
+
+
 def _score(flags: list[str]) -> int:
     if not flags:
         return 0
-    weights = sorted((WEIGHTS.get(f, 10) for f in flags), reverse=True)
-    score = weights[0] + sum(min(w, 25) // 5 for w in weights[1:6])
+    # One feature family contributes once: wrappers and nested copies of a
+    # document are not independent evidence of maliciousness.
+    groups: dict[str, int] = {}
+    for flag in set(flags):
+        base = _base_flag(flag)
+        family = ("office" if base.startswith(("office_", "macro_", "rtf")) else
+                  "execution" if base in EXEC_CATEGORIES or base == "archive_single_executable" else
+                  "disguise" if base in {"double_extension", "rtlo_filename", "extension_mismatch_executable", "padded_filename", "extension_mismatch"} else
+                  base.split("_", 1)[0])
+        groups[family] = max(groups.get(family, 0), WEIGHTS.get(flag, WEIGHTS.get(base, 5)))
+    weights = sorted(groups.values(), reverse=True)
+    score = weights[0] + sum(5 for w in weights[1:] if w >= 40)
     return max(0, min(100, score))
+
+
+def rescore_attachment(summary: dict[str, Any]) -> dict[str, Any]:
+    """Recalibrate retained static results; never execute or invent missing bytes."""
+    out = dict(summary)
+    flags = set(out.get("flags") or [])
+    details = out.get("details") or {}
+    html = details.get("html")
+    limited = False
+    if isinstance(html, dict) and "apis" in html and "decodedBlobTypes" in html:
+        flags -= {"html_smuggling", "html_smuggling_possible", "html_embedded_payload"}
+        flags.update(_html.smuggling_flags(html))
+    elif flags & {"html_smuggling", "html_embedded_payload"}:
+        limited = True
+    archive = details.get("archive")
+    if isinstance(archive, dict) and isinstance(archive.get("nested"), list):
+        nested = [rescore_attachment(a) for a in archive["nested"]]
+        flags = {f for f in flags if not f.startswith("nested_")}
+        for a in nested:
+            flags.update("nested_" + f for f in a["flags"])
+            limited |= bool(a.get("rescoreLimited"))
+        out["details"] = {**details, "archive": {**archive, "nested": nested}}
+    elif any(f.startswith("nested_") and ("html_smuggling" in f or "html_embedded_payload" in f) for f in flags):
+        limited = True
+    if details.get("skipped") or flags & {"analysis_error", "office_parse_error", "unsupported_archive_format", "archive_partially_analyzed"}:
+        limited = True
+    out["flags"] = sorted(flags)
+    out["risk"] = max(_score(out["flags"]), int(out.get("risk") or 0) if limited else 0)
+    out["rescoreLimited"] = limited
+    return out
 
 
 def analyze_attachment(name: str | None, data: bytes, declared_mime: str | None = None,
@@ -186,8 +234,7 @@ def analyze_attachment(name: str | None, data: bytes, declared_mime: str | None 
 
 def _nested(name: str, data: bytes, depth: int) -> dict[str, Any]:
     res = analyze_attachment(name, data, None, depth=depth)
-    # keep nested entries compact
-    res.pop("details", None)
+    # Retain facts needed to recalibrate a nested attachment without its bytes.
     return res
 
 

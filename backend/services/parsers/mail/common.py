@@ -37,7 +37,7 @@ MAIL_WEIGHTS: dict[str, int] = {
     "single_hop": 5, "no_origin_ip": 2, "from_webmail": 8, "suspicious_mailer": 45, "bulk_mailer": 2,
     "high_priority": 5, "unsubscribe_without_list": 5, "email_in_display_name": 20, "display_name_email_mismatch": 70,
     "mixed_script_display_name": 55, "undisclosed_recipients": 20, "mass_recipients": 15, "helo_domain_mismatch": 15,
-    "sender_punycode": 65, "sender_mixed_script": 65, "sender_confusable": 60, "sender_lookalike_internal": 90,
+    "sender_punycode": 25, "sender_mixed_script": 55, "sender_confusable": 35, "sender_lookalike_internal": 90,
     "sender_lookalike_brand": 60, "sender_tld_swap": 70, "sender_subdomain_trick": 75, "sender_homoglyph": 75,
     "sender_digit_substitution": 70, "sender_edit_distance": 60, "sender_brand_embedding": 55,
     "replyto_lookalike_internal": 85, "replyto_lookalike_brand": 55,
@@ -47,7 +47,7 @@ MAIL_WEIGHTS: dict[str, int] = {
     "internal_spoof": 85,
     "bidi_override": 50, "hidden_text": 45, "hidden_preheader": 3, "hidden_style": 5, "base64_blob": 20, "obfuscated_html": 45,
     "html_script": 40, "html_form": 40, "html_embed": 30, "image_only": 40, "mixed_script_text": 30,
-    "url_ip_literal": 50, "url_private_ip": 20, "url_punycode": 60, "url_suspicious_tld": 35, "url_many_subdomains": 12,
+    "url_ip_literal": 50, "url_private_ip": 20, "url_punycode": 25, "url_suspicious_tld": 35, "url_many_subdomains": 12,
     "url_shortener": 30, "url_file_hosting": 8, "url_free_hosting": 35, "url_many_hyphens": 10, "url_long_host": 10,
     "url_userinfo": 55, "url_unusual_port": 30, "url_long_url": 3, "url_double_encoded": 25,
     "url_executable_download": 65, "url_credential_keywords": 40, "url_login_link": 5, "url_rewritten": 2,
@@ -79,10 +79,10 @@ URL_SUSPICION = {
 # attachment), weak wording/link/header noise is capped so ordinary corporate mail stays low.
 STRONG_FLAGS = {
     "sender_lookalike_internal", "sender_tld_swap", "sender_subdomain_trick", "sender_homoglyph",
-    "sender_digit_substitution", "sender_punycode", "sender_mixed_script", "sender_confusable",
-    "replyto_lookalike_internal", "display_name_email_mismatch", "mixed_script_display_name", "replyto_webmail",
+    "sender_digit_substitution", "sender_mixed_script",
+    "replyto_lookalike_internal", "display_name_email_mismatch", "mixed_script_display_name",
     "suspicious_mailer", "bec_pattern", "credential_phishing_pattern", "internal_spoof", "hidden_text", "bidi_override",
-    "url_text_href_mismatch", "url_ip_literal", "url_punycode", "url_userinfo", "url_data_uri", "url_script_uri",
+    "url_text_href_mismatch", "url_ip_literal", "url_userinfo", "url_data_uri", "url_script_uri",
     "url_executable_download", "url_credential_keywords", "html_form_password", "html_form_external",
 }
 
@@ -143,6 +143,21 @@ def _user_trusted(addr: str, domain: str, registrable: str, entries: list[str]) 
     return False
 
 
+def score_groups(flags: Iterable[str]) -> dict[str, int]:
+    """Correlated observations contribute once; attachment evidence is scored separately."""
+    groups: dict[str, int] = {}
+    for f in set(flags):
+        if f.startswith("att_") or f not in MAIL_WEIGHTS:
+            continue
+        group = ("authentication" if f.startswith(("spf_", "dkim_", "dmarc_", "compauth_", "returnpath_")) else
+                 "identity" if f.startswith(("sender_", "replyto_", "display_name_", "mixed_script_display")) or f == "internal_spoof" else
+                 "wording" if f.startswith("lexicon_") else
+                 "links" if f.startswith("url_") else
+                 "content" if f in {"bec_pattern", "credential_phishing_pattern", "html_form_password", "html_form_external", "hidden_text", "bidi_override"} else "context")
+        groups[group] = max(groups.get(group, 0), MAIL_WEIGHTS[f])
+    return groups
+
+
 def _score(flags: Iterable[str], attachment_risk: int, trust: dict[str, bool] | None = None) -> int:
     """
     Strong indicators drive the score; weak wording/link/header noise only amplifies.
@@ -151,7 +166,7 @@ def _score(flags: Iterable[str], attachment_risk: int, trust: dict[str, bool] | 
     """
     fl = set(flags)
     trust = trust or {}
-    ws = sorted((MAIL_WEIGHTS.get(f, 5) for f in fl), reverse=True)
+    ws = sorted(score_groups(fl).values(), reverse=True)
     score = 0
     if ws:
         score = ws[0] + sum(min(w, 30) // 4 for w in ws[1:8])
@@ -445,7 +460,9 @@ def build_row(headers: list[Header], body_text: str | None, body_html: str | Non
     for k, v in extra.items():
         if k not in row and k not in ("dateFallback", "to", "cc", "bcc", "subject"):
             row[k] = v
-    return row
+    from services.analysis.mail_calibration import calibrate_mail
+
+    return calibrate_mail(row, {"internal_domains": ctx.internal_domains, "trusted_senders": ctx.trusted_senders})
 
 
 # ---------------------------------------------------------------------------

@@ -102,7 +102,7 @@ export function SettingsView() {
     const add = suggestions?.filter((f) => picked.has(f.registrable)).map((f) => f.registrable) ?? []
     await patch({ trustedSenders: Array.from(new Set([...(s.trustedSenders ?? []), ...add])) })
     setSuggestions(null)
-    toast('ok', `${add.length} trusted sender(s) added - spoofing rules skip them on the next run; risk scores need re-ingest`)
+    toast('ok', `${add.length} trusted sender(s) added. Use Mails → rescore + refresh findings to apply the changes.`)
   }
   const saveAi = async (patch: Partial<typeof aiCfg>) => {
     setAiConfig(patch)
@@ -201,12 +201,12 @@ export function SettingsView() {
               <label className="field"><span>VIP display names (CEO, CFO, IT admins…) - impersonation rule</span><ListInput value={s.vipNames} onChange={(v) => patch({ vipNames: v })} placeholder={'Marie Lefevre\nJean Dupont'} /></label>
               <label className="field"><span>organisation display names (all staff, one per line) - employee-impersonation rules; the Sublime pack's $org_display_names</span><ListInput value={s.orgDisplayNames ?? []} onChange={(v) => patch({ orgDisplayNames: v })} placeholder={'one display name per line'} /></label>
               <label className="field"><span>extra brands to protect (second-level labels)</span><ListInput mono value={s.brands} onChange={(v) => patch({ brands: v.map((x) => x.toLowerCase()) })} placeholder={'mybank\nmysupplier'} /></label>
-              <label className="field"><span>trusted senders (addresses or domains) - spoofing rules skip them, risk capped at 10</span><ListInput mono value={s.trustedSenders ?? []} onChange={(v) => patch({ trustedSenders: v.map((x) => x.toLowerCase().replace(/^@/, '')) })} placeholder={'notifications.supplier.com\nfacture@partenaire.fr'} /></label>
+              <label className="field"><span>trusted senders (addresses or domains) - lower weak signals; some spoofing rules exempt them</span><ListInput mono value={s.trustedSenders ?? []} onChange={(v) => patch({ trustedSenders: v.map((x) => x.toLowerCase().replace(/^@/, '')) })} placeholder={'notifications.supplier.com\nfacture@partenaire.fr'} /></label>
               <div className="row">
                 <button className="btn sm" onClick={runSuggest} disabled={suggesting}>{suggesting ? 'scanning…' : 'suggest trusted senders'}</button>
                 <span className="small dim">known relays (Teams, GitHub…) are already built in when auth passes</span>
               </div>
-              <div className="hint">Rule exemption applies on the next rule run. The risk-score cap only applies to mails ingested after the change (re-ingest to rescore).</div>
+              <div className="hint">After changing these settings, use Mails → rescore + refresh findings. Trust reduces weak signals; suspicious payloads retain their risk. Full reanalysis of missing attachment facts requires the original evidence.</div>
             </div>
           </div>
           <div className="panel">

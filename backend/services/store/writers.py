@@ -6,7 +6,7 @@ import re
 from typing import Any
 
 from services.common import is_public_ip
-from services.store.casestore import ATTACHMENT_COLUMNS, CaseStore, EVENT_COLUMNS, EVENT_INT, MAIL_COLUMNS, MAIL_INT, MAIL_JSON, MAIL_LIST, URL_COLUMNS
+from services.store.casestore import ATTACHMENT_COLUMNS, CaseStore, EVENT_COLUMNS, EVENT_INT, MAIL_COLUMNS, MAIL_INT, MAIL_BOOL, MAIL_JSON, MAIL_LIST, URL_COLUMNS, as_bool
 
 EVENT_NAMES = [n for n, _ in EVENT_COLUMNS]
 MAIL_NAMES = [n for n, _ in MAIL_COLUMNS]
@@ -195,6 +195,8 @@ class MailWriter:
                 out[name] = [str(x) for x in v] if isinstance(v, list) else []
             elif name in MAIL_INT:
                 out[name] = _int(row.get(name))
+            elif name in MAIL_BOOL:
+                out[name] = as_bool(row.get(name))
             else:
                 v = row.get(name)
                 out[name] = v if (v is None or isinstance(v, str)) else str(v)

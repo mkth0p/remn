@@ -135,7 +135,8 @@ def enrich(mails: Iterable[dict[str, Any]], settings: dict[str, Any] | None = No
             fs = first_seen.setdefault(frm, t)
             e["senderFirstSeen"] = fs
             e["senderDaysKnown"] = max(0, int((t - fs) / 86_400_000))
-            e["senderSolicited"] = (frm in contacted) if not is_internal else True
+            # An inbox-only/partial export cannot establish absence of prior contact.
+            e["senderSolicited"] = (frm in contacted if contacted else None) if not is_internal else True
             prior[frm] = n + 1
         ap = _auth_pass(m)
         e["senderAuthRegression"] = bool(reg and ap is False and dom_pass.get(reg, 0) >= 3 and not is_internal)

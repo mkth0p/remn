@@ -2,6 +2,12 @@
 from __future__ import annotations
 
 FLAGS: dict[str, str] = {
+    "mail_corroborated": "Deceptive identity/link evidence or a sender authentication regression corroborates a review signal.",
+    "sender_expected": "Chronological history and aligned authentication support an expected correspondent; concrete malicious content still scores.",
+    "sender_auth_regression": "The sender previously passed authentication and now fails.",
+    "sender_history_unknown": "Sender history has not been established for this message. Absence of history is not evidence of an attack.",
+    "html_file_download": "HTML can create/download a local file, including ordinary report exports; capability alone is not smuggling.",
+    "html_embedded_document": "HTML contains an embedded image or PDF; informational unless other evidence is suspicious.",
     "trusted_sender": "Known notification/SaaS relay with passing authentication, or a sender on this case's trusted list. Risk is capped unless strong indicators are present.",
     # authentication
     "spf_fail": "SPF check failed or soft-failed: the sending server is not authorised for the envelope domain.",
@@ -192,7 +198,7 @@ FLAGS: dict[str, str] = {
     "archive_contains_disk_image": "Archive contains a disk image.",
     "archive_contains_office_macro": "Archive contains a macro-enabled Office document.",
     "archive_contains_legacy_office": "Archive contains a legacy Office document.",
-    "archive_contains_html": "Archive contains an HTML file (smuggling).",
+    "archive_contains_html": "Archive contains an HTML file. Review its behavior; the file type alone is not smuggling.",
     "archive_contains_onenote": "Archive contains a OneNote file.",
     "nested_archive": "Archive inside an archive.",
     "archive_single_executable": "Archive whose only file is an executable.",

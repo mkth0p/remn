@@ -168,6 +168,11 @@ and write the columns back to IndexedDB (`POST /api/enrich/mails`). Sublime
 rules using `profile.by_sender().prevalence / .solicited / .days_known` now
 translate onto these columns.
 
+An inbox-only export leaves prior solicitation unknown until outbound contact
+has been observed. The **rescore + refresh findings** action also runs this
+history pass and uses established, authenticated relationships to reduce weak
+anomaly scores. Strong payload and deceptive-identity evidence still applies.
+
 ## Deleted and orphaned mail (PST / OST)
 
 Messages inside Deleted Items and the Exchange Recoverable Items dumpster
@@ -199,6 +204,12 @@ with the other seeds listed as related. Chains are also stored as findings
 inside DuckDB; browser-store cases post the relevant rows to the local API
 (`POST /api/chains/build`). `services/analysis/chains.py` is pure functions
 over plain rows, tested on the synthetic BEC scenario plus host events.
+
+The Chains view shows the last built snapshot (kv `chains-<case>`), so a rebuild is
+explicit. Removing evidence clears the case's findings, chain snapshot and last-run
+diagnostics, since they reference rows that no longer exist; analyst decisions are
+archived and reattached when the same findings reappear on the next rule run.
+Rebuilding chains with no seed left replaces the snapshot with an empty one.
 
 ## Community rule packs (SigmaHQ, Sublime Security)
 
@@ -305,14 +316,15 @@ impersonation rules.
 
 ## Mail risk scoring
 
-The 0-100 risk score is indicator-driven, not additive noise:
+The 0-100 risk score is an investigation priority, not a probability of compromise.
+Calibration **mail-2** groups correlated observations before scoring:
 
 * **Strong indicators** (domain spoofing/lookalikes, display-name tricks, hidden
   text, IP-literal or credential-harvest URLs, risky attachments, gated BEC /
   credential-phishing patterns) set the score on their own.
 * **Weak signals** (urgency/finance wording, trackers, shorteners, bulk-mail
   headers) only amplify a strong indicator. Without one the score is capped at
-  45, and authenticated senders are capped lower: internal + SPF/DKIM/DMARC pass
+  45, and authenticated senders are capped lower: internal + aligned authentication
   ≤ 12, authenticated newsletters ≤ 20.
 * Links wrapped by mail gateways (Microsoft Safe Links, Proofpoint v2/v3,
   Mimecast…) are unwrapped and the real destination is analysed, so protected
@@ -327,10 +339,63 @@ The 0-100 risk score is indicator-driven, not additive noise:
   salting; click-tracker link mismatches are expected in newsletters; `.msg` /
   `.pst` exports without transport headers are not treated as forged mail; a
   valid ARC seal restores trust for mailing-list forwarding.
-* The mail detail drawer shows the score drivers (each flag's weight, strong
-  indicators starred) so any score can be audited at a glance.
+* Static HTML in an archive, a normal CSV-export button, PDF JavaScript,
+  encrypted content and bank-change wording remain review signals. Stronger
+  findings require payload behavior or corroborating identity/link/authentication
+  evidence. Related attachment flags contribute once per family.
+* Mail details show the calibration version, evidence confidence, grouped score
+  drivers, attachment risk and analysis limitations. Findings display priority
+  separately from a rule's declared confidence; flags use neutral observation
+  badges. Confidence is qualitative and does not change automatically with a
+  priority escalation. Rules without declared confidence show `unspecified`.
 
-Re-ingest existing evidence after upgrading: risk is computed at parse time.
+After upgrading/restarting REMN, open **Mails → rescore + refresh findings** for
+each existing case. This updates chronological sender history, recalculates mail
+and attachment scores from retained facts, refreshes score/flag facets, and reruns
+enabled mail rules with current settings. It supports both browser and server
+cases, preserves evidence IDs and original mail bodies, and retains analyst
+status/notes for stable finding keys even if a finding disappears and later
+reappears. Completed rule results replace previous findings atomically; a failed
+rule retains its previous findings. Interrupted refreshes are marked incomplete
+and can be retried. Server score updates roll back on failure/cancellation;
+browser score updates commit in batches and may need a retry to finish.
+
+Original attachment bytes are not stored with analysis summaries. Old HTML facts
+can be reclassified when available; missing or skipped analysis is explicitly
+marked incomplete, and uncertain previous high attachment scores are retained.
+Re-ingest original evidence for a full fresh analysis in those cases. Changes to
+parser extraction or internal-domain lookalike detection also need re-ingestion;
+rescoring only reuses retained observations. Custom rule overrides and enabled
+community packs retain their own priorities. Analyst false-positive decisions do
+not train the scorer or automatically whitelist a sender.
+
+Run the labelled calibration benchmark without changing a case:
+
+```powershell
+.\.venv\Scripts\python.exe tools/calibrate_mail.py --synthetic --output calibration-results.json
+.\.venv\Scripts\python.exe tools/calibrate_mail.py --manifest corpus.json --output corpus-results.json
+```
+
+The manifest supplies local EML files and reviewed labels, with paths relative to
+the manifest (originals are read-only; there are no network lookups):
+
+```json
+{"settings":{"internal_domains":["company.example"]},"messages":[
+  {"path":"mail/invoice.eml","label":"benign","name":"Reviewed supplier invoice"},
+  {"path":"mail/phishing.eml","label":"malicious","name":"Confirmed phishing"}
+]}
+```
+
+The report ranks high/critical false positives by rule and counts unique message
+references separately for core and Sublime packs. Large grouped findings cap
+references, so those counts can understate coverage on a large corpus. The eight
+synthetic controls yield **0/5 benign messages high/critical** in scores and core
+findings, while **3/3 malicious controls** remain high/critical. Sublime matches
+none of these eight examples; this is not a coverage or accuracy claim for that
+pack or for a real mailbox. Reviewed real examples are needed for further tuning.
+
+The browser rule-engine regression fixture is generated from the same Python
+pipeline using `--synthetic --export-fixture samples/synthetic/mail-calibration.json`.
 
 After a rule run, the **Rules view shows why every silent rule found nothing**
 (event ids absent from the case, empty Settings lists disarming it, everything

@@ -91,12 +91,13 @@ MAIL_COLUMNS: list[tuple[str, tuple[str, Any]]] = [
     # JSON payloads (stored as text, parsed on read)
     ("auth", _S), ("sender", _S), ("replyTo", _S), ("to", _S), ("cc", _S), ("bcc", _S), ("references", _S), ("hops", _S),
     ("urls", _S), ("attachments", _S), ("keywordHits", _S), ("hiddenText", _S), ("lookalike", _S), ("replyToLookalike", _S),
-    ("htmlInfo", _S), ("reputation", _S), ("labels", _S),
+    ("htmlInfo", _S), ("reputation", _S), ("labels", _S), ("assessment", _S),
 ]
 MAIL_INT = {n for n, t in MAIL_COLUMNS if t in (_I, _L)}
+MAIL_BOOL = {n for n, t in MAIL_COLUMNS if t == _B}
 MAIL_LIST = {n for n, t in MAIL_COLUMNS if t == _LS}
 MAIL_JSON = {"auth", "sender", "replyTo", "to", "cc", "bcc", "references", "hops", "urls", "attachments", "keywordHits",
-             "hiddenText", "lookalike", "replyToLookalike", "htmlInfo", "reputation", "labels"}
+             "hiddenText", "lookalike", "replyToLookalike", "htmlInfo", "reputation", "labels", "assessment"}
 
 ATTACHMENT_COLUMNS: list[tuple[str, tuple[str, Any]]] = [
     ("id", _L), ("mailId", _L), ("evidenceId", _I), ("name", _S), ("ext", _S), ("realExt", _S), ("realMime", _S),
@@ -133,6 +134,22 @@ def _ddl(table: str, columns: list[tuple[str, tuple[str, Any]]], pk: str | None 
     return f"CREATE TABLE IF NOT EXISTS {table} ({cols})"
 
 
+def as_bool(value: Any) -> bool | None:
+    """Preserve unknowns and parse serialized booleans without string truthiness."""
+    if isinstance(value, bool) or value is None:
+        return value
+    if isinstance(value, str):
+        value = value.strip().lower()
+        if value in ("true", "1"):
+            return True
+        if value in ("false", "0"):
+            return False
+        return None
+    if isinstance(value, (int, float)) and value in (0, 1):
+        return bool(value)
+    return None
+
+
 def _arrow_table(columns: list[tuple[str, tuple[str, Any]]], rows: list[dict[str, Any]]) -> pa.Table:
     """Build an Arrow table from sparse row dicts: absent columns become null arrays without per-row work."""
     n = len(rows)
@@ -160,7 +177,7 @@ def _arrow_table(columns: list[tuple[str, tuple[str, Any]]], rows: list[dict[str
             elif patype == pa.list_(pa.string()):
                 arrays[name] = pa.array([[str(x) for x in (v or [])] if isinstance(v, (list, tuple)) else ([] if v is None else [str(v)]) for v in values], type=patype)
             elif patype == pa.bool_():
-                arrays[name] = pa.array([bool(v) if v is not None else None for v in values], type=patype)
+                arrays[name] = pa.array([as_bool(v) for v in values], type=patype)
             else:
                 arrays[name] = pa.array([None if v is None else (v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)) for v in values], type=patype)
     return pa.table(arrays)

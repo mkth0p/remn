@@ -20,17 +20,8 @@ export function Flag({ name }: { name: string }) {
   const meta = useStore((s) => s.meta)
   const base = name.replace(/^(att_|nested_|archive_entry_|sender_|replyto_|url_)/, '')
   const desc = meta?.flags[name] ?? meta?.flags[base] ?? name
-  const sev = /critical|executable|smuggling|macro_|lookalike_internal|bec_pattern|rtlo|credential_harvest|equation|dde|external_template|encrypted_archive|extension_mismatch_executable|vip/.test(name)
-    ? 'critical'
-    : /^(hidden_preheader|hidden_style|calendar_item|exchange_internal|trusted_sender|gateway_bulk_verdict)$/.test(name)
-      ? name === 'hidden_style' ? 'medium' : 'info'
-      : /fail|mismatch|lookalike|hidden|punycode|shortener|ip_literal|suspicious|obfusc|script|javascript|launch|double_extension|spoof|zero_width|bidi|homoglyph|form|gateway_spam/.test(name)
-        ? 'high'
-        : /lexicon|none|webmail|priority|single_hop|bulk|tracking|many|long|unusual|image_only|base64/.test(name)
-          ? 'medium'
-          : 'info'
   return (
-    <span className={classNames('badge flag', sev)} title={desc}>
+    <span className="badge flag info" title={`Observation: ${desc} Severity depends on the message context; this flag alone is not a verdict.`}>
       {name}
     </span>
   )

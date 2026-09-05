@@ -24,6 +24,7 @@ export interface Rule {
   title: string
   description?: string
   severity: Severity
+  confidence?: 'low' | 'medium' | 'high'
   source: 'events' | 'mails'
   attack?: string[]
   tags?: string[]
@@ -244,7 +245,23 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
     }
     opts.onDiag({ ruleId: rule.id, reason, detail, matched: nWhere, afterExclude: nExcl, afterTime: matches.length })
   }
-  const base = () => ({ ruleId: rule.id, title: rule.title, description: rule.description, severity: rule.severity, source: rule.source, attack: rule.attack ?? [], tags: rule.tags ?? [] })
+  const base = () => ({ ruleId: rule.id, title: rule.title, description: rule.description, severity: rule.severity, confidence: rule.confidence, source: rule.source, attack: rule.attack ?? [], tags: rule.tags ?? [] })
+  const escalationFor = (rows: Row[]) => {
+    let severity = rule.severity
+    let escalation: string | undefined
+    for (const [flag, s] of thenFlags) {
+      if (sevRank(s) > sevRank(severity) && rows.some((r) => Array.isArray(r.flags) && r.flags.includes(flag))) {
+        severity = s
+        escalation = flag
+      }
+    }
+    let refs = rows.slice(0, 500).map(idOf)
+    if (escalation) {
+      const supporting = rows.find((r) => Array.isArray(r.flags) && r.flags.includes(escalation))!
+      if (!refs.includes(idOf(supporting))) refs = [...refs.slice(0, 499), idOf(supporting)]
+    }
+    return { severity, escalation, refs }
+  }
   const idOf = (r: Row) => Number(r[idField])
 
   const threshold = parseThreshold(rule.threshold)
@@ -257,7 +274,7 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
       // too many per-row alerts: collapse into one finding per entity combination
       const groupable = GROUPABLE[rule.source] ?? entityFields
       const keyFields = entityFields.filter((f) => groupable.includes(f))
-      const grouped: Rule = { ...rule, group_by: keyFields.length ? keyFields : entityFields.slice(0, 2), threshold: '>= 1', then_flags: undefined }
+      const grouped: Rule = { ...rule, group_by: keyFields.length ? keyFields : entityFields.slice(0, 2), threshold: '>= 1' }
       const out = runRule(grouped, opts)
       for (const f of out) f.escalation = f.escalation || `collapsed: ${matches.length.toLocaleString('en-US')} matching rows`
       return out
@@ -302,7 +319,7 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
       const last = rows[rows.length - 1]
       const ent = entitiesOf(first, entityFields)
       if (rule.distinct) ent[rule.distinct] = Array.from(new Set(rows.map((r) => str(getPath(r, rule.distinct!))).filter(Boolean))).slice(0, 8).join(', ')
-      findings.push({ ...base(), key: `${rule.id}|${groupKey(first, groupBy)}`, ts: (first[tsField] as number) ?? null, tsEnd: (last[tsField] as number) ?? null, entities: ent, count: rows.length, refs: rows.slice(0, 500).map(idOf) })
+      findings.push({ ...base(), ...escalationFor(rows), key: `${rule.id}|${groupKey(first, groupBy)}`, ts: (first[tsField] as number) ?? null, tsEnd: (last[tsField] as number) ?? null, entities: ent, count: rows.length })
       if (findings.length >= maxFindings) break
       continue
     }
@@ -338,7 +355,7 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
     const first = b.rows[0]
     const ent = entitiesOf(first, entityFields)
     if (rule.distinct) ent[rule.distinct] = Array.from(new Set(b.rows.map((r) => str(getPath(r, rule.distinct!))).filter(Boolean))).slice(0, 8).join(', ')
-    return { ...base(), key: `${rule.id}|${groupKey(first, groupBy)}|${Math.floor(b.start / 60000)}`, ts: b.start, tsEnd: b.last, entities: ent, count: b.rows.length, refs: b.rows.slice(0, 500).map(idOf) }
+    return { ...base(), ...escalationFor(b.rows), key: `${rule.id}|${groupKey(first, groupBy)}|${Math.floor(b.start / 60000)}`, ts: b.start, tsEnd: b.last, entities: ent, count: b.rows.length }
   }
 
   // follow-up ("then"): escalate when a matching event follows within `within`

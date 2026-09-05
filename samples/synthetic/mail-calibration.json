@@ -1,0 +1,1485 @@
+{
+  "version": "mail-2",
+  "settings": {
+    "internal_domains": [
+      "interne.fr"
+    ],
+    "trusted_senders": [],
+    "vip_names": [
+      "lefevre marie"
+    ]
+  },
+  "examples": [
+    {
+      "name": "static_html_zip",
+      "label": "benign",
+      "row": {
+        "folder": "",
+        "subject": "Static HTML report in ZIP",
+        "date": 1788602400000,
+        "dateIso": "2026-09-05T10:00:00.000Z",
+        "dateRaw": "Sat, 5 Sep 2026 10:00:00 +0000",
+        "fromName": "Reports",
+        "fromNameNorm": "reports",
+        "fromAddr": "reports@vendor-news.com",
+        "fromDomain": "vendor-news.com",
+        "fromRegistrable": "vendor-news.com",
+        "sender": null,
+        "replyTo": [],
+        "returnPath": null,
+        "to": [
+          {
+            "name": "Alice",
+            "addr": "alice@interne.fr",
+            "domain": "interne.fr"
+          }
+        ],
+        "cc": [],
+        "bcc": [],
+        "recipientCount": 1,
+        "messageId": "<calibration@vendor-news.com>",
+        "inReplyTo": null,
+        "references": [],
+        "xMailer": null,
+        "priority": null,
+        "listId": null,
+        "originIp": "93.184.216.34",
+        "originIpSource": "received",
+        "originHelo": "mail.vendor-news.com",
+        "originRdns": null,
+        "hopCount": 1,
+        "hops": [
+          {
+            "raw": "from mail.vendor-news.com ([93.184.216.34]) by mx.interne.fr; Sat, 5 Sep 2026 10:00:01 +0000",
+            "from": "mail.vendor-news.com ([93.184.216.34])",
+            "fromHelo": "mail.vendor-news.com",
+            "fromIp": "93.184.216.34",
+            "by": "mx.interne.fr",
+            "with": null,
+            "id": null,
+            "for": null,
+            "date": "Sat, 5 Sep 2026 10:00:01 +0000",
+            "ts": 1788602401000,
+            "dateIso": "2026-09-05T10:00:01.000Z",
+            "index": 0,
+            "delayS": null
+          }
+        ],
+        "totalDelayS": null,
+        "auth": {
+          "spf": "pass",
+          "dkim": "pass",
+          "dmarc": "pass",
+          "arc": null,
+          "compauth": null,
+          "dkimDomain": "vendor-news.com",
+          "spfDomain": "vendor-news.com",
+          "dmarcPolicy": null,
+          "raw": [
+            "mx.interne.fr; spf=pass smtp.mailfrom=vendor-news.com; dkim=pass header.d=vendor-news.com; dmarc=pass header.from=vendor-news.com"
+          ],
+          "dkimSigned": false,
+          "exoAuthAs": null,
+          "exoAuthSource": null,
+          "scl": null,
+          "sfv": null,
+          "bcl": null
+        },
+        "headersText": "From: Reports <reports@vendor-news.com>\nTo: Alice <alice@interne.fr>\nSubject: Static HTML report in ZIP\nDate: Sat, 5 Sep 2026 10:00:00 +0000\nMessage-ID: <calibration@vendor-news.com>\nReceived: from mail.vendor-news.com ([93.184.216.34]) by mx.interne.fr; Sat, 5 Sep 2026 10:00:01 +0000\nAuthentication-Results: mx.interne.fr; spf=pass smtp.mailfrom=vendor-news.com; dkim=pass header.d=vendor-news.com; dmarc=pass header.from=vendor-news.com",
+        "headerCount": 7,
+        "bodyText": "The requested report is attached. Kind regards.",
+        "bodyHtml": null,
+        "hasHtml": false,
+        "hasText": true,
+        "visibleText": null,
+        "textPreview": "The requested report is attached. Kind regards.",
+        "keywordHits": {},
+        "hiddenText": [],
+        "urls": [],
+        "urlCount": 0,
+        "htmlInfo": {
+          "images": 0,
+          "tinyImages": 0,
+          "hasScript": false,
+          "metaRefresh": null,
+          "forms": []
+        },
+        "attachments": [
+          {
+            "name": "report.zip",
+            "ext": "zip",
+            "size": 197,
+            "declaredMime": "",
+            "realExt": "zip",
+            "realMime": "application/zip",
+            "realType": "ZIP container (zip)",
+            "category": "archive",
+            "sha256": "5293fff7cc887551f6c9da88a87de278e41153273b9e7476c956665af53936b1",
+            "md5": "9659961215711c8f8c9e7f42b366d4ab",
+            "inline": false,
+            "contentId": null,
+            "depth": 0,
+            "flags": [
+              "archive",
+              "archive_contains_html",
+              "archive_single_lure",
+              "nested_html_attachment"
+            ],
+            "risk": 25,
+            "details": {
+              "archive": {
+                "flags": [
+                  "archive_contains_html",
+                  "archive_single_lure",
+                  "nested_html_attachment"
+                ],
+                "format": "zip",
+                "entries": [
+                  {
+                    "name": "report.html",
+                    "size": 89,
+                    "compressedSize": 77,
+                    "encrypted": false,
+                    "dir": false,
+                    "ext": "html",
+                    "category": "html"
+                  }
+                ],
+                "entryCount": 1,
+                "encrypted": false,
+                "uncompressedSize": 89,
+                "ratio": 0.5,
+                "nested": [
+                  {
+                    "name": "report.html",
+                    "ext": "html",
+                    "size": 89,
+                    "declaredMime": "",
+                    "realExt": "html",
+                    "realMime": "text/html",
+                    "realType": "HTML document",
+                    "category": "html",
+                    "sha256": "af87e5c1abfedc12ef8913a7693d63c17e57141eae353a64940ebcfedd2be673",
+                    "md5": "dfa4a48282b5d02d3d0fd2cec3e57991",
+                    "inline": false,
+                    "contentId": null,
+                    "depth": 1,
+                    "flags": [
+                      "html_attachment"
+                    ],
+                    "risk": 20,
+                    "details": {
+                      "html": {
+                        "flags": [],
+                        "apis": [],
+                        "scripts": 0,
+                        "externalScripts": [],
+                        "base64Bytes": 0,
+                        "base64Blobs": 0,
+                        "decodedBlobTypes": [],
+                        "forms": [],
+                        "redirect": null,
+                        "title": null,
+                        "urls": [],
+                        "passwordInput": false,
+                        "size": 89,
+                        "dangerousDownload": false,
+                        "obfuscated": false
+                      }
+                    },
+                    "rescoreLimited": false
+                  }
+                ]
+              }
+            },
+            "rescoreLimited": false
+          }
+        ],
+        "attachmentCount": 1,
+        "maxAttachmentRisk": 25,
+        "lookalike": {
+          "domain": "vendor-news.com",
+          "registrable": "vendor-news.com",
+          "unicode": null,
+          "flags": [],
+          "matches": [],
+          "internal": false
+        },
+        "replyToLookalike": null,
+        "flags": [
+          "att_archive",
+          "att_archive_contains_html",
+          "att_archive_single_lure",
+          "att_nested_html_attachment",
+          "single_hop"
+        ],
+        "risk": 22,
+        "size": null,
+        "contentType": null,
+        "depth": 0,
+        "assessment": {
+          "version": "mail-2",
+          "confidence": "low",
+          "groups": {
+            "context": 5
+          },
+          "attachmentRisk": 25,
+          "expectedSender": false,
+          "limitations": []
+        },
+        "id": 1,
+        "senderPrevalence": "new",
+        "senderPriorCount": 0,
+        "senderFirstSeen": 1788602400000,
+        "senderDaysKnown": 0,
+        "senderSolicited": null,
+        "senderAuthRegression": false
+      }
+    },
+    {
+      "name": "pdf_javascript",
+      "label": "benign",
+      "row": {
+        "folder": "",
+        "subject": "PDF with harmless JavaScript",
+        "date": 1788602400000,
+        "dateIso": "2026-09-05T10:00:00.000Z",
+        "dateRaw": "Sat, 5 Sep 2026 10:00:00 +0000",
+        "fromName": "Reports",
+        "fromNameNorm": "reports",
+        "fromAddr": "reports@vendor-news.com",
+        "fromDomain": "vendor-news.com",
+        "fromRegistrable": "vendor-news.com",
+        "sender": null,
+        "replyTo": [],
+        "returnPath": null,
+        "to": [
+          {
+            "name": "Alice",
+            "addr": "alice@interne.fr",
+            "domain": "interne.fr"
+          }
+        ],
+        "cc": [],
+        "bcc": [],
+        "recipientCount": 1,
+        "messageId": "<calibration@vendor-news.com>",
+        "inReplyTo": null,
+        "references": [],
+        "xMailer": null,
+        "priority": null,
+        "listId": null,
+        "originIp": "93.184.216.34",
+        "originIpSource": "received",
+        "originHelo": "mail.vendor-news.com",
+        "originRdns": null,
+        "hopCount": 1,
+        "hops": [
+          {
+            "raw": "from mail.vendor-news.com ([93.184.216.34]) by mx.interne.fr; Sat, 5 Sep 2026 10:00:01 +0000",
+            "from": "mail.vendor-news.com ([93.184.216.34])",
+            "fromHelo": "mail.vendor-news.com",
+            "fromIp": "93.184.216.34",
+            "by": "mx.interne.fr",
+            "with": null,
+            "id": null,
+            "for": null,
+            "date": "Sat, 5 Sep 2026 10:00:01 +0000",
+            "ts": 1788602401000,
+            "dateIso": "2026-09-05T10:00:01.000Z",
+            "index": 0,
+            "delayS": null
+          }
+        ],
+        "totalDelayS": null,
+        "auth": {
+          "spf": "pass",
+          "dkim": "pass",
+          "dmarc": "pass",
+          "arc": null,
+          "compauth": null,
+          "dkimDomain": "vendor-news.com",
+          "spfDomain": "vendor-news.com",
+          "dmarcPolicy": null,
+          "raw": [
+            "mx.interne.fr; spf=pass smtp.mailfrom=vendor-news.com; dkim=pass header.d=vendor-news.com; dmarc=pass header.from=vendor-news.com"
+          ],
+          "dkimSigned": false,
+          "exoAuthAs": null,
+          "exoAuthSource": null,
+          "scl": null,
+          "sfv": null,
+          "bcl": null
+        },
+        "headersText": "From: Reports <reports@vendor-news.com>\nTo: Alice <alice@interne.fr>\nSubject: PDF with harmless JavaScript\nDate: Sat, 5 Sep 2026 10:00:00 +0000\nMessage-ID: <calibration@vendor-news.com>\nReceived: from mail.vendor-news.com ([93.184.216.34]) by mx.interne.fr; Sat, 5 Sep 2026 10:00:01 +0000\nAuthentication-Results: mx.interne.fr; spf=pass smtp.mailfrom=vendor-news.com; dkim=pass header.d=vendor-news.com; dmarc=pass header.from=vendor-news.com",
+        "headerCount": 7,
+        "bodyText": "The requested report is attached. Kind regards.",
+        "bodyHtml": null,
+        "hasHtml": false,
+        "hasText": true,
+        "visibleText": null,
+        "textPreview": "The requested report is attached. Kind regards.",
+        "keywordHits": {},
+        "hiddenText": [],
+        "urls": [],
+        "urlCount": 0,
+        "htmlInfo": {
+          "images": 0,
+          "tinyImages": 0,
+          "hasScript": false,
+          "metaRefresh": null,
+          "forms": []
+        },
+        "attachments": [
+          {
+            "name": "form.pdf",
+            "ext": "pdf",
+            "size": 628,
+            "declaredMime": "",
+            "realExt": "pdf",
+            "realMime": "application/pdf",
+            "realType": "PDF document",
+            "category": "pdf",
+            "sha256": "c992d648d83aade6fee92f017731bafd0605a7097c851923d8113c16f4f28b77",
+            "md5": "f7cf0f996799e051770d2cc18670297f",
+            "inline": false,
+            "contentId": null,
+            "depth": 0,
+            "flags": [
+              "pdf_image_only",
+              "pdf_javascript"
+            ],
+            "risk": 35,
+            "details": {
+              "pdf": {
+                "flags": [
+                  "pdf_image_only",
+                  "pdf_javascript"
+                ],
+                "keywords": {
+                  "/JS": 1,
+                  "/JavaScript": 2,
+                  "/Names": 2
+                },
+                "objects": 5,
+                "streams": 0,
+                "eofs": 1,
+                "pages": 1,
+                "encrypted": false,
+                "metadata": {
+                  "Producer": "pypdf"
+                },
+                "uris": [],
+                "embeddedFiles": [],
+                "formFields": 0,
+                "header": "%PDF-1.3",
+                "trailingData": 0,
+                "version": "1.3",
+                "firstPageText": ""
+              }
+            },
+            "rescoreLimited": false
+          }
+        ],
+        "attachmentCount": 1,
+        "maxAttachmentRisk": 35,
+        "lookalike": {
+          "domain": "vendor-news.com",
+          "registrable": "vendor-news.com",
+          "unicode": null,
+          "flags": [],
+          "matches": [],
+          "internal": false
+        },
+        "replyToLookalike": null,
+        "flags": [
+          "att_pdf_image_only",
+          "att_pdf_javascript",
+          "single_hop"
+        ],
+        "risk": 31,
+        "size": null,
+        "contentType": null,
+        "depth": 0,
+        "assessment": {
+          "version": "mail-2",
+          "confidence": "low",
+          "groups": {
+            "context": 5
+          },
+          "attachmentRisk": 35,
+          "expectedSender": false,
+          "limitations": []
+        },
+        "id": 2,
+        "senderPrevalence": "rare",
+        "senderPriorCount": 1,
+        "senderFirstSeen": 1788602400000,
+        "senderDaysKnown": 0,
+        "senderSolicited": null,
+        "senderAuthRegression": false
+      }
+    },
+    {
+      "name": "html_csv_export",
+      "label": "benign",
+      "row": {
+        "folder": "",
+        "subject": "HTML CSV export",
+        "date": 1788602400000,
+        "dateIso": "2026-09-05T10:00:00.000Z",
+        "dateRaw": "Sat, 5 Sep 2026 10:00:00 +0000",
+        "fromName": "Reports",
+        "fromNameNorm": "reports",
+        "fromAddr": "reports@vendor-news.com",
+        "fromDomain": "vendor-news.com",
+        "fromRegistrable": "vendor-news.com",
+        "sender": null,
+        "replyTo": [],
+        "returnPath": null,
+        "to": [
+          {
+            "name": "Alice",
+            "addr": "alice@interne.fr",
+            "domain": "interne.fr"
+          }
+        ],
+        "cc": [],
+        "bcc": [],
+        "recipientCount": 1,
+        "messageId": "<calibration@vendor-news.com>",
+        "inReplyTo": null,
+        "references": [],
+        "xMailer": null,
+        "priority": null,
+        "listId": null,
+        "originIp": "93.184.216.34",
+        "originIpSource": "received",
+        "originHelo": "mail.vendor-news.com",
+        "originRdns": null,
+        "hopCount": 1,
+        "hops": [
+          {
+            "raw": "from mail.vendor-news.com ([93.184.216.34]) by mx.interne.fr; Sat, 5 Sep 2026 10:00:01 +0000",
+            "from": "mail.vendor-news.com ([93.184.216.34])",
+            "fromHelo": "mail.vendor-news.com",
+            "fromIp": "93.184.216.34",
+            "by": "mx.interne.fr",
+            "with": null,
+            "id": null,
+            "for": null,
+            "date": "Sat, 5 Sep 2026 10:00:01 +0000",
+            "ts": 1788602401000,
+            "dateIso": "2026-09-05T10:00:01.000Z",
+            "index": 0,
+            "delayS": null
+          }
+        ],
+        "totalDelayS": null,
+        "auth": {
+          "spf": "pass",
+          "dkim": "pass",
+          "dmarc": "pass",
+          "arc": null,
+          "compauth": null,
+          "dkimDomain": "vendor-news.com",
+          "spfDomain": "vendor-news.com",
+          "dmarcPolicy": null,
+          "raw": [
+            "mx.interne.fr; spf=pass smtp.mailfrom=vendor-news.com; dkim=pass header.d=vendor-news.com; dmarc=pass header.from=vendor-news.com"
+          ],
+          "dkimSigned": false,
+          "exoAuthAs": null,
+          "exoAuthSource": null,
+          "scl": null,
+          "sfv": null,
+          "bcl": null
+        },
+        "headersText": "From: Reports <reports@vendor-news.com>\nTo: Alice <alice@interne.fr>\nSubject: HTML CSV export\nDate: Sat, 5 Sep 2026 10:00:00 +0000\nMessage-ID: <calibration@vendor-news.com>\nReceived: from mail.vendor-news.com ([93.184.216.34]) by mx.interne.fr; Sat, 5 Sep 2026 10:00:01 +0000\nAuthentication-Results: mx.interne.fr; spf=pass smtp.mailfrom=vendor-news.com; dkim=pass header.d=vendor-news.com; dmarc=pass header.from=vendor-news.com",
+        "headerCount": 7,
+        "bodyText": "The requested report is attached. Kind regards.",
+        "bodyHtml": null,
+        "hasHtml": false,
+        "hasText": true,
+        "visibleText": null,
+        "textPreview": "The requested report is attached. Kind regards.",
+        "keywordHits": {},
+        "hiddenText": [],
+        "urls": [],
+        "urlCount": 0,
+        "htmlInfo": {
+          "images": 0,
+          "tinyImages": 0,
+          "hasScript": false,
+          "metaRefresh": null,
+          "forms": []
+        },
+        "attachments": [
+          {
+            "name": "report.html",
+            "ext": "html",
+            "size": 417,
+            "declaredMime": "",
+            "realExt": "html",
+            "realMime": "text/html",
+            "realType": "HTML document",
+            "category": "html",
+            "sha256": "41eaaeb14965c59f3a563c619bae731c6fe98f0da0b4611a3e0b2741d58d2b91",
+            "md5": "abc33026b78ce006b00a913dd29ebab7",
+            "inline": false,
+            "contentId": null,
+            "depth": 0,
+            "flags": [
+              "html_attachment",
+              "html_event_handler",
+              "html_file_download",
+              "html_script"
+            ],
+            "risk": 35,
+            "details": {
+              "html": {
+                "flags": [
+                  "html_event_handler",
+                  "html_file_download",
+                  "html_script"
+                ],
+                "apis": [
+                  "Blob",
+                  "createObjectURL",
+                  "download_attr"
+                ],
+                "scripts": 1,
+                "externalScripts": [],
+                "base64Bytes": 0,
+                "base64Blobs": 0,
+                "decodedBlobTypes": [],
+                "forms": [],
+                "redirect": null,
+                "title": "Weekly report",
+                "urls": [],
+                "passwordInput": false,
+                "size": 417,
+                "dangerousDownload": false,
+                "obfuscated": false
+              }
+            },
+            "rescoreLimited": false
+          }
+        ],
+        "attachmentCount": 1,
+        "maxAttachmentRisk": 35,
+        "lookalike": {
+          "domain": "vendor-news.com",
+          "registrable": "vendor-news.com",
+          "unicode": null,
+          "flags": [],
+          "matches": [],
+          "internal": false
+        },
+        "replyToLookalike": null,
+        "flags": [
+          "att_html_attachment",
+          "att_html_event_handler",
+          "att_html_file_download",
+          "att_html_script",
+          "single_hop"
+        ],
+        "risk": 31,
+        "size": null,
+        "contentType": null,
+        "depth": 0,
+        "assessment": {
+          "version": "mail-2",
+          "confidence": "low",
+          "groups": {
+            "context": 5
+          },
+          "attachmentRisk": 35,
+          "expectedSender": false,
+          "limitations": []
+        },
+        "id": 3,
+        "senderPrevalence": "rare",
+        "senderPriorCount": 2,
+        "senderFirstSeen": 1788602400000,
+        "senderDaysKnown": 0,
+        "senderSolicited": null,
+        "senderAuthRegression": false
+      }
+    },
+    {
+      "name": "bank_notice",
+      "label": "benign",
+      "row": {
+        "folder": "",
+        "subject": "New bank details",
+        "date": 1788602400000,
+        "dateIso": "2026-09-05T10:00:00.000Z",
+        "dateRaw": "Sat, 5 Sep 2026 10:00:00 +0000",
+        "fromName": "Reports",
+        "fromNameNorm": "reports",
+        "fromAddr": "reports@vendor-news.com",
+        "fromDomain": "vendor-news.com",
+        "fromRegistrable": "vendor-news.com",
+        "sender": null,
+        "replyTo": [],
+        "returnPath": null,
+        "to": [
+          {
+            "name": "Alice",
+            "addr": "alice@interne.fr",
+            "domain": "interne.fr"
+          }
+        ],
+        "cc": [],
+        "bcc": [],
+        "recipientCount": 1,
+        "messageId": "<calibration@vendor-news.com>",
+        "inReplyTo": null,
+        "references": [],
+        "xMailer": null,
+        "priority": null,
+        "listId": null,
+        "originIp": "93.184.216.34",
+        "originIpSource": "received",
+        "originHelo": "mail.vendor-news.com",
+        "originRdns": null,
+        "hopCount": 1,
+        "hops": [
+          {
+            "raw": "from mail.vendor-news.com ([93.184.216.34]) by mx.interne.fr; Sat, 5 Sep 2026 10:00:01 +0000",
+            "from": "mail.vendor-news.com ([93.184.216.34])",
+            "fromHelo": "mail.vendor-news.com",
+            "fromIp": "93.184.216.34",
+            "by": "mx.interne.fr",
+            "with": null,
+            "id": null,
+            "for": null,
+            "date": "Sat, 5 Sep 2026 10:00:01 +0000",
+            "ts": 1788602401000,
+            "dateIso": "2026-09-05T10:00:01.000Z",
+            "index": 0,
+            "delayS": null
+          }
+        ],
+        "totalDelayS": null,
+        "auth": {
+          "spf": "pass",
+          "dkim": "pass",
+          "dmarc": "pass",
+          "arc": null,
+          "compauth": null,
+          "dkimDomain": "vendor-news.com",
+          "spfDomain": "vendor-news.com",
+          "dmarcPolicy": null,
+          "raw": [
+            "mx.interne.fr; spf=pass smtp.mailfrom=vendor-news.com; dkim=pass header.d=vendor-news.com; dmarc=pass header.from=vendor-news.com"
+          ],
+          "dkimSigned": false,
+          "exoAuthAs": null,
+          "exoAuthSource": null,
+          "scl": null,
+          "sfv": null,
+          "bcl": null
+        },
+        "headersText": "From: Reports <reports@vendor-news.com>\nTo: Alice <alice@interne.fr>\nSubject: New bank details\nDate: Sat, 5 Sep 2026 10:00:00 +0000\nMessage-ID: <calibration@vendor-news.com>\nReceived: from mail.vendor-news.com ([93.184.216.34]) by mx.interne.fr; Sat, 5 Sep 2026 10:00:01 +0000\nAuthentication-Results: mx.interne.fr; spf=pass smtp.mailfrom=vendor-news.com; dkim=pass header.d=vendor-news.com; dmarc=pass header.from=vendor-news.com",
+        "headerCount": 7,
+        "bodyText": "Following our bank merger, here are our new bank details. Verify using your usual contact number.",
+        "bodyHtml": null,
+        "hasHtml": false,
+        "hasText": true,
+        "visibleText": null,
+        "textPreview": "Following our bank merger, here are our new bank details. Verify using your usual contact number.",
+        "keywordHits": {
+          "financial": [
+            "bank details"
+          ]
+        },
+        "hiddenText": [],
+        "urls": [],
+        "urlCount": 0,
+        "htmlInfo": {
+          "images": 0,
+          "tinyImages": 0,
+          "hasScript": false,
+          "metaRefresh": null,
+          "forms": []
+        },
+        "attachments": [],
+        "attachmentCount": 0,
+        "maxAttachmentRisk": 0,
+        "lookalike": {
+          "domain": "vendor-news.com",
+          "registrable": "vendor-news.com",
+          "unicode": null,
+          "flags": [],
+          "matches": [],
+          "internal": false
+        },
+        "replyToLookalike": null,
+        "flags": [
+          "lexicon_financial",
+          "single_hop"
+        ],
+        "risk": 13,
+        "size": null,
+        "contentType": null,
+        "depth": 0,
+        "assessment": {
+          "version": "mail-2",
+          "confidence": "low",
+          "groups": {
+            "context": 5,
+            "wording": 12
+          },
+          "attachmentRisk": 0,
+          "expectedSender": false,
+          "limitations": []
+        },
+        "id": 4,
+        "senderPrevalence": "rare",
+        "senderPriorCount": 3,
+        "senderFirstSeen": 1788602400000,
+        "senderDaysKnown": 0,
+        "senderSolicited": null,
+        "senderAuthRegression": false
+      }
+    },
+    {
+      "name": "invoice_replyto",
+      "label": "benign",
+      "row": {
+        "folder": "",
+        "subject": "Invoice",
+        "date": 1788602400000,
+        "dateIso": "2026-09-05T10:00:00.000Z",
+        "dateRaw": "Sat, 5 Sep 2026 10:00:00 +0000",
+        "fromName": "Reports",
+        "fromNameNorm": "reports",
+        "fromAddr": "reports@vendor-news.com",
+        "fromDomain": "vendor-news.com",
+        "fromRegistrable": "vendor-news.com",
+        "sender": null,
+        "replyTo": [
+          {
+            "name": "Accounts",
+            "addr": "accounts-example@gmail.com",
+            "domain": "gmail.com"
+          }
+        ],
+        "returnPath": null,
+        "to": [
+          {
+            "name": "Alice",
+            "addr": "alice@interne.fr",
+            "domain": "interne.fr"
+          }
+        ],
+        "cc": [],
+        "bcc": [],
+        "recipientCount": 1,
+        "messageId": "<calibration@vendor-news.com>",
+        "inReplyTo": null,
+        "references": [],
+        "xMailer": null,
+        "priority": null,
+        "listId": null,
+        "originIp": "93.184.216.34",
+        "originIpSource": "received",
+        "originHelo": "mail.vendor-news.com",
+        "originRdns": null,
+        "hopCount": 1,
+        "hops": [
+          {
+            "raw": "from mail.vendor-news.com ([93.184.216.34]) by mx.interne.fr; Sat, 5 Sep 2026 10:00:01 +0000",
+            "from": "mail.vendor-news.com ([93.184.216.34])",
+            "fromHelo": "mail.vendor-news.com",
+            "fromIp": "93.184.216.34",
+            "by": "mx.interne.fr",
+            "with": null,
+            "id": null,
+            "for": null,
+            "date": "Sat, 5 Sep 2026 10:00:01 +0000",
+            "ts": 1788602401000,
+            "dateIso": "2026-09-05T10:00:01.000Z",
+            "index": 0,
+            "delayS": null
+          }
+        ],
+        "totalDelayS": null,
+        "auth": {
+          "spf": "pass",
+          "dkim": "pass",
+          "dmarc": "pass",
+          "arc": null,
+          "compauth": null,
+          "dkimDomain": "vendor-news.com",
+          "spfDomain": "vendor-news.com",
+          "dmarcPolicy": null,
+          "raw": [
+            "mx.interne.fr; spf=pass smtp.mailfrom=vendor-news.com; dkim=pass header.d=vendor-news.com; dmarc=pass header.from=vendor-news.com"
+          ],
+          "dkimSigned": false,
+          "exoAuthAs": null,
+          "exoAuthSource": null,
+          "scl": null,
+          "sfv": null,
+          "bcl": null
+        },
+        "headersText": "From: Reports <reports@vendor-news.com>\nTo: Alice <alice@interne.fr>\nSubject: Invoice\nDate: Sat, 5 Sep 2026 10:00:00 +0000\nMessage-ID: <calibration@vendor-news.com>\nReceived: from mail.vendor-news.com ([93.184.216.34]) by mx.interne.fr; Sat, 5 Sep 2026 10:00:01 +0000\nAuthentication-Results: mx.interne.fr; spf=pass smtp.mailfrom=vendor-news.com; dkim=pass header.d=vendor-news.com; dmarc=pass header.from=vendor-news.com\nReply-To: Accounts <accounts-example@gmail.com>",
+        "headerCount": 8,
+        "bodyText": "Here is the invoice for work completed last month.",
+        "bodyHtml": null,
+        "hasHtml": false,
+        "hasText": true,
+        "visibleText": null,
+        "textPreview": "Here is the invoice for work completed last month.",
+        "keywordHits": {
+          "financial": [
+            "invoice"
+          ]
+        },
+        "hiddenText": [],
+        "urls": [],
+        "urlCount": 0,
+        "htmlInfo": {
+          "images": 0,
+          "tinyImages": 0,
+          "hasScript": false,
+          "metaRefresh": null,
+          "forms": []
+        },
+        "attachments": [],
+        "attachmentCount": 0,
+        "maxAttachmentRisk": 0,
+        "lookalike": {
+          "domain": "vendor-news.com",
+          "registrable": "vendor-news.com",
+          "unicode": null,
+          "flags": [],
+          "matches": [],
+          "internal": false
+        },
+        "replyToLookalike": null,
+        "flags": [
+          "lexicon_financial",
+          "replyto_mismatch",
+          "replyto_webmail",
+          "single_hop"
+        ],
+        "risk": 35,
+        "size": null,
+        "contentType": null,
+        "depth": 0,
+        "assessment": {
+          "version": "mail-2",
+          "confidence": "low",
+          "groups": {
+            "context": 5,
+            "wording": 12,
+            "identity": 45
+          },
+          "attachmentRisk": 0,
+          "expectedSender": false,
+          "limitations": []
+        },
+        "id": 5,
+        "senderPrevalence": "rare",
+        "senderPriorCount": 4,
+        "senderFirstSeen": 1788602400000,
+        "senderDaysKnown": 0,
+        "senderSolicited": null,
+        "senderAuthRegression": false
+      }
+    },
+    {
+      "name": "smuggled_payload",
+      "label": "malicious",
+      "row": {
+        "folder": "",
+        "subject": "Requested document",
+        "date": 1788602400000,
+        "dateIso": "2026-09-05T10:00:00.000Z",
+        "dateRaw": "Sat, 5 Sep 2026 10:00:00 +0000",
+        "fromName": "Reports",
+        "fromNameNorm": "reports",
+        "fromAddr": "reports@vendor-news.com",
+        "fromDomain": "vendor-news.com",
+        "fromRegistrable": "vendor-news.com",
+        "sender": null,
+        "replyTo": [],
+        "returnPath": null,
+        "to": [
+          {
+            "name": "Alice",
+            "addr": "alice@interne.fr",
+            "domain": "interne.fr"
+          }
+        ],
+        "cc": [],
+        "bcc": [],
+        "recipientCount": 1,
+        "messageId": "<calibration@vendor-news.com>",
+        "inReplyTo": null,
+        "references": [],
+        "xMailer": null,
+        "priority": null,
+        "listId": null,
+        "originIp": "93.184.216.34",
+        "originIpSource": "received",
+        "originHelo": "mail.vendor-news.com",
+        "originRdns": null,
+        "hopCount": 1,
+        "hops": [
+          {
+            "raw": "from mail.vendor-news.com ([93.184.216.34]) by mx.interne.fr; Sat, 5 Sep 2026 10:00:01 +0000",
+            "from": "mail.vendor-news.com ([93.184.216.34])",
+            "fromHelo": "mail.vendor-news.com",
+            "fromIp": "93.184.216.34",
+            "by": "mx.interne.fr",
+            "with": null,
+            "id": null,
+            "for": null,
+            "date": "Sat, 5 Sep 2026 10:00:01 +0000",
+            "ts": 1788602401000,
+            "dateIso": "2026-09-05T10:00:01.000Z",
+            "index": 0,
+            "delayS": null
+          }
+        ],
+        "totalDelayS": null,
+        "auth": {
+          "spf": "pass",
+          "dkim": "pass",
+          "dmarc": "pass",
+          "arc": null,
+          "compauth": null,
+          "dkimDomain": "vendor-news.com",
+          "spfDomain": "vendor-news.com",
+          "dmarcPolicy": null,
+          "raw": [
+            "mx.interne.fr; spf=pass smtp.mailfrom=vendor-news.com; dkim=pass header.d=vendor-news.com; dmarc=pass header.from=vendor-news.com"
+          ],
+          "dkimSigned": false,
+          "exoAuthAs": null,
+          "exoAuthSource": null,
+          "scl": null,
+          "sfv": null,
+          "bcl": null
+        },
+        "headersText": "From: Reports <reports@vendor-news.com>\nTo: Alice <alice@interne.fr>\nSubject: Requested document\nDate: Sat, 5 Sep 2026 10:00:00 +0000\nMessage-ID: <calibration@vendor-news.com>\nReceived: from mail.vendor-news.com ([93.184.216.34]) by mx.interne.fr; Sat, 5 Sep 2026 10:00:01 +0000\nAuthentication-Results: mx.interne.fr; spf=pass smtp.mailfrom=vendor-news.com; dkim=pass header.d=vendor-news.com; dmarc=pass header.from=vendor-news.com",
+        "headerCount": 7,
+        "bodyText": "The requested report is attached. Kind regards.",
+        "bodyHtml": null,
+        "hasHtml": false,
+        "hasText": true,
+        "visibleText": null,
+        "textPreview": "The requested report is attached. Kind regards.",
+        "keywordHits": {},
+        "hiddenText": [],
+        "urls": [],
+        "urlCount": 0,
+        "htmlInfo": {
+          "images": 0,
+          "tinyImages": 0,
+          "hasScript": false,
+          "metaRefresh": null,
+          "forms": []
+        },
+        "attachments": [
+          {
+            "name": "document.html",
+            "ext": "html",
+            "size": 4655,
+            "declaredMime": "",
+            "realExt": "html",
+            "realMime": "text/html",
+            "realType": "HTML document",
+            "category": "html",
+            "sha256": "b442da4d6bbfc0c6f89eb374c8ab90ca628a4ffa56fc827c350b3e3eb25c0063",
+            "md5": "cf2df924c8d45b7f3abd21bc4be373d6",
+            "inline": false,
+            "contentId": null,
+            "depth": 0,
+            "flags": [
+              "html_attachment",
+              "html_brand_lure",
+              "html_credential_harvest",
+              "html_embedded_payload",
+              "html_file_download",
+              "html_password_form",
+              "html_prefilled_email",
+              "html_script",
+              "html_smuggling"
+            ],
+            "risk": 90,
+            "details": {
+              "html": {
+                "flags": [
+                  "html_brand_lure",
+                  "html_credential_harvest",
+                  "html_embedded_payload",
+                  "html_file_download",
+                  "html_password_form",
+                  "html_prefilled_email",
+                  "html_script",
+                  "html_smuggling"
+                ],
+                "apis": [
+                  "Blob",
+                  "Uint8Array",
+                  "atob",
+                  "charCodeAt",
+                  "createObjectURL",
+                  "download_attr",
+                  "octet_stream"
+                ],
+                "scripts": 1,
+                "externalScripts": [],
+                "base64Bytes": 4008,
+                "base64Blobs": 1,
+                "decodedBlobTypes": [
+                  "zip"
+                ],
+                "forms": [
+                  "https://login-microsoft0nline.web.app/collect.php"
+                ],
+                "redirect": null,
+                "title": "Microsoft OneDrive - Sign in to view document",
+                "urls": [
+                  {
+                    "url": "https://login-microsoft0nline.web.app/collect.php",
+                    "normalized": "https://login-microsoft0nline.web.app/collect.php",
+                    "defanged": "hxxps://login-microsoft0nline[.]web[.]app/collect.php",
+                    "host": "login-microsoft0nline.web.app",
+                    "unicodeHost": null,
+                    "domain": "web.app",
+                    "scheme": "https",
+                    "port": null,
+                    "path": "/collect.php",
+                    "flags": [
+                      "form_action",
+                      "free_hosting"
+                    ],
+                    "text": "",
+                    "source": "form"
+                  }
+                ],
+                "passwordInput": true,
+                "size": 4655,
+                "dangerousDownload": true,
+                "obfuscated": false
+              }
+            },
+            "rescoreLimited": false
+          }
+        ],
+        "attachmentCount": 1,
+        "maxAttachmentRisk": 90,
+        "lookalike": {
+          "domain": "vendor-news.com",
+          "registrable": "vendor-news.com",
+          "unicode": null,
+          "flags": [],
+          "matches": [],
+          "internal": false
+        },
+        "replyToLookalike": null,
+        "flags": [
+          "att_html_attachment",
+          "att_html_brand_lure",
+          "att_html_credential_harvest",
+          "att_html_embedded_payload",
+          "att_html_file_download",
+          "att_html_password_form",
+          "att_html_prefilled_email",
+          "att_html_script",
+          "att_html_smuggling",
+          "single_hop"
+        ],
+        "risk": 81,
+        "size": null,
+        "contentType": null,
+        "depth": 0,
+        "assessment": {
+          "version": "mail-2",
+          "confidence": "high",
+          "groups": {
+            "context": 5
+          },
+          "attachmentRisk": 90,
+          "expectedSender": false,
+          "limitations": []
+        },
+        "id": 6,
+        "senderPrevalence": "common",
+        "senderPriorCount": 5,
+        "senderFirstSeen": 1788602400000,
+        "senderDaysKnown": 0,
+        "senderSolicited": null,
+        "senderAuthRegression": false
+      }
+    },
+    {
+      "name": "disguised_executable",
+      "label": "malicious",
+      "row": {
+        "folder": "",
+        "subject": "Requested image",
+        "date": 1788602400000,
+        "dateIso": "2026-09-05T10:00:00.000Z",
+        "dateRaw": "Sat, 5 Sep 2026 10:00:00 +0000",
+        "fromName": "Reports",
+        "fromNameNorm": "reports",
+        "fromAddr": "reports@vendor-news.com",
+        "fromDomain": "vendor-news.com",
+        "fromRegistrable": "vendor-news.com",
+        "sender": null,
+        "replyTo": [],
+        "returnPath": null,
+        "to": [
+          {
+            "name": "Alice",
+            "addr": "alice@interne.fr",
+            "domain": "interne.fr"
+          }
+        ],
+        "cc": [],
+        "bcc": [],
+        "recipientCount": 1,
+        "messageId": "<calibration@vendor-news.com>",
+        "inReplyTo": null,
+        "references": [],
+        "xMailer": null,
+        "priority": null,
+        "listId": null,
+        "originIp": "93.184.216.34",
+        "originIpSource": "received",
+        "originHelo": "mail.vendor-news.com",
+        "originRdns": null,
+        "hopCount": 1,
+        "hops": [
+          {
+            "raw": "from mail.vendor-news.com ([93.184.216.34]) by mx.interne.fr; Sat, 5 Sep 2026 10:00:01 +0000",
+            "from": "mail.vendor-news.com ([93.184.216.34])",
+            "fromHelo": "mail.vendor-news.com",
+            "fromIp": "93.184.216.34",
+            "by": "mx.interne.fr",
+            "with": null,
+            "id": null,
+            "for": null,
+            "date": "Sat, 5 Sep 2026 10:00:01 +0000",
+            "ts": 1788602401000,
+            "dateIso": "2026-09-05T10:00:01.000Z",
+            "index": 0,
+            "delayS": null
+          }
+        ],
+        "totalDelayS": null,
+        "auth": {
+          "spf": "pass",
+          "dkim": "pass",
+          "dmarc": "pass",
+          "arc": null,
+          "compauth": null,
+          "dkimDomain": "vendor-news.com",
+          "spfDomain": "vendor-news.com",
+          "dmarcPolicy": null,
+          "raw": [
+            "mx.interne.fr; spf=pass smtp.mailfrom=vendor-news.com; dkim=pass header.d=vendor-news.com; dmarc=pass header.from=vendor-news.com"
+          ],
+          "dkimSigned": false,
+          "exoAuthAs": null,
+          "exoAuthSource": null,
+          "scl": null,
+          "sfv": null,
+          "bcl": null
+        },
+        "headersText": "From: Reports <reports@vendor-news.com>\nTo: Alice <alice@interne.fr>\nSubject: Requested image\nDate: Sat, 5 Sep 2026 10:00:00 +0000\nMessage-ID: <calibration@vendor-news.com>\nReceived: from mail.vendor-news.com ([93.184.216.34]) by mx.interne.fr; Sat, 5 Sep 2026 10:00:01 +0000\nAuthentication-Results: mx.interne.fr; spf=pass smtp.mailfrom=vendor-news.com; dkim=pass header.d=vendor-news.com; dmarc=pass header.from=vendor-news.com",
+        "headerCount": 7,
+        "bodyText": "The requested report is attached. Kind regards.",
+        "bodyHtml": null,
+        "hasHtml": false,
+        "hasText": true,
+        "visibleText": null,
+        "textPreview": "The requested report is attached. Kind regards.",
+        "keywordHits": {},
+        "hiddenText": [],
+        "urls": [],
+        "urlCount": 0,
+        "htmlInfo": {
+          "images": 0,
+          "tinyImages": 0,
+          "hasScript": false,
+          "metaRefresh": null,
+          "forms": []
+        },
+        "attachments": [
+          {
+            "name": "photo.jpg",
+            "ext": "jpg",
+            "size": 302,
+            "declaredMime": "",
+            "realExt": "exe",
+            "realMime": "application/x-msdownload",
+            "realType": "Windows PE executable",
+            "category": "executable",
+            "sha256": "be8dc61c06bbc21a0975ddd4a644cbe45a9e18bdb97ce4c633dcf1aa26655aad",
+            "md5": "50f43d13c560acfc3c78ac0d17fdbf11",
+            "inline": false,
+            "contentId": null,
+            "depth": 0,
+            "flags": [
+              "executable",
+              "extension_mismatch_executable"
+            ],
+            "risk": 100,
+            "details": {
+              "pe": {
+                "dosStubMissing": true,
+                "hasSignature": false
+              }
+            },
+            "rescoreLimited": false
+          }
+        ],
+        "attachmentCount": 1,
+        "maxAttachmentRisk": 100,
+        "lookalike": {
+          "domain": "vendor-news.com",
+          "registrable": "vendor-news.com",
+          "unicode": null,
+          "flags": [],
+          "matches": [],
+          "internal": false
+        },
+        "replyToLookalike": null,
+        "flags": [
+          "att_executable",
+          "att_extension_mismatch_executable",
+          "single_hop"
+        ],
+        "risk": 90,
+        "size": null,
+        "contentType": null,
+        "depth": 0,
+        "assessment": {
+          "version": "mail-2",
+          "confidence": "high",
+          "groups": {
+            "context": 5
+          },
+          "attachmentRisk": 100,
+          "expectedSender": false,
+          "limitations": []
+        },
+        "id": 7,
+        "senderPrevalence": "common",
+        "senderPriorCount": 6,
+        "senderFirstSeen": 1788602400000,
+        "senderDaysKnown": 0,
+        "senderSolicited": null,
+        "senderAuthRegression": false
+      }
+    },
+    {
+      "name": "credential_harvest",
+      "label": "malicious",
+      "row": {
+        "folder": "",
+        "subject": "Requested document",
+        "date": 1788602400000,
+        "dateIso": "2026-09-05T10:00:00.000Z",
+        "dateRaw": "Sat, 5 Sep 2026 10:00:00 +0000",
+        "fromName": "Reports",
+        "fromNameNorm": "reports",
+        "fromAddr": "reports@vendor-news.com",
+        "fromDomain": "vendor-news.com",
+        "fromRegistrable": "vendor-news.com",
+        "sender": null,
+        "replyTo": [],
+        "returnPath": null,
+        "to": [
+          {
+            "name": "Alice",
+            "addr": "alice@interne.fr",
+            "domain": "interne.fr"
+          }
+        ],
+        "cc": [],
+        "bcc": [],
+        "recipientCount": 1,
+        "messageId": "<calibration@vendor-news.com>",
+        "inReplyTo": null,
+        "references": [],
+        "xMailer": null,
+        "priority": null,
+        "listId": null,
+        "originIp": "93.184.216.34",
+        "originIpSource": "received",
+        "originHelo": "mail.vendor-news.com",
+        "originRdns": null,
+        "hopCount": 1,
+        "hops": [
+          {
+            "raw": "from mail.vendor-news.com ([93.184.216.34]) by mx.interne.fr; Sat, 5 Sep 2026 10:00:01 +0000",
+            "from": "mail.vendor-news.com ([93.184.216.34])",
+            "fromHelo": "mail.vendor-news.com",
+            "fromIp": "93.184.216.34",
+            "by": "mx.interne.fr",
+            "with": null,
+            "id": null,
+            "for": null,
+            "date": "Sat, 5 Sep 2026 10:00:01 +0000",
+            "ts": 1788602401000,
+            "dateIso": "2026-09-05T10:00:01.000Z",
+            "index": 0,
+            "delayS": null
+          }
+        ],
+        "totalDelayS": null,
+        "auth": {
+          "spf": "pass",
+          "dkim": "pass",
+          "dmarc": "pass",
+          "arc": null,
+          "compauth": null,
+          "dkimDomain": "vendor-news.com",
+          "spfDomain": "vendor-news.com",
+          "dmarcPolicy": null,
+          "raw": [
+            "mx.interne.fr; spf=pass smtp.mailfrom=vendor-news.com; dkim=pass header.d=vendor-news.com; dmarc=pass header.from=vendor-news.com"
+          ],
+          "dkimSigned": false,
+          "exoAuthAs": null,
+          "exoAuthSource": null,
+          "scl": null,
+          "sfv": null,
+          "bcl": null
+        },
+        "headersText": "From: Reports <reports@vendor-news.com>\nTo: Alice <alice@interne.fr>\nSubject: Requested document\nDate: Sat, 5 Sep 2026 10:00:00 +0000\nMessage-ID: <calibration@vendor-news.com>\nReceived: from mail.vendor-news.com ([93.184.216.34]) by mx.interne.fr; Sat, 5 Sep 2026 10:00:01 +0000\nAuthentication-Results: mx.interne.fr; spf=pass smtp.mailfrom=vendor-news.com; dkim=pass header.d=vendor-news.com; dmarc=pass header.from=vendor-news.com",
+        "headerCount": 7,
+        "bodyText": "The requested report is attached. Kind regards.",
+        "bodyHtml": null,
+        "hasHtml": false,
+        "hasText": true,
+        "visibleText": null,
+        "textPreview": "The requested report is attached. Kind regards.",
+        "keywordHits": {},
+        "hiddenText": [],
+        "urls": [],
+        "urlCount": 0,
+        "htmlInfo": {
+          "images": 0,
+          "tinyImages": 0,
+          "hasScript": false,
+          "metaRefresh": null,
+          "forms": []
+        },
+        "attachments": [
+          {
+            "name": "signin.html",
+            "ext": "html",
+            "size": 143,
+            "declaredMime": "",
+            "realExt": "html",
+            "realMime": "text/html",
+            "realType": "HTML document",
+            "category": "html",
+            "sha256": "6fa9cda81f274b1a92a77ddb3cc5de84e5fc5e35bc127bcefea72bf222841c36",
+            "md5": "91f09c66e3076e8a3c7e5517f59b5878",
+            "inline": false,
+            "contentId": null,
+            "depth": 0,
+            "flags": [
+              "html_attachment",
+              "html_credential_harvest",
+              "html_password_form"
+            ],
+            "risk": 90,
+            "details": {
+              "html": {
+                "flags": [
+                  "html_credential_harvest",
+                  "html_password_form"
+                ],
+                "apis": [],
+                "scripts": 0,
+                "externalScripts": [],
+                "base64Bytes": 0,
+                "base64Blobs": 0,
+                "decodedBlobTypes": [],
+                "forms": [
+                  "https://collect.example/submit"
+                ],
+                "redirect": null,
+                "title": null,
+                "urls": [
+                  {
+                    "url": "https://collect.example/submit",
+                    "normalized": "https://collect.example/submit",
+                    "defanged": "hxxps://collect[.]example/submit",
+                    "host": "collect.example",
+                    "unicodeHost": null,
+                    "domain": "example",
+                    "scheme": "https",
+                    "port": null,
+                    "path": "/submit",
+                    "flags": [
+                      "form_action"
+                    ],
+                    "text": "",
+                    "source": "form"
+                  }
+                ],
+                "passwordInput": true,
+                "size": 143,
+                "dangerousDownload": false,
+                "obfuscated": false
+              }
+            },
+            "rescoreLimited": false
+          }
+        ],
+        "attachmentCount": 1,
+        "maxAttachmentRisk": 90,
+        "lookalike": {
+          "domain": "vendor-news.com",
+          "registrable": "vendor-news.com",
+          "unicode": null,
+          "flags": [],
+          "matches": [],
+          "internal": false
+        },
+        "replyToLookalike": null,
+        "flags": [
+          "att_html_attachment",
+          "att_html_credential_harvest",
+          "att_html_password_form",
+          "single_hop"
+        ],
+        "risk": 81,
+        "size": null,
+        "contentType": null,
+        "depth": 0,
+        "assessment": {
+          "version": "mail-2",
+          "confidence": "high",
+          "groups": {
+            "context": 5
+          },
+          "attachmentRisk": 90,
+          "expectedSender": false,
+          "limitations": []
+        },
+        "id": 8,
+        "senderPrevalence": "common",
+        "senderPriorCount": 7,
+        "senderFirstSeen": 1788602400000,
+        "senderDaysKnown": 0,
+        "senderSolicited": null,
+        "senderAuthRegression": false
+      }
+    }
+  ]
+}
