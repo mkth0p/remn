@@ -10,6 +10,8 @@ export interface CaseSettings {
   /** ISO country codes where sign-ins are expected (M365 / Entra rules) */
   expectedCountries?: string[]
   vipNames: string[]
+  /** display names of everyone in the organisation (Sublime's $org_display_names); VIPs are the subset that matters most */
+  orgDisplayNames?: string[]
   adminAccounts: string[]
   serviceAccounts: string[]
   internalIps: string[]
@@ -31,6 +33,7 @@ export const defaultSettings = (): CaseSettings => ({
   internalDomains: [],
   expectedCountries: [],
   vipNames: [],
+  orgDisplayNames: [],
   adminAccounts: [],
   serviceAccounts: [],
   internalIps: ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '127.0.0.0/8', '::1', 'fe80::/10', 'fc00::/7'],

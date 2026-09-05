@@ -211,7 +211,7 @@ converter round-trip:
 | `sigma-windows` | SigmaHQ `rules/` (Windows, stable + test) | 2,374 of 2,410 | on |
 | `sigma-emerging-threats` | SigmaHQ `rules-emerging-threats/` (Windows) | 319 of 323 | on |
 | `sigma-threat-hunting` | SigmaHQ `rules-threat-hunting/` (Windows) | 116 of 128 | off (noisy by design) |
-| `sublime` | sublime-security `detection-rules/` | 168 of 1,227 | on |
+| `sublime` | sublime-security `detection-rules/` | 189 of 1,227 | on |
 
 Each pack directory holds the rules grouped by log source (`process_creation.yaml`,
 `registry_set.yaml`, ...) or by Sublime rule family, a `pack.json` manifest with
@@ -260,7 +260,25 @@ subset of MQL translates (sender / subject / header comparisons, `strings.*` and
 `length()` counts, `$org_domains` / `$org_vips` from the case settings, the
 common `$lists`, `strings.ilevenshtein` through the `levenshtein` operator,
 `1 of (...)`, `all()` with negated predicates, `profile.by_sender()` through the
-sender-baseline columns).
+sender-baseline columns, `length()` of a text field through the `length`
+operator, `$tenant_domains` / `$org_display_names` / `$recipient_emails`
+through the case settings, `$tranco_10k` through the bundled list).
+
+**Built-in reference lists.** `in_setting` / `nin_setting` fall back to a
+bundled list when the case settings define none of that name. Today that is
+`tranco_10k`, the top 10,000 of the [Tranco](https://tranco-list.eu) ranking
+(list id and fetch date in `backend/services/reference/tranco.json`; Le Pochat
+et al., NDSS 2019). Sublime's `$tranco_1m` is approximated with it, which only
+makes those rules fire more often, never less. A case setting named
+`tranco_10k` overrides the bundled list. Refresh with
+`tools/import_community_rules.py tranco --download`.
+
+**Rule operators added for the packs**: `field|length: "< 500"` (characters of a
+text, items of a list, threshold syntax as for `threshold`), and the derived
+URL fields `urls.subdomain` (host minus the registrable domain) and
+`urls.fragment`, available in both engines. Settings gained *organisation
+display names* (all staff) next to the VIP names, used by the employee
+impersonation rules.
 
 ## Test data (public)
 

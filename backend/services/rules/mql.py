@@ -67,6 +67,11 @@ FILE_TYPES_IMAGES = ["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg", "tiff", 
 LISTS: dict[str, tuple[str, Any]] = {
     "$org_domains": ("setting", "internal_domains"),
     "$org_vips": ("setting", "vip_names"),
+    "$org_display_names": ("setting", "org_display_names"),
+    "$tenant_domains": ("setting", "internal_domains"),
+    "$recipient_emails": ("setting_domain", "internal_domains"),  # the org's mailboxes ~ any address at an internal domain
+    "$tranco_10k": ("setting", "tranco_10k"),  # built-in reference list (backend/services/reference)
+    "$tranco_1m": ("setting", "tranco_10k"),
     "$high_trust_sender_root_domains": ("inline", sorted(set(BRAND_OWNED_DOMAINS) | set(NOTIFICATION_SENDERS))),
     "$free_file_hosts": ("inline", sorted(FILE_HOSTING)),
     "$url_shorteners": ("inline", sorted(SHORTENERS)),
@@ -79,7 +84,11 @@ LISTS: dict[str, tuple[str, Any]] = {
     "$file_types_images": ("inline", FILE_TYPES_IMAGES),
     "$file_extensions_images": ("inline", FILE_TYPES_IMAGES),
 }
-LIST_WARNINGS = {"$high_trust_sender_root_domains": "$high_trust_sender_root_domains approximated with REMN's built-in trusted/brand domain list"}
+LIST_WARNINGS = {"$high_trust_sender_root_domains": "$high_trust_sender_root_domains approximated with REMN's built-in trusted/brand domain list",
+                 "$tranco_1m": "$tranco_1m approximated with the bundled Tranco top 10k (more domains count as unpopular)",
+                 "$recipient_emails": "$recipient_emails approximated as any address at an internal domain (case setting internal_domains)"}
+# address column -> its domain column, for lists of addresses approximated by domains
+_DOMAIN_OF = {"fromAddr": "fromDomain", "to.addr": "to.domain", "cc.addr": "cc.domain", "bcc.addr": "bcc.domain", "replyTo.addr": "replyTo.domain"}
 
 # top-level message paths -> (kind, column). kinds: text | auth | regex_local (local part of an
 # address column) | regex_sld (second-level label of a registrable) | suffix (TLD of a domain column)
@@ -108,6 +117,9 @@ PATHS: dict[str, tuple[str, str]] = {
     "headers.auth_summary.dmarc.pass": ("auth", "dmarc"),
     "headers.auth_summary.spf.pass": ("auth", "spf"),
     "headers.auth_summary.dkim.pass": ("auth", "dkim"),
+    "headers.auth_summary.spf.details.designator": ("text", "auth.spfDomain"),
+    "headers.return_path.domain.tld": ("suffix", "returnPath"),
+    "sender.email.domain.valid": ("valid", "fromDomain"),
     "mailbox.email.email": ("text", "toList"),
 }
 PATH_WARNINGS = {
@@ -115,6 +127,7 @@ PATH_WARNINGS = {
     "subject.base": "subject.base matched against the full subject",
     "headers.return_path.domain.domain": "return-path domain matched by regex on the address",
     "headers.return_path.domain.root_domain": "return-path domain matched by regex on the address",
+    "headers.auth_summary.spf.details.designator": "SPF designator = the smtp.mailfrom domain of the Authentication-Results header",
 }
 BOOL_PATHS: dict[str, dict[str, Any]] = {
     "subject.is_reply": {"subject|re": r"^\s*(re|aw|sv|antw|vs|r)\s*:"},
@@ -131,6 +144,8 @@ COLLECTIONS: dict[str, tuple[str, dict[str, tuple[str, str]]]] = {
         ".display_text": ("text", "urls.text"), ".display_url.url": ("text", "urls.text"),
         ".display_url.domain.root_domain": ("regex_domain", "urls.text"), ".display_url.domain.domain": ("regex_domain", "urls.text"),
         ".href_url.scheme": ("text", "urls.scheme"),
+        ".href_url.domain.subdomain": ("text", "urls.subdomain"), ".href_url.fragment": ("text", "urls.fragment"),
+        ".href_url.domain.valid": ("valid", "urls.domain"),
     }),
     "attachments": ("attachments", {
         ".file_extension": ("text", "attachments.ext"), ".file_type": ("text", "attachments.realExt"),
@@ -138,13 +153,13 @@ COLLECTIONS: dict[str, tuple[str, dict[str, tuple[str, str]]]] = {
         ".size": ("num", "attachments.size"), ".sha256": ("text", "attachments.sha256"), ".md5": ("text", "attachments.md5"),
     }),
     "recipients.to": ("to", {".email.email": ("text", "to.addr"), ".email.domain.domain": ("text", "to.domain"),
-                             ".email.domain.root_domain": ("text", "to.domain"), ".display_name": ("text", "to.name")}),
+                             ".email.domain.root_domain": ("text", "to.domain"), ".display_name": ("text", "to.name"), ".email.domain.valid": ("valid", "to.domain")}),
     "recipients.cc": ("cc", {".email.email": ("text", "cc.addr"), ".email.domain.domain": ("text", "cc.domain"),
-                             ".email.domain.root_domain": ("text", "cc.domain"), ".display_name": ("text", "cc.name")}),
+                             ".email.domain.root_domain": ("text", "cc.domain"), ".display_name": ("text", "cc.name"), ".email.domain.valid": ("valid", "cc.domain")}),
     "recipients.bcc": ("bcc", {".email.email": ("text", "bcc.addr"), ".email.domain.domain": ("text", "bcc.domain"),
-                               ".email.domain.root_domain": ("text", "bcc.domain"), ".display_name": ("text", "bcc.name")}),
+                               ".email.domain.root_domain": ("text", "bcc.domain"), ".display_name": ("text", "bcc.name"), ".email.domain.valid": ("valid", "bcc.domain")}),
     "headers.reply_to": ("replyTo", {".email.email": ("text", "replyTo.addr"), ".email.domain.domain": ("text", "replyTo.domain"),
-                                     ".email.domain.root_domain": ("regex_domain", "replyTo.domain")}),
+                                     ".email.domain.root_domain": ("regex_domain", "replyTo.domain"), ".email.domain.valid": ("valid", "replyTo.domain")}),
 }
 COLLECTIONS["body.current_thread.links"] = COLLECTIONS["body.links"]
 COLLECTIONS["headers.domains"] = ("headersText", {".root_domain": ("contains_in", "headersText"), ".domain": ("contains_in", "headersText"),
@@ -167,7 +182,7 @@ ARITH = {"+", "-", "*", "/"}
 # ---------------------------------------------------------------------------
 _TOKEN = re.compile(
     r"""(?P<ws>\s+|//[^\n]*|/\*.*?\*/)
-      | (?P<str>"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')
+      | (?P<str>"(?:[^"\\]|\\.|"")*"|'(?:[^'\\]|\\.|'')*')
       | (?P<num>\d+(?:\.\d+)?)
       | (?P<list>\$[A-Za-z_]\w*)
       | (?P<pdot>\.\.[A-Za-z_][\w.]*|\.\.(?![\w.]))
@@ -195,9 +210,10 @@ def tokenize(text: str) -> list[tuple[str, str]]:
 
 
 def _unquote(s: str) -> str:
-    """MQL strings keep backslashes literally (regexes are written as-is); only the quote is escapable."""
+    """MQL strings keep backslashes literally (regexes are written as-is); the quote is escaped by
+    doubling it ('I''ll') or with a backslash."""
     q = s[0]
-    return s[1:-1].replace("\\" + q, q)
+    return s[1:-1].replace(q + q, q).replace("\\" + q, q)
 
 
 class Parser:
@@ -513,6 +529,12 @@ class Translator:
             v = vals[0]
             truth = bool(v) if isinstance(v, bool) else str(v).lower() in ("true", "1", "yes")
             return {f.col: truth if op == "eq" else (not truth)}
+        if f.kind == "valid":
+            if op not in ("eq", "ne"):
+                raise Unsupported(f"{op} on domain.valid")
+            v = vals[0]
+            truth = bool(v) if isinstance(v, bool) else str(v).lower() in ("true", "1", "yes")
+            return {f"{f.col}|exists": truth if op == "eq" else (not truth)}
         if f.kind == "contains_in":
             # a value list matched as substrings of a text blob (headers.domains -> raw headers)
             m = {"eq": "contains", "in": "contains_any", "ne": "not_contains", "nin": "not_contains",
@@ -616,7 +638,7 @@ class Translator:
         if t == "bool":
             if node[1]:
                 return TRUE
-            raise Unsupported("literal false")
+            raise Unsupported("rule disabled upstream (source is 'false')")
         raise Unsupported(f"expression {t}")
 
     def bool_path(self, node: Any) -> dict[str, Any]:
@@ -674,11 +696,19 @@ class Translator:
 
     def membership(self, node: Any) -> dict[str, Any]:
         _, neg, _ci, left, right = node
+        if left[0] == "str":
+            what = right[1] if isinstance(right[1], str) else "a computed list"
+            raise Unsupported(f"string membership in {what}")
         f = self.field(left)
         if right[0] == "list":
             kind, payload = self._list(right[1])
+            if kind == "setting_domain":
+                dom_col = _DOMAIN_OF.get(f.col) if f.kind == "text" else None
+                if not dom_col:
+                    raise Unsupported(f"{right[1]} on {f.col}")
+                return {f"{dom_col}|{'nin_setting' if neg else 'in_setting'}": payload}
             if kind == "setting":
-                if f.kind == "text" and f.col == "fromName" and payload == "vip_names":
+                if f.kind == "text" and f.col == "fromName" and payload in ("vip_names", "org_display_names"):
                     f = Field("text", "fromNameNorm")
                 if f.kind != "text":
                     raise Unsupported(f"{right[1]} on a derived field")
@@ -718,6 +748,11 @@ class Translator:
             if (dsl, n) in (("gt", 0), ("gte", 1), ("ne", 0)):
                 return {"references|exists": True}
             raise Unsupported("length(headers.references) bound")
+        if p in PATHS and PATHS[p][0] == "text":
+            sym = {"eq": "=", "ne": "!=", "lt": "<", "gt": ">", "lte": "<=", "gte": ">="}[dsl]
+            if p in PATH_WARNINGS:
+                self.warn(PATH_WARNINGS[p])
+            return {f"{PATHS[p][1]}|length": f"{sym} {int(n)}"}
         if p == "headers.reply_to":
             if (dsl, n) in (("eq", 0), ("lt", 1), ("lte", 0)):
                 return {"replyTo.addr|exists": False}

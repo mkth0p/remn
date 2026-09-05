@@ -54,7 +54,7 @@ const GROUPABLE: Record<string, string[]> = {
 export const sevRank = (s: Severity | string | undefined): number => Math.max(0, SEVERITIES.indexOf((s || 'info') as Severity))
 export const maxSeverity = (a: Severity, b: Severity | undefined): Severity => (b && sevRank(b) > sevRank(a) ? b : a)
 
-const OPS = new Set<string>(['eq', 'ne', 'in', 'nin', 'contains', 'not_contains', 'contains_any', 'contains_all', 'startswith', 'not_startswith', 'endswith', 'not_endswith', 're', 'not_re', 'gt', 'gte', 'lt', 'lte', 'exists', 'empty', 'in_setting', 'nin_setting', 'levenshtein'])
+const OPS = new Set<string>(['eq', 'ne', 'in', 'nin', 'contains', 'not_contains', 'contains_any', 'contains_all', 'startswith', 'not_startswith', 'endswith', 'not_endswith', 're', 'not_re', 'gt', 'gte', 'lt', 'lte', 'exists', 'empty', 'in_setting', 'nin_setting', 'levenshtein', 'length'])
 
 type Pred = (row: Row) => boolean
 

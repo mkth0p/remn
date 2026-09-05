@@ -795,6 +795,7 @@ where:
       - references|exists: true
       - inReplyTo|exists: true
       - inReplyTo|exists: true
+  - bodyText|length: < 1500
 sublime:
   id: 9cbbf9b8-a44a-5d86-8caa-3aef898841c1
   attack_types:

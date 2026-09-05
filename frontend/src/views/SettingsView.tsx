@@ -199,6 +199,7 @@ export function SettingsView() {
             <div className="panel-b col">
               <label className="field"><span>internal domains (one per line) - drives lookalike / spoof detection</span><ListInput mono value={s.internalDomains} onChange={(v) => patch({ internalDomains: v.map((x) => x.toLowerCase().replace(/^@/, '')) })} placeholder={'company.com\ncompany.fr'} /></label>
               <label className="field"><span>VIP display names (CEO, CFO, IT admins…) - impersonation rule</span><ListInput value={s.vipNames} onChange={(v) => patch({ vipNames: v })} placeholder={'Marie Lefevre\nJean Dupont'} /></label>
+              <label className="field"><span>organisation display names (all staff, one per line) - employee-impersonation rules; the Sublime pack's $org_display_names</span><ListInput value={s.orgDisplayNames ?? []} onChange={(v) => patch({ orgDisplayNames: v })} placeholder={'one display name per line'} /></label>
               <label className="field"><span>extra brands to protect (second-level labels)</span><ListInput mono value={s.brands} onChange={(v) => patch({ brands: v.map((x) => x.toLowerCase()) })} placeholder={'mybank\nmysupplier'} /></label>
               <label className="field"><span>trusted senders (addresses or domains) - spoofing rules skip them, risk capped at 10</span><ListInput mono value={s.trustedSenders ?? []} onChange={(v) => patch({ trustedSenders: v.map((x) => x.toLowerCase().replace(/^@/, '')) })} placeholder={'notifications.supplier.com\nfacture@partenaire.fr'} /></label>
               <div className="row">

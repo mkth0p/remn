@@ -10,7 +10,7 @@ import yaml
 RULES = Path(__file__).resolve().parents[2] / "rules"
 OPS = {"eq", "ne", "in", "nin", "contains", "not_contains", "contains_any", "contains_all", "startswith", "not_startswith",
        "endswith", "not_endswith", "re", "not_re", "gt", "gte", "lt", "lte", "exists", "empty", "in_setting", "nin_setting",
-       "levenshtein"}
+       "levenshtein", "length"}
 SEVERITIES = {"info", "low", "medium", "high", "critical"}
 GROUP_KEYS = re.compile(r"^(any_of|all_of)(_\d+)?$|^not$")
 

@@ -32,7 +32,7 @@
  {
   "file": "detection-rules/abuse_docsend_new_domain.yml",
   "title": "Service abuse: DocSend share from newly registered domain",
-  "reason": "unknown list $recipient_emails"
+  "reason": "network.whois() result field"
  },
  {
   "file": "detection-rules/abuse_docsend_unsolicited_reply-to.yml",
@@ -52,27 +52,22 @@
  {
   "file": "detection-rules/abuse_dropbox_new_domain.yml",
   "title": "Service abuse: Dropbox share from new domain",
-  "reason": "field headers.auth_summary.spf.details.designator"
+  "reason": "beta.profile.by_reply_to() result field"
  },
  {
   "file": "detection-rules/abuse_dropbox_sus_names.yml",
   "title": "Service abuse: Dropbox share with suspicious sender or document name",
-  "reason": "field headers.auth_summary.spf.details.designator"
+  "reason": "unsupported value path"
  },
  {
   "file": "detection-rules/abuse_dropbox_unsolicited_reply-to.yml",
   "title": "Service abuse: Dropbox share from an unsolicited reply-to address",
-  "reason": "field headers.auth_summary.spf.details.designator"
+  "reason": "beta.profile.by_reply_to() result field"
  },
  {
   "file": "detection-rules/abuse_evernote_suspicious_indicators.yml",
   "title": "Service abuse: Evernote link",
   "reason": "any() over a computed list"
- },
- {
-  "file": "detection-rules/abuse_exacttarget_sender_domain.yml",
-  "title": "Service Abuse: ExactTarget with suspicious sender indicators",
-  "reason": "length(sender.email.email) >= 50"
  },
  {
   "file": "detection-rules/abuse_firebase_sender.yml",
@@ -105,11 +100,6 @@
   "reason": "beta.profile.by_reply_to() result field"
  },
  {
-  "file": "detection-rules/abuse_google_shortlinks_services.yml",
-  "title": "Google services using g.co shortlinks",
-  "reason": "element field .href_url.domain.subdomain"
- },
- {
   "file": "detection-rules/abuse_hellosign_sus_names.yml",
   "title": "Service Abuse: HelloSign share with suspicious sender or document name",
   "reason": "any(headers.hops)"
@@ -130,14 +120,9 @@
   "reason": "strings.count() as a field"
  },
  {
-  "file": "detection-rules/abuse_quickbooks_impersonation_intuit.yml",
-  "title": "Brand impersonation: QuickBooks notification from Intuit themed company name",
-  "reason": "field headers.auth_summary.spf.details.designator"
- },
- {
   "file": "detection-rules/abuse_quickbooks_new_domain.yml",
   "title": "Service abuse: QuickBooks notification from new domain",
-  "reason": "field headers.auth_summary.spf.details.designator"
+  "reason": "beta.profile.by_reply_to() result field"
  },
  {
   "file": "detection-rules/abuse_quickbooks_suspicious_comments.yml",
@@ -172,7 +157,7 @@
  {
   "file": "detection-rules/abuse_wix_mass_mailer.yml",
   "title": "Service abuse: Wix redirect through bulk mailer domains",
-  "reason": "expected a field, got str"
+  "reason": "string membership in .href_url.rewrite.encoders"
  },
  {
   "file": "detection-rules/abuse_zoom_docs_unsolicited_sender.yml",
@@ -537,7 +522,7 @@
  {
   "file": "detection-rules/attachment_free_subdomain_suspicious_link_language.yml",
   "title": "Free subdomain link with credential theft indicators",
-  "reason": "element field .href_url.domain.subdomain"
+  "reason": "all() with a positive predicate"
  },
  {
   "file": "detection-rules/attachment_google_image_lure_qr_code.yml",
@@ -1522,7 +1507,7 @@
  {
   "file": "detection-rules/attachment_vba_macro_employee_impersonation.yml",
   "title": "Attachment with VBA macros from employee impersonation (unsolicited)",
-  "reason": "unknown list $org_display_names"
+  "reason": "file.oletools() result field"
  },
  {
   "file": "detection-rules/attachment_vba_macro_high_risk.yml",
@@ -1552,7 +1537,7 @@
  {
   "file": "detection-rules/attachment_word_doc_hyperlink_fraud.yml",
   "title": "Attachment: Word document with hyperlink and fraud language",
-  "reason": "unbalanced parentheses in regex.extract()"
+  "reason": "any(file.explode(...))"
  },
  {
   "file": "detection-rules/attachment_xlsx_sus_exif_titleofparts.yml",
@@ -1722,7 +1707,7 @@
  {
   "file": "detection-rules/body_extortion.yml",
   "title": "Extortion / sextortion (untrusted sender)",
-  "reason": "unbalanced parentheses in regex.icontains()"
+  "reason": "length(filter(...)) bound other than 0"
  },
  {
   "file": "detection-rules/body_fake_investment_outreach_suspicious_tld.yml",
@@ -1743,11 +1728,6 @@
   "file": "detection-rules/body_html_class_name_placeholder_rcpt.yml",
   "title": "HTML: Template placeholders or recipient email in element class attributes",
   "reason": "parent-scope path (..) inside a nested any()"
- },
- {
-  "file": "detection-rules/body_html_smuggling_atob_in_body.yml",
-  "title": "HTML smuggling with atob in message body",
-  "reason": "an always-true alternative (type.inbound / dropped guard) inside an OR"
  },
  {
   "file": "detection-rules/body_investor_solicitation.yml",
@@ -1902,7 +1882,7 @@
  {
   "file": "detection-rules/brand_impersonation_hulu.yml",
   "title": "Brand impersonation: Hulu",
-  "reason": "element field .email.domain.valid"
+  "reason": "all() with a positive predicate"
  },
  {
   "file": "detection-rules/brand_impersonation_interac.yml",
@@ -2057,7 +2037,7 @@
  {
   "file": "detection-rules/brand_impersonation_uk_home_office.yml",
   "title": "Brand impersonation: UK government Home Office",
-  "reason": "unbalanced parentheses in regex.icontains()"
+  "reason": "strings.replace_confusables() as a field"
  },
  {
   "file": "detection-rules/brand_impersonation_vanguard.yml",
@@ -2087,7 +2067,7 @@
  {
   "file": "detection-rules/brand_impersonation_zoom_lookalike.yml",
   "title": "Brand impersonation: Zoom via lookalike domain",
-  "reason": "element field .href_url.domain.subdomain"
+  "reason": "element field .display_url.domain.sld"
  },
  {
   "file": "detection-rules/callback_aol_senders.yml",
@@ -2222,7 +2202,7 @@
  {
   "file": "detection-rules/canva_suspicious_embedded_link.yml",
   "title": "Canva design with suspicious embedded link",
-  "reason": "unbalanced parentheses in regex.iextract()"
+  "reason": "any(html.xpath(...))"
  },
  {
   "file": "detection-rules/cc_infra_abuse.yml",
@@ -2272,7 +2252,7 @@
  {
   "file": "detection-rules/credential_phishing_docusign_embedded_image_lure.yml",
   "title": "Credential phishing: DocuSign embedded image lure with no DocuSign domains in links",
-  "reason": "element field .href_url.domain.valid"
+  "reason": "length(filter(...)) bound other than 0"
  },
  {
   "file": "detection-rules/credential_phishing_docusign_html_table_forgery.yml",
@@ -2472,7 +2452,7 @@
  {
   "file": "detection-rules/file_sharing_link_suspicious_subject.yml",
   "title": "File sharing link with a suspicious subject",
-  "reason": "unknown list $tenant_domains"
+  "reason": "any(ml.nlu_classifier(...))"
  },
  {
   "file": "detection-rules/file_sharing_with_template_artifacts.yml",
@@ -2503,11 +2483,6 @@
   "file": "detection-rules/google_drive_abuse_credential_phishing.yml",
   "title": "Google Drive abuse: Credential phishing link",
   "reason": "parent-scope path (..) inside a nested any()"
- },
- {
-  "file": "detection-rules/gophish_abuse_pixel_tracking.yml",
-  "title": "Credential theft: Gophish abuse with hidden tracking image",
-  "reason": "unbalanced parentheses in strings.icontains()"
  },
  {
   "file": "detection-rules/govdelivery_compromise.yml",
@@ -2547,7 +2522,7 @@
  {
   "file": "detection-rules/headers_invalid_rcpt_reply-to_mismatch_new.yml",
   "title": "Headers: Invalid recipient domain with mismatched reply-to from new sender",
-  "reason": "element field .email.domain.valid"
+  "reason": "all() with a positive predicate"
  },
  {
   "file": "detection-rules/headers_outlook_express.yml",
@@ -2567,7 +2542,7 @@
  {
   "file": "detection-rules/headers_russia_return_path.yml",
   "title": "Russia return-path TLD (untrusted sender)",
-  "reason": "field headers.return_path.domain.tld"
+  "reason": "profile.by_sender().any_messages_malicious_or_spam"
  },
  {
   "file": "detection-rules/headers_spf_temp_error.yml",
@@ -2625,11 +2600,6 @@
   "reason": "all() with a positive predicate"
  },
  {
-  "file": "detection-rules/impersonation_adp.yml",
-  "title": "Brand impersonation: ADP",
-  "reason": "unknown list $recipient_emails"
- },
- {
   "file": "detection-rules/impersonation_afp_australian_federal_police.yml",
   "title": "Impersonation: Australian Federal Police with criminal case language",
   "reason": "2 of 6 (only 1 of / all of translate exactly)"
@@ -2645,19 +2615,14 @@
   "reason": "any(file.explode(...))"
  },
  {
-  "file": "detection-rules/impersonation_apple.yml",
-  "title": "Brand impersonation: Apple",
-  "reason": "unknown list $recipient_emails"
- },
- {
   "file": "detection-rules/impersonation_aramco.yml",
   "title": "Brand impersonation: Aramco",
-  "reason": "element field .href_url.domain.valid"
+  "reason": "length(filter(...)) bound other than 0"
  },
  {
   "file": "detection-rules/impersonation_bank_of_america.yml",
   "title": "Brand impersonation: Bank of America",
-  "reason": "unknown list $recipient_emails"
+  "reason": "computed value"
  },
  {
   "file": "detection-rules/impersonation_barracuda.yml",
@@ -2667,7 +2632,7 @@
  {
   "file": "detection-rules/impersonation_benefits_enrollment.yml",
   "title": "Benefits enrollment impersonation",
-  "reason": "an always-true alternative (type.inbound / dropped guard) inside an OR"
+  "reason": "any(ml.nlu_classifier(...))"
  },
  {
   "file": "detection-rules/impersonation_binance.yml",
@@ -2717,12 +2682,12 @@
  {
   "file": "detection-rules/impersonation_coinbase.yml",
   "title": "Brand impersonation: Coinbase",
-  "reason": "unknown list $recipient_emails"
+  "reason": "unknown list $recipient_domains"
  },
  {
   "file": "detection-rules/impersonation_dhl.yml",
   "title": "Brand impersonation: DHL",
-  "reason": "length(sender.email.domain.domain) < 15"
+  "reason": "any(ml.nlu_classifier(...))"
  },
  {
   "file": "detection-rules/impersonation_digital_ocean.yml",
@@ -2737,7 +2702,7 @@
  {
   "file": "detection-rules/impersonation_docusign.yml",
   "title": "Brand impersonation: DocuSign",
-  "reason": "unbalanced parentheses in regex.icontains()"
+  "reason": "parent-scope path (..) inside a nested any()"
  },
  {
   "file": "detection-rules/impersonation_docusign_via_cloudhq.yml",
@@ -2767,7 +2732,7 @@
  {
   "file": "detection-rules/impersonation_employee_initial_contact.yml",
   "title": "Impersonation: Employee using fabricated identity in initial contact",
-  "reason": "unbalanced parentheses in regex.extract()"
+  "reason": "expected a field, got str"
  },
  {
   "file": "detection-rules/impersonation_employee_payroll_fraud.yml",
@@ -2777,7 +2742,7 @@
  {
   "file": "detection-rules/impersonation_employee_subject.yml",
   "title": "BEC: Employee impersonation with subject manipulation",
-  "reason": "unknown list $org_display_names"
+  "reason": "any(ml.nlu_classifier(...))"
  },
  {
   "file": "detection-rules/impersonation_employee_suspicious_sender.yml",
@@ -2787,7 +2752,7 @@
  {
   "file": "detection-rules/impersonation_employee_urgent_request.yml",
   "title": "Employee impersonation with urgent request (untrusted sender)",
-  "reason": "unknown list $org_display_names"
+  "reason": "any(ml.nlu_classifier(...))"
  },
  {
   "file": "detection-rules/impersonation_exodus.yml",
@@ -2840,11 +2805,6 @@
   "reason": "parent-scope path (..) inside a nested any()"
  },
  {
-  "file": "detection-rules/impersonation_google_via_msft_forms.yml",
-  "title": "Brand impersonation: Google using Microsoft Forms",
-  "reason": "unknown list $tranco_1m"
- },
- {
   "file": "detection-rules/impersonation_google_workspace.yml",
   "title": "Brand impersonation: Google Workspace alert notification",
   "reason": "any(headers.hops)"
@@ -2852,7 +2812,7 @@
  {
   "file": "detection-rules/impersonation_gov_tax_auth_document_lure.yml",
   "title": "Brand impersonation: Government / Tax Authority document lure",
-  "reason": "unknown list $tranco_1m"
+  "reason": "any(ml.nlu_classifier(...))"
  },
  {
   "file": "detection-rules/impersonation_gusto.yml",
@@ -2877,7 +2837,7 @@
  {
   "file": "detection-rules/impersonation_lastpass.yml",
   "title": "Brand impersonation: LastPass",
-  "reason": "element field .href_url.domain.subdomain"
+  "reason": "any() over a computed list"
  },
  {
   "file": "detection-rules/impersonation_ledger.yml",
@@ -2963,11 +2923,6 @@
   "file": "detection-rules/impersonation_openai_payment_issues.yml",
   "title": "Brand impersonation: OpenAI with payment issues",
   "reason": "2 of 33 (only 1 of / all of translate exactly)"
- },
- {
-  "file": "detection-rules/impersonation_outlook.yml",
-  "title": "Brand impersonation: Outlook",
-  "reason": "unknown list $recipient_emails"
  },
  {
   "file": "detection-rules/impersonation_paypal.yml",
@@ -3065,14 +3020,9 @@
   "reason": "parent-scope path (..) inside a nested any()"
  },
  {
-  "file": "detection-rules/impersonation_turbotax.yml",
-  "title": "Brand impersonation: TurboTax",
-  "reason": "unknown list $recipient_emails"
- },
- {
   "file": "detection-rules/impersonation_twitter.yml",
   "title": "Brand impersonation: Twitter",
-  "reason": "element field .href_url.domain.subdomain"
+  "reason": "3 of 8 (only 1 of / all of translate exactly)"
  },
  {
   "file": "detection-rules/impersonation_uhc.yml",
@@ -3125,11 +3075,6 @@
   "reason": "parent-scope path (..) inside a nested any()"
  },
  {
-  "file": "detection-rules/impersonation_wells_fargo.yml",
-  "title": "Brand impersonation: Wells Fargo",
-  "reason": "unknown list $recipient_emails"
- },
- {
   "file": "detection-rules/impersonation_wise.yml",
   "title": "Brand impersonation: Wise",
   "reason": "any(ml.nlu_classifier(...))"
@@ -3162,7 +3107,7 @@
  {
   "file": "detection-rules/invoicera_infra_abuse.yml",
   "title": "Invoicera infrastructure abuse",
-  "reason": "element field .email.domain.valid"
+  "reason": "field-to-field comparison"
  },
  {
   "file": "detection-rules/issuu_suspicious_embedded_link.yml",
@@ -3202,7 +3147,7 @@
  {
   "file": "detection-rules/link_autodownloaded_html_smuggling.yml",
   "title": "Low reputation link to auto-downloaded HTML file with smuggling indicators",
-  "reason": "unknown list $tranco_1m"
+  "reason": "unknown list $social_landing_hosts"
  },
  {
   "file": "detection-rules/link_blogspot_explicit_romance_content.yml",
@@ -3327,7 +3272,7 @@
  {
   "file": "detection-rules/link_cyrillic_substitutions_unsolicited.yml",
   "title": "Cyrillic vowel substitution in subject or display name from unknown sender",
-  "reason": "field headers.return_path.domain.tld"
+  "reason": "profile.by_sender().any_messages_benign"
  },
  {
   "file": "detection-rules/link_deactivated_bitly.yml",
@@ -3392,7 +3337,7 @@
  {
   "file": "detection-rules/link_dropbox_paper_file.yml",
   "title": "Link: Direct link to Dropbox Paper file",
-  "reason": "expected a field, got str"
+  "reason": "string membership in keys"
  },
  {
   "file": "detection-rules/link_dynamics_form.yml",
@@ -3592,7 +3537,7 @@
  {
   "file": "detection-rules/link_google_translate.yml",
   "title": "Link: Google Translate (unsolicited)",
-  "reason": "expected a field, got str"
+  "reason": "string membership in .href_url.rewrite.encoders"
  },
  {
   "file": "detection-rules/link_google_web_light_open_redirect.yml",
@@ -3608,11 +3553,6 @@
   "file": "detection-rules/link_gophish_rid.yml",
   "title": "Link: GoPhish query param values",
   "reason": "parent-scope path (..) inside a nested any()"
- },
- {
-  "file": "detection-rules/link_hidden_dir.yml",
-  "title": "Link: Common hidden directory observed",
-  "reason": "element field .href_url.fragment"
  },
  {
   "file": "detection-rules/link_hidden_domain_using_at_symbol_with_suspicious_indicators.yml",
@@ -3635,11 +3575,6 @@
   "reason": "element field .visible"
  },
  {
-  "file": "detection-rules/link_html_frag_binary_end.yml",
-  "title": "Link: HTML file with suspicious binary fragment ending pattern",
-  "reason": "element field .href_url.fragment"
- },
- {
   "file": "detection-rules/link_html_smuggling_with_adobe_branding.yml",
   "title": "Link to auto-downloaded file with Adobe branding",
   "reason": "parent-scope path (..) inside a nested any()"
@@ -3652,7 +3587,7 @@
  {
   "file": "detection-rules/link_invalid_replyto_with_recipient_details.yml",
   "title": "Link: Invalid reply-to with recipient details in subject, body, and encoded link",
-  "reason": "element field .email.domain.valid"
+  "reason": "computed value"
  },
  {
   "file": "detection-rules/link_invoice_fake_customer_service_freemail_sender.yml",
@@ -3662,7 +3597,7 @@
  {
   "file": "detection-rules/link_ipfs_phishing.yml",
   "title": "Link: IPFS",
-  "reason": "unknown list $tranco_1m"
+  "reason": "unknown list $umbrella_1m"
  },
  {
   "file": "detection-rules/link_ipv4_in_ipv6.yml",
@@ -3927,7 +3862,7 @@
  {
   "file": "detection-rules/link_remittance_timeline_template.yml",
   "title": "Link: Remittance payment request with timeline template",
-  "reason": "unknown list $tranco_10k"
+  "reason": "unknown list $self_service_creation_platform_domains"
  },
  {
   "file": "detection-rules/link_romance_suspicious.yml",
@@ -3957,7 +3892,7 @@
  {
   "file": "detection-rules/link_screenconnect_access_guest.yml",
   "title": "Link: ScreenConnect remote access tool delivery with unattended guest access",
-  "reason": "unknown list $tenant_domains"
+  "reason": "all() form"
  },
  {
   "file": "detection-rules/link_scribd_document_cred_theft.yml",
@@ -3967,7 +3902,7 @@
  {
   "file": "detection-rules/link_scribd_fullscreen.yml",
   "title": "Link: Scribd fullscreen link from suspicious sender",
-  "reason": "element field .href_url.fragment"
+  "reason": "profile.by_sender().any_messages_benign"
  },
  {
   "file": "detection-rules/link_secure_sharepoint_file.yml",
@@ -3997,7 +3932,7 @@
  {
   "file": "detection-rules/link_self_service_sus_rcpt_caps.yml",
   "title": "Link abuse: Self-service creation platform link with suspicious recipient behavior",
-  "reason": "element field .email.domain.valid"
+  "reason": "computed value"
  },
  {
   "file": "detection-rules/link_sharepoint_filename_org.yml",
@@ -4012,17 +3947,12 @@
  {
   "file": "detection-rules/link_sharepoint_invalid_recipient_domain.yml",
   "title": "Link: Personal SharePoint with invalid recipients and credential theft language",
-  "reason": "element field .email.domain.valid"
+  "reason": "all() with a positive predicate"
  },
  {
   "file": "detection-rules/link_sharepoint_netorgft.yml",
   "title": "Link: SharePoint files shared from GoDaddy federated tenants",
-  "reason": "element field .href_url.domain.subdomain"
- },
- {
-  "file": "detection-rules/link_sharepoint_online_multiple_recipients_from_outside_org.yml",
-  "title": "Sharepoint online with external recipients and external display name",
-  "reason": "unknown list $org_display_names"
+  "reason": "profile.by_sender().any_messages_benign"
  },
  {
   "file": "detection-rules/link_sharepoint_self_sender.yml",
@@ -4037,7 +3967,7 @@
  {
   "file": "detection-rules/link_sharepoint_sus_name.yml",
   "title": "Link: Suspicious SharePoint document name",
-  "reason": "unknown list $tenant_domains"
+  "reason": "any(ml.nlu_classifier(...))"
  },
  {
   "file": "detection-rules/link_single_riddle.yml",
@@ -4055,19 +3985,9 @@
   "reason": "length(distinct(...))"
  },
  {
-  "file": "detection-rules/link_storage_google_indexphp.yml",
-  "title": "Link: Google Cloud Storage link with index.php in URL",
-  "reason": "element field .href_url.fragment"
- },
- {
   "file": "detection-rules/link_storage_google_la_redirect.yml",
   "title": "Link: Google Cloud Storage redirect to external domain",
   "reason": "ml.link_analysis() result field"
- },
- {
-  "file": "detection-rules/link_storage_google_redirect.yml",
-  "title": "Link: Google Cloud Storage link with redirect.html in URL",
-  "reason": "element field .href_url.fragment"
  },
  {
   "file": "detection-rules/link_su_redirect.yml",
@@ -4155,14 +4075,9 @@
   "reason": "member access on path"
  },
  {
-  "file": "detection-rules/link_url_repeating_hex_pattern_with_periods.yml",
-  "title": "Link: URL fragment with hexadecimal pattern obfuscation",
-  "reason": "element field .href_url.fragment"
- },
- {
   "file": "detection-rules/link_url_shortener_fragment_in_subject.yml",
   "title": "Link: Shortened URL with fragment matching subject",
-  "reason": "element field .href_url.fragment"
+  "reason": "length(.href_url.fragment)"
  },
  {
   "file": "detection-rules/link_url_shortner_workers_dev.yml",
@@ -4182,12 +4097,12 @@
  {
   "file": "detection-rules/link_vu_tld_recently_registered.yml",
   "title": "Link: Recently registered .vu domain in lure",
-  "reason": "element field .href_url.domain.valid"
+  "reason": "network.whois() result field"
  },
  {
   "file": "detection-rules/link_webflow_unsolicited.yml",
   "title": "Link: Webflow link from unsolicited sender",
-  "reason": "element field .href_url.domain.subdomain"
+  "reason": "profile.by_sender().any_messages_malicious_or_spam"
  },
  {
   "file": "detection-rules/link_wordpress_credphish.yml",
@@ -4242,12 +4157,12 @@
  {
   "file": "detection-rules/mass_campaign_xss.yml",
   "title": "Mass campaign: Cross Site Scripting (XSS) attempt",
-  "reason": "unknown list $recipient_emails"
+  "reason": "length(filter(...)) bound other than 0"
  },
  {
   "file": "detection-rules/monday_infra_abuse.yml",
   "title": "Service abuse: Monday.com infrastructure with phishing intent",
-  "reason": "expected a field, got str"
+  "reason": "string membership in .href_url.rewrite.encoders"
  },
  {
   "file": "detection-rules/ms_infrastructure_abuse.yml",
@@ -4257,7 +4172,7 @@
  {
   "file": "detection-rules/observed_malicious_attachment_sha256.yml",
   "title": "Observed IOC: Malicious attachment SHA-256 hashes",
-  "reason": "literal false"
+  "reason": "rule disabled upstream (source is 'false')"
  },
  {
   "file": "detection-rules/observed_malicious_body_link_domains.yml",
@@ -4287,27 +4202,27 @@
  {
   "file": "detection-rules/observed_malicious_headers_ips_spamhaus_asndrop.yml",
   "title": "Spamhaus: Mail transiting an ASN-DROP listed network",
-  "reason": "unknown list $tranco_10k"
+  "reason": "any(headers.ips)"
  },
  {
   "file": "detection-rules/observed_malicious_headers_ips_spamhaus_drop.yml",
   "title": "Spamhaus: Mail transiting a DROP listed network",
-  "reason": "unknown list $tranco_10k"
+  "reason": "any(headers.ips)"
  },
  {
   "file": "detection-rules/observed_malicious_reply_to_domains.yml",
   "title": "Observed IOC: Malicious reply-to domains",
-  "reason": "literal false"
+  "reason": "rule disabled upstream (source is 'false')"
  },
  {
   "file": "detection-rules/observed_malicious_reply_to_emails.yml",
   "title": "Observed IOC: Malicious reply-to email addresses",
-  "reason": "literal false"
+  "reason": "rule disabled upstream (source is 'false')"
  },
  {
   "file": "detection-rules/observed_malicious_reply_to_root_domains.yml",
   "title": "Observed IOC: Malicious reply-to root domains",
-  "reason": "literal false"
+  "reason": "rule disabled upstream (source is 'false')"
  },
  {
   "file": "detection-rules/observed_malicious_sender_domains.yml",
@@ -4343,11 +4258,6 @@
   "file": "detection-rules/open_redirect_bangkoksync.yml",
   "title": "Open redirect: bangkoksync.com",
   "reason": "any() over a computed list"
- },
- {
-  "file": "detection-rules/open_redirect_cartoonnetwork.yml",
-  "title": "Open redirect: Cartoon Network",
-  "reason": "element field .href_url.domain.subdomain"
  },
  {
   "file": "detection-rules/open_redirect_convertcart.yml",
@@ -4387,7 +4297,7 @@
  {
   "file": "detection-rules/open_redirect_indeed.yml",
   "title": "Open redirect: Indeed",
-  "reason": "expected a field, got str"
+  "reason": "string membership in .href_url.rewrite.encoders"
  },
  {
   "file": "detection-rules/open_redirect_indiatimes.yml",
@@ -4423,11 +4333,6 @@
   "file": "detection-rules/open_redirect_retailrocket.yml",
   "title": "Open redirect: retailrocket.net",
   "reason": "length(filter(...)) bound other than 0"
- },
- {
-  "file": "detection-rules/open_redirect_samsung.yml",
-  "title": "Open redirect: Samsung",
-  "reason": "element field .href_url.domain.subdomain"
  },
  {
   "file": "detection-rules/open_redirect_spently.yml",
@@ -4472,7 +4377,7 @@
  {
   "file": "detection-rules/predatory_academic_journal.yml",
   "title": "Spam/fraud: Predatory journal/research paper request",
-  "reason": "unbalanced parentheses in regex.icontains()"
+  "reason": "any(beta.ml_topic(...))"
  },
  {
   "file": "detection-rules/qr_code_auto_download_suspicious_file.yml",
@@ -4497,7 +4402,7 @@
  {
   "file": "detection-rules/recipients_undisclosed_free_subdomain_host.yml",
   "title": "Link: Free subdomain host with undisclosed recipients",
-  "reason": "element field .href_url.domain.subdomain"
+  "reason": "all() with a positive predicate"
  },
  {
   "file": "detection-rules/recipients_undisclosed_nlu_cred_theft_low_rep_links.yml",
@@ -4518,11 +4423,6 @@
   "file": "detection-rules/recon_large_recipients_unknown.yml",
   "title": "Reconnaissance: Large unknown recipient list",
   "reason": "arithmetic expression"
- },
- {
-  "file": "detection-rules/recon_real_estate_inquiry_empty_body.yml",
-  "title": "Reconnaissance: Fake real estate inquiry with empty body",
-  "reason": "length(subject.base) > 150"
  },
  {
   "file": "detection-rules/recon_recipients_bccd_undisclosed.yml",
@@ -4592,7 +4492,7 @@
  {
   "file": "detection-rules/sender_local_part_contains_ip.yml",
   "title": "Sender: IP address in local part",
-  "reason": "length(body.current_thread.text) > 100"
+  "reason": "any(ml.nlu_classifier(...))"
  },
  {
   "file": "detection-rules/sender_long_local_part.yml",
@@ -4735,11 +4635,6 @@
   "reason": "any(ml.nlu_classifier(...))"
  },
  {
-  "file": "detection-rules/service_abuse_google_oauth_with_suspicious_redirect_destination.yml",
-  "title": "Service abuse: Google OAuth with suspicious redirect destination",
-  "reason": "element field .href_url.domain.subdomain"
- },
- {
   "file": "detection-rules/service_abuse_ibm_iam_callback.yml",
   "title": "Service abuse: IBM IAM account notification with callback scam indicators",
   "reason": "any(ml.nlu_classifier(...))"
@@ -4787,7 +4682,7 @@
  {
   "file": "detection-rules/service_abuse_nylas_suspect_content.yml",
   "title": "Service abuse: Nylas tracking subdomain with suspicious content",
-  "reason": "element field .href_url.domain.subdomain"
+  "reason": "any(ml.nlu_classifier(...))"
  },
  {
   "file": "detection-rules/service_abuse_oracle_workflow_callback.yml",
@@ -4822,7 +4717,7 @@
  {
   "file": "detection-rules/service_abuse_recruiting_impersonation.yml",
   "title": "Service abuse: Recruiting with suspicious language patterns from legitimate platforms",
-  "reason": "length(sender.email.email) >= 50"
+  "reason": "any(ml.nlu_classifier(...))"
  },
  {
   "file": "detection-rules/service_abuse_roomsy.yml",
@@ -4867,7 +4762,7 @@
  {
   "file": "detection-rules/service_abuse_soundestlink_ms_subdomains.yml",
   "title": "Service abuse: Soundestlink.com Microsoft impersonation",
-  "reason": "element field .href_url.domain.subdomain"
+  "reason": "any() over a computed list"
  },
  {
   "file": "detection-rules/service_abuse_square_QR_code.yml",
@@ -4917,12 +4812,12 @@
  {
   "file": "detection-rules/sharepoint_file_name_is_sender_name.yml",
   "title": "Service abuse: File sharing impersonation with external SharePoint links",
-  "reason": "unknown list $tenant_domains"
+  "reason": "field-to-field comparison"
  },
  {
   "file": "detection-rules/sharepoint_opt_filename_org.yml",
   "title": "SharePoint OTP for filename matching org name",
-  "reason": "unbalanced parentheses in regex.iextract()"
+  "reason": "any(headers.hops)"
  },
  {
   "file": "detection-rules/shipping_chinese_domain.yml",
@@ -4932,7 +4827,7 @@
  {
   "file": "detection-rules/shopify_infra_abuse.yml",
   "title": "Shopify infrastructure abuse",
-  "reason": "literal false"
+  "reason": "rule disabled upstream (source is 'false')"
  },
  {
   "file": "detection-rules/spam_attendee_list_solicitation.yml",
@@ -4982,7 +4877,7 @@
  {
   "file": "detection-rules/spam_explicit_google_drive_share.yml",
   "title": "Spam: Sexually explicit Google Drive share",
-  "reason": "unknown list $recipient_emails"
+  "reason": "unknown list $sender_emails"
  },
  {
   "file": "detection-rules/spam_fake_dating_profile.yml",
@@ -5017,7 +4912,7 @@
  {
   "file": "detection-rules/spam_google_looker_studio_report.yml",
   "title": "Spam: Sexually explicit Looker Studio report",
-  "reason": "unknown list $recipient_emails"
+  "reason": "unknown list $sender_emails"
  },
  {
   "file": "detection-rules/spam_large_sum_mention_new_domain.yml",
@@ -5042,7 +4937,7 @@
  {
   "file": "detection-rules/spam_onmicrosoft.yml",
   "title": "Spam: Default Microsoft Exchange Online sender domain (onmicrosoft.com)",
-  "reason": "field sender.email.domain.valid"
+  "reason": "any(headers.hops)"
  },
  {
   "file": "detection-rules/spam_sendersrv.yml",
@@ -5087,7 +4982,7 @@
  {
   "file": "detection-rules/spoofable_internal_domain_suspicious_signals.yml",
   "title": "Spoofable internal domain with suspicious signals",
-  "reason": "unknown list $org_display_names"
+  "reason": "any(headers.hops)"
  },
  {
   "file": "detection-rules/stripe_invoice_abuse.yml",
@@ -5117,7 +5012,7 @@
  {
   "file": "detection-rules/suspicious_recipient_low_rep_link.yml",
   "title": "Suspicious recipient pattern and language with low reputation link to login",
-  "reason": "unknown list $tranco_1m"
+  "reason": "ml.link_analysis() result field"
  },
  {
   "file": "detection-rules/suspicious_request_financial.yml",
@@ -5182,7 +5077,7 @@
  {
   "file": "detection-rules/urlhaus_malicious_dom_in_body_or_pdf.yml",
   "title": "URLhaus: Malicious domain in message body or pdf attachment (trusted reporters)",
-  "reason": "unknown list $tranco_1m"
+  "reason": "unknown list $umbrella_1m"
  },
  {
   "file": "detection-rules/vendor_impersonation_thread_hijack.yml",

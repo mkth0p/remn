@@ -91,7 +91,6 @@ def test_unsupported_constructs_are_skipped():
         "type.inbound and length(filter(body.links, .href_url.domain.root_domain == 'x.com')) == 1",
         "type.inbound and all(recipients.to, .email.domain.domain == 'x.com')",
         "type.inbound and sender.email.domain.root_domain == headers.return_path.domain.root_domain",
-        "type.inbound and sender.email.email in $recipient_emails",
         "type.inbound",
     ]
     for src in bad:
@@ -104,7 +103,7 @@ def test_unsupported_constructs_are_skipped():
     assert ok["ok"], ok
     assert ok["rule"]["where"]["any_of"] == [{"fromRegistrable": "a.com"}, {"subject": "x"}]
     assert ok["rule"]["where"]["fromAddr|in"] == ["a@a.com", "b@a.com"]
-    assert "every message" in _rule(bad[5])["error"]
+    assert "every message" in _rule(bad[4])["error"]
 
 
 def test_filter_all_levenshtein_and_chained_comparisons(store):
@@ -189,3 +188,56 @@ def test_negative_child_operator_binds_and_means_none_matches(store):
     rule = {"id": "t-nin-child", "title": "t", "severity": "low", "source": "mails", "where": {"urls.domain|nin": ["a-site.com", "x-site.com", "y-site.com", "z-site.com"], "urls.url|contains": "b-site.com"}}
     hits = R.run_rule(store, rule, {})
     assert len(hits) == 1 and hits[0]["entities"].get("subject") == "m1", hits
+
+
+def test_doubled_quotes_lists_and_new_paths():
+    """MQL escapes a quote by doubling it; the environment lists and the extra paths translate."""
+    ok = mql.convert_text("""name: q
+source: |
+  type.inbound
+  and strings.icontains(subject.subject, 'I''ll call you')
+  and sender.email.email not in $recipient_emails
+  and sender.display_name in~ $org_display_names
+  and sender.email.domain.root_domain not in $tranco_10k
+  and length(subject.subject) < 12
+  and strings.ends_with(headers.auth_summary.spf.details.designator, '.onmicrosoft.com')
+  and any(body.links, .href_url.domain.subdomain is not null and .href_url.fragment is not null and .href_url.domain.valid)
+""", "q.yml")[0]
+    assert ok["ok"], ok
+    w = ok["rule"]["where"]
+    assert w["subject|contains"] == "i'll call you".replace("i'", "I'") or w["subject|contains"] == "I'll call you"
+    assert w["fromDomain|nin_setting"] == "internal_domains" and w["fromNameNorm|in_setting"] == "org_display_names"
+    assert w["fromRegistrable|nin_setting"] == "tranco_10k" and w["subject|length"] == "< 12"
+    assert w["auth.spfDomain|endswith"] == ".onmicrosoft.com"
+    assert w["urls.subdomain|exists"] is True and w["urls.fragment|exists"] is True and w["urls.domain|exists"] is True
+    tranco = mql.convert_text("name: t\nsource: |\n  sender.email.domain.root_domain not in $tranco_1m\n", "t.yml")[0]
+    assert tranco["ok"] and any("top 10k" in x for x in tranco["warnings"])
+    bad = mql.convert_text("name: d\nsource: |\n  false // disabled\n", "d.yml")[0]
+    assert not bad["ok"] and "disabled upstream" in bad["error"]
+
+
+def test_length_builtin_list_and_derived_url_fields_on_sql_engine(store):
+    ctx = ParseContext(internal_domains=["contoso.com"])
+    wri = MailWriter(store, 1)
+    cases = [("short", "<a href='https://www.tracker.top/p#frag-1'>x</a>", "s0@google.com"),
+             ("a rather long subject line", "<a href='https://tracker.top/p'>x</a>", "s1@rare-sender.net")]
+    for i, (subject, html, frm) in enumerate(cases):
+        headers = [("From", f"<{frm}>"), ("To", "<alice@contoso.com>"), ("Subject", subject), ("Date", "Mon, 01 Sep 2026 09:00:00 +0000"), ("Message-ID", f"<n{i}@x.example>")]
+        wri.add(build_row(headers, None, f"<html><body>{html}</body></html>", [], ctx, folder="Inbox", size=None, extra={}))
+    wri.flush()
+
+    def hits(where, settings=None):
+        rule = {"id": "t", "title": "t", "severity": "low", "source": "mails", "where": where}
+        return sorted(h["entities"]["subject"] for h in R.run_rule(store, rule, settings or {}))
+
+    assert hits({"subject|length": "< 10"}) == ["short"]
+    assert hits({"subject|length": ">= 10"}) == ["a rather long subject line"]
+    assert hits({"subject|length": 5}) == ["short"]
+    assert hits({"urls.subdomain|exists": True}) == ["short"]
+    assert hits({"urls.subdomain": "www"}) == ["short"]
+    assert hits({"urls.fragment|contains": "frag"}) == ["short"]
+    assert hits({"urls.fragment|exists": False}) == ["a rather long subject line"]
+    assert hits({"fromRegistrable|in_setting": "tranco_10k"}) == ["short"]  # google.com is in the bundled list
+    assert hits({"fromRegistrable|nin_setting": "tranco_10k"}) == ["a rather long subject line"]
+    assert hits({"fromRegistrable|in_setting": "tranco_10k"}, {"tranco_10k": ["rare-sender.net"]}) == ["a rather long subject line"]  # a case setting overrides
+    assert R.diagnose_zero(store, {"id": "t", "title": "t", "severity": "low", "source": "mails", "where": {"fromRegistrable|in_setting": "tranco_10k", "subject": "zzz"}}, {})["reason"] == "no_selector_match"

@@ -10,7 +10,7 @@ import time
 from typing import Any, Callable
 
 from services.store.casestore import CaseStore, q
-from services.store.sqlfilter import Ctx, FilterError, compile_cond, resolve
+from services.store.sqlfilter import Ctx, FilterError, compile_cond, resolve, _setting
 
 SEVERITIES = ["info", "low", "medium", "high", "critical"]
 _DUR = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(ms|s|m|h|d|w)?\s*$", re.I)
@@ -371,8 +371,7 @@ def _rule_event_ids(cond: dict[str, Any] | None) -> list[int] | None:
 
 
 def _setting_empty(settings: dict[str, Any], name: str) -> bool:
-    camel = re.sub(r"_([a-z])", lambda m: m.group(1).upper(), name)
-    return not (settings.get(name) or settings.get(camel))
+    return not _setting(settings, name)  # case setting, else a built-in reference list (tranco_10k)
 
 
 def _empty_positive_settings(cond: dict[str, Any] | None, settings: dict[str, Any], acc: list[str] | None = None) -> list[str]:

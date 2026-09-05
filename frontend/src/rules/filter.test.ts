@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { compileFilter, extractEventIds, getPath, ipInCidr, isOutsideHours, localHourAndDay, matchCondition } from './filter'
+import { compileFilter, extractEventIds, getPath, ipInCidr, isOutsideHours, localHourAndDay, matchCondition, settingList } from './filter'
 
 const row = {
   eventId: 4625,
@@ -92,5 +92,32 @@ describe('extractEventIds', () => {
     expect(extractEventIds([{ field: 'eventId', op: 'in', value: [4624, 4625] }, { field: 'x', op: 'eq', value: 1 }])).toEqual([4624, 4625])
     expect(extractEventIds([{ field: 'eventId', op: 'ne', value: 1 }])).toBeNull()
     expect(extractEventIds([{ field: 'eventId', op: 'eq', value: 1 }, { field: 'y', op: 'eq', value: 2 }], 'or')).toBeNull()
+  })
+})
+
+describe('length, built-in lists and derived url fields', () => {
+  const row = { subject: 'short', fromRegistrable: 'google.com', to: [{ addr: 'a@x.com' }, { addr: 'b@x.com' }], urls: [{ url: 'https://www.tracker.top/p#frag-1', host: 'www.tracker.top', domain: 'tracker.top' }] }
+  it('compares text and list lengths against a threshold', () => {
+    expect(matchCondition(row, { field: 'subject', op: 'length', value: '< 10' })).toBe(true)
+    expect(matchCondition(row, { field: 'subject', op: 'length', value: '>= 10' })).toBe(false)
+    expect(matchCondition(row, { field: 'subject', op: 'length', value: 5 })).toBe(true)
+    expect(matchCondition(row, { field: 'to', op: 'length', value: '== 2' })).toBe(true)
+    expect(matchCondition({ subject: null }, { field: 'subject', op: 'length', value: '< 10' })).toBe(false)
+  })
+  it('derives url.subdomain and url.fragment like the SQL engine', () => {
+    expect(getPath(row, 'urls.subdomain')).toBe('www')
+    expect(getPath(row, 'urls.fragment')).toBe('frag-1')
+    expect(getPath({ urls: [{ url: 'https://tracker.top/p', host: 'tracker.top', domain: 'tracker.top' }] }, 'urls.subdomain')).toBeNull()
+    expect(matchCondition(row, { field: 'urls.subdomain', op: 'exists', value: true })).toBe(true)
+    expect(matchCondition(row, { field: 'urls.fragment', op: 'contains', value: 'frag' })).toBe(true)
+    expect(matchCondition({ urls: [{ url: 'https://tracker.top/p', host: 'tracker.top', domain: 'tracker.top' }] }, { field: 'urls.fragment', op: 'exists', value: false })).toBe(true)
+  })
+  it('falls back to the bundled Tranco list for in_setting, case settings win', () => {
+    expect(settingList({}, 'tranco_10k')).toContain('google.com')
+    expect(settingList({}, 'tranco_10k').length).toBe(10000)
+    expect(matchCondition(row, { field: 'fromRegistrable', op: 'in_setting', value: 'tranco_10k' }, {})).toBe(true)
+    expect(matchCondition({ fromRegistrable: 'rare-sender.net' }, { field: 'fromRegistrable', op: 'nin_setting', value: 'tranco_10k' }, {})).toBe(true)
+    expect(matchCondition(row, { field: 'fromRegistrable', op: 'in_setting', value: 'tranco_10k' }, { tranco_10k: ['rare-sender.net'] })).toBe(false)
+    expect(matchCondition({ fromNameNorm: 'dupont jean' }, { field: 'fromNameNorm', op: 'in_setting', value: 'org_display_names' }, { org_display_names: ['Jean Dupont'] })).toBe(true)
   })
 })

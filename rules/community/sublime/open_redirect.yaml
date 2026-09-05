@@ -1517,6 +1517,50 @@ sublime:
     in $high_trust_sender_root_domains\n    and not headers.auth_summary.dmarc.pass\n  )\n  or sender.email.domain.root_domain
     not in $high_trust_sender_root_domains\n)"
 ---
+id: sublime-164ece9a-26ca-5872-9604-7e948722d627
+title: 'Open redirect: Samsung'
+description: Message contains use of the Samsung open redirect, but the sender is not Samsung.
+severity: medium
+source: mails
+tags:
+- sublime
+- credential-phishing
+- malware-ransomware
+- open-redirect
+references:
+- https://twitter.com/ffforward/status/1232958609031598080?lang=en
+- https://twitter.com/JCyberSec_/status/1238488919135715328?s=20
+where:
+  any_of:
+  - urls.host: t.info.samsungusa.com
+    urls.url: /r/
+  - all_of:
+    - urls.domain: samsung.com
+    - urls.subdomain|endswith: .email
+    - urls.url|contains: /r/
+    - urls.url|contains: id=
+    - urls.url|contains: p1=
+    - urls.url|re: p1=[^\&]*(?:google\.|doubleclick\.net)
+  fromRegistrable|nin:
+  - samsungusa.com
+  - samsung.com
+sublime:
+  id: 164ece9a-26ca-5872-9604-7e948722d627
+  attack_types:
+  - Credential Phishing
+  - Malware/Ransomware
+  tactics_and_techniques:
+  - Open redirect
+  detection_methods:
+  - Sender analysis
+  - URL analysis
+  source: "type.inbound\nand any(body.links,\n        (\n          .href_url.domain.domain == 't.info.samsungusa.com'\n          and
+    .href_url.path =~ '/r/'\n        )\n        or (\n          .href_url.domain.root_domain == \"samsung.com\"\n          and
+    strings.iends_with(.href_url.domain.subdomain, '.email')\n          and strings.icontains(.href_url.path, '/r/')\n          and
+    strings.icontains(.href_url.query_params, 'id=')\n          and strings.icontains(.href_url.query_params, 'p1=')\n          //
+    with redirects to google/doubleclick\n          and regex.icontains(.href_url.query_params,\n                              'p1=[^\\&]*(?:google\\.|doubleclick\\.net)'\n
+    \         )\n        )\n)\nand sender.email.domain.root_domain not in ('samsungusa.com', 'samsung.com')"
+---
 id: sublime-18b74a2a-b832-569f-8f1d-a974863c149a
 title: 'Open redirect: whitefox.pl'
 description: Message contains use of the whitefox.pl open redirect. This has been exploited in the wild.
@@ -10423,6 +10467,38 @@ sublime:
     =~ '/r/'\n)\nand sender.email.domain.root_domain not in ('dell.com', 'dell.ca')\n\n// negate highly trusted sender domains
     unless they fail DMARC authentication\nand (\n  (\n    sender.email.domain.root_domain in $high_trust_sender_root_domains\n
     \   and not headers.auth_summary.dmarc.pass\n  )\n  or sender.email.domain.root_domain not in $high_trust_sender_root_domains\n)"
+---
+id: sublime-7435e057-5abb-55b4-b1da-f1b6ec191c33
+title: 'Open redirect: Cartoon Network'
+description: This rule detects the use of Cartoon Network's Denmark domain as an open redirect.
+severity: medium
+source: mails
+tags:
+- sublime
+- credential-phishing
+- spam
+- open-redirect
+- evasion
+where:
+  urls.domain|re: ^cartoonnetwork\.
+  urls.subdomain: www
+  urls.url|startswith: //
+  urls.url|endswith: /
+sublime:
+  id: 7435e057-5abb-55b4-b1da-f1b6ec191c33
+  attack_types:
+  - Credential Phishing
+  - Spam
+  tactics_and_techniques:
+  - Open redirect
+  - Evasion
+  detection_methods:
+  - Content analysis
+  - URL analysis
+  source: "type.inbound\nand any(body.links,\n        .href_url.domain.sld == 'cartoonnetwork'\n        // it has to be www.
+    - not hitting the www doesn't work\n        and .href_url.domain.subdomain == 'www'\n        // the path startswith a
+    double //\n        and strings.starts_with(.href_url.path, '//')\n        // the path has to end in a trailing /\n        and
+    strings.ends_with(.href_url.path, '/')\n)"
 ---
 id: sublime-76dbd946-62d1-527f-b50b-fa4548c002d8
 title: 'Open redirect: plasticsurgery.or.kr'

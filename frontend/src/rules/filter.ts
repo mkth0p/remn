@@ -2,10 +2,12 @@
  * Filter DSL shared by the search UI, the AI tools and the rule engine.
  * Pure functions - no DOM, no Dexie - so it runs in workers and in tests.
  */
+import { BUILTIN_LISTS } from '../reference/lists'
+
 export type Op =
   | 'eq' | 'ne' | 'in' | 'nin' | 'contains' | 'not_contains' | 'contains_any' | 'contains_all'
   | 'startswith' | 'not_startswith' | 'endswith' | 'not_endswith' | 're' | 'not_re'
-  | 'gt' | 'gte' | 'lt' | 'lte' | 'exists' | 'empty' | 'in_setting' | 'nin_setting' | 'levenshtein'
+  | 'gt' | 'gte' | 'lt' | 'lte' | 'exists' | 'empty' | 'in_setting' | 'nin_setting' | 'levenshtein' | 'length'
 
 export interface Condition {
   field: string
@@ -45,12 +47,28 @@ export interface SettingsLike {
 
 export type Row = Record<string, unknown>
 
+/** A property of a row, plus the derived url fields the SQL engine also exposes (subdomain, fragment). */
+function derived(obj: Row, key: string): unknown {
+  const v = obj[key]
+  if (v !== undefined) return v
+  if (key === 'subdomain' && typeof obj.host === 'string' && typeof obj.domain === 'string') {
+    const h = obj.host.toLowerCase()
+    const d = obj.domain.toLowerCase()
+    return d && h !== d && h.endsWith('.' + d) ? h.slice(0, h.length - d.length - 1) : null
+  }
+  if (key === 'fragment' && typeof obj.url === 'string') {
+    const i = obj.url.indexOf('#')
+    return i >= 0 ? obj.url.slice(i + 1) : null
+  }
+  return undefined
+}
+
 const camel = (s: string) => s.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())
 
 /** Resolve a dotted path; arrays are flattened (attachments.flags -> all flags of all attachments). */
 export function getPath(row: unknown, path: string): unknown {
   if (row == null) return undefined
-  if (!path.includes('.')) return (row as Row)[path]
+  if (!path.includes('.')) return derived(row as Row, path)
   const parts = path.split('.')
   let cur: unknown[] = [row]
   for (let i = 0; i < parts.length; i++) {
@@ -62,14 +80,14 @@ export function getPath(row: unknown, path: string): unknown {
       if (c == null) continue
       if (Array.isArray(c)) {
         for (const item of c) {
-          if (item != null && typeof item === 'object') next.push((item as Row)[p])
+          if (item != null && typeof item === 'object') next.push(derived(item as Row, p))
         }
       } else if (typeof c === 'object') {
         if (i > 0 && rest !== p && Object.prototype.hasOwnProperty.call(c, rest)) {
           const flat = (c as Row)[rest]
           return Array.isArray(flat) && flat.length === 1 ? flat[0] : flat
         }
-        next.push((c as Row)[p])
+        next.push(derived(c as Row, p))
       }
     }
     cur = next.flatMap((v) => (Array.isArray(v) ? v : [v])).filter((v) => v !== undefined)
@@ -172,10 +190,12 @@ export function ipInCidr(ip: string, cidr: string): boolean {
   return ((ipN & mask) >>> 0) === ((netN & mask) >>> 0)
 }
 
+/** A case-settings list by snake or camel name, else a built-in reference list of that name (tranco_10k). */
 export function settingList(settings: SettingsLike | undefined, name: string): string[] {
-  if (!settings) return []
-  const v = settings[name] ?? settings[camel(name)]
-  return Array.isArray(v) ? v.map((x) => String(x)) : []
+  const v = settings ? (settings[name] ?? settings[camel(name)]) : undefined
+  if (Array.isArray(v) && v.length) return v.map((x) => String(x))
+  const builtin = BUILTIN_LISTS[name] ?? BUILTIN_LISTS[camel(name)]
+  return builtin ? builtin() : []
 }
 
 function normalizeNameLike(s: string): string {
@@ -199,7 +219,7 @@ function inSetting(value: unknown, settings: SettingsLike | undefined, name: str
   if (name === 'internal_ips' || name === 'internalIps') {
     return vals.some((v) => list.some((c) => ipInCidr(v, c)))
   }
-  if (name === 'vip_names' || name === 'vipNames') {
+  if (name === 'vip_names' || name === 'vipNames' || name === 'org_display_names' || name === 'orgDisplayNames') {
     const set = new Set(list.map(normalizeNameLike))
     return vals.some((v) => set.has(normalizeNameLike(v)))
   }
@@ -276,6 +296,16 @@ export function matchCondition(row: Row, c: Condition, settings?: SettingsLike):
       const max = numeric(wanted[1])
       if (max === null) return false
       return actStr.some((a) => levenshtein(a, needle) <= max)
+    }
+    case 'length': {
+      // wanted = threshold string ("< 500", ">= 3") or a number (exact); characters of a text, items of a list
+      if (actual == null) return false
+      const m = /^\s*(>=|<=|==|=|!=|>|<)?\s*(\d+)\s*$/.exec(String(wanted))
+      if (!m) return false
+      const n = Number(m[2])
+      const sym = m[1] || '='
+      const len = Array.isArray(actual) ? actual.length : Array.from(typeof actual === 'string' ? actual : String(actual)).length
+      return sym === '>' ? len > n : sym === '>=' ? len >= n : sym === '<' ? len < n : sym === '<=' ? len <= n : sym === '!=' ? len !== n : len === n
     }
     case 're':
     case 'not_re': {

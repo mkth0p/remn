@@ -22,22 +22,22 @@
   },
   "counts": {
     "upstream": 1227,
-    "converted": 168,
-    "skipped": 1059,
-    "warnings": 446
+    "converted": 189,
+    "skipped": 1038,
+    "warnings": 483
   },
   "skipReasons": [
     [
       "any(file.explode(...))",
-      151
+      152
     ],
     [
       "any(ml.nlu_classifier(...))",
-      112
+      122
     ],
     [
       "parent-scope path",
-      103
+      104
     ],
     [
       "any(ml.logo_detect(...))",
@@ -49,35 +49,35 @@
     ],
     [
       "any(html.xpath(...))",
-      29
+      30
     ],
     [
       "network.whois() result field",
-      28
-    ],
-    [
-      "profile.by_sender().any_messages_malicious_or_spam",
-      25
+      30
     ],
     [
       "all() with a positive predicate",
-      25
+      30
     ],
     [
-      "field-to-field comparison",
-      23
+      "profile.by_sender().any_messages_malicious_or_spam",
+      27
     ],
     [
       "length(filter(...)) bound other than 0",
-      22
+      26
+    ],
+    [
+      "field-to-field comparison",
+      25
+    ],
+    [
+      "computed value",
+      21
     ],
     [
       "length(distinct(...))",
       19
-    ],
-    [
-      "computed value",
-      18
     ],
     [
       "member access on path",
@@ -85,11 +85,15 @@
     ],
     [
       "ml.link_analysis() result field",
+      15
+    ],
+    [
+      "beta.profile.by_reply_to() result field",
       14
     ],
     [
-      "element field .href_url.domain.subdomain",
-      13
+      "any(headers.hops)",
+      14
     ],
     [
       "length() of a non-field",
@@ -104,15 +108,7 @@
       12
     ],
     [
-      "beta.profile.by_reply_to() result field",
-      11
-    ],
-    [
-      "unknown list $recipient_emails",
-      11
-    ],
-    [
-      "any(headers.hops)",
+      "any() over a computed list",
       11
     ],
     [
@@ -124,28 +120,33 @@
       9
     ],
     [
-      "any() over a computed list",
+      "any(beta.file.parse_ics(...))",
       9
+    ],
+    [
+      "file.parse_text() result field",
+      8
     ]
   ],
   "files": {
-    "abuse.yaml": 2,
+    "abuse.yaml": 5,
     "attachment.yaml": 3,
     "bec.yaml": 1,
-    "body.yaml": 4,
+    "body.yaml": 5,
     "brand_impersonation.yaml": 9,
     "free.yaml": 1,
+    "gophish.yaml": 1,
     "headers.yaml": 5,
-    "impersonation.yaml": 12,
+    "impersonation.yaml": 18,
     "infra.yaml": 1,
-    "link.yaml": 22,
+    "link.yaml": 28,
     "macos.yaml": 1,
-    "open_redirect.yaml": 93,
+    "open_redirect.yaml": 95,
     "punycode.yaml": 1,
-    "recon.yaml": 2,
+    "recon.yaml": 3,
     "sender.yaml": 1,
     "sendgrid.yaml": 1,
-    "service.yaml": 2,
+    "service.yaml": 3,
     "spam.yaml": 3,
     "spoof.yaml": 1,
     "suspicious.yaml": 3

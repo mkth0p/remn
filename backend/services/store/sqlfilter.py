@@ -11,11 +11,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from services.parsers.mail.common import normalize_name
+from services.reference import lists as reference_lists
 from services.store.casestore import EVENT_COLUMNS, EVENT_INT, MAIL_COLUMNS, MAIL_INT, MAIL_LIST, q
 
 OPS = {"eq", "ne", "in", "nin", "contains", "not_contains", "contains_any", "contains_all", "startswith", "not_startswith",
        "endswith", "not_endswith", "re", "not_re", "gt", "gte", "lt", "lte", "exists", "empty", "in_setting", "nin_setting",
-       "levenshtein"}
+       "levenshtein", "length"}
 
 EVENT_COLS = {n for n, _ in EVENT_COLUMNS}
 MAIL_COLS = {n for n, _ in MAIL_COLUMNS}
@@ -88,9 +89,27 @@ def _norm(v: Any) -> str:
 
 
 def _setting(settings: dict[str, Any], name: str) -> list[str]:
+    """A case-settings list by snake or camel name, else a built-in reference list of that name (tranco_10k)."""
     camel = re.sub(r"_([a-z])", lambda m: m.group(1).upper(), name)
     v = settings.get(name, settings.get(camel))
-    return [str(x) for x in v] if isinstance(v, list) else []
+    if isinstance(v, list) and v:
+        return [str(x) for x in v]
+    builtin = reference_lists.builtin_list(name)
+    return list(builtin) if builtin else []
+
+
+_THRESHOLD_RE = re.compile(r"^\s*(>=|<=|==|=|!=|>|<)?\s*(\d+)\s*$")
+
+
+def _threshold(v: Any) -> tuple[str, int]:
+    """'< 500' / '>= 3' / 3 -> (sql comparator, n) for the length operator."""
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return "=", int(v)
+    m = _THRESHOLD_RE.match(str(v))
+    if not m:
+        raise FilterError(f"length expects a threshold such as '< 500', got {v!r}")
+    sym = {"==": "=", "!=": "<>"}.get(m.group(1) or "=", m.group(1) or "=")
+    return sym, int(m.group(2))
 
 
 def _ipv4_int_sql(expr: str) -> str:
@@ -139,6 +158,14 @@ def resolve(field_name: str, ctx: Ctx) -> Expr:
     if tbl == "urls":
         if f in URL_COLS:
             return Expr(f"{a}{q(f)}", "list" if f == "flags" else ("num" if f == "date" else "text"))
+        if f == "subdomain":
+            # host minus the registrable domain ("www.foo.co.uk" -> "www"); NULL when there is none
+            h, d = f'{a}"host"', f'{a}"domain"'
+            return Expr(f"(CASE WHEN {h} IS NULL OR {d} IS NULL OR {d} = '' OR {h} = {d} OR NOT ends_with({h}, '.' || {d}) "
+                        f"THEN NULL ELSE left({h}, length({h}) - length({d}) - 1) END)", "text")
+        if f == "fragment":
+            u = f'{a}"url"'
+            return Expr(f"(CASE WHEN strpos({u}, '#') > 0 THEN substr({u}, strpos({u}, '#') + 1) ELSE NULL END)", "text")
         raise FilterError(f"unknown url field {field_name!r}")
     raise FilterError(f"unknown table {tbl}")
 
@@ -202,6 +229,9 @@ def compile_condition(field_name: str, op: str, value: Any, ctx: Ctx) -> str:
             items = [_norm(x) for x in _setting(ctx.settings, str(value))]
             cond = f"list_has_any({lowlist}, [{', '.join(ctx.p(v) for v in items)}])" if items else "FALSE"
             return f"NOT {cond}" if op == "nin_setting" else cond
+        if op == "length":
+            sym, n = _threshold(value)
+            return f"coalesce(len({sql}) {sym} {ctx.p(n)}, FALSE)"
         raise FilterError(f"operator {op} not supported on list field {field_name}")
 
     # scalar
@@ -279,6 +309,10 @@ def compile_condition(field_name: str, op: str, value: Any, ctx: Ctx) -> str:
         if dist is None:
             raise FilterError("levenshtein max_distance must be a number")
         return f"coalesce(levenshtein(lower(CAST({sql} AS VARCHAR)), {ctx.p(needle)}) <= {ctx.p(int(dist))}, FALSE)"
+    if op == "length":
+        # value = threshold string ("< 500", ">= 3") or a number (exact); character count of the text value
+        sym, n = _threshold(value)
+        return f"coalesce(length(CAST({sql} AS VARCHAR)) {sym} {ctx.p(n)}, FALSE)"
     raise FilterError(f"unsupported operator {op}")
 
 
@@ -327,7 +361,7 @@ def _setting_condition(sql: str, low: str, name: str, ctx: Ctx) -> str:
         if exact:
             parts.append(f"{low} IN ({', '.join(ctx.p(x) for x in exact)})")
         return "(" + " OR ".join(parts) + ")"
-    if name in ("vip_names", "vipNames"):
+    if name in ("vip_names", "vipNames", "org_display_names", "orgDisplayNames"):
         norms = sorted({normalize_name(x) for x in items if x})
         return f"{low} IN ({', '.join(ctx.p(n) for n in norms)})" if norms else "FALSE"
     if name in ("internal_domains", "internalDomains", "trusted_senders", "trustedSenders"):

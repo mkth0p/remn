@@ -111,6 +111,498 @@ sublime:
     \ )\n  // if this comes from a custom domain,\n  // flag if org has never sent an email to sender's domain before\n  or
     (\n    sender.email.domain.root_domain not in $free_email_providers\n    and not profile.by_sender().solicited\n  )\n)"
 ---
+id: sublime-02d7301f-cc29-5031-9a1e-f013400805ba
+title: 'Brand impersonation: Wells Fargo'
+description: Impersonation of Wells Fargo Bank.
+severity: high
+source: mails
+tags:
+- sublime
+- credential-phishing
+- impersonation-brand
+- lookalike-domain
+- social-engineering
+references:
+- https://www.americanbanker.com/news/wells-fargo-customers-targeted-with-phishing-attacks-using-calendar-invites
+- https://www.wellsfargo.com/biz/help/faqs/credit-card-rewards/
+where:
+  any_of:
+  - fromName: wellsfargo
+  - fromName|levenshtein:
+    - wellsfargo
+    - 1
+  - fromName|re: we(ll|ii)s?\s?farg(o|o͙)
+  - fromDomain|contains: wellsfargo
+  - subject|contains: wells fargo security
+  - bodyText|contains: wells fargo security team
+  - visibleText|contains: wells fargo security team
+  - fromName|re: \bW.?F.?C\b
+    any_of:
+    - fromName|contains_any:
+      - bank
+      - security
+      - processing
+      - approval
+      - refund
+    - subject|contains_any:
+      - bank
+      - security
+      - processing
+      - approval
+      - refund
+  fromRegistrable|nin:
+  - wellsfargo.com
+  - wellsfargoadvisors.com
+  - transunion.com
+  - wellsfargoemail.com
+  - wellsfargorewards.com
+  - comcast-spectacor.com
+  - investordelivery.com
+  - comcastspectacor.com
+  - wfadvisors.com
+  - wellsfargomerchantservicesllc.com
+  any_of_2:
+  - fromDomain|nin_setting: internal_domains
+  - fromAddr|re: no.?reply
+  any_of_3:
+  - fromRegistrable|in:
+    - adobe.com
+    - adobesign.com
+    - amazon.co.uk
+    - amazon.com
+    - amazon.de
+    - amazon.fr
+    - amazonaws.com
+    - amazonses.com
+    - ameli.fr
+    - apple.com
+    - asana.com
+    - atlassian.com
+    - atlassian.net
+    - azure.com
+    - banquepopulaire.fr
+    - bing.com
+    - bitbucket.org
+    - bnpparibas.com
+    - bnpparibas.net
+    - boursorama.com
+    - bouyguestelecom.fr
+    - box.com
+    - caf.fr
+    - caisse-epargne.fr
+    - chronopost.fr
+    - cic.fr
+    - clickup.com
+    - colissimo.fr
+    - concur.com
+    - credit-agricole.com
+    - credit-agricole.fr
+    - creditmutuel.fr
+    - dhl.com
+    - dhl.de
+    - dhl.fr
+    - docusign.com
+    - docusign.net
+    - dropbox.com
+    - dropboxmail.com
+    - edf.fr
+    - engie.com
+    - engie.fr
+    - eventbrite.com
+    - facebook.com
+    - facebookmail.com
+    - fedex.com
+    - figma.com
+    - free.fr
+    - freshdesk.com
+    - github.com
+    - gitlab.com
+    - gmail.com
+    - google.com
+    - google.fr
+    - googleapis.com
+    - googlemail.com
+    - gotomeeting.com
+    - hotmail.com
+    - hubspot.com
+    - icloud.com
+    - ing.com
+    - ing.fr
+    - instagram.com
+    - intuit.com
+    - labanquepostale.fr
+    - laposte.fr
+    - laposte.net
+    - lcl.fr
+    - linkedin.com
+    - live.com
+    - mac.com
+    - mail.microsoft
+    - mailchimp.com
+    - mastercard.com
+    - me.com
+    - microsoft.com
+    - microsoft.net
+    - microsoftonline.com
+    - miro.com
+    - monday.com
+    - msn.com
+    - n26.com
+    - netflix.com
+    - notion.so
+    - office.com
+    - office365.com
+    - okta.com
+    - onmicrosoft.com
+    - orange.com
+    - orange.fr
+    - outlook.com
+    - ovh.com
+    - ovh.net
+    - ovhcloud.com
+    - paypal.com
+    - paypal.fr
+    - paypalobjects.com
+    - proxad.net
+    - revolut.com
+    - salesforce.com
+    - sap.com
+    - sendgrid.net
+    - service-now.com
+    - servicenow.com
+    - sfr.fr
+    - sharepoint.com
+    - sharepointonline.com
+    - skype.com
+    - slack.com
+    - socgen.com
+    - societegenerale.com
+    - societegenerale.fr
+    - successfactors.com
+    - surveymonkey.com
+    - trello.com
+    - ups.com
+    - visa.com
+    - visa.fr
+    - webex.com
+    - whatsapp.com
+    - windows.com
+    - windows.net
+    - withgoogle.com
+    - workday.com
+    - xbox.com
+    - yammer.com
+    - youtube.com
+    - zendesk.com
+    - zoom.com
+    - zoom.us
+    not:
+      auth.dmarc: pass
+  - fromRegistrable|nin:
+    - adobe.com
+    - adobesign.com
+    - amazon.co.uk
+    - amazon.com
+    - amazon.de
+    - amazon.fr
+    - amazonaws.com
+    - amazonses.com
+    - ameli.fr
+    - apple.com
+    - asana.com
+    - atlassian.com
+    - atlassian.net
+    - azure.com
+    - banquepopulaire.fr
+    - bing.com
+    - bitbucket.org
+    - bnpparibas.com
+    - bnpparibas.net
+    - boursorama.com
+    - bouyguestelecom.fr
+    - box.com
+    - caf.fr
+    - caisse-epargne.fr
+    - chronopost.fr
+    - cic.fr
+    - clickup.com
+    - colissimo.fr
+    - concur.com
+    - credit-agricole.com
+    - credit-agricole.fr
+    - creditmutuel.fr
+    - dhl.com
+    - dhl.de
+    - dhl.fr
+    - docusign.com
+    - docusign.net
+    - dropbox.com
+    - dropboxmail.com
+    - edf.fr
+    - engie.com
+    - engie.fr
+    - eventbrite.com
+    - facebook.com
+    - facebookmail.com
+    - fedex.com
+    - figma.com
+    - free.fr
+    - freshdesk.com
+    - github.com
+    - gitlab.com
+    - gmail.com
+    - google.com
+    - google.fr
+    - googleapis.com
+    - googlemail.com
+    - gotomeeting.com
+    - hotmail.com
+    - hubspot.com
+    - icloud.com
+    - ing.com
+    - ing.fr
+    - instagram.com
+    - intuit.com
+    - labanquepostale.fr
+    - laposte.fr
+    - laposte.net
+    - lcl.fr
+    - linkedin.com
+    - live.com
+    - mac.com
+    - mail.microsoft
+    - mailchimp.com
+    - mastercard.com
+    - me.com
+    - microsoft.com
+    - microsoft.net
+    - microsoftonline.com
+    - miro.com
+    - monday.com
+    - msn.com
+    - n26.com
+    - netflix.com
+    - notion.so
+    - office.com
+    - office365.com
+    - okta.com
+    - onmicrosoft.com
+    - orange.com
+    - orange.fr
+    - outlook.com
+    - ovh.com
+    - ovh.net
+    - ovhcloud.com
+    - paypal.com
+    - paypal.fr
+    - paypalobjects.com
+    - proxad.net
+    - revolut.com
+    - salesforce.com
+    - sap.com
+    - sendgrid.net
+    - service-now.com
+    - servicenow.com
+    - sfr.fr
+    - sharepoint.com
+    - sharepointonline.com
+    - skype.com
+    - slack.com
+    - socgen.com
+    - societegenerale.com
+    - societegenerale.fr
+    - successfactors.com
+    - surveymonkey.com
+    - trello.com
+    - ups.com
+    - visa.com
+    - visa.fr
+    - webex.com
+    - whatsapp.com
+    - windows.com
+    - windows.net
+    - withgoogle.com
+    - workday.com
+    - xbox.com
+    - yammer.com
+    - youtube.com
+    - zendesk.com
+    - zoom.com
+    - zoom.us
+  - fromAddr|in:
+    - drive-shares-noreply@google.com
+    - drive-shares-dm-noreply@google.com
+sublime:
+  id: 02d7301f-cc29-5031-9a1e-f013400805ba
+  attack_types:
+  - Credential Phishing
+  tactics_and_techniques:
+  - 'Impersonation: Brand'
+  - Lookalike domain
+  - Social engineering
+  detection_methods:
+  - Content analysis
+  - Sender analysis
+  source: "type.inbound\nand (\n  sender.display_name =~ 'wellsfargo'\n  or strings.ilevenshtein(strings.replace_confusables(sender.display_name),\n
+    \                         'wellsfargo'\n  ) <= 1\n  or regex.icontains(strings.replace_confusables(sender.display_name),\n
+    \                    'we(ll|ii)s?\\s?farg(o|o͙)'\n  )\n  or strings.ilike(sender.email.domain.domain, '*wellsfargo*')\n
+    \ or strings.ilike(subject.subject, '*wells fargo security*')\n  or strings.ilike(body.plain.raw, '*wells fargo security
+    team*')\n  or strings.ilike(body.html.inner_text, '*wells fargo security team*')\n  // Wells Fargo & Company (WFC)\n  or
+    (\n    regex.icontains(sender.display_name, '\\bW.?F.?C\\b')\n    and any([sender.display_name, subject.base],\n            strings.ilike(.,\n
+    \                         '*bank*',\n                          '*security*',\n                          '*processing*',\n
+    \                         '*approval*',\n                          '*refund*'\n            )\n    )\n  )\n)\nand sender.email.domain.root_domain
+    not in~ (\n  'wellsfargo.com',\n  'wellsfargoadvisors.com',\n  'transunion.com',\n  'wellsfargoemail.com',\n  'wellsfargorewards.com',\n
+    \ 'comcast-spectacor.com',\n  'investordelivery.com',\n  'comcastspectacor.com',\n  'wfadvisors.com',\n  'wellsfargomerchantservicesllc.com'\n)\nand
+    (\n  sender.email.email not in $recipient_emails\n  or regex.icontains(sender.email.email, \"no.?reply\")\n)\n\n// negate
+    highly trusted sender domains unless they fail DMARC authentication\nand (\n  (\n    sender.email.domain.root_domain in
+    $high_trust_sender_root_domains\n    and not headers.auth_summary.dmarc.pass\n  )\n  or sender.email.domain.root_domain
+    not in $high_trust_sender_root_domains\n  or sender.email.email in (\n    \"drive-shares-noreply@google.com\",\n    \"drive-shares-dm-noreply@google.com\"\n
+    \ ) // Google Drive abuse has been observed\n)"
+---
+id: sublime-0b17f2c2-e100-5d51-b53e-ee3da0431f1d
+title: 'Brand impersonation: Apple'
+description: Impersonation of Apple.
+severity: high
+source: mails
+tags:
+- sublime
+- credential-phishing
+- impersonation-brand
+- social-engineering
+references:
+- https://www.computerworld.com/article/3538470/how-to-protect-against-apple-phishing-scams.html
+where:
+  any_of:
+  - fromName: apple developer
+  - fromName|levenshtein:
+    - apple developer
+    - 2
+  fromRegistrable|ne: apple.com
+  fromDomain|nin_setting: internal_domains
+sublime:
+  id: 0b17f2c2-e100-5d51-b53e-ee3da0431f1d
+  attack_types:
+  - Credential Phishing
+  tactics_and_techniques:
+  - 'Impersonation: Brand'
+  - Social engineering
+  detection_methods:
+  - Header analysis
+  - Sender analysis
+  source: "type.inbound\nand (\n  sender.display_name =~ 'apple developer'\n  or strings.ilevenshtein(sender.display_name,
+    'apple developer') <= 2\n)\nand sender.email.domain.root_domain !~ 'apple.com'\nand sender.email.email not in $recipient_emails"
+---
+id: sublime-1daac608-66f7-5d0a-ab0f-ff9902ddabb7
+title: 'Brand impersonation: Google using Microsoft Forms'
+description: Abuses Microsoft Forms to impersonate Google.
+severity: high
+source: mails
+tags:
+- sublime
+- credential-phishing
+- impersonation-brand
+- lookalike-domain
+- social-engineering
+where:
+  all_of:
+  - fromDomain: email.formspro.microsoft.com
+  - fromName|re: (google|gmail)
+  - fromName|re: (alert|warning|notification)
+  - not:
+      messageId|re: (mail|mx)?\.?(google(mail)?|gmail.com)
+  - any_of:
+    - urls.domain|nin_setting: tranco_10k
+    - visibleText|contains_any:
+      - suspicious activities
+      - failure to secure
+      - loose your
+      - suspended
+sublime:
+  id: 1daac608-66f7-5d0a-ab0f-ff9902ddabb7
+  attack_types:
+  - Credential Phishing
+  tactics_and_techniques:
+  - 'Impersonation: Brand'
+  - Lookalike domain
+  - Social engineering
+  detection_methods:
+  - Content analysis
+  - Header analysis
+  - Sender analysis
+  source: "type.inbound\nand sender.email.domain.domain == 'email.formspro.microsoft.com'\nand regex.icontains(sender.display_name,
+    '(google|gmail)')\nand regex.icontains(sender.display_name, '(alert|warning|notification)')\n// MsgID does not contain
+    Google|Gmail|GoogleMail\nand not regex.icontains(headers.message_id,\n                        '(mail|mx)?\\.?(google(mail)?|gmail.com)'\n)\nand
+    (\n  any(body.links, .href_url.domain.root_domain not in $tranco_1m)\n  or strings.ilike(body.html.display_text,\n                   \"*suspicious
+    activities*\",\n                   \"*failure to secure*\",\n                   \"*loose your*\",\n                   \"*suspended*\"\n
+    \ )\n)"
+---
+id: sublime-1fe5bf7b-c4e8-5f8e-a2d7-07e32bd9678f
+title: 'Brand impersonation: Outlook'
+description: Impersonation of Outlook.com. Senders with "outlook.com" in the subdomain have been observed sending fake account
+  notifications.
+severity: high
+source: mails
+tags:
+- sublime
+- credential-phishing
+- impersonation-brand
+- lookalike-domain
+- social-engineering
+where:
+  fromDomain|re: .*outlook.com.+
+  fromRegistrable|nin:
+  - outlook.com.au
+  - outlook.com.br
+  - outlook.com.ar
+  - outlook.at
+  - outlook.be
+  - outlook.cl
+  - outlook.cz
+  - outlook.dk
+  - outlook.fr
+  - outlook.de
+  - outlook.com.gr
+  - outlook.co.il
+  - outlook.in
+  - outlook.co.id
+  - outlook.ie
+  - outlook.it
+  - outlook.hu
+  - outlook.jp
+  - outlook.kr
+  - outlook.lv
+  - outlook.my
+  - outlook.co.nz
+  - outlook.com.pe
+  - outlook.ph
+  - outlook.pt
+  - outlook.sa
+  - outlook.sg
+  - outlook.sk
+  - outlook.es
+  - outlook.co.th
+  - outlook.com.tr
+  - outlook.com.vn
+  fromDomain|nin_setting: internal_domains
+sublime:
+  id: 1fe5bf7b-c4e8-5f8e-a2d7-07e32bd9678f
+  attack_types:
+  - Credential Phishing
+  tactics_and_techniques:
+  - 'Impersonation: Brand'
+  - Lookalike domain
+  - Social engineering
+  detection_methods:
+  - Header analysis
+  - Sender analysis
+  source: "type.inbound\nand regex.icontains(sender.email.domain.domain, '.*outlook.com.+')\n// Negate legitimate outlook
+    root domains\nand sender.email.domain.root_domain not in (\n  'outlook.com.au',\n  'outlook.com.br',\n  'outlook.com.ar',\n
+    \ 'outlook.at',\n  'outlook.be',\n  'outlook.cl',\n  'outlook.cz',\n  'outlook.dk',\n  'outlook.fr',\n  'outlook.de',\n
+    \ 'outlook.com.gr',\n  'outlook.co.il',\n  'outlook.in',\n  'outlook.co.id',\n  'outlook.ie',\n  'outlook.it',\n  'outlook.hu',\n
+    \ 'outlook.jp',\n  'outlook.kr',\n  'outlook.lv',\n  'outlook.my',\n  'outlook.co.nz',\n  'outlook.com.pe',\n  'outlook.ph',\n
+    \ 'outlook.pt',\n  'outlook.sa',\n  'outlook.sg',\n  'outlook.sk',\n  'outlook.es',\n  'outlook.co.th',\n  'outlook.com.tr',\n
+    \ 'outlook.com.vn'\n)\nand sender.email.email not in $recipient_emails"
+---
 id: sublime-3cb4015f-1e35-5bba-8d83-d5ed3dfff011
 title: 'Brand impersonation: ukr[.]net'
 description: Impersonation of ukr[.]net. Originally reported by CERT-UA on 07 March, 2022, phishing emails impersonate ukr[.]net
@@ -697,6 +1189,62 @@ sublime:
     and sender.email.domain.domain in $free_email_providers
 
     and regex.icontains(sender.email.local_part, ''^c(?:hair|eo)\d+'')'
+---
+id: sublime-90084031-cd65-5184-a7d6-a1e61d32b82b
+title: 'Brand impersonation: TurboTax'
+description: Impersonation of the TurboTax service from Intuit. Most commonly seen around US tax season (Q1).
+severity: low
+source: mails
+tags:
+- sublime
+- credential-phishing
+- impersonation-brand
+- lookalike-domain
+- social-engineering
+references:
+- https://turbotax.intuit.com/tax-tips/security/taxpayer-beware-email-phishing-scams/L6r4YHSuG
+where:
+  any_of:
+  - fromName|contains: turbotax
+  - fromName|levenshtein:
+    - turbotax
+    - 1
+    not:
+      fromName: TurboTan
+      fromRegistrable: brevosend.com
+      auth.spf: pass
+  - fromDomain|contains: turbotax
+  fromRegistrable|nin:
+  - intuit.com
+  - turbotax.com
+  - intuit.ca
+  - truist.com
+  fromDomain|nin_setting: internal_domains
+  not:
+    fromRegistrable|in:
+    - qemailserver.com
+    auth.spf: pass
+    urls.domain|in:
+    - qualtrics.com
+    - intuit.com
+sublime:
+  id: 90084031-cd65-5184-a7d6-a1e61d32b82b
+  attack_types:
+  - Credential Phishing
+  tactics_and_techniques:
+  - 'Impersonation: Brand'
+  - Lookalike domain
+  - Social engineering
+  detection_methods:
+  - Sender analysis
+  source: "type.inbound\nand (\n  strings.ilike(sender.display_name, '*turbotax*')\n  or (\n    strings.ilevenshtein(sender.display_name,
+    'turbotax') <= 1\n    // negates FP for company called TurboTan\n    and not (\n      sender.display_name == \"TurboTan\"\n
+    \     and sender.email.domain.root_domain == \"brevosend.com\"\n      and headers.auth_summary.spf.pass\n    )\n  )\n
+    \ or strings.ilike(sender.email.domain.domain, '*turbotax*')\n)\nand sender.email.domain.root_domain not in (\n  'intuit.com',\n
+    \ 'turbotax.com',\n  'intuit.ca',\n  'truist.com' // Truist partners with Intuit to provide discounts\n)\nand sender.email.email
+    not in $recipient_emails\n\n// negates survery service used by TurboTax\nand not (\n  sender.email.domain.root_domain
+    in ('qemailserver.com')\n  and headers.auth_summary.spf.pass\n  and any(body.links,\n          .href_url.domain.root_domain
+    in (\"qualtrics.com\", \"intuit.com\")\n  )\n)"
 ---
 id: sublime-9416b5b7-3850-505c-a283-45a2bc483f81
 title: 'Brand impersonation: QuickBooks dispute notification'
@@ -1684,6 +2232,42 @@ sublime:
     '*Dashlane*')\n)\nand sender.email.domain.root_domain not in~ ('dashlane.com')\n\n// negate highly trusted sender domains
     unless they fail DMARC authentication\nand (\n  (\n    sender.email.domain.root_domain in $high_trust_sender_root_domains\n
     \   and not headers.auth_summary.dmarc.pass\n  )\n  or sender.email.domain.root_domain not in $high_trust_sender_root_domains\n)"
+---
+id: sublime-bb9cf46b-188e-58f5-996e-b35caf2423a2
+title: 'Brand impersonation: ADP'
+description: Impersonation of the payroll provider ADP. Most commonly seen around US tax season (Q1)
+severity: medium
+source: mails
+tags:
+- sublime
+- credential-phishing
+- impersonation-brand
+- social-engineering
+references:
+- https://www.align.com/blog/tax-related-phishing-scam-targets-adp-users
+where:
+  fromName|in:
+  - RS-Plan-Admin@adp.com
+  - ADP
+  - SecurityServices_NoReply@adp.com
+  fromRegistrable|nin:
+  - adp.com
+  - adpsurveys.com
+  - adp.com.br
+  fromDomain|nin_setting: internal_domains
+sublime:
+  id: bb9cf46b-188e-58f5-996e-b35caf2423a2
+  attack_types:
+  - Credential Phishing
+  tactics_and_techniques:
+  - 'Impersonation: Brand'
+  - Social engineering
+  detection_methods:
+  - Header analysis
+  - Sender analysis
+  source: "type.inbound\nand sender.display_name in~ (\n  'RS-Plan-Admin@adp.com',\n  'ADP',\n  'SecurityServices_NoReply@adp.com'\n)\nand
+    sender.email.domain.root_domain not in~ (\n  'adp.com',\n  'adpsurveys.com',\n  'adp.com.br'\n)\nand sender.email.email
+    not in $recipient_emails"
 ---
 id: sublime-d437710b-ad4e-5618-93de-f559aa27ad8a
 title: DocuSign impersonation via spoofed Intuit sender

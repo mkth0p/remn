@@ -165,6 +165,40 @@ sublime:
     \       and not regex.icontains(.display_text,\n                                '\\bRFI-\\d{2}-\\d{2}-\\d{4}\\b',\n                                '\\bRFI-\\d{4}-\\d{2}-\\d{2}\\b'\n
     \       )\n)\nand length(body.links) < 11"
 ---
+id: sublime-2820ff89-7ae4-5fef-beac-86dc349ac0d8
+title: 'Link: Google Cloud Storage link with redirect.html in URL'
+description: Detects inbound messages containing links that route through a redirect.html page hosted on Google Cloud Storage
+  (storage.googleapis.com). Attackers abuse legitimate cloud storage infrastructure to host redirect pages that forward victims
+  to malicious destinations, evading URL reputation checks.
+severity: high
+source: mails
+tags:
+- sublime
+- credential-phishing
+- evasion
+- free-file-host
+- open-redirect
+where:
+  any_of:
+  - urls.url|endswith: redirect.html
+  - urls.fragment|startswith:
+    - /redirect.html
+    - redirect.html?
+  urls.host: storage.googleapis.com
+sublime:
+  id: 2820ff89-7ae4-5fef-beac-86dc349ac0d8
+  attack_types:
+  - Credential Phishing
+  tactics_and_techniques:
+  - Evasion
+  - Free file host
+  - Open redirect
+  detection_methods:
+  - URL analysis
+  source: "type.inbound\nand any(body.links,\n        (\n          strings.iends_with(.href_url.path, 'redirect.html')\n          or
+    strings.istarts_with(.href_url.fragment,\n                                  '/redirect.html',\n                                  'redirect.html?'\n
+    \         )\n        )\n        and .href_url.domain.domain == \"storage.googleapis.com\"\n)"
+---
 id: sublime-28db8459-dbc5-52c1-8863-4ede01cf104a
 title: 'Credential Phishing: W-2 lure with inline SVG Windows logo'
 description: Detects inbound messages containing a link with W-2 display text and an inline SVG constructed from four colored
@@ -261,6 +295,99 @@ sublime:
   - Content analysis
   source: "type.inbound\nand strings.contains(body.current_thread.text,\n                     'has invited you to VIEW the
     following document:'\n)\nand length(body.current_thread.links) > 0"
+---
+id: sublime-51f51aa0-4e62-5140-8baa-014cd95f7a46
+title: 'Link: URL fragment with hexadecimal pattern obfuscation'
+description: Detects links containing URL fragments with repeating hexadecimal patterns, commonly used to obfuscate malicious
+  destinations or bypass security filters.
+severity: high
+source: mails
+tags:
+- sublime
+- credential-phishing
+- evasion
+where:
+  urls.fragment|re: .html\/\?(?:[a-f0-9]{2}\.){12,}
+sublime:
+  id: 51f51aa0-4e62-5140-8baa-014cd95f7a46
+  attack_types:
+  - Credential Phishing
+  tactics_and_techniques:
+  - Evasion
+  detection_methods:
+  - Content analysis
+  - URL analysis
+  source: "type.inbound\nand any(body.links,\n        regex.contains(.href_url.fragment, '.html\\/\\?(?:[a-f0-9]{2}\\.){12,}')\n)"
+---
+id: sublime-5579bb4b-a225-57c1-99e1-65c704bad6ad
+title: Sharepoint online with external recipients and external display name
+description: An email from Sharepoint Online that was sent to multiple recipients that did not originate from a sender, by
+  display name, in your organization.
+severity: medium
+source: mails
+tags:
+- sublime
+- credential-phishing
+- spam
+- evasion
+where:
+  fromAddr: no-reply@sharepointonline.com
+  recipientCount|gt: 40
+  to.domain|in:
+  - aol.com
+  - fastmail.com
+  - free.fr
+  - gmail.com
+  - gmx.com
+  - gmx.de
+  - gmx.fr
+  - gmx.net
+  - hotmail.com
+  - hotmail.fr
+  - icloud.com
+  - laposte.net
+  - live.com
+  - live.fr
+  - mail.com
+  - mail.ru
+  - me.com
+  - msn.com
+  - orange.fr
+  - outlook.com
+  - outlook.fr
+  - proton.me
+  - protonmail.com
+  - sfr.fr
+  - tutanota.com
+  - wanadoo.fr
+  - web.de
+  - yahoo.co.uk
+  - yahoo.com
+  - yahoo.fr
+  - yandex.com
+  - yandex.ru
+  - zoho.com
+  fromNameNorm|nin_setting: org_display_names
+sublime:
+  id: 5579bb4b-a225-57c1-99e1-65c704bad6ad
+  attack_types:
+  - Credential Phishing
+  - Spam
+  tactics_and_techniques:
+  - Evasion
+  detection_methods:
+  - Content analysis
+  - Header analysis
+  - Sender analysis
+  source: 'type.inbound
+
+    and sender.email.email == "no-reply@sharepointonline.com"
+
+    and length(recipients.to) > 40 // You may want to adjust this threshold if 40 is too aggressive
+
+    and any(recipients.to, .email.domain.domain in $free_email_providers)
+
+    and sender.display_name not in $org_display_names'
 ---
 id: sublime-5b03f8e6-222f-5112-b111-faff54305b0b
 title: 'Service abuse: Dropbox Paper with copy-paste instructions'
@@ -688,6 +815,332 @@ sublime:
   - URL analysis
   source: "type.inbound\nand strings.icontains(body.html.raw, 'https:/<span')\nand regex.icontains(body.html.raw,\n                    'https:/<span[^>]{0,300}display:\\s*none[^>]{0,300}>[A-Z0-9]{6,}\\s*</span>/'\n)"
 ---
+id: sublime-9f316da6-821c-5fed-b967-80fc0e740626
+title: 'Link: Common hidden directory observed'
+description: Links in the message point to sensitive system directories like .git, .env, or .well-known that could expose
+  confidential configuration data or system files. Actors will often abuse these directories to hide credential phishing landing
+  pages of compromised sites.
+severity: medium
+source: mails
+tags:
+- sublime
+- credential-phishing
+- evasion
+references:
+- https://datatracker.ietf.org/doc/html/rfc8615
+- https://www.iana.org/assignments/well-known-uris/well-known-uris.xhtml
+where:
+  urlCount|gt: 0
+  urlCount|lte: 10
+  any_of:
+  - urls.url|contains: /.well-known/
+    any_of:
+    - urls.url|re: \/\.well-known\/[^\/]+\/
+      not:
+        urls.url|re: ^(?:/.well-known/pki-validation/(?:godaddy.html)?)$
+    - urls.fragment|exists: true
+  - urls.url|contains: /.js/
+  - urls.url|contains: /.env/
+  - urls.url|contains: /.git/
+  - urls.url|contains: /.svn/
+  - urls.url|contains: /.hg/
+  - urls.url|contains: /.DS_Store/
+  - urls.url|contains: /.htpasswd/
+  - urls.url|contains: /.htaccess/
+  - urls.url|contains: /.bash_history/
+  - urls.url|contains: /.bashrc/
+  - urls.url|contains: /.zshrc/
+  - urls.url|contains: /.profile/
+  - urls.url|contains: /.wp/
+  any_of_2:
+  - fromRegistrable|in:
+    - adobe.com
+    - adobesign.com
+    - amazon.co.uk
+    - amazon.com
+    - amazon.de
+    - amazon.fr
+    - amazonaws.com
+    - amazonses.com
+    - ameli.fr
+    - apple.com
+    - asana.com
+    - atlassian.com
+    - atlassian.net
+    - azure.com
+    - banquepopulaire.fr
+    - bing.com
+    - bitbucket.org
+    - bnpparibas.com
+    - bnpparibas.net
+    - boursorama.com
+    - bouyguestelecom.fr
+    - box.com
+    - caf.fr
+    - caisse-epargne.fr
+    - chronopost.fr
+    - cic.fr
+    - clickup.com
+    - colissimo.fr
+    - concur.com
+    - credit-agricole.com
+    - credit-agricole.fr
+    - creditmutuel.fr
+    - dhl.com
+    - dhl.de
+    - dhl.fr
+    - docusign.com
+    - docusign.net
+    - dropbox.com
+    - dropboxmail.com
+    - edf.fr
+    - engie.com
+    - engie.fr
+    - eventbrite.com
+    - facebook.com
+    - facebookmail.com
+    - fedex.com
+    - figma.com
+    - free.fr
+    - freshdesk.com
+    - github.com
+    - gitlab.com
+    - gmail.com
+    - google.com
+    - google.fr
+    - googleapis.com
+    - googlemail.com
+    - gotomeeting.com
+    - hotmail.com
+    - hubspot.com
+    - icloud.com
+    - ing.com
+    - ing.fr
+    - instagram.com
+    - intuit.com
+    - labanquepostale.fr
+    - laposte.fr
+    - laposte.net
+    - lcl.fr
+    - linkedin.com
+    - live.com
+    - mac.com
+    - mail.microsoft
+    - mailchimp.com
+    - mastercard.com
+    - me.com
+    - microsoft.com
+    - microsoft.net
+    - microsoftonline.com
+    - miro.com
+    - monday.com
+    - msn.com
+    - n26.com
+    - netflix.com
+    - notion.so
+    - office.com
+    - office365.com
+    - okta.com
+    - onmicrosoft.com
+    - orange.com
+    - orange.fr
+    - outlook.com
+    - ovh.com
+    - ovh.net
+    - ovhcloud.com
+    - paypal.com
+    - paypal.fr
+    - paypalobjects.com
+    - proxad.net
+    - revolut.com
+    - salesforce.com
+    - sap.com
+    - sendgrid.net
+    - service-now.com
+    - servicenow.com
+    - sfr.fr
+    - sharepoint.com
+    - sharepointonline.com
+    - skype.com
+    - slack.com
+    - socgen.com
+    - societegenerale.com
+    - societegenerale.fr
+    - successfactors.com
+    - surveymonkey.com
+    - trello.com
+    - ups.com
+    - visa.com
+    - visa.fr
+    - webex.com
+    - whatsapp.com
+    - windows.com
+    - windows.net
+    - withgoogle.com
+    - workday.com
+    - xbox.com
+    - yammer.com
+    - youtube.com
+    - zendesk.com
+    - zoom.com
+    - zoom.us
+    not:
+      auth.dmarc: pass
+  - fromRegistrable|nin:
+    - adobe.com
+    - adobesign.com
+    - amazon.co.uk
+    - amazon.com
+    - amazon.de
+    - amazon.fr
+    - amazonaws.com
+    - amazonses.com
+    - ameli.fr
+    - apple.com
+    - asana.com
+    - atlassian.com
+    - atlassian.net
+    - azure.com
+    - banquepopulaire.fr
+    - bing.com
+    - bitbucket.org
+    - bnpparibas.com
+    - bnpparibas.net
+    - boursorama.com
+    - bouyguestelecom.fr
+    - box.com
+    - caf.fr
+    - caisse-epargne.fr
+    - chronopost.fr
+    - cic.fr
+    - clickup.com
+    - colissimo.fr
+    - concur.com
+    - credit-agricole.com
+    - credit-agricole.fr
+    - creditmutuel.fr
+    - dhl.com
+    - dhl.de
+    - dhl.fr
+    - docusign.com
+    - docusign.net
+    - dropbox.com
+    - dropboxmail.com
+    - edf.fr
+    - engie.com
+    - engie.fr
+    - eventbrite.com
+    - facebook.com
+    - facebookmail.com
+    - fedex.com
+    - figma.com
+    - free.fr
+    - freshdesk.com
+    - github.com
+    - gitlab.com
+    - gmail.com
+    - google.com
+    - google.fr
+    - googleapis.com
+    - googlemail.com
+    - gotomeeting.com
+    - hotmail.com
+    - hubspot.com
+    - icloud.com
+    - ing.com
+    - ing.fr
+    - instagram.com
+    - intuit.com
+    - labanquepostale.fr
+    - laposte.fr
+    - laposte.net
+    - lcl.fr
+    - linkedin.com
+    - live.com
+    - mac.com
+    - mail.microsoft
+    - mailchimp.com
+    - mastercard.com
+    - me.com
+    - microsoft.com
+    - microsoft.net
+    - microsoftonline.com
+    - miro.com
+    - monday.com
+    - msn.com
+    - n26.com
+    - netflix.com
+    - notion.so
+    - office.com
+    - office365.com
+    - okta.com
+    - onmicrosoft.com
+    - orange.com
+    - orange.fr
+    - outlook.com
+    - ovh.com
+    - ovh.net
+    - ovhcloud.com
+    - paypal.com
+    - paypal.fr
+    - paypalobjects.com
+    - proxad.net
+    - revolut.com
+    - salesforce.com
+    - sap.com
+    - sendgrid.net
+    - service-now.com
+    - servicenow.com
+    - sfr.fr
+    - sharepoint.com
+    - sharepointonline.com
+    - skype.com
+    - slack.com
+    - socgen.com
+    - societegenerale.com
+    - societegenerale.fr
+    - successfactors.com
+    - surveymonkey.com
+    - trello.com
+    - ups.com
+    - visa.com
+    - visa.fr
+    - webex.com
+    - whatsapp.com
+    - windows.com
+    - windows.net
+    - withgoogle.com
+    - workday.com
+    - xbox.com
+    - yammer.com
+    - youtube.com
+    - zendesk.com
+    - zoom.com
+    - zoom.us
+sublime:
+  id: 9f316da6-821c-5fed-b967-80fc0e740626
+  attack_types:
+  - Credential Phishing
+  tactics_and_techniques:
+  - Evasion
+  detection_methods:
+  - URL analysis
+  - HTML analysis
+  source: "type.inbound\nand 0 < length(body.links) <= 10\nand any(body.links,\n        (\n          strings.icontains(.href_url.path,
+    \"/.well-known/\")\n          and (\n            // well-known with a directory behind it\n            (\n              regex.icontains(.href_url.path,
+    '\\/\\.well-known\\/[^\\/]+\\/')\n              // doesn't contain anything after /pki-validation/ or contains godaddy.html
+    after (which is their location for the validation)\n              and not regex.imatch(.href_url.path,\n                                   '/.well-known/pki-validation/(?:godaddy.html)?'\n
+    \             )\n            )\n            // or a fragment in the url\n            or .href_url.fragment is not null\n
+    \         )\n        )\n        or strings.icontains(.href_url.path, \"/.js/\")\n        or strings.icontains(.href_url.path,
+    \"/.env/\")\n        or strings.icontains(.href_url.path, \"/.git/\")\n        or strings.icontains(.href_url.path, \"/.svn/\")\n
+    \       or strings.icontains(.href_url.path, \"/.hg/\")\n        or strings.icontains(.href_url.path, \"/.DS_Store/\")\n
+    \       or strings.icontains(.href_url.path, \"/.htpasswd/\")\n        or strings.icontains(.href_url.path, \"/.htaccess/\")\n
+    \       or strings.icontains(.href_url.path, \"/.bash_history/\")\n        or strings.icontains(.href_url.path, \"/.bashrc/\")\n
+    \       or strings.icontains(.href_url.path, \"/.zshrc/\")\n        or strings.icontains(.href_url.path, \"/.profile/\")\n
+    \       or strings.icontains(.href_url.path, \"/.wp/\")\n)\n// negate highly trusted sender domains unless they fail DMARC
+    authentication\nand (\n  (\n    sender.email.domain.root_domain in $high_trust_sender_root_domains\n    and not headers.auth_summary.dmarc.pass\n
+    \ )\n  or sender.email.domain.root_domain not in $high_trust_sender_root_domains\n)"
+---
 id: sublime-a165e206-61b3-5b08-9408-2fe3c2bf0810
 title: 'Link: 9WOLF phishkit initial landing URI'
 description: Detects links containing the '?ai=xd' query parameter associated with 9wolf phishing service initial landing
@@ -828,6 +1281,38 @@ sublime:
   - HTML analysis
   - URL analysis
   source: "type.inbound\nand any(body.current_thread.links,\n        regex.imatch(.href_url.path, '/loom/[^\\/]+\\.html')\n)"
+---
+id: sublime-d0ecb49a-6251-51b2-850e-b3503dd3d02f
+title: 'Link: Google Cloud Storage link with index.php in URL'
+description: Detects inbound messages containing links hosted on storage.googleapis.com that point to an index.php path, either
+  in the URL path or fragment. Attackers abuse Google Cloud Storage to host malicious content, leveraging the trusted domain
+  to bypass security filters.
+severity: high
+source: mails
+tags:
+- sublime
+- credential-phishing
+- evasion
+- free-file-host
+- open-redirect
+where:
+  urls.host: storage.googleapis.com
+  any_of:
+  - urls.url|endswith: index.php
+  - urls.fragment|re: ^\/?index.php
+sublime:
+  id: d0ecb49a-6251-51b2-850e-b3503dd3d02f
+  attack_types:
+  - Credential Phishing
+  tactics_and_techniques:
+  - Evasion
+  - Free file host
+  - Open redirect
+  detection_methods:
+  - URL analysis
+  source: "type.inbound\nand any(body.links,\n        .href_url.domain.domain == \"storage.googleapis.com\"\n        and (\n
+    \         strings.iends_with(.href_url.path, 'index.php')\n          or regex.icontains(.href_url.fragment, '^\\/?index.php')\n
+    \       )\n)"
 ---
 id: sublime-d6041a8b-55a9-5016-b214-ba021f4eba64
 title: Catbox.moe link from untrusted source
@@ -1137,6 +1622,7 @@ tags:
 - evasion
 - social-engineering
 where:
+  bodyText|length: < 1000
   bodyText|re: (shared.{0,30}with you|View Document)
   urls.host: lookerstudio.google.com
   senderPrevalence|in:
@@ -1425,6 +1911,30 @@ sublime:
     in (\"new\", \"outlier\")\n  and not profile.by_sender().solicited\n)\n\n// negate highly trusted sender domains unless
     they fail DMARC authentication\nand (\n  (\n    sender.email.domain.root_domain in $high_trust_sender_root_domains\n    and
     not headers.auth_summary.dmarc.pass\n  )\n  or sender.email.domain.root_domain not in $high_trust_sender_root_domains\n)"
+---
+id: sublime-dc5e3700-1f29-5fed-8378-38631e0ceea1
+title: 'Link: HTML file with suspicious binary fragment ending pattern'
+description: Detects links to HTML files containing fragments with a suspicious pattern of alphanumeric characters followed
+  by a 5-digit binary sequence, commonly used in malicious URL structures.
+severity: high
+source: mails
+tags:
+- sublime
+- credential-phishing
+- evasion
+where:
+  urls.url|endswith: .html
+  urls.fragment|re: \-[a-z0-9]+[01]{5}$
+sublime:
+  id: dc5e3700-1f29-5fed-8378-38631e0ceea1
+  attack_types:
+  - Credential Phishing
+  tactics_and_techniques:
+  - Evasion
+  detection_methods:
+  - URL analysis
+  source: "type.inbound\nand any(body.links,\n        strings.ends_with(.href_url.path, '.html')\n        and regex.contains(.href_url.fragment,
+    '\\-[a-z0-9]+[01]{5}$')\n)"
 ---
 id: sublime-e366f316-6e63-593f-aaeb-330ec90fb845
 title: 'Link: Suspicious URL path with binary character sequence'
