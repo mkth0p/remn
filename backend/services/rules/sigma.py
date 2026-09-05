@@ -279,7 +279,9 @@ def compile_field(raw_field: str, value: Any, aliases: dict[str, list[str]], war
             raise Unsupported(f"modifier |{m} on {name}")
     if "cased" in mods:
         warnings.append(f"{name}: |cased ignored (REMN matches case-insensitively)")
-    targets = aliases.get(name) or [SPECIAL_FIELDS.get(name) or FIELD_MAP.get(name) or f"data.{name}"]
+    # "'|all': [...]" (a modifier with no field) is a keyword search over the whole event
+    keywords = name == ""
+    targets = ["raw"] if keywords else (aliases.get(name) or [SPECIAL_FIELDS.get(name) or FIELD_MAP.get(name) or f"data.{name}"])
     all_mode = "all" in mods
     values = value if isinstance(value, list) else [value]
 
@@ -305,6 +307,8 @@ def compile_field(raw_field: str, value: Any, aliases: dict[str, list[str]], war
     smod = next((m for m in mods if m in STRING_MODIFIERS), None)
     if "windash" in mods:
         values = [v2 for v in values for v2 in _windash(str(v))]
+        smod = smod or "contains"
+    if keywords:
         smod = smod or "contains"
 
     if smod:

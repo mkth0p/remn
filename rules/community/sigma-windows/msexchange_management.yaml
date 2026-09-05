@@ -13,11 +13,11 @@ tags:
 references:
 - https://github.com/rapid7/metasploit-framework/blob/1416b5776d963f21b7b5b45d19f3e961201e0aed/modules/exploits/windows/http/exchange_proxyshell_rce.rb#L430
 where:
-  all_of:
-  - channel|contains: msexchange management
-  - data.: Remove-MailboxExportRequest
-  - data.: ' -Identity '
-  - data.: ' -Confirm "False"'
+  channel|contains: msexchange management
+  raw|contains_all:
+  - Remove-MailboxExportRequest
+  - ' -Identity '
+  - ' -Confirm "False"'
 sigma:
   id: 09570ae5-889e-43ea-aac0-0e1221fb3d95
   status: test
@@ -78,16 +78,16 @@ references:
 where:
   channel|contains: msexchange management
   any_of:
-  - all_of:
-    - data.: New-MailboxExportRequest
-    - data.: ' -Mailbox '
-    - raw|contains_any:
-      - -FilePath "\\\\
-      - .aspx
-  - all_of:
-    - data.: New-ManagementRoleAssignment
-    - data.: ' -Role "Mailbox Import Export"'
-    - data.: ' -User '
+  - raw|contains_all:
+    - New-MailboxExportRequest
+    - ' -Mailbox '
+    raw|contains_any:
+    - -FilePath "\\\\
+    - .aspx
+  - raw|contains_all:
+    - New-ManagementRoleAssignment
+    - ' -Role "Mailbox Import Export"'
+    - ' -User '
 sigma:
   id: 516376b4-05cd-4122-bae0-ad7641c38d48
   status: test
@@ -116,15 +116,15 @@ tags:
 references:
 - https://bi-zone.medium.com/hunting-down-ms-exchange-attacks-part-1-proxylogon-cve-2021-26855-26858-27065-26857-6e885c5f197c
 where:
-  all_of:
-  - channel|contains: msexchange management
-  - data.: OabVirtualDirectory
-  - data.: ' -ExternalUrl '
-  - raw|contains_any:
-    - eval(request
-    - http://f/<script
-    - '"unsafe"};'
-    - function Page_Load()
+  channel|contains: msexchange management
+  raw|contains_all:
+  - OabVirtualDirectory
+  - ' -ExternalUrl '
+  raw|contains_any:
+  - eval(request
+  - http://f/<script
+  - '"unsafe"};'
+  - function Page_Load()
 sigma:
   id: 550d3350-bb8a-4ff3-9533-2ba533f4a1c0
   status: test
@@ -153,12 +153,12 @@ tags:
 references:
 - https://twitter.com/OTR_Community/status/1371053369071132675
 where:
-  all_of:
-  - channel|contains: msexchange management
-  - data.: Set-OabVirtualDirectory
-  - data.: ExternalUrl
-  - data.: Page_Load
-  - data.: script
+  channel|contains: msexchange management
+  raw|contains_all:
+  - Set-OabVirtualDirectory
+  - ExternalUrl
+  - Page_Load
+  - script
 sigma:
   id: 9db37458-4df2-46a5-95ab-307e7f29e675
   status: test
@@ -187,17 +187,17 @@ tags:
 references:
 - https://twitter.com/GossiTheDog/status/1429175908905127938
 where:
-  all_of:
-  - channel|contains: msexchange management
-  - data.: New-ExchangeCertificate
-  - data.: ' -GenerateRequest'
-  - data.: ' -BinaryEncoded'
-  - data.: ' -RequestFile'
-  - raw|contains_any:
-    - \\\\localhost\\C$
-    - \\\\127.0.0.1\\C$
-    - C:\\inetpub
-    - .aspx
+  channel|contains: msexchange management
+  raw|contains_all:
+  - New-ExchangeCertificate
+  - ' -GenerateRequest'
+  - ' -BinaryEncoded'
+  - ' -RequestFile'
+  raw|contains_any:
+  - \\\\localhost\\C$
+  - \\\\127.0.0.1\\C$
+  - C:\\inetpub
+  - .aspx
 sigma:
   id: b7bc7038-638b-4ffd-880c-292c692209ef
   status: test

@@ -74,6 +74,24 @@ def test_every_pack_rule_compiles_on_the_sql_engine_with_unique_ids():
             assert no_prefilter <= max(3, len(rules) // 100), f"{p['id']}: {no_prefilter} of {len(rules)} rules cannot be pre-filtered by event id"
 
 
+def test_every_pack_rule_binds_in_duckdb(store):
+    """compile_cond can succeed on SQL that DuckDB's binder rejects (an empty JSON key did); run each WHERE."""
+    cur = store.cursor()
+    for p in packs.list_packs():
+        for r in packs.load_pack(p["id"])["rules"]:
+            rule = r.get("rule")
+            if not rule:
+                continue
+            for key in ("where", "exclude"):
+                if rule.get(key):
+                    ctx = Ctx(source=p["source"])
+                    sql = compile_cond(rule[key], ctx)
+                    try:
+                        cur.execute(f"SELECT count(*) FROM {p['source']} WHERE {sql}", ctx.params).fetchone()
+                    except Exception as exc:  # noqa: BLE001
+                        raise AssertionError(f"{rule['id']} ({key}): {exc}") from exc
+
+
 def test_all_of_members_pin_event_ids():
     assert R._rule_event_ids({"all_of": [{"channel|contains": "sysmon", "eventId": 1}, {"image|endswith": "x.exe"}]}) == [1]
     assert R._rule_event_ids({"all_of": [{"any_of": [{"eventId": 1}, {"eventId": 4688}]}, {"eventId|in": [1, 7]}]}) == [1]  # intersection

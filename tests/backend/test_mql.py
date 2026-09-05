@@ -175,3 +175,17 @@ def test_profile_by_sender_maps_to_baseline_columns():
     assert any("baseline" in x for x in r["warnings"])
     compile_cond(w, Ctx(source="mails"))
     assert not _rule("type.inbound and profile.by_sender().any_messages_malicious_or_spam")["ok"]
+
+
+def test_negative_child_operator_binds_and_means_none_matches(store):
+    """urls.domain|nin used to compile the positive form twice, leaving 4 '?' values unbound in DuckDB."""
+    ctx = ParseContext(internal_domains=["contoso.com"])
+    wri = MailWriter(store, 1)
+    for i, links in enumerate((["https://a-site.com/x", "https://b-site.com/y"], ["https://b-site.com/z"])):
+        headers = [("From", f"<s{i}@ext.example>"), ("To", "<alice@contoso.com>"), ("Subject", f"m{i}"), ("Date", "Mon, 01 Sep 2026 09:00:00 +0000"), ("Message-ID", f"<m{i}@ext.example>")]
+        html = "<html><body>" + "".join(f'<a href="{u}">link</a>' for u in links) + "</body></html>"
+        wri.add(build_row(headers, None, html, [], ctx, folder="Inbox", size=None, extra={}))
+    wri.flush()
+    rule = {"id": "t-nin-child", "title": "t", "severity": "low", "source": "mails", "where": {"urls.domain|nin": ["a-site.com", "x-site.com", "y-site.com", "z-site.com"], "urls.url|contains": "b-site.com"}}
+    hits = R.run_rule(store, rule, {})
+    assert len(hits) == 1 and hits[0]["entities"].get("subject") == "m1", hits

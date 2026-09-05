@@ -229,12 +229,17 @@ rules it does not use. Single rules can still be switched off in the table, and
 a custom rule with the same id overrides a pack rule. Analysts' pack choices are
 kept in the browser (`packOverrides`).
 
-Running 3,000 rules is cheap on both engines: the browser worker groups rules by
-the event ids they pin and reads each event subset from IndexedDB once (the
-~1,500 process-creation rules share one read of the Sysmon 1 / 4688 rows), and
-the SQL engine runs them at a few milliseconds per rule (a DuckDB parameter
-binding quirk that cost 50 ms per rule when pandas is absent is short-circuited
-in `casestore.py`).
+Running 3,000 rules stays practical on both engines: the browser worker groups
+rules by the event ids they pin and reads each event subset from IndexedDB once
+(the ~1,500 process-creation rules share one read of the Sysmon 1 / 4688 rows;
+2,987 rules over a 972-event PowerShell log ran in 10 s), and the SQL engine
+runs the same set in about 90 s as a background job (35 ms per rule including
+the zero-finding diagnostics). Two DuckDB pitfalls are handled in the engine: a
+parameter-binding probe for pandas that rescanned `sys.path` on every bound
+value when pandas is absent (50 ms per rule, short-circuited in `casestore.py`),
+and list operators such as a 179-item `contains_any` on script blocks, which are
+compiled to one regex alternation instead of a chain of `lower(col) LIKE ?`
+(5.6 s per rule down to 0.04 s).
 
 **Refreshing the packs**: `tools/import_community_rules.py all --download`
 resolves the branch heads on GitHub, fetches those exact commits, converts them

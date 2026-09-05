@@ -32,6 +32,7 @@ import re
 import sys
 import tempfile
 import urllib.request
+import uuid
 import zipfile
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -48,6 +49,7 @@ import yaml  # noqa: E402
 
 from services.rules import mql, sigma  # noqa: E402
 from services.store.sqlfilter import Ctx, compile_cond  # noqa: E402
+from services.store.casestore import StoreRegistry  # noqa: E402
 
 COMMUNITY = ROOT / "rules" / "community"
 
@@ -170,7 +172,15 @@ def _core_ids() -> set[str]:
     return ids
 
 
-def build_pack(src: dict[str, Any], pack: dict[str, Any], zf: zipfile.ZipFile, provenance: dict[str, Any], taken: set[str]) -> dict[str, Any]:
+def _bind(store: Any, rule: dict[str, Any], source: str) -> None:
+    for key in ("where", "exclude"):
+        if rule.get(key):
+            ctx = Ctx(source=source)
+            sql = compile_cond(rule[key], ctx)
+            store.cursor().execute(f"SELECT count(*) FROM {source} WHERE {sql}", ctx.params).fetchone()
+
+
+def build_pack(src: dict[str, Any], pack: dict[str, Any], zf: zipfile.ZipFile, provenance: dict[str, Any], taken: set[str], scratch: Any) -> dict[str, Any]:
     convert = src["convert"]
     members = _members(zf, pack["roots"])
     groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -195,10 +205,9 @@ def build_pack(src: dict[str, Any], pack: dict[str, Any], zf: zipfile.ZipFile, p
             if rid in taken:
                 raise SystemExit(f"duplicate rule id {rid} ({rel})")
             taken.add(rid)
-            # both engines must accept the rule before it is shipped
-            compile_cond(rule["where"], Ctx(source=src["source"]))
-            if rule.get("exclude"):
-                compile_cond(rule["exclude"], Ctx(source=src["source"]))
+            # the SQL engine must compile AND bind the rule before it is shipped (a compiled
+            # condition can still fail in DuckDB's binder, e.g. an empty JSON key)
+            _bind(scratch, rule, src["source"])
             warnings += len(r.get("warnings") or [])
             group = _sigma_group(rule) if src is SOURCES["sigma"] else _sublime_group(rel)
             groups[group].append(rule)
@@ -251,9 +260,15 @@ def run(source: str, zip_path: Path | None, sha: str | None, download: bool, cac
     provenance = {"sha": sha or "unknown", "fetched": dt.date.today().isoformat()}
     print(f"{source}: {zip_path} @ {provenance['sha'][:12]}")
     taken = _core_ids()
-    with zipfile.ZipFile(zip_path) as zf:
-        for pack in src["packs"]:
-            build_pack(src, pack, zf, provenance, taken)
+    reg = StoreRegistry()
+    reg.configure(Path(tempfile.mkdtemp(prefix="remn-rule-import-")) / "cases")
+    scratch = reg.get(str(uuid.uuid4()))
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            for pack in src["packs"]:
+                build_pack(src, pack, zf, provenance, taken, scratch)
+    finally:
+        reg.close_all()
 
 
 def main(argv: list[str] | None = None) -> None:

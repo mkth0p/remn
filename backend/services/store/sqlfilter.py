@@ -64,6 +64,21 @@ class Ctx:
         return "?"
 
 
+_RE2_META = set("\\.^$|()[]{}*+?")
+
+
+def _re_literal(s: str) -> str:
+    """Escape a literal for RE2 (only the metacharacters, so non-ASCII and spaces stay readable)."""
+    return "".join("\\" + ch if ch in _RE2_META else ch for ch in s)
+
+
+def _alternation(values: list[str], prefix: str = "", suffix: str = "") -> str:
+    """One regex matching any of the (already lowercased) literals: evaluated once per row, unlike a
+    chain of lower(col) LIKE ?, which recomputes lower() for every alternative (a 179-item
+    contains_any on script-block rows went from 5.6 s to 0.04 s)."""
+    return prefix + "(?:" + "|".join(_re_literal(v) for v in values) + ")" + suffix
+
+
 def _like_escape(s: str) -> str:
     return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
@@ -135,14 +150,15 @@ def compile_condition(field_name: str, op: str, value: Any, ctx: Ctx) -> str:
     if ctx.source == "mails" and not ctx.table and (field_name.startswith("attachments.") or field_name.startswith("urls.")):
         child = "attachments" if field_name.startswith("attachments.") else "urls"
         sub = Ctx(source="mails", settings=ctx.settings, params=ctx.params, table=child, alias="c")
-        inner = compile_condition(field_name.split(".", 1)[1], op, value, sub)
         negative = op in ("ne", "nin", "not_contains", "not_startswith", "not_endswith", "not_re", "nin_setting")
         if negative:
-            # "no attachment matches" semantics for negative operators
+            # "no attachment matches" semantics for negative operators. Only the positive form is
+            # compiled: params are bound positionally, so compiling the negated form too would leave
+            # its "?" values unbound (urls.domain|nin failed with an argument-count mismatch).
             positive_op = {"ne": "eq", "nin": "in", "not_contains": "contains", "not_startswith": "startswith", "not_endswith": "endswith", "not_re": "re", "nin_setting": "in_setting"}[op]
-            sub2 = Ctx(source="mails", settings=ctx.settings, params=ctx.params, table=child, alias="c")
-            inner_pos = compile_condition(field_name.split(".", 1)[1], positive_op, value, sub2)
+            inner_pos = compile_condition(field_name.split(".", 1)[1], positive_op, value, sub)
             return f"NOT EXISTS (SELECT 1 FROM {child} c WHERE c.\"mailId\" = mails.id AND ({inner_pos}))"
+        inner = compile_condition(field_name.split(".", 1)[1], op, value, sub)
         return f"EXISTS (SELECT 1 FROM {child} c WHERE c.\"mailId\" = mails.id AND ({inner}))"
 
     e = resolve(field_name, ctx)
@@ -214,14 +230,31 @@ def compile_condition(field_name: str, op: str, value: Any, ctx: Ctx) -> str:
     if op in ("contains", "contains_any", "not_contains", "contains_all"):
         if not vals:
             return "TRUE" if op in ("not_contains", "contains_all") else "FALSE"
-        joiner = " AND " if op == "contains_all" else " OR "
-        cond = "(" + joiner.join(f"{low} LIKE {ctx.p('%' + _like_escape(_norm(v)) + '%')} ESCAPE '\\'" for v in vals) + ")"
+        strs = [_norm(v) for v in vals]
+        if op == "contains_all":
+            cond = "(" + " AND ".join(f"regexp_matches({low}, {ctx.p(_alternation([s]))})" for s in strs) + ")"
+        elif len(strs) == 1:
+            cond = f"({low} LIKE {ctx.p('%' + _like_escape(strs[0]) + '%')} ESCAPE '\\')"
+        else:
+            cond = f"regexp_matches({low}, {ctx.p(_alternation(strs))})"
         return f"NOT coalesce({cond}, FALSE)" if op == "not_contains" else f"coalesce({cond}, FALSE)"
     if op in ("startswith", "not_startswith"):
-        cond = "(" + " OR ".join(f"{low} LIKE {ctx.p(_like_escape(_norm(v)) + '%')} ESCAPE '\\'" for v in vals) + ")" if vals else "FALSE"
+        strs = [_norm(v) for v in vals]
+        if not strs:
+            cond = "FALSE"
+        elif len(strs) == 1:
+            cond = f"({low} LIKE {ctx.p(_like_escape(strs[0]) + '%')} ESCAPE '\\')"
+        else:
+            cond = f"regexp_matches({low}, {ctx.p(_alternation(strs, prefix='^'))})"
         return f"NOT coalesce({cond}, FALSE)" if op == "not_startswith" else f"coalesce({cond}, FALSE)"
     if op in ("endswith", "not_endswith"):
-        cond = "(" + " OR ".join(f"{low} LIKE {ctx.p('%' + _like_escape(_norm(v)))} ESCAPE '\\'" for v in vals) + ")" if vals else "FALSE"
+        strs = [_norm(v) for v in vals]
+        if not strs:
+            cond = "FALSE"
+        elif len(strs) == 1:
+            cond = f"({low} LIKE {ctx.p('%' + _like_escape(strs[0]))} ESCAPE '\\')"
+        else:
+            cond = f"regexp_matches({low}, {ctx.p(_alternation(strs, suffix='$'))})"
         return f"NOT coalesce({cond}, FALSE)" if op == "not_endswith" else f"coalesce({cond}, FALSE)"
     if op in ("re", "not_re"):
         cond = "(" + " OR ".join(f"regexp_matches(CAST({sql} AS VARCHAR), {ctx.p(_regex(v))}, 'i')" for v in vals) + ")" if vals else "FALSE"
