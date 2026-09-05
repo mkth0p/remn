@@ -58,7 +58,7 @@ MAIL_WEIGHTS: dict[str, int] = {
     "empty_subject": 10, "reply_without_thread": 15, "subject_re_fwd_spoof": 20, "many_attachments": 5,
     "encrypted_body": 15, "calendar_invite": 5, "rtf_only_body": 10, "no_body": 10, "html_only": 5,
     "exchange_internal": 0, "calendar_item": 0, "gateway_spam_verdict": 40, "gateway_bulk_verdict": 5,
-    "scripted_mailer": 8, "url_tracker_redirect": 2, "url_own_domain": 0,
+    "scripted_mailer": 8, "url_tracker_redirect": 2, "url_own_domain": 0, "deleted_item": 0, "orphan_item": 0,
 }
 
 

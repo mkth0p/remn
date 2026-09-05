@@ -5,6 +5,7 @@ PST / OST parsing with libpff (pypff). Optional dependency: install
 from __future__ import annotations
 
 import logging
+import re
 from email.utils import format_datetime
 from typing import Any, Iterator
 
@@ -234,33 +235,81 @@ def _walk(folder: Any, path: str) -> Iterator[tuple[str, Any]]:
         pass
 
 
+# Folders whose content the user (or an attacker) deleted: Outlook's Deleted Items in the common
+# locales, and the Exchange Recoverable Items dumpster subtree of an OST/PST export.
+_DELETED_FOLDER_RE = re.compile(
+    r"(?i)(deleted items|éléments supprimés|elements supprimes|gelöschte elemente|elementos eliminados|posta eliminata|"
+    r"recoverable items|éléments récupérables|purges|deletions|versions|discoveryholds|substrateholds|calendar logging)"
+)
+ORPHAN_FOLDER = "(orphaned - deleted item not attached to any folder)"
+
+
+def _message_row(message: Any, folder: str, ctx: ParseContext, index: int) -> dict[str, Any]:
+    try:
+        props = _props(message)
+        headers, extra = _headers_from_message(message, props)
+        text, html = _bodies(message)
+        attachments = _attachments(message) if ctx.analyze_attachments else []
+        extra["sourceFormat"] = "pst"
+        row = build_row(headers, text, html, attachments, ctx, folder=folder, size=None, extra=extra)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("pst message %d failed: %s", index, exc)
+        row = {"folder": folder, "subject": "(unparseable message)", "flags": ["parse_error"], "risk": 10,
+               "error": str(exc)[:200], "attachments": [], "urls": [], "sourceFormat": "pst"}
+    row["sourceIndex"] = index
+    try:
+        row["pstIdentifier"] = message.identifier
+    except Exception:  # noqa: BLE001
+        pass
+    return row
+
+
+def _add_flag(row: dict[str, Any], flag: str) -> None:
+    row["flags"] = sorted(set(row.get("flags") or []) | {flag})
+
+
+def _looks_like_message(item: Any) -> bool:
+    return hasattr(item, "get_transport_headers") or hasattr(item, "transport_headers") or hasattr(item, "plain_text_body")
+
+
+def iter_pst_file(pst: Any, ctx: ParseContext) -> Iterator[dict[str, Any]]:
+    """Rows of an opened pypff file: the folder tree, then the orphan items (messages that lost
+    their folder link when they were deleted - libpff keeps them reachable through the item tree)."""
+    root = pst.get_root_folder()
+    index = 0
+    for folder, message in _walk(root, ""):
+        index += 1
+        row = _message_row(message, folder, ctx, index)
+        if _DELETED_FOLDER_RE.search(folder or ""):
+            _add_flag(row, "deleted_item")
+        yield row
+    try:
+        n_orphans = int(pst.number_of_orphan_items)
+    except Exception:  # noqa: BLE001
+        n_orphans = 0
+    for i in range(n_orphans):
+        try:
+            item = pst.get_orphan_item(i)
+        except Exception as exc:  # noqa: BLE001
+            log.debug("pst orphan %d failed: %s", i, exc)
+            continue
+        if item is None or not _looks_like_message(item):
+            continue
+        index += 1
+        row = _message_row(item, ORPHAN_FOLDER, ctx, index)
+        _add_flag(row, "orphan_item")
+        _add_flag(row, "deleted_item")
+        row["orphan"] = True
+        yield row
+
+
 def iter_pst(path: str, ctx: ParseContext) -> Iterator[dict[str, Any]]:
     import pypff
 
     pst = pypff.file()
     pst.open(path)
     try:
-        root = pst.get_root_folder()
-        index = 0
-        for folder, message in _walk(root, ""):
-            index += 1
-            try:
-                props = _props(message)
-                headers, extra = _headers_from_message(message, props)
-                text, html = _bodies(message)
-                attachments = _attachments(message) if ctx.analyze_attachments else []
-                extra["sourceFormat"] = "pst"
-                row = build_row(headers, text, html, attachments, ctx, folder=folder, size=None, extra=extra)
-            except Exception as exc:  # noqa: BLE001
-                log.warning("pst message %d failed: %s", index, exc)
-                row = {"folder": folder, "subject": "(unparseable message)", "flags": ["parse_error"], "risk": 10,
-                       "error": str(exc)[:200], "attachments": [], "urls": [], "sourceFormat": "pst"}
-            row["sourceIndex"] = index
-            try:
-                row["pstIdentifier"] = message.identifier
-            except Exception:  # noqa: BLE001
-                pass
-            yield row
+        yield from iter_pst_file(pst, ctx)
     finally:
         try:
             pst.close()

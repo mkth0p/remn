@@ -150,6 +150,17 @@ countries within 24 h, password spray, brute force followed by success, MFA
 fatigue. `samples/synthetic/make_m365.py` writes a complete BEC scenario in all
 four formats.
 
+## Deleted and orphaned mail (PST / OST)
+
+Messages inside Deleted Items and the Exchange Recoverable Items dumpster
+(Purges, Deletions, Versions, DiscoveryHolds, in the common Outlook locales)
+are flagged `deleted_item`. Messages that were deleted and detached from every
+folder are recovered from the PST/OST item tree as libpff orphan items, listed
+under a synthetic "(orphaned)" folder and flagged `deleted_item` +
+`orphan_item`. The rule `mail-deleted-message-with-indicators` reports the
+ones that also score 45 or more, since a cleaned mailbox is itself evidence.
+Outlook *exports* rarely contain orphans; original PST/OST files do.
+
 ## Attack chains (cross-source correlation)
 
 The Chains view links a suspicious mail to what its recipient did next, across

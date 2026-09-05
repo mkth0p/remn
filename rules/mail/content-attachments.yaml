@@ -303,3 +303,15 @@ attack: [T1566.001]
 tags: [attachment, nested]
 where:
   flags|re: "^att_nested_(executable|script|office_macro|html_smuggling|html_embedded_payload|pdf_javascript|encrypted_archive|extension_mismatch_executable|att_)"
+---
+id: mail-deleted-message-with-indicators
+title: Deleted or orphaned message that carries phishing indicators
+description: A message found in Deleted Items / Recoverable Items or recovered as an orphan item from the PST/OST, and scored 45 or more. Attackers clean the mailbox after a compromise; the victim deletes the lure after clicking it. Either way the deleted copy is the evidence.
+severity: medium
+source: mails
+attack: [T1070.008]
+tags: [evidence, deleted, anti-forensics]
+where:
+  flags|contains_any: [deleted_item, orphan_item]
+  risk|gte: 45
+entities: [fromAddr, folder]

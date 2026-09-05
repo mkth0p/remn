@@ -366,3 +366,64 @@ def test_pst_rtf_only_message_builds_row():
                     folder="Inbox", size=None, extra={"sourceFormat": "pst"})
     assert "parse_error" not in row["flags"]
     assert "connexion" in json.dumps(row, default=str)
+
+
+
+# --- PST orphan / deleted items ---------------------------------------------------------
+class _FakeMsg:
+    def __init__(self, subject, body, ident):
+        self.subject = subject
+        self.plain_text_body = body.encode("utf-8")
+        self.html_body = None
+        self.rtf_body = None
+        self.sender_name = "Billing <billing@evil-login.net>"
+        self.transport_headers = f"From: Billing <billing@evil-login.net>\r\nTo: <user@interne.fr>\r\nSubject: {subject}\r\nDate: Tue, 1 Sep 2026 09:05:00 +0000\r\nMessage-ID: <{ident}@evil-login.net>\r\n"
+        self.number_of_record_sets = 0
+        self.number_of_attachments = 0
+        self.identifier = ident
+        self.delivery_time = None
+
+
+class _FakeFolder:
+    def __init__(self, name, messages, subfolders=()):
+        self.name = name
+        self._m = messages
+        self._f = list(subfolders)
+        self.number_of_sub_messages = len(messages)
+        self.number_of_sub_folders = len(self._f)
+
+    def get_sub_message(self, i):
+        return self._m[i]
+
+    def get_sub_folder(self, i):
+        return self._f[i]
+
+
+class _FakePst:
+    def __init__(self):
+        self.root = _FakeFolder("Top of Outlook data file", [], [
+            _FakeFolder("Inbox", [_FakeMsg("Hello", "normal mail", 1)]),
+            _FakeFolder("Deleted Items", [_FakeMsg("Invoice overdue - verify your password now", "urgent: confirm your password at https://evil-login.net/login", 2)]),
+        ])
+        self.number_of_orphan_items = 2
+        self._orphans = [_FakeMsg("Re: wire transfer", "please send the payment to the new IBAN", 3), _FakeFolder("stray folder", [])]
+
+    def get_root_folder(self):
+        return self.root
+
+    def get_orphan_item(self, i):
+        return self._orphans[i]
+
+
+def test_pst_orphan_and_deleted_items_are_tagged():
+    from services.parsers.mail import pst
+
+    rows = list(pst.iter_pst_file(_FakePst(), ParseContext(internal_domains=["interne.fr"])))
+    assert [r["subject"] for r in rows] == ["Hello", "Invoice overdue - verify your password now", "Re: wire transfer"]
+    assert "deleted_item" not in rows[0]["flags"]
+    assert "deleted_item" in rows[1]["flags"] and "orphan_item" not in rows[1]["flags"] and "Deleted Items" in rows[1]["folder"]
+    assert {"deleted_item", "orphan_item"} <= set(rows[2]["flags"]) and rows[2]["orphan"] is True and rows[2]["folder"] == pst.ORPHAN_FOLDER
+    assert rows[2]["sourceIndex"] == 3 and rows[2]["pstIdentifier"] == 3
+    # localised deleted-folder names
+    assert pst._DELETED_FOLDER_RE.search("Top of Outlook data file/Éléments supprimés")
+    assert pst._DELETED_FOLDER_RE.search("Recoverable Items/Purges") and not pst._DELETED_FOLDER_RE.search("Inbox/Projects")

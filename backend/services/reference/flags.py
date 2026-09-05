@@ -27,6 +27,8 @@ FLAGS: dict[str, str] = {
     "gateway_spam_verdict": "The receiving gateway classified the message as spam or phishing (Exchange SCL >= 5, or SFV:SPM/BLK).",
     "gateway_bulk_verdict": "The receiving gateway classified the message as bulk mail (Exchange BCL >= 4).",
     "calendar_item": "Calendar object (appointment, meeting request or response) rather than a mail message.",
+    "deleted_item": "Message sat in a Deleted Items / Recoverable Items (dumpster) folder of the export: the user or an attacker deleted it.",
+    "orphan_item": "Deleted message recovered from the PST/OST item tree: it is no longer attached to any folder (libpff orphan item).",
     "scripted_mailer": "Sent with a scripting-library mailer (PHPMailer…) by an authenticated or bulk sender: how CMS newsletters are sent. Only unauthenticated use is flagged suspicious_mailer.",
     "tracker_redirect": "Link goes through an e-mail service provider's click tracker (opaque redirect), so the anchor text cannot match the href.",
     "own_domain": "Link stays on the authenticated sender's own domain: credential wording, redirects and text/href differences there are the sender's navigation, not a lure.",
