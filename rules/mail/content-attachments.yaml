@@ -280,13 +280,24 @@ where:
 ---
 id: mail-high-risk-score
 title: High overall risk score
-description: Aggregate risk score of the mail is 70 or more.
+description: Aggregate risk score of the mail is between 60 and 79 (the "high" band of the Mails page). Exists so that every mail the Mails page paints high has a finding; the specific indicators carry their own rules.
 severity: medium
 source: mails
 attack: [T1566]
 tags: [score]
 where:
-  risk|gte: 70
+  risk|gte: 60
+  risk|lt: 80
+---
+id: mail-critical-risk-score
+title: Critical overall risk score
+description: Aggregate risk score of the mail is 80 or more (the "critical" band of the Mails page).
+severity: high
+source: mails
+attack: [T1566]
+tags: [score]
+where:
+  risk|gte: 80
 ---
 id: mail-sender-burst
 title: Burst of messages from one address (compromised account / mass mailing)

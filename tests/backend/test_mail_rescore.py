@@ -16,7 +16,7 @@ from services.analysis.attachments.analyzer import _score, rescore_attachment
 from services.analysis.attachments.html import analyze_html
 from services.store.casestore import StoreRegistry, _arrow_table, MAIL_COLUMNS
 from services.store.writers import MailWriter
-from services.store.rules import run_rule
+from services.store.rules import MAX_REFS, run_rule
 
 HDR = {"HTTP_X_FORENSIC_CLIENT": "1"}
 
@@ -145,15 +145,15 @@ def test_rescore_endpoint_and_input_validation():
 @pytest.mark.parametrize("window", [None, "10m"])
 def test_grouped_escalation_keeps_critical_evidence_beyond_ref_cap(store, window):
     w = MailWriter(store, 1)
-    for i in range(502):
-        w.add({"date": i, "fromAddr": "sender@example.org", "subject": "file", "flags": ["att_macro_vba_stomping"] if i == 501 else ["att_office_macro"]})
+    for i in range(MAX_REFS + 2):
+        w.add({"date": i, "fromAddr": "sender@example.org", "subject": "file", "flags": ["att_macro_vba_stomping"] if i == MAX_REFS + 1 else ["att_office_macro"]})
     w.flush()
     rule = {"id": "macro-review", "title": "Macro review", "source": "mails", "severity": "medium", "confidence": "low", "where": {}, "then_flags": [{"att_macro_vba_stomping": "critical"}]}
     if window:
         rule.update(group_by=["fromAddr"], threshold=">= 2", window=window)
     found = run_rule(store, rule, SETTINGS)
     assert len(found) == 1 and found[0]["severity"] == "critical" and found[0]["confidence"] == "low"
-    assert 502 in found[0]["refs"] and len(found[0]["refs"]) == 500
+    assert MAX_REFS + 2 in found[0]["refs"] and len(found[0]["refs"]) == MAX_REFS
 
 
 def test_mail_writer_preserves_false_and_unknown_history(store):

@@ -4,35 +4,31 @@ import { usePivot } from '../components/Detail'
 import { entityKind } from '../components/EntityPanel'
 import { AddToTimeline } from '../components/AddToTimeline'
 import { Badge, Dot, Flyout, JsonView, Kpi, Progress, Sev, SevBar, Tabs } from '../components/ui'
-import { IconCircle, IconFindings, IconInfo, IconPlay, IconSearch, IconTarget } from '../components/Icons'
+import { IconArrowLeft, IconCircle, IconFindings, IconInfo, IconPlay, IconSearch, IconTarget } from '../components/Icons'
 import { RescoreButton } from '../components/RescoreButton'
-import { loadRules, runRulesFor, type LoadedRule } from '../data/rules'
-import { pruneOrphanFindings } from '../data/findingReviews'
+import { loadRules, type LoadedRule } from '../data/rules'
+import { findingsStaleness, runEnabledRules, type Staleness } from '../data/findingsState'
 import { getSource } from '../data/source'
-import { refreshCounts } from '../data/ingest'
 import { getDb, type Finding, type Severity } from '../db/schema'
-import { toast, useStore } from '../state/store'
+import { buildIncidents, sevCounts, type Incident } from '../rules/incidents'
+import { useStore } from '../state/store'
 import { classNames, fmtNum, fmtTs } from '../util/format'
 import { exportCsv, exportJson } from '../util/export'
 
 const ORDER: Severity[] = ['critical', 'high', 'medium', 'low', 'info']
 const STATUSES = ['new', 'reviewed', 'escalated', 'false_positive'] as const
 type Status = (typeof STATUSES)[number]
-type Group = '' | 'ruleId' | 'entity' | 'source'
+type Group = 'incident' | '' | 'ruleId' | 'entity' | 'source'
+const REFS_OPEN = 2000
 
 const STATUS_LABEL: Record<Status, string> = { new: 'new', reviewed: 'reviewed', escalated: 'escalated', false_positive: 'false positive' }
 const STATUS_SEV: Record<Status, string> = { new: 'accent', reviewed: 'ok', escalated: 'critical', false_positive: 'info' }
+const KIND_LABEL: Record<Incident['kind'], string> = { mail: 'mail', entity: 'entity', group: 'grouped' }
 
 interface LastRun {
   ts: number
   byRule: Record<string, number>
   errors?: string[]
-}
-
-function sevCounts(rows: Finding[]): Record<string, number> {
-  const c: Record<string, number> = {}
-  for (const f of rows) c[f.severity] = (c[f.severity] ?? 0) + 1
-  return c
 }
 
 /** Findings referencing the same seed mail or the same identity as this one. */
@@ -42,9 +38,17 @@ function relatedChains(f: Finding, all: Finding[]): Finding[] {
   return all.filter((c) => c.ruleId === 'chain' && (c.refs.some((r) => f.refs.includes(r)) || Object.values(c.entities).some((v) => ents.has(String(v).toLowerCase()))))
 }
 
+const StatusBadge = ({ s }: { s: string }) => <Badge sev={STATUS_SEV[s as Status] ?? 'info'}>{STATUS_LABEL[s as Status] ?? s}</Badge>
+
+/**
+ * Findings triage. The default view is incidents: every finding on one mail, or about one
+ * user / host / IP within a few hours, is one line. Flat and grouped views keep the per-rule
+ * detail. The banner above the queue says when the findings are behind the evidence.
+ */
 export function FindingsView() {
   const kase = useStore((s) => s.currentCase)
   const rulesVersion = useStore((s) => s.rulesVersion)
+  const running = useStore((s) => s.rulesRun)
   const setFocus = useStore((s) => s.setFocus)
   const setView = useStore((s) => s.setView)
   const setEventsFilter = useStore((s) => s.setEventsFilter)
@@ -58,16 +62,18 @@ export function FindingsView() {
   const [status, setStatus] = useState('')
   const [source, setSource] = useState('')
   const [q, setQ] = useState('')
-  const [group, setGroup] = useState<Group>('')
+  const [group, setGroup] = useState<Group>('incident')
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set())
   const [tab, setTab] = useState<'findings' | 'attack'>('findings')
   const [selected, setSelected] = useState<Finding | null>(null)
+  const [incident, setIncident] = useState<Incident | null>(null)
+  const [parent, setParent] = useState<Incident | null>(null)
   const [flyTab, setFlyTab] = useState<'overview' | 'table' | 'json'>('overview')
   const [picked, setPicked] = useState<Set<string | number>>(new Set())
-  const [running, setRunning] = useState<{ done: number; total: number; rule: string } | null>(null)
   const [rules, setRules] = useState<LoadedRule[]>([])
   const [lastRun, setLastRun] = useState<LastRun | null>(null)
   const [previous, setPrevious] = useState<Record<string, number> | null>(null)
+  const [stale, setStale] = useState<Staleness | null>(null)
   const [prevalence, setPrevalence] = useState<Record<string, number | null>>({})
 
   const reload = useCallback(() => {
@@ -76,6 +82,7 @@ export function FindingsView() {
     db.findings.where('caseId').equals(kase.id).toArray().then((f) => setAll(f.sort((a, b) => ORDER.indexOf(a.severity) - ORDER.indexOf(b.severity) || (b.ts ?? 0) - (a.ts ?? 0))))
     db.kv.get(`ruleDiags-${kase.id}`).then((k) => setLastRun((k?.value as LastRun) ?? null))
     db.kv.get(`findingCounts-${kase.id}`).then((k) => setPrevious(((k?.value as { previous?: Record<string, number> }) ?? {}).previous ?? null))
+    findingsStaleness(kase.id).then(setStale).catch(() => setStale(null))
   }, [kase?.id])
   useEffect(() => {
     reload()
@@ -85,16 +92,24 @@ export function FindingsView() {
   }, [kase, rulesVersion])
   useEffect(() => {
     setSelected(null)
+    setIncident(null)
+    setParent(null)
     setPicked(new Set())
   }, [kase?.id])
+  // a rule run just finished elsewhere (auto-run after ingest): refresh the staleness banner
+  useEffect(() => {
+    if (!running && kase?.id) findingsStaleness(kase.id).then(setStale).catch(() => undefined)
+  }, [running, kase?.id])
 
-  const counts = useMemo(() => sevCounts(all), [all])
   const rows = useMemo(() => {
     const needle = q.toLowerCase()
     return all.filter((f) => (!sev || f.severity === sev) && (!status || f.status === status) && (!source || f.source === source) && (!needle || `${f.title} ${f.ruleId} ${JSON.stringify(f.entities)} ${f.attack.join(' ')}`.toLowerCase().includes(needle)))
   }, [all, sev, status, source, q])
+  const incidents = useMemo(() => (group === 'incident' ? buildIncidents(rows) : []), [rows, group])
+  const allIncidents = useMemo(() => buildIncidents(all), [all])
+  const counts = useMemo(() => (group === 'incident' ? sevCounts(allIncidents) : sevCounts(all)), [all, allIncidents, group])
   const groups = useMemo(() => {
-    if (!group) return []
+    if (!group || group === 'incident') return []
     const m = new Map<string, { key: string; label: string; items: Finding[] }>()
     for (const f of rows) {
       const key = group === 'ruleId' ? f.ruleId : group === 'source' ? f.source : (Object.values(f.entities)[0] ?? '(no entity)')
@@ -143,7 +158,7 @@ export function FindingsView() {
     }
   }, [selected, kase])
 
-  // keyboard: j / k move, o or Enter open, Escape close, / focus search
+  // keyboard: j / k move, Escape close, / focus search
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null
@@ -153,8 +168,13 @@ export function FindingsView() {
         ;(document.querySelector('[data-findings-search]') as HTMLInputElement | null)?.focus()
         return
       }
-      if (group || tab !== 'findings' || !rows.length) return
-      if (e.key === 'j' || e.key === 'k') {
+      if (tab !== 'findings' || (e.key !== 'j' && e.key !== 'k')) return
+      if (group === 'incident' && incidents.length) {
+        const i = incident ? incidents.findIndex((r) => r.id === incident.id) : -1
+        const next = e.key === 'j' ? Math.min(incidents.length - 1, i + 1) : Math.max(0, i - 1)
+        setSelected(null)
+        setIncident(incidents[next])
+      } else if (!group && rows.length) {
         const i = selected ? rows.findIndex((r) => r.id === selected.id) : -1
         const next = e.key === 'j' ? Math.min(rows.length - 1, i + 1) : Math.max(0, i - 1)
         setSelected(rows[next])
@@ -162,48 +182,54 @@ export function FindingsView() {
     }
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
-  }, [rows, selected, group, tab])
+  }, [rows, incidents, selected, incident, group, tab])
 
   if (!kase) return null
 
   const run = async () => {
-    const enabled = rules.filter((r) => r.enabled && !r.error).map((r) => r.rule)
-    if (!enabled.length) return toast('warn', 'no enabled rules')
-    const before = sevCounts(all)
-    setRunning({ done: 0, total: enabled.length, rule: '' })
-    try {
-      await runRulesFor(kase, enabled, (done, total, rule) => setRunning({ done, total, rule }))
-      const pruned = await pruneOrphanFindings(kase.id!, rules.map((r) => r.rule.id))
-      if (pruned) toast('info', `${pruned} finding(s) of rules that no longer exist were removed`)
-      await getDb().kv.put({ key: `findingCounts-${kase.id}`, value: { previous: before, at: Date.now() } })
-    } catch (e) {
-      toast('err', `rules failed: ${(e as Error).message}`, 0)
-    }
-    setRunning(null)
+    await runEnabledRules(kase, 'manual')
     reload()
-    refreshCounts(kase)
   }
   const setStatusFor = async (ids: number[], s: Status) => {
     const db = getDb()
     await Promise.all(ids.map((id) => db.findings.update(id, { status: s })))
     if (selected && ids.includes(selected.id!)) setSelected({ ...selected, status: s })
+    if (incident) setIncident({ ...incident, status: s, findings: incident.findings.map((f) => (ids.includes(f.id!) ? { ...f, status: s } : f)) })
     setPicked(new Set())
     reload()
   }
-  const openRefs = (f: Finding) => {
-    if (!f.refs.length) return
-    if (f.source === 'events') setEventsFilter({ conditions: [{ field: 'id', op: 'in', value: f.refs.slice(0, 500) }], sort: { field: 'ts', dir: 'asc' } })
-    else setMailsFilter({ conditions: [{ field: 'id', op: 'in', value: f.refs.slice(0, 500) }] })
-    setView(f.source)
+  const openRefs = (source: 'events' | 'mails' | 'mixed', refs: number[]) => {
+    if (!refs.length || source === 'mixed') return
+    if (source === 'events') setEventsFilter({ conditions: [{ field: 'id', op: 'in', value: refs.slice(0, REFS_OPEN) }], sort: { field: 'ts', dir: 'asc' } })
+    else setMailsFilter({ conditions: [{ field: 'id', op: 'in', value: refs.slice(0, REFS_OPEN) }] })
+    setView(source)
   }
   const explain = (f: Finding) => {
     setAiPrompt(`Explain this finding and propose the next investigation steps. Rule ${f.ruleId} (${f.severity}): ${f.title}. ${f.description ?? ''} Entities: ${JSON.stringify(f.entities)}. ${f.count} matching row(s) in ${f.source}, first ${f.ts ? new Date(f.ts).toISOString() : 'n/a'}. Use the tools to look at the referenced rows (ids ${f.refs.slice(0, 20).join(', ')}).`)
     setView('ai')
   }
+  const explainIncident = (i: Incident) => {
+    setAiPrompt(`Assess this incident and propose the next investigation steps. ${i.kind === 'mail' ? 'Mail' : 'Entity'} "${i.title}" (${i.severity}), ${i.findings.length} finding(s) from ${i.rules.length} rule(s), ${i.ts ? new Date(i.ts).toISOString() : 'n/a'} to ${i.tsEnd ? new Date(i.tsEnd).toISOString() : 'n/a'}. Entities: ${JSON.stringify(i.entities)}. Findings: ${i.findings.slice(0, 20).map((f) => `${f.severity} ${f.ruleId}: ${f.title}`).join(' | ')}. Referenced rows (${i.source}): ${i.refs.slice(0, 20).join(', ')}.`)
+    setView('ai')
+  }
   const toggleGroup = (key: string) => setOpenGroups((s) => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n })
-  const delta = (s: Severity) => (previous ? (counts[s] ?? 0) - (previous[s] ?? 0) : null)
+  const delta = (s: Severity) => (group !== 'incident' && previous ? (counts[s] ?? 0) - (previous[s] ?? 0) : null)
   const enabledCount = rules.filter((r) => r.enabled).length
-  const pickedIds = Array.from(picked).map(Number)
+  const pickedFindingIds = group === 'incident' ? incidents.filter((i) => picked.has(i.id)).flatMap((i) => i.findings.map((f) => f.id!)) : Array.from(picked).map(Number)
+  const openFinding = (f: Finding, from: Incident | null) => {
+    setParent(from)
+    setIncident(null)
+    setSelected(f)
+    setFlyTab('overview')
+  }
+  const inheritedReview = (f: Finding) => lastRun && f.status !== 'new' && f.createdAt < lastRun.ts
+  const staleParts: string[] = []
+  if (stale) {
+    if (stale.lastRun == null && all.length === 0 && stale.evidenceAfter > 0) staleParts.push('rules have not run on this evidence yet')
+    else if (stale.evidenceAfter > 0) staleParts.push(`${stale.evidenceAfter} evidence file${stale.evidenceAfter === 1 ? '' : 's'} added since the last run`)
+    if (stale.rescoreIncomplete) staleParts.push('mail scores changed but the findings refresh did not finish')
+    if (stale.baselineAfter) staleParts.push('sender baseline ran after the last run')
+  }
 
   const columns: Column<Finding>[] = [
     { key: 'severity', label: 'severity', width: 104, render: (r) => <Sev sev={r.severity} /> },
@@ -213,15 +239,36 @@ export function FindingsView() {
     { key: 'source', label: 'source', width: 70 },
     { key: 'count', label: 'rows', width: 64, render: (r) => fmtNum(r.count) },
     { key: 'ts', label: 'first seen (UTC)', width: 150, render: (r) => fmtTs(r.ts) },
-    { key: 'status', label: 'status', width: 110, render: (r) => <Badge sev={STATUS_SEV[r.status as Status] ?? 'info'}>{STATUS_LABEL[r.status as Status] ?? r.status}</Badge> },
+    { key: 'status', label: 'status', width: 110, render: (r) => <StatusBadge s={r.status} /> },
   ]
+  const incidentColumns: Column<Incident>[] = [
+    { key: 'severity', label: 'severity', width: 104, render: (r) => <Sev sev={r.severity} /> },
+    { key: 'title', label: 'incident', width: 'minmax(300px, 1.8fr)', render: (r) => <span className="sans ellipsis" title={r.subtitle}><span style={{ color: 'var(--fg-1)' }}>{r.title}</span><span className="muted"> · {r.subtitle}</span></span> },
+    { key: 'kind', label: 'kind', width: 74, render: (r) => KIND_LABEL[r.kind] },
+    { key: 'findings', label: 'findings', width: 130, render: (r) => <span className="row" style={{ gap: 6 }}><span className="mono">{fmtNum(r.findings.length)}</span><span style={{ width: 70 }}><SevBar counts={sevCounts(r.findings)} /></span></span> },
+    { key: 'rules', label: 'rules', width: 56, render: (r) => fmtNum(r.rules.length) },
+    { key: 'ts', label: 'first seen (UTC)', width: 150, render: (r) => fmtTs(r.ts) },
+    { key: 'tsEnd', label: 'last (UTC)', width: 150, render: (r) => (r.tsEnd && r.tsEnd !== r.ts ? fmtTs(r.tsEnd) : '') },
+    { key: 'status', label: 'status', width: 110, render: (r) => <StatusBadge s={r.status} /> },
+  ]
+
+  const memberRow = (f: Finding, from: Incident | null) => (
+    <tr key={f.id} onClick={() => openFinding(f, from)} style={{ cursor: 'pointer' }}>
+      <td style={{ width: 100 }}><Sev sev={f.severity} /></td>
+      <td className="sans">{f.title}{f.escalation ? <span className="muted"> · {f.escalation}</span> : null}</td>
+      <td className="muted">{f.ruleId}</td>
+      <td style={{ width: 60 }}>{fmtNum(f.count)}</td>
+      <td style={{ width: 150 }} className="nowrap">{fmtTs(f.ts)}</td>
+      <td style={{ width: 110 }}><StatusBadge s={f.status} /></td>
+    </tr>
+  )
 
   return (
     <div className="view">
       <div className="view-header">
         <div className="desc">
           <h1>Findings</h1>
-          <span className="sub">{fmtNum(all.length)} finding(s) from {enabledCount} enabled rule(s){lastRun ? ` · last run ${fmtTs(lastRun.ts)}` : ' · rules not run yet'}</span>
+          <span className="sub">{fmtNum(allIncidents.length)} incident(s) · {fmtNum(all.length)} finding(s) from {enabledCount} enabled rule(s){lastRun ? ` · last run ${fmtTs(lastRun.ts)}` : ' · rules not run yet'}</span>
         </div>
         <span className="spacer" />
         <button className="btn ghost sm" onClick={() => setView('rules')}>manage rules</button>
@@ -230,7 +277,23 @@ export function FindingsView() {
         <RescoreButton key={kase.id} />
         <button className="btn primary" onClick={run} disabled={!!running}><IconPlay /> run rules</button>
       </div>
-      {running && <div style={{ padding: '6px 16px', background: 'var(--surface)' }} className="col"><div className="small dim mono">{running.done}/{running.total} · {running.rule}</div><Progress value={running.done / Math.max(1, running.total)} /></div>}
+      {running && <div style={{ padding: '6px 16px', background: 'var(--surface)' }} className="col"><div className="small dim mono">{running.reason === 'ingest' ? 'refreshing findings after ingest · ' : ''}{running.done}/{running.total} · {running.rule}</div><Progress value={running.done / Math.max(1, running.total)} /></div>}
+      {!running && staleParts.length > 0 && (
+        <div className="bulkbar" style={{ background: 'var(--sev-medium-bg)', borderColor: 'rgba(217,130,43,0.35)', color: 'var(--sev-medium)' }}>
+          <b>Findings are behind the evidence:</b>
+          <span>{staleParts.join(' · ')}</span>
+          <span className="spacer" />
+          <button className="btn xs" onClick={run}>run rules now</button>
+        </div>
+      )}
+      {!running && stale && stale.errors.length > 0 && (
+        <div className="bulkbar" style={{ background: 'var(--sev-high-bg)', borderColor: 'rgba(209,64,63,0.35)', color: 'var(--sev-high)' }}>
+          <b>{stale.errors.length} rule{stale.errors.length === 1 ? '' : 's'} failed in the last run</b>
+          <span className="ellipsis" title={stale.errors.join('\n')}>{stale.errors.slice(0, 3).map((e) => e.split(':')[0]).join(', ')}{stale.errors.length > 3 ? ` +${stale.errors.length - 3}` : ''} · their findings are from an earlier run or missing</span>
+          <span className="spacer" />
+          <button className="btn xs" onClick={() => setView('rules')}>see diagnostics</button>
+        </div>
+      )}
       <div className="grid-5" style={{ padding: '12px 16px 0' }}>
         <Kpi tone="critical" icon={<IconFindings />} value={fmtNum(counts.critical ?? 0)} label="critical" delta={delta('critical')} onClick={() => setSev(sev === 'critical' ? '' : 'critical')} />
         <Kpi tone="high" icon={<IconFindings />} value={fmtNum(counts.high ?? 0)} label="high" delta={delta('high')} onClick={() => setSev(sev === 'high' ? '' : 'high')} />
@@ -241,7 +304,7 @@ export function FindingsView() {
       <div style={{ padding: '10px 16px 0' }}>
         <Tabs
           tabs={[
-            { id: 'findings', label: <span>Findings <span className="n">{fmtNum(rows.length)}</span></span> },
+            { id: 'findings', label: <span>{group === 'incident' ? 'Incidents' : 'Findings'} <span className="n">{fmtNum(group === 'incident' ? incidents.length : rows.length)}</span></span> },
             { id: 'attack', label: <span>ATT&amp;CK <span className="n">{attack.hits.length}</span></span> },
           ]}
           active={tab}
@@ -259,31 +322,44 @@ export function FindingsView() {
               <label className={classNames('pill', sev && 'active')}>severity <select value={sev} onChange={(e) => setSev(e.target.value)}><option value="">any</option>{ORDER.map((s) => <option key={s} value={s}>{s} ({counts[s] ?? 0})</option>)}</select></label>
               <label className={classNames('pill', status && 'active')}>status <select value={status} onChange={(e) => setStatus(e.target.value)}><option value="">any</option>{STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}</select></label>
               <label className={classNames('pill', source && 'active')}>source <select value={source} onChange={(e) => setSource(e.target.value)}><option value="">events + mails</option><option value="events">events</option><option value="mails">mails</option></select></label>
-              <div className="segmented" title="group by">
-                {([['', 'flat'], ['ruleId', 'rule'], ['entity', 'entity'], ['source', 'source']] as [Group, string][]).map(([g, label]) => (
-                  <button key={g} className={classNames(group === g && 'active')} onClick={() => setGroup(g)}>{label}</button>
+              <div className="segmented" title="how the queue is grouped">
+                {([['incident', 'incidents'], ['', 'flat'], ['ruleId', 'rule'], ['entity', 'entity'], ['source', 'source']] as [Group, string][]).map(([g, label]) => (
+                  <button key={g} className={classNames(group === g && 'active')} onClick={() => { setGroup(g); setPicked(new Set()); setIncident(null) }}>{label}</button>
                 ))}
               </div>
               <span className="spacer" />
-              <span className="mono small dim">{fmtNum(rows.length)} shown</span>
+              <span className="mono small dim">{group === 'incident' ? `${fmtNum(incidents.length)} incident(s) · ${fmtNum(rows.length)} finding(s)` : `${fmtNum(rows.length)} shown`}</span>
             </div>
           </div>
           {picked.size > 0 && (
             <div className="bulkbar">
-              <b>{picked.size} selected</b>
+              <b>{picked.size} selected{group === 'incident' ? ` · ${pickedFindingIds.length} finding(s)` : ''}</b>
               <span className="muted">set status:</span>
-              {STATUSES.map((s) => <button key={s} className="btn xs" onClick={() => setStatusFor(pickedIds, s)}>{STATUS_LABEL[s]}</button>)}
+              {STATUSES.map((s) => <button key={s} className="btn xs" onClick={() => setStatusFor(pickedFindingIds, s)}>{STATUS_LABEL[s]}</button>)}
               <span className="spacer" />
               <button className="btn xs ghost" onClick={() => setPicked(new Set())}>clear</button>
             </div>
           )}
           <div className="relative" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            {group === 'incident' && (
+              <VirtualTable
+                rows={incidents}
+                columns={incidentColumns}
+                rowKey={(r) => r.id}
+                onRowClick={(r) => { setSelected(null); setParent(null); setIncident(r) }}
+                selectedKey={incident?.id ?? null}
+                selectedKeys={picked}
+                onToggleSelect={(k) => setPicked((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n })}
+                onToggleAll={(on) => setPicked(on ? new Set(incidents.map((r) => r.id)) : new Set())}
+                empty={all.length ? 'no incident matches the filters' : 'no findings yet - run the rules'}
+              />
+            )}
             {!group && (
               <VirtualTable
                 rows={rows}
                 columns={columns}
                 rowKey={(r) => r.id!}
-                onRowClick={(r) => { setSelected(r); setFlyTab('overview') }}
+                onRowClick={(r) => openFinding(r, null)}
                 selectedKey={selected?.id ?? null}
                 selectedKeys={picked}
                 onToggleSelect={(k) => setPicked((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n })}
@@ -291,7 +367,7 @@ export function FindingsView() {
                 empty={all.length ? 'no finding matches the filters' : 'no findings yet - run the rules'}
               />
             )}
-            {group && (
+            {group && group !== 'incident' && (
               <div style={{ flex: 1, overflow: 'auto', background: 'var(--surface)' }}>
                 {groups.map((g) => (
                   <div key={g.key}>
@@ -308,16 +384,7 @@ export function FindingsView() {
                     {openGroups.has(g.key) && (
                       <table className="table compact">
                         <tbody>
-                          {g.items.slice(0, 300).map((f) => (
-                            <tr key={f.id} onClick={() => { setSelected(f); setFlyTab('overview') }} style={{ cursor: 'pointer' }}>
-                              <td style={{ width: 100 }}><Sev sev={f.severity} /></td>
-                              <td className="sans">{f.title}{f.escalation ? <span className="muted"> · {f.escalation}</span> : null}</td>
-                              <td className="muted">{Object.entries(f.entities).map(([k, v]) => `${k}=${v}`).join(' · ')}</td>
-                              <td style={{ width: 60 }}>{fmtNum(f.count)}</td>
-                              <td style={{ width: 150 }}>{fmtTs(f.ts)}</td>
-                              <td style={{ width: 110 }}><Badge sev={STATUS_SEV[f.status as Status] ?? 'info'}>{STATUS_LABEL[f.status as Status] ?? f.status}</Badge></td>
-                            </tr>
-                          ))}
+                          {g.items.slice(0, 300).map((f) => memberRow(f, null))}
                           {g.items.length > 300 && <tr><td colSpan={6} className="muted sans">{fmtNum(g.items.length - 300)} more - switch to the flat view with a filter</td></tr>}
                         </tbody>
                       </table>
@@ -327,26 +394,69 @@ export function FindingsView() {
                 {!groups.length && <div className="vtable-empty">{all.length ? 'no finding matches the filters' : 'no findings yet - run the rules'}</div>}
               </div>
             )}
+            {incident && !selected && (
+              <Flyout
+                title={<span className="row" style={{ gap: 8 }}><Sev sev={incident.severity} /><span>{incident.title}</span></span>}
+                meta={<>
+                  <Badge>{KIND_LABEL[incident.kind]}</Badge>
+                  <span>{fmtNum(incident.findings.length)} finding(s) from {incident.rules.length} rule(s)</span>
+                  <span>{fmtTs(incident.ts)}{incident.tsEnd && incident.tsEnd !== incident.ts ? ` → ${fmtTs(incident.tsEnd)}` : ''}</span>
+                  <span>{fmtNum(incident.refs.length)} row(s)</span>
+                  <StatusBadge s={incident.status} />
+                </>}
+                onClose={() => setIncident(null)}
+                footer={<>
+                  <AddToTimeline ts={incident.ts} text={`${incident.title}: ${incident.lead.title}`} link={{ source: 'findings', id: incident.lead.id!, label: incident.lead.ruleId }} severity={incident.severity} />
+                  <span className="small muted">status</span>
+                  <div className="segmented">{STATUSES.map((s) => <button key={s} className={classNames(incident.status === s && 'active')} onClick={() => setStatusFor(incident.findings.map((f) => f.id!), s)}>{STATUS_LABEL[s]}</button>)}</div>
+                  <span className="spacer" />
+                  <button className="btn sm" onClick={() => explainIncident(incident)}>ask the analyst</button>
+                  {incident.source !== 'mixed' && <button className="btn sm primary" onClick={() => openRefs(incident.source, incident.refs)}>open {fmtNum(Math.min(incident.refs.length, REFS_OPEN))} row(s)</button>}
+                </>}
+              >
+                <div className="section">
+                  <h3>Findings</h3>
+                  <div className="small muted">{incident.subtitle}. The status of the incident is set on every finding below; open one for its own detail.</div>
+                  <table className="table compact">
+                    <tbody>{incident.findings.map((f) => memberRow(f, incident))}</tbody>
+                  </table>
+                </div>
+                <div className="section">
+                  <h3>Investigation</h3>
+                  <div className="highlight">
+                    {Object.entries(incident.entities).slice(0, 12).map(([k, v]) => (
+                      <div className="f" key={k}>
+                        <span className="k">{k}</span>
+                        <span className="v" onClick={() => openEntity(k, String(v), incident.source === 'mails' ? 'mails' : 'events')} title={entityKind(k) ? `open the ${entityKind(k)} page` : `pivot on ${k}`}>{String(v)}</span>
+                      </div>
+                    ))}
+                    {incident.kind === 'mail' && <div className="f"><span className="k">mail</span><span className="v" onClick={() => { setFocus({ source: 'mails', id: incident.refs[0] }); setView('mails') }}>open #{incident.refs[0]}</span></div>}
+                  </div>
+                  {incident.attack.length > 0 && <div className="row wrap" style={{ gap: 6 }}>{incident.attack.map((t) => <a key={t} className="badge outline" href={`https://attack.mitre.org/techniques/${t.replace('.', '/')}/`} target="_blank" rel="noreferrer">{t}</a>)}</div>}
+                </div>
+              </Flyout>
+            )}
             {selected && (
               <Flyout
-                title={<span className="row" style={{ gap: 8 }}><Sev sev={selected.severity} /><span>{selected.title}</span></span>}
+                title={<span className="row" style={{ gap: 8 }}>{parent && <button className="btn icon ghost sm" title="back to the incident" onClick={() => { setSelected(null); setIncident(parent); setParent(null) }}><IconArrowLeft /></button>}<Sev sev={selected.severity} /><span>{selected.title}</span></span>}
                 meta={<>
                   <span className="mono">{selected.ruleId}</span>
                   <span>{selected.source}</span>
                   <span>{fmtTs(selected.ts)}{selected.tsEnd && selected.tsEnd !== selected.ts ? ` → ${fmtTs(selected.tsEnd)}` : ''}</span>
                   <span>{fmtNum(selected.count)} row(s)</span>
-                  <Badge sev={STATUS_SEV[selected.status as Status] ?? 'info'}>{STATUS_LABEL[selected.status as Status] ?? selected.status}</Badge>
+                  <StatusBadge s={selected.status} />
                   {selected.confidence && <span title="rule confidence">confidence {selected.confidence}</span>}
+                  {inheritedReview(selected) && <span title="the status was set on an earlier evaluation of this finding key and carried over by the last run">status carried over from {fmtTs(selected.createdAt)}</span>}
                 </>}
                 tabs={<Tabs tabs={[{ id: 'overview', label: 'Overview' }, { id: 'table', label: 'Table' }, { id: 'json', label: 'JSON' }]} active={flyTab} onChange={setFlyTab} />}
-                onClose={() => setSelected(null)}
+                onClose={() => { setSelected(null); setParent(null) }}
                 footer={<>
                   <AddToTimeline ts={selected.ts} text={selected.title} link={{ source: 'findings', id: selected.id!, label: selected.ruleId }} severity={selected.severity} />
                   <span className="small muted">status</span>
                   <div className="segmented">{STATUSES.map((s) => <button key={s} className={classNames(selected.status === s && 'active')} onClick={() => setStatusFor([selected.id!], s)}>{STATUS_LABEL[s]}</button>)}</div>
                   <span className="spacer" />
                   <button className="btn sm" onClick={() => explain(selected)}>ask the analyst</button>
-                  <button className="btn sm primary" onClick={() => openRefs(selected)}>open {Math.min(selected.refs.length, 500)} row(s)</button>
+                  <button className="btn sm primary" onClick={() => openRefs(selected.source, selected.refs)}>open {fmtNum(Math.min(selected.refs.length, REFS_OPEN))} row(s)</button>
                 </>}
               >
                 {flyTab === 'overview' && (
@@ -370,7 +480,7 @@ export function FindingsView() {
                             <span className="v" onClick={() => openEntity(k, String(v), selected.source)} title={entityKind(k) ? `open the ${entityKind(k)} page` : `pivot on ${k}`}>{String(v)}</span>
                           </div>
                         ))}
-                        <div className="f"><span className="k">referenced rows</span><span className="v" onClick={() => openRefs(selected)}>{fmtNum(selected.refs.length)}{selected.refs.length > 500 ? ' (first 500)' : ''}</span></div>
+                        <div className="f"><span className="k">referenced rows</span><span className="v" onClick={() => openRefs(selected.source, selected.refs)}>{fmtNum(selected.refs.length)}{selected.refs.length > REFS_OPEN ? ` (first ${REFS_OPEN} open)` : ''}</span></div>
                         {selected.refs.slice(0, 1).map((id) => <div className="f" key={id}><span className="k">first row</span><span className="v" onClick={() => { setFocus({ source: selected.source, id }); setView(selected.source) }}>#{id}</span></div>)}
                       </div>
                     </div>
@@ -384,6 +494,7 @@ export function FindingsView() {
                           </div>
                         ))}
                         {(() => { const rc = relatedChains(selected, all); return rc.length ? <><div className="k">attack chains</div><div className="v">{rc.map((c) => <button key={c.id} className="btn link" style={{ display: 'block' }} onClick={() => setView('chains')}>{c.title}</button>)}</div></> : null })()}
+                        {(() => { const inc = allIncidents.find((i) => i.findings.some((f) => f.id === selected.id)); return inc && inc.findings.length > 1 ? <><div className="k">incident</div><div className="v click" onClick={() => { setSelected(null); setParent(null); setIncident(inc) }}>{inc.title} · {inc.findings.length} finding(s)</div></> : null })()}
                         <div className="k">same rule</div>
                         <div className="v">{fmtNum(all.filter((f) => f.ruleId === selected.ruleId).length)} finding(s) · {fmtNum(all.filter((f) => f.ruleId === selected.ruleId && f.status === 'false_positive').length)} marked false positive</div>
                       </div>

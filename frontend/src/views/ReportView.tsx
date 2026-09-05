@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { runAgent } from '../ai/chat'
 import { getSource } from '../data/source'
 import { getDb, type CaseNote, type Evidence, type Finding, type Ioc } from '../db/schema'
+import { buildIncidents } from '../rules/incidents'
 import { listNotes } from '../data/caseNotes'
 import { toast, useStore } from '../state/store'
 import { defang, escapeHtml, fmtBytes, fmtNum, fmtTs, renderMarkdown } from '../util/format'
@@ -34,6 +35,7 @@ export function ReportView() {
   }, [kase, rulesVersion])
   if (!kase) return null
   const shown = findings.filter((f) => includeFp || f.status !== 'false_positive')
+  const incidents = buildIncidents(shown)
   const curated = notes.filter((n) => n.kind === 'timeline').sort((a, b) => a.ts - b.ts)
   const tasks = notes.filter((n) => n.kind === 'task').sort((a, b) => Number(a.done ?? false) - Number(b.done ?? false) || a.createdAt - b.createdAt)
   const analystNotes = notes.filter((n) => n.kind === 'note').sort((a, b) => a.createdAt - b.createdAt)
@@ -54,38 +56,60 @@ export function ReportView() {
     }
   }
   const html = () => {
+    // every cell is escaped here; the few cells that carry markup (severity spans, <code>) build it from already-escaped text
+    const h = escapeHtml
     const rows = (xs: string[][]) => xs.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join('')}</tr>`).join('')
+    const sev = (x: string) => { const k = ['critical', 'high', 'medium', 'low', 'info'].includes(x) ? x : 'info'; return `<span class="sev-${k}">${h(x)}</span>` }
     return `<!doctype html><html><head><meta charset="utf-8"><title>REMN report - ${escapeHtml(kase.name)}</title>
 <style>body{font:13px/1.5 Segoe UI,Arial,sans-serif;color:#111;margin:40px;max-width:1100px}h1{font-size:22px;border-bottom:2px solid #222;padding-bottom:6px}h2{font-size:16px;margin-top:28px;border-bottom:1px solid #ccc}table{border-collapse:collapse;width:100%;font-size:12px}td,th{border:1px solid #ccc;padding:4px 6px;text-align:left;vertical-align:top}th{background:#eee}code,.mono{font-family:Consolas,monospace;font-size:11px}.sev-critical{color:#b00035;font-weight:bold}.sev-high{color:#c4471b;font-weight:bold}.sev-medium{color:#9a6b00}.sev-low{color:#1f5fb0}.sev-info{color:#666}.muted{color:#666}</style></head><body>
 <h1>Forensic analysis report — ${escapeHtml(kase.name)}</h1>
 <p class="muted">Generated ${new Date().toISOString()} by REMN${kase.analyst ? ` · analyst ${escapeHtml(kase.analyst)}` : ''}. All timestamps UTC.</p>
 ${summary ? `<h2>Executive summary</h2><div>${renderMarkdown(summary)}</div>` : ''}
 <h2>Evidence &amp; chain of custody</h2>
-<table><tr><th>file</th><th>kind</th><th>size</th><th>rows</th><th>SHA-256</th><th>integrity</th><th>added</th></tr>${rows(evidence.map((e) => [escapeHtml(e.name), e.format || e.kind, fmtBytes(e.size), fmtNum(e.count), `<code>${e.sha256Client ?? ''}</code>`, e.integrity, fmtTs(e.addedAt)]))}</table>
+<table><tr><th>file</th><th>kind</th><th>size</th><th>rows</th><th>SHA-256</th><th>integrity</th><th>added</th></tr>${rows(evidence.map((e) => [h(e.name), h(e.format || e.kind), fmtBytes(e.size), fmtNum(e.count), `<code>${h(e.sha256Client ?? '')}</code>`, h(e.integrity), fmtTs(e.addedAt)]))}</table>
 <h2>Findings (${shown.length})</h2>
 <p>${ORDER.map((s) => `<span class="sev-${s}">${s}: ${bySev[s] ?? 0}</span>`).join(' · ')}</p>
-<table><tr><th>severity</th><th>finding</th><th>entities</th><th>count</th><th>first</th><th>last</th><th>ATT&amp;CK</th><th>status</th><th>notes</th></tr>${rows(shown.map((f) => [`<span class="sev-${f.severity}">${f.severity}</span>`, escapeHtml(f.title) + (f.escalation ? `<br><span class="muted">${escapeHtml(f.escalation)}</span>` : ''), `<code>${escapeHtml(Object.entries(f.entities).map(([k, v]) => `${k}=${v}`).join('; '))}</code>`, String(f.count), fmtTs(f.ts), fmtTs(f.tsEnd ?? null), f.attack.join(' '), f.status, escapeHtml(f.notes ?? '')]))}</table>
+<h3>Incidents (${incidents.length})</h3>
+<p class="muted">Findings on the same mail, or about the same user, host or IP within six hours, are one incident.</p>
+<table><tr><th>severity</th><th>incident</th><th>kind</th><th>findings</th><th>rules</th><th>first</th><th>last</th><th>status</th></tr>${rows(incidents.map((i) => [sev(i.severity), `${h(i.title)}<br><span class="muted">${h(i.subtitle)}</span>`, h(i.kind), String(i.findings.length), h(i.rules.join(', ')), fmtTs(i.ts), fmtTs(i.tsEnd), h(i.status)]))}</table>
+<h3>All findings</h3>
+<table><tr><th>severity</th><th>finding</th><th>entities</th><th>count</th><th>first</th><th>last</th><th>ATT&amp;CK</th><th>status</th><th>notes</th></tr>${rows(shown.map((f) => [sev(f.severity), h(f.title) + (f.escalation ? `<br><span class="muted">${h(f.escalation)}</span>` : ''), `<code>${h(Object.entries(f.entities).map(([k, v]) => `${k}=${v}`).join('; '))}</code>`, String(f.count), fmtTs(f.ts), fmtTs(f.tsEnd ?? null), h(f.attack.join(' ')), h(f.status), h(f.notes ?? '')]))}</table>
 <h2>Indicators of compromise (flagged by reputation)</h2>
-${iocs.length ? `<table><tr><th>kind</th><th>indicator (defanged)</th><th>verdict</th><th>tags</th><th>seen</th></tr>${rows(iocs.map((i) => [i.kind, `<code>${escapeHtml(defang(i.value))}</code>`, i.verdict ?? '', (i.tags ?? []).join(' '), `${i.count} (${i.sources.join(', ')})`]))}</table>` : '<p class="muted">No indicator flagged (reputation checks not run, or nothing malicious).</p>'}
-${curated.length ? `<h2>Case timeline</h2><table><tr><th>time (UTC)</th><th>severity</th><th>entry</th><th>source</th></tr>${rows(curated.map((n) => [fmtTs(n.ts), `<span class="sev-${n.severity ?? 'info'}">${n.severity ?? 'info'}</span>`, escapeHtml(n.text), n.link ? escapeHtml(`${n.link.source} ${n.link.label ?? n.link.id}`) : '']))}</table>` : ''}
-${tasks.length ? `<h2>Tasks</h2><table><tr><th>status</th><th>task</th><th>updated</th></tr>${rows(tasks.map((t) => [t.done ? 'done' : '<b>open</b>', escapeHtml(t.text), fmtTs(t.updatedAt)]))}</table>` : ''}
+${iocs.length ? `<table><tr><th>kind</th><th>indicator (defanged)</th><th>verdict</th><th>tags</th><th>seen</th></tr>${rows(iocs.map((i) => [h(i.kind), `<code>${h(defang(i.value))}</code>`, h(i.verdict ?? ''), h((i.tags ?? []).join(' ')), h(`${i.count} (${i.sources.join(', ')})`)]))}</table>` : '<p class="muted">No indicator flagged (reputation checks not run, or nothing malicious).</p>'}
+${curated.length ? `<h2>Case timeline</h2><table><tr><th>time (UTC)</th><th>severity</th><th>entry</th><th>source</th></tr>${rows(curated.map((n) => [fmtTs(n.ts), sev(n.severity ?? 'info'), h(n.text), n.link ? h(`${n.link.source} ${n.link.label ?? n.link.id}`) : '']))}</table>` : ''}
+${tasks.length ? `<h2>Tasks</h2><table><tr><th>status</th><th>task</th><th>updated</th></tr>${rows(tasks.map((t) => [t.done ? 'done' : '<b>open</b>', h(t.text), fmtTs(t.updatedAt)]))}</table>` : ''}
 ${analystNotes.length ? `<h2>Analyst notes</h2>${analystNotes.map((n) => `<div><p class="muted">${fmtTs(n.createdAt)}</p>${renderMarkdown(n.text)}</div>`).join('<hr>')}` : ''}
 <h2>Timeline of findings</h2>
-<table><tr><th>time (UTC)</th><th>severity</th><th>finding</th><th>entities</th></tr>${rows([...shown].filter((f) => f.ts).sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0)).map((f) => [fmtTs(f.ts), `<span class="sev-${f.severity}">${f.severity}</span>`, escapeHtml(f.title), `<code>${escapeHtml(Object.values(f.entities).slice(0, 3).join(' · '))}</code>`]))}</table>
+<table><tr><th>time (UTC)</th><th>severity</th><th>finding</th><th>entities</th></tr>${rows([...shown].filter((f) => f.ts).sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0)).map((f) => [fmtTs(f.ts), sev(f.severity), h(f.title), `<code>${h(Object.values(f.entities).slice(0, 3).join(' · '))}</code>`]))}</table>
 <h2>Case settings</h2>
 <p class="mono">internal domains: ${escapeHtml(kase.settings.internalDomains.join(', ') || '—')} · VIPs: ${escapeHtml(kase.settings.vipNames.join(', ') || '—')} · business hours ${kase.settings.businessHours.start}h–${kase.settings.businessHours.end}h (${escapeHtml(kase.settings.businessHours.tz)}) · external lookups ${kase.settings.networkAllowed ? 'enabled' : 'disabled'}</p>
 </body></html>`
+  }
+  // the report is built from case data: print it from a sandboxed frame (opaque origin, no access to the case database) rather than a window that shares the app origin
+  const printReport = () => {
+    const frame = document.createElement('iframe')
+    frame.setAttribute('sandbox', 'allow-modals')
+    frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0'
+    frame.srcdoc = html()
+    frame.onload = () => {
+      try {
+        frame.contentWindow?.print()
+      } finally {
+        setTimeout(() => frame.remove(), 60_000)
+      }
+    }
+    document.body.appendChild(frame)
   }
   return (
     <div className="view">
       <div className="view-header">
         <h1>Report</h1>
-        <span className="sub">{shown.length} finding(s) · {iocs.length} flagged IOC(s) · {evidence.length} evidence file(s) · {curated.length} timeline entr{curated.length === 1 ? 'y' : 'ies'} · {tasks.filter((t) => !t.done).length} open task(s) · {analystNotes.length} note(s)</span>
+        <span className="sub">{incidents.length} incident(s) · {shown.length} finding(s) · {iocs.length} flagged IOC(s) · {evidence.length} evidence file(s) · {curated.length} timeline entr{curated.length === 1 ? 'y' : 'ies'} · {tasks.filter((t) => !t.done).length} open task(s) · {analystNotes.length} note(s)</span>
         <span className="spacer" />
         <label className="checkbox small"><input type="checkbox" checked={includeFp} onChange={(e) => setIncludeFp(e.target.checked)} /> include false positives</label>
         <button className="btn sm" onClick={generateSummary} disabled={busy}>{busy ? <Spinner /> : <IconAi />} AI executive summary</button>
         <button className="btn sm primary" onClick={() => downloadBlob(`${kase.name.replace(/[^a-z0-9_-]+/gi, '_')}-report.html`, new Blob([html()], { type: 'text/html' }))}><IconDownload /> download HTML</button>
-        <button className="btn sm" onClick={() => { const w = window.open('', '_blank'); if (w) { w.document.write(html()); w.document.close(); w.focus(); setTimeout(() => w.print(), 300) } }}>print / PDF</button>
+        <button className="btn sm" onClick={printReport}>print / PDF</button>
       </div>
       <div className="view-body col" style={{ gap: 14 }}>
         <div className="grid-2">

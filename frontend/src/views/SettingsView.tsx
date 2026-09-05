@@ -251,6 +251,7 @@ export function SettingsView() {
             <div className="panel-h">ingestion &amp; storage</div>
             <div className="panel-b col">
               <Toggle on={s.includeRaw !== false} onChange={(v) => patch({ includeRaw: v })} label="store the raw event JSON (enables regex over the whole record; ~2x storage)" />
+              <Toggle on={s.autoRunRules !== false} onChange={(v) => patch({ autoRunRules: v })} label="run the enabled rules automatically when an ingest finishes (the Findings page otherwise lags the evidence until you run them)" />
               <div className="kv small">
                 <div className="k">server</div><div className="v">{health?.name} v{health?.version} · python {health?.python} · multipart limit {health?.limits.maxUploadMb} MB · chunked uploads up to {health?.limits.maxChunkedGb ?? '?'} GB</div>
                 <div className="k">case stores</div><div className="v">{health?.store?.casesDir ?? '—'}</div>

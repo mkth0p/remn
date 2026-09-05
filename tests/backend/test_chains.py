@@ -202,3 +202,35 @@ def test_routine_activity_and_own_domain_links_do_not_make_a_chain():
     c = res2["chains"][0]
     assert c["artifactLinks"] >= 1 and any("mail URL domain evil-login.net" in a for s in c["steps"] for a in s["artifacts"])
     assert c["severity"] in ("medium", "high") and c["score"] < 80
+
+
+def test_score_is_bounded_and_explained():
+    """Long windows of routine activity cannot saturate the score; no artifact link means no critical."""
+    step = lambda w, arts=(), findings=(), kind="event", origin="m365": {"kind": kind, "origin": origin, "weight": w, "artifacts": list(arts), "findings": [{"severity": s} for s in findings]}
+    # 40 routine sign-ins and nothing tying them to the mail: medium at most
+    steps = [step(1) for _ in range(40)]
+    routine = {id(s) for s in steps}
+    score, b = C.score_chain(95, steps, routine, 0, 5, 0)
+    assert b["cap"] == 54 and score <= 54 and b["steps"] <= 20
+    # a finding on a step but still no artifact link: high at most
+    steps = [step(4, findings=("high",))] + [step(1) for _ in range(40)]
+    routine = {id(s) for s in steps[1:]}
+    score, b = C.score_chain(95, steps, routine, 0, 5, 4)
+    assert b["cap"] == 79 and 55 <= score <= 79
+    # the same with one step tied to the mail: critical, and every part is bounded
+    steps = [step(4, arts=("mail URL domain evil.test",), findings=("high",)), step(4, kind="mail", origin=None, arts=("victim engaged with the sender",))] + [step(1) for _ in range(40)]
+    routine = {id(s) for s in steps[2:]}
+    score, b = C.score_chain(95, steps, routine, 2, 5, 4)
+    assert b["cap"] is None and score >= 80
+    assert b["seed"] <= 30 and b["links"] <= 30 and b["steps"] <= 20 and b["findings"] <= 15 and b["sources"] <= 5 and b["linkSteps"] == 2
+    assert C.is_link("victim engaged with the sender") and C.is_link("mail attachment x.html") and not C.is_link("unexpected country")
+
+
+def test_chain_result_carries_the_breakdown():
+    mails, events, findings = scenario()
+    res = C.build_chains(mails, events, findings, {"expected_countries": ["FR"], "internal_domains": ["contoso.com"]})
+    c = res["chains"][0]
+    b = c["scoreBreakdown"]
+    assert set(b) == {"seed", "links", "steps", "findings", "sources", "cap", "linkSteps"}
+    assert c["score"] == min(100, b["seed"] + b["links"] + b["steps"] + b["findings"] + b["sources"])
+    assert c["artifactLinks"] >= b["linkSteps"] >= 1

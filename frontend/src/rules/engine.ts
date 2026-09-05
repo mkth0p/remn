@@ -48,6 +48,8 @@ export interface Rule {
 
 export const SEVERITIES: Severity[] = ['info', 'low', 'medium', 'high', 'critical']
 export const COLLAPSE_AFTER = 200
+/** row ids kept on a finding (both engines): enough for a mailbox-wide burst to stay linked from every mail */
+export const MAX_REFS = 5000
 const GROUPABLE: Record<string, string[]> = {
   events: ['computer', 'targetUser', 'subjectUser', 'ipAddress', 'processName', 'serviceName', 'memberName', 'groupName', 'shareName', 'image', 'destinationIp', 'query'],
   mails: ['fromAddr', 'fromDomain', 'fromRegistrable', 'fromNameNorm', 'originIp', 'replyToDomain', 'folder'],
@@ -255,10 +257,10 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
         escalation = flag
       }
     }
-    let refs = rows.slice(0, 500).map(idOf)
+    let refs = rows.slice(0, MAX_REFS).map(idOf)
     if (escalation) {
       const supporting = rows.find((r) => Array.isArray(r.flags) && r.flags.includes(escalation))!
-      if (!refs.includes(idOf(supporting))) refs = [...refs.slice(0, 499), idOf(supporting)]
+      if (!refs.includes(idOf(supporting))) refs = [...refs.slice(0, MAX_REFS - 1), idOf(supporting)]
     }
     return { severity, escalation, refs }
   }

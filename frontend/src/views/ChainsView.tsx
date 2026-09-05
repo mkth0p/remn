@@ -134,13 +134,24 @@ export function ChainsView() {
                   <div className="col" style={{ gap: 3, flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 600, color: 'var(--fg-1)', fontSize: 14 }}>
                       <span className="click" style={{ cursor: 'pointer' }} onClick={() => setEntity({ kind: 'user', value: chain.entities.user || chain.identityLabel })} title="open the user page">{chain.identityLabel}</span>
-                      <span className="muted" style={{ fontWeight: 400 }}> · score {chain.score} · {chain.steps.length} steps over {span(chain.end - chain.start)} · {chain.artifactLinks} artifact link(s)</span>
+                      <span className="muted" style={{ fontWeight: 400 }} title={chain.scoreBreakdown ? `seed ${chain.scoreBreakdown.seed} + links ${chain.scoreBreakdown.links} + steps ${chain.scoreBreakdown.steps} + findings ${chain.scoreBreakdown.findings} + sources ${chain.scoreBreakdown.sources}${chain.scoreBreakdown.cap ? ` · capped at ${chain.scoreBreakdown.cap}: no artifact ties the activity to the mail` : ''}` : undefined}> · score {chain.score} · {chain.steps.length} steps over {span(chain.end - chain.start)} · {chain.artifactLinks} artifact link(s)</span>
                     </div>
                     <div className="small" style={{ color: 'var(--fg-2)' }}>{chain.summary}</div>
                   </div>
                   <AddToTimeline ts={chain.start} text={`Attack chain ${chain.identityLabel}: ${chain.summary}`} link={{ source: 'chains', id: chain.id, label: chain.identityLabel }} severity={chain.severity} />
                   <button className="btn sm" onClick={() => ask(chain)}><IconAi /> ask the analyst</button>
                 </div>
+                {chain.scoreBreakdown && (
+                  <div className="row wrap small mono" style={{ gap: 10, marginTop: 6, color: 'var(--fg-3)' }} title="how the score is built: each part is bounded, so long windows of routine activity do not saturate it">
+                    <span>score {chain.score} =</span>
+                    <span>seed {chain.scoreBreakdown.seed}/30</span>
+                    <span>links {chain.scoreBreakdown.links}/30</span>
+                    <span>steps {chain.scoreBreakdown.steps}/20</span>
+                    <span>findings {chain.scoreBreakdown.findings}/15</span>
+                    <span>sources {chain.scoreBreakdown.sources}/5</span>
+                    {chain.scoreBreakdown.cap ? <span style={{ color: 'var(--sev-medium)' }}>capped at {chain.scoreBreakdown.cap}: nothing ties the activity to the mail</span> : null}
+                  </div>
+                )}
                 <div className="row wrap small" style={{ gap: 6, marginTop: 8 }}>
                   {chain.seed.fromAddr && <span className="pill" onClick={() => setEntity({ kind: 'address', value: chain.seed.fromAddr! })} title="seed sender"><IconMail /> {chain.seed.fromAddr}</span>}
                   {chain.entities.attackerAddresses.filter((a) => a !== chain.seed.fromAddr).map((a) => <span key={a} className="pill" onClick={() => setEntity({ kind: 'address', value: a })} title="attacker address"><IconMail /> {a}</span>)}

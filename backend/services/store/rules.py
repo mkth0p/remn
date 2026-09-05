@@ -16,7 +16,7 @@ SEVERITIES = ["info", "low", "medium", "high", "critical"]
 _DUR = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(ms|s|m|h|d|w)?\s*$", re.I)
 _THR = re.compile(r"^\s*(>=|<=|==|=|>|<|!=)?\s*(\d+)\s*$")
 MAX_FINDINGS = 2000
-MAX_REFS = 500
+MAX_REFS = 5000  # mirrors rules/engine.ts MAX_REFS
 COLLAPSE_AFTER = 200
 # Entity fields that make sense as a collapse key (avoid grouping by free text such as subject/commandLine).
 _GROUPABLE = {

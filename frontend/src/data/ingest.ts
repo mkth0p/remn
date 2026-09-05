@@ -1,3 +1,4 @@
+import { autoRunAfterIngest } from './findingsState'
 import { apiPost, API_HEADERS } from '../api/client'
 import { getDb, type Case, type Evidence } from '../db/schema'
 import { log, toast, useStore } from '../state/store'
@@ -100,6 +101,7 @@ export async function ingestToServer(file: File, kase: Case, kind: 'evtx' | 'mai
   } finally {
     setTimeout(() => useStore.getState().removeJob(jobId), 4000)
     refreshCounts(kase)
+    autoRunAfterIngest(kase)
   }
   return evidenceId
 }
@@ -156,6 +158,7 @@ export async function ingestToBrowser(file: File, kase: Case, kind: 'evtx' | 'ma
           worker.terminate()
           setTimeout(() => useStore.getState().removeJob(jobId), 4000)
           refreshCounts(kase)
+          autoRunAfterIngest(kase)
           resolve(evidenceId)
           break
         }

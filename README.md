@@ -496,13 +496,31 @@ same tokens in `frontend/src/ui/theme.css`. The wordmark and view titles use
 [Gulax](https://velvetyne.fr/fonts/gulax/) by Morgan Gilbert (Velvetyne, SIL Open Font
 License 1.1; licence and copyright files ship in `frontend/public/fonts/`).
 
-The Findings view is a triage queue: severity tiles with the change since the last
-run, search and severity / status / source filters, group-by rule, entity or source,
-checkbox selection with bulk status changes, `j` / `k` / `/` keyboard navigation,
-and a flyout with About, Investigation (entity pivots, referenced rows), Insights
+The Findings view is a triage queue. Its default unit is the incident: every finding
+on one mail (the rules that fired, the score band, the attack chain it seeded) is one
+line, and event findings about the same user, host or IP within six hours are one
+line, the way Sentinel and Elastic group alerts on shared entities. Incidents are
+derived from the findings table (nothing new is stored); setting an incident's status
+sets every member. Flat, rule, entity and source views keep the per-rule detail.
+Severity tiles show the change since the last run, `j` / `k` / `/` move and search,
+and the flyouts carry About, Investigation (entity pages, referenced rows), Insights
 (prevalence of the entities in the case, related chains, false-positive history of
-the rule) and Notes, plus Table and JSON views. The ATT&CK tab counts techniques
-observed against the enabled rules that map to them.
+the rule) and Notes. The ATT&CK tab counts techniques observed against the enabled
+rules that map to them.
+
+Findings are only as fresh as the last rule run, and that is where the Mails and
+Findings pages used to disagree: a mail scored at ingest showed as phishing on the
+Mails page while the Findings page still reflected an older run. Three things keep
+them aligned now. The enabled rules run automatically when an ingest finishes (case
+setting, on by default). A banner on the Findings page says when evidence was added,
+a rescore did not finish its findings refresh, or a sender baseline ran after the last
+run, with a one-click run; a second banner lists rules that failed in the last run
+(their findings are stale or missing rather than silently absent). And the score bands
+are mirrored by rules: a mail the Mails page paints high (60-79) or critical (80+)
+always has at least a score-band finding, so the specific indicator rules can stay
+precise. A status carried over from an earlier evaluation of the same finding key is
+labelled as such in the flyout. Findings keep up to 5,000 row ids (was 500), so every
+mail of a mailbox-wide burst stays linked from its own preview pane.
 
 Events and Mails share one query bar (search, time range, conditions, business
 hours, regex, saved searches, plain-language "ask") and a histogram of the current
@@ -518,6 +536,13 @@ Every user, host, IP, sender address or domain value opens an entity page as a
 flyout over the current view: first and last seen, counts, a merged timeline of the
 entity's findings, mails and events, insights (what else the entity was seen with,
 sender history), and pivots to the filtered Events or Mails lists or to the analyst.
+
+Chain scores are bounded and explained: seed mail risk (0-30), steps tied to the
+mail by an artifact (0-30), weight of the non-routine steps with diminishing returns
+(0-20), the worst finding on the seed and on a step (0-15), and more than one source
+involved (0-5). A chain with no artifact link cannot be critical (cap 79), and one
+with neither a link, a finding-bearing step nor a strong step stays medium at most
+(cap 54). The Chains page shows the breakdown under the chain header.
 
 Chains are read as stories: the left list ranks them by severity and score, the
 middle column is the ordered narrative (time and offset from the seed mail, source

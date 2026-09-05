@@ -27,6 +27,8 @@ export interface CaseSettings {
   deepAttachments?: boolean
   /** server store only: keep mail bodies / raw headers */
   keepBodies?: boolean
+  /** run the enabled rules when an ingest finishes so the findings never lag the evidence (default on) */
+  autoRunRules?: boolean
 }
 
 export const defaultSettings = (): CaseSettings => ({

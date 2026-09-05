@@ -63,6 +63,9 @@ interface State {
   /** entity page (user, host, ip, address, domain) shown as a flyout over any view */
   entity: EntityRef | null
   setEntity: (e: EntityRef | null) => void
+  /** progress of the rule run in flight (manual, or automatic after ingest) */
+  rulesRun: { done: number; total: number; rule: string; reason: 'manual' | 'ingest' } | null
+  setRulesRun: (r: State['rulesRun']) => void
   aiPrompt: string | null
   setAiPrompt: (p: string | null) => void
   counts: { events: number; mails: number; findings: number; iocs: number; evidence: number }
@@ -121,6 +124,8 @@ export const useStore = create<State>((set) => ({
   setFocus: (focusId) => set({ focusId }),
   entity: null,
   setEntity: (entity) => set({ entity }),
+  rulesRun: null,
+  setRulesRun: (rulesRun) => set({ rulesRun }),
   aiPrompt: null,
   setAiPrompt: (aiPrompt) => set({ aiPrompt }),
   counts: { events: 0, mails: 0, findings: 0, iocs: 0, evidence: 0 },

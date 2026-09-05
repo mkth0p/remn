@@ -23,6 +23,7 @@ from a browser-stored case.
 """
 from __future__ import annotations
 
+import math
 import re
 from collections import defaultdict
 from typing import Any, Iterable
@@ -152,6 +153,40 @@ def seed_artifacts(mail: dict[str, Any], settings: dict[str, Any] | None = None)
 # Step classification
 # ---------------------------------------------------------------------------
 SEV_WEIGHT = {"critical": 5, "high": 4, "medium": 2, "low": 1, "info": 0}
+
+# Artifacts that tie a step to the seed mail (as opposed to attribute notes such as "unexpected country").
+_LINK_ARTIFACTS = ("victim engaged with the sender", "same thread")
+
+
+def is_link(artifact: str) -> bool:
+    return artifact.startswith("mail ") or artifact in _LINK_ARTIFACTS
+
+
+def score_chain(seed_risk: int, steps: list[dict[str, Any]], routine_ids: set[int], artifact_links: int, top_seed: int, top_step: int) -> tuple[int, dict[str, Any]]:
+    """Bounded, additive score with the contribution of each part, so the interface can explain it.
+
+    seed 0-30 (mail risk), links 0-30 (steps tied to the mail by an artifact), steps 0-20 (weight of
+    the non-routine steps, diminishing), findings 0-15 (worst finding on the seed and on a step),
+    sources 0-5 (more than one source involved). Without any artifact link the chain cannot be
+    critical (cap 79), and without a link, a finding-bearing step or a strong step it stays medium
+    at most (cap 54): activity of the recipient that nothing ties to the mail is context.
+    """
+    link_steps = [s for s in steps if any(is_link(a) for a in s["artifacts"])]
+    routine = [s for s in steps if id(s) in routine_ids]
+    strong_weight = sum(min(int(s["weight"]), 6) for s in steps if id(s) not in routine_ids) + min(len(routine), 3)
+    seed_pts = min(30, round(seed_risk * 0.3))
+    links_pts = min(30, 12 * len(link_steps) + 3 * max(0, artifact_links - len(link_steps)))
+    steps_pts = min(20, int(round(5 * math.log2(1 + strong_weight))))
+    findings_pts = min(15, 2 * top_seed + 2 * top_step)
+    sources = {"mail" if s["kind"] == "mail" else s.get("origin") for s in steps}
+    sources_pts = 5 if len(sources) > 1 else 0
+    total = seed_pts + links_pts + steps_pts + findings_pts + sources_pts
+    cap = None
+    if not artifact_links:
+        linked = any(s["findings"] for s in steps)
+        cap = 79 if linked or max(int(s["weight"]) for s in steps) >= 3 else 54
+    score = min(100, total, cap or 100)
+    return score, {"seed": seed_pts, "links": links_pts, "steps": steps_pts, "findings": findings_pts, "sources": sources_pts, "cap": cap, "linkSteps": len(link_steps)}
 
 _M365_WEIGHTS = {
     "new-inboxrule": (4, "inbox rule created"), "set-inboxrule": (4, "inbox rule changed"), "updateinboxrules": (3, "inbox rules updated"),
@@ -455,20 +490,18 @@ def build_chains(mails: Iterable[dict[str, Any]], events: Iterable[dict[str, Any
                 s["offsetMin"] = round((s["ts"] - t0) / 60_000, 1)
                 if s["count"] > 1:
                     s["title"] = f"{s['title']} ×{s['count']}"
-            artifact_links = sum(1 for s in steps for a in s["artifacts"] if a.startswith("mail "))
+            artifact_links = sum(1 for s in steps for a in s["artifacts"] if is_link(a))
             # Routine activity (logons, sign-ins, DNS, mailbox reads at weight 1, without a link to the
             # mail or a finding) is context, not evidence: it contributes at most 3 points however long
             # the window is, and a chain made only of it is not a chain at all.
-            linked = {id(s) for s in steps if s["findings"] or any(a.startswith("mail ") for a in s["artifacts"])}
+            linked = {id(s) for s in steps if s["findings"] or any(is_link(a) for a in s["artifacts"])}
             routine = [s for s in steps if s["weight"] <= 1 and id(s) not in linked]
             if not artifact_links and not any(id(s) in linked or s["weight"] >= 2 for s in steps):
                 continue
             routine_ids = {id(s) for s in routine}
-            total_w = sum(s["weight"] for s in steps if id(s) not in routine_ids) + min(len(routine), 3)
             top_seed = max((SEV_WEIGHT.get(str(f.get("severity")), 0) for f in (seed_findings or [])), default=0)
-            score = min(100, int(int(seed.get("risk") or 0) * 0.4 + total_w * 6 + artifact_links * 8 + top_seed * 4))
-            if not artifact_links and not any(id(s) in linked for s in steps) and max(s["weight"] for s in steps) < 3:
-                score = min(score, 54)  # nothing ties the activity to the mail: never high without a link, a strong step or a finding
+            top_step = max((SEV_WEIGHT.get(str(f.get("severity")), 0) for s in steps for f in s["findings"]), default=0)
+            score, breakdown = score_chain(int(seed.get("risk") or 0), steps, routine_ids, artifact_links, top_seed, top_step)
             if score < min_score:
                 continue
             severity = "critical" if score >= 80 else "high" if score >= 55 else "medium" if score >= 35 else "low"
@@ -485,7 +518,7 @@ def build_chains(mails: Iterable[dict[str, Any]], events: Iterable[dict[str, Any
                          "risk": int(seed.get("risk") or 0), "flags": list(seed.get("flags") or [])[:12], "findings": _fsum(seed_findings or []),
                          "urlDomains": sorted(art["domains"])[:10], "attachments": sorted(art["attachments"])[:10]},
                 "steps": steps, "start": t0, "end": max(s["tsEnd"] for s in steps), "score": score, "severity": severity,
-                "artifactLinks": artifact_links,
+                "artifactLinks": artifact_links, "scoreBreakdown": breakdown,
                 "entities": {"user": labels.get(ident) or rcpt, "ips": ips[:20], "hosts": hosts[:20], "attackerAddresses": sorted(set(attacker))[:10],
                              "domains": sorted(art["domains"])[:10]},
             })

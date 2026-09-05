@@ -2,7 +2,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import yaml from 'js-yaml'
 import { describe, expect, it } from 'vitest'
-import { runRule, validateRule, type Rule } from './engine'
+import { runRule, validateRule, type Rule, MAX_REFS } from './engine'
 
 const root = join(__dirname, '../../..')
 const fixture = JSON.parse(readFileSync(join(root, 'samples/synthetic/mail-calibration.json'), 'utf8'))
@@ -26,12 +26,12 @@ describe('mail calibration across rule engines', () => {
   })
 
   for (const window of [undefined, '10m']) it(`preserves the strongest escalation beyond the reference cap, window=${window}`, () => {
-    const rows = Array.from({ length: 502 }, (_, i) => ({ id: i + 1, date: i * 1000, fromAddr: 'sender@example.org', subject: 'file', flags: [i === 501 ? 'att_macro_vba_stomping' : 'att_office_macro'] }))
+    const rows = Array.from({ length: MAX_REFS + 2 }, (_, i) => ({ id: i + 1, date: i * 1000, fromAddr: 'sender@example.org', subject: 'file', flags: [i === MAX_REFS + 1 ? 'att_macro_vba_stomping' : 'att_office_macro'] }))
     const rule: Rule = { id: 'macro-review', title: 'Macro review', source: 'mails', severity: 'medium', confidence: 'low', where: {}, then_flags: [{ att_macro_vba_stomping: 'critical' }], ...(window ? { group_by: ['fromAddr'], threshold: '>= 2', window } : {}) }
     const found = runRule(rule, { rows })
     expect(found).toHaveLength(1)
     expect(found[0]).toMatchObject({ severity: 'critical', confidence: 'low', escalation: 'att_macro_vba_stomping' })
-    expect(found[0].refs).toHaveLength(500)
-    expect(found[0].refs).toContain(502)
+    expect(found[0].refs).toHaveLength(MAX_REFS)
+    expect(found[0].refs).toContain(MAX_REFS + 2)
   })
 })

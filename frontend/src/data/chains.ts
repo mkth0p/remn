@@ -44,6 +44,8 @@ export interface Chain {
   score: number
   severity: Severity
   artifactLinks: number
+  /** contribution of each part of the score (seed, links, steps, findings, sources) and the cap applied, if any */
+  scoreBreakdown?: { seed: number; links: number; steps: number; findings: number; sources: number; cap: number | null; linkSteps: number }
   entities: { user: string; ips: string[]; hosts: string[]; attackerAddresses: string[]; domains: string[] }
   summary: string
 }
