@@ -12,6 +12,10 @@ urlpatterns = [
     # rule-format converters (Sigma -> REMN DSL)
     path("rules/convert/sigma", rules.convert_sigma),
     path("rules/convert/sublime", rules.convert_sublime),
+    # community rule packs (SigmaHQ, Sublime) served on demand
+    path("rules/packs", rules.list_packs),
+    path("rules/packs/<str:pack_id>", rules.pack),
+    path("rules/packs/<str:pack_id>/license", rules.pack_license),
     # cross-source attack chains
     path("chains/build", chains.build),
     # enrichment passes (sender baseline, campaigns)

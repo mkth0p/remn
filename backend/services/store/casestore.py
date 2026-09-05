@@ -16,7 +16,15 @@ import time
 from pathlib import Path
 from typing import Any, Iterable
 
+import importlib.util
+import sys
 import duckdb
+
+# DuckDB probes for pandas while binding every "?" parameter. When pandas is not installed the
+# failed import rescans sys.path on disk each time (about 90 stats per rule with list-heavy
+# community rules, 50 ms instead of 6). A None entry makes that import fail instantly.
+if "pandas" not in sys.modules and importlib.util.find_spec("pandas") is None:
+    sys.modules["pandas"] = None  # type: ignore[assignment]
 import pyarrow as pa
 
 log = logging.getLogger(__name__)

@@ -5,10 +5,10 @@ import io
 import json
 import zipfile
 
-from django.http import HttpRequest, JsonResponse
-from django.views.decorators.http import require_POST
+from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.views.decorators.http import require_GET, require_POST
 
-from services.rules import mql, sigma
+from services.rules import mql, packs, sigma
 
 MAX_RULES = 6000
 MAX_ZIP_MEMBER = 512 * 1024
@@ -75,3 +75,27 @@ def convert_sigma(request: HttpRequest):
 @require_POST
 def convert_sublime(request: HttpRequest):
     return _convert(request, mql.convert_text, "Sublime rule YAML")
+
+
+# ---------------------------------------------------------------------------
+# community packs (rules/community/<id>/, written by tools/import_community_rules.py)
+# ---------------------------------------------------------------------------
+@require_GET
+def list_packs(request: HttpRequest):
+    return JsonResponse({"packs": packs.list_packs()})
+
+
+@require_GET
+def pack(request: HttpRequest, pack_id: str):
+    data = packs.load_pack(pack_id)
+    if data is None:
+        return JsonResponse({"error": f"unknown rule pack {pack_id!r}"}, status=404)
+    return JsonResponse(data)
+
+
+@require_GET
+def pack_license(request: HttpRequest, pack_id: str):
+    text = packs.license_text(pack_id)
+    if text is None:
+        return JsonResponse({"error": f"no licence file for rule pack {pack_id!r}"}, status=404)
+    return HttpResponse(text, content_type="text/plain; charset=utf-8")

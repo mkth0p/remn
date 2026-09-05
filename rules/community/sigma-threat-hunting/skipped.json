@@ -1,0 +1,62 @@
+[
+ {
+  "file": "rules-threat-hunting/windows/file/file_access/file_access_win_browsers_chromium_sensitive_files.yml",
+  "title": "Access To Chromium Browsers Sensitive Files By Uncommon Applications",
+  "reason": "logsource category 'file_access'"
+ },
+ {
+  "file": "rules-threat-hunting/windows/file/file_access/file_access_win_browsers_credential.yml",
+  "title": "Access To Browser Credential Files By Uncommon Applications",
+  "reason": "logsource category 'file_access'"
+ },
+ {
+  "file": "rules-threat-hunting/windows/file/file_access/file_access_win_office_outlook_mail_credential.yml",
+  "title": "Access To Windows Outlook Mail Files By Uncommon Applications",
+  "reason": "logsource category 'file_access'"
+ },
+ {
+  "file": "rules-threat-hunting/windows/file/file_access/file_access_win_susp_gpo_access_uncommon_process.yml",
+  "title": "Access To Sysvol Policies Share By Uncommon Process",
+  "reason": "logsource category 'file_access'"
+ },
+ {
+  "file": "rules-threat-hunting/windows/file/file_access/file_access_win_susp_reg_and_hive.yml",
+  "title": "Access To .Reg/.Hive Files By Uncommon Applications",
+  "reason": "logsource category 'file_access'"
+ },
+ {
+  "file": "rules-threat-hunting/windows/file/file_access/file_access_win_susp_unattend_xml.yml",
+  "title": "Unattend.XML File Access Attempt",
+  "reason": "logsource category 'file_access'"
+ },
+ {
+  "file": "rules-threat-hunting/windows/file/file_change/file_change_win_date_changed_to_another_year.yml",
+  "title": "File Creation Date Changed to Another Year",
+  "reason": "logsource category 'file_change'"
+ },
+ {
+  "file": "rules-threat-hunting/windows/file/file_rename/file_rename_win_non_dll_to_dll_ext.yml",
+  "title": "Non-DLL Extension File Renamed With DLL Extension",
+  "reason": "logsource category 'file_rename'"
+ },
+ {
+  "file": "rules-threat-hunting/windows/network_connection/net_connection_win_dfsvc_non_local_ip.yml",
+  "title": "Dfsvc.EXE Network Connection To Non-Local IPs",
+  "reason": "IPv6 cidr ::1/128"
+ },
+ {
+  "file": "rules-threat-hunting/windows/network_connection/net_connection_win_dllhost_non_local_ip.yml",
+  "title": "Dllhost.EXE Initiated Network Connection To Non-Local IP Address",
+  "reason": "IPv6 cidr ::1/128"
+ },
+ {
+  "file": "rules-threat-hunting/windows/network_connection/net_connection_win_powershell_network_connection.yml",
+  "title": "Network Connection Initiated By PowerShell Process",
+  "reason": "IPv6 cidr ::1/128"
+ },
+ {
+  "file": "rules-threat-hunting/windows/process_creation/proc_creation_win_susp_parent_execute_itself.yml",
+  "title": "Potential Executable Run Itself As Sacrificial Process",
+  "reason": "modifier |fieldref on Image"
+ }
+]

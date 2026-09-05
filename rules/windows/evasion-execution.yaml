@@ -108,7 +108,7 @@ where:
     - { processName|endswith: mshta.exe, commandLine|contains: ["javascript:", "vbscript:", "http", ".hta", "about:"] }
     - { processName|endswith: regsvr32.exe, commandLine|contains: [scrobj.dll, /i:http, /u /n, "http", ".sct", "/s /i"] }
     - { processName|endswith: rundll32.exe, commandLine|contains: ["javascript:", "shell32.dll,Control_RunDLL", "url.dll,", "advpack.dll", "zipfldr.dll", "pcwutl.dll", "comsvcs.dll", "MiniDump", "\\temp\\", "\\appdata\\", "\\users\\public\\", "http", ".txt", ".dat", ".png", ".jpg"] }
-    - { processName|endswith: wmic.exe, commandLine|contains: [process call create, /node:, "shadowcopy delete", "os get", "/format:", "http", "antivirusproduct", "product get"] }
+    - { processName|endswith: wmic.exe, commandLine|contains: [process call create, "/node:", "shadowcopy delete", "os get", "/format:", "http", "antivirusproduct", "product get"] }
     - { processName|endswith: msiexec.exe, commandLine|contains: ["http", "/q", "/quiet", "\\temp\\", "\\appdata\\", ".png", ".jpg", ".txt"] }
     - { processName|endswith: [cscript.exe, wscript.exe], commandLine|contains: ["\\temp\\", "\\appdata\\", "\\users\\public\\", "\\downloads\\", "//e:", "/e:", ".js", ".jse", ".vbs", ".vbe", ".wsf", "http"] }
     - { processName|endswith: [curl.exe, wget.exe], commandLine|contains: ["http", "-o ", "-O ", "--output"] }

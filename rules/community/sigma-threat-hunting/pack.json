@@ -1,0 +1,70 @@
+{
+  "id": "sigma-threat-hunting",
+  "name": "Sigma - Threat hunting (Windows)",
+  "description": "SigmaHQ threat-hunting rules for Windows. Written to surface activity worth a look rather than confirmed malice, so they are noisy on purpose and off by default.",
+  "source": "events",
+  "defaultEnabled": false,
+  "license": {
+    "name": "Detection Rule License (DRL) 1.1",
+    "spdx": "DRL-1.1",
+    "url": "https://github.com/SigmaHQ/Detection-Rule-License",
+    "file": "LICENSE"
+  },
+  "upstream": {
+    "repo": "SigmaHQ/sigma",
+    "ref": "master",
+    "sha": "272daf82bf77fb0bb97f1f0c4d82bc61154772e1",
+    "url": "https://github.com/SigmaHQ/sigma/tree/272daf82bf77fb0bb97f1f0c4d82bc61154772e1",
+    "paths": [
+      "rules-threat-hunting"
+    ],
+    "fetched": "2026-09-05"
+  },
+  "counts": {
+    "upstream": 128,
+    "converted": 116,
+    "skipped": 12,
+    "warnings": 0
+  },
+  "skipReasons": [
+    [
+      "logsource category 'file_access'",
+      6
+    ],
+    [
+      "IPv6 cidr ::1/128",
+      3
+    ],
+    [
+      "logsource category 'file_change'",
+      1
+    ],
+    [
+      "logsource category 'file_rename'",
+      1
+    ],
+    [
+      "modifier |fieldref on Image",
+      1
+    ]
+  ],
+  "files": {
+    "appxdeployment_server.yaml": 1,
+    "create_remote_thread.yaml": 3,
+    "file_delete.yaml": 1,
+    "file_event.yaml": 9,
+    "firewall_as.yaml": 1,
+    "image_load.yaml": 10,
+    "network_connection.yaml": 5,
+    "pipe_created.yaml": 1,
+    "process_access.yaml": 4,
+    "process_creation.yaml": 57,
+    "ps_classic_start.yaml": 2,
+    "ps_module.yaml": 1,
+    "ps_script.yaml": 12,
+    "registry_event.yaml": 1,
+    "registry_set.yaml": 5,
+    "security.yaml": 3
+  },
+  "generator": "tools/import_community_rules.py"
+}

@@ -193,6 +193,26 @@ export interface Meta {
   mailStrongFlags?: string[]
   dangerousExtensions: Record<string, string>
   rules: { file: string; yaml: string; rule?: Record<string, unknown>; error?: string }[]
+  packs?: PackInfo[]
+}
+/** Manifest of a community rule pack (rules/community/<id>/pack.json). */
+export interface PackInfo {
+  id: string
+  name: string
+  description: string
+  source: 'events' | 'mails'
+  defaultEnabled: boolean
+  license: { name: string; spdx?: string; url?: string; file?: string }
+  upstream: { repo: string; ref: string; sha: string; url: string; paths?: string[]; fetched: string }
+  counts: { upstream: number; converted: number; skipped: number; warnings?: number }
+  skipReasons?: [string, number][]
+  files?: Record<string, number>
+  hash?: string
+  licenseText?: boolean
+}
+export interface PackRules {
+  pack: PackInfo
+  rules: { file: string; rule?: Record<string, unknown>; error?: string; yaml?: string }[]
 }
 export const getHealth = () => apiGet<Health>('/api/health')
 export const getMeta = () => apiGet<Meta>('/api/meta')

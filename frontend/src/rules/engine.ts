@@ -396,6 +396,16 @@ export function ruleEventIds(cond: RuleCond | undefined): number[] | null {
       if (all.length) return Array.from(new Set(all))
     }
   }
+  // all_of: every member must hold, so any member that pins ids bounds the rule (intersect when several do)
+  for (const [key, value] of Object.entries(cond)) {
+    if (/^all_of(_\d+)?$/.test(key) && Array.isArray(value)) {
+      const pinned = value.map((m) => ruleEventIds(m as RuleCond)).filter((ids): ids is number[] => !!ids && ids.length > 0)
+      if (pinned.length) {
+        const inter = pinned[0].filter((id) => pinned.every((set) => set.includes(id)))
+        return inter.length ? inter : pinned[0]
+      }
+    }
+  }
   return null
 }
 

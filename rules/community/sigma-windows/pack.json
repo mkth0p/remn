@@ -1,0 +1,136 @@
+{
+  "id": "sigma-windows",
+  "name": "Sigma - Windows (stable + test)",
+  "description": "The main SigmaHQ Windows rule set (process creation, registry, image load, PowerShell, network, file, DNS, built-in Security/System channels). Converted to the REMN DSL one to one; rules that would need to be weakened are listed in skipped.json.",
+  "source": "events",
+  "defaultEnabled": true,
+  "license": {
+    "name": "Detection Rule License (DRL) 1.1",
+    "spdx": "DRL-1.1",
+    "url": "https://github.com/SigmaHQ/Detection-Rule-License",
+    "file": "LICENSE"
+  },
+  "upstream": {
+    "repo": "SigmaHQ/sigma",
+    "ref": "master",
+    "sha": "272daf82bf77fb0bb97f1f0c4d82bc61154772e1",
+    "url": "https://github.com/SigmaHQ/sigma/tree/272daf82bf77fb0bb97f1f0c4d82bc61154772e1",
+    "paths": [
+      "rules"
+    ],
+    "fetched": "2026-09-05"
+  },
+  "counts": {
+    "upstream": 2410,
+    "converted": 2374,
+    "skipped": 36,
+    "warnings": 1
+  },
+  "skipReasons": [
+    [
+      "IPv6 cidr ::1/128",
+      17
+    ],
+    [
+      "logsource category 'file_access'",
+      7
+    ],
+    [
+      "modifier |base64offset on CommandLine",
+      4
+    ],
+    [
+      "modifier |base64offset on ServiceFileName",
+      1
+    ],
+    [
+      "modifier |fieldref on SubjectUserName",
+      1
+    ],
+    [
+      "modifier |base64offset on ImagePath",
+      1
+    ],
+    [
+      "logsource category 'file_change'",
+      1
+    ],
+    [
+      "modifier |fieldref on TargetFilename",
+      1
+    ],
+    [
+      "logsource category 'file_rename'",
+      1
+    ],
+    [
+      "modifier |fieldref on User",
+      1
+    ],
+    [
+      "modifier |base64offset on Destination",
+      1
+    ]
+  ],
+  "files": {
+    "application.yaml": 23,
+    "applocker.yaml": 2,
+    "appmodel_runtime.yaml": 1,
+    "appxdeployment_server.yaml": 9,
+    "appxpackaging_om.yaml": 1,
+    "bits_client.yaml": 7,
+    "capi2.yaml": 1,
+    "certificateservicesclient_lifecycle_system.yaml": 1,
+    "codeintegrity_operational.yaml": 10,
+    "create_remote_thread.yaml": 11,
+    "create_stream_hash.yaml": 9,
+    "diagnosis_scripted.yaml": 1,
+    "dns_client.yaml": 6,
+    "dns_query.yaml": 22,
+    "dns_server.yaml": 2,
+    "driver_framework.yaml": 1,
+    "driver_load.yaml": 10,
+    "file_delete.yaml": 11,
+    "file_event.yaml": 166,
+    "file_executable_detected.yaml": 1,
+    "firewall_as.yaml": 8,
+    "iis_configuration.yaml": 4,
+    "image_load.yaml": 100,
+    "ldap.yaml": 1,
+    "lsa_server.yaml": 1,
+    "microsoft_servicebus_client.yaml": 1,
+    "msexchange_management.yaml": 7,
+    "network_connection.yaml": 38,
+    "ntlm.yaml": 3,
+    "openssh.yaml": 1,
+    "other.yaml": 1,
+    "pipe_created.yaml": 17,
+    "powershell_classic.yaml": 3,
+    "process_access.yaml": 23,
+    "process_creation.yaml": 1180,
+    "process_tampering.yaml": 1,
+    "ps_classic_provider_start.yaml": 1,
+    "ps_classic_start.yaml": 9,
+    "ps_module.yaml": 33,
+    "ps_script.yaml": 163,
+    "raw_access_thread.yaml": 1,
+    "registry_add.yaml": 1,
+    "registry_delete.yaml": 10,
+    "registry_event.yaml": 32,
+    "registry_set.yaml": 204,
+    "security.yaml": 140,
+    "security_mitigations.yaml": 2,
+    "shell_core.yaml": 1,
+    "smbclient_security.yaml": 1,
+    "sysmon.yaml": 4,
+    "sysmon_error.yaml": 1,
+    "sysmon_status.yaml": 1,
+    "system.yaml": 62,
+    "taskscheduler.yaml": 3,
+    "terminalservices_localsessionmanager.yaml": 1,
+    "windefend.yaml": 16,
+    "wmi.yaml": 2,
+    "wmi_event.yaml": 2
+  },
+  "generator": "tools/import_community_rules.py"
+}

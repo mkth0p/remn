@@ -200,34 +200,62 @@ inside DuckDB; browser-store cases post the relevant rows to the local API
 (`POST /api/chains/build`). `services/analysis/chains.py` is pure functions
 over plain rows, tested on the synthetic BEC scenario plus host events.
 
-## Importing community rules (Sigma, Sublime)
+## Community rule packs (SigmaHQ, Sublime Security)
 
-The Rules view has two import buttons. Both send the files to the local API,
-translate what can be expressed exactly in the REMN DSL, and store the result
-as custom rules (both engines run them). Anything that cannot be translated
-without changing what the rule detects is listed as skipped with the reason;
-approximations are listed as warnings on the rule.
+The public collections ship with REMN as **packs** under `rules/community/`,
+already converted to the REMN DSL so both engines run them without a
+converter round-trip:
 
-* **Sigma** (`import Sigma`): one `.yml` or a `.zip` of the SigmaHQ / Chainsaw
-  / Hayabusa rules folder. Windows logsources map to channel + event id
-  (Sysmon 1 and Security 4688 for `process_creation`, ...), fields map to the
-  parser's flattened columns (`Image` matches both Sysmon and 4688), unmapped
-  EventData fields are reachable as `data.<Field>`, globs become the right
-  operator or an anchored regex, `1 of x*` / `all of them` become `any_of` /
-  `all_of`. On the SigmaHQ master branch, 2,490 of 2,538 real Windows rules
-  translate; the remainder use base64 / utf16 / fieldref modifiers, placeholder
-  expansion, aggregations or IPv6 CIDRs. `POST /api/rules/convert/sigma`.
-* **Sublime Security** (`import Sublime`): one `.yml` or a `.zip` of the
-  MIT-licensed `sublime-rules` repository. The structural subset of MQL
-  translates: sender / subject / header comparisons, `strings.*` and `regex.*`
-  matchers, `any(body.links | attachments | recipients.* | headers.reply_to)`,
-  `length()` counts, `$org_domains` / `$org_vips` (case settings), the common
-  `$lists` (built-in), `strings.ilevenshtein` (new `levenshtein` operator in
-  both engines), `1 of (...)`, `all()` with negated predicates. Rules that rely
-  on Sublime-only features (ML classifiers, link analysis, logo detection,
-  sender profiles, file explosion, screenshots, nested lambdas with `..`) are
-  skipped: about 160 of 1,226 rules translate today, and every skipped rule
-  names the feature it needs. `POST /api/rules/convert/sublime`.
+| pack | upstream | rules | default |
+|---|---|---|---|
+| `sigma-windows` | SigmaHQ `rules/` (Windows, stable + test) | 2,374 of 2,410 | on |
+| `sigma-emerging-threats` | SigmaHQ `rules-emerging-threats/` (Windows) | 319 of 323 | on |
+| `sigma-threat-hunting` | SigmaHQ `rules-threat-hunting/` (Windows) | 116 of 128 | off (noisy by design) |
+| `sublime` | sublime-security `detection-rules/` | 168 of 1,227 | on |
+
+Each pack directory holds the rules grouped by log source (`process_creation.yaml`,
+`registry_set.yaml`, ...) or by Sublime rule family, a `pack.json` manifest with
+the upstream repository, the exact commit, the licence and the counts, the
+upstream `LICENSE` verbatim, and `skipped.json` naming every upstream rule that
+was not converted and why (a rule is skipped rather than weakened: base64 /
+utf16 / fieldref modifiers, IPv6 CIDRs, `file_access` sources, Sublime ML
+classifiers, `file.explode`, link analysis, ...). The SigmaHQ rules are
+redistributed under the Detection Rule License 1.1, the Sublime rules under MIT.
+
+The Rules view lists the packs with a toggle each. `/api/meta` only carries the
+manifests; a pack's rules are fetched once per session from
+`GET /api/rules/packs/<id>` when it is on, so the app does not pay for 3,000
+rules it does not use. Single rules can still be switched off in the table, and
+a custom rule with the same id overrides a pack rule. Analysts' pack choices are
+kept in the browser (`packOverrides`).
+
+Running 3,000 rules is cheap on both engines: the browser worker groups rules by
+the event ids they pin and reads each event subset from IndexedDB once (the
+~1,500 process-creation rules share one read of the Sysmon 1 / 4688 rows), and
+the SQL engine runs them at a few milliseconds per rule (a DuckDB parameter
+binding quirk that cost 50 ms per rule when pandas is absent is short-circuited
+in `casestore.py`).
+
+**Refreshing the packs**: `tools/import_community_rules.py all --download`
+resolves the branch heads on GitHub, fetches those exact commits, converts them
+with the same code as the import buttons and rewrites the pack directories in
+place (stable order, no YAML aliases), so an update is one reviewable commit.
+`--zip <archive> --sha <commit>` works offline from a downloaded archive.
+
+**Importing other collections** (`import Sigma` / `import Sublime` in the Rules
+view) still converts one `.yml` or a `.zip` through `POST /api/rules/convert/sigma`
+and `POST /api/rules/convert/sublime` and stores the result as custom rules.
+Sigma: Windows logsources map to channel + event id (Sysmon 1 and Security 4688
+for `process_creation`, ...), fields map to the parser's flattened columns
+(`Image` matches both Sysmon and 4688), unmapped EventData fields are reachable
+as `data.<Field>`, globs become the right operator or an anchored regex,
+`1 of x*` / `all of them` become `any_of` / `all_of`. Sublime: the structural
+subset of MQL translates (sender / subject / header comparisons, `strings.*` and
+`regex.*` matchers, `any(body.links | attachments | recipients.* | headers.reply_to)`,
+`length()` counts, `$org_domains` / `$org_vips` from the case settings, the
+common `$lists`, `strings.ilevenshtein` through the `levenshtein` operator,
+`1 of (...)`, `all()` with negated predicates, `profile.by_sender()` through the
+sender-baseline columns).
 
 ## Test data (public)
 

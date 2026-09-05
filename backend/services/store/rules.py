@@ -360,6 +360,13 @@ def _rule_event_ids(cond: dict[str, Any] | None) -> list[int] | None:
                 all_ids += ids
             if all_ids:
                 return sorted(set(all_ids))
+    # all_of: every member must hold, so any member that pins ids bounds the rule (intersect when several do)
+    for k, v in cond.items():
+        if re.match(r"^all_of(_\d+)?$", k) and isinstance(v, list):
+            pinned = [set(ids) for ids in (_rule_event_ids(m if isinstance(m, dict) else None) for m in v) if ids]
+            if pinned:
+                inter = set.intersection(*pinned)
+                return sorted(inter or pinned[0])
     return None
 
 

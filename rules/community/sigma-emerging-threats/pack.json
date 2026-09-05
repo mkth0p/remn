@@ -1,0 +1,68 @@
+{
+  "id": "sigma-emerging-threats",
+  "name": "Sigma - Emerging threats (Windows)",
+  "description": "SigmaHQ emerging-threats rules for Windows: specific malware families, threat actors, exploited CVEs. Narrow by design, so they are on by default.",
+  "source": "events",
+  "defaultEnabled": true,
+  "license": {
+    "name": "Detection Rule License (DRL) 1.1",
+    "spdx": "DRL-1.1",
+    "url": "https://github.com/SigmaHQ/Detection-Rule-License",
+    "file": "LICENSE"
+  },
+  "upstream": {
+    "repo": "SigmaHQ/sigma",
+    "ref": "master",
+    "sha": "272daf82bf77fb0bb97f1f0c4d82bc61154772e1",
+    "url": "https://github.com/SigmaHQ/sigma/tree/272daf82bf77fb0bb97f1f0c4d82bc61154772e1",
+    "paths": [
+      "rules-emerging-threats"
+    ],
+    "fetched": "2026-09-05"
+  },
+  "counts": {
+    "upstream": 323,
+    "converted": 319,
+    "skipped": 4,
+    "warnings": 0
+  },
+  "skipReasons": [
+    [
+      "modifier |expand on Attributes",
+      2
+    ],
+    [
+      "IPv6 cidr ::1/128",
+      1
+    ],
+    [
+      "modifier |wide on CommandLine",
+      1
+    ]
+  ],
+  "files": {
+    "application.yaml": 9,
+    "create_remote_thread.yaml": 1,
+    "dns_query.yaml": 6,
+    "dns_server_analytic.yaml": 1,
+    "file_delete.yaml": 1,
+    "file_event.yaml": 45,
+    "image_load.yaml": 15,
+    "msexchange_management.yaml": 1,
+    "network_connection.yaml": 2,
+    "pipe_created.yaml": 2,
+    "printservice_admin.yaml": 1,
+    "printservice_operational.yaml": 1,
+    "process_access.yaml": 2,
+    "process_creation.yaml": 173,
+    "ps_script.yaml": 4,
+    "registry_add.yaml": 2,
+    "registry_event.yaml": 8,
+    "registry_set.yaml": 15,
+    "security.yaml": 17,
+    "system.yaml": 11,
+    "taskscheduler.yaml": 1,
+    "windefend.yaml": 1
+  },
+  "generator": "tools/import_community_rules.py"
+}

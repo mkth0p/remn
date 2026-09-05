@@ -1,0 +1,182 @@
+[
+ {
+  "file": "rules/windows/builtin/security/account_management/win_security_successful_external_remote_rdp_login.yml",
+  "title": "External Remote RDP Logon from Public IP",
+  "reason": "IPv6 cidr ::1/128"
+ },
+ {
+  "file": "rules/windows/builtin/security/account_management/win_security_successful_external_remote_smb_login.yml",
+  "title": "External Remote SMB Logon from Public IP",
+  "reason": "IPv6 cidr ::1/128"
+ },
+ {
+  "file": "rules/windows/builtin/security/account_management/win_security_susp_failed_logon_source.yml",
+  "title": "Failed Logon From Public IP",
+  "reason": "IPv6 cidr ::1/128"
+ },
+ {
+  "file": "rules/windows/builtin/security/win_security_cobaltstrike_service_installs.yml",
+  "title": "CobaltStrike Service Installations - Security",
+  "reason": "modifier |base64offset on ServiceFileName"
+ },
+ {
+  "file": "rules/windows/builtin/security/win_security_explicit_credential_local_logon.yml",
+  "title": "Potentially Suspicious Explicit Credential Local Logon",
+  "reason": "modifier |fieldref on SubjectUserName"
+ },
+ {
+  "file": "rules/windows/builtin/smbserver/connectivity/win_smbserver_connectivity_unsigned_and_unencrypted_share_connection.yml",
+  "title": "Unsigned or Unencrypted SMB Connection to Share Established",
+  "reason": "IPv6 cidr ::1/128"
+ },
+ {
+  "file": "rules/windows/builtin/system/service_control_manager/win_system_cobaltstrike_service_installs.yml",
+  "title": "CobaltStrike Service Installations - System",
+  "reason": "modifier |base64offset on ImagePath"
+ },
+ {
+  "file": "rules/windows/file/file_access/file_access_win_susp_credential_manager_access.yml",
+  "title": "Credential Manager Access By Uncommon Applications",
+  "reason": "logsource category 'file_access'"
+ },
+ {
+  "file": "rules/windows/file/file_access/file_access_win_susp_credhist.yml",
+  "title": "Access To Windows Credential History File By Uncommon Applications",
+  "reason": "logsource category 'file_access'"
+ },
+ {
+  "file": "rules/windows/file/file_access/file_access_win_susp_crypto_currency_wallets.yml",
+  "title": "Access To Crypto Currency Wallets By Uncommon Applications",
+  "reason": "logsource category 'file_access'"
+ },
+ {
+  "file": "rules/windows/file/file_access/file_access_win_susp_dpapi_master_key_access.yml",
+  "title": "Access To Windows DPAPI Master Keys By Uncommon Applications",
+  "reason": "logsource category 'file_access'"
+ },
+ {
+  "file": "rules/windows/file/file_access/file_access_win_susp_gpo_files.yml",
+  "title": "Access To Potentially Sensitive Sysvol Files By Uncommon Applications",
+  "reason": "logsource category 'file_access'"
+ },
+ {
+  "file": "rules/windows/file/file_access/file_access_win_susp_process_access_browser_cred_files.yml",
+  "title": "Suspicious File Access to Browser Credential Storage",
+  "reason": "logsource category 'file_access'"
+ },
+ {
+  "file": "rules/windows/file/file_access/file_access_win_teams_sensitive_files.yml",
+  "title": "Microsoft Teams Sensitive File Access By Uncommon Applications",
+  "reason": "logsource category 'file_access'"
+ },
+ {
+  "file": "rules/windows/file/file_change/file_change_win_unusual_modification_by_dns_exe.yml",
+  "title": "Unusual File Modification by dns.exe",
+  "reason": "logsource category 'file_change'"
+ },
+ {
+  "file": "rules/windows/file/file_delete/file_delete_win_delete_own_image.yml",
+  "title": "Process Deletion of Its Own Executable",
+  "reason": "modifier |fieldref on TargetFilename"
+ },
+ {
+  "file": "rules/windows/file/file_rename/file_rename_win_ransomware.yml",
+  "title": "Suspicious Appended Extension",
+  "reason": "logsource category 'file_rename'"
+ },
+ {
+  "file": "rules/windows/network_connection/net_connection_win_cmstp_initiated_connection.yml",
+  "title": "Outbound Network Connection Initiated By Cmstp.EXE",
+  "reason": "IPv6 cidr ::1/128"
+ },
+ {
+  "file": "rules/windows/network_connection/net_connection_win_dialer_initiated_connection.yml",
+  "title": "Outbound Network Connection Initiated By Microsoft Dialer",
+  "reason": "IPv6 cidr ::1/128"
+ },
+ {
+  "file": "rules/windows/network_connection/net_connection_win_office_outbound_non_local_ip.yml",
+  "title": "Office Application Initiated Network Connection To Non-Local IP",
+  "reason": "IPv6 cidr ::1/128"
+ },
+ {
+  "file": "rules/windows/network_connection/net_connection_win_rdp_reverse_tunnel.yml",
+  "title": "RDP Over Reverse SSH Tunnel",
+  "reason": "IPv6 cidr ::1/128"
+ },
+ {
+  "file": "rules/windows/network_connection/net_connection_win_regasm_network_activity.yml",
+  "title": "RegAsm.EXE Initiating Network Connection To Public IP",
+  "reason": "IPv6 cidr ::1/128"
+ },
+ {
+  "file": "rules/windows/network_connection/net_connection_win_rundll32_net_connections.yml",
+  "title": "Rundll32 Internet Connection",
+  "reason": "IPv6 cidr ::1/128"
+ },
+ {
+  "file": "rules/windows/network_connection/net_connection_win_susp_malware_callback_port.yml",
+  "title": "Potentially Suspicious Malware Callback Communication",
+  "reason": "IPv6 cidr ::1/128"
+ },
+ {
+  "file": "rules/windows/network_connection/net_connection_win_susp_malware_callback_ports_uncommon.yml",
+  "title": "Communication To Uncommon Destination Ports",
+  "reason": "IPv6 cidr ::1/128"
+ },
+ {
+  "file": "rules/windows/network_connection/net_connection_win_susp_outbound_mobsync_connection.yml",
+  "title": "Microsoft Sync Center Suspicious Network Connections",
+  "reason": "IPv6 cidr ::1/128"
+ },
+ {
+  "file": "rules/windows/network_connection/net_connection_win_winlogon_net_connections.yml",
+  "title": "Outbound Network Connection To Public IP Via Winlogon",
+  "reason": "IPv6 cidr ::1/128"
+ },
+ {
+  "file": "rules/windows/network_connection/net_connection_win_wscript_cscript_local_connection.yml",
+  "title": "Local Network Connection Initiated By Script Interpreter",
+  "reason": "IPv6 cidr ::1/128"
+ },
+ {
+  "file": "rules/windows/network_connection/net_connection_win_wscript_cscript_outbound_connection.yml",
+  "title": "Outbound Network Connection Initiated By Script Interpreter",
+  "reason": "IPv6 cidr ::1/128"
+ },
+ {
+  "file": "rules/windows/network_connection/net_connection_win_wuauclt_network_connection.yml",
+  "title": "Potentially Suspicious Wuauclt Network Connection",
+  "reason": "IPv6 cidr ::1/128"
+ },
+ {
+  "file": "rules/windows/process_creation/proc_creation_win_powershell_base64_frombase64string.yml",
+  "title": "PowerShell Base64 Encoded FromBase64String Cmdlet",
+  "reason": "modifier |base64offset on CommandLine"
+ },
+ {
+  "file": "rules/windows/process_creation/proc_creation_win_powershell_base64_iex.yml",
+  "title": "PowerShell Base64 Encoded IEX Cmdlet",
+  "reason": "modifier |base64offset on CommandLine"
+ },
+ {
+  "file": "rules/windows/process_creation/proc_creation_win_powershell_base64_mppreference.yml",
+  "title": "Powershell Base64 Encoded MpPreference Cmdlet",
+  "reason": "modifier |base64offset on CommandLine"
+ },
+ {
+  "file": "rules/windows/process_creation/proc_creation_win_powershell_defender_disable_feature.yml",
+  "title": "Powershell Defender Disable Scan Feature",
+  "reason": "modifier |base64offset on CommandLine"
+ },
+ {
+  "file": "rules/windows/process_creation/proc_creation_win_susp_cross_user_process_spawn.yml",
+  "title": "Suspicious Cross-User Process Spawn",
+  "reason": "modifier |fieldref on User"
+ },
+ {
+  "file": "rules/windows/wmi_event/sysmon_wmi_susp_encoded_scripts.yml",
+  "title": "Suspicious Encoded Scripts in a WMI Consumer",
+  "reason": "modifier |base64offset on Destination"
+ }
+]

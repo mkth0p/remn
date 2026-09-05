@@ -4,12 +4,15 @@ import { validateRule, type Rule, type RuleDiag } from '../rules/engine'
 import { log, toast, useStore } from '../state/store'
 import type { RunRequest } from '../workers/rules.worker'
 import type { SettingsLike } from '../rules/filter'
+import { enabledPackIds, getPackRules } from './packs'
 
 export interface LoadedRule {
   rule: Rule
   yaml: string
   file: string
-  origin: 'bundled' | 'custom'
+  origin: 'bundled' | 'pack' | 'custom'
+  /** community pack id for origin 'pack' */
+  pack?: string
   error?: string
   enabled: boolean
 }
@@ -45,6 +48,28 @@ export async function loadRules(caseId: number | null): Promise<LoadedRule[]> {
     const v = validateRule(r.rule)
     if (v.ok) out.push({ rule: v.rule, yaml: r.yaml, file: r.file, origin: 'bundled', enabled: !disabled.has(v.rule.id) })
     else out.push({ rule: { id: r.file, title: r.file, severity: 'info', source: 'events' }, yaml: r.yaml, file: r.file, origin: 'bundled', error: v.error, enabled: false })
+  }
+  // community packs (SigmaHQ, Sublime): fetched on demand, only the enabled ones
+  const packs = meta?.packs ?? []
+  const enabledPacks = await enabledPackIds(packs)
+  for (const p of packs) {
+    if (!enabledPacks.has(p.id)) continue
+    let pr
+    try {
+      pr = await getPackRules(p.id)
+    } catch (e) {
+      log('err', `rule pack ${p.id}: ${(e as Error).message}`)
+      continue
+    }
+    for (const r of pr.rules) {
+      if (r.error || !r.rule) {
+        out.push({ rule: { id: r.file, title: r.file, severity: 'info', source: p.source }, yaml: r.yaml ?? '', file: r.file, origin: 'pack', pack: p.id, error: r.error ?? 'empty rule', enabled: false })
+        continue
+      }
+      const v = validateRule(r.rule)
+      if (v.ok) out.push({ rule: v.rule, yaml: '', file: r.file, origin: 'pack', pack: p.id, enabled: !disabled.has(v.rule.id) })
+      else out.push({ rule: { id: r.file, title: r.file, severity: 'info', source: p.source }, yaml: '', file: r.file, origin: 'pack', pack: p.id, error: v.error, enabled: false })
+    }
   }
   const custom = await db.customRules.filter((c) => c.caseId === null || c.caseId === caseId).toArray()
   for (const c of custom) {

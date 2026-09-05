@@ -1,0 +1,154 @@
+{
+  "id": "sublime",
+  "name": "Sublime Security - detection rules",
+  "description": "The structural subset of the Sublime Security MQL detection rules: sender, subject, header, link and attachment logic that translates exactly to the REMN DSL. Rules that depend on Sublime-only features (ML classifiers, link analysis, sender profiles, file explosion) are listed in skipped.json.",
+  "source": "mails",
+  "defaultEnabled": true,
+  "license": {
+    "name": "MIT License",
+    "spdx": "MIT",
+    "url": "https://github.com/sublime-security/sublime-rules/blob/main/LICENSE",
+    "file": "LICENSE"
+  },
+  "upstream": {
+    "repo": "sublime-security/sublime-rules",
+    "ref": "main",
+    "sha": "b4fe36890fd93e42509a841641230fe5690debd3",
+    "url": "https://github.com/sublime-security/sublime-rules/tree/b4fe36890fd93e42509a841641230fe5690debd3",
+    "paths": [
+      "detection-rules"
+    ],
+    "fetched": "2026-09-05"
+  },
+  "counts": {
+    "upstream": 1227,
+    "converted": 168,
+    "skipped": 1059,
+    "warnings": 446
+  },
+  "skipReasons": [
+    [
+      "any(file.explode(...))",
+      151
+    ],
+    [
+      "any(ml.nlu_classifier(...))",
+      112
+    ],
+    [
+      "parent-scope path",
+      103
+    ],
+    [
+      "any(ml.logo_detect(...))",
+      35
+    ],
+    [
+      "arithmetic expression",
+      33
+    ],
+    [
+      "any(html.xpath(...))",
+      29
+    ],
+    [
+      "network.whois() result field",
+      28
+    ],
+    [
+      "profile.by_sender().any_messages_malicious_or_spam",
+      25
+    ],
+    [
+      "all() with a positive predicate",
+      25
+    ],
+    [
+      "field-to-field comparison",
+      23
+    ],
+    [
+      "length(filter(...)) bound other than 0",
+      22
+    ],
+    [
+      "length(distinct(...))",
+      19
+    ],
+    [
+      "computed value",
+      18
+    ],
+    [
+      "member access on path",
+      16
+    ],
+    [
+      "ml.link_analysis() result field",
+      14
+    ],
+    [
+      "element field .href_url.domain.subdomain",
+      13
+    ],
+    [
+      "length() of a non-field",
+      13
+    ],
+    [
+      "any() form",
+      13
+    ],
+    [
+      "beta.parse_exif() result field",
+      12
+    ],
+    [
+      "beta.profile.by_reply_to() result field",
+      11
+    ],
+    [
+      "unknown list $recipient_emails",
+      11
+    ],
+    [
+      "any(headers.hops)",
+      11
+    ],
+    [
+      "any(ml.link_analysis(...))",
+      10
+    ],
+    [
+      "strings.count() as a field",
+      9
+    ],
+    [
+      "any() over a computed list",
+      9
+    ]
+  ],
+  "files": {
+    "abuse.yaml": 2,
+    "attachment.yaml": 3,
+    "bec.yaml": 1,
+    "body.yaml": 4,
+    "brand_impersonation.yaml": 9,
+    "free.yaml": 1,
+    "headers.yaml": 5,
+    "impersonation.yaml": 12,
+    "infra.yaml": 1,
+    "link.yaml": 22,
+    "macos.yaml": 1,
+    "open_redirect.yaml": 93,
+    "punycode.yaml": 1,
+    "recon.yaml": 2,
+    "sender.yaml": 1,
+    "sendgrid.yaml": 1,
+    "service.yaml": 2,
+    "spam.yaml": 3,
+    "spoof.yaml": 1,
+    "suspicious.yaml": 3
+  },
+  "generator": "tools/import_community_rules.py"
+}

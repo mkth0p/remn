@@ -32,6 +32,11 @@ describe('helpers', () => {
     expect(ruleEventIds({ 'eventId|in': [1, 2] })).toEqual([1, 2])
     expect(ruleEventIds({ any_of: [{ eventId: 4624, logonType: 10 }, { eventId: 1149 }] })).toEqual([4624, 1149])
     expect(ruleEventIds({ any_of: [{ eventId: 4624 }, { 'provider|contains': 'x' }] })).toBeNull()
+    // all_of: any member that pins ids bounds the rule; several pinned members intersect
+    expect(ruleEventIds({ all_of: [{ 'channel|contains': 'sysmon', eventId: 1 }, { 'image|endswith': 'x.exe' }] })).toEqual([1])
+    expect(ruleEventIds({ all_of: [{ any_of: [{ eventId: 1 }, { eventId: 4688 }] }, { 'eventId|in': [1, 7] }] })).toEqual([1])
+    expect(ruleEventIds({ all_of: [{ any_of: [{ eventId: 1 }, { eventId: 4688 }] }, { eventId: 7045 }] })).toEqual([1, 4688])
+    expect(ruleEventIds({ all_of: [{ 'image|endswith': 'x' }] })).toBeNull()
     expect(Array.from(ruleFields({ 'bodyText|re': 'x', any_of: [{ subject: 'y' }] }))).toEqual(['bodyText', 'subject'])
   })
 })

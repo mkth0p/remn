@@ -12,6 +12,7 @@ from django.views.decorators.http import require_GET
 from services.analysis.attachments.magic import DANGEROUS_EXT
 from services.parsers.mail.common import MAIL_WEIGHTS, STRONG_FLAGS
 from services.reference import eventids, flags
+from services.rules import packs
 
 log = logging.getLogger(__name__)
 
@@ -21,6 +22,8 @@ def load_rules(rules_dir: Path) -> list[dict]:
     if not rules_dir.is_dir():
         return out
     for path in sorted(rules_dir.rglob("*.y*ml")):
+        if packs.is_pack_path(path, rules_dir):
+            continue  # community packs are served lazily by /api/rules/packs/<id>
         try:
             text = path.read_text(encoding="utf-8")
             docs = [d for d in yaml.safe_load_all(text) if isinstance(d, dict)]
@@ -51,4 +54,5 @@ def meta(request):
         "mailStrongFlags": sorted(STRONG_FLAGS),
         "dangerousExtensions": DANGEROUS_EXT,
         "rules": load_rules(settings.RULES_DIR),
+        "packs": packs.list_packs(),
     })
