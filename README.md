@@ -150,6 +150,27 @@ countries within 24 h, password spray, brute force followed by success, MFA
 fatigue. `samples/synthetic/make_m365.py` writes a complete BEC scenario in all
 four formats.
 
+## Attack chains (cross-source correlation)
+
+The Chains view links a suspicious mail to what its recipient did next, across
+the three sources of a case. A *seed* is a mail above the risk threshold or
+carrying a medium+ finding. Its recipients are normalised to an identity
+(`alice@contoso.com`, `CONTOSO\alice` and a UAL `UserId` all become `alice`),
+and every step of that identity inside the window (72 h by default) is
+collected and scored: replies to the sender (same thread), Entra sign-ins
+(country, legacy client, identity-protection risk), MailItemsAccessed bursts,
+inbox rules and mailbox forwarding, consent grants, role and MFA changes,
+Windows logons, processes spawned by Outlook or a browser, DNS queries, network
+connections and file writes that name the mail's URL domains or attachment
+names (strong *artifact links*), Defender detections, persistence and
+log-clearing events. Bursts collapse into one step, findings of the last rule
+run attach to the steps they reference, one chain is kept per identity per day
+with the other seeds listed as related. Chains are also stored as findings
+(rule `chain`) so they reach the report. Server-store cases are correlated
+inside DuckDB; browser-store cases post the relevant rows to the local API
+(`POST /api/chains/build`). `services/analysis/chains.py` is pure functions
+over plain rows, tested on the synthetic BEC scenario plus host events.
+
 ## Importing community rules (Sigma, Sublime)
 
 The Rules view has two import buttons. Both send the files to the local API,

@@ -3,7 +3,7 @@ import type { Case, CaseSettings } from '../db/schema'
 import type { Health, Meta } from '../api/client'
 import type { Filter } from '../rules/filter'
 
-export type View = 'dashboard' | 'evidence' | 'events' | 'mails' | 'findings' | 'timeline' | 'iocs' | 'ai' | 'report' | 'rules' | 'settings'
+export type View = 'dashboard' | 'evidence' | 'events' | 'mails' | 'findings' | 'chains' | 'timeline' | 'iocs' | 'ai' | 'report' | 'rules' | 'settings'
 
 export interface ConsoleLine {
   id: number

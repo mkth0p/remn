@@ -7,7 +7,7 @@ import { migrateCaseToServer } from './data/migrate'
 import { getSource } from './data/source'
 import { setLocalTime } from './util/format'
 import { getTransport } from './ai/transport'
-import { IconAi, IconDashboard, IconEvents, IconEvidence, IconFindings, IconIoc, IconMail, IconReport, IconRules, IconSettings, IconTerminal, IconTimeline, IconPivot } from './components/Icons'
+import { IconAi, IconDashboard, IconEvents, IconEvidence, IconFindings, IconIoc, IconMail, IconReport, IconRules, IconSettings, IconTerminal, IconTimeline, IconPivot, IconLink } from './components/Icons'
 import { ConsolePanel, Toasts } from './components/ConsolePanel'
 import { TokenGate } from './components/TokenGate'
 import { Modal, Progress } from './components/ui'
@@ -16,6 +16,7 @@ import { EvidenceView } from './views/EvidenceView'
 import { EventsView } from './views/EventsView'
 import { MailsView } from './views/MailsView'
 import { FindingsView } from './views/FindingsView'
+import { ChainsView } from './views/ChainsView'
 import { TimelineView } from './views/TimelineView'
 import { IocsView } from './views/IocsView'
 import { AiView } from './views/AiView'
@@ -32,6 +33,7 @@ const NAV: { id: View; label: string; icon: React.ComponentType; count?: 'events
   { id: 'mails', label: 'Mails', icon: IconMail, count: 'mails' },
   { id: 'timeline', label: 'Timeline', icon: IconTimeline },
   { id: 'findings', label: 'Findings', icon: IconFindings, count: 'findings', section: 'detect' },
+  { id: 'chains', label: 'Chains', icon: IconLink },
   { id: 'rules', label: 'Rules', icon: IconRules },
   { id: 'iocs', label: 'Indicators', icon: IconIoc, count: 'iocs' },
   { id: 'ai', label: 'AI analyst', icon: IconAi, section: 'assist' },
@@ -244,6 +246,7 @@ export default function App() {
         {view === 'mails' && <MailsView />}
         {view === 'timeline' && <TimelineView />}
         {view === 'findings' && <FindingsView />}
+        {view === 'chains' && <ChainsView />}
         {view === 'rules' && <RulesView />}
         {view === 'iocs' && <IocsView />}
         {view === 'ai' && <AiView />}
