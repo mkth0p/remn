@@ -38,6 +38,17 @@ interface StoredUpload {
 
 const uploadKvKey = (file: File) => `upload-${file.name}-${file.size}-${file.lastModified}`
 
+/** Drop the resume record of a file and the partial the server may still hold (evidence removal). */
+export async function forgetUpload(file: { name: string; size: number; lastModified?: number | null }): Promise<boolean> {
+  const db = getDb()
+  const key = `upload-${file.name}-${file.size}-${file.lastModified ?? ''}`
+  const rec = await db.kv.get(key).catch(() => undefined)
+  const uploadId = (rec?.value as StoredUpload | undefined)?.uploadId
+  if (uploadId) await fetch(`/api/upload/${uploadId}`, { method: 'DELETE', headers: API_HEADERS }).catch(() => undefined)
+  await db.kv.delete(key).catch(() => undefined)
+  return !!rec
+}
+
 async function findResumable(file: File): Promise<{ uploadId: string; received: number } | null> {
   try {
     const rec = await getDb().kv.get(uploadKvKey(file))

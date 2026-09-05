@@ -153,10 +153,17 @@ class BrowserSource implements DataSource {
     return { findings: [], byRule: res.byRule, errors: res.errors, diagnostics: res.diagnostics }
   }
   async deleteEvidence(evidenceId: number) {
+    const db = getDb()
+    const ev = await db.evidence.get(evidenceId)
     const { deleteEvidenceData } = await import('../db/schema')
     const { clearDerivedState } = await import('./caseState')
-    await deleteEvidenceData(getDb(), this.id, evidenceId)
-    return clearDerivedState(this.id)
+    const { rebuildDerived } = await import('./ingest')
+    const { forgetUpload } = await import('./upload')
+    await deleteEvidenceData(db, this.id, evidenceId)  // events, mails, bodies, attachments, urls, evidence row
+    const cleared = await clearDerivedState(this.id)  // findings, chain snapshot, diagnostics (reviews archived)
+    if (ev) await forgetUpload(ev)  // resume record + server-side partial, if any
+    await rebuildDerived(this.id)  // facets and indicators from the rows that remain
+    return cleared
   }
 }
 
@@ -266,10 +273,15 @@ class ServerSource implements DataSource {
     return { findings: res.findings ?? [], byRule: res.byRule ?? {}, errors: (res.errors ?? []).map((e) => `${e.ruleId}: ${e.error}`), diagnostics: res.diagnostics ?? [] }
   }
   async deleteEvidence(evidenceId: number) {
+    const db = getDb()
+    const ev = await db.evidence.get(evidenceId)
+    // rows, bodies, attachments, urls and indicators leave the DuckDB store and the file is checkpointed
     const res = await fetch(`/api/store/${this.key}/evidence/${evidenceId}`, { method: 'DELETE', headers: API_HEADERS })
     if (!res.ok) throw new Error(`server refused the deletion (HTTP ${res.status})`)
-    await getDb().evidence.delete(evidenceId)
+    await db.evidence.delete(evidenceId)
     const { clearDerivedState } = await import('./caseState')
+    const { forgetUpload } = await import('./upload')
+    if (ev) await forgetUpload(ev)
     return clearDerivedState(this.kase.id!)
   }
   sql(sql: string, limit = 200) {

@@ -30,7 +30,7 @@ export function EvidenceView() {
     if (!confirm(`Remove "${e.name}" and all its rows from ${isServer ? 'the server store' : 'this browser'}?`)) return
     try {
       const cleared = await ds.deleteEvidence(e.id!)
-      toast('ok', `${e.name} removed · ${cleared.findings} finding(s)${cleared.chains ? ` and ${cleared.chains} chain(s)` : ''} cleared - run the rules again (analyst decisions are kept)`, 9000)
+      toast('ok', `${e.name} removed: rows, bodies, attachments, indicators and facets deleted${cleared.findings ? `, ${cleared.findings} finding(s)${cleared.chains ? ` and ${cleared.chains} chain(s)` : ''} cleared` : ''} - run the rules again (analyst decisions are kept)`, 9000)
     } catch (err) {
       toast('err', `remove failed: ${(err as Error).message}`, 0)
     }

@@ -277,7 +277,10 @@ def test_chunked_upload_store_ingest_and_query(settings, tmp_path):
     r = c.generic("POST", f"/api/store/{key}/import?evidenceId=8", lines.encode(), content_type="application/x-ndjson", **HDR)
     assert r.status_code == 200 and r.json()["events"] == 10
     r = c.delete(f"/api/store/{key}/evidence/8", **HDR)
-    assert r.json()["deleted"]["events"] == 10
+    deleted = r.json()["deleted"]
+    assert deleted["events"] == 10 and "mail_bodies" in deleted and deleted["bytes"] > 0  # the import path creates no evidence row
+    r = c.post(f"/api/store/{key}/sql", data=json.dumps({"sql": 'SELECT count(*) AS n FROM events WHERE "evidenceId" = 8'}), content_type="application/json", **HDR)
+    assert r.json()["rows"][0]["n"] == 0
     assert not Path(settings.FILE_UPLOAD_TEMP_DIR, "uploads", f"{upload_id}.part").exists()
     r = c.delete(f"/api/store/{key}", **HDR)
     assert r.json()["deleted"] is True

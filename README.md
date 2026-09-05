@@ -206,9 +206,14 @@ inside DuckDB; browser-store cases post the relevant rows to the local API
 over plain rows, tested on the synthetic BEC scenario plus host events.
 
 The Chains view shows the last built snapshot (kv `chains-<case>`), so a rebuild is
-explicit. Removing evidence clears the case's findings, chain snapshot and last-run
-diagnostics, since they reference rows that no longer exist; analyst decisions are
-archived and reattached when the same findings reappear on the next rule run.
+explicit. **Removing evidence deletes everything derived from it at once**: its
+events, mails, bodies, attachments and URLs, the case's findings, chain snapshot and
+last-run diagnostics (they reference rows that no longer exist), the upload-resume
+record and any server-side partial. Browser cases recompute facets and indicators
+from the rows that remain (reputation results of surviving indicators are kept);
+server cases delete the rows from DuckDB and checkpoint the file so the space is
+released. Analyst decisions are archived and reattached when the same findings
+reappear on the next rule run.
 Rebuilding chains with no seed left replaces the snapshot with an empty one.
 Links to the organisation's own domains are not artifacts, routine steps (logons,
 sign-ins, DNS, mailbox reads without a link or a finding) add at most 3 points, a

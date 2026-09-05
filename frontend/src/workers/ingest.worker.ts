@@ -25,7 +25,12 @@ export interface HashRequest {
   jobId: number
   file: File
 }
-export type WorkerRequest = IngestRequest | HashRequest
+/** Recompute facets and indicators of a case from the rows still present (after evidence removal). */
+export interface RebuildRequest {
+  cmd: 'rebuild'
+  caseId: number
+}
+export type WorkerRequest = IngestRequest | HashRequest | RebuildRequest
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope
 const post = (msg: Record<string, unknown>) => ctx.postMessage(msg)
@@ -125,6 +130,72 @@ async function flushIocs(caseId: number, ic: IocCounter): Promise<void> {
     })
     await db.iocs.bulkPut(puts)
   }
+}
+
+function accumulateEvent(caseId: number, row: Record<string, unknown>, fc: FacetCounter, ic: IocCounter): void {
+  for (const f of EVENT_FACETS) fc.add(f, row[f])
+  const ts = typeof row.ts === 'number' ? row.ts : null
+  const prov = String(row.provider ?? '')
+  for (const f of ['ipAddress', 'destinationIp', 'sourceIp']) {
+    const v = row[f]
+    if (typeof v === 'string' && isPublicIp(v)) ic.add(caseId, 'ip', v, `event:${row.eventId}`, ts)
+  }
+  if (typeof row.query === 'string' && row.query.includes('.')) ic.add(caseId, 'domain', row.query, 'sysmon-dns', ts)
+  if (typeof row.destinationHostname === 'string' && row.destinationHostname.includes('.')) ic.add(caseId, 'domain', row.destinationHostname, 'sysmon-net', ts)
+  for (const h of hashesFromSysmon(row.hashes)) ic.add(caseId, 'hash', h, `sysmon:${row.eventId}`, ts)
+  if (typeof row.url === 'string' && /^https?:\/\/(?![+*]|localhost|127\.)[a-z0-9.-]+(?::\d+)?(?:\/|$)/i.test(row.url)) ic.add(caseId, 'url', row.url, prov, ts)
+}
+
+function accumulateMail(caseId: number, m: MailRow, fc: FacetCounter, ic: IocCounter): void {
+  for (const f of MAIL_FACETS) {
+    if (f === 'attExt') fc.add(f, (m.attachments ?? []).map((a) => a.realExt || a.ext || '?'))
+    else if (f === 'riskBand') fc.add(f, m.risk >= 80 ? 'critical' : m.risk >= 60 ? 'high' : m.risk >= 40 ? 'medium' : m.risk >= 20 ? 'low' : 'clean')
+    else fc.add(f, (m as Record<string, unknown>)[f])
+  }
+  const ts = m.date ?? null
+  if (m.originIp && isPublicIp(m.originIp)) ic.add(caseId, 'ip', m.originIp, 'mail-origin', ts)
+  if (m.fromAddr) ic.add(caseId, 'email', m.fromAddr, 'mail-from', ts)
+  if (m.fromRegistrable) ic.add(caseId, 'domain', m.fromRegistrable, 'mail-from', ts)
+  for (const u of m.urls ?? []) {
+    if (u.scheme === 'http' || u.scheme === 'https' || !u.scheme) {
+      ic.add(caseId, 'url', u.normalized || u.url, 'mail-url', ts)
+      if (u.domain && !/^\d+\.\d+\.\d+\.\d+$/.test(u.domain)) ic.add(caseId, 'domain', u.domain, 'mail-url', ts)
+      else if (u.domain && isPublicIp(u.domain)) ic.add(caseId, 'ip', u.domain, 'mail-url', ts)
+    }
+  }
+  for (const a of m.attachments ?? []) if (a.sha256) ic.add(caseId, 'hash', a.sha256, 'attachment', ts)
+}
+
+/** Facets and indicators are accumulated during ingestion; after evidence removal they are recomputed
+ * from the rows that remain, keeping the reputation results already obtained for surviving indicators. */
+async function rebuild(caseId: number): Promise<void> {
+  const db = getDb()
+  const fcEvents = new FacetCounter()
+  const fcMails = new FacetCounter()
+  const ic = new IocCounter()
+  let rows = 0
+  await db.events.where('caseId').equals(caseId).each((row) => {
+    accumulateEvent(caseId, row as unknown as Record<string, unknown>, fcEvents, ic)
+    rows++
+  })
+  await db.mails.where('caseId').equals(caseId).each((m) => {
+    accumulateMail(caseId, m, fcMails, ic)
+    rows++
+  })
+  const old = await db.iocs.where('caseId').equals(caseId).toArray()
+  const checked = new Map(old.filter((i) => i.checkedAt).map((i) => [i.kind + ':' + i.value, i]))
+  for (const x of ic.map.values()) {
+    const o = checked.get(x.kind + ':' + x.value)
+    if (o) Object.assign(x, { reputation: o.reputation, verdict: o.verdict, tags: o.tags, checkedAt: o.checkedAt })
+  }
+  await db.transaction('rw', [db.facets, db.iocs], async () => {
+    await db.facets.where('caseId').equals(caseId).delete()
+    await db.iocs.where('caseId').equals(caseId).delete()
+  })
+  await flushFacets(caseId, 'events', fcEvents)
+  await flushFacets(caseId, 'mails', fcMails)
+  await flushIocs(caseId, ic)
+  post({ type: 'rebuilt', rows, iocs: ic.map.size })
 }
 
 function hashesFromSysmon(h: unknown): string[] {
@@ -227,38 +298,11 @@ async function ingest(req: IngestRequest): Promise<void> {
     row.caseId = caseId
     row.evidenceId = evidenceId
     if (type === 'event') {
-      for (const f of EVENT_FACETS) fc.add(f, row[f])
-      const ts = typeof row.ts === 'number' ? row.ts : null
-      const prov = String(row.provider ?? '')
-      for (const f of ['ipAddress', 'destinationIp', 'sourceIp']) {
-        const v = row[f]
-        if (typeof v === 'string' && isPublicIp(v)) ic.add(caseId, 'ip', v, `event:${row.eventId}`, ts)
-      }
-      if (typeof row.query === 'string' && row.query.includes('.')) ic.add(caseId, 'domain', row.query, 'sysmon-dns', ts)
-      if (typeof row.destinationHostname === 'string' && row.destinationHostname.includes('.')) ic.add(caseId, 'domain', row.destinationHostname, 'sysmon-net', ts)
-      for (const h of hashesFromSysmon(row.hashes)) ic.add(caseId, 'hash', h, `sysmon:${row.eventId}`, ts)
-      if (typeof row.url === 'string' && /^https?:\/\/(?![+*]|localhost|127\.)[a-z0-9.-]+(?::\d+)?(?:\/|$)/i.test(row.url)) ic.add(caseId, 'url', row.url, prov, ts)
+      accumulateEvent(caseId, row, fc, ic)
       batch.push(row)
       if (batch.length >= BATCH) await flushEvents()
     } else if (type === 'mail') {
-      const m = row as unknown as MailRow
-      for (const f of MAIL_FACETS) {
-        if (f === 'attExt') fc.add(f, (m.attachments ?? []).map((a) => a.realExt || a.ext || '?'))
-        else if (f === 'riskBand') fc.add(f, m.risk >= 80 ? 'critical' : m.risk >= 60 ? 'high' : m.risk >= 40 ? 'medium' : m.risk >= 20 ? 'low' : 'clean')
-        else fc.add(f, (m as Record<string, unknown>)[f])
-      }
-      const ts = m.date ?? null
-      if (m.originIp && isPublicIp(m.originIp)) ic.add(caseId, 'ip', m.originIp, 'mail-origin', ts)
-      if (m.fromAddr) ic.add(caseId, 'email', m.fromAddr, 'mail-from', ts)
-      if (m.fromRegistrable) ic.add(caseId, 'domain', m.fromRegistrable, 'mail-from', ts)
-      for (const u of m.urls ?? []) {
-        if (u.scheme === 'http' || u.scheme === 'https' || !u.scheme) {
-          ic.add(caseId, 'url', u.normalized || u.url, 'mail-url', ts)
-          if (u.domain && !/^\d+\.\d+\.\d+\.\d+$/.test(u.domain)) ic.add(caseId, 'domain', u.domain, 'mail-url', ts)
-          else if (u.domain && isPublicIp(u.domain)) ic.add(caseId, 'ip', u.domain, 'mail-url', ts)
-        }
-      }
-      for (const a of m.attachments ?? []) if (a.sha256) ic.add(caseId, 'hash', a.sha256, 'attachment', ts)
+      accumulateMail(caseId, row as unknown as MailRow, fc, ic)
       batch.push(row)
       if (batch.length >= 200) await flushMails()
     }
@@ -311,6 +355,8 @@ ctx.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
     } else if (req.cmd === 'ingest') {
       if (req.token) setApiToken(req.token)
       await ingest(req)
+    } else if (req.cmd === 'rebuild') {
+      await rebuild(req.caseId)
     }
   } catch (e) {
     post({ type: 'error', error: (e as Error).message || String(e) })

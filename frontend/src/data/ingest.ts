@@ -197,6 +197,27 @@ export async function hashOnly(file: File, onProgress?: (p: number) => void): Pr
   })
 }
 
+/** Recompute a browser case's facets and indicators from the rows that remain (after evidence removal). */
+export function rebuildDerived(caseId: number): Promise<{ rows: number; iocs: number }> {
+  const worker = new Worker(new URL('../workers/ingest.worker.ts', import.meta.url), { type: 'module' })
+  return new Promise((resolve, reject) => {
+    worker.onmessage = (ev: MessageEvent<Record<string, unknown>>) => {
+      if (ev.data.type === 'rebuilt') {
+        worker.terminate()
+        resolve({ rows: Number(ev.data.rows), iocs: Number(ev.data.iocs) })
+      } else if (ev.data.type === 'error') {
+        worker.terminate()
+        reject(new Error(String(ev.data.error)))
+      }
+    }
+    worker.onerror = (e) => {
+      worker.terminate()
+      reject(new Error(e.message))
+    }
+    worker.postMessage({ cmd: 'rebuild', caseId })
+  })
+}
+
 export async function refreshCounts(kase: Case | number): Promise<void> {
   const db = getDb()
   const k = typeof kase === 'number' ? await db.cases.get(kase) : kase

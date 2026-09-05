@@ -286,10 +286,19 @@ class CaseStore:
             for t in ("events", "attachments", "urls", "iocs"):
                 out[t] = con.execute(f'SELECT count(*) FROM {t} WHERE "evidenceId" = ?', [evidence_id]).fetchone()[0]
                 con.execute(f'DELETE FROM {t} WHERE "evidenceId" = ?', [evidence_id])
+            out["mail_bodies"] = con.execute('SELECT count(*) FROM mail_bodies WHERE "mailId" IN (SELECT id FROM mails WHERE "evidenceId" = ?)', [evidence_id]).fetchone()[0]
             con.execute('DELETE FROM mail_bodies WHERE "mailId" IN (SELECT id FROM mails WHERE "evidenceId" = ?)', [evidence_id])
             out["mails"] = con.execute('SELECT count(*) FROM mails WHERE "evidenceId" = ?', [evidence_id]).fetchone()[0]
             con.execute('DELETE FROM mails WHERE "evidenceId" = ?', [evidence_id])
+            out["evidence"] = con.execute("SELECT count(*) FROM evidence WHERE id = ?", [evidence_id]).fetchone()[0]
             con.execute("DELETE FROM evidence WHERE id = ?", [evidence_id])
+            # write the deletes out and fold the WAL: the rows are gone from disk now, not at the next
+            # automatic checkpoint, and the freed blocks are reused by the next ingestion
+            con.execute("CHECKPOINT")
+        try:
+            out["bytes"] = self.path.stat().st_size
+        except OSError:
+            pass
         return out
 
     def set_reputation(self, items: list[dict[str, Any]]) -> int:

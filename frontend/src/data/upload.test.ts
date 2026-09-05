@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { chunkedUpload } from './upload'
+import { chunkedUpload, forgetUpload } from './upload'
 import { getDb } from '../db/schema'
 
 // hashOnly spins a real web worker: stub it out
@@ -81,3 +81,16 @@ describe('chunkedUpload resume', () => {
     expect(await getDb().kv.get('upload-big.bin-64-1725000000000')).toBeUndefined()
   })
 })
+
+describe('forgetUpload', () => {
+  it('drops the resume record and asks the server to discard the partial', async () => {
+    const db = getDb()
+    await db.kv.put({ key: 'upload-big.bin-4096-1725000000000', value: { uploadId: 'u-9', name: 'big.bin', size: 4096, lastModified: 1725000000000, received: 1024 } })
+    fetchMock.mockResolvedValueOnce(json({ deleted: true }))
+    expect(await forgetUpload({ name: 'big.bin', size: 4096, lastModified: 1725000000000 })).toBe(true)
+    expect(fetchMock.mock.calls.some(([url, init]) => String(url) === '/api/upload/u-9' && (init as RequestInit).method === 'DELETE')).toBe(true)
+    expect(await db.kv.get('upload-big.bin-4096-1725000000000')).toBeUndefined()
+    expect(await forgetUpload({ name: 'other.bin', size: 1, lastModified: 2 })).toBe(false)
+  })
+})
+
