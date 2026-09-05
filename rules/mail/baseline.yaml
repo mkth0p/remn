@@ -1,0 +1,59 @@
+# Rules on the sender-baseline / campaign enrichment columns (run "baseline senders" in the
+# Mails view first; the columns are empty until then and these rules simply stay quiet).
+id: mail-first-contact-with-lure
+title: First mail ever from this sender, with phishing wording or links
+description: The address never wrote before in this case and the message carries credential, financial or urgency wording, a login link or a risky attachment. First contact is where most phishing lives; the same wording from a known correspondent is routine.
+severity: medium
+source: mails
+attack: [T1566]
+tags: [baseline, first-contact]
+where:
+  senderPrevalence: new
+  senderSolicited: false
+  flags|not_contains: [trusted_sender, exchange_internal]
+  risk|gte: 30
+  any_of:
+    - flags|contains_any: [lexicon_credentials, lexicon_financial, lexicon_urgency, lexicon_gift_card, lexicon_secrecy, url_login_link, url_credential_keywords, credential_phishing_pattern, bec_pattern]
+    - maxAttachmentRisk|gte: 40
+entities: [fromAddr, fromRegistrable]
+---
+id: mail-sender-auth-regression
+title: Sender domain used to pass authentication and now fails
+description: At least three earlier mails from this domain passed SPF/DKIM/DMARC; this one fails. A spoof of a known correspondent, or the correspondent's own infrastructure changed - either way worth a look.
+severity: high
+source: mails
+attack: [T1566.002, T1036]
+tags: [baseline, authentication, spoofing]
+where:
+  senderAuthRegression: true
+entities: [fromAddr, fromRegistrable]
+---
+id: mail-campaign-cluster
+title: Campaign - the same lure sent to several mailboxes
+description: Three or more mails share a subject skeleton and link domains / attachment hashes, from an external sender, and score 40 or more. One finding per campaign with the sender count (rotating senders = automation).
+severity: high
+source: mails
+attack: [T1566]
+tags: [baseline, campaign]
+where:
+  campaignSize|gte: 3
+  risk|gte: 40
+  flags|not_contains: [trusted_sender, exchange_internal]
+group_by: [campaignId]
+threshold: ">= 3"
+distinct: fromAddr
+entities: [campaignId, fromRegistrable, fromAddr]
+---
+id: mail-unsolicited-new-sender-attachment
+title: Unsolicited first-contact mail with a risky attachment
+severity: medium
+source: mails
+attack: [T1566.001]
+tags: [baseline, first-contact, attachment]
+where:
+  senderPrevalence: new
+  senderSolicited: false
+  flags|not_contains: [trusted_sender, exchange_internal]
+  attachmentCount|gte: 1
+  maxAttachmentRisk|gte: 40
+entities: [fromAddr, fromRegistrable]

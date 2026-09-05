@@ -88,7 +88,6 @@ and subject.is_reply
 def test_unsupported_constructs_are_skipped():
     bad = [
         "type.inbound and any(ml.nlu_classifier(body.current_thread.text).intents, .name == 'cred_theft')",
-        "type.inbound and profile.by_sender().prevalence == 'new'",
         "type.inbound and length(filter(body.links, .href_url.domain.root_domain == 'x.com')) == 1",
         "type.inbound and all(recipients.to, .email.domain.domain == 'x.com')",
         "type.inbound and sender.email.domain.root_domain == headers.return_path.domain.root_domain",
@@ -99,13 +98,13 @@ def test_unsupported_constructs_are_skipped():
         r = _rule(src)
         assert not r["ok"], src
     assert "ml.nlu_classifier" in _rule(bad[0])["error"]
-    assert "profile.by_sender" in _rule(bad[1])["error"]
+    assert "length(filter" in _rule(bad[1])["error"]
     # Sublime's own quantifier and trailing commas
     ok = _rule("type.inbound and 1 of (sender.email.domain.root_domain == 'a.com', subject.subject == 'x',) and sender.email.email in ('a@a.com', 'b@a.com', )")
     assert ok["ok"], ok
     assert ok["rule"]["where"]["any_of"] == [{"fromRegistrable": "a.com"}, {"subject": "x"}]
     assert ok["rule"]["where"]["fromAddr|in"] == ["a@a.com", "b@a.com"]
-    assert "every message" in _rule(bad[6])["error"]
+    assert "every message" in _rule(bad[5])["error"]
 
 
 def test_filter_all_levenshtein_and_chained_comparisons(store):
@@ -166,3 +165,13 @@ and strings.icontains(subject.subject, "invoice", "facture")
     w.flush()
     hits = R.run_rule(store, r["rule"], {"internal_domains": ["interne.fr"]})
     assert sorted(ref for h in hits for ref in h["refs"]) == [1, 2], hits
+
+
+def test_profile_by_sender_maps_to_baseline_columns():
+    r = _rule("type.inbound and profile.by_sender().prevalence == 'new' and not profile.by_sender().solicited and profile.by_sender().days_known < 7")
+    assert r["ok"], r
+    w = r["rule"]["where"]
+    assert w["senderPrevalence"] == "new" and w["not"] == {"senderSolicited": True} and w["senderDaysKnown|lt"] == 7
+    assert any("baseline" in x for x in r["warnings"])
+    compile_cond(w, Ctx(source="mails"))
+    assert not _rule("type.inbound and profile.by_sender().any_messages_malicious_or_spam")["ok"]

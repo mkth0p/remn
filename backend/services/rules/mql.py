@@ -416,11 +416,22 @@ class Translator:
             self.warnings.append(msg)
 
     # ---- fields ---------------------------------------------------------
+    PROFILE_MEMBERS = {".prevalence": ("text", "senderPrevalence"), ".solicited": ("bool", "senderSolicited"),
+                       ".days_known": ("num", "senderDaysKnown"), ".days_since_first_seen": ("num", "senderDaysKnown"),
+                       ".first_seen": ("num", "senderFirstSeen"), ".message_count": ("num", "senderPriorCount")}
+
     def field(self, node: Any) -> Field:
         if node[0] == "member":
             base = node[1]
             while base[0] in ("member", "index"):
                 base = base[1]
+            # profile.by_sender().prevalence / .solicited / .days_known -> REMN's sender-baseline columns
+            if base[0] == "call" and base[1].lower() in ("profile.by_sender", "profile.by_sender_email") and node[1][0] == "call":
+                member = self.PROFILE_MEMBERS.get(node[2])
+                if member:
+                    self.warn("profile.by_sender() uses REMN's sender baseline (run 'baseline senders' first)")
+                    return Field(member[0], member[1])
+                raise Unsupported(f"profile.by_sender(){node[2]}")
             raise Unsupported(f"{base[1]}() result field" if base[0] == "call" else f"member access on {base[0]}")
         if node[0] == "index":
             raise Unsupported("indexed access ([0])")
@@ -496,6 +507,12 @@ class Translator:
             if op not in ("eq", "ne", "lt", "gt", "lte", "gte", "in", "nin"):
                 raise Unsupported(f"{op} on a numeric field")
             return {f"{f.col}|{op}" if op != "eq" else f.col: value}
+        if f.kind == "bool":
+            if op not in ("eq", "ne"):
+                raise Unsupported(f"{op} on a boolean field")
+            v = vals[0]
+            truth = bool(v) if isinstance(v, bool) else str(v).lower() in ("true", "1", "yes")
+            return {f.col: truth if op == "eq" else (not truth)}
         if f.kind == "contains_in":
             # a value list matched as substrings of a text blob (headers.domains -> raw headers)
             m = {"eq": "contains", "in": "contains_any", "ne": "not_contains", "nin": "not_contains",
@@ -590,10 +607,10 @@ class Translator:
         if t == "call":
             return self.call(node)
         if t in ("member", "index"):
-            base = node
-            while base[0] in ("member", "index"):
-                base = base[1]
-            raise Unsupported(f"{base[1]}() result field" if base[0] == "call" else "indexed access ([0])")
+            f = self.field(node)  # raises Unsupported unless it is a mapped profile member
+            if f.kind == "bool":
+                return {f.col: True}
+            return {f"{f.col}|exists": True}
         if t == "path":
             return self.bool_path(node)
         if t == "bool":

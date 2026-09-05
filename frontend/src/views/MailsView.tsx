@@ -9,6 +9,7 @@ import type { Condition, Filter } from '../rules/filter'
 import { useStore } from '../state/store'
 import { fmtTs } from '../util/format'
 import { exportCsv, exportJson } from '../util/export'
+import { BaselineButton } from '../components/BaselineButton'
 import { Flag, Risk } from '../components/ui'
 
 const FACETS: FacetDef[] = [
@@ -123,6 +124,7 @@ export function MailsView() {
             <span className="spacer" />
             <button className="btn xs ghost" onClick={() => exportCsv('mails.csv', rows.map((r) => ({ id: r.id, date: r.dateIso, risk: r.risk, from: r.fromAddr, fromName: r.fromName, subject: r.subject, to: (r.to ?? []).map((t) => t.addr).join(';'), replyTo: (r.replyTo ?? []).map((t) => t.addr).join(';'), originIp: r.originIp, spf: r.auth?.spf, dkim: r.auth?.dkim, dmarc: r.auth?.dmarc, flags: (r.flags ?? []).join(' '), attachments: (r.attachments ?? []).map((a) => `${a.name}(${a.risk})`).join(';'), hashes: (r.attachments ?? []).map((a) => a.sha256).join(';'), urls: (r.urls ?? []).map((u) => u.defanged).join(' '), folder: r.folder, source: r.sourceName })))}>csv</button>
             <button className="btn xs ghost" onClick={() => exportJson('mails.json', rows)}>json</button>
+            <BaselineButton />
             <span className="hint">alt+click a facet to exclude · click a sender to filter</span>
           </div>
           <VirtualTable

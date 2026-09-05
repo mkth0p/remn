@@ -19,6 +19,7 @@ OPS = {"eq", "ne", "in", "nin", "contains", "not_contains", "contains_any", "con
 
 EVENT_COLS = {n for n, _ in EVENT_COLUMNS}
 MAIL_COLS = {n for n, _ in MAIL_COLUMNS}
+MAIL_BOOL = {n for n, t in MAIL_COLUMNS if t[0] == "BOOLEAN"}
 ATT_COLS = {"name", "ext", "realExt", "realMime", "size", "sha256", "md5", "risk", "flags", "category", "inline", "details", "date", "fromAddr", "mailSubject"}
 URL_COLS = {"url", "normalized", "defanged", "host", "domain", "scheme", "flags", "text", "source", "date"}
 ATT_INT = {"size", "risk", "date"}
@@ -103,7 +104,7 @@ def resolve(field_name: str, ctx: Ctx) -> Expr:
             col, sub = m_sub.groups()
             return Expr(f"CAST(json_extract({a}\"{col}\", '$[*].{sub}') AS VARCHAR[])", "list")
         if f in MAIL_COLS:
-            kind = "list" if f in MAIL_LIST else ("num" if f in MAIL_INT else "text")
+            kind = "list" if f in MAIL_LIST else ("num" if f in MAIL_INT else ("bool" if f in MAIL_BOOL else "text"))
             return Expr(f"{a}{q(f)}", kind)
         if f in BODY_COLS:
             return Expr(f"(SELECT b.{q(f)} FROM mail_bodies b WHERE b.\"mailId\" = {a or 'mails.'}id)", "text")
@@ -149,6 +150,8 @@ def compile_condition(field_name: str, op: str, value: Any, ctx: Ctx) -> str:
     if isinstance(value, str) and "," in value and op in ("in", "nin", "contains_any", "contains_all"):
         vals = [s.strip() for s in value.split(",") if s.strip()]
     sql = e.sql
+    if e.kind == "bool":
+        sql = f"CAST({sql} AS VARCHAR)"  # 'true' / 'false', so eq/ne/in compare like any text value
     low = f"lower({sql})"
 
     if op == "exists":

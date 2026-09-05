@@ -150,6 +150,24 @@ countries within 24 h, password spray, brute force followed by success, MFA
 fatigue. `samples/synthetic/make_m365.py` writes a complete BEC scenario in all
 four formats.
 
+## Sender baseline and campaigns (enrichment pass)
+
+"baseline senders" in the Mails view runs one pass over the case's mails, in
+time order, and writes history columns every rule and the DSL can use:
+`senderPrevalence` (new / rare / common: earlier mails from the address),
+`senderPriorCount`, `senderFirstSeen`, `senderDaysKnown`, `senderSolicited`
+(an internal sender wrote to that address first, so its reply is expected),
+`senderAuthRegression` (the domain passed SPF/DKIM/DMARC at least three times
+before and fails now), and `campaignId` / `campaignSize` / `campaignSenders`
+(mails sharing a subject skeleton plus link domains or attachment hashes,
+with the number of distinct senders behind them). `rules/mail/baseline.yaml`
+uses them: first contact with a lure, unsolicited first-contact attachment,
+authentication regression, campaign clusters (one finding per campaign).
+Server cases are updated inside DuckDB; browser cases post the minimal rows
+and write the columns back to IndexedDB (`POST /api/enrich/mails`). Sublime
+rules using `profile.by_sender().prevalence / .solicited / .days_known` now
+translate onto these columns.
+
 ## Deleted and orphaned mail (PST / OST)
 
 Messages inside Deleted Items and the Exchange Recoverable Items dumpster

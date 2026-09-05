@@ -1,6 +1,6 @@
 from django.urls import path
 
-from api.views import ai, chains, health, ingest, meta, reputation, rules, store, upload
+from api.views import ai, chains, enrich, health, ingest, meta, reputation, rules, store, upload
 
 urlpatterns = [
     path("health", health.health),
@@ -14,6 +14,8 @@ urlpatterns = [
     path("rules/convert/sublime", rules.convert_sublime),
     # cross-source attack chains
     path("chains/build", chains.build),
+    # enrichment passes (sender baseline, campaigns)
+    path("enrich/mails", enrich.mails),
     # chunked uploads (large files)
     path("upload/init", upload.init),
     path("upload/<str:upload_id>/chunk", upload.chunk),

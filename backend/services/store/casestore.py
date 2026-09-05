@@ -77,6 +77,9 @@ MAIL_COLUMNS: list[tuple[str, tuple[str, Any]]] = [
     ("spf", _S), ("dkim", _S), ("dmarc", _S), ("compauth", _S), ("textPreview", _S), ("urlCount", _I),
     ("attachmentCount", _I), ("maxAttachmentRisk", _I), ("risk", _I), ("flags", _LS), ("size", _L), ("contentType", _S),
     ("reputationWorst", _S), ("reputationOriginIp", _S),
+    # sender baseline / campaign enrichment (services/analysis/baseline.py), NULL until the pass runs
+    ("senderPrevalence", _S), ("senderPriorCount", _I), ("senderFirstSeen", _L), ("senderDaysKnown", _I), ("senderSolicited", _B),
+    ("senderAuthRegression", _B), ("campaignId", _S), ("campaignSize", _I), ("campaignSenders", _I),
     # JSON payloads (stored as text, parsed on read)
     ("auth", _S), ("sender", _S), ("replyTo", _S), ("to", _S), ("cc", _S), ("bcc", _S), ("references", _S), ("hops", _S),
     ("urls", _S), ("attachments", _S), ("keywordHits", _S), ("hiddenText", _S), ("lookalike", _S), ("replyToLookalike", _S),
@@ -186,6 +189,12 @@ class CaseStore:
             self._con.execute('CREATE TABLE IF NOT EXISTS evidence (id INTEGER PRIMARY KEY, name VARCHAR, kind VARCHAR, format VARCHAR, size BIGINT, "sha256Client" VARCHAR, "sha256Server" VARCHAR, count BIGINT, stats VARCHAR, "addedAt" BIGINT, status VARCHAR)')
             self._con.execute('CREATE TABLE IF NOT EXISTS ioc_reputation (kind VARCHAR, value VARCHAR, verdict VARCHAR, tags VARCHAR[], summary VARCHAR, verdicts VARCHAR, "checkedAt" BIGINT, PRIMARY KEY (kind, value))')
             self._con.execute("CREATE TABLE IF NOT EXISTS meta (key VARCHAR PRIMARY KEY, value VARCHAR)")
+            # columns added after a store was created (enrichment passes): add them in place
+            for t, cols in TABLES.items():
+                have = {r[1] for r in self._con.execute(f"PRAGMA table_info('{t}')").fetchall()}
+                for n, typ in cols:
+                    if n not in have:
+                        self._con.execute(f"ALTER TABLE {t} ADD COLUMN {q(n)} {typ[0]}")
             for ddl in INDEXES:
                 try:
                     self._con.execute(ddl)
@@ -268,6 +277,26 @@ class CaseStore:
                 )
                 n += 1
         return n
+
+    def apply_mail_enrichment(self, rows: list[dict[str, Any]]) -> int:
+        """UPDATE mails with the enrichment columns of services/analysis/baseline.py (rows keyed by id)."""
+        if not rows:
+            return 0
+        from services.analysis.baseline import ENRICH_COLUMNS
+
+        types = dict(MAIL_COLUMNS)
+        schema = pa.schema([("id", pa.int64())] + [(c, types[c][1]) for c in ENRICH_COLUMNS])
+        norm = [{"id": int(r["id"]), **{c: r.get(c) for c in ENRICH_COLUMNS}} for r in rows]
+        table = pa.Table.from_pylist(norm, schema=schema)
+        sets = ", ".join(f"{q(c)} = e.{q(c)}" for c in ENRICH_COLUMNS)
+        with self.lock:
+            con = self._con
+            con.register("_enrich", table)
+            try:
+                con.execute(f"UPDATE mails SET {sets} FROM _enrich e WHERE mails.id = e.id")
+            finally:
+                con.unregister("_enrich")
+        return len(norm)
 
     def mirror_reputation_to_mails(self) -> int:
         """Copy the worst verdict of related IOCs onto mails (reputationWorst / reputationOriginIp) for the rules."""

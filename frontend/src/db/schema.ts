@@ -210,6 +210,16 @@ export interface MailRow {
   maxAttachmentRisk: number
   lookalike: Record<string, unknown>
   replyToLookalike?: Record<string, unknown> | null
+  /** sender baseline / campaign enrichment (data/enrich.ts), absent until the pass runs */
+  senderPrevalence?: 'new' | 'rare' | 'common'
+  senderPriorCount?: number
+  senderFirstSeen?: number
+  senderDaysKnown?: number
+  senderSolicited?: boolean
+  senderAuthRegression?: boolean
+  campaignId?: string
+  campaignSize?: number
+  campaignSenders?: number
   flags: string[]
   risk: number
   size?: number | null
