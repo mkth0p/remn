@@ -485,6 +485,25 @@ tests/backend/      pytest suite
 backend/data/       lists/ (offline block lists), yara/ (rules), geoip/ (GeoLite2 .mmdb)
 ```
 
+## Interface
+
+The interface follows the conventions of analyst tooling (Elastic Security, Sentinel,
+Timesketch, DFIR-IRIS): neutral surfaces with colour reserved for severity and
+status, dense tables with a frozen time column, a flyout for details instead of a
+page change, and pivots on every entity value. Light is the default; the switch in
+the top bar stores the choice in this browser (`remn-theme`) and both modes share the
+same tokens in `frontend/src/ui/theme.css`. The wordmark and view titles use
+[Gulax](https://velvetyne.fr/fonts/gulax/) by Morgan Gilbert (Velvetyne, SIL Open Font
+License 1.1; licence and copyright files ship in `frontend/public/fonts/`).
+
+The Findings view is a triage queue: severity tiles with the change since the last
+run, search and severity / status / source filters, group-by rule, entity or source,
+checkbox selection with bulk status changes, `j` / `k` / `/` keyboard navigation,
+and a flyout with About, Investigation (entity pivots, referenced rows), Insights
+(prevalence of the entities in the case, related chains, false-positive history of
+the rule) and Notes, plus Table and JSON views. The ATT&CK tab counts techniques
+observed against the enabled rules that map to them.
+
 ## Security model
 
 * Server binds to `127.0.0.1`, keeps no database and deletes upload temp files at

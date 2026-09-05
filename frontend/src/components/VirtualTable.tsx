@@ -22,16 +22,27 @@ interface Props<T> {
   sort?: { field: string; dir: 'asc' | 'desc' }
   onSort?: (field: string) => void
   empty?: ReactNode
+  /** bulk selection: a leading checkbox column appears when onToggleSelect is given */
+  selectedKeys?: Set<string | number>
+  onToggleSelect?: (key: string | number, row: T) => void
+  onToggleAll?: (all: boolean) => void
 }
 
-export function VirtualTable<T extends object>({ rows, columns, rowHeight = 28, rowKey, onRowClick, selectedKey, rowClass, sort, onSort, empty }: Props<T>) {
+export function VirtualTable<T extends object>({ rows, columns, rowHeight = 30, rowKey, onRowClick, selectedKey, rowClass, sort, onSort, empty, selectedKeys, onToggleSelect, onToggleAll }: Props<T>) {
   const parentRef = useRef<HTMLDivElement>(null)
   const virtualizer = useVirtualizer({ count: rows.length, getScrollElement: () => parentRef.current, estimateSize: () => rowHeight, overscan: 12 })
-  const template = columns.map((c) => (typeof c.width === 'number' ? `${c.width}px` : c.width)).join(' ')
+  const selectable = !!onToggleSelect
+  const template = (selectable ? '32px ' : '') + columns.map((c) => (typeof c.width === 'number' ? `${c.width}px` : c.width)).join(' ')
   const items = virtualizer.getVirtualItems()
+  const allSelected = selectable && rows.length > 0 && rows.every((r) => selectedKeys?.has(rowKey(r)))
   return (
     <div className="vtable">
       <div className="vtable-head" style={{ gridTemplateColumns: template }}>
+        {selectable && (
+          <div onClick={(e) => e.stopPropagation()} style={{ cursor: 'default' }}>
+            <input type="checkbox" checked={allSelected} onChange={(e) => onToggleAll?.(e.target.checked)} title="select all shown" style={{ accentColor: 'var(--accent)' }} />
+          </div>
+        )}
         {columns.map((c) => (
           <div key={c.key} onClick={() => onSort?.(c.key)} title={c.label}>
             {c.label}
@@ -52,6 +63,11 @@ export function VirtualTable<T extends object>({ rows, columns, rowHeight = 28, 
                 style={{ transform: `translateY(${vi.start}px)`, height: vi.size, gridTemplateColumns: template }}
                 onClick={() => onRowClick?.(row)}
               >
+                {selectable && (
+                  <div onClick={(e) => { e.stopPropagation(); onToggleSelect!(key, row) }}>
+                    <input type="checkbox" checked={!!selectedKeys?.has(key)} readOnly style={{ accentColor: 'var(--accent)' }} />
+                  </div>
+                )}
                 {columns.map((c) => {
                   const value = (row as Record<string, unknown>)[c.key]
                   const content = c.render ? c.render(row) : value == null ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value)

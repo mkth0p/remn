@@ -10,7 +10,7 @@ import { getTransport } from './ai/transport'
 import { IconAi, IconDashboard, IconEvents, IconEvidence, IconFindings, IconIoc, IconMail, IconReport, IconRules, IconSettings, IconTerminal, IconTimeline, IconPivot, IconLink } from './components/Icons'
 import { ConsolePanel, Toasts } from './components/ConsolePanel'
 import { TokenGate } from './components/TokenGate'
-import { Modal, Progress } from './components/ui'
+import { Modal, Progress, ThemeToggle } from './components/ui'
 import { Dashboard } from './views/Dashboard'
 import { EvidenceView } from './views/EvidenceView'
 import { EventsView } from './views/EventsView'
@@ -206,7 +206,7 @@ export default function App() {
   return (
     <div className="app">
       <aside className="sidebar">
-        <div className="brand"><div className="logo" /><div><div className="name">REMN</div><div className="tag">forensic analyzer</div></div></div>
+        <div className="brand"><span className="wordmark">REMN</span></div>
         <nav className="nav">
           {NAV.map((n) => (
             <div key={n.id}>
@@ -234,6 +234,7 @@ export default function App() {
         <button className="btn sm ghost" onClick={() => setNewCase({ name: '', storage: 'browser' })}>+ case</button>
         <span className="title">{NAV.find((n) => n.id === view)?.label}</span>
         <span className="spacer" />
+        <ThemeToggle />
         <div className="row" style={{ width: 420 }}>
           <IconPivot style={{ color: 'var(--fg-3)' }} />
           <input className="input mono" style={{ flex: 1 }} placeholder="pivot: IP, user, domain, hash, subject… (Enter)" value={global} onChange={(e) => setGlobal(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && runPivot()} />

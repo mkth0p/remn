@@ -1,8 +1,9 @@
 import { Fragment, useEffect, useState, type ReactNode } from 'react'
 import type { Severity } from '../db/schema'
 import { classNames, highlightJson, riskClass } from '../util/format'
-import { IconClose, IconCopy } from './Icons'
+import { IconClose, IconCopy, IconMoon, IconSun } from './Icons'
 import { useStore } from '../state/store'
+import { currentTheme, setTheme, type Theme } from '../ui/theme'
 
 export function Badge({ sev, children, className, title }: { sev?: Severity | 'ok' | 'accent' | 'flag' | string; children: ReactNode; className?: string; title?: string }) {
   return (
@@ -189,3 +190,70 @@ export function ListInput({ value, onChange, placeholder, mono }: { value: strin
     />
   )
 }
+
+/** Severity dot (colour only) and dot + label. */
+export function Dot({ sev, className, title }: { sev?: string; className?: string; title?: string }) {
+  return <span className={classNames('dot', sev, className)} title={title} />
+}
+export function Sev({ sev, children }: { sev: Severity | string; children?: ReactNode }) {
+  return (
+    <span className={classNames('sev', sev)}>
+      <Dot sev={sev} />
+      {children ?? sev}
+    </span>
+  )
+}
+
+/** KPI tile: icon, value with delta, label. tone colours the icon well. */
+export function Kpi({ icon, value, label, delta, tone, onClick, title }: { icon?: ReactNode; value: ReactNode; label: ReactNode; delta?: number | null; tone?: string; onClick?: () => void; title?: string }) {
+  return (
+    <div className={classNames('kpi', tone, onClick && 'click')} onClick={onClick} title={title}>
+      {icon && <div className="icon">{icon}</div>}
+      <div className="body">
+        <div className="value">
+          {value}
+          {delta != null && delta !== 0 && <span className={classNames('delta', delta > 0 ? 'up' : 'down')}>{delta > 0 ? '+' : ''}{delta}</span>}
+        </div>
+        <div className="label">{label}</div>
+      </div>
+    </div>
+  )
+}
+
+/** Right-hand flyout over a list: header (title + meta), optional tabs, body sections, footer actions. */
+export function Flyout({ title, meta, tabs, onClose, footer, children, width }: { title: ReactNode; meta?: ReactNode; tabs?: ReactNode; onClose: () => void; footer?: ReactNode; children: ReactNode; width?: string }) {
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [onClose])
+  return (
+    <div className="flyout" style={width ? { width } : undefined}>
+      <div className="flyout-h">
+        <div className="heading">
+          <div className="t">{title}</div>
+          {meta && <div className="m">{meta}</div>}
+        </div>
+        <button className="btn ghost sm icon" onClick={onClose} aria-label="close"><IconClose /></button>
+      </div>
+      {tabs}
+      <div className="flyout-b">{children}</div>
+      {footer && <div className="flyout-f">{footer}</div>}
+    </div>
+  )
+}
+
+export function ThemeToggle() {
+  const [theme, setT] = useState<Theme>(() => currentTheme())
+  const flip = () => {
+    const next: Theme = theme === 'dark' ? 'light' : 'dark'
+    setTheme(next)
+    setT(next)
+  }
+  return (
+    <button className="btn ghost sm icon" onClick={flip} title={theme === 'dark' ? 'switch to light mode' : 'switch to dark mode'} aria-label="toggle theme">
+      {theme === 'dark' ? <IconSun /> : <IconMoon />}
+    </button>
+  )
+}
+

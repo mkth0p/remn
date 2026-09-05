@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { estimateStorage, getDb, type Evidence, type Finding } from '../db/schema'
 import { useStore } from '../state/store'
 import { fmtBytes, fmtNum, fmtTs } from '../util/format'
-import { Badge, SevBar } from '../components/ui'
+import { Badge, Kpi, SevBar } from '../components/ui'
+import { IconEvents, IconEvidence, IconFindings, IconMail } from '../components/Icons'
 import { Dropzone } from '../components/Dropzone'
 import { requestIngest, refreshCounts } from '../data/ingest'
 import { getSource } from '../data/source'
@@ -51,10 +52,10 @@ export function Dashboard() {
       </div>
       <div className="view-body col" style={{ gap: 14 }}>
         <div className="grid-4">
-          <div className="card stat" onClick={() => setView('evidence')} style={{ cursor: 'pointer' }}><span className="label">evidence</span><span className="value">{fmtNum(counts.evidence)}</span><span className="small muted">{fmtBytes(evidence.reduce((s, e) => s + e.size, 0))} · {evidence.filter((e) => e.integrity === 'verified').length} verified</span></div>
-          <div className="card stat" onClick={() => setView('events')} style={{ cursor: 'pointer' }}><span className="label">events</span><span className="value accent">{fmtNum(counts.events)}</span><span className="small muted">{range?.firstIso ? `${range.firstIso.slice(0, 10)} → ${range.lastIso?.slice(0, 10)}` : 'no EVTX loaded'}</span></div>
-          <div className="card stat" onClick={() => setView('mails')} style={{ cursor: 'pointer' }}><span className="label">mails</span><span className="value accent">{fmtNum(counts.mails)}</span><span className="small muted">{evidence.filter((e) => e.kind === 'mail').length} mailbox file(s)</span></div>
-          <div className="card stat" onClick={() => setView('findings')} style={{ cursor: 'pointer' }}><span className="label">findings</span><span className={`value ${bySev.critical || bySev.high ? 'danger' : ''}`}>{fmtNum(counts.findings)}</span><SevBar counts={bySev} /></div>
+          <Kpi tone="accent" icon={<IconEvidence />} value={fmtNum(counts.evidence)} label={`evidence · ${fmtBytes(evidence.reduce((s, e) => s + e.size, 0))} · ${evidence.filter((e) => e.integrity === 'verified').length} verified`} onClick={() => setView('evidence')} />
+          <Kpi tone="accent" icon={<IconEvents />} value={fmtNum(counts.events)} label={range?.firstIso ? `events · ${range.firstIso.slice(0, 10)} → ${range.lastIso?.slice(0, 10)}` : 'events · no EVTX loaded'} onClick={() => setView('events')} />
+          <Kpi tone="accent" icon={<IconMail />} value={fmtNum(counts.mails)} label={`mails · ${evidence.filter((e) => e.kind === 'mail').length} mailbox file(s)`} onClick={() => setView('mails')} />
+          <Kpi tone={bySev.critical ? 'critical' : bySev.high ? 'high' : 'medium'} icon={<IconFindings />} value={fmtNum(counts.findings)} label={<span className="row" style={{ gap: 8 }}><span>findings</span><span style={{ width: 90 }}><SevBar counts={bySev} /></span></span>} onClick={() => setView('findings')} />
         </div>
         <div className="grid-2">
           <div className="panel">

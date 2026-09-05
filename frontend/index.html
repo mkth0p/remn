@@ -3,7 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="light" />
+    <script>
+      try {
+        var t = localStorage.getItem('remn-theme')
+        if (t !== 'dark' && t !== 'light') t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+        document.documentElement.dataset.theme = t
+        document.querySelector('meta[name="color-scheme"]').setAttribute('content', t)
+      } catch (e) {}
+    </script>
     <title>REMN — Forensic Analyzer</title>
   </head>
   <body>

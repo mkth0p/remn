@@ -62,6 +62,7 @@ function FacetBlock({ ds, source, def, conditions, onToggle, version }: { ds: Da
                   onClick={(e) => onToggle(def.field, it.value, e.altKey)}
                   title={`${it.value} — click to filter, alt+click to exclude`}
                 >
+                  <span className="box" />
                   <span className="val">{it.value}</span>
                   <span className="cnt">{fmtNum(it.count)}</span>
                   <span className="bar" style={{ width: `${(it.count / max) * 100}%` }} />
@@ -69,8 +70,8 @@ function FacetBlock({ ds, source, def, conditions, onToggle, version }: { ds: Da
               )
             })}
             {items.length > limit && (
-              <button className="btn ghost xs" onClick={() => setLimit(limit + 30)}>
-                more…
+              <button className="btn link xs" style={{ alignSelf: 'flex-start', margin: '4px 6px' }} onClick={() => setLimit(limit + 30)}>
+                show more ({fmtNum(items.length - limit)})
               </button>
             )}
           </div>
