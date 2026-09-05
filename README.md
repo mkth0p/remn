@@ -504,6 +504,21 @@ and a flyout with About, Investigation (entity pivots, referenced rows), Insight
 the rule) and Notes, plus Table and JSON views. The ATT&CK tab counts techniques
 observed against the enabled rules that map to them.
 
+Events and Mails share one query bar (search, time range, conditions, business
+hours, regex, saved searches, plain-language "ask") and a histogram of the current
+result set above the table; clicking a bar narrows the time range to that bucket.
+Selecting a mail opens a bottom pane: the message (text or sandboxed HTML), headers,
+hops, URLs, attachments, a Related tab (findings on the mail and the recipients'
+host and cloud events from 15 minutes before to 72 hours after delivery) and JSON,
+with an evidence-context column on the right (entities, sender history from the
+baseline pass, findings, score drivers, source file). `j` / `k` move the selection,
+`/` focuses the search.
+
+Every user, host, IP, sender address or domain value opens an entity page as a
+flyout over the current view: first and last seen, counts, a merged timeline of the
+entity's findings, mails and events, insights (what else the entity was seen with,
+sender history), and pivots to the filtered Events or Mails lists or to the analyst.
+
 ## Security model
 
 * Server binds to `127.0.0.1`, keeps no database and deletes upload temp files at

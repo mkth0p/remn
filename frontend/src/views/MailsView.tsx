@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Facets, type FacetDef } from '../components/Facets'
 import { FilterBar } from '../components/FilterBar'
+import { TimeHistogram } from '../components/TimeHistogram'
 import { VirtualTable, type Column } from '../components/VirtualTable'
 import { MailDetail } from '../components/Detail'
 import { getSource } from '../data/source'
@@ -11,7 +12,8 @@ import { fmtTs } from '../util/format'
 import { exportCsv, exportJson } from '../util/export'
 import { BaselineButton } from '../components/BaselineButton'
 import { RescoreButton } from '../components/RescoreButton'
-import { Flag, Risk } from '../components/ui'
+import { Dot, Flag } from '../components/ui'
+import { IconMore, IconPaperclip } from '../components/Icons'
 
 const FACETS: FacetDef[] = [
   { field: 'riskBand', label: 'Risk', open: true },
@@ -27,7 +29,14 @@ const FACETS: FacetDef[] = [
 ]
 const FIELDS = ['subject', 'fromName', 'fromNameNorm', 'fromAddr', 'fromDomain', 'fromRegistrable', 'replyTo.addr', 'returnPath', 'to.addr', 'originIp', 'originHelo', 'hopCount', 'messageId', 'xMailer', 'risk', 'flags', 'folder', 'sourceName', 'urlCount', 'attachmentCount', 'maxAttachmentRisk', 'attachments.name', 'attachments.realExt', 'attachments.sha256', 'attachments.flags', 'urls.host', 'urls.domain', 'urls.flags', 'auth.spf', 'auth.dkim', 'auth.dmarc', 'textPreview', 'bodyText', 'sourceFormat', 'reputation.worst']
 const LIMIT = 3000
+const QUIET_FLAGS = /^(spf_none|dkim_none|dmarc_none|html_only|from_webmail|single_hop|no_origin_ip)$/
 
+export const riskSev = (risk: number) => (risk >= 80 ? 'critical' : risk >= 60 ? 'high' : risk >= 40 ? 'medium' : risk >= 20 ? 'low' : 'info')
+
+/**
+ * Mails: query bar, histogram of the result set, dense table, and a bottom preview pane
+ * (message on the left, evidence context on the right). j / k move the selection.
+ */
 export function MailsView() {
   const kase = useStore((s) => s.currentCase)
   const filter = useStore((s) => s.mailsFilter)
@@ -43,6 +52,7 @@ export function MailsView() {
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<MailRow | null>(null)
   const [version, setVersion] = useState(0)
+  const [menu, setMenu] = useState(false)
   const ds = useMemo(() => (kase ? getSource(kase) : null), [kase])
   useEffect(() => {
     if (jobs.every((j) => j.phase === 'done' || j.phase === 'error')) setVersion((v) => v + 1)
@@ -79,6 +89,26 @@ export function MailsView() {
       setFocus(null)
     }
   }, [focus, setFocus, ds])
+  // keyboard: j / k move the selection, Escape closes the pane, / focuses the search
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return
+      if (e.key === '/') {
+        e.preventDefault()
+        ;(document.querySelector('[data-query-search]') as HTMLInputElement | null)?.focus()
+        return
+      }
+      if (e.key === 'Escape') return useStore.getState().entity ? undefined : setSelected(null)
+      if ((e.key === 'j' || e.key === 'k') && rows.length) {
+        const i = selected ? rows.findIndex((r) => r.id === selected.id) : -1
+        const next = e.key === 'j' ? Math.min(rows.length - 1, i + 1) : Math.max(0, i - 1)
+        setSelected(rows[next])
+      }
+    }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [rows, selected])
   const toggleFacet = useCallback(
     (field: string, value: string, negate?: boolean) => {
       setFilter((prev: Filter) => {
@@ -105,38 +135,56 @@ export function MailsView() {
   )
   const columns: Column<MailRow>[] = useMemo(
     () => [
-      { key: 'date', label: 'date (UTC)', width: 150, render: (r) => fmtTs(r.date) },
-      { key: 'risk', label: 'risk', width: 60, render: (r) => <Risk value={r.risk} /> },
-      { key: 'fromAddr', label: 'from', width: 260, click: (r) => toggleFacet('fromAddr', r.fromAddr), render: (r) => (r.fromName ? `${r.fromName} <${r.fromAddr}>` : r.fromAddr), title: (r) => `${r.fromName} <${r.fromAddr}>` },
-      { key: 'subject', label: 'subject', width: 'minmax(240px, 1fr)' },
-      { key: 'flags', label: 'flags', width: 'minmax(220px, 1.2fr)', render: (r) => <span className="row" style={{ gap: 3, overflow: 'hidden' }}>{(r.flags ?? []).filter((f) => !/^(spf_none|dkim_none|dmarc_none|html_only|from_webmail|single_hop|no_origin_ip)$/.test(f)).slice(0, 6).map((f) => <Flag key={f} name={f} />)}{(r.flags ?? []).length > 6 ? <span className="muted">+{r.flags.length - 6}</span> : null}</span> },
-      { key: 'attachmentCount', label: 'att', width: 50, render: (r) => (r.attachmentCount ? `${r.attachmentCount}${r.maxAttachmentRisk >= 60 ? ' ⚠' : ''}` : '') },
-      { key: 'originIp', label: 'origin ip', width: 120, click: (r) => toggleFacet('originIp', String(r.originIp)) },
-      { key: 'folder', label: 'folder', width: 120 },
+      { key: 'date', label: 'date (UTC)', width: 138, render: (r) => fmtTs(r.date) },
+      { key: 'risk', label: 'risk', width: 62, render: (r) => <span className="row" style={{ gap: 6 }}><Dot sev={riskSev(r.risk)} /><span className="mono">{r.risk}</span></span> },
+      { key: 'fromAddr', label: 'from', width: 'minmax(180px, 0.9fr)', click: (r) => toggleFacet('fromAddr', r.fromAddr), title: (r) => `${r.fromName} <${r.fromAddr}>`, render: (r) => (r.fromName ? <span><span style={{ color: 'var(--fg-1)' }}>{r.fromName}</span> <span className="muted">{r.fromAddr}</span></span> : r.fromAddr) },
+      { key: 'to', label: 'to', width: 'minmax(120px, 0.6fr)', render: (r) => { const t = r.to ?? []; return t.length ? <span title={t.map((x) => x.addr).join(', ')}>{t[0].addr || t[0].name}{t.length > 1 ? <span className="muted"> +{t.length - 1}</span> : null}</span> : <span className="muted">(undisclosed)</span> } },
+      { key: 'subject', label: 'subject', width: 'minmax(220px, 1.4fr)', render: (r) => <span style={{ color: 'var(--fg-1)' }}>{r.subject || <span className="muted">(no subject)</span>}</span> },
+      { key: 'attachmentCount', label: '', width: 44, render: (r) => (r.attachmentCount ? <span className="row" style={{ gap: 3, color: r.maxAttachmentRisk >= 60 ? 'var(--sev-high)' : 'var(--fg-2)' }} title={`${r.attachmentCount} attachment(s), max risk ${r.maxAttachmentRisk}`}><IconPaperclip />{r.attachmentCount}</span> : null) },
+      { key: 'flags', label: 'flags', width: 'minmax(180px, 1fr)', render: (r) => { const fl = (r.flags ?? []).filter((f) => !QUIET_FLAGS.test(f)); return <span className="row" style={{ gap: 3, overflow: 'hidden' }}>{fl.slice(0, 4).map((f) => <Flag key={f} name={f} />)}{fl.length > 4 ? <span className="muted">+{fl.length - 4}</span> : null}</span> } },
+      { key: 'sourceName', label: 'source', width: 130, title: (r) => `${r.sourceName ?? ''} · ${r.folder ?? ''}`, render: (r) => <span className="muted">{(r.sourceName ?? '').replace(/^.*[\\/]/, '') || r.sourceFormat}{r.folder ? ` / ${r.folder}` : ''}</span> },
     ],
     [toggleFacet],
   )
   if (!kase || !ds) return null
   const sort = filter.sort ?? { field: 'date', dir: 'desc' as const }
+  const exportCsvRows = () => exportCsv('mails.csv', rows.map((r) => ({ id: r.id, date: r.dateIso, risk: r.risk, from: r.fromAddr, fromName: r.fromName, subject: r.subject, to: (r.to ?? []).map((t) => t.addr).join(';'), replyTo: (r.replyTo ?? []).map((t) => t.addr).join(';'), originIp: r.originIp, spf: r.auth?.spf, dkim: r.auth?.dkim, dmarc: r.auth?.dmarc, flags: (r.flags ?? []).join(' '), attachments: (r.attachments ?? []).map((a) => `${a.name}(${a.risk})`).join(';'), hashes: (r.attachments ?? []).map((a) => a.sha256).join(';'), urls: (r.urls ?? []).map((u) => u.defanged).join(' '), folder: r.folder, source: r.sourceName })))
   return (
     <div className="view">
       <div className="split">
         <div className="left">
-          <div className="panel-h">facets <span className="muted">({ds.kind === 'server' ? 'server store' : 'global'})</span></div>
+          <div className="panel-h">Filters <span className="muted">({ds.kind === 'server' ? 'server store' : 'browser store'})</span></div>
           <Facets ds={ds} source="mails" fields={FACETS} conditions={filter.conditions ?? []} onToggle={toggleFacet} version={version + rulesVersion} />
         </div>
         <div className="right relative">
-          <FilterBar source="mails" filter={filter} onChange={setFilter} fields={FIELDS} total={total} loading={loading} />
-          <div className="row small dim" style={{ padding: '4px 14px', gap: 12 }}>
-            <span className="mono">{rows.length.toLocaleString('en-US')} row(s) loaded{truncated ? ` (first ${LIMIT})` : ''}</span>
-            {error && <span style={{ color: 'var(--danger)' }}>{error}</span>}
-            <span className="spacer" />
-            <button className="btn xs ghost" onClick={() => exportCsv('mails.csv', rows.map((r) => ({ id: r.id, date: r.dateIso, risk: r.risk, from: r.fromAddr, fromName: r.fromName, subject: r.subject, to: (r.to ?? []).map((t) => t.addr).join(';'), replyTo: (r.replyTo ?? []).map((t) => t.addr).join(';'), originIp: r.originIp, spf: r.auth?.spf, dkim: r.auth?.dkim, dmarc: r.auth?.dmarc, flags: (r.flags ?? []).join(' '), attachments: (r.attachments ?? []).map((a) => `${a.name}(${a.risk})`).join(';'), hashes: (r.attachments ?? []).map((a) => a.sha256).join(';'), urls: (r.urls ?? []).map((u) => u.defanged).join(' '), folder: r.folder, source: r.sourceName })))}>csv</button>
-            <button className="btn xs ghost" onClick={() => exportJson('mails.json', rows)}>json</button>
-            <BaselineButton />
-            <RescoreButton key={kase?.id} />
-            <span className="hint">alt+click a facet to exclude · click a sender to filter</span>
-          </div>
+          <FilterBar
+            source="mails"
+            filter={filter}
+            onChange={setFilter}
+            fields={FIELDS}
+            total={total}
+            loading={loading}
+            extra={
+              <span className="row relative" style={{ gap: 4 }}>
+                <BaselineButton />
+                <RescoreButton key={kase?.id} />
+                <button className="btn icon ghost sm" title="export" onClick={() => setMenu(!menu)}><IconMore /></button>
+                {menu && (
+                  <div className="menu" style={{ position: 'absolute', right: 0, top: '100%', zIndex: 25 }} onMouseLeave={() => setMenu(false)}>
+                    <button className="btn ghost sm" onClick={() => { exportCsvRows(); setMenu(false) }}>export CSV ({rows.length})</button>
+                    <button className="btn ghost sm" onClick={() => { exportJson('mails.json', rows); setMenu(false) }}>export JSON ({rows.length})</button>
+                  </div>
+                )}
+              </span>
+            }
+          />
+          <TimeHistogram ds={ds} source="mails" filter={filter} version={version + rulesVersion} onRange={(from, to) => setFilter({ ...filter, timeRange: { from: new Date(from).toISOString(), to: new Date(to).toISOString() } })} />
+          {(truncated || error) && (
+            <div className="row small dim" style={{ padding: '3px 16px', gap: 12, borderBottom: '1px solid var(--line)' }}>
+              {truncated && <span className="mono">showing the first {LIMIT.toLocaleString('en-US')} rows - narrow the filter or change the sort</span>}
+              {error && <span style={{ color: 'var(--danger)' }}>{error}</span>}
+            </div>
+          )}
           <VirtualTable
             rows={rows}
             columns={columns}
@@ -148,7 +196,7 @@ export function MailsView() {
             rowClass={(r) => (r.risk >= 80 ? 'sev-critical' : r.risk >= 60 ? 'sev-high' : r.risk >= 40 ? 'sev-medium' : undefined)}
             empty={loading ? 'loading…' : 'no mails match - load a mailbox in Evidence or relax the filter'}
           />
-          {selected && <MailDetail row={selected} onClose={() => setSelected(null)} />}
+          {selected && <MailDetail row={selected} onClose={() => setSelected(null)} layout="pane" />}
         </div>
       </div>
     </div>

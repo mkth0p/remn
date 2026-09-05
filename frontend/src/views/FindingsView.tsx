@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { VirtualTable, type Column } from '../components/VirtualTable'
 import { usePivot } from '../components/Detail'
+import { entityKind } from '../components/EntityPanel'
 import { Badge, Dot, Flyout, JsonView, Kpi, Progress, Sev, SevBar, Tabs } from '../components/ui'
 import { IconCircle, IconFindings, IconInfo, IconPlay, IconSearch, IconTarget } from '../components/Icons'
 import { RescoreButton } from '../components/RescoreButton'
@@ -49,6 +50,8 @@ export function FindingsView() {
   const setMailsFilter = useStore((s) => s.setMailsFilter)
   const setAiPrompt = useStore((s) => s.setAiPrompt)
   const pivot = usePivot()
+  const setEntity = useStore((s) => s.setEntity)
+  const openEntity = (k: string, v: string, source: 'events' | 'mails') => { const kind = entityKind(k); if (kind && v && !v.includes(',')) setEntity({ kind, value: v }); else pivot(v, k, source) }
   const [all, setAll] = useState<Finding[]>([])
   const [sev, setSev] = useState('')
   const [status, setStatus] = useState('')
@@ -362,7 +365,7 @@ export function FindingsView() {
                         {Object.entries(selected.entities).map(([k, v]) => (
                           <div className="f" key={k}>
                             <span className="k">{k}</span>
-                            <span className="v" onClick={() => pivot(String(v), k, selected.source)} title={`pivot on ${k}`}>{String(v)}</span>
+                            <span className="v" onClick={() => openEntity(k, String(v), selected.source)} title={entityKind(k) ? `open the ${entityKind(k)} page` : `pivot on ${k}`}>{String(v)}</span>
                           </div>
                         ))}
                         <div className="f"><span className="k">referenced rows</span><span className="v" onClick={() => openRefs(selected)}>{fmtNum(selected.refs.length)}{selected.refs.length > 500 ? ' (first 500)' : ''}</span></div>

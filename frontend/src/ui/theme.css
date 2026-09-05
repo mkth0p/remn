@@ -412,3 +412,9 @@ label.field > span { font-weight: 500; }
   .app { display: block; }
   .report { color: #111; }
 }
+
+/* small anchored menu (export, more actions) */
+.menu { display: flex; flex-direction: column; min-width: 190px; background: var(--surface); border: 1px solid var(--line-2); border-radius: var(--radius); box-shadow: var(--shadow-lg); padding: 4px; }
+.menu .btn { justify-content: flex-start; width: 100%; text-align: left; }
+.pane { flex: none; }
+.pane-side .section > h3 { font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-2); }

@@ -10,6 +10,7 @@ import { getTransport } from './ai/transport'
 import { IconAi, IconDashboard, IconEvents, IconEvidence, IconFindings, IconIoc, IconMail, IconReport, IconRules, IconSettings, IconTerminal, IconTimeline, IconPivot, IconLink } from './components/Icons'
 import { ConsolePanel, Toasts } from './components/ConsolePanel'
 import { TokenGate } from './components/TokenGate'
+import { EntityPanel } from './components/EntityPanel'
 import { Modal, Progress, ThemeToggle } from './components/ui'
 import { Dashboard } from './views/Dashboard'
 import { EvidenceView } from './views/EvidenceView'
@@ -253,6 +254,7 @@ export default function App() {
         {view === 'ai' && <AiView />}
         {view === 'report' && <ReportView />}
         {view === 'settings' && <SettingsView />}
+        <EntityPanel />
         {showConsole && <div style={{ position: 'absolute', left: 12, right: 12, bottom: 12, zIndex: 30 }}><ConsolePanel /></div>}
       </main>
       <Toasts />

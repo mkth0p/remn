@@ -3,6 +3,11 @@ import type { Case, CaseSettings } from '../db/schema'
 import type { Health, Meta } from '../api/client'
 import type { Filter } from '../rules/filter'
 
+export interface EntityRef {
+  kind: 'user' | 'host' | 'ip' | 'address' | 'domain'
+  value: string
+}
+
 export type View = 'dashboard' | 'evidence' | 'events' | 'mails' | 'findings' | 'chains' | 'timeline' | 'iocs' | 'ai' | 'report' | 'rules' | 'settings'
 
 export interface ConsoleLine {
@@ -55,6 +60,9 @@ interface State {
   setMailsFilter: (f: Filter | ((prev: Filter) => Filter)) => void
   focusId: { source: 'events' | 'mails'; id: number } | null
   setFocus: (f: { source: 'events' | 'mails'; id: number } | null) => void
+  /** entity page (user, host, ip, address, domain) shown as a flyout over any view */
+  entity: EntityRef | null
+  setEntity: (e: EntityRef | null) => void
   aiPrompt: string | null
   setAiPrompt: (p: string | null) => void
   counts: { events: number; mails: number; findings: number; iocs: number; evidence: number }
@@ -111,6 +119,8 @@ export const useStore = create<State>((set) => ({
   setMailsFilter: (f) => set((s) => ({ mailsFilter: typeof f === 'function' ? f(s.mailsFilter) : f })),
   focusId: null,
   setFocus: (focusId) => set({ focusId }),
+  entity: null,
+  setEntity: (entity) => set({ entity }),
   aiPrompt: null,
   setAiPrompt: (aiPrompt) => set({ aiPrompt }),
   counts: { events: 0, mails: 0, findings: 0, iocs: 0, evidence: 0 },

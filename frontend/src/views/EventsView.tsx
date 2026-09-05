@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Facets, type FacetDef } from '../components/Facets'
 import { FilterBar } from '../components/FilterBar'
+import { TimeHistogram } from '../components/TimeHistogram'
+import { IconMore } from '../components/Icons'
 import { VirtualTable, type Column } from '../components/VirtualTable'
 import { EventDetail } from '../components/Detail'
 import { getSource } from '../data/source'
@@ -43,6 +45,7 @@ export function EventsView() {
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<EventRow | null>(null)
   const [version, setVersion] = useState(0)
+  const [menu, setMenu] = useState(false)
   const ds = useMemo(() => (kase ? getSource(kase) : null), [kase])
   useEffect(() => {
     if (jobs.every((j) => j.phase === 'done' || j.phase === 'error')) setVersion((v) => v + 1)
@@ -115,19 +118,36 @@ export function EventsView() {
     <div className="view">
       <div className="split">
         <div className="left">
-          <div className="panel-h">facets <span className="muted">({ds.kind === 'server' ? 'server store' : 'global'})</span></div>
+          <div className="panel-h">Filters <span className="muted">({ds.kind === 'server' ? 'server store' : 'browser store'})</span></div>
           <Facets ds={ds} source="events" fields={FACETS} conditions={filter.conditions ?? []} onToggle={toggleFacet} version={version} />
         </div>
         <div className="right relative">
-          <FilterBar source="events" filter={filter} onChange={setFilter} fields={FIELDS} total={total} loading={loading} />
-          <div className="row small dim" style={{ padding: '4px 14px', gap: 12 }}>
-            <span className="mono">{rows.length.toLocaleString('en-US')} row(s) loaded{truncated ? ` (first ${LIMIT} - narrow the filter or sort)` : ''}</span>
-            {error && <span style={{ color: 'var(--danger)' }}>{error}</span>}
-            <span className="spacer" />
-            <button className="btn xs ghost" onClick={() => exportCsv('events.csv', rows.map(({ raw, data, ...r }) => { void raw; void data; return r }), ['id', 'tsIso', 'eventId', 'provider', 'channel', 'computer', 'sourceFile', 'levelName', 'summary', 'targetUser', 'targetDomain', 'subjectUser', 'logonType', 'ipAddress', 'workstation', 'statusText', 'processName', 'commandLine', 'serviceName', 'serviceFile'])}>csv</button>
-            <button className="btn xs ghost" onClick={() => exportJson('events.json', rows)}>json</button>
-            <span className="hint">click a row for details · click a cell value to filter · alt+click a facet to exclude</span>
-          </div>
+          <FilterBar
+            source="events"
+            filter={filter}
+            onChange={setFilter}
+            fields={FIELDS}
+            total={total}
+            loading={loading}
+            extra={
+              <span className="row relative" style={{ gap: 4 }}>
+                <button className="btn icon ghost sm" title="export" onClick={() => setMenu(!menu)}><IconMore /></button>
+                {menu && (
+                  <div className="menu" style={{ position: 'absolute', right: 0, top: '100%', zIndex: 25 }} onMouseLeave={() => setMenu(false)}>
+                    <button className="btn ghost sm" onClick={() => { exportCsv('events.csv', rows.map(({ raw, data, ...r }) => { void raw; void data; return r }), ['id', 'tsIso', 'eventId', 'provider', 'channel', 'computer', 'sourceFile', 'levelName', 'summary', 'targetUser', 'targetDomain', 'subjectUser', 'logonType', 'ipAddress', 'workstation', 'statusText', 'processName', 'commandLine', 'serviceName', 'serviceFile']); setMenu(false) }}>export CSV ({rows.length})</button>
+                    <button className="btn ghost sm" onClick={() => { exportJson('events.json', rows); setMenu(false) }}>export JSON ({rows.length})</button>
+                  </div>
+                )}
+              </span>
+            }
+          />
+          <TimeHistogram ds={ds} source="events" filter={filter} version={version} onRange={(from, to) => setFilter({ ...filter, timeRange: { from: new Date(from).toISOString(), to: new Date(to).toISOString() } })} />
+          {(truncated || error) && (
+            <div className="row small dim" style={{ padding: '3px 16px', gap: 12, borderBottom: '1px solid var(--line)' }}>
+              {truncated && <span className="mono">showing the first {LIMIT.toLocaleString('en-US')} rows - narrow the filter or change the sort</span>}
+              {error && <span style={{ color: 'var(--danger)' }}>{error}</span>}
+            </div>
+          )}
           <VirtualTable
             rows={rows}
             columns={columns}

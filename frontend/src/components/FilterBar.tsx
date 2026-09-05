@@ -4,7 +4,7 @@ import { getDb } from '../db/schema'
 import type { Condition, Filter, Op } from '../rules/filter'
 import { toast, useStore } from '../state/store'
 import { Chip, Modal, Spinner } from './ui'
-import { IconAi, IconClose, IconSave, IconSearch } from './Icons'
+import { IconAi, IconClock, IconClose, IconFilter, IconSave, IconSearch } from './Icons'
 
 const OPS: Op[] = ['eq', 'ne', 'in', 'nin', 'contains', 'not_contains', 'startswith', 'endswith', 're', 'gt', 'gte', 'lt', 'lte', 'exists', 'empty']
 
@@ -16,6 +16,8 @@ interface Props {
   total?: number | null
   loading?: boolean
   facetsHint?: Record<string, string[]>
+  /** extra controls rendered at the right end of the first row */
+  extra?: React.ReactNode
 }
 
 function toLocalInput(v: string | number | null | undefined): string {
@@ -29,13 +31,24 @@ function fromLocalInput(s: string): string | undefined {
   if (!s) return undefined
   return s.length === 16 ? s + ':00Z' : s + 'Z'
 }
+function shortTs(v: string | number | null | undefined): string {
+  const s = toLocalInput(v)
+  return s ? s.replace('T', ' ') : '…'
+}
 
-export function FilterBar({ source, filter, onChange, fields, total, loading, facetsHint }: Props) {
+/**
+ * Query bar: one search field, then pills for the time range, conditions, business hours,
+ * regex, saved searches and the plain-language query. Active pills carry their value;
+ * the full state is also listed as removable chips below the bar.
+ */
+export function FilterBar({ source, filter, onChange, fields, total, loading, facetsHint, extra }: Props) {
   const kase = useStore((s) => s.currentCase)
   const [text, setText] = useState(filter.text ?? '')
   const [regex, setRegex] = useState(filter.regex?.pattern ?? '')
   const [regexField, setRegexField] = useState(filter.regex?.field ?? '*')
   const [showAdd, setShowAdd] = useState(false)
+  const [showTime, setShowTime] = useState(false)
+  const [showRegex, setShowRegex] = useState(Boolean(filter.regex?.pattern))
   const [cond, setCond] = useState<Condition>({ field: fields[0] ?? '', op: 'eq', value: '' })
   const [ai, setAi] = useState(false)
   const [aiQ, setAiQ] = useState('')
@@ -47,6 +60,7 @@ export function FilterBar({ source, filter, onChange, fields, total, loading, fa
   useEffect(() => {
     setRegex(filter.regex?.pattern ?? '')
     setRegexField(filter.regex?.field ?? '*')
+    if (filter.regex?.pattern) setShowRegex(true)
   }, [filter.regex])
   useEffect(() => {
     if (!kase?.id) return
@@ -60,16 +74,19 @@ export function FilterBar({ source, filter, onChange, fields, total, loading, fa
 
   const conds = filter.conditions ?? []
   const setConds = (c: Condition[]) => onChange({ ...filter, conditions: c })
-  const applyText = () => onChange({ ...filter, text: text.trim() || undefined })
+  const applyText = () => {
+    const t = text.trim() || undefined
+    if (t !== (filter.text || undefined)) onChange({ ...filter, text: t })
+  }
   const applyRegex = () => {
-    if (!regex.trim()) return onChange({ ...filter, regex: undefined })
+    if (!regex.trim()) return filter.regex ? onChange({ ...filter, regex: undefined }) : undefined
     try {
       new RegExp(regex, 'i')
     } catch (e) {
       toast('err', `invalid regex: ${(e as Error).message}`)
       return
     }
-    onChange({ ...filter, regex: { field: regexField, pattern: regex, flags: 'i' } })
+    if (filter.regex?.pattern !== regex || filter.regex?.field !== regexField) onChange({ ...filter, regex: { field: regexField, pattern: regex, flags: 'i' } })
   }
   const preset = (hours: number) => {
     const to = Date.now()
@@ -104,57 +121,64 @@ export function FilterBar({ source, filter, onChange, fields, total, loading, fa
     toast('ok', 'search saved')
     setSaveName(null)
   }
-  const hasAny = conds.length || filter.timeRange?.from || filter.timeRange?.to || filter.regex?.pattern || filter.text || filter.hourRange
+  const hasTime = Boolean(filter.timeRange?.from || filter.timeRange?.to)
+  const hasAny = conds.length || hasTime || filter.regex?.pattern || filter.text || filter.hourRange
+  const cls = (on: unknown) => 'pill' + (on ? ' active' : '')
 
   return (
-    <div className="col" style={{ padding: '10px 14px', borderBottom: '1px solid var(--line)', background: 'var(--bg-1)', gap: 8 }}>
-      <div className="row wrap">
-        <div className="row" style={{ flex: 1, minWidth: 220 }}>
-          <IconSearch style={{ color: 'var(--fg-3)' }} />
-          <input className="input mono" style={{ flex: 1 }} placeholder="full-text search (summary, users, IPs, command lines, raw…)" value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && applyText()} onBlur={applyText} />
+    <div className="querybar">
+      <div className="row wrap" style={{ gap: 6 }}>
+        <div className="search">
+          <IconSearch />
+          <input data-query-search placeholder={source === 'events' ? 'search summary, users, IPs, command lines, raw…  (Enter)' : 'search subject, sender, recipients, body…  (Enter)'} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && applyText()} onBlur={applyText} />
+          {text && <button className="btn icon ghost xs" title="clear search" onClick={() => { setText(''); onChange({ ...filter, text: undefined }) }}><IconClose /></button>}
         </div>
-        <div className="row" style={{ minWidth: 300 }}>
-          <select className="select mono" value={regexField} onChange={(e) => setRegexField(e.target.value)} title="regex target field">
-            <option value="*">/ any (raw) /</option>
-            {fields.map((f) => (
-              <option key={f} value={f}>
-                {f}
-              </option>
-            ))}
-          </select>
-          <input className="input mono" style={{ flex: 1 }} placeholder="regex (JS syntax, case-insensitive)" value={regex} onChange={(e) => setRegex(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && applyRegex()} onBlur={applyRegex} />
-        </div>
-        <div className="row">
-          <input type="datetime-local" className="input mono" value={toLocalInput(filter.timeRange?.from)} onChange={(e) => onChange({ ...filter, timeRange: { ...filter.timeRange, from: fromLocalInput(e.target.value) } })} title="from (UTC)" />
-          <span className="muted">→</span>
-          <input type="datetime-local" className="input mono" value={toLocalInput(filter.timeRange?.to)} onChange={(e) => onChange({ ...filter, timeRange: { ...filter.timeRange, to: fromLocalInput(e.target.value) } })} title="to (UTC)" />
-          <button className="btn sm ghost" onClick={() => preset(24)}>24h</button>
-          <button className="btn sm ghost" onClick={() => preset(24 * 7)}>7d</button>
-          <button className="btn sm ghost" onClick={() => preset(24 * 30)}>30d</button>
-        </div>
-        <button className="btn sm" onClick={() => setShowAdd(true)}>+ condition</button>
-        <button className="btn sm" onClick={() => onChange({ ...filter, hourRange: filter.hourRange ? undefined : { from: kase?.settings.businessHours.start ?? 8, to: kase?.settings.businessHours.end ?? 19, outside: true, tz: kase?.settings.businessHours.tz } })} title="only rows outside business hours (Settings)">
-          {filter.hourRange ? '✓ ' : ''}outside hours
-        </button>
-        <button className="btn sm primary" onClick={() => setAi(!ai)} title="describe what you want in plain language; the local model builds the filter">
-          <IconAi /> ask
-        </button>
+        <button className={cls(hasTime)} onClick={() => setShowTime(!showTime)} title="time range (UTC)"><IconClock /> {hasTime ? `${shortTs(filter.timeRange?.from)} → ${shortTs(filter.timeRange?.to)}` : 'any time'}</button>
+        <button className={cls(conds.length)} onClick={() => setShowAdd(true)} title="add a field condition"><IconFilter /> {conds.length ? `${conds.length} condition${conds.length === 1 ? '' : 's'}` : 'condition'}</button>
+        <button className={cls(filter.hourRange)} onClick={() => onChange({ ...filter, hourRange: filter.hourRange ? undefined : { from: kase?.settings.businessHours.start ?? 8, to: kase?.settings.businessHours.end ?? 19, outside: true, tz: kase?.settings.businessHours.tz } })} title="only rows outside business hours (Settings)">outside hours</button>
+        <button className={cls(filter.regex?.pattern)} onClick={() => setShowRegex(!showRegex)} title="regular expression on a field">regex</button>
+        <button className={cls(ai)} onClick={() => setAi(!ai)} title="describe what you want in plain language; the local model builds the filter"><IconAi /> ask</button>
         {saved.length > 0 && (
-          <select className="select" value="" onChange={(e) => { const s = saved.find((x) => String(x.id) === e.target.value); if (s) onChange(s.filter) }}>
-            <option value="">saved searches…</option>
-            {saved.map((s) => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
+          <label className="pill" title="saved searches">
+            <select value="" onChange={(e) => { const s = saved.find((x) => String(x.id) === e.target.value); if (s) onChange(s.filter) }}>
+              <option value="">saved ({saved.length})</option>
+              {saved.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </label>
         )}
-        {hasAny && (
+        {hasAny ? (
           <>
-            <button className="btn sm ghost" onClick={() => setSaveName('')} title="save this search"><IconSave /></button>
-            <button className="btn sm ghost" onClick={() => onChange({ sort: filter.sort })} title="clear all"><IconClose /> clear</button>
+            <button className="btn icon ghost sm" onClick={() => setSaveName('')} title="save this search"><IconSave /></button>
+            <button className="btn ghost sm" onClick={() => onChange({ sort: filter.sort })} title="clear every filter">clear</button>
           </>
-        )}
-        <span className="mono small dim nowrap">{loading ? <Spinner /> : total != null ? `${total.toLocaleString('en-US')} match${total === 1 ? '' : 'es'}` : ''}</span>
+        ) : null}
+        <span className="spacer" />
+        {extra}
+        <span className="mono small dim nowrap" style={{ minWidth: 80, textAlign: 'right' }}>{loading ? <Spinner /> : total != null ? `${total.toLocaleString('en-US')} match${total === 1 ? '' : 'es'}` : ''}</span>
       </div>
+      {showTime && (
+        <div className="row wrap" style={{ gap: 6 }}>
+          <input type="datetime-local" className="input mono" value={toLocalInput(filter.timeRange?.from)} onChange={(e) => onChange({ ...filter, timeRange: { ...filter.timeRange, from: fromLocalInput(e.target.value) } })} title="from (UTC)" />
+          <span className="muted">to</span>
+          <input type="datetime-local" className="input mono" value={toLocalInput(filter.timeRange?.to)} onChange={(e) => onChange({ ...filter, timeRange: { ...filter.timeRange, to: fromLocalInput(e.target.value) } })} title="to (UTC)" />
+          <div className="segmented">
+            <button onClick={() => preset(24)}>24h</button>
+            <button onClick={() => preset(24 * 7)}>7d</button>
+            <button onClick={() => preset(24 * 30)}>30d</button>
+            <button onClick={() => onChange({ ...filter, timeRange: undefined })}>any</button>
+          </div>
+          <span className="hint">times are UTC · click a histogram bar to narrow to that bucket</span>
+        </div>
+      )}
+      {showRegex && (
+        <div className="row wrap" style={{ gap: 6 }}>
+          <select className="select mono" value={regexField} onChange={(e) => setRegexField(e.target.value)} title="regex target field">
+            <option value="*">any field (raw)</option>
+            {fields.map((f) => <option key={f} value={f}>{f}</option>)}
+          </select>
+          <input className="input mono" style={{ flex: 1, minWidth: 240 }} placeholder="JavaScript regular expression, case-insensitive (Enter)" value={regex} onChange={(e) => setRegex(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && applyRegex()} onBlur={applyRegex} />
+        </div>
+      )}
       {ai && (
         <div className="row" style={{ gap: 8 }}>
           <input className="input" style={{ flex: 1 }} placeholder={source === 'events' ? 'e.g. failed logons on the admin account last night from outside the LAN' : 'e.g. mails with macro attachments from lookalike domains this week'} value={aiQ} onChange={(e) => setAiQ(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && runAi()} autoFocus />
@@ -162,7 +186,7 @@ export function FilterBar({ source, filter, onChange, fields, total, loading, fa
           {aiExpl && <span className="small dim" style={{ maxWidth: 480 }}>{aiExpl}</span>}
         </div>
       )}
-      {hasAny && (
+      {hasAny ? (
         <div className="row wrap" style={{ gap: 6 }}>
           {filter.logic === 'or' && conds.length > 1 && <span className="badge accent">OR</span>}
           {conds.map((c, i) => (
@@ -170,9 +194,9 @@ export function FilterBar({ source, filter, onChange, fields, total, loading, fa
               {c.field} <b>{c.op}</b> {c.value !== undefined && (Array.isArray(c.value) ? c.value.join(', ') : String(c.value))}
             </Chip>
           ))}
-          {(filter.timeRange?.from || filter.timeRange?.to) && (
+          {hasTime && (
             <Chip onRemove={() => onChange({ ...filter, timeRange: undefined })}>
-              time {filter.timeRange?.from ? toLocalInput(filter.timeRange.from) : '…'} → {filter.timeRange?.to ? toLocalInput(filter.timeRange.to) : '…'}
+              time {shortTs(filter.timeRange?.from)} → {shortTs(filter.timeRange?.to)}
             </Chip>
           )}
           {filter.hourRange && <Chip onRemove={() => onChange({ ...filter, hourRange: undefined })}>{filter.hourRange.outside ? 'outside' : 'within'} {filter.hourRange.from}h–{filter.hourRange.to}h</Chip>}
@@ -184,7 +208,7 @@ export function FilterBar({ source, filter, onChange, fields, total, loading, fa
             </button>
           )}
         </div>
-      )}
+      ) : null}
       {showAdd && (
         <Modal title="Add condition" onClose={() => setShowAdd(false)} footer={<><button className="btn" onClick={() => setShowAdd(false)}>cancel</button><button className="btn primary" onClick={() => { if (!cond.field) return; let v: unknown = cond.value; if (cond.op === 'in' || cond.op === 'nin') v = String(v).split(',').map((s) => s.trim()).filter(Boolean); else if (typeof v === 'string' && /^-?\d+$/.test(v) && ['eq', 'ne', 'gt', 'gte', 'lt', 'lte'].includes(cond.op)) v = Number(v); if (cond.op === 'exists' || cond.op === 'empty') v = undefined; setConds([...conds, { ...cond, value: v }]); setShowAdd(false) }}>add</button></>}>
           <div className="row">
@@ -198,7 +222,7 @@ export function FilterBar({ source, filter, onChange, fields, total, loading, fa
                 <option key={o} value={o}>{o}</option>
               ))}
             </select>
-            <input className="input mono" style={{ flex: 1 }} placeholder={cond.op === 'in' || cond.op === 'nin' ? 'comma-separated values' : 'value'} value={String(cond.value ?? '')} onChange={(e) => setCond({ ...cond, value: e.target.value })} disabled={cond.op === 'exists' || cond.op === 'empty'} />
+            <input className="input mono" style={{ flex: 1 }} placeholder={cond.op === 'in' || cond.op === 'nin' ? 'comma-separated values' : 'value'} value={String(cond.value ?? '')} onChange={(e) => setCond({ ...cond, value: e.target.value })} disabled={cond.op === 'exists' || cond.op === 'empty'} autoFocus={false} onKeyDown={(e) => { if (e.key === 'Enter') (e.currentTarget.closest('.modal')?.querySelector('.btn.primary') as HTMLButtonElement | null)?.click() }} />
           </div>
           <div className="hint">Strings compare case-insensitively. Dotted paths reach nested values (attachments.flags, data.LogonType). "re" takes a JavaScript regular expression.</div>
         </Modal>
