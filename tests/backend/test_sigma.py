@@ -243,3 +243,22 @@ level: low
     w = res["rule"]["where"]
     assert w["channel|contains"] == "some-new-provider" and w["data.SomeNewField|startswith"] == "abc" and w["provider"] == "Microsoft-Windows-Foo"
     compile_cond(w, Ctx(source="events"))
+
+
+def test_informational_level_is_enrichment_not_an_alert():
+    text = """title: User Logoff Event
+id: 0badd08f-c6a3-4630-90d3-6875cca440be
+status: test
+level: informational
+logsource:
+    product: windows
+    service: security
+detection:
+    selection:
+        EventID:
+            - 4634
+            - 4647
+    condition: selection
+"""
+    r = sigma.convert_text(text, "logoff.yml")[0]
+    assert not r["ok"] and "informational" in r["error"]

@@ -248,7 +248,7 @@ export function RulesView() {
         <Modal title={edit.id ? 'Edit custom rule' : 'New custom rule'} onClose={() => setEdit(null)} wide footer={<><button className="btn" onClick={() => setEdit(null)}>cancel</button><button className="btn primary" onClick={save}>save</button></>}>
           <textarea className="textarea mono" style={{ minHeight: 360 }} value={edit.yaml} onChange={(e) => setEdit({ ...edit, yaml: e.target.value })} spellCheck={false} />
           {edit.error && <div className="small" style={{ color: 'var(--danger)' }}>{edit.error}</div>}
-          <div className="hint">Operators: field|eq (default), ne, in, nin, contains, not_contains, contains_any, contains_all, startswith, not_startswith, endswith, not_endswith, re, not_re, gt, gte, lt, lte, exists, empty, in_setting, nin_setting, levenshtein, length ("&lt; 500"). Groups: any_of / all_of / not. Aggregation: group_by, window, threshold, distinct, then, time, exclude. Custom rules with the same id override bundled and pack rules.</div>
+          <div className="hint">Operators: field|eq (default), ne, in, nin, contains, not_contains, contains_any, contains_all, startswith, not_startswith, endswith, not_endswith, re, not_re, gt, gte, lt, lte, exists, empty, in_setting, nin_setting, levenshtein, length ("&lt; 500"), contains_cs / startswith_cs / endswith_cs (case-sensitive). Groups: any_of / all_of / not. Aggregation: group_by, window, threshold, distinct, then, time, exclude. Custom rules with the same id override bundled and pack rules.</div>
         </Modal>
       )}
     </div>

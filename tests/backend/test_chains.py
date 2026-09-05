@@ -165,3 +165,40 @@ def test_build_endpoint_accepts_posted_rows():
     assert len(body["chains"]) == 1 and body["chains"][0]["identity"] == "alice" and body["stats"]["chains"] == 1
     r2 = c.post("/api/chains/build", json.dumps({"storeKey": "00000000-0000-0000-0000-000000000000"}), content_type="application/json", **HDR)
     assert r2.status_code == 404
+
+
+def test_routine_activity_and_own_domain_links_do_not_make_a_chain():
+    """A supplier invoice at risk 13 with a medium (approximate) finding, linking to the intranet portal,
+    followed by two days of logons, DNS and sign-ins of the recipient: context, not an attack chain."""
+    t0 = ms(0)
+    seed = {"id": 1, "date": t0, "subject": "Supplier invoice NS-0000018", "fromAddr": "reports@vendor.example", "fromRegistrable": "vendor.example",
+            "to": [{"addr": "employee019@northstar.example"}], "risk": 13, "attachments": [],
+            "urls": [{"url": "https://portal.northstar.example/x", "host": "portal.northstar.example", "domain": "northstar.example"}]}
+    findings = [{"ruleId": "sublime-mixed-case", "title": "Link: Mixed case HTTPS protocol", "severity": "medium", "source": "mails", "refs": [1]}]
+    events = []
+    for i in range(14):
+        ts = t0 + (i + 1) * 3_600_000
+        if i % 3 == 2:
+            events.append({"id": 100 + i, "ts": ts, "eventId": 22, "channel": "Microsoft-Windows-Sysmon/Operational", "provider": "Microsoft-Windows-Sysmon",
+                           "computer": "WS-019", "user": "NORTHSTAR\\employee019", "subjectUser": "employee019", "query": "portal.northstar.example", "image": "C:\\Program Files\\Microsoft Office\\OUTLOOK.EXE"})
+        elif i % 3 == 1:
+            events.append({"id": 100 + i, "ts": ts, "provider": "Microsoft 365 Unified Audit Log", "category": "M365 Entra", "operation": "UserLoggedIn",
+                           "subjectUser": "employee019@northstar.example", "upn": "employee019@northstar.example", "ipAddress": "82.64.10.3", "status": "Succeeded", "data": {"UserId": "employee019@northstar.example"}})
+        else:
+            events.append({"id": 100 + i, "ts": ts, "eventId": 4624, "channel": "Security", "provider": "Microsoft-Windows-Security-Auditing",
+                           "computer": "WS-019", "targetUser": "employee019", "targetDomain": "NORTHSTAR", "ipAddress": "10.20.6.208", "logonType": 3, "logonTypeName": "Network"})
+    settings = {"internal_domains": ["northstar.example"], "expected_countries": ["FR"]}
+    art = C.seed_artifacts(seed, settings)
+    assert art["domains"] == set() and art["hosts"] == set()
+    res = C.build_chains([seed], events, findings, settings)
+    assert res["stats"]["seeds"] == 1 and res["chains"] == [], res["chains"][:1]
+    # an external lure link changes nothing while no event names it: still no chain
+    lure = dict(seed, urls=[{"url": "https://login-northstar.evil-login.net/x", "host": "login-northstar.evil-login.net", "domain": "evil-login.net"}])
+    assert C.build_chains([lure], events, findings, settings)["chains"] == []
+    # one DNS query for the lure domain is the click: now there is a chain, tied to the mail by that link
+    click = dict(events[2], id=999, query="login-northstar.evil-login.net")
+    res2 = C.build_chains([lure], events + [click], findings, settings)
+    assert len(res2["chains"]) == 1
+    c = res2["chains"][0]
+    assert c["artifactLinks"] >= 1 and any("mail URL domain evil-login.net" in a for s in c["steps"] for a in s["artifacts"])
+    assert c["severity"] in ("medium", "high") and c["score"] < 80

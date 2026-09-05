@@ -121,3 +121,16 @@ describe('length, built-in lists and derived url fields', () => {
     expect(matchCondition({ fromNameNorm: 'dupont jean' }, { field: 'fromNameNorm', op: 'in_setting', value: 'org_display_names' }, { org_display_names: ['Jean Dupont'] })).toBe(true)
   })
 })
+
+describe('case-sensitive operators', () => {
+  it('match the literal case exactly, unlike contains / startswith / endswith', () => {
+    expect(matchCondition({ subject: 'Click hTTPs://x' }, { field: 'subject', op: 'contains_cs', value: 'hTTPs://' })).toBe(true)
+    expect(matchCondition({ subject: 'Click https://x' }, { field: 'subject', op: 'contains_cs', value: 'hTTPs://' })).toBe(false)
+    expect(matchCondition({ subject: 'Click https://x' }, { field: 'subject', op: 'contains', value: 'hTTPs://' })).toBe(true)
+    expect(matchCondition({ subject: 'RE: hello' }, { field: 'subject', op: 'startswith_cs', value: 'RE:' })).toBe(true)
+    expect(matchCondition({ subject: 're: hello' }, { field: 'subject', op: 'startswith_cs', value: 'RE:' })).toBe(false)
+    expect(matchCondition({ subject: 'x.Admin' }, { field: 'subject', op: 'endswith_cs', value: ['Admin', 'Root'] })).toBe(true)
+    expect(matchCondition({ urls: [{ url: 'hTTPs://a' }, { url: 'https://b' }] }, { field: 'urls.url', op: 'contains_cs', value: 'hTTPs://' })).toBe(true)
+    expect(matchCondition({ subject: null }, { field: 'subject', op: 'contains_cs', value: 'x' })).toBe(false)
+  })
+})

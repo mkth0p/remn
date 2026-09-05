@@ -590,6 +590,9 @@ def convert_rule(doc: dict[str, Any]) -> dict[str, Any]:
         det = _any_of(trees)
         where = _all_of([ls_where, det]) if ls_where else det
         level = str(doc.get("level") or "medium").lower()
+        if level in ("informational", "info"):
+            # Sigma: "no case or alerting should be triggered by such rules" - they tag context (logoffs, logons)
+            raise Unsupported("level informational (Sigma: enrichment only, not an alert)")
         attack, tags = _attack_tags(doc.get("tags") or [])
         cat_or_service = (ls.get("category") or ls.get("service") or "").lower()
         rule: dict[str, Any] = {

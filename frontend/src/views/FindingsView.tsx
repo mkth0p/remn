@@ -3,6 +3,7 @@ import { VirtualTable, type Column } from '../components/VirtualTable'
 import { Drawer } from '../components/Detail'
 import { Badge, JsonView, Progress, SevBar } from '../components/ui'
 import { loadRules, runRulesFor, type LoadedRule } from '../data/rules'
+import { pruneOrphanFindings } from '../data/findingReviews'
 import { getDb, type Finding, type Severity } from '../db/schema'
 import { toast, useStore } from '../state/store'
 import { fmtNum, fmtTs } from '../util/format'
@@ -44,6 +45,8 @@ export function FindingsView() {
     setRunning({ done: 0, total: enabled.length, rule: '' })
     try {
       await runRulesFor(kase, enabled, (done, total, rule) => setRunning({ done, total, rule }))
+      const pruned = await pruneOrphanFindings(kase.id!, rules.map((r) => r.rule.id))
+      if (pruned) toast('info', `${pruned} finding(s) of rules that no longer exist were removed`)
     } catch (e) {
       toast('err', `rules failed: ${(e as Error).message}`, 0)
     }

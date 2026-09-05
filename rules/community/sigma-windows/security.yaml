@@ -244,38 +244,6 @@ sigma:
   falsepositives:
   - Legitimate administrative activity
 ---
-id: sigma-0badd08f-c6a3-4630-90d3-6875cca440be
-title: User Logoff Event
-description: Detects a user log-off activity. Could be used for example to correlate information during forensic investigations
-severity: info
-source: events
-attack:
-- T1531
-tags:
-- sigma
-- security
-- impact
-references:
-- https://github.com/Yamato-Security/EnableWindowsLogSettings/blob/7f6d755d45ac7cc9fc35b0cbf498e6aa4ef19def/ConfiguringSecurityLogAuditPolicies.md
-- https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4634
-- https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4647
-where:
-  channel: Security
-  eventId|in:
-  - 4634
-  - 4647
-sigma:
-  id: 0badd08f-c6a3-4630-90d3-6875cca440be
-  status: test
-  author: frack113
-  date: '2022-10-14'
-  level: informational
-  logsource:
-    service: security
-    product: windows
-  falsepositives:
-  - Unknown
----
 id: sigma-0c718a5e-4284-4fb9-b4d9-b9a50b3a1974
 title: Invoke-Obfuscation STDIN+ Launcher - Security
 description: Detects Obfuscated use of stdin to execute PowerShell
@@ -1794,36 +1762,6 @@ sigma:
   - Legacy systems or applications that legitimately use RC4 encryption
   - Misconfigured accounts with pre-authentication disabled
 ---
-id: sigma-411742ad-89b0-49cb-a7b0-3971b5c1e0a4
-title: Locked Workstation
-description: Detects locked workstation session events that occur automatically after a standard period of inactivity.
-severity: info
-source: events
-tags:
-- sigma
-- security
-- impact
-references:
-- https://www.cisecurity.org/controls/cis-controls-list/
-- https://www.pcisecuritystandards.org/documents/PCI_DSS_v3-2-1.pdf
-- https://nvlpubs.nist.gov/nistpubs/CSWP/NIST.CSWP.04162018.pdf
-- https://www.ultimatewindowssecurity.com/securitylog/encyclopedia/event.aspx?eventID=4800
-where:
-  channel: Security
-  eventId: 4800
-sigma:
-  id: 411742ad-89b0-49cb-a7b0-3971b5c1e0a4
-  status: stable
-  author: Alexandr Yampolskyi, SOC Prime
-  date: '2019-03-26'
-  modified: '2023-12-11'
-  level: informational
-  logsource:
-    product: windows
-    service: security
-  falsepositives:
-  - Likely
----
 id: sigma-45545954-4016-43c6-855e-eae8f1c369dc
 title: Protected Storage Service Access
 description: Detects access to a protected_storage service over the network. Potential abuse of DPAPI to extract domain backup
@@ -1888,47 +1826,6 @@ sigma:
       (SACL): Auditing/User'
   falsepositives:
   - Intended exclusions by administrators
----
-id: sigma-470ec5fa-7b4e-4071-b200-4c753100f49b
-title: Failed Code Integrity Checks
-description: Detects code integrity failures such as missing page hashes or corrupted drivers due unauthorized modification.
-  This could be a sign of tampered binaries.
-severity: info
-source: events
-attack:
-- T1027.001
-tags:
-- sigma
-- security
-- stealth
-references:
-- https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-5038
-- https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-6281
-where:
-  channel: Security
-  eventId|in:
-  - 5038
-  - 6281
-  not:
-    any_of:
-    - param1|contains_any:
-      - \CSFalconServiceUninstallTool_
-      - \Program Files\CrowdStrike\
-      - \System32\drivers\CrowdStrike\
-      - \Windows\System32\ScriptControl64_
-    - param1|contains: \Program Files\Sophos\
-sigma:
-  id: 470ec5fa-7b4e-4071-b200-4c753100f49b
-  status: stable
-  author: Thomas Patzke
-  date: '2019-12-03'
-  modified: '2025-01-19'
-  level: informational
-  logsource:
-    product: windows
-    service: security
-  falsepositives:
-  - Disk device errors
 ---
 id: sigma-496a0e47-0a33-4dca-b009-9e6ca3591f39
 title: Suspicious Kerberos RC4 Ticket Encryption
@@ -5008,39 +4905,6 @@ sigma:
       (SACL): Auditing/User'
   falsepositives:
   - Unknown
----
-id: sigma-e9faba72-4974-4ab2-a4c5-46e25ad59e9b
-title: VSSAudit Security Event Source Registration
-description: Detects the registration of the security event source VSSAudit. It would usually trigger when volume shadow copy
-  operations happen.
-severity: info
-source: events
-attack:
-- T1003.002
-tags:
-- sigma
-- security
-- credential-access
-references:
-- https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1003.002/T1003.002.md#atomic-test-3---esentutlexe-sam-copy
-where:
-  channel: Security
-  data.AuditSourceName: VSSAudit
-  eventId|in:
-  - 4904
-  - 4905
-sigma:
-  id: e9faba72-4974-4ab2-a4c5-46e25ad59e9b
-  status: test
-  author: Roberto Rodriguez @Cyb3rWard0g, Open Threat Research (OTR)
-  date: '2020-10-20'
-  modified: '2022-04-28'
-  level: informational
-  logsource:
-    product: windows
-    service: security
-  falsepositives:
-  - Legitimate use of VSSVC. Maybe backup operations. It would usually be done by C:\Windows\System32\VSSVC.exe.
 ---
 id: sigma-eca91c7c-9214-47b9-b4c5-cb1d7e4f2350
 title: Uncommon Outbound Kerberos Connection - Security

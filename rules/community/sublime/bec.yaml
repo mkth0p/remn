@@ -16,8 +16,8 @@ tags:
 - lookalike-domain
 - social-engineering
 where:
-  xMailer|startswith: Open-Xchange Mailer
-  messageId|endswith: '@privateemail.com>'
+  xMailer|startswith_cs: Open-Xchange Mailer
+  messageId|endswith_cs: '@privateemail.com>'
   fromRegistrable|re: ^(?:.*(?:llc|ltd|inc|corp|llp|co))$
   not:
     fromRegistrable: simpelllc.com

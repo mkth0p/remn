@@ -17,9 +17,10 @@ export async function rememberReviews(caseId: number, findings: Finding[]): Prom
 /** Commit a completed rule evaluation atomically, including archived reviews. */
 export async function replaceFindings(caseId: number, ruleIds: string[], findings: Record<string, unknown>[]): Promise<number> {
   const db = getDb()
-  const ids = new Set(ruleIds)
+  const keys = ruleIds.map((id) => [caseId, id] as [number, string])
   return db.transaction('rw', [db.findings, db.kv], async () => {
-    const current = db.findings.where('caseId').equals(caseId).filter((f) => ids.has(f.ruleId))
+    // the compound index: a per-rule call (the worker replaces after every rule) must not rescan every finding of the case
+    const current = db.findings.where('[caseId+ruleId]').anyOf(keys)
     const reviews = await rememberReviews(caseId, await current.toArray())
     await current.delete()
     const now = Date.now()
@@ -29,5 +30,19 @@ export async function replaceFindings(caseId: number, ruleIds: string[], finding
     })
     for (let i = 0; i < rows.length; i += 2000) await db.findings.bulkAdd(rows.slice(i, i + 2000))
     return rows.length
+  })
+}
+
+/** Drop findings of rules that no longer exist (a pack refreshed, a custom rule deleted); chains are kept. */
+export async function pruneOrphanFindings(caseId: number, knownRuleIds: Iterable<string>): Promise<number> {
+  const db = getDb()
+  const known = new Set(knownRuleIds)
+  known.add('chain')
+  return db.transaction('rw', [db.findings, db.kv], async () => {
+    const orphans = await db.findings.where('caseId').equals(caseId).filter((f) => !known.has(f.ruleId)).toArray()
+    if (!orphans.length) return 0
+    await rememberReviews(caseId, orphans)
+    await db.findings.bulkDelete(orphans.map((f) => f.id!))
+    return orphans.length
   })
 }

@@ -22,8 +22,8 @@
   },
   "counts": {
     "upstream": 128,
-    "converted": 116,
-    "skipped": 12,
+    "converted": 114,
+    "skipped": 14,
     "warnings": 0
   },
   "skipReasons": [
@@ -34,6 +34,10 @@
     [
       "IPv6 cidr ::1/128",
       3
+    ],
+    [
+      "level informational",
+      2
     ],
     [
       "logsource category 'file_change'",
@@ -58,7 +62,7 @@
     "network_connection.yaml": 5,
     "pipe_created.yaml": 1,
     "process_access.yaml": 4,
-    "process_creation.yaml": 57,
+    "process_creation.yaml": 55,
     "ps_classic_start.yaml": 2,
     "ps_module.yaml": 1,
     "ps_script.yaml": 12,

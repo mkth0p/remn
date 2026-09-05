@@ -137,6 +137,9 @@ where:
   operation: MailItemsAccessed
   data.MailAccessType: Sync
   data.LogonType|in: ["1", "2"]
+group_by: [targetUser, ipAddress]
+window: 1h
+threshold: ">= 1"
 entities: [targetUser, subjectUser, ipAddress]
 ---
 id: m365-app-consent

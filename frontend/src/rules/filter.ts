@@ -8,6 +8,7 @@ export type Op =
   | 'eq' | 'ne' | 'in' | 'nin' | 'contains' | 'not_contains' | 'contains_any' | 'contains_all'
   | 'startswith' | 'not_startswith' | 'endswith' | 'not_endswith' | 're' | 'not_re'
   | 'gt' | 'gte' | 'lt' | 'lte' | 'exists' | 'empty' | 'in_setting' | 'nin_setting' | 'levenshtein' | 'length'
+  | 'contains_cs' | 'startswith_cs' | 'endswith_cs'
 
 export interface Condition {
   field: string
@@ -296,6 +297,15 @@ export function matchCondition(row: Row, c: Condition, settings?: SettingsLike):
       const max = numeric(wanted[1])
       if (max === null) return false
       return actStr.some((a) => levenshtein(a, needle) <= max)
+    }
+    case 'contains_cs':
+    case 'startswith_cs':
+    case 'endswith_cs': {
+      // case-sensitive variants: the literal's case is the point (MQL strings.contains on "hTTPs://")
+      if (actual == null) return false
+      const raw = actArr.map((a) => (a == null ? '' : typeof a === 'object' ? JSON.stringify(a) : String(a)))
+      const needles = wantArr.map((w) => String(w))
+      return raw.some((a) => needles.some((w) => (op === 'contains_cs' ? a.includes(w) : op === 'startswith_cs' ? a.startsWith(w) : a.endsWith(w))))
     }
     case 'length': {
       // wanted = threshold string ("< 500", ">= 3") or a number (exact); characters of a text, items of a list

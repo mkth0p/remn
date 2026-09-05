@@ -16,7 +16,7 @@ from services.store.casestore import EVENT_COLUMNS, EVENT_INT, MAIL_COLUMNS, MAI
 
 OPS = {"eq", "ne", "in", "nin", "contains", "not_contains", "contains_any", "contains_all", "startswith", "not_startswith",
        "endswith", "not_endswith", "re", "not_re", "gt", "gte", "lt", "lte", "exists", "empty", "in_setting", "nin_setting",
-       "levenshtein", "length"}
+       "levenshtein", "length", "contains_cs", "startswith_cs", "endswith_cs"}
 
 EVENT_COLS = {n for n, _ in EVENT_COLUMNS}
 MAIL_COLS = {n for n, _ in MAIL_COLUMNS}
@@ -78,6 +78,9 @@ def _alternation(values: list[str], prefix: str = "", suffix: str = "") -> str:
     chain of lower(col) LIKE ?, which recomputes lower() for every alternative (a 179-item
     contains_any on script-block rows went from 5.6 s to 0.04 s)."""
     return prefix + "(?:" + "|".join(_re_literal(v) for v in values) + ")" + suffix
+
+
+_CS_FN = {"contains_cs": "contains", "startswith_cs": "starts_with", "endswith_cs": "ends_with"}
 
 
 def _like_escape(s: str) -> str:
@@ -232,6 +235,12 @@ def compile_condition(field_name: str, op: str, value: Any, ctx: Ctx) -> str:
         if op == "length":
             sym, n = _threshold(value)
             return f"coalesce(len({sql}) {sym} {ctx.p(n)}, FALSE)"
+        if op in _CS_FN:
+            strs = [str(v) for v in vals]
+            if not strs:
+                return "FALSE"
+            pat = " OR ".join(f"{_CS_FN[op]}(x, {ctx.p(s)})" for s in strs)
+            return f"coalesce(list_bool_or(list_transform({sql}, x -> ({pat}))), FALSE)"
         raise FilterError(f"operator {op} not supported on list field {field_name}")
 
     # scalar
@@ -313,6 +322,17 @@ def compile_condition(field_name: str, op: str, value: Any, ctx: Ctx) -> str:
         # value = threshold string ("< 500", ">= 3") or a number (exact); character count of the text value
         sym, n = _threshold(value)
         return f"coalesce(length(CAST({sql} AS VARCHAR)) {sym} {ctx.p(n)}, FALSE)"
+    if op in _CS_FN:
+        # case-sensitive variants (MQL strings.contains / starts_with / ends_with): the literal's case matters
+        strs = [str(v) for v in vals]
+        if not strs:
+            return "FALSE"
+        text = f"CAST({sql} AS VARCHAR)"
+        if len(strs) == 1:
+            return f"coalesce({_CS_FN[op]}({text}, {ctx.p(strs[0])}), FALSE)"
+        pre = "^" if op == "startswith_cs" else ""
+        suf = "$" if op == "endswith_cs" else ""
+        return f"coalesce(regexp_matches({text}, {ctx.p(_alternation(strs, prefix=pre, suffix=suf))}), FALSE)"
     raise FilterError(f"unsupported operator {op}")
 
 

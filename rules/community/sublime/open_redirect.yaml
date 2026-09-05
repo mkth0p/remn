@@ -5581,8 +5581,8 @@ tags:
 - open-redirect
 where:
   urls.domain: g7.fr
-  urls.url|startswith: //
-  urls.url|endswith: /
+  urls.url|startswith_cs: //
+  urls.url|endswith_cs: /
   any_of:
   - fromRegistrable|in:
     - adobe.com
@@ -10482,8 +10482,8 @@ tags:
 where:
   urls.domain|re: ^cartoonnetwork\.
   urls.subdomain: www
-  urls.url|startswith: //
-  urls.url|endswith: /
+  urls.url|startswith_cs: //
+  urls.url|endswith_cs: /
 sublime:
   id: 7435e057-5abb-55b4-b1da-f1b6ec191c33
   attack_types:
@@ -16629,7 +16629,7 @@ tags:
 where:
   all_of:
   - urls.host: shoppingwebapi.didatravel.com
-    urls.url|startswith: /Analytics/Marketing
+    urls.url|startswith_cs: /Analytics/Marketing
     urls.url|contains: rdu=
     not:
       urls.url|re: rdu=(?:https?(?:%3a|:))?(?:%2f|\/){2}[^&]*didatravel\.com(?:\&|\/|$)
@@ -17900,7 +17900,7 @@ tags:
 where:
   urls.domain: usap-dc.org
   urls.url: /tracker
-  urls.url|startswith: type=dataset&url=http
+  urls.url|startswith_cs: type=dataset&url=http
 sublime:
   id: c499d041-1e95-52a5-bc7e-857376e1a873
   attack_types:

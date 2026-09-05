@@ -282,7 +282,7 @@ tags:
 - social-engineering
 - free-file-host
 where:
-  bodyText|contains: 'has invited you to VIEW the following document:'
+  bodyText|contains_cs: 'has invited you to VIEW the following document:'
   urlCount|gt: 0
 sublime:
   id: 437a20d4-2ea1-5365-b060-fad8e7a6d32e
@@ -1152,7 +1152,7 @@ tags:
 - malware-ransomware
 - evasion
 where:
-  urls.url|contains: ?ai=xd
+  urls.url|contains_cs: ?ai=xd
 sublime:
   id: a165e206-61b3-5b08-9408-2fe3c2bf0810
   attack_types:
@@ -1242,7 +1242,7 @@ tags:
 - free-subdomain-host
 - social-engineering
 where:
-  bodyText|startswith: Flare
+  bodyText|startswith_cs: Flare
   urls.domain: trycloudflare.com
 sublime:
   id: ac81eaf3-cc29-5945-a3a8-2a57b3de441d
@@ -1923,7 +1923,7 @@ tags:
 - credential-phishing
 - evasion
 where:
-  urls.url|endswith: .html
+  urls.url|endswith_cs: .html
   urls.fragment|re: \-[a-z0-9]+[01]{5}$
 sublime:
   id: dc5e3700-1f29-5fed-8378-38631e0ceea1

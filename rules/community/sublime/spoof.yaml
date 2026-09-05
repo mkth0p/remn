@@ -16,7 +16,7 @@ where:
   - not:
       auth.dmarc: pass
   - not:
-      messageId|endswith: .dropbox.com>
+      messageId|endswith_cs: .dropbox.com>
 sublime:
   id: bd99740a-07e1-5c6f-92f6-b223478effa8
   attack_types:

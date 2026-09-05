@@ -101,17 +101,38 @@ _LOLBIN_RE = re.compile(r"(?i)\\(cmd|powershell|pwsh|wscript|cscript|mshta|rundl
 _LEGACY_CLIENT_RE = re.compile(r"(?i)^(other clients|imap|pop|smtp|authenticated smtp|exchange activesync|exchange web services|exchange online powershell)")
 
 
-def seed_artifacts(mail: dict[str, Any]) -> dict[str, set[str]]:
+def _own_domains(settings: dict[str, Any] | None) -> set[str]:
+    out: set[str] = set()
+    for key in ("internal_domains", "internalDomains", "trusted_senders", "trustedSenders"):
+        for d in (settings or {}).get(key) or []:
+            s = str(d).lower().strip().lstrip("@")
+            if s and "@" not in s:
+                out.add(s)
+    return out
+
+
+def _is_own(host: str, own: set[str]) -> bool:
+    return any(host == d or host.endswith("." + d) for d in own)
+
+
+def seed_artifacts(mail: dict[str, Any], settings: dict[str, Any] | None = None) -> dict[str, set[str]]:
+    """Link domains / hosts and attachment names worth looking for in the events. Links to the
+    organisation's own domains (the intranet portal in a supplier invoice) are not artifacts:
+    every workstation resolves them all day."""
+    own = _own_domains(settings)
     domains: set[str] = set()
     hosts: set[str] = set()
     for u in mail.get("urls") or []:
         if not isinstance(u, dict):
             continue
-        for k in ("domain",):
-            if u.get(k):
-                domains.add(str(u[k]).lower())
-        if u.get("host"):
-            hosts.add(str(u["host"]).lower())
+        host = str(u.get("host") or "").lower()
+        dom = str(u.get("domain") or "").lower()
+        if (host and _is_own(host, own)) or (dom and _is_own(dom, own)):
+            continue
+        if dom:
+            domains.add(dom)
+        if host:
+            hosts.add(host)
     names: set[str] = set()
     for a in mail.get("attachments") or []:
         if isinstance(a, dict) and a.get("name"):
@@ -372,7 +393,7 @@ def build_chains(mails: Iterable[dict[str, Any]], events: Iterable[dict[str, Any
     chains: list[dict[str, Any]] = []
     for seed in seeds:
         t0 = int(seed["date"])
-        art = seed_artifacts(seed)
+        art = seed_artifacts(seed, settings)
         seed_findings = f_by_ref.get(("mails", int(seed["id"]))) if seed.get("id") is not None else []
         for rcpt in mail_recipients(seed):
             ident = identity_key(rcpt)
@@ -434,9 +455,20 @@ def build_chains(mails: Iterable[dict[str, Any]], events: Iterable[dict[str, Any
                 s["offsetMin"] = round((s["ts"] - t0) / 60_000, 1)
                 if s["count"] > 1:
                     s["title"] = f"{s['title']} ×{s['count']}"
-            total_w = sum(s["weight"] for s in steps)
             artifact_links = sum(1 for s in steps for a in s["artifacts"] if a.startswith("mail "))
-            score = min(100, int(int(seed.get("risk") or 0) * 0.4 + total_w * 6 + artifact_links * 8 + max((SEV_WEIGHT.get(str(f.get("severity")), 0) for f in (seed_findings or [])), default=0) * 4))
+            # Routine activity (logons, sign-ins, DNS, mailbox reads at weight 1, without a link to the
+            # mail or a finding) is context, not evidence: it contributes at most 3 points however long
+            # the window is, and a chain made only of it is not a chain at all.
+            linked = {id(s) for s in steps if s["findings"] or any(a.startswith("mail ") for a in s["artifacts"])}
+            routine = [s for s in steps if s["weight"] <= 1 and id(s) not in linked]
+            if not artifact_links and not any(id(s) in linked or s["weight"] >= 2 for s in steps):
+                continue
+            routine_ids = {id(s) for s in routine}
+            total_w = sum(s["weight"] for s in steps if id(s) not in routine_ids) + min(len(routine), 3)
+            top_seed = max((SEV_WEIGHT.get(str(f.get("severity")), 0) for f in (seed_findings or [])), default=0)
+            score = min(100, int(int(seed.get("risk") or 0) * 0.4 + total_w * 6 + artifact_links * 8 + top_seed * 4))
+            if not artifact_links and not any(id(s) in linked for s in steps) and max(s["weight"] for s in steps) < 3:
+                score = min(score, 54)  # nothing ties the activity to the mail: never high without a link, a strong step or a finding
             if score < min_score:
                 continue
             severity = "critical" if score >= 80 else "high" if score >= 55 else "medium" if score >= 35 else "low"

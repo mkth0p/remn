@@ -43,7 +43,7 @@ references:
 where:
   any_of:
   - bodyText|re: https?:\/\/[^\s⁄∕]+(?:\/[^\s⁄∕]+)*[⁄∕][^\s⁄∕]+
-  - urls.url|contains_any:
+  - urls.url|contains_cs:
     - ⁄
     - ∕
 sublime:

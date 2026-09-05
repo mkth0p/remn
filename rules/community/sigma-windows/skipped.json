@@ -20,9 +20,29 @@
   "reason": "modifier |base64offset on ServiceFileName"
  },
  {
+  "file": "rules/windows/builtin/security/win_security_codeintegrity_check_failure.yml",
+  "title": "Failed Code Integrity Checks",
+  "reason": "level informational (Sigma: enrichment only, not an alert)"
+ },
+ {
   "file": "rules/windows/builtin/security/win_security_explicit_credential_local_logon.yml",
   "title": "Potentially Suspicious Explicit Credential Local Logon",
   "reason": "modifier |fieldref on SubjectUserName"
+ },
+ {
+  "file": "rules/windows/builtin/security/win_security_user_logoff.yml",
+  "title": "User Logoff Event",
+  "reason": "level informational (Sigma: enrichment only, not an alert)"
+ },
+ {
+  "file": "rules/windows/builtin/security/win_security_vssaudit_secevent_source_registration.yml",
+  "title": "VSSAudit Security Event Source Registration",
+  "reason": "level informational (Sigma: enrichment only, not an alert)"
+ },
+ {
+  "file": "rules/windows/builtin/security/win_security_workstation_was_locked.yml",
+  "title": "Locked Workstation",
+  "reason": "level informational (Sigma: enrichment only, not an alert)"
  },
  {
   "file": "rules/windows/builtin/smbserver/connectivity/win_smbserver_connectivity_unsigned_and_unencrypted_share_connection.yml",
@@ -30,9 +50,19 @@
   "reason": "IPv6 cidr ::1/128"
  },
  {
+  "file": "rules/windows/builtin/system/microsoft_windows_windows_update_client/win_system_susp_system_update_error.yml",
+  "title": "Windows Update Error",
+  "reason": "level informational (Sigma: enrichment only, not an alert)"
+ },
+ {
   "file": "rules/windows/builtin/system/service_control_manager/win_system_cobaltstrike_service_installs.yml",
   "title": "CobaltStrike Service Installations - System",
   "reason": "modifier |base64offset on ImagePath"
+ },
+ {
+  "file": "rules/windows/builtin/windefend/win_defender_history_delete.yml",
+  "title": "Windows Defender Malware Detection History Deletion",
+  "reason": "level informational (Sigma: enrichment only, not an alert)"
  },
  {
   "file": "rules/windows/file/file_access/file_access_win_susp_credential_manager_access.yml",
@@ -150,6 +180,21 @@
   "reason": "IPv6 cidr ::1/128"
  },
  {
+  "file": "rules/windows/pipe_created/pipe_created_powershell_execution_pipe.yml",
+  "title": "New PowerShell Instance Created",
+  "reason": "level informational (Sigma: enrichment only, not an alert)"
+ },
+ {
+  "file": "rules/windows/powershell/powershell_module/posh_pm_decompress_commands.yml",
+  "title": "PowerShell Decompress Commands",
+  "reason": "level informational (Sigma: enrichment only, not an alert)"
+ },
+ {
+  "file": "rules/windows/process_creation/proc_creation_win_conhost_legacy_option.yml",
+  "title": "Suspicious High IntegrityLevel Conhost Legacy Option",
+  "reason": "level informational (Sigma: enrichment only, not an alert)"
+ },
+ {
   "file": "rules/windows/process_creation/proc_creation_win_powershell_base64_frombase64string.yml",
   "title": "PowerShell Base64 Encoded FromBase64String Cmdlet",
   "reason": "modifier |base64offset on CommandLine"
@@ -173,6 +218,11 @@
   "file": "rules/windows/process_creation/proc_creation_win_susp_cross_user_process_spawn.yml",
   "title": "Suspicious Cross-User Process Spawn",
   "reason": "modifier |fieldref on User"
+ },
+ {
+  "file": "rules/windows/registry/registry_set/registry_set_new_application_appcompat.yml",
+  "title": "New Application in AppCompat",
+  "reason": "level informational (Sigma: enrichment only, not an alert)"
  },
  {
   "file": "rules/windows/wmi_event/sysmon_wmi_susp_encoded_scripts.yml",

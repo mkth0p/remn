@@ -53,7 +53,7 @@ where:
   fromAddr: quickbooks@notification.intuit.com
   auth.spf: pass
   auth.dmarc: pass
-  auth.spfDomain|endswith: .intuit.com
+  auth.spfDomain|endswith_cs: .intuit.com
   any_of:
   - any_of:
     - replyTo.addr|contains: intuit

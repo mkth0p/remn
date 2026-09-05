@@ -868,7 +868,10 @@ class Translator:
             key, val = next(iter(cond.items()))
             field, _, op = key.partition("|")
             neg = {"eq": "ne", "": "ne", "in": "nin", "contains": "not_contains", "contains_any": "not_contains", "startswith": "not_startswith",
-                   "endswith": "not_endswith", "re": "not_re", "in_setting": "nin_setting"}.get(op)
+                   "endswith": "not_endswith", "re": "not_re", "in_setting": "nin_setting",
+                   "contains_cs": "not_contains", "startswith_cs": "not_startswith", "endswith_cs": "not_endswith"}.get(op)
+            if op.endswith("_cs"):
+                self.warn("all(not strings.contains(...)) matched case-insensitively (no negated case-sensitive operator)")
             if op == "exists":
                 return {f"{field}|exists": not bool(val)}
             if neg is None:
@@ -898,14 +901,19 @@ class Translator:
         for a in args[1:]:
             needles.extend(self._values(a))
         strs = [str(n) for n in needles]
-        if name in ("strings.contains", "strings.starts_with", "strings.ends_with", "strings.like", "regex.contains", "regex.match"):
+        # strings.contains / starts_with / ends_with are case-sensitive in MQL. On a plain text column the
+        # DSL's *_cs operators keep that exactly ("hTTPs://" must not match every https link); derived
+        # kinds (local part, TLD, headers blob) only have case-insensitive matching, so they fall back.
+        cs = f.kind == "text" and name in ("strings.contains", "strings.starts_with", "strings.ends_with")
+        if name in ("strings.contains", "strings.starts_with", "strings.ends_with", "strings.like", "regex.contains", "regex.match") and not cs:
             self.warn(f"{name} is case-sensitive in MQL; REMN matches case-insensitively")
         if name in ("strings.icontains", "strings.contains"):
-            return self.cond(f, "contains_any" if len(strs) > 1 else "contains", strs if len(strs) > 1 else strs[0])
+            op = "contains_cs" if cs else ("contains_any" if len(strs) > 1 else "contains")
+            return self.cond(f, op, strs if len(strs) > 1 else strs[0])
         if name in ("strings.istarts_with", "strings.starts_with"):
-            return self.cond(f, "startswith", strs if len(strs) > 1 else strs[0])
+            return self.cond(f, "startswith_cs" if cs else "startswith", strs if len(strs) > 1 else strs[0])
         if name in ("strings.iends_with", "strings.ends_with"):
-            return self.cond(f, "endswith", strs if len(strs) > 1 else strs[0])
+            return self.cond(f, "endswith_cs" if cs else "endswith", strs if len(strs) > 1 else strs[0])
         if name in ("strings.iequals", "strings.equals"):
             return self.cond(f, "eq", strs if len(strs) > 1 else strs[0])
         if name in ("strings.ilike", "strings.like"):

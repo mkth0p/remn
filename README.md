@@ -210,6 +210,10 @@ explicit. Removing evidence clears the case's findings, chain snapshot and last-
 diagnostics, since they reference rows that no longer exist; analyst decisions are
 archived and reattached when the same findings reappear on the next rule run.
 Rebuilding chains with no seed left replaces the snapshot with an empty one.
+Links to the organisation's own domains are not artifacts, routine steps (logons,
+sign-ins, DNS, mailbox reads without a link or a finding) add at most 3 points, a
+chain made only of them is dropped, and one without any link, strong step or
+finding stays below high.
 
 ## Community rule packs (SigmaHQ, Sublime Security)
 
@@ -514,5 +518,7 @@ exclude: { targetUser|in_setting: service_accounts }
 
 Operators: `eq ne in nin contains not_contains contains_any contains_all
 startswith not_startswith endswith not_endswith re not_re gt gte lt lte exists
-empty in_setting nin_setting`. Dotted paths reach nested values
+empty in_setting nin_setting levenshtein length contains_cs startswith_cs
+endswith_cs` (the `_cs` variants match case exactly; everything else is
+case-insensitive). Dotted paths reach nested values
 (`attachments.flags`, `data.LogonType`).

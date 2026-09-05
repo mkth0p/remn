@@ -11898,48 +11898,6 @@ sigma:
   falsepositives:
   - Unlikely
 ---
-id: sigma-3037d961-21e9-4732-b27a-637bcc7bf539
-title: Suspicious High IntegrityLevel Conhost Legacy Option
-description: ForceV1 asks for information directly from the kernel space. Conhost connects to the console application. High
-  IntegrityLevel means the process is running with elevated privileges, such as an Administrator context.
-severity: info
-source: events
-attack:
-- T1202
-tags:
-- sigma
-- process_creation
-- stealth
-references:
-- https://cybercryptosec.medium.com/covid-19-cyber-infection-c615ead7c29
-- https://thedfirreport.com/2022/04/04/stolen-images-campaign-ends-in-conti-ransomware/
-- https://learn.microsoft.com/en-us/windows/win32/secauthz/mandatory-integrity-control
-where:
-  any_of:
-  - channel|contains: sysmon
-    eventId: 1
-  - channel: Security
-    eventId: 4688
-  integrityLevel|in:
-  - High
-  - S-1-16-12288
-  commandLine|contains_all:
-  - conhost.exe
-  - '0xffffffff'
-  - -ForceV1
-sigma:
-  id: 3037d961-21e9-4732-b27a-637bcc7bf539
-  status: test
-  author: frack113
-  date: '2022-12-09'
-  modified: '2024-12-01'
-  level: informational
-  logsource:
-    product: windows
-    category: process_creation
-  falsepositives:
-  - Very Likely, including launching cmd.exe via Run As Administrator
----
 id: sigma-30bf1789-379d-4fdc-900f-55cd0a90a801
 title: Visual Studio Code Tunnel Service Installation
 description: Detects the installation of VsCode tunnel (code-tunnel) as a service.

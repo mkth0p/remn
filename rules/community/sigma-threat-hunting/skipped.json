@@ -55,8 +55,18 @@
   "reason": "IPv6 cidr ::1/128"
  },
  {
+  "file": "rules-threat-hunting/windows/process_creation/proc_creation_win_boinc_execution.yml",
+  "title": "Potential BOINC Software Execution (UC-Berkeley Signature)",
+  "reason": "level informational (Sigma: enrichment only, not an alert)"
+ },
+ {
   "file": "rules-threat-hunting/windows/process_creation/proc_creation_win_susp_parent_execute_itself.yml",
   "title": "Potential Executable Run Itself As Sacrificial Process",
   "reason": "modifier |fieldref on Image"
+ },
+ {
+  "file": "rules-threat-hunting/windows/process_creation/proc_creation_win_tasklist_basic_execution.yml",
+  "title": "Suspicious Tasklist Discovery Command",
+  "reason": "level informational (Sigma: enrichment only, not an alert)"
  }
 ]

@@ -208,7 +208,7 @@ source: |
     assert w["subject|contains"] == "i'll call you".replace("i'", "I'") or w["subject|contains"] == "I'll call you"
     assert w["fromDomain|nin_setting"] == "internal_domains" and w["fromNameNorm|in_setting"] == "org_display_names"
     assert w["fromRegistrable|nin_setting"] == "tranco_10k" and w["subject|length"] == "< 12"
-    assert w["auth.spfDomain|endswith"] == ".onmicrosoft.com"
+    assert w["auth.spfDomain|endswith_cs"] == ".onmicrosoft.com"  # strings.ends_with is case-sensitive in MQL
     assert w["urls.subdomain|exists"] is True and w["urls.fragment|exists"] is True and w["urls.domain|exists"] is True
     tranco = mql.convert_text("name: t\nsource: |\n  sender.email.domain.root_domain not in $tranco_1m\n", "t.yml")[0]
     assert tranco["ok"] and any("top 10k" in x for x in tranco["warnings"])
@@ -241,3 +241,25 @@ def test_length_builtin_list_and_derived_url_fields_on_sql_engine(store):
     assert hits({"fromRegistrable|nin_setting": "tranco_10k"}) == ["a rather long subject line"]
     assert hits({"fromRegistrable|in_setting": "tranco_10k"}, {"tranco_10k": ["rare-sender.net"]}) == ["a rather long subject line"]  # a case setting overrides
     assert R.diagnose_zero(store, {"id": "t", "title": "t", "severity": "low", "source": "mails", "where": {"fromRegistrable|in_setting": "tranco_10k", "subject": "zzz"}}, {})["reason"] == "no_selector_match"
+
+
+def test_case_sensitive_string_functions_keep_their_case(store):
+    r = _rule("type.inbound and strings.contains(subject.subject, 'hTTPs://') and strings.icontains(sender.display_name, 'DocuSign') and strings.starts_with(subject.subject, 'RE:') and strings.ends_with(sender.email.local_part, 'Admin')")
+    assert r["ok"], r
+    w = r["rule"]["where"]
+    assert w["subject|contains_cs"] == "hTTPs://" and w["fromName|contains"] == "DocuSign" and w["subject|startswith_cs"] == "RE:"
+    assert "fromAddr|re" in w  # derived kinds (local part) fall back to the case-insensitive regex, with a warning
+    assert any("case-sensitive in MQL" in x for x in r["warnings"])
+    ctx = ParseContext(internal_domains=["interne.fr"])
+    wri = MailWriter(store, 1)
+    for subject in ("Click https://x.example/a", "Click hTTPs://x.example/a", "RE: hello"):
+        headers = [("From", "<a@ext.example>"), ("To", "<u@interne.fr>"), ("Subject", subject), ("Date", "Tue, 1 Sep 2026 11:00:00 +0200"), ("Message-ID", f"<{uuid.uuid4()}@x>")]
+        wri.add(build_row(headers, subject, None, [], ctx, folder="Inbox", size=None, extra={}))  # the link is in the body too
+    wri.flush()
+    def refs(where):
+        return sorted(ref for h in R.run_rule(store, {"id": "cs", "title": "cs", "severity": "low", "source": "mails", "where": where}, {}) for ref in h["refs"])
+    assert refs({"subject|contains_cs": "hTTPs://"}) == [2]
+    assert refs({"subject|contains": "hTTPs://"}) == [1, 2]
+    assert refs({"subject|startswith_cs": "RE:"}) == [3] and refs({"subject|startswith_cs": "re:"}) == []
+    assert refs({"subject|endswith_cs": ["/a", "HELLO"]}) == [1, 2]
+    assert refs({"urls.url|contains_cs": "hTTPs://"}) == [2]  # child table

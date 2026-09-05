@@ -22,14 +22,18 @@
   },
   "counts": {
     "upstream": 323,
-    "converted": 319,
-    "skipped": 4,
+    "converted": 318,
+    "skipped": 5,
     "warnings": 0
   },
   "skipReasons": [
     [
       "modifier |expand on Attributes",
       2
+    ],
+    [
+      "level informational",
+      1
     ],
     [
       "IPv6 cidr ::1/128",
@@ -47,7 +51,7 @@
     "dns_server_analytic.yaml": 1,
     "file_delete.yaml": 1,
     "file_event.yaml": 45,
-    "image_load.yaml": 15,
+    "image_load.yaml": 14,
     "msexchange_management.yaml": 1,
     "network_connection.yaml": 2,
     "pipe_created.yaml": 2,

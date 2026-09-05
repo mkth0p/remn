@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultSettings, deleteCaseData, deleteEvidenceData, RemnDB, setDb, type Case } from '../db/schema'
 import { clearDerivedState } from './caseState'
 import { buildChains, loadChains } from './chains'
-import { replaceFindings } from './findingReviews'
+import { pruneOrphanFindings, replaceFindings } from './findingReviews'
 
 vi.mock('../api/client', () => ({ apiPost: vi.fn() }))
 vi.mock('./rules', () => ({ settingsForRules: (k: Case) => ({ internal_domains: k.settings.internalDomains }) }))
@@ -65,4 +65,14 @@ describe('derived state follows the evidence', () => {
     await deleteCaseData(db, 1)
     expect((await db.kv.toArray()).map((k) => k.key).sort()).toEqual(['chains-2', 'disabledRules'])
   })
+
+  it('prunes findings of rules that no longer exist, keeps chains, archives the decisions', async () => {
+    await replaceFindings(1, ['sigma-gone', 'mail-x', 'chain'], [finding('sigma-gone|1', 'sigma-gone'), finding('mail-x|1'), finding('chain|a|1', 'chain')])
+    const gone = await db.findings.where('[caseId+ruleId]').equals([1, 'sigma-gone']).first()
+    await db.findings.update(gone!.id!, { status: 'reviewed', notes: 'seen' })
+    expect(await pruneOrphanFindings(1, ['mail-x'])).toBe(1)
+    expect((await db.findings.toArray()).map((f) => f.ruleId).sort()).toEqual(['chain', 'mail-x'])
+    expect(((await db.kv.get('finding-reviews-1'))?.value as Record<string, unknown>)['sigma-gone|1']).toMatchObject({ status: 'reviewed', notes: 'seen' })
+  })
 })
+
