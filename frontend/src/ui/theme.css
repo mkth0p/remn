@@ -418,3 +418,24 @@ label.field > span { font-weight: 500; }
 .menu .btn { justify-content: flex-start; width: 100%; text-align: left; }
 .pane { flex: none; }
 .pane-side .section > h3 { font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-2); }
+
+/* collapsible sidebar: icons only, labels as tooltips */
+.app.sidebar-collapsed { --sidebar-w: 56px; }
+.brand .mark { display: none; font-family: var(--display); font-size: 20px; color: var(--fg-1); letter-spacing: 0; }
+.sidebar-collapsed .brand { padding: 0; justify-content: center; }
+.sidebar-collapsed .brand .wordmark { display: none; }
+.sidebar-collapsed .brand .mark { display: inline; }
+.sidebar-collapsed .nav { padding: 8px 6px; }
+.sidebar-collapsed .nav-section { display: none; }
+.sidebar-collapsed .nav-item { justify-content: center; padding: 9px 0; }
+.sidebar-collapsed .nav-item span { display: none; }
+.sidebar-collapsed .sidebar-footer { padding: 8px 4px; }
+.sidebar-collapsed .sidebar-footer > div { display: none; }
+.sidebar-collapsed .sidebar-footer .btn { justify-content: center !important; }
+.sidebar-collapsed .sidebar-footer .label { display: none; }
+/* mail pane: header capped so the tabs and body are always reachable; grip resizes it */
+.pane .pane-head { flex: none; max-height: 45%; overflow: auto; padding: 8px 16px 6px; border-bottom: 1px solid var(--line); }
+.pane-b { min-height: 80px; }
+.pane-grip { height: 7px; flex: none; cursor: row-resize; background: var(--surface-2); border-top: 1px solid var(--line); }
+.pane-grip:hover { background: var(--accent-dim); }
+.btn.link.small { font-size: 11px; }

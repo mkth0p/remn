@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Facets, type FacetDef } from '../components/Facets'
 import { FilterBar } from '../components/FilterBar'
 import { TimeHistogram } from '../components/TimeHistogram'
@@ -53,6 +53,22 @@ export function MailsView() {
   const [selected, setSelected] = useState<MailRow | null>(null)
   const [version, setVersion] = useState(0)
   const [menu, setMenu] = useState(false)
+  // bottom pane height (% of the page), remembered per browser; the grip above the pane drags it
+  const [paneH, setPaneH] = useState(() => { try { return Number(localStorage.getItem('remn-mail-pane')) || 55 } catch { return 55 } })
+  const [paneMax, setPaneMax] = useState(false)
+  const rightRef = useRef<HTMLDivElement>(null)
+  useEffect(() => { try { localStorage.setItem('remn-mail-pane', String(paneH)) } catch { /* private mode */ } }, [paneH])
+  const startDrag = (e: React.PointerEvent) => {
+    const el = rightRef.current
+    if (!el) return
+    e.preventDefault()
+    const rect = el.getBoundingClientRect()
+    const move = (ev: PointerEvent) => setPaneH(Math.min(92, Math.max(20, Math.round(((rect.bottom - ev.clientY) / rect.height) * 100))))
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    setPaneMax(false)
+  }
   const ds = useMemo(() => (kase ? getSource(kase) : null), [kase])
   useEffect(() => {
     if (jobs.every((j) => j.phase === 'done' || j.phase === 'error')) setVersion((v) => v + 1)
@@ -156,7 +172,7 @@ export function MailsView() {
           <div className="panel-h">Filters <span className="muted">({ds.kind === 'server' ? 'server store' : 'browser store'})</span></div>
           <Facets ds={ds} source="mails" fields={FACETS} conditions={filter.conditions ?? []} onToggle={toggleFacet} version={version + rulesVersion} />
         </div>
-        <div className="right relative">
+        <div className="right relative" ref={rightRef}>
           <FilterBar
             source="mails"
             filter={filter}
@@ -196,7 +212,8 @@ export function MailsView() {
             rowClass={(r) => (r.risk >= 80 ? 'sev-critical' : r.risk >= 60 ? 'sev-high' : r.risk >= 40 ? 'sev-medium' : undefined)}
             empty={loading ? 'loading…' : 'no mails match - load a mailbox in Evidence or relax the filter'}
           />
-          {selected && <MailDetail row={selected} onClose={() => setSelected(null)} layout="pane" />}
+          {selected && <div className="pane-grip" onPointerDown={startDrag} onDoubleClick={() => { setPaneH(55); setPaneMax(false) }} title="drag to resize the message pane · double-click to reset" />}
+          {selected && <MailDetail row={selected} onClose={() => setSelected(null)} layout="pane" paneHeight={`${paneMax ? 94 : paneH}%`} paneMax={paneMax} onPaneMax={setPaneMax} />}
         </div>
       </div>
     </div>

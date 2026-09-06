@@ -97,8 +97,24 @@ export function TimelineView() {
       const fm: Marker[] = fd.map((f: Finding) => ({ ts: f.ts as number, kind: 'finding', severity: f.severity, title: f.title, sub: `${f.ruleId} · ${fmtNum(f.count)} row(s)`, open: () => setView('findings') }))
       const nm: Marker[] = notes.map((n) => ({ ts: n.ts, kind: 'note', severity: n.severity ?? 'info', title: n.text, sub: n.link ? `${n.link.source} ${n.link.label ?? n.link.id}` : 'case timeline', open: () => { if (n.link && (n.link.source === 'events' || n.link.source === 'mails')) { setFocus({ source: n.link.source, id: Number(n.link.id) }); setView(n.link.source) } else setView('case') } }))
       setMarkers([...fm, ...nm].sort((a, b) => a.ts - b.ts))
-      const maxEv = Math.max(1, ...ev.map((b) => b.count))
+      const hasEv = ev.length > 0
+      const hasMl = ml.length > 0
+      const both = hasEv && hasMl
+      // the source with data gets the main grid (findings and case-timeline markers sit on it);
+      // a mail-only or events-only case gets one grid instead of an empty half
+      const primary: 'events' | 'mails' = hasEv || !hasMl ? 'events' : 'mails'
+      const pMax = Math.max(1, ...(primary === 'events' ? ev : ml).map((b) => b.count))
+      const grids = both ? [{ left: 56, right: 16, top: 30, height: '52%' }, { left: 56, right: 16, top: '68%', height: '20%' }] : [{ left: 56, right: 16, top: 30, height: '76%' }]
       const axis = { axisLine: { lineStyle: { color: t.line2 } }, axisLabel: { color: t.fg3, fontFamily: t.mono, fontSize: 10 }, splitLine: { show: false } }
+      const yFor = (i: number, name: string) => ({ type: 'value', gridIndex: i, name, nameTextStyle: { color: t.fg3, fontSize: 10 }, minInterval: 1, axisLabel: axis.axisLabel, splitLine: { lineStyle: { color: t.line } } })
+      const evGrid = primary === 'events' ? 0 : 1
+      const mlGrid = primary === 'mails' ? 0 : 1
+      const series: Record<string, unknown>[] = []
+      if (hasEv) series.push({ name: 'events', type: 'bar', xAxisIndex: evGrid, yAxisIndex: evGrid, data: ev.map((b) => [b.t, b.count]), itemStyle: { color: t.accent, opacity: 0.85 }, large: true, barMaxWidth: 12 })
+      series.push({ name: 'findings', type: 'scatter', xAxisIndex: 0, yAxisIndex: 0, symbolSize: 8, z: 5, data: fd.map((f) => ({ value: [f.ts, pMax * 1.04, `${f.severity}: ${f.title}`], itemStyle: { color: t.sev[f.severity] ?? t.fg2 } })) })
+      if (showNotes && notes.length) series.push({ name: 'case timeline', type: 'scatter', xAxisIndex: 0, yAxisIndex: 0, symbol: 'diamond', symbolSize: 11, z: 6, data: notes.map((n) => ({ value: [n.ts, pMax * 1.12, n.text.slice(0, 80)], itemStyle: { color: t.sev[n.severity ?? 'info'] ?? t.fg1, borderColor: t.fg1, borderWidth: 1 } })) })
+      if (hasMl) series.push({ name: 'mails', type: 'bar', xAxisIndex: mlGrid, yAxisIndex: mlGrid, data: ml.map((b) => [b.t, b.count]), itemStyle: { color: t.mails, opacity: 0.85 }, barMaxWidth: 12 })
+      const zoomAxes = grids.map((_, i) => i)
       c.setOption(
         {
           backgroundColor: 'transparent',
@@ -106,18 +122,13 @@ export function TimelineView() {
           textStyle: { fontFamily: t.mono, color: t.fg2 },
           tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, backgroundColor: t.surface, borderColor: t.line2, textStyle: { color: t.fg1, fontSize: 11 }, formatter: (params: { seriesName: string; value: [number, number, ...unknown[]]; marker: string }[]) => { const ts = params[0]?.value?.[0]; return `<b>${fmtTs(ts as number)}</b><br/>` + params.map((p) => `${p.marker} ${p.seriesName}: ${p.seriesName === 'findings' || p.seriesName === 'case timeline' ? String(p.value[2] ?? '') : fmtNum(p.value[1])}`).join('<br/>') } },
           legend: { top: 2, textStyle: { color: t.fg2, fontSize: 11 }, itemWidth: 12, itemHeight: 8 },
-          grid: [{ left: 56, right: 16, top: 30, height: '54%' }, { left: 56, right: 16, top: '70%', height: '17%' }],
-          xAxis: [{ type: 'time', gridIndex: 0, min: tMin, max: tMax, ...axis }, { type: 'time', gridIndex: 1, min: tMin, max: tMax, ...axis }],
-          yAxis: [{ type: 'value', gridIndex: 0, name: 'events', nameTextStyle: { color: t.fg3, fontSize: 10 }, minInterval: 1, axisLabel: axis.axisLabel, splitLine: { lineStyle: { color: t.line } } }, { type: 'value', gridIndex: 1, name: 'mails', nameTextStyle: { color: t.fg3, fontSize: 10 }, minInterval: 1, axisLabel: axis.axisLabel, splitLine: { lineStyle: { color: t.line } } }],
-          dataZoom: [{ type: 'slider', xAxisIndex: [0, 1], bottom: 6, height: 16, borderColor: t.line2, backgroundColor: t.surface, fillerColor: `${t.accent}22`, handleStyle: { color: t.accent }, textStyle: { color: t.fg3, fontSize: 10 } }, { type: 'inside', xAxisIndex: [0, 1] }],
+          grid: grids,
+          xAxis: grids.map((_, i) => ({ type: 'time', gridIndex: i, min: tMin, max: tMax, ...axis })),
+          yAxis: both ? [yFor(0, primary), yFor(1, primary === 'events' ? 'mails' : 'events')] : [yFor(0, primary)],
+          dataZoom: [{ type: 'slider', xAxisIndex: zoomAxes, bottom: 6, height: 16, borderColor: t.line2, backgroundColor: t.surface, fillerColor: `${t.accent}22`, handleStyle: { color: t.accent }, textStyle: { color: t.fg3, fontSize: 10 } }, { type: 'inside', xAxisIndex: zoomAxes }],
           toolbox: { show: false },
-          brush: { xAxisIndex: [0, 1], brushType: 'lineX', brushStyle: { color: `${t.accent}1f`, borderColor: t.accent }, throttleType: 'debounce', throttleDelay: 200 },
-          series: [
-            { name: 'events', type: 'bar', xAxisIndex: 0, yAxisIndex: 0, data: ev.map((b) => [b.t, b.count]), itemStyle: { color: t.accent, opacity: 0.85 }, large: true, barMaxWidth: 12 },
-            { name: 'findings', type: 'scatter', xAxisIndex: 0, yAxisIndex: 0, symbolSize: 8, z: 5, data: fd.map((f) => ({ value: [f.ts, maxEv * 1.04, `${f.severity}: ${f.title}`], itemStyle: { color: t.sev[f.severity] ?? t.fg2 } })) },
-            ...(showNotes && notes.length ? [{ name: 'case timeline', type: 'scatter', xAxisIndex: 0, yAxisIndex: 0, symbol: 'diamond', symbolSize: 11, z: 6, data: notes.map((n) => ({ value: [n.ts, maxEv * 1.12, n.text.slice(0, 80)], itemStyle: { color: t.sev[n.severity ?? 'info'] ?? t.fg1, borderColor: t.fg1, borderWidth: 1 } })) }] : []),
-            { name: 'mails', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: ml.map((b) => [b.t, b.count]), itemStyle: { color: t.mails, opacity: 0.85 }, barMaxWidth: 12 },
-          ],
+          brush: { xAxisIndex: zoomAxes, brushType: 'lineX', brushStyle: { color: `${t.accent}1f`, borderColor: t.accent }, throttleType: 'debounce', throttleDelay: 200 },
+          series,
         },
         true,
       )
@@ -156,7 +167,7 @@ export function TimelineView() {
       <div className="view-header">
         <div className="desc">
           <h1>Timeline</h1>
-          <span className="sub">{fmtNum(stats.events)} events · {fmtNum(stats.mails)} mails · {fmtNum(stats.findings)} findings · {fmtNum(stats.notes)} case timeline entr{stats.notes === 1 ? 'y' : 'ies'}{stats.span ? ` · ${fmtTs(stats.span[0])} → ${fmtTs(stats.span[1])}` : ''}</span>
+          <span className="sub">{fmtNum(stats.events)} events · {fmtNum(stats.mails)} mails · {fmtNum(stats.findings)} findings · {fmtNum(stats.notes)} case timeline entr{stats.notes === 1 ? 'y' : 'ies'}{stats.span ? ` · ${fmtTs(stats.span[0])} → ${fmtTs(stats.span[1])}` : ''} · drag on the chart to select a range</span>
         </div>
         <span className="spacer" />
         <div className="segmented" title="bucket">
@@ -177,8 +188,7 @@ export function TimelineView() {
       )}
       <div className="pane" style={{ flex: 1, height: 'auto', borderTop: 0, gridTemplateColumns: '1fr 360px' }}>
         <div className="pane-main" style={{ padding: '4px 8px 0' }}>
-          <div ref={ref} className="timeline-chart" style={{ flex: 1, minHeight: 240 }} />
-          <div className="hint" style={{ padding: '2px 8px 6px' }}>drag on the chart to select a range · scroll to zoom · dots are findings, diamonds are case timeline entries</div>
+          <div ref={ref} className="timeline-chart" style={{ flex: 1, minHeight: 240 }} title="drag to select a range · scroll to zoom · dots are findings, diamonds are case timeline entries" />
         </div>
         <div className="pane-side" style={{ padding: 0 }}>
           <div className="panel-h">{sel ? 'In the selected range' : 'Findings and case timeline'} <span className="muted">({fmtNum(inRange.length)})</span></div>

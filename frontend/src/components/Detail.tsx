@@ -5,7 +5,7 @@ import { getSource } from '../data/source'
 import type { Condition, Filter } from '../rules/filter'
 import { useStore } from '../state/store'
 import { fmtBytes, fmtTs } from '../util/format'
-import { IconAi, IconClose, IconPivot } from './Icons'
+import { IconAi, IconChevronDown, IconClose, IconPivot } from './Icons'
 import { Badge, CopyButton, Dot, Flag, JsonView, KV, Risk, Sev, Tabs } from './ui'
 import { AddToTimeline } from './AddToTimeline'
 
@@ -145,7 +145,10 @@ function normalizeMail(m: MailRow): MailRow {
   return { ...m, hops: m.hops ?? [], to: m.to ?? [], cc: m.cc ?? [], bcc: m.bcc ?? [], replyTo: m.replyTo ?? [], urls: m.urls ?? [], attachments: m.attachments ?? [], flags: m.flags ?? [], keywordHits: m.keywordHits ?? {}, auth: m.auth ?? {}, lookalike: m.lookalike ?? {} }
 }
 
-type MailTab = 'message' | 'headers' | 'hops' | 'urls' | 'attachments' | 'related' | 'json'
+/** observations that are common on legitimate mail: shown only behind "+N more" in the header */
+const QUIET_FLAGS = /^(html_only|from_webmail|single_hop|no_origin_ip|sender_history_unknown|hidden_preheader|hidden_style|url_tracking|url_tracking_pixel|url_tracker_redirect|url_long_url|url_rewritten|url_login_link|url_own_domain|calendar_item|calendar_invite|exchange_internal|mail_corroborated|sender_expected|gateway_bulk_verdict|many_attachments|base64_blob|scripted_mailer|url_file_hosting|url_form_saas)$/
+
+type MailTab = 'message' | 'html' | 'headers' | 'hops' | 'urls' | 'attachments' | 'related' | 'json'
 
 /** Local part used by identity_key on the parser side; matches events' targetUser / subjectUser. */
 function localPart(addr: string): string {
@@ -157,10 +160,10 @@ function localPart(addr: string): string {
  * (message left, evidence context right); the default is the right-hand drawer used from
  * other views (findings, chains, IOCs) where the context block sits on top of the tabs.
  */
-export function MailDetail({ row: initialRaw, onClose, layout = 'drawer' }: { row: MailRow; onClose: () => void; layout?: 'drawer' | 'pane' }) {
+export function MailDetail({ row: initialRaw, onClose, layout = 'drawer', paneHeight, paneMax, onPaneMax }: { row: MailRow; onClose: () => void; layout?: 'drawer' | 'pane'; paneHeight?: string; paneMax?: boolean; onPaneMax?: (v: boolean) => void }) {
   const initial = useMemo(() => normalizeMail(initialRaw), [initialRaw])
   const [tab, setTab] = useState<MailTab>('message')
-  const [bodyMode, setBodyMode] = useState<'text' | 'html'>('text')
+  const [allFlags, setAllFlags] = useState(false)
   const [body, setBody] = useState<MailBody | null>(null)
   const [row, setRow] = useState<MailRow>(initial)
   const [findings, setFindings] = useState<Finding[]>([])
@@ -226,11 +229,16 @@ export function MailDetail({ row: initialRaw, onClose, layout = 'drawer' }: { ro
     setAiPrompt(`Analyse this e-mail (mail id ${row.id}) for phishing / BEC indicators and tell me what to check next. Use get_mail with includeBody if needed. Summary: subject "${row.subject}", from ${row.fromName} <${row.fromAddr}>, origin IP ${row.originIp}, risk ${row.risk}, flags: ${row.flags.join(', ')}`)
     setView('ai')
   }
-  const srcdoc = useMemo(() => (bodyMode === 'html' && body?.bodyHtml ? sanitizeMailHtml(body.bodyHtml) : ''), [bodyMode, body])
+  const srcdoc = useMemo(() => (tab === 'html' && body?.bodyHtml ? sanitizeMailHtml(body.bodyHtml) : ''), [tab, body])
   const lookalike = (row.lookalike as { matches?: { reference: string; method: string; kind: string }[] }).matches ?? []
   const worstFinding = findings[0]?.severity
   const senderDomain = row.fromRegistrable || row.fromDomain
   const visibleFlags = row.flags.filter((f) => !/^(spf_none|dkim_none|dmarc_none)$/.test(f))
+  // the strongest flags first; quiet observations (tracking pixels, hidden preheaders, history) behind "+N more"
+  const weightOf = (f: string) => meta?.mailWeights?.[f] ?? 5
+  const loud = visibleFlags.filter((f) => !QUIET_FLAGS.test(f)).sort((a, b) => weightOf(b) - weightOf(a))
+  const shownFlags = allFlags ? [...loud, ...visibleFlags.filter((f) => QUIET_FLAGS.test(f))] : loud.slice(0, 8)
+  const hiddenFlags = visibleFlags.length - shownFlags.length
 
   const context = (
     <div className="col" style={{ gap: 14 }}>
@@ -298,28 +306,29 @@ export function MailDetail({ row: initialRaw, onClose, layout = 'drawer' }: { ro
   )
 
   const head = (
-    <div className="col" style={{ gap: 6 }}>
-      <div className="row" style={{ gap: 10, alignItems: 'flex-start' }}>
+    <div className="col" style={{ gap: 4, minWidth: 0 }}>
+      <div className="row" style={{ gap: 8, alignItems: 'center', minWidth: 0 }}>
         <Risk value={row.risk} />
-        <div className="col" style={{ gap: 2, flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 600, color: 'var(--fg-1)', fontSize: 13.5 }}>{row.subject || '(no subject)'}</div>
-          <div className="small mono" style={{ color: 'var(--fg-2)' }}>
-            <span className="click" onClick={() => setEntity({ kind: 'address', value: row.fromAddr })}>{row.fromName ? `"${row.fromName}" ` : ''}&lt;{row.fromAddr}&gt;</span>
-            {' → '}{row.to.map((t) => t.addr || t.name).slice(0, 3).join(', ') || '(undisclosed)'}{row.to.length > 3 ? ` +${row.to.length - 3}` : ''}
-            {row.cc.length ? <span className="muted"> · cc {row.cc.length}</span> : null}
-            {' · '}{fmtTs(row.date)}
-          </div>
-        </div>
+        <div className="ellipsis" style={{ fontWeight: 600, color: 'var(--fg-1)', fontSize: 13.5, flex: 1, minWidth: 0 }} title={row.subject}>{row.subject || '(no subject)'}</div>
         {worstFinding && <Sev sev={worstFinding}>{findings.length} finding{findings.length === 1 ? '' : 's'}</Sev>}
         <AddToTimeline ts={row.date} text={`Mail "${row.subject || '(no subject)'}" from ${row.fromAddr} to ${row.to.map((t) => t.addr).slice(0, 2).join(', ')}`} link={{ source: 'mails', id: row.id!, label: row.subject || `#${row.id}` }} severity={row.risk >= 80 ? 'critical' : row.risk >= 60 ? 'high' : row.risk >= 40 ? 'medium' : 'info'} />
         <button className="btn sm" onClick={explain} title="ask the local model"><IconAi /> analyse</button>
+        {onPaneMax && <button className="btn icon ghost sm" onClick={() => onPaneMax(!paneMax)} title={paneMax ? 'restore the table' : 'expand the message'}><IconChevronDown style={{ transform: paneMax ? 'none' : 'rotate(180deg)' }} /></button>}
         <button className="btn icon ghost sm" onClick={onClose} title="close (Esc)"><IconClose /></button>
+      </div>
+      <div className="small mono ellipsis" style={{ color: 'var(--fg-2)' }} title={`${row.fromName ? `"${row.fromName}" ` : ''}<${row.fromAddr}> → ${row.to.map((t) => t.addr || t.name).join(', ') || '(undisclosed)'}${row.cc.length ? ` · cc ${row.cc.map((t) => t.addr).join(', ')}` : ''} · ${fmtTs(row.date)}`}>
+        <span className="click" onClick={() => setEntity({ kind: 'address', value: row.fromAddr })}>{row.fromName ? `"${row.fromName}" ` : ''}&lt;{row.fromAddr}&gt;</span>
+        {' → '}{row.to.map((t) => t.addr || t.name).slice(0, 3).join(', ') || '(undisclosed)'}{row.to.length > 3 ? ` +${row.to.length - 3}` : ''}
+        {row.cc.length ? <span className="muted"> · cc {row.cc.length}</span> : null}
+        {' · '}{fmtTs(row.date)}
       </div>
       <div className="row wrap" style={{ gap: 4 }}>
         {['spf', 'dkim', 'dmarc'].map(authBadge)}{auth?.compauth ? authBadge('compauth') : null}{auth?.arc ? authBadge('arc') : null}
         {row.replyTo.some((r) => r.addr && r.addr.toLowerCase() !== row.fromAddr.toLowerCase()) && <Badge sev="medium" title={row.replyTo.map((r) => r.addr).join(', ')}>reply-to differs</Badge>}
         {lookalike.length > 0 && <Badge sev="critical" title={lookalike.map((m) => `${m.reference} (${m.method}, ${m.kind})`).join('; ')}>lookalike of {lookalike[0].reference}</Badge>}
-        {visibleFlags.map((f) => <Flag key={f} name={f} />)}
+        {shownFlags.map((f) => <Flag key={f} name={f} />)}
+        {hiddenFlags > 0 && <button className="btn link small" onClick={() => setAllFlags(true)} title="show every flag, including the quiet observations">+{hiddenFlags} more</button>}
+        {allFlags && visibleFlags.length > 8 && <button className="btn link small" onClick={() => setAllFlags(false)}>fewer</button>}
       </div>
     </div>
   )
@@ -328,6 +337,7 @@ export function MailDetail({ row: initialRaw, onClose, layout = 'drawer' }: { ro
     <Tabs
       tabs={[
         { id: 'message' as MailTab, label: 'Message' },
+        { id: 'html' as MailTab, label: body?.bodyHtml ? 'HTML (sandbox)' : 'HTML' },
         { id: 'headers' as MailTab, label: 'Headers' },
         { id: 'hops' as MailTab, label: <span>Hops <span className="n">{row.hopCount}</span></span> },
         { id: 'urls' as MailTab, label: <span>URLs <span className="n">{row.urlCount}</span></span> },
@@ -344,17 +354,16 @@ export function MailDetail({ row: initialRaw, onClose, layout = 'drawer' }: { ro
     <>
       {tab === 'message' && (
         <div className="col" style={{ gap: 8 }}>
-          <div className="row" style={{ gap: 8 }}>
-            <div className="segmented">
-              <button className={bodyMode === 'text' ? 'active' : ''} onClick={() => setBodyMode('text')}>text</button>
-              <button className={bodyMode === 'html' ? 'active' : ''} onClick={() => setBodyMode('html')} disabled={!body?.bodyHtml} title={body?.bodyHtml ? 'sandboxed: images blocked, links disabled' : 'no HTML body'}>html</button>
+          {(Object.keys(row.keywordHits ?? {}).length > 0 || (body?.visibleText && body.bodyText && body.visibleText.length < body.bodyText.length * 0.6)) && (
+            <div className="row wrap" style={{ gap: 8 }}>
+              {Object.keys(row.keywordHits ?? {}).length > 0 && <span className="small dim">lexicon: {Object.entries(row.keywordHits).map(([k, v]) => `${k} → ${v.slice(0, 4).join(', ')}`).join(' · ')}</span>}
+              {body?.visibleText && body.bodyText && body.visibleText.length < body.bodyText.length * 0.6 && <Badge sev="medium" title="a large part of the text is not visible when rendered">hidden text</Badge>}
             </div>
-            {Object.keys(row.keywordHits ?? {}).length > 0 && <span className="small dim">lexicon: {Object.entries(row.keywordHits).map(([k, v]) => `${k} → ${v.slice(0, 4).join(', ')}`).join(' · ')}</span>}
-            {body?.visibleText && body.bodyText && body.visibleText.length < body.bodyText.length * 0.6 && <Badge sev="medium" title="a large part of the text is not visible when rendered">hidden text</Badge>}
-          </div>
-          {bodyMode === 'text' ? <pre className="codeblock" style={{ fontFamily: 'var(--sans)', fontSize: 12.5, lineHeight: 1.5 }}>{body?.bodyText || body?.visibleText || row.textPreview || '(empty)'}</pre> : <iframe className="mailframe" sandbox="" srcDoc={srcdoc} title="mail html (sandboxed, images blocked, links disabled)" />}
+          )}
+          <pre className="codeblock" style={{ fontFamily: 'var(--sans)', fontSize: 12.5, lineHeight: 1.5 }}>{body?.bodyText || body?.visibleText || row.textPreview || '(empty)'}</pre>
         </div>
       )}
+      {tab === 'html' && (body?.bodyHtml ? <iframe className="mailframe" sandbox="" srcDoc={srcdoc} title="mail html (sandboxed: images blocked, links disabled, no scripts)" /> : <div className="muted">no HTML body{body ? '' : ' (loading…)'}</div>)}
       {tab === 'headers' && <pre className="codeblock">{body?.headersText || '(headers not stored)'}</pre>}
       {tab === 'hops' && (
         <table className="table compact">
@@ -450,9 +459,9 @@ export function MailDetail({ row: initialRaw, onClose, layout = 'drawer' }: { ro
 
   if (layout === 'pane') {
     return (
-      <div className="pane">
+      <div className="pane" style={paneHeight ? { height: paneHeight } : undefined}>
         <div className="pane-main">
-          <div style={{ padding: '10px 16px 8px', borderBottom: '1px solid var(--line)' }}>{head}</div>
+          <div className="pane-head">{head}</div>
           {tabs}
           <div className="pane-b">{content}</div>
         </div>

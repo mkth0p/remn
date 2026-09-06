@@ -7,7 +7,7 @@ import { migrateCaseToServer } from './data/migrate'
 import { getSource } from './data/source'
 import { setLocalTime } from './util/format'
 import { getTransport } from './ai/transport'
-import { IconAi, IconDashboard, IconEvents, IconEvidence, IconFindings, IconIoc, IconMail, IconReport, IconRules, IconSettings, IconTerminal, IconTimeline, IconPivot, IconLink, IconFile } from './components/Icons'
+import { IconAi, IconDashboard, IconEvents, IconEvidence, IconFindings, IconIoc, IconMail, IconReport, IconRules, IconSettings, IconTerminal, IconTimeline, IconPivot, IconLink, IconFile, IconArrowLeft } from './components/Icons'
 import { ConsolePanel, Toasts } from './components/ConsolePanel'
 import { TokenGate } from './components/TokenGate'
 import { EntityPanel } from './components/EntityPanel'
@@ -47,6 +47,8 @@ const NAV: { id: View; label: string; icon: React.ComponentType; count?: 'events
 export default function App() {
   const view = useStore((s) => s.view)
   const setView = useStore((s) => s.setView)
+  const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem('remn-sidebar') === 'collapsed' } catch { return false } })
+  useEffect(() => { try { localStorage.setItem('remn-sidebar', collapsed ? 'collapsed' : 'open') } catch { /* private mode */ } }, [collapsed])
   const kase = useStore((s) => s.currentCase)
   const setCurrentCase = useStore((s) => s.setCurrentCase)
   const health = useStore((s) => s.health)
@@ -207,14 +209,14 @@ export default function App() {
   const isServer = kase.storage === 'server'
   const bigTotal = pending ? pending.files.reduce((s, f) => s + f.size, 0) : 0
   return (
-    <div className="app">
+    <div className={collapsed ? 'app sidebar-collapsed' : 'app'}>
       <aside className="sidebar">
-        <div className="brand"><span className="wordmark">REMN</span></div>
+        <div className="brand"><span className="wordmark">REMN</span><span className="mark">R</span></div>
         <nav className="nav">
           {NAV.map((n) => (
             <div key={n.id}>
               {n.section && <div className="nav-section">{n.section}</div>}
-              <button className={`nav-item ${view === n.id ? 'active' : ''}`} onClick={() => setView(n.id)}>
+              <button className={`nav-item ${view === n.id ? 'active' : ''}`} onClick={() => setView(n.id)} title={n.label}>
                 <n.icon />
                 <span>{n.label}</span>
                 {n.count && counts[n.count] > 0 && <span className="count">{fmtNum(counts[n.count])}</span>}
@@ -227,7 +229,8 @@ export default function App() {
           <div title={aiCfg.transport === 'browser' ? `browser-direct: ${aiCfg.ollamaUrl}` : 'via REMN server'}><span className={`status-dot ${aiStatus.reachable ? 'ok' : aiStatus.reachable === null ? '' : 'bad'}`} />ollama {aiStatus.reachable ? 'online' : aiStatus.reachable === null ? '…' : 'offline'} <span className="dim">[{aiCfg.transport}]</span></div>
           <div><span className={`status-dot ${kase.settings.networkAllowed ? 'bad' : 'ok'}`} />egress {kase.settings.networkAllowed ? 'allowed' : 'blocked'}</div>
           <div><span className={`status-dot ${isServer ? 'ok' : ''}`} />store {isServer ? 'server' : 'browser'}</div>
-          <button className="btn ghost xs" style={{ justifyContent: 'flex-start' }} onClick={() => setShowConsole(!showConsole)}><IconTerminal /> console {busy ? '●' : ''}</button>
+          <button className="btn ghost xs" style={{ justifyContent: 'flex-start' }} onClick={() => setShowConsole(!showConsole)} title="console"><IconTerminal /><span className="label"> console {busy ? '●' : ''}</span></button>
+          <button className="btn ghost xs sidebar-toggle" style={{ justifyContent: 'flex-start' }} onClick={() => setCollapsed(!collapsed)} title={collapsed ? 'expand the sidebar' : 'collapse the sidebar'}><IconArrowLeft style={{ transform: collapsed ? 'rotate(180deg)' : undefined }} /><span className="label"> collapse</span></button>
         </div>
       </aside>
       <header className="topbar">

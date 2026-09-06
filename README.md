@@ -529,8 +529,12 @@ Selecting a mail opens a bottom pane: the message (text or sandboxed HTML), head
 hops, URLs, attachments, a Related tab (findings on the mail and the recipients'
 host and cloud events from 15 minutes before to 72 hours after delivery) and JSON,
 with an evidence-context column on the right (entities, sender history from the
-baseline pass, findings, score drivers, source file). `j` / `k` move the selection,
-`/` focuses the search.
+baseline pass, findings, score drivers, source file). The pane is resizable (drag the
+grip above it, double-click to reset) and can be expanded over the table; its header
+keeps the subject and sender on one line each and shows the strongest flags with the
+quiet observations behind a "+N more" link, so the tabs and the body stay reachable at
+any window size. `j` / `k` move the selection, `/` focuses the search. The sidebar
+collapses to an icon rail (button at its foot, remembered per browser).
 
 Every user, host, IP, sender address or domain value opens an entity page as a
 flyout over the current view: first and last seen, counts, a merged timeline of the
