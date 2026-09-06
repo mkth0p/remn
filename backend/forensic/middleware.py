@@ -39,3 +39,32 @@ class ApiClientHeaderMiddleware:
                     {"error": "invalid access token", "code": "auth"}, status=401
                 )
         return self.get_response(request)
+
+
+# What the built index.html declares in its <meta> tag, plus frame-ancestors (header only).
+CSP = (
+    "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' http: https:; worker-src 'self' blob:; "
+    "frame-src 'self' blob: data: about:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+)
+
+
+class SecurityHeadersMiddleware:
+    """Hardening headers on every response: no framing, no MIME sniffing, no referrer leaks,
+    a Content Security Policy for the app pages, and no cross-origin embedding of API bodies."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        resp = self.get_response(request)
+        resp.setdefault("X-Content-Type-Options", "nosniff")
+        resp.setdefault("Referrer-Policy", "no-referrer")
+        resp.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+        resp.setdefault("Cross-Origin-Resource-Policy", "same-origin")
+        resp.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
+        if not request.path.startswith("/api/") and str(resp.get("Content-Type", "")).startswith("text/html"):
+            resp.setdefault("Content-Security-Policy", CSP)
+        else:
+            resp.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; sandbox")
+        return resp

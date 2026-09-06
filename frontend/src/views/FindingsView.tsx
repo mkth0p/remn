@@ -14,6 +14,7 @@ import { buildIncidents, sevCounts, type Incident } from '../rules/incidents'
 import { useStore } from '../state/store'
 import { classNames, fmtNum, fmtTs } from '../util/format'
 import { exportCsv, exportJson } from '../util/export'
+import { attackHref } from '../util/safe'
 
 const ORDER: Severity[] = ['critical', 'high', 'medium', 'low', 'info']
 const STATUSES = ['new', 'reviewed', 'escalated', 'false_positive'] as const
@@ -438,7 +439,7 @@ export function FindingsView() {
                     ))}
                     {incident.kind === 'mail' && <div className="f"><span className="k">mail</span><span className="v" onClick={() => { setFocus({ source: 'mails', id: incident.refs[0] }); setView('mails') }}>open #{incident.refs[0]}</span></div>}
                   </div>
-                  {incident.attack.length > 0 && <div className="row wrap" style={{ gap: 6 }}>{incident.attack.map((t) => <a key={t} className="badge outline" href={`https://attack.mitre.org/techniques/${t.replace('.', '/')}/`} target="_blank" rel="noreferrer">{t}</a>)}</div>}
+                  {incident.attack.length > 0 && <div className="row wrap" style={{ gap: 6 }}>{incident.attack.map((t) => attackHref(t) ? <a key={t} className="badge outline" href={attackHref(t)} target="_blank" rel="noreferrer noopener">{t}</a> : <Badge key={t} sev="outline">{t}</Badge>)}</div>}
                 </div>
               </Flyout>
             )}
@@ -471,7 +472,7 @@ export function FindingsView() {
                       <h3>About</h3>
                       <div>{selected.description || <span className="muted">the rule has no description</span>}</div>
                       <div className="row wrap" style={{ gap: 6 }}>
-                        {selected.attack.map((t) => <a key={t} className="badge outline" href={`https://attack.mitre.org/techniques/${t.replace('.', '/')}/`} target="_blank" rel="noreferrer">{t}</a>)}
+                        {selected.attack.map((t) => attackHref(t) ? <a key={t} className="badge outline" href={attackHref(t)} target="_blank" rel="noreferrer noopener">{t}</a> : <Badge key={t} sev="outline">{t}</Badge>)}
                         {(selected.tags ?? []).map((t) => <Badge key={t}>{t}</Badge>)}
                       </div>
                       {selected.escalation && <div className="small" style={{ color: 'var(--danger)' }}>escalated by: {selected.escalation}</div>}
@@ -539,7 +540,7 @@ export function FindingsView() {
                     <td>{fmtNum(h.findings)}</td>
                     <td>{h.rules.size}</td>
                     <td>{attack.enabledByTechnique.get(h.id) ?? 0}</td>
-                    <td className="sans"><a href={`https://attack.mitre.org/techniques/${h.id.replace('.', '/')}/`} target="_blank" rel="noreferrer">attack.mitre.org</a> · <button className="btn link" onClick={() => { setTab('findings'); setQ(h.id) }}>show findings</button></td>
+                    <td className="sans">{attackHref(h.id) ? <a href={attackHref(h.id)} target="_blank" rel="noreferrer noopener">attack.mitre.org</a> : <span className="muted">not a technique id</span>} · <button className="btn link" onClick={() => { setTab('findings'); setQ(h.id) }}>show findings</button></td>
                   </tr>
                 ))}
                 {!attack.hits.length && <tr><td colSpan={6} className="muted sans">no technique yet - run the rules</td></tr>}

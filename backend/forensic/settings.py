@@ -9,6 +9,7 @@ optional reputation providers.
 from __future__ import annotations
 
 import os
+import secrets
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -30,7 +31,8 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-SECRET_KEY = os.environ.get("FORENSIC_SECRET_KEY", "local-forensic-tool-no-sessions")
+# stateless server (no sessions, no signed cookies): a per-process random key when none is configured
+SECRET_KEY = os.environ.get("FORENSIC_SECRET_KEY") or secrets.token_urlsafe(48)
 DEBUG = _env_bool("FORENSIC_DEBUG", False)
 
 # Comma-separated extra hosts for remote/home-server deployments, e.g.
@@ -49,6 +51,8 @@ INSTALLED_APPS = ["api"]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "forensic.middleware.ApiClientHeaderMiddleware",
+    "forensic.middleware.SecurityHeadersMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "django.middleware.common.CommonMiddleware",
 ]
 
@@ -143,3 +147,8 @@ LOGGING = {
         "httpcore": {"level": "WARNING"},
     },
 }
+
+# Browser hardening for the served app (also applied when the Vite dev server proxies /api)
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = "no-referrer"
+X_FRAME_OPTIONS = "DENY"

@@ -7,6 +7,7 @@ import { getSource } from '../data/source'
 import { getDb, type Ioc } from '../db/schema'
 import { toast, useStore } from '../state/store'
 import { defang, fmtNum, fmtTs } from '../util/format'
+import { safeHref } from '../util/safe'
 import { exportCsv, exportJson, iocsToStix } from '../util/export'
 import { IconShield } from '../components/Icons'
 import { refreshCounts } from '../data/ingest'
@@ -107,7 +108,7 @@ export function IocsView() {
               <div className="col">
                 {((selected.reputation as { verdicts?: { provider: string; verdict: string; score: number | null; tags: string[]; details: Record<string, unknown>; link: string | null }[] }).verdicts ?? []).map((v) => (
                   <div key={v.provider} className="card">
-                    <div className="row"><b>{v.provider}</b><Badge sev={v.verdict === 'malicious' ? 'critical' : v.verdict === 'suspicious' ? 'high' : v.verdict === 'clean' ? 'ok' : 'info'}>{v.verdict}</Badge>{v.score != null && <span className="mono small">score {v.score}</span>}<span className="spacer" />{v.link && <a href={v.link} target="_blank" rel="noreferrer" className="small">open ↗</a>}</div>
+                    <div className="row"><b>{v.provider}</b><Badge sev={v.verdict === 'malicious' ? 'critical' : v.verdict === 'suspicious' ? 'high' : v.verdict === 'clean' ? 'ok' : 'info'}>{v.verdict}</Badge>{v.score != null && <span className="mono small">score {v.score}</span>}<span className="spacer" />{safeHref(v.link) && <a href={safeHref(v.link)} target="_blank" rel="noreferrer noopener" className="small">open ↗</a>}</div>
                     {v.tags?.length > 0 && <div className="small dim">{v.tags.join(' · ')}</div>}
                     <JsonView value={v.details} />
                   </div>

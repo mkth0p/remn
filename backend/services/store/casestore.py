@@ -201,6 +201,13 @@ class CaseStore:
             self._con.execute("SET memory_limit = '2GB'")
         except duckdb.Error:
             pass
+        # the store never reads or writes files through SQL: block read_csv / COPY TO / ATTACH / extension
+        # loading so the raw SQL endpoint and the analyst's `sql` tool cannot touch the server's filesystem
+        try:
+            self._con.execute("SET enable_external_access = false")
+            self._con.execute("SET lock_configuration = true")
+        except duckdb.Error:
+            pass
         self._init_schema()
         self._next: dict[str, int] = {}
         for t in ("events", "mails", "attachments", "urls"):

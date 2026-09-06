@@ -10,6 +10,7 @@ import { RuleImport } from '../components/RuleImport'
 import { IconAi, IconEdit, IconPlus, IconTrash } from '../components/Icons'
 import type { RuleDiag } from '../rules/engine'
 import { fmtNum, fmtTs } from '../util/format'
+import { safeHref } from '../util/safe'
 
 interface LastRun {
   ts: number
@@ -63,9 +64,9 @@ function PackCard({ pack, on, busy, selected, onToggle, onShow }: { pack: PackIn
         {pack.counts.skipped ? <span className="muted"> · {fmtNum(pack.counts.skipped)} skipped (listed in skipped.json)</span> : null}
       </div>
       <div className="small muted row" style={{ gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
-        <a href={pack.upstream?.url} target="_blank" rel="noreferrer">{pack.upstream?.repo}{sha ? `@${sha}` : ''}</a>
+        <a href={safeHref(pack.upstream?.url)} target="_blank" rel="noreferrer noopener">{pack.upstream?.repo}{sha ? `@${sha}` : ''}</a>
         <span>· {pack.upstream?.fetched}</span>
-        <span>· {pack.license?.url ? <a href={pack.license.url} target="_blank" rel="noreferrer">{pack.license.name}</a> : pack.license?.name}</span>
+        <span>· {safeHref(pack.license?.url) ? <a href={safeHref(pack.license?.url)} target="_blank" rel="noreferrer noopener">{pack.license?.name}</a> : pack.license?.name}</span>
         {pack.licenseText && <a href={`/api/rules/packs/${encodeURIComponent(pack.id)}/license`} target="_blank" rel="noreferrer">licence text</a>}
         <span className="spacer" />
         {on && <button className={`btn xs${selected ? ' primary' : ''}`} onClick={onShow} disabled={busy}>{busy ? <Spinner /> : selected ? 'showing' : 'show rules'}</button>}
