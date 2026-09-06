@@ -231,7 +231,8 @@ export function MailDetail({ row: initialRaw, onClose, layout = 'drawer', paneHe
   }
   const srcdoc = useMemo(() => (tab === 'html' && body?.bodyHtml ? sanitizeMailHtml(body.bodyHtml) : ''), [tab, body])
   const lookalike = (row.lookalike as { matches?: { reference: string; method: string; kind: string }[] }).matches ?? []
-  const worstFinding = findings[0]?.severity
+  const activeFindings = findings.filter((f) => f.status !== 'false_positive')
+  const worstFinding = activeFindings[0]?.severity
   const senderDomain = row.fromRegistrable || row.fromDomain
   const visibleFlags = row.flags.filter((f) => !/^(spf_none|dkim_none|dmarc_none)$/.test(f))
   // the strongest flags first; quiet observations (tracking pixels, hidden preheaders, history) behind "+N more"
@@ -310,7 +311,7 @@ export function MailDetail({ row: initialRaw, onClose, layout = 'drawer', paneHe
       <div className="row" style={{ gap: 8, alignItems: 'center', minWidth: 0 }}>
         <Risk value={row.risk} />
         <div className="ellipsis" style={{ fontWeight: 600, color: 'var(--fg-1)', fontSize: 13.5, flex: 1, minWidth: 0 }} title={row.subject}>{row.subject || '(no subject)'}</div>
-        {worstFinding && <Sev sev={worstFinding}>{findings.length} finding{findings.length === 1 ? '' : 's'}</Sev>}
+        {worstFinding && <Sev sev={worstFinding}>{activeFindings.length} finding{activeFindings.length === 1 ? '' : 's'}</Sev>}
         <AddToTimeline ts={row.date} text={`Mail "${row.subject || '(no subject)'}" from ${row.fromAddr} to ${row.to.map((t) => t.addr).slice(0, 2).join(', ')}`} link={{ source: 'mails', id: row.id!, label: row.subject || `#${row.id}` }} severity={row.risk >= 80 ? 'critical' : row.risk >= 60 ? 'high' : row.risk >= 40 ? 'medium' : 'info'} />
         <button className="btn sm" onClick={explain} title="ask the local model"><IconAi /> analyse</button>
         {onPaneMax && <button className="btn icon ghost sm" onClick={() => onPaneMax(!paneMax)} title={paneMax ? 'restore the table' : 'expand the message'}><IconChevronDown style={{ transform: paneMax ? 'none' : 'rotate(180deg)' }} /></button>}
@@ -459,7 +460,7 @@ export function MailDetail({ row: initialRaw, onClose, layout = 'drawer', paneHe
 
   if (layout === 'pane') {
     return (
-      <div className="pane" style={paneHeight ? { height: paneHeight } : undefined}>
+      <div className={paneMax ? 'pane max' : 'pane'} style={paneHeight && !paneMax ? { height: paneHeight } : undefined}>
         <div className="pane-main">
           <div className="pane-head">{head}</div>
           {tabs}

@@ -63,7 +63,7 @@ export async function runEnabledRules(kase: Case, reason: RulesRun['reason'] = '
   }
   running = true
   const db = getDb()
-  const before = sevCounts(await db.findings.where('caseId').equals(caseId).toArray())
+  const before = sevCounts((await db.findings.where('caseId').equals(caseId).toArray()).filter((f) => f.status !== 'false_positive'))
   useStore.getState().setRulesRun({ done: 0, total: enabled.length, rule: '', reason })
   try {
     const res = await runRulesFor(kase, enabled, (done, total, rule) => useStore.getState().setRulesRun({ done, total, rule, reason }))

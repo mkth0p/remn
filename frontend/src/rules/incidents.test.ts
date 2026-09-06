@@ -73,3 +73,17 @@ describe('incidents', () => {
     expect(primaryEntity(f({ ruleId: 'r', severity: 'low', source: 'events', entities: { image: 'x' } }))).toBeNull()
   })
 })
+
+describe('false positives', () => {
+  it('do not decide the severity or headline of an incident but stay listed', () => {
+    const rows = [
+      f({ ruleId: 'mail-credential-phishing', severity: 'critical', source: 'mails', refs: [7], status: 'false_positive', title: 'Credential phishing' }),
+      f({ ruleId: 'mail-high-risk-score', severity: 'medium', source: 'mails', refs: [7], title: 'High overall risk score' }),
+    ]
+    const [inc] = buildIncidents(rows)
+    expect(inc.severity).toBe('medium')
+    expect(inc.lead.ruleId).toBe('mail-high-risk-score')
+    expect(inc.findings).toHaveLength(2)
+    expect(inc.status).toBe('new')
+  })
+})

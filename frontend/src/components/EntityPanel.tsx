@@ -129,14 +129,14 @@ export function EntityPanel() {
   if (!entity || !kase) return null
   const close = () => setEntity(null)
   const items: Item[] = [
-    ...findings.map((f) => ({ ts: f.ts ?? 0, kind: 'finding' as const, sev: f.severity, title: f.title, sub: `${f.ruleId} · ${fmtNum(f.count)} row(s)`, open: () => { setView('findings') } })),
+    ...findings.map((f) => ({ ts: f.ts ?? 0, kind: 'finding' as const, sev: f.status === 'false_positive' ? 'info' : f.severity, title: f.title, sub: `${f.ruleId} · ${fmtNum(f.count)} row(s)${f.status === 'false_positive' ? ' · marked false positive' : ''}`, open: () => { setView('findings') } })),
     ...mails.map((m) => ({ ts: m.date ?? 0, kind: 'mail' as const, sev: m.risk >= 80 ? 'critical' : m.risk >= 60 ? 'high' : m.risk >= 40 ? 'medium' : 'info', title: m.subject || '(no subject)', sub: `${m.fromAddr} → ${(m.to ?? []).map((t) => t.addr).slice(0, 2).join(', ')} · risk ${m.risk}`, open: () => { setFocus({ source: 'mails', id: m.id! }); setView('mails'); close() } })),
     ...events.map((e) => ({ ts: e.ts ?? 0, kind: 'event' as const, title: String(e.summary ?? e.description ?? e.operation ?? e.eventId ?? ''), sub: [e.computer, e.ipAddress, e.provider].filter(Boolean).join(' · '), open: () => { setFocus({ source: 'events', id: e.id! }); setView('events'); close() } })),
   ].sort((a, b) => b.ts - a.ts)
   const seen = items.filter((i) => i.ts)
   const first = seen.length ? Math.min(...seen.map((i) => i.ts)) : null
   const last = seen.length ? Math.max(...seen.map((i) => i.ts)) : null
-  const worst = findings.reduce<string>((w, f) => (['critical', 'high', 'medium', 'low', 'info'].indexOf(f.severity) < ['critical', 'high', 'medium', 'low', 'info'].indexOf(w) ? f.severity : w), 'info')
+  const worst = findings.filter((f) => f.status !== 'false_positive').reduce<string>((w, f) => (['critical', 'high', 'medium', 'low', 'info'].indexOf(f.severity) < ['critical', 'high', 'medium', 'low', 'info'].indexOf(w) ? f.severity : w), 'info')
   const Icon = KIND_ICON[entity.kind]
   const ask = () => {
     setAiPrompt(`Summarise what this ${entity.kind} did in the case and what to check next: ${entity.value}. ${findings.length} finding(s), ${counts.events ?? events.length} event(s), ${counts.mails ?? mails.length} mail(s) involve it; first seen ${first ? new Date(first).toISOString() : 'n/a'}, last seen ${last ? new Date(last).toISOString() : 'n/a'}.`)
@@ -146,7 +146,7 @@ export function EntityPanel() {
   return (
     <Flyout
       width="min(720px, 58vw)"
-      title={<span className="row" style={{ gap: 8 }}><Icon /><span className="mono">{entity.value}</span><Badge>{entity.kind}</Badge>{findings.length > 0 && <Sev sev={worst}>{findings.length} finding(s)</Sev>}</span>}
+      title={<span className="row" style={{ gap: 8 }}><Icon /><span className="mono">{entity.value}</span><Badge>{entity.kind}</Badge>{findings.length > 0 && <Sev sev={worst}>{findings.filter((f) => f.status !== 'false_positive').length} finding(s)</Sev>}</span>}
       meta={<>
         <span>first seen {first ? fmtTs(first) : '—'}</span>
         <span>last seen {last ? fmtTs(last) : '—'}</span>

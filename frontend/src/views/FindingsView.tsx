@@ -61,6 +61,7 @@ export function FindingsView() {
   const [sev, setSev] = useState('')
   const [status, setStatus] = useState('')
   const [source, setSource] = useState('')
+  const [showFp, setShowFp] = useState(false)
   const [q, setQ] = useState('')
   const [group, setGroup] = useState<Group>('incident')
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set())
@@ -101,13 +102,17 @@ export function FindingsView() {
     if (!running && kase?.id) findingsStaleness(kase.id).then(setStale).catch(() => undefined)
   }, [running, kase?.id])
 
+  // false positives leave the queue and the counts unless asked for (status filter or the toggle)
+  const active = useMemo(() => all.filter((f) => f.status !== 'false_positive'), [all])
+  const fpCount = all.length - active.length
   const rows = useMemo(() => {
     const needle = q.toLowerCase()
-    return all.filter((f) => (!sev || f.severity === sev) && (!status || f.status === status) && (!source || f.source === source) && (!needle || `${f.title} ${f.ruleId} ${JSON.stringify(f.entities)} ${f.attack.join(' ')}`.toLowerCase().includes(needle)))
-  }, [all, sev, status, source, q])
+    const base = status === 'false_positive' || showFp ? all : active
+    return base.filter((f) => (!sev || f.severity === sev) && (!status || f.status === status) && (!source || f.source === source) && (!needle || `${f.title} ${f.ruleId} ${JSON.stringify(f.entities)} ${f.attack.join(' ')}`.toLowerCase().includes(needle)))
+  }, [all, active, sev, status, source, q, showFp])
   const incidents = useMemo(() => (group === 'incident' ? buildIncidents(rows) : []), [rows, group])
-  const allIncidents = useMemo(() => buildIncidents(all), [all])
-  const counts = useMemo(() => (group === 'incident' ? sevCounts(allIncidents) : sevCounts(all)), [all, allIncidents, group])
+  const allIncidents = useMemo(() => buildIncidents(active), [active])
+  const counts = useMemo(() => (group === 'incident' ? sevCounts(allIncidents) : sevCounts(active)), [active, allIncidents, group])
   const groups = useMemo(() => {
     if (!group || group === 'incident') return []
     const m = new Map<string, { key: string; label: string; items: Finding[] }>()
@@ -122,7 +127,7 @@ export function FindingsView() {
   }, [rows, group])
   const attack = useMemo(() => {
     const m = new Map<string, { id: string; findings: number; rules: Set<string>; worst: Severity }>()
-    for (const f of all) {
+    for (const f of active) {
       for (const t of f.attack) {
         const e = m.get(t) ?? { id: t, findings: 0, rules: new Set<string>(), worst: 'info' as Severity }
         e.findings++
@@ -134,7 +139,7 @@ export function FindingsView() {
     const enabledByTechnique = new Map<string, number>()
     for (const r of rules) if (r.enabled) for (const t of r.rule.attack ?? []) enabledByTechnique.set(t, (enabledByTechnique.get(t) ?? 0) + 1)
     return { hits: Array.from(m.values()).sort((a, b) => b.findings - a.findings), enabledByTechnique }
-  }, [all, rules])
+  }, [active, rules])
 
   // prevalence of the selected finding's entities in the case (Insights section)
   useEffect(() => {
@@ -268,7 +273,7 @@ export function FindingsView() {
       <div className="view-header">
         <div className="desc">
           <h1>Findings</h1>
-          <span className="sub">{fmtNum(allIncidents.length)} incident(s) · {fmtNum(all.length)} finding(s) from {enabledCount} enabled rule(s){lastRun ? ` · last run ${fmtTs(lastRun.ts)}` : ' · rules not run yet'}</span>
+          <span className="sub">{fmtNum(allIncidents.length)} incident(s) · {fmtNum(active.length)} finding(s) from {enabledCount} enabled rule(s){fpCount ? ` · ${fmtNum(fpCount)} false positive${fpCount === 1 ? '' : 's'}${showFp || status === 'false_positive' ? '' : ' hidden'}` : ''}{lastRun ? ` · last run ${fmtTs(lastRun.ts)}` : ' · rules not run yet'}</span>
         </div>
         <span className="spacer" />
         <button className="btn ghost sm" onClick={() => setView('rules')}>manage rules</button>
@@ -321,6 +326,7 @@ export function FindingsView() {
               </div>
               <label className={classNames('pill', sev && 'active')}>severity <select value={sev} onChange={(e) => setSev(e.target.value)}><option value="">any</option>{ORDER.map((s) => <option key={s} value={s}>{s} ({counts[s] ?? 0})</option>)}</select></label>
               <label className={classNames('pill', status && 'active')}>status <select value={status} onChange={(e) => setStatus(e.target.value)}><option value="">any</option>{STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}</select></label>
+              {fpCount > 0 && <button className={classNames('pill', showFp && 'active')} onClick={() => setShowFp(!showFp)} title="false positives are hidden from the queue and the counts by default">{showFp ? 'hiding' : 'show'} {fmtNum(fpCount)} false positive{fpCount === 1 ? '' : 's'}</button>}
               <label className={classNames('pill', source && 'active')}>source <select value={source} onChange={(e) => setSource(e.target.value)}><option value="">events + mails</option><option value="events">events</option><option value="mails">mails</option></select></label>
               <div className="segmented" title="how the queue is grouped">
                 {([['incident', 'incidents'], ['', 'flat'], ['ruleId', 'rule'], ['entity', 'entity'], ['source', 'source']] as [Group, string][]).map(([g, label]) => (
@@ -494,7 +500,7 @@ export function FindingsView() {
                           </div>
                         ))}
                         {(() => { const rc = relatedChains(selected, all); return rc.length ? <><div className="k">attack chains</div><div className="v">{rc.map((c) => <button key={c.id} className="btn link" style={{ display: 'block' }} onClick={() => setView('chains')}>{c.title}</button>)}</div></> : null })()}
-                        {(() => { const inc = allIncidents.find((i) => i.findings.some((f) => f.id === selected.id)); return inc && inc.findings.length > 1 ? <><div className="k">incident</div><div className="v click" onClick={() => { setSelected(null); setParent(null); setIncident(inc) }}>{inc.title} · {inc.findings.length} finding(s)</div></> : null })()}
+                        {(() => { const inc = buildIncidents(all).find((i) => i.findings.some((f) => f.id === selected.id)); return inc && inc.findings.length > 1 ? <><div className="k">incident</div><div className="v click" onClick={() => { setSelected(null); setParent(null); setIncident(inc) }}>{inc.title} · {inc.findings.length} finding(s)</div></> : null })()}
                         <div className="k">same rule</div>
                         <div className="v">{fmtNum(all.filter((f) => f.ruleId === selected.ruleId).length)} finding(s) · {fmtNum(all.filter((f) => f.ruleId === selected.ruleId && f.status === 'false_positive').length)} marked false positive</div>
                       </div>

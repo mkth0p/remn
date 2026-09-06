@@ -194,14 +194,14 @@ export function MailsView() {
               </span>
             }
           />
-          <TimeHistogram ds={ds} source="mails" filter={filter} version={version + rulesVersion} onRange={(from, to) => setFilter({ ...filter, timeRange: { from: new Date(from).toISOString(), to: new Date(to).toISOString() } })} />
-          {(truncated || error) && (
+          {!paneMax && <TimeHistogram ds={ds} source="mails" filter={filter} version={version + rulesVersion} onRange={(from, to) => setFilter({ ...filter, timeRange: { from: new Date(from).toISOString(), to: new Date(to).toISOString() } })} />}
+          {!paneMax && (truncated || error) && (
             <div className="row small dim" style={{ padding: '3px 16px', gap: 12, borderBottom: '1px solid var(--line)' }}>
               {truncated && <span className="mono">showing the first {LIMIT.toLocaleString('en-US')} rows - narrow the filter or change the sort</span>}
               {error && <span style={{ color: 'var(--danger)' }}>{error}</span>}
             </div>
           )}
-          <VirtualTable
+          {!paneMax && <VirtualTable
             rows={rows}
             columns={columns}
             rowKey={(r) => r.id!}
@@ -211,8 +211,8 @@ export function MailsView() {
             onSort={(field) => setFilter({ ...filter, sort: { field, dir: sort.field === field && sort.dir === 'desc' ? 'asc' : 'desc' } })}
             rowClass={(r) => (r.risk >= 80 ? 'sev-critical' : r.risk >= 60 ? 'sev-high' : r.risk >= 40 ? 'sev-medium' : undefined)}
             empty={loading ? 'loading…' : 'no mails match - load a mailbox in Evidence or relax the filter'}
-          />
-          {selected && <div className="pane-grip" onPointerDown={startDrag} onDoubleClick={() => { setPaneH(55); setPaneMax(false) }} title="drag to resize the message pane · double-click to reset" />}
+          />}
+          {selected && !paneMax && <div className="pane-grip" onPointerDown={startDrag} onDoubleClick={() => { setPaneH(55); setPaneMax(false) }} title="drag to resize the message pane · double-click to reset" />}
           {selected && <MailDetail row={selected} onClose={() => setSelected(null)} layout="pane" paneHeight={`${paneMax ? 94 : paneH}%`} paneMax={paneMax} onPaneMax={setPaneMax} />}
         </div>
       </div>

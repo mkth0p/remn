@@ -439,3 +439,5 @@ label.field > span { font-weight: 500; }
 .pane-grip { height: 7px; flex: none; cursor: row-resize; background: var(--surface-2); border-top: 1px solid var(--line); }
 .pane-grip:hover { background: var(--accent-dim); }
 .btn.link.small { font-size: 11px; }
+
+.pane.max { flex: 1 1 auto; height: auto; min-height: 0; border-top: 0; }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { runAgent, type ChatMessage } from '../ai/chat'
+import { bindChatToCase, newChatSession, openChatSession, sendMessage, stopChat, useChat } from '../ai/session'
 import { getTransport, type ModelInfo } from '../ai/transport'
 import { getDb, type AiSession } from '../db/schema'
 import { toast, useStore } from '../state/store'
@@ -29,23 +29,25 @@ export function AiView() {
   const aiPrompt = useStore((s) => s.aiPrompt)
   const setAiPrompt = useStore((s) => s.setAiPrompt)
   const [sessions, setSessions] = useState<AiSession[]>([])
-  const [session, setSession] = useState<AiSession | null>(null)
-  const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [input, setInput] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [live, setLive] = useState('')
-  const [liveThinking, setLiveThinking] = useState('')
+  const session = useChat((s) => s.session)
+  const messages = useChat((s) => s.messages)
+  const input = useChat((s) => s.input)
+  const busy = useChat((s) => s.busy)
+  const live = useChat((s) => s.live)
+  const liveThinking = useChat((s) => s.liveThinking)
+  const sessionsVersion = useChat((s) => s.sessionsVersion)
+  const setInput = (v: string) => useChat.getState().set({ input: v })
   const [think, setThink] = useState(false)
   const [tools, setTools] = useState(true)
   const [model, setModel] = useState('')
   const [showTools, setShowTools] = useState(true)
-  const abort = useRef<AbortController | null>(null)
   const logRef = useRef<HTMLDivElement>(null)
   const reloadSessions = () => kase?.id && getDb().aiSessions.where('caseId').equals(kase.id).reverse().sortBy('updatedAt').then(setSessions)
   useEffect(() => {
+    if (kase?.id) bindChatToCase(kase.id)
     reloadSessions()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kase?.id])
+  }, [kase?.id, sessionsVersion])
   useEffect(() => {
     if (aiPrompt) {
       setInput(aiPrompt)
@@ -77,63 +79,13 @@ export function AiView() {
   if (!kase) return null
   const reachable = aiStatus.reachable === true
   const retryPing = () => getTransport().ping().then((r) => setAiStatus({ reachable: r.reachable, error: r.error, models: r.models, checkedAt: Date.now() }))
-  const newSession = () => {
-    setSession(null)
-    setMessages([])
-  }
-  const openSession = (s: AiSession) => {
-    setSession(s)
-    setMessages(s.messages as unknown as ChatMessage[])
-  }
-  const persist = async (msgs: ChatMessage[]) => {
-    const title = msgs.find((m) => m.role === 'user')?.content.slice(0, 80) || 'session'
-    if (session?.id) {
-      await getDb().aiSessions.update(session.id, { messages: msgs as unknown as Record<string, unknown>[], updatedAt: Date.now(), title })
-    } else {
-      const id = await getDb().aiSessions.add({ caseId: kase.id!, title, messages: msgs as unknown as Record<string, unknown>[], createdAt: Date.now(), updatedAt: Date.now() })
-      setSession({ id, caseId: kase.id!, title, messages: msgs as unknown as Record<string, unknown>[], createdAt: Date.now(), updatedAt: Date.now() })
-    }
-    reloadSessions()
-  }
-  const send = async (text?: string) => {
+  const newSession = () => newChatSession()
+  const openSession = (s: AiSession) => openChatSession(s)
+  const send = (text?: string) => {
     const q = (text ?? input).trim()
     if (!q || busy) return
     if (!reachable) return toast('err', aiCfg.transport === 'browser' ? `your local Ollama (${aiCfg.ollamaUrl}) is not reachable - start it, or switch the transport in Settings` : 'Ollama is not reachable from the server (see Settings).')
-    setInput('')
-    const msgs: ChatMessage[] = [...messages, { role: 'user', content: q, ts: Date.now() }]
-    setMessages(msgs)
-    setBusy(true)
-    setLive('')
-    setLiveThinking('')
-    abort.current = new AbortController()
-    try {
-      await runAgent(msgs, kase, {
-        mode: tools ? 'analyst' : 'free',
-        model: model || undefined,
-        think,
-        tools: tools && canTools,
-        signal: abort.current.signal,
-        onToken: (t) => setLive((l) => l + t),
-        onThinking: (t) => setLiveThinking((l) => l + t),
-        onMessage: (m) => {
-          setMessages([...msgs])
-          if (m.role === 'assistant') {
-            setLive('')
-            setLiveThinking('')
-          }
-        },
-        onToolCall: (name, args) => useStore.getState().log('info', `ai → ${name}(${JSON.stringify(args).slice(0, 200)})`),
-        onToolResult: (name, result, ms) => useStore.getState().log('ok', `ai ← ${name}: ${result.length} chars in ${ms} ms`),
-      })
-    } catch (e) {
-      if ((e as Error).name !== 'AbortError') toast('err', `AI error: ${(e as Error).message}`)
-    } finally {
-      setBusy(false)
-      setLive('')
-      setLiveThinking('')
-      setMessages([...msgs])
-      persist(msgs)
-    }
+    void sendMessage(kase, q, { mode: tools ? 'analyst' : 'free', model: model || undefined, think, tools: tools && canTools })
   }
   return (
     <div className="view">
@@ -143,7 +95,7 @@ export function AiView() {
           {sessions.map((s) => (
             <div key={s.id} className={`list-item ${session?.id === s.id ? 'active' : ''}`} onClick={() => openSession(s)} style={{ padding: '6px 10px' }}>
               <div style={{ flex: 1, minWidth: 0 }}><div className="ellipsis small">{s.title}</div><div className="muted" style={{ fontSize: 10 }}>{fmtTs(s.updatedAt)}</div></div>
-              <button className="btn ghost xs" onClick={(e) => { e.stopPropagation(); getDb().aiSessions.delete(s.id!).then(() => { reloadSessions(); if (session?.id === s.id) newSession() }) }}><IconTrash /></button>
+              <button className="btn ghost xs" onClick={(e) => { e.stopPropagation(); getDb().aiSessions.delete(s.id!).then(() => { reloadSessions(); if (session?.id === s.id) useChat.getState().set({ session: null, messages: [] }) }) }}><IconTrash /></button>
             </div>
           ))}
           <div className="divider" />
@@ -166,7 +118,7 @@ export function AiView() {
             <Toggle on={think} onChange={setThink} label="thinking" />
             <Toggle on={showTools} onChange={setShowTools} label="show tool traffic" />
             <span className="spacer" />
-            {busy && <button className="btn sm danger" onClick={() => abort.current?.abort()}><IconStop /> stop</button>}
+            {busy && <button className="btn sm danger" onClick={stopChat}><IconStop /> stop</button>}
           </div>
           {!reachable && aiStatus.reachable !== null && (
             <div className="row" style={{ padding: '8px 14px', gap: 10, borderBottom: '1px solid var(--line)', background: 'var(--bg-2)' }}>

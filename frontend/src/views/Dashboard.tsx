@@ -33,7 +33,7 @@ export function Dashboard() {
     if (!kase?.id || !ds) return
     const db = getDb()
     db.evidence.where('caseId').equals(kase.id).toArray().then(setEvidence)
-    db.findings.where('caseId').equals(kase.id).toArray().then((f) => setFindings(f.sort((a, b) => ['info', 'low', 'medium', 'high', 'critical'].indexOf(b.severity) - ['info', 'low', 'medium', 'high', 'critical'].indexOf(a.severity)).slice(0, 12)))
+    db.findings.where('caseId').equals(kase.id).filter((f) => f.status !== 'false_positive').toArray().then((f) => setFindings(f.sort((a, b) => ['info', 'low', 'medium', 'high', 'critical'].indexOf(b.severity) - ['info', 'low', 'medium', 'high', 'critical'].indexOf(a.severity)).slice(0, 12)))
     estimateStorage().then(setStorage)
     ds.summary().then((s) => setSummary(s as Summary)).catch(() => setSummary(null))
     refreshCounts(kase)

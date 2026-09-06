@@ -86,7 +86,8 @@ export async function buildChains(kase: Case, opts: ChainOptions = {}): Promise<
   const db = getDb()
   const caseId = kase.id!
   const settings = settingsForRules(kase)
-  const findings = (await db.findings.where('caseId').equals(caseId).toArray()).filter((f) => f.ruleId !== 'chain').map(slimFinding)
+  // findings marked false positive neither seed a chain nor weight its steps
+  const findings = (await db.findings.where('caseId').equals(caseId).toArray()).filter((f) => f.ruleId !== 'chain' && f.status !== 'false_positive').map(slimFinding)
   const seedMinRisk = opts.seedMinRisk ?? 45
   const windowHours = opts.windowHours ?? 72
   let result: ChainResult

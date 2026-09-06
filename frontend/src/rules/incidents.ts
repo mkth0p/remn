@@ -68,7 +68,9 @@ function sortMembers(members: Finding[]): Finding[] {
 
 function finish(id: string, kind: IncidentKind, members: Finding[], title?: string, subtitle?: string): Incident {
   const findings = sortMembers(members)
-  const lead = findings[0]
+  // a member marked false positive no longer decides the severity or the headline
+  const active = findings.filter((f) => f.status !== 'false_positive')
+  const lead = (active.length ? active : findings)[0]
   const entities: Record<string, string> = {}
   for (const f of findings) for (const [k, v] of Object.entries(f.entities)) if (!(k in entities) && v) entities[k] = v
   const rules = Array.from(new Set(findings.map((f) => f.ruleId)))

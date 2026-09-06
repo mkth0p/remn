@@ -82,8 +82,14 @@ describe('FindingsView', () => {
       const row = await db.findings.where('ruleId').equals('win-log-cleared').first()
       expect(row?.status).toBe('false_positive')
     }, WAIT)
-    // the incident of that finding is derived from its members: it is now false positive too
+    // a false positive leaves the queue and the counts: one incident remains, the toggle offers it back
     fireEvent.click(screen.getByRole('button', { name: 'incidents' }))
-    await waitFor(() => expect(sub()).toContain('2 incident(s)'), WAIT)
+    await waitFor(() => expect(sub()).toContain('1 incident(s) · 3 finding(s)'), WAIT)
+    expect(sub()).toContain('1 false positive hidden')
+    fireEvent.click(screen.getByText(/show 1 false positive/))
+    await waitFor(() => {
+      expect(sub()).toContain('1 false positive')
+      expect(sub()).not.toContain('hidden')
+    }, WAIT)
   }, TEST_TIMEOUT)
 })
