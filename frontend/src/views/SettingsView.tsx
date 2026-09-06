@@ -7,7 +7,7 @@ import { refreshCounts } from '../data/ingest'
 import { migrateCaseToServer } from '../data/migrate'
 import { getSource } from '../data/source'
 import { API_HEADERS } from '../api/client'
-import { getTransport, type ModelInfo } from '../ai/transport'
+import { CLAUDE_MODELS, fetchClaudeStatus, getTransport, type ClaudeStatus, type ModelInfo } from '../ai/transport'
 import { suggestTrustedSenders, type TrustedSuggestion } from '../data/trusted'
 import { Modal } from '../components/ui'
 
@@ -37,6 +37,15 @@ export function SettingsView() {
   const [storeSize, setStoreSize] = useState<number | null>(null)
   const ds = useMemo(() => (kase ? getSource(kase) : null), [kase])
   useEffect(() => setUrlDraft(aiCfg.ollamaUrl), [aiCfg.ollamaUrl])
+  const [claudeStatus, setClaudeStatus] = useState<ClaudeStatus | null>(null)
+  useEffect(() => {
+    if (aiCfg.transport !== 'claude') return
+    let dead = false
+    fetchClaudeStatus()
+      .then((st) => { if (!dead) setClaudeStatus(st) })
+      .catch((e) => { if (!dead) setClaudeStatus({ enabled: false, available: false, version: null, loggedIn: false, account: null, method: null, error: (e as Error).message }) })
+    return () => { dead = true }
+  }, [aiCfg.transport, aiStatus.checkedAt])
   useEffect(() => {
     setName(kase?.name ?? '')
     setAnalyst(kase?.analyst ?? '')
@@ -111,6 +120,7 @@ export function SettingsView() {
     if (patch.ollamaUrl !== undefined) await db.kv.put({ key: 'aiOllamaUrl', value: patch.ollamaUrl })
     if (patch.model !== undefined) await db.kv.put({ key: 'aiModel', value: patch.model })
     if (patch.numCtx !== undefined) await db.kv.put({ key: 'aiNumCtx', value: patch.numCtx })
+    if (patch.claudeModel !== undefined) await db.kv.put({ key: 'aiClaudeModel', value: patch.claudeModel })
   }
   const testAi = async () => {
     setAiTesting(true)
@@ -120,7 +130,7 @@ export function SettingsView() {
       setAiStatus({ reachable: r.reachable, error: r.error, models: r.models, checkedAt: Date.now() })
       if (r.reachable) {
         setAiModels(await t.listModels().catch(() => []))
-        toast('ok', `Ollama reachable (${t.kind === 'browser' ? t.endpoint : 'via server'}) - ${r.models ?? 0} model(s)`)
+        toast('ok', t.kind === 'claude' ? 'Claude Code is installed and signed in on the server machine' : `Ollama reachable (${t.kind === 'browser' ? t.endpoint : 'via server'}) - ${r.models ?? 0} model(s)`)
       } else {
         toast('err', r.error ?? 'unreachable', 0)
       }
@@ -163,12 +173,23 @@ export function SettingsView() {
             </div>
           </div>
           <div className="panel">
-            <div className="panel-h">AI · Ollama connection</div>
+            <div className="panel-h">AI · analyst model</div>
             <div className="panel-b col">
               <div className="col" style={{ gap: 6 }}>
                 <label className="checkbox"><input type="radio" name="aitransport" checked={aiCfg.transport === 'browser'} onChange={() => saveAi({ transport: 'browser' })} /> <span><b>Browser-direct</b> <span className="muted small">— this page calls YOUR local Ollama. Prompts and evidence excerpts never reach the REMN server. Each analyst uses their own machine's models.</span></span></label>
                 <label className="checkbox"><input type="radio" name="aitransport" checked={aiCfg.transport === 'server'} onChange={() => saveAi({ transport: 'server' })} /> <span><b>Server proxy</b> <span className="muted small">— the REMN server relays to the Ollama configured in its .env (nothing persisted). Use when no local Ollama, or on Safari over HTTPS.</span></span></label>
+                <label className="checkbox"><input type="radio" name="aitransport" checked={aiCfg.transport === 'claude'} onChange={() => saveAi({ transport: 'claude' })} /> <span><b>Claude Code</b> <span className="muted small">— the REMN server runs the <code>claude</code> command line installed on its machine, signed in with that machine's Claude account. Prompts, tool results (evidence excerpts) and answers go to Anthropic; the server keeps nothing. Not for evidence that may not leave your organisation.</span></span></label>
               </div>
+              {aiCfg.transport === 'claude' && (
+                <div className="row" style={{ alignItems: 'flex-start' }}>
+                  <label className="field"><span>model</span>
+                    <select className="select mono" value={aiCfg.claudeModel} onChange={(e) => saveAi({ claudeModel: e.target.value })}>{CLAUDE_MODELS.map((m) => <option key={m.name} value={m.name}>{m.name}{m.parameterSize ? ` · ${m.parameterSize}` : ''}</option>)}</select>
+                  </label>
+                  <div className="field" style={{ flex: 1 }}><span>on the server machine</span>
+                    <div className="small" style={{ paddingTop: 6 }}>{!claudeStatus ? '…' : claudeStatus.available && claudeStatus.loggedIn ? `${claudeStatus.version ?? 'installed'} · signed in${claudeStatus.method ? ` (${claudeStatus.method})` : ''}${claudeStatus.account ? ` as ${claudeStatus.account}` : ''}` : claudeStatus.error ?? 'not available'}</div>
+                  </div>
+                </div>
+              )}
               {aiCfg.transport === 'browser' && (
                 <label className="field"><span>local Ollama URL (as seen from this browser)</span>
                   <div className="row">
@@ -176,7 +197,7 @@ export function SettingsView() {
                   </div>
                 </label>
               )}
-              <div className="row">
+              {aiCfg.transport !== 'claude' && <div className="row">
                 <label className="field" style={{ flex: 1 }}><span>default model (blank = server default)</span>
                   <input className="input mono" list="ai-models" value={aiCfg.model} onChange={(e) => saveAi({ model: e.target.value })} placeholder={health?.ollama.defaultModel ?? 'qwen3:8b'} />
                   <datalist id="ai-models">{aiModels.map((m) => <option key={m.name} value={m.name} />)}</datalist>
@@ -184,11 +205,14 @@ export function SettingsView() {
                 <label className="field"><span>context window (num_ctx)</span>
                   <input type="number" className="input mono" min={2048} step={1024} value={aiCfg.numCtx ?? ''} onChange={(e) => saveAi({ numCtx: e.target.value ? Number(e.target.value) : null })} placeholder={String(health?.ollama.numCtx ?? 32768)} />
                 </label>
-              </div>
+              </div>}
               <div className="row">
                 <button className="btn primary sm" onClick={testAi} disabled={aiTesting}>{aiTesting ? 'testing…' : 'test connection'}</button>
-                <span className="small dim">{aiStatus.reachable === true ? `✓ reachable · ${aiStatus.models ?? 0} model(s)` : aiStatus.reachable === false ? '✗ unreachable' : ''}</span>
+                <span className="small dim">{aiStatus.reachable === true ? (aiCfg.transport === 'claude' ? '✓ ready' : `✓ reachable · ${aiStatus.models ?? 0} model(s)`) : aiStatus.reachable === false ? '✗ unreachable' : ''}</span>
               </div>
+              {aiCfg.transport === 'claude' && (
+                <div className="hint">Install Claude Code on the server machine (<code>npm install -g @anthropic-ai/claude-code</code>), run <code>claude</code> there once to sign in, then restart REMN. The server runs it with its own tools, hooks, plugins and MCP servers off and without saving a session; REMN's tools are still executed in this browser. Operators can switch the connector off with <code>CLAUDE_CODE_ENABLED=0</code>.</div>
+              )}
               {aiCfg.transport === 'browser' && (
                 <div className="hint">If REMN is NOT served from localhost (e.g. accessed on your home server), your Ollama must allow this origin: run <code>setx OLLAMA_ORIGINS "{typeof location !== 'undefined' ? location.origin : ''}"</code> (Windows, then restart Ollama) or <code>OLLAMA_ORIGINS={typeof location !== 'undefined' ? location.origin : ''} ollama serve</code>. HTTPS pages may call http://localhost in Chrome, Edge and Firefox; Safari blocks it — use the server proxy there.</div>
               )}

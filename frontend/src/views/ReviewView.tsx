@@ -106,7 +106,7 @@ export function ReviewView() {
   }
   const draft = async (c: Chain) => {
     if (!kase) return
-    if (useStore.getState().aiStatus.reachable !== true) return toast('err', 'Ollama is not reachable (see Settings)')
+    if (useStore.getState().aiStatus.reachable !== true) return toast('err', 'the analyst model is not reachable (see the AI section in Settings)')
     setDrafting(true)
     try {
       const steps = c.steps.filter((s) => stepVisible(s, 'weighted')).slice(0, 40).map((s) => `${fmtTs(s.ts)} (+${Math.round(s.offsetMin)} min) [${s.kind === 'mail' ? 'mail' : s.origin}] ${s.title}${s.artifacts.length ? ' | ties: ' + s.artifacts.join('; ') : ''}${s.findings.length ? ' | findings: ' + s.findings.map((f) => f.title).join('; ') : ''}`)
@@ -172,6 +172,7 @@ export function ReviewView() {
           <label className="pill active">from <select value={settings.minSeverity} onChange={(e) => saveSettings({ minSeverity: e.target.value as Severity })}>{SEVERITIES.map((s) => <option key={s} value={s}>{s}</option>)}</select> up</label>
           <label className="pill active">chain steps <select value={settings.chainDetail} onChange={(e) => saveSettings({ chainDetail: e.target.value as ReportSettings['chainDetail'] })}><option value="linked">tied to the mail or with a finding</option><option value="weighted">plus weighted steps</option><option value="all">every step</option></select></label>
           <Toggle on={settings.includeChains} onChange={(v) => saveSettings({ includeChains: v })} label="chains" />
+          <Toggle on={settings.includeGraphs} onChange={(v) => saveSettings({ includeGraphs: v })} label="chain graphs" />
           <Toggle on={settings.includeTimeline} onChange={(v) => saveSettings({ includeTimeline: v })} label="case timeline" />
           <Toggle on={settings.includeTasks} onChange={(v) => saveSettings({ includeTasks: v })} label="tasks" />
           <Toggle on={settings.includeNotes} onChange={(v) => saveSettings({ includeNotes: v })} label="notes" />

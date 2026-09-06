@@ -22,6 +22,8 @@ export interface ReportSettings {
   /** findings and incidents below this severity stay out of the report */
   minSeverity: Severity
   includeChains: boolean
+  /** the swimlane graph of each chain (and the shared-entity graph when several) as pictures */
+  includeGraphs: boolean
   /** which chain steps the report prints: tied to the mail or carrying a finding / plus weighted steps / every step */
   chainDetail: ChainDetail
   includeTimeline: boolean
@@ -34,7 +36,7 @@ export interface ReportSettings {
   onlyReviewed: boolean
 }
 
-export const DEFAULT_REPORT: ReportSettings = { minSeverity: 'medium', includeChains: true, chainDetail: 'weighted', includeTimeline: true, includeTasks: true, includeNotes: true, includeIocs: true, includeEvidence: true, includeFp: false, onlyReviewed: false }
+export const DEFAULT_REPORT: ReportSettings = { minSeverity: 'medium', includeChains: true, includeGraphs: true, chainDetail: 'weighted', includeTimeline: true, includeTasks: true, includeNotes: true, includeIocs: true, includeEvidence: true, includeFp: false, onlyReviewed: false }
 
 export interface ChainReview {
   verdict?: Verdict

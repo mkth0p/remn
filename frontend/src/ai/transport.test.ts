@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { composeSystem, pyJson, resetAiMetaCache, type AiMeta } from './meta'
-import { getTransport, type ChatChunk, type ChatTurnParams } from './transport'
+import { CLAUDE_MODELS, getTransport, pickClaudeModel, type ChatChunk, type ChatTurnParams } from './transport'
+import { DEFAULT_REPORT } from '../data/review'
 import { useStore } from '../state/store'
 
 const FIXTURE = JSON.parse(readFileSync(join(__dirname, '../../../tests/fixtures/ai_system_compose.json'), 'utf-8')) as {
@@ -151,5 +152,26 @@ describe('BrowserOllamaTransport.chatTurn', () => {
     const res = await getTransport().queryJson('failed logons', { now: 'T' })
     expect(res.query).toEqual({ source: 'events', filter: {} })
     expect(res.model).toBe('testmodel')
+  })
+})
+
+describe('Claude Code transport', () => {
+  it('keeps Claude aliases and full ids, drops Ollama names', () => {
+    expect(pickClaudeModel('opus', 'sonnet')).toBe('opus')
+    expect(pickClaudeModel('Claude-Opus-5', 'sonnet')).toBe('claude-opus-5')
+    expect(pickClaudeModel('qwen3:8b', 'haiku')).toBe('haiku')
+    expect(pickClaudeModel('', 'fable')).toBe('fable')
+    expect(pickClaudeModel(undefined, 'gemma4:latest')).toBe('sonnet')
+    expect(pickClaudeModel(undefined, undefined)).toBe('sonnet')
+  })
+  it('lists every alias with tool support', () => {
+    expect(CLAUDE_MODELS.map((m) => m.name)).toEqual(['sonnet', 'opus', 'fable', 'haiku'])
+    expect(CLAUDE_MODELS.every((m) => m.capabilities?.includes('tools'))).toBe(true)
+  })
+})
+
+describe('report defaults', () => {
+  it('prints chain graphs unless switched off', () => {
+    expect(DEFAULT_REPORT.includeGraphs).toBe(true)
   })
 })

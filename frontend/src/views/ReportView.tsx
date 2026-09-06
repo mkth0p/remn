@@ -11,6 +11,8 @@ import { defang, escapeHtml, fmtBytes, fmtNum, fmtTs, renderMarkdown } from '../
 import { downloadBlob, exportCaseBundle, importCaseBundle } from '../util/export'
 import { Badge, Spinner } from '../components/ui'
 import { Dropzone } from '../components/Dropzone'
+import { renderGraphPng } from '../components/ChainGraph'
+import { buildCampaignGraph } from '../data/chainGraph'
 import { IconAi, IconCheck, IconDownload } from '../components/Icons'
 
 const ORDER = ['critical', 'high', 'medium', 'low', 'info']
@@ -47,6 +49,15 @@ export function ReportView() {
     loadReportSettings(kase.id).then(setSettings)
   }, [kase, rulesVersion])
   const selection = useMemo(() => (settings ? selectForReport(findings, chains, reviews, settings) : { findings: [], chains: [] }), [findings, chains, reviews, settings])
+  // graph pictures for the report, drawn off-screen from the same models as the Chains page
+  const [graphs, setGraphs] = useState<Record<string, string>>({})
+  useEffect(() => {
+    if (!settings?.includeGraphs || !selection.chains.length) { setGraphs({}); return }
+    const out: Record<string, string> = {}
+    for (const c of selection.chains) { const png = renderGraphPng({ mode: 'chain', chain: c }); if (png) out[c.id] = png }
+    if (selection.chains.length > 1) { const png = renderGraphPng({ mode: 'campaign', chains: selection.chains }); if (png) out['campaign'] = png }
+    setGraphs(out)
+  }, [selection.chains, settings?.includeGraphs])
   if (!kase || !settings) return null
   const shown = selection.findings
   const incidents = buildIncidents(shown)
@@ -58,7 +69,7 @@ export function ReportView() {
   const undecided = buildIncidents(findings).filter((i) => i.status === 'new').length + chains.filter((c) => !reviews[c.id]?.verdict).length
 
   const generateSummary = async () => {
-    if (useStore.getState().aiStatus.reachable !== true) return toast('err', 'Ollama is not reachable (check the AI section in Settings)')
+    if (useStore.getState().aiStatus.reachable !== true) return toast('err', 'the analyst model is not reachable (see the AI section in Settings)')
     setBusy(true)
     try {
       const data = {
@@ -84,6 +95,9 @@ export function ReportView() {
     const h = escapeHtml
     const rows = (xs: string[][]) => xs.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join('')}</tr>`).join('')
     const sev = (x: string) => { const k = ORDER.includes(x) ? x : 'info'; return `<span class="sev-${k}">${h(x)}</span>` }
+    // only a PNG data URL this page produced itself is embedded
+    const img = (src: string | undefined, alt: string) => (src && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(src) ? `<figure><img src="${src}" alt="${h(alt)}"></figure>` : '')
+    const campaign = settings.includeGraphs && selection.chains.length > 1 && graphs.campaign ? (() => { const g = buildCampaignGraph(selection.chains); return `<h3>Shared between chains</h3>${img(graphs.campaign, 'campaign graph: chains and the senders, domains, IPs and hosts they share')}<p class="muted">${g.insights.length ? g.insights.slice(0, 8).map((x) => h(x.text)).join(' · ') : 'no sender, domain, IP or host is shared between the chains'}</p>` })() : ''
     const chainSection = selection.chains.map((c) => {
       const r = reviews[c.id]
       const steps = c.steps.filter((s) => stepVisible(s, settings.chainDetail))
@@ -91,16 +105,17 @@ export function ReportView() {
       return `<h3>${h(c.identityLabel)} · ${sev(chainSeverity(c, r))} · score ${c.score}${r?.verdict ? ` · ${h(r.verdict)}` : ''}</h3>
 <p class="muted">Seed mail "${h(c.seed.subject)}" from ${h(c.seed.fromAddr ?? '')} at ${fmtTs(c.seed.ts)} (risk ${c.seed.risk}) · ${c.steps.length} steps from ${fmtTs(c.start)} to ${fmtTs(c.end)} · ${c.artifactLinks} artifact link(s)${c.entities.attackerAddresses.length ? ` · attacker ${h(c.entities.attackerAddresses.join(', '))}` : ''}${c.entities.ips.length ? ` · IPs ${h(c.entities.ips.join(', '))}` : ''}</p>
 <p>${r?.narrative ? renderMarkdown(r.narrative) : h(c.summary)}</p>
+${settings.includeGraphs ? img(graphs[c.id], `graph of the chain for ${c.identityLabel}: seed mail, steps by lane and time, ties to the mail`) : ''}
 <table><tr><th>time (UTC)</th><th>offset</th><th>source</th><th>step</th><th>ties to the mail / findings</th></tr>${rows(steps.map((s) => [fmtTs(s.ts), `${s.offsetMin >= 0 ? '+' : ''}${Math.round(s.offsetMin)} min`, h(s.kind === 'mail' ? 'mailbox' : s.origin === 'm365' ? 'Microsoft 365' : 'host'), h(s.title) + (s.computer || s.ipAddress ? `<br><span class="muted">${h([s.computer, s.ipAddress].filter(Boolean).join(' · '))}</span>` : ''), h([...s.artifacts, ...s.findings.map((f) => f.title)].join('; '))]))}</table>${hidden ? `<p class="muted">${hidden} routine step(s) not printed at the "${h(settings.chainDetail)}" detail level.</p>` : ''}`
     }).join('\n')
     return `<!doctype html><html><head><meta charset="utf-8"><title>REMN report - ${h(kase.name)}</title>
-<style>body{font:13px/1.5 Segoe UI,Arial,sans-serif;color:#111;margin:40px;max-width:1100px}h1{font-size:22px;border-bottom:2px solid #222;padding-bottom:6px}h2{font-size:16px;margin-top:28px;border-bottom:1px solid #ccc}h3{font-size:14px;margin-top:20px}table{border-collapse:collapse;width:100%;font-size:12px;margin:6px 0 12px}td,th{border:1px solid #ccc;padding:4px 6px;text-align:left;vertical-align:top}th{background:#eee}code,.mono{font-family:Consolas,monospace;font-size:11px}.sev-critical{color:#b00035;font-weight:bold}.sev-high{color:#c4471b;font-weight:bold}.sev-medium{color:#9a6b00}.sev-low{color:#1f5fb0}.sev-info{color:#666}.muted{color:#666}</style></head><body>
+<style>body{font:13px/1.5 Segoe UI,Arial,sans-serif;color:#111;margin:40px;max-width:1100px}h1{font-size:22px;border-bottom:2px solid #222;padding-bottom:6px}h2{font-size:16px;margin-top:28px;border-bottom:1px solid #ccc}h3{font-size:14px;margin-top:20px}table{border-collapse:collapse;width:100%;font-size:12px;margin:6px 0 12px}td,th{border:1px solid #ccc;padding:4px 6px;text-align:left;vertical-align:top}th{background:#eee}code,.mono{font-family:Consolas,monospace;font-size:11px}.sev-critical{color:#b00035;font-weight:bold}.sev-high{color:#c4471b;font-weight:bold}.sev-medium{color:#9a6b00}.sev-low{color:#1f5fb0}.sev-info{color:#666}.muted{color:#666}figure{margin:8px 0 12px;page-break-inside:avoid}figure img{width:100%;border:1px solid #ddd}</style></head><body>
 <h1>Forensic analysis report — ${h(kase.name)}</h1>
 <p class="muted">Generated ${new Date().toISOString()} by REMN${kase.analyst ? ` · analyst ${h(kase.analyst)}` : ''}. All timestamps UTC. Findings from ${h(settings.minSeverity)} severity up${settings.onlyReviewed ? ', reviewed items only' : ''}${settings.includeFp ? ', false positives included' : ''}.</p>
 ${summary ? `<h2>Executive summary</h2><div>${renderMarkdown(summary)}</div>` : ''}
 ${settings.includeEvidence ? `<h2>Evidence &amp; chain of custody</h2>
 <table><tr><th>file</th><th>kind</th><th>size</th><th>rows</th><th>SHA-256</th><th>integrity</th><th>added</th></tr>${rows(evidence.map((e) => [h(e.name), h(e.format || e.kind), fmtBytes(e.size), fmtNum(e.count), `<code>${h(e.sha256Client ?? '')}</code>`, h(e.integrity), fmtTs(e.addedAt)]))}</table>` : ''}
-${selection.chains.length ? `<h2>Attack chains (${selection.chains.length})</h2>${chainSection}` : ''}
+${selection.chains.length ? `<h2>Attack chains (${selection.chains.length})</h2>${settings.includeGraphs && Object.keys(graphs).length ? '<p class="muted">Graphs: diamond = seed mail · box = step (size = weight, colour = worst finding) · grey dot = collapsed routine steps · green edges = ties to the mail · lanes = attacker side, mailbox, identity, Microsoft 365, host, machines &amp; IPs.</p>' : ''}${campaign}${chainSection}` : ''}
 <h2>Incidents (${incidents.length})</h2>
 <p>${ORDER.map((s) => `<span class="sev-${s}">${s}: ${bySev[s] ?? 0}</span>`).join(' · ')} finding(s). Findings on the same mail, or about the same user, host or IP within six hours, are one incident.</p>
 ${incidents.map((i) => `<h3>${sev(i.severity)} · ${h(i.title)}${i.status !== 'new' ? ` · ${h(i.status === 'escalated' ? 'confirmed' : i.status === 'false_positive' ? 'false positive' : i.status)}` : ''}</h3>

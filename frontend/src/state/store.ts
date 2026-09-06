@@ -79,7 +79,7 @@ interface State {
   setStoreThresholdMb: (mb: number) => void
   pendingIngest: { files: File[]; kindOverride?: 'evtx' | 'mail'; reason: 'big' | 'archive' } | null
   setPendingIngest: (p: State['pendingIngest']) => void
-  aiConfig: { transport: 'browser' | 'server'; ollamaUrl: string; model: string; numCtx: number | null }
+  aiConfig: { transport: 'browser' | 'server' | 'claude'; ollamaUrl: string; model: string; numCtx: number | null; claudeModel: string }
   setAiConfig: (patch: Partial<State['aiConfig']>) => void
   aiStatus: { reachable: boolean | null; error?: string; models?: number; checkedAt: number }
   setAiStatus: (s: State['aiStatus']) => void
@@ -141,7 +141,7 @@ export const useStore = create<State>((set) => ({
   setStoreThresholdMb: (storeThresholdMb) => set({ storeThresholdMb }),
   pendingIngest: null,
   setPendingIngest: (pendingIngest) => set({ pendingIngest }),
-  aiConfig: { transport: 'browser', ollamaUrl: 'http://localhost:11434', model: '', numCtx: null },
+  aiConfig: { transport: 'browser', ollamaUrl: 'http://localhost:11434', model: '', numCtx: null, claudeModel: 'sonnet' },
   setAiConfig: (patch) => set((s) => ({ aiConfig: { ...s.aiConfig, ...patch } })),
   aiStatus: { reachable: null, checkedAt: 0 },
   setAiStatus: (aiStatus) => set({ aiStatus }),

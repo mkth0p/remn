@@ -149,7 +149,7 @@ export function RulesView() {
   }
   const askAi = async () => {
     if (!aiAsk.trim()) return
-    if (useStore.getState().aiStatus.reachable !== true) return toast('err', 'Ollama is not reachable (check the AI section in Settings)')
+    if (useStore.getState().aiStatus.reachable !== true) return toast('err', 'the analyst model is not reachable (see the AI section in Settings)')
     setAiBusy(true)
     try {
       const msgs = await runAgent([{ role: 'user', content: `Write one rule for: ${aiAsk}` }], kase, { mode: 'rule', tools: false, think: false, maxIterations: 1 })

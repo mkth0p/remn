@@ -106,6 +106,11 @@ OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4-hauhaucs:latest")
 OLLAMA_NUM_CTX = _env_int("OLLAMA_NUM_CTX", 32768)
 OLLAMA_TIMEOUT = _env_int("OLLAMA_TIMEOUT", 600)
+# Claude Code connector: the server runs the local "claude" command line as the analyst model
+# (evidence excerpts leave the machine for Anthropic). Operators can switch it off.
+CLAUDE_CODE_ENABLED = _env_bool("CLAUDE_CODE_ENABLED", True)
+CLAUDE_CODE_BIN = os.environ.get("CLAUDE_CODE_BIN", "").strip()
+CLAUDE_CODE_TIMEOUT = _env_int("CLAUDE_CODE_TIMEOUT", 600)
 
 # ---------------------------------------------------------------------------
 # Reputation providers (all optional, all opt-in from the UI)

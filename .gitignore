@@ -36,3 +36,5 @@ frontend/public/_samples/
 
 # public validation corpora (tools/validate_public.py downloads them)
 samples/public/
+
+backend/data/claude-cwd/

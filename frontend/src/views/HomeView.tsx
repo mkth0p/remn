@@ -23,7 +23,7 @@ export function HomeView() {
           <dt>out</dt>
           <dd>scored mails, findings grouped into incidents, attack chains across mail, cloud and host, a report</dd>
           <dt>where</dt>
-          <dd>in this browser, or in a DuckDB store on your server for large cases; the analyst model is your own Ollama</dd>
+          <dd>in this browser, or in a DuckDB store on your server for large cases; the analyst model is your own Ollama, or Claude through a Claude Code sign-in on the server</dd>
         </dl>
         <div className="row" style={{ gap: 8 }}>
           {hasEvidence ? <button className="btn primary" onClick={() => setView('findings')}>open the findings</button> : <button className="btn primary" onClick={() => setView('evidence')}>add evidence</button>}

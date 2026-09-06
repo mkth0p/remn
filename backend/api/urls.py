@@ -57,4 +57,7 @@ urlpatterns = [
     path("ai/models", ai.models),
     path("ai/query", ai.query),
     path("ai/chat", ai.chat),
+    path("ai/claude/status", ai.claude_status),
+    path("ai/claude/chat", ai.claude_chat),
+    path("ai/claude/query", ai.claude_query),
 ]

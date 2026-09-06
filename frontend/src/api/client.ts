@@ -169,7 +169,7 @@ export interface Health {
   limits: { maxUploadMb: number; inMemoryMb: number; maxChunkedGb?: number; chunkMb?: number }
   store?: { thresholdMb: number; casesDir: string }
   ollama: { reachable: boolean; host: string; models: { name: string; size?: number; family?: string; parameterSize?: string }[]; defaultModel: string; defaultAvailable?: boolean; capabilities?: string[]; error?: string; numCtx?: number }
-  optional: { pst: boolean; yara: boolean; yaraRules: number }
+  optional: { pst: boolean; yara: boolean; yaraRules: number; claudeCode?: boolean }
   providers: ProviderInfo[]
 }
 export interface ProviderInfo {

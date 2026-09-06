@@ -8,6 +8,7 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_GET
 
 from api.services import ollama_service
+from services.ai import claude_code
 from services.analysis.attachments import yara_scan
 from services.parsers.mail import pst
 from services.reputation.base import registry
@@ -33,6 +34,7 @@ def health(request):
             "pst": pst.available(),
             "yara": yara_scan.available(),
             "yaraRules": yara_scan.rule_count(),
+            "claudeCode": claude_code.available(),
         },
         "providers": registry.list(),
         "rulesDir": str(settings.RULES_DIR),

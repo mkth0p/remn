@@ -417,6 +417,24 @@ whitelisted, below threshold), so "no findings" is always explainable.
   excerpts never reach the REMN server. Settings → AI switches to the server
   proxy (the pre-existing `/api/ai/*` path) for machines without a local
   Ollama. Prompts and tool schemas stay server-defined (`GET /api/ai/meta`).
+* **Claude Code connector** (Settings → AI → Claude Code): the REMN server runs
+  the `claude` command line installed on its machine, signed in with that
+  machine's Claude account, as the analyst model. One command per model turn,
+  in print mode, with REMN's system prompt in place of Claude Code's, its own
+  tools, hooks, plugins and MCP servers off (`--safe-mode --tools ""`) and no
+  session file (`--no-session-persistence`). The browser still owns the
+  conversation and runs the REMN tools; Claude asks for them with a JSON reply
+  (`{"tool_calls": [...]}`) that the server holds back and hands to the agent
+  loop, and the command line is stopped as soon as that object is complete so
+  the model cannot invent the tool result. Models are the `sonnet`, `opus`,
+  `fable` and `haiku` aliases. Prompts, tool results (evidence excerpts) and
+  answers leave the server for Anthropic; the server keeps nothing. Not for
+  evidence that may not leave the organisation. Install with
+  `npm install -g @anthropic-ai/claude-code`, run `claude` once to sign in,
+  restart REMN; `CLAUDE_CODE_ENABLED=0` switches the connector off,
+  `CLAUDE_CODE_BIN` points at the binary, `CLAUDE_CODE_TIMEOUT` (600 s) caps a
+  turn. Endpoints: `GET /api/ai/claude/status`, `POST /api/ai/claude/chat`
+  (SSE, same chunks as the Ollama proxy), `POST /api/ai/claude/query`.
 * The analyst agent sends the system prompt + tool definitions on every turn;
   with a 7-8B model running **on CPU** a turn takes 2-4 minutes (prompt
   evaluation dominates). On a GPU the same turn takes a few seconds. Check
@@ -576,7 +594,13 @@ positives, reviewed items only). Decisions live on the findings and in the case'
 key-value store, travel with the bundle, and the Report page prints from them: attack
 chains with narrative and step table, incidents with their notes and member findings
 at the effective severity, then indicators, timeline, tasks, notes and the findings
-timeline. The Report page says how many items still have no decision.
+timeline. The Report page says how many items still have no decision. With
+"chain graphs" on (the default), each printed chain carries its swimlane graph
+as a picture, drawn off-screen from the same model as the Chains page in the
+report's light palette, and a report with several chains opens with the
+shared-entity graph and its insights (senders, domains, IPs and hosts common to
+chains). The pictures are PNG data URLs embedded in the HTML, so the report
+stays one self-contained file.
 
 Case notes hold what the analyst decides to keep: a curated timeline (entries added
 with the "timeline" button on findings, mails, events and chain steps, each linked

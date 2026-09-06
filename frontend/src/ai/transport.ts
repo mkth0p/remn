@@ -2,7 +2,9 @@
  * AI transports. Browser-direct (default): the analyst's browser talks to
  * their OWN Ollama (http://localhost:11434 relative to the browser machine),
  * so prompts and tool results never reach the REMN server. Server proxy:
- * the pre-existing /api/ai/* path, for setups without a local Ollama.
+ * the pre-existing /api/ai/* path, for setups without a local Ollama. Claude Code:
+ * the server runs the local `claude` command line (that machine's Claude login);
+ * prompts, tool results and answers leave for Anthropic, nothing is kept on the server.
  */
 import { apiGet, apiPost, readNdjsonBody, streamSse } from '../api/client'
 import { useStore } from '../state/store'
@@ -32,7 +34,7 @@ export interface ModelInfo {
 }
 
 export interface AiTransport {
-  kind: 'server' | 'browser'
+  kind: 'server' | 'browser' | 'claude'
   /** Human-readable endpoint for status displays. */
   endpoint: string
   chatTurn(p: ChatTurnParams, onChunk: (c: ChatChunk) => void, signal?: AbortSignal): Promise<void>
@@ -318,6 +320,82 @@ class BrowserOllamaTransport implements AiTransport {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Claude Code (the server runs the local claude command line)
+// ---------------------------------------------------------------------------
+export const CLAUDE_MODELS: ModelInfo[] = [
+  { name: 'sonnet', parameterSize: 'default', capabilities: ['tools', 'thinking'] },
+  { name: 'opus', capabilities: ['tools', 'thinking'] },
+  { name: 'fable', parameterSize: 'most capable', capabilities: ['tools', 'thinking'] },
+  { name: 'haiku', parameterSize: 'fast', capabilities: ['tools', 'thinking'] },
+]
+
+const isClaudeName = (m: string) => CLAUDE_MODELS.some((x) => x.name === m) || m.startsWith('claude-')
+
+/** The AI page's model box may still hold an Ollama name; only Claude aliases or full Claude ids go to the command line. */
+export function pickClaudeModel(requested: string | undefined, configured: string | undefined): string {
+  const r = (requested || '').trim().toLowerCase()
+  if (r && isClaudeName(r)) return r
+  const c = (configured || '').trim().toLowerCase()
+  return c && isClaudeName(c) ? c : 'sonnet'
+}
+
+export interface ClaudeStatus {
+  enabled: boolean
+  available: boolean
+  version: string | null
+  loggedIn: boolean
+  account: string | null
+  method: string | null
+  error: string | null
+}
+
+export function fetchClaudeStatus(refresh = false): Promise<ClaudeStatus> {
+  return apiGet<ClaudeStatus>(`/api/ai/claude/status${refresh ? '?refresh=1' : ''}`)
+}
+
+class ClaudeCodeTransport implements AiTransport {
+  readonly kind = 'claude' as const
+  readonly endpoint = 'Claude Code on the server machine'
+
+  async chatTurn(p: ChatTurnParams, onChunk: (c: ChatChunk) => void, signal?: AbortSignal): Promise<void> {
+    await streamSse(
+      '/api/ai/claude/chat',
+      {
+        messages: p.messages.map((m) => ({ role: m.role, content: m.content, tool_calls: m.tool_calls, tool_name: m.tool_name })),
+        mode: p.mode,
+        tools: p.tools,
+        model: pickClaudeModel(p.model, useStore.getState().aiConfig.claudeModel),
+        context: p.context,
+      },
+      (ev) => onChunk(ev as ChatChunk),
+      signal,
+    )
+  }
+
+  queryJson(question: string, context: Record<string, unknown>, model?: string) {
+    return apiPost<{ query: Record<string, unknown> | null; raw: string; model: string }>('/api/ai/claude/query', { question, context, model: pickClaudeModel(model, useStore.getState().aiConfig.claudeModel) })
+  }
+
+  async listModels(): Promise<ModelInfo[]> {
+    return CLAUDE_MODELS
+  }
+
+  async capabilities(): Promise<string[]> {
+    return ['tools', 'thinking']
+  }
+
+  async ping() {
+    try {
+      const s = await fetchClaudeStatus(true)
+      if (!s.available || !s.loggedIn) return { reachable: false, error: s.error ?? 'Claude Code is not available on the server machine' }
+      return { reachable: true, models: CLAUDE_MODELS.length }
+    } catch (e) {
+      return { reachable: false, error: (e as Error).message }
+    }
+  }
+}
+
 function pyLike(v: unknown): string {
   // f-string interpolation of a dict in Python prints {'key': value}; close enough for prompt context
   return typeof v === 'object' ? JSON.stringify(v) : String(v)
@@ -328,10 +406,10 @@ const instances = new Map<string, AiTransport>()
 
 export function getTransport(): AiTransport {
   const cfg = useStore.getState().aiConfig
-  const key = cfg.transport === 'server' ? 'server' : `browser:${cfg.ollamaUrl}`
+  const key = cfg.transport === 'server' ? 'server' : cfg.transport === 'claude' ? 'claude' : `browser:${cfg.ollamaUrl}`
   let t = instances.get(key)
   if (!t) {
-    t = cfg.transport === 'server' ? new ServerProxyTransport() : new BrowserOllamaTransport(cfg.ollamaUrl)
+    t = cfg.transport === 'server' ? new ServerProxyTransport() : cfg.transport === 'claude' ? new ClaudeCodeTransport() : new BrowserOllamaTransport(cfg.ollamaUrl)
     instances.set(key, t)
   }
   return t

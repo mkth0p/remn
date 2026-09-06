@@ -87,9 +87,10 @@ export default function App() {
       if (lt?.value) setLocalTime(true)
       const th = await db.kv.get('storeThresholdMb')
       if (typeof th?.value === 'number') setThreshold(th.value)
-      const [tp, ou, om, onc] = await Promise.all([db.kv.get('aiTransport'), db.kv.get('aiOllamaUrl'), db.kv.get('aiModel'), db.kv.get('aiNumCtx')])
+      const [tp, ou, om, onc, ocm] = await Promise.all([db.kv.get('aiTransport'), db.kv.get('aiOllamaUrl'), db.kv.get('aiModel'), db.kv.get('aiNumCtx'), db.kv.get('aiClaudeModel')])
       useStore.getState().setAiConfig({
-        transport: tp?.value === 'server' ? 'server' : 'browser',
+        transport: tp?.value === 'server' ? 'server' : tp?.value === 'claude' ? 'claude' : 'browser',
+        claudeModel: typeof ocm?.value === 'string' && ocm.value ? ocm.value : 'sonnet',
         ollamaUrl: typeof ou?.value === 'string' && ou.value ? ou.value : 'http://localhost:11434',
         model: typeof om?.value === 'string' ? om.value : '',
         numCtx: typeof onc?.value === 'number' ? onc.value : null,

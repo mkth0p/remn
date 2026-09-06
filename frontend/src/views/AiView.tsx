@@ -84,7 +84,7 @@ export function AiView() {
   const send = (text?: string) => {
     const q = (text ?? input).trim()
     if (!q || busy) return
-    if (!reachable) return toast('err', aiCfg.transport === 'browser' ? `your local Ollama (${aiCfg.ollamaUrl}) is not reachable - start it, or switch the transport in Settings` : 'Ollama is not reachable from the server (see Settings).')
+    if (!reachable) return toast('err', aiCfg.transport === 'browser' ? `your local Ollama (${aiCfg.ollamaUrl}) is not reachable - start it, or switch the transport in Settings` : aiCfg.transport === 'claude' ? 'Claude Code is not available on the server machine (see Settings).' : 'Ollama is not reachable from the server (see Settings).')
     void sendMessage(kase, q, { mode: tools ? 'analyst' : 'free', model: model || undefined, think, tools: tools && canTools })
   }
   return (
@@ -102,16 +102,18 @@ export function AiView() {
           <div className="small dim" style={{ padding: '0 4px' }}>
             {aiCfg.transport === 'browser'
               ? `Browser-direct: this page talks straight to YOUR Ollama at ${aiCfg.ollamaUrl}. Prompts and tool results never touch the REMN server.`
-              : 'Server proxy: prompts and tool results transit through the REMN server to its Ollama (nothing is persisted there).'}
+              : aiCfg.transport === 'claude'
+                ? 'Claude Code: the REMN server runs the claude command line on its machine; prompts, tool results (evidence excerpts) and answers go to Anthropic under that machine\'s Claude account. The server keeps nothing.'
+                : 'Server proxy: prompts and tool results transit through the REMN server to its Ollama (nothing is persisted there).'}
             {' '}Nothing else leaves the machine except opt-in reputation lookups.
           </div>
         </div>
         <div className="right chat">
           <div className="row" style={{ padding: '8px 14px', borderBottom: '1px solid var(--line)', gap: 10 }}>
-            <Badge sev={reachable ? 'ok' : 'critical'}>{reachable ? 'ollama online' : aiStatus.reachable === null ? 'ollama …' : 'ollama offline'}</Badge>
-            <Badge sev="info">{aiCfg.transport === 'browser' ? `local · ${aiCfg.ollamaUrl.replace(/^https?:\/\//, '')}` : 'via server'}</Badge>
+            <Badge sev={reachable ? 'ok' : 'critical'}>{aiCfg.transport === 'claude' ? (reachable ? 'claude ready' : aiStatus.reachable === null ? 'claude …' : 'claude unavailable') : reachable ? 'ollama online' : aiStatus.reachable === null ? 'ollama …' : 'ollama offline'}</Badge>
+            <Badge sev="info">{aiCfg.transport === 'browser' ? `local · ${aiCfg.ollamaUrl.replace(/^https?:\/\//, '')}` : aiCfg.transport === 'claude' ? 'Claude Code · server machine' : 'via server'}</Badge>
             <select className="select mono" value={model} onChange={(e) => setModel(e.target.value)} title="model">
-              <option value="">{aiCfg.model || health?.ollama.defaultModel || 'default model'}</option>
+              <option value="">{aiCfg.transport === 'claude' ? aiCfg.claudeModel || 'sonnet' : aiCfg.model || health?.ollama.defaultModel || 'default model'}</option>
               {models.map((m) => <option key={m.name} value={m.name}>{m.name}{m.parameterSize ? ` (${m.parameterSize})` : ''}</option>)}
             </select>
             <Toggle on={tools} onChange={setTools} label={canTools ? 'analyst mode (tools)' : 'tools unsupported by model'} />
@@ -122,7 +124,7 @@ export function AiView() {
           </div>
           {!reachable && aiStatus.reachable !== null && (
             <div className="row" style={{ padding: '8px 14px', gap: 10, borderBottom: '1px solid var(--line)', background: 'var(--bg-2)' }}>
-              <span className="small" style={{ flex: 1 }}>⚠ {aiStatus.error ?? 'Ollama unreachable.'}</span>
+              <span className="small" style={{ flex: 1 }}>⚠ {aiStatus.error ?? (aiCfg.transport === 'claude' ? 'Claude Code unavailable.' : 'Ollama unreachable.')}</span>
               <button className="btn xs" onClick={retryPing}>retry</button>
               {aiCfg.transport === 'browser' && health?.ollama.reachable && (
                 <button className="btn xs" onClick={async () => { setAiConfig({ transport: 'server' }); const { getDb } = await import('../db/schema'); await getDb().kv.put({ key: 'aiTransport', value: 'server' }); getTransport().ping().then((r) => setAiStatus({ reachable: r.reachable, error: r.error, models: r.models, checkedAt: Date.now() })) }}>use server proxy instead</button>

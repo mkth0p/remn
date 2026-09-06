@@ -105,13 +105,24 @@ async function eachEvent(caseId: number, filter: Filter, settings: SettingsLike 
   return n
 }
 
+/** Group label of one value: addresses ({name, addr}) group by address, other objects by their JSON. */
+function groupKey(x: unknown): string {
+  if (x == null || x === '') return '(empty)'
+  if (typeof x === 'object') {
+    const o = x as Record<string, unknown>
+    const addr = o.addr ?? o.address ?? o.email
+    return typeof addr === 'string' && addr ? addr.toLowerCase() : JSON.stringify(x)
+  }
+  return String(x)
+}
+
 export async function aggregateEvents(caseId: number, filter: Filter, field: string, limit = 25, settings?: SettingsLike): Promise<{ groups: AggGroup[]; total: number; distinct: number }> {
   const map = new Map<string, AggGroup>()
   const total = await eachEvent(caseId, filter, settings, (r) => {
     const v = getPath(r, field)
     const vals = Array.isArray(v) ? v : [v]
     for (const x of vals) {
-      const key = x == null || x === '' ? '(empty)' : String(x)
+      const key = groupKey(x)
       const g = map.get(key)
       const ts = r.ts ?? null
       if (g) {
@@ -184,7 +195,7 @@ export async function aggregateMails(caseId: number, filter: Filter, field: stri
       const v = getPath(r, field)
       const vals = Array.isArray(v) ? v : [v]
       for (const x of vals) {
-        const key = x == null || x === '' ? '(empty)' : String(x)
+        const key = groupKey(x)
         const g = map.get(key)
         const ts = r.date ?? null
         if (g) {

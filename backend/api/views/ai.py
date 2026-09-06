@@ -13,7 +13,7 @@ from django.http import HttpRequest, JsonResponse, StreamingHttpResponse
 from django.views.decorators.http import require_GET, require_POST
 
 from api.services import ollama_service
-from services.ai import prompts
+from services.ai import claude_code, prompts
 from services.ai.tools import QUERY_SCHEMA, TOOLS
 
 log = logging.getLogger(__name__)
@@ -78,16 +78,10 @@ def models(request: HttpRequest):
     return JsonResponse(info)
 
 
-@require_POST
-def query(request: HttpRequest):
-    """Natural language -> filter DSL (structured output)."""
-    try:
-        body = json.loads(request.body or b"{}")
-    except ValueError:
-        return JsonResponse({"error": "invalid JSON"}, status=400)
+def _query_messages(body: dict[str, Any]) -> list[dict[str, Any]] | None:
     question = str(body.get("question") or "").strip()
     if not question:
-        return JsonResponse({"error": "question is required"}, status=400)
+        return None
     context = body.get("context") or {}
     ctx_lines = [f"Reference time (now, UTC): {context.get('now') or 'unknown'}"]
     if context.get("businessHours"):
@@ -98,10 +92,22 @@ def query(request: HttpRequest):
         ctx_lines.append("Known values (facets): " + json.dumps(context["facets"], ensure_ascii=False)[:4000])
     if context.get("source"):
         ctx_lines.append(f"Preferred source: {context['source']}")
-    messages = [
+    return [
         {"role": "system", "content": prompts.SYSTEM_QUERY},
         {"role": "user", "content": "\n".join(ctx_lines) + f"\n\nRequest: {question}"},
     ]
+
+
+@require_POST
+def query(request: HttpRequest):
+    """Natural language -> filter DSL (structured output)."""
+    try:
+        body = json.loads(request.body or b"{}")
+    except ValueError:
+        return JsonResponse({"error": "invalid JSON"}, status=400)
+    messages = _query_messages(body)
+    if messages is None:
+        return JsonResponse({"error": "question is required"}, status=400)
     try:
         res = ollama_service().chat_json(messages, QUERY_SCHEMA, model=body.get("model"), think=False)
     except Exception as exc:  # noqa: BLE001
@@ -147,3 +153,68 @@ def chat(request: HttpRequest):
     resp["Cache-Control"] = "no-store"
     resp["X-Accel-Buffering"] = "no"
     return resp
+
+
+# ---------------------------------------------------------------------------
+# Claude Code connector: same contract as the Ollama proxy, the model turn runs
+# through the local "claude" command line (see services/ai/claude_code.py).
+# ---------------------------------------------------------------------------
+@require_GET
+def claude_status(request: HttpRequest):
+    resp = JsonResponse(claude_code.status(force=request.GET.get("refresh") == "1"))
+    resp["Cache-Control"] = "no-store"
+    return resp
+
+
+@require_POST
+def claude_chat(request: HttpRequest):
+    """One model turn through Claude Code, streamed as SSE. Body: {messages, mode, tools(bool), model, context}."""
+    try:
+        body = json.loads(request.body or b"{}")
+    except ValueError:
+        return JsonResponse({"error": "invalid JSON"}, status=400)
+    if not claude_code.enabled():
+        return JsonResponse({"error": "the Claude Code connector is switched off on this server"}, status=403)
+    messages = _clean_messages(body.get("messages"))
+    if not messages:
+        return JsonResponse({"error": "messages are required"}, status=400)
+    mode = str(body.get("mode") or "analyst")
+    system = prompts.compose_system(mode, body.get("context") or {})
+    if messages[0]["role"] == "system":
+        system = (system + "\n\n" + messages[0]["content"]).strip()
+    use_tools = bool(body.get("tools", mode == "analyst"))
+    model = str(body.get("model") or "") or None
+
+    def gen() -> Iterator[bytes]:
+        try:
+            for chunk in claude_code.chat_stream(messages, system, model=model, tools=TOOLS if use_tools else None):
+                yield _sse(chunk)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("claude chat failed: %s", exc)
+            yield _sse({"type": "error", "error": str(exc)[:300]})
+            yield _sse({"type": "done", "model": model or claude_code.DEFAULT_MODEL, "stats": {}})
+
+    resp = StreamingHttpResponse(gen(), content_type="text/event-stream; charset=utf-8")
+    resp["Cache-Control"] = "no-store"
+    resp["X-Accel-Buffering"] = "no"
+    return resp
+
+
+@require_POST
+def claude_query(request: HttpRequest):
+    """Natural language -> filter DSL through Claude Code."""
+    try:
+        body = json.loads(request.body or b"{}")
+    except ValueError:
+        return JsonResponse({"error": "invalid JSON"}, status=400)
+    if not claude_code.enabled():
+        return JsonResponse({"error": "the Claude Code connector is switched off on this server"}, status=403)
+    messages = _query_messages(body)
+    if messages is None:
+        return JsonResponse({"error": "question is required"}, status=400)
+    try:
+        res = claude_code.chat_json(messages[1:], messages[0]["content"], QUERY_SCHEMA, model=str(body.get("model") or "") or None)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("claude query failed: %s", exc)
+        return JsonResponse({"error": f"Claude Code error: {str(exc)[:200]}"}, status=502)
+    return JsonResponse({"query": res["data"], "raw": res["raw"], "model": res["model"]})
