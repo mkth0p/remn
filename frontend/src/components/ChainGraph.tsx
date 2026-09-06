@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useRef } from 'react'
 import * as echarts from 'echarts/core'
 import { GraphChart } from 'echarts/charts'
-import { GraphicComponent, LegendComponent, TooltipComponent } from 'echarts/components'
+import { LegendComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import type { Chain } from '../data/chains'
 import { buildCampaignGraph, buildChainGraph, LANE_LABEL, LANES, type GNode, type Graph } from '../data/chainGraph'
 import type { EntityRef } from '../state/store'
 import { fmtTs } from '../util/format'
 
-echarts.use([GraphChart, TooltipComponent, LegendComponent, GraphicComponent, CanvasRenderer])
+echarts.use([GraphChart, TooltipComponent, LegendComponent, CanvasRenderer])
 
 function tokens() {
   const cs = getComputedStyle(document.documentElement)
@@ -89,12 +89,16 @@ export function ChainGraph({ mode, chain, chains, selectedStep, onStep, onEntity
       symbolSize: 7,
       label: { show: !!e.label, formatter: e.label ?? '', fontSize: 9, fontFamily: t.mono, color: e.kind === 'artifact' ? t.accent : t.fg3, backgroundColor: t.surface, padding: [1, 3] },
     }))
-    const graphic = mode === 'chain'
-      ? lanes.flatMap((l, i) => [
-          { type: 'text', left: 10, top: 40 + i * laneH + 6, style: { text: LANE_LABEL[l], fill: t.fg3, font: `10px ${t.mono}` }, silent: true },
-          { type: 'line', shape: { x1: 0, y1: 40 + i * laneH, x2: W, y2: 40 + i * laneH }, style: { stroke: t.line, lineWidth: 1 }, silent: true },
-        ])
+    // lane names and separators live inside the graph (anchor nodes and edges) so they pan and zoom with it
+    const right = mode === 'chain' ? 120 + Math.max(1, ...graph.nodes.map((n) => n.x)) * colW + 160 : 0
+    const laneNodes = mode === 'chain'
+      ? lanes.flatMap((l, i) => {
+          const yTop = 40 + i * laneH
+          const anchor = (id: string, x: number, y: number, label?: string) => ({ id, name: label ?? '', x, y, fixed: true, symbol: 'circle', symbolSize: 1, itemStyle: { color: 'transparent', borderWidth: 0 }, label: label ? { show: true, position: 'right', formatter: label, color: t.fg3, fontSize: 10, fontFamily: t.mono, distance: 4, opacity: 1 } : { show: false }, tooltip: { show: false }, emphasis: { disabled: true }, blur: { label: { opacity: 1 } }, silent: true })
+          return [anchor(`lane:${l}`, 8, yTop + 12, LANE_LABEL[l]), anchor(`lane:${l}:l`, 0, yTop), anchor(`lane:${l}:r`, right, yTop)]
+        })
       : []
+    const laneLinks = mode === 'chain' ? lanes.map((l) => ({ source: `lane:${l}:l`, target: `lane:${l}:r`, lineStyle: { color: t.line, width: 1, type: 'solid', curveness: 0 }, symbol: ['none', 'none'], label: { show: false }, tooltip: { show: false }, emphasis: { disabled: true }, blur: { lineStyle: { opacity: 1 } }, silent: true })) : []
     c.setOption(
       {
         backgroundColor: 'transparent',
@@ -110,7 +114,6 @@ export function ChainGraph({ mode, chain, chains, selectedStep, onStep, onEntity
             return lines.filter(Boolean).map((s) => String(s).replace(/</g, '&lt;')).join('<br/>')
           },
         },
-        graphic,
         series: [{
           type: 'graph',
           layout: mode === 'chain' ? 'none' : 'force',
@@ -118,8 +121,8 @@ export function ChainGraph({ mode, chain, chains, selectedStep, onStep, onEntity
           roam: true,
           zoom: 1,
           draggable: mode !== 'chain',
-          data,
-          links,
+          data: [...laneNodes, ...data],
+          links: [...laneLinks, ...links],
           edgeSymbol: ['none', 'none'],
           lineStyle: { opacity: 0.9 },
           emphasis: { focus: 'adjacency', lineStyle: { width: 3 } },
