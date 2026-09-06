@@ -23,6 +23,7 @@ import { IocsView } from './views/IocsView'
 import { AiView } from './views/AiView'
 import { ReportView } from './views/ReportView'
 import { CaseView } from './views/CaseView'
+import { HomeView } from './views/HomeView'
 import { RulesView } from './views/RulesView'
 import { SettingsView } from './views/SettingsView'
 import type { PivotResult } from './data/queries'
@@ -211,7 +212,7 @@ export default function App() {
   return (
     <div className={collapsed ? 'app sidebar-collapsed' : 'app'}>
       <aside className="sidebar">
-        <div className="brand"><span className="wordmark">REMN</span><span className="mark">R</span></div>
+        <div className="brand click" role="button" tabIndex={0} title="about REMN" onClick={() => setView('home')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setView('home') }}><span className="wordmark">REMN</span><span className="mark">R</span></div>
         <nav className="nav">
           {NAV.map((n) => (
             <div key={n.id}>
@@ -238,7 +239,7 @@ export default function App() {
           {cases.map((c) => <option key={c.id} value={c.id}>{c.name}{c.storage === 'server' ? ' [server]' : ''}</option>)}
         </select>
         <button className="btn sm ghost" onClick={() => setNewCase({ name: '', storage: 'browser' })}>+ case</button>
-        <span className="title">{NAV.find((n) => n.id === view)?.label}</span>
+        <span className="title">{NAV.find((n) => n.id === view)?.label ?? (view === 'home' ? 'About' : '')}</span>
         <span className="spacer" />
         <ThemeToggle />
         <div className="row" style={{ width: 420 }}>
@@ -247,6 +248,7 @@ export default function App() {
         </div>
       </header>
       <main className="main relative">
+        {view === 'home' && <HomeView />}
         {view === 'dashboard' && <Dashboard />}
         {view === 'evidence' && <EvidenceView />}
         {view === 'events' && <EventsView />}

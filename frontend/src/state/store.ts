@@ -8,7 +8,7 @@ export interface EntityRef {
   value: string
 }
 
-export type View = 'dashboard' | 'evidence' | 'events' | 'mails' | 'findings' | 'chains' | 'timeline' | 'iocs' | 'ai' | 'case' | 'report' | 'rules' | 'settings'
+export type View = 'home' | 'dashboard' | 'evidence' | 'events' | 'mails' | 'findings' | 'chains' | 'timeline' | 'iocs' | 'ai' | 'case' | 'report' | 'rules' | 'settings'
 
 export interface ConsoleLine {
   id: number
