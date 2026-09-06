@@ -218,7 +218,7 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any]) -
                         escalation = {"severity": severity, "escalation": flag}
                 if escalation and rec[-1] not in refs:
                     refs = refs[:MAX_REFS - 1] + [rec[-1]]
-            findings.append({**base, **escalation, "key": f"{rule['id']}|{''.join(str(k) for k in keyvals)}", "ts": first, "tsEnd": last, "entities": ents,
+            findings.append({**base, **escalation, "key": f"{rule['id']}|{chr(1).join(str(k) for k in keyvals)}", "ts": first, "tsEnd": last, "entities": ents,
                              "count": int(d if dexpr else n), "refs": refs})
     else:
         # streaming burst detection per group
@@ -264,7 +264,7 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any]) -
                 supporting = next(r[0] for r in b["rows"] if escalation["escalation"] in r[3])
                 if supporting not in refs:
                     refs = refs[:MAX_REFS - 1] + [supporting]
-            buffered.append({**base, **escalation, "key": f"{rule['id']}|{''.join(str(k) for k in (cur_key or ()))}|{b['start'] // 60000}", "ts": b["start"], "tsEnd": b["last"],
+            buffered.append({**base, **escalation, "key": f"{rule['id']}|{chr(1).join(str(k) for k in (cur_key or ()))}|{b['start'] // 60000}", "ts": b["start"], "tsEnd": b["last"],
                              "entities": ents, "count": len(b["rows"]), "refs": refs})
 
         def flush_group() -> None:
@@ -398,6 +398,63 @@ def _rule_event_ids(cond: dict[str, Any] | None) -> list[int] | None:
     return None
 
 
+def _rule_channels(cond: dict[str, Any] | None) -> list[tuple[str, bool]] | None:
+    """Channel selectors (value, is_contains) a rule's where clause pins down, mirroring rules/engine.ts ruleChannels."""
+    if not cond:
+        return None
+    direct: list[tuple[str, bool]] = []
+    for k, v in cond.items():
+        field, _, op = k.partition("|")
+        if field != "channel":
+            continue
+        vals = v if isinstance(v, list) else [v]
+        if op in ("", "eq", "in"):
+            direct += [(str(x).lower(), False) for x in vals]
+        elif op in ("contains", "contains_any"):
+            direct += [(str(x).lower(), True) for x in vals]
+    if direct:
+        return direct
+    for k, v in cond.items():
+        if re.match(r"^any_of(_\d+)?$", k) and isinstance(v, list):
+            all_c: list[tuple[str, bool]] = []
+            for alt in v:
+                c = _rule_channels(alt if isinstance(alt, dict) else None)
+                if not c:
+                    return None
+                all_c += c
+            if all_c:
+                return all_c
+    for k, v in cond.items():
+        if re.match(r"^all_of(_\d+)?$", k) and isinstance(v, list):
+            for m in v:
+                c = _rule_channels(m if isinstance(m, dict) else None)
+                if c:
+                    return c
+    return None
+
+
+def rule_not_applicable(rule: dict[str, Any], event_ids: set[int], channels: set[str]) -> str | None:
+    """Why an event rule cannot match this store (pinned event ids / channels absent), or None when it can."""
+    if rule.get("source") != "events":
+        return None
+    ids = _rule_event_ids(rule.get("where"))
+    if ids and not any(i in event_ids for i in ids):
+        shown = ", ".join(str(i) for i in ids[:6]) + ("…" if len(ids) > 6 else "")
+        return f"no event id{'s' if len(ids) > 1 else ''} {shown} in this evidence"
+    chans = _rule_channels(rule.get("where"))
+    if chans and not any((val in ch) if contains else (ch == val) for val, contains in chans for ch in channels):
+        return f'no "{chans[0][0]}" channel in this evidence'
+    return None
+
+
+def present_selectors(store: CaseStore) -> tuple[set[int], set[str]]:
+    """Distinct event ids and channel names of the store (one scan each; lower-cased channels)."""
+    with store.lock:
+        ids = {int(r[0]) for r in store._con.execute('SELECT DISTINCT "eventId" FROM events WHERE "eventId" IS NOT NULL').fetchall()}
+        chans = {str(r[0]).lower() for r in store._con.execute("SELECT DISTINCT channel FROM events WHERE channel IS NOT NULL").fetchall()}
+    return ids, chans
+
+
 def _setting_empty(settings: dict[str, Any], name: str) -> bool:
     return not _setting(settings, name)  # case setting, else a built-in reference list (tranco_10k)
 
@@ -469,6 +526,12 @@ def run_rules(store: CaseStore, rules: list[dict[str, Any]], settings: dict[str,
     by_rule: dict[str, int] = {}
     errors: list[dict[str, str]] = []
     diagnostics: list[dict[str, Any]] = []
+    present: tuple[set[int], set[str]] | None = None
+    if any(r.get("source") == "events" for r in rules):
+        try:
+            present = present_selectors(store)
+        except Exception:  # noqa: BLE001
+            present = None
     for i, rule in enumerate(rules):
         if cancelled and cancelled():
             break
@@ -476,6 +539,14 @@ def run_rules(store: CaseStore, rules: list[dict[str, Any]], settings: dict[str,
             continue
         t0 = time.time()
         failed = False
+        if present is not None:
+            why = rule_not_applicable(rule, *present)
+            if why:
+                by_rule[rule.get("id", "?")] = 0
+                diagnostics.append({"ruleId": rule.get("id", "?"), "reason": "not_applicable", "detail": why, "matched": 0, "afterExclude": 0, "afterTime": 0})
+                if progress:
+                    progress({"index": i + 1, "total": len(rules), "ruleId": rule.get("id"), "findings": 0, "ms": 0})
+                continue
         try:
             found = run_rule(store, rule, settings)
         except Exception as exc:  # noqa: BLE001

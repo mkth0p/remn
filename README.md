@@ -556,6 +556,73 @@ back to its row, or typed by hand), a task checklist and markdown notes. The thr
 are stored with the case, travel in the case bundle, and are printed in the report
 before the automatic timeline of findings.
 
+## Validation on public data
+
+`tools/validate_public.py` downloads redistributable corpora into `samples/public/`
+(ignored by git), runs REMN's mail scoring over them with default case settings and
+prints the band distribution with recall (phishing sets) and false-positive rates
+(legitimate sets). Numbers from 2026-09-06, defaults only, no sender baseline, no
+internal domains configured, so they are a floor:
+
+| corpus | kind | mails | high or above | medium or above |
+|---|---|---|---|---|
+| Nazario phishing corpus, 2004-2007 (CC BY 4.0) | phishing | 2,293 | 61% | 76% |
+| Phishing Pot honeypot, 2022-2026, random 800 of 8,614 | phishing | 800 | 63% | 91% |
+| SpamAssassin easy_ham, 2003 | legitimate | 800 | 0% | 2% |
+| SpamAssassin hard_ham, 2003 (newsletters that look like spam) | legitimate | 251 | 14% | 62% |
+
+Two calibration changes came out of the first run and are kept because both corpora
+moved the right way: the receiving gateway's own spam verdict (Exchange SCL 5+,
+SFV:SPM/BLK) now counts as a strong indicator (Phishing Pot 38% to 63% at high), and
+a form posting to another domain no longer does on its own, a password field still
+does (hard_ham 46% to 14% at high). The remaining hard_ham "medium" band is 2003-era
+commercial mail without any authentication headers; on a modern mailbox those mails
+carry DKIM and a List-Id and score lower.
+
+What the harness does not cover: Windows event detection has no public ground truth
+with labelled attacks that fits a drop-in, the EVTX-ATTACK-SAMPLES archive (see
+"Public datasets") is the closest and was quarantined by endpoint protection on the
+development machine; M365 detection was checked for parsing only (the Invictus IR
+Unified Audit Log set, 9,608 records of real business email compromise, loads and
+its inbox-rule and mailbox-permission rules fire). Re-run with
+`.venv/Scripts/python.exe tools/validate_public.py --phishpot` after any scoring change.
+
+### Public datasets you can drop in
+
+| set | what | drop in as | source |
+|---|---|---|---|
+| EVTX-ATTACK-SAMPLES | ~200 small .evtx files, one attack technique each, GPL-3.0 | the zip, or any .evtx | github.com/sbousseaden/EVTX-ATTACK-SAMPLES |
+| Invictus IR O365 dataset | 9,608 Unified Audit Log records from real BEC cases, CC BY 4.0 | `auditrecords.csv` after extracting the 7z | github.com/invictus-ir/o365_dataset |
+| Nazario phishing corpus | hand-classified phishing mailboxes, mbox, CC BY 4.0 | any `phishingN.mbox` | monkey.org/~jose/phishing |
+| Phishing Pot | 8,614 honeypot phishing .eml, 2022 onwards | the zip (.eml archive) or a folder of .eml | github.com/rf-peixoto/phishing_pot |
+| SpamAssassin public corpus | legitimate mail (easy_ham, hard_ham) and spam, message files | extract and rename to .eml, or run the harness | spamassassin.apache.org/old/publiccorpus |
+| Apache Tika test PST | a 7-message PST for the PST path | `testPST.pst` | apache/tika test documents |
+
+Endpoint protection may quarantine the EVTX archive and some phishing mailboxes as
+they download: add the download folder to its exclusions on the analysis machine.
+
+## Engine parity
+
+Two rule engines exist on purpose: the browser engine lets confidential evidence be
+analysed without a row ever reaching the server, the SQL engine handles GB-scale cases.
+They are held to the same output by a fixture: `tools/parity_fixture.py` builds a
+mixed scenario (Windows events, M365 rows, mails), runs every bundled rule on the SQL
+engine and records the rows and finding keys under `tests/fixtures/parity/`;
+`frontend/src/rules/parity.test.ts` runs the browser engine on the same rows and fails
+on any difference. Regenerate the fixture after changing an engine or a rule and
+review the diff.
+
+Rules pinned to event ids or channels the evidence does not contain (most of the Sigma
+packs on a mail-only or Security-only case) are skipped before they run and reported
+as "not applicable" in the Rules view, on both engines.
+
+## Interface tests
+
+Component tests run under jsdom with `fake-indexeddb` (`*.test.tsx` next to the views:
+the Findings queue grouping and status writes, the Case notes page). The engine,
+incident, staleness and data-layer tests stay in Node. `npx vitest run` runs all of
+them; the jsdom files are the slow ones.
+
 ## Security model
 
 * Server binds to `127.0.0.1`, keeps no database and deletes upload temp files at

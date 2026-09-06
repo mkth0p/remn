@@ -1,16 +1,53 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import * as echarts from 'echarts/core'
 import { BarChart, ScatterChart } from 'echarts/charts'
-import { BrushComponent, DataZoomComponent, GridComponent, LegendComponent, MarkLineComponent, TooltipComponent } from 'echarts/components'
+import { BrushComponent, DataZoomComponent, GridComponent, LegendComponent, MarkLineComponent, ToolboxComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import type { Bucket } from '../data/queries'
 import { getSource } from '../data/source'
-import { getDb } from '../db/schema'
+import { listNotes } from '../data/caseNotes'
+import { getDb, type CaseNote, type Finding } from '../db/schema'
 import { useStore } from '../state/store'
-import { fmtTs } from '../util/format'
+import { classNames, fmtNum, fmtTs } from '../util/format'
+import { Badge, Dot, Sev } from '../components/ui'
+import { IconClock } from '../components/Icons'
 
-echarts.use([BarChart, ScatterChart, GridComponent, TooltipComponent, DataZoomComponent, BrushComponent, LegendComponent, MarkLineComponent, CanvasRenderer])
+echarts.use([BarChart, ScatterChart, GridComponent, TooltipComponent, DataZoomComponent, BrushComponent, LegendComponent, MarkLineComponent, ToolboxComponent, CanvasRenderer])
 
+const BUCKET_MS: Record<Bucket, number> = { minute: 60_000, hour: 3_600_000, day: 86_400_000 }
+
+/** Theme tokens read from the document so the chart follows the light / dark switch. */
+function tokens() {
+  const cs = getComputedStyle(document.documentElement)
+  const v = (name: string, fallback: string) => cs.getPropertyValue(name).trim() || fallback
+  return {
+    accent: v('--accent', '#1b7f66'),
+    mails: v('--sev-low', '#2f6fdb'),
+    line: v('--line', '#e3e6ea'),
+    line2: v('--line-2', '#cfd5dc'),
+    fg2: v('--fg-2', '#5b6876'),
+    fg3: v('--fg-3', '#8a95a3'),
+    surface: v('--surface', '#ffffff'),
+    fg1: v('--fg-1', '#111820'),
+    sev: { critical: v('--sev-critical', '#a8231f'), high: v('--sev-high', '#d1403f'), medium: v('--sev-medium', '#d9822b'), low: v('--sev-low', '#2f6fdb'), info: v('--sev-info', '#8a95a3') } as Record<string, string>,
+    mono: v('--mono', 'monospace'),
+  }
+}
+
+interface Marker {
+  ts: number
+  kind: 'finding' | 'note'
+  severity: string
+  title: string
+  sub?: string
+  open: () => void
+}
+
+/**
+ * Timeline: events and mails per bucket with the findings and the curated case timeline drawn
+ * over them. Drag on the chart to select a range: the list below narrows to it and the range can
+ * be pushed to the Events or Mails page as a time filter.
+ */
 export function TimelineView() {
   const kase = useStore((s) => s.currentCase)
   const eventsFilter = useStore((s) => s.eventsFilter)
@@ -18,48 +55,68 @@ export function TimelineView() {
   const setEventsFilter = useStore((s) => s.setEventsFilter)
   const setMailsFilter = useStore((s) => s.setMailsFilter)
   const setView = useStore((s) => s.setView)
+  const setFocus = useStore((s) => s.setFocus)
   const rulesVersion = useStore((s) => s.rulesVersion)
   const jobs = useStore((s) => s.jobs)
   const [bucket, setBucket] = useState<Bucket>('hour')
   const [useFilters, setUseFilters] = useState(true)
+  const [showNotes, setShowNotes] = useState(true)
   const [sel, setSel] = useState<{ from: number; to: number } | null>(null)
-  const [stats, setStats] = useState<{ events: number; mails: number; findings: number }>({ events: 0, mails: 0, findings: 0 })
+  const [stats, setStats] = useState<{ events: number; mails: number; findings: number; notes: number; span: [number, number] | null }>({ events: 0, mails: 0, findings: 0, notes: 0, span: null })
+  const [markers, setMarkers] = useState<Marker[]>([])
+  const [theme, setTheme] = useState(0)
   const ref = useRef<HTMLDivElement>(null)
   const chart = useRef<echarts.ECharts | null>(null)
+
+  // re-render on theme switch
+  useEffect(() => {
+    const obs = new MutationObserver(() => setTheme((t) => t + 1))
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+    return () => obs.disconnect()
+  }, [])
+
   useEffect(() => {
     if (!kase?.id || !ref.current) return
     if (!chart.current) chart.current = echarts.init(ref.current, undefined, { renderer: 'canvas' })
     const c = chart.current
     let alive = true
     const ds = getSource(kase)
+    const caseId = kase.id
     Promise.all([
       ds.timelineEvents(useFilters ? eventsFilter : {}, bucket).catch(() => []),
       ds.timelineMails(useFilters ? mailsFilter : {}, bucket).catch(() => []),
-      getDb().findings.where('caseId').equals(kase.id).filter((f) => f.ts != null && f.status !== 'false_positive').toArray(),
-    ]).then(([ev, ml, fd]) => {
+      getDb().findings.where('caseId').equals(caseId).filter((f) => f.ts != null && f.status !== 'false_positive').toArray(),
+      listNotes(caseId, 'timeline').catch(() => [] as CaseNote[]),
+    ]).then(([ev, ml, fd, notes]) => {
       if (!alive) return
-      setStats({ events: ev.reduce((s, b) => s + b.count, 0), mails: ml.reduce((s, b) => s + b.count, 0), findings: fd.length })
-      const sevColor: Record<string, string> = { critical: '#ff3366', high: '#ff7b4f', medium: '#f5b942', low: '#4fa3ff', info: '#6b7a8c' }
-      const maxEv = Math.max(1, ...ev.map((b) => b.count))
-      const allT = [...ev.map((b) => b.t), ...ml.map((b) => b.t), ...fd.map((f) => f.ts as number)]
+      const t = tokens()
+      const allT = [...ev.map((b) => b.t), ...ml.map((b) => b.t), ...fd.map((f) => f.ts as number), ...notes.map((n) => n.ts)]
       const tMin = allT.length ? Math.min(...allT) : undefined
-      const tMax = allT.length ? Math.max(...allT) + (bucket === 'day' ? 86_400_000 : bucket === 'hour' ? 3_600_000 : 60_000) : undefined
+      const tMax = allT.length ? Math.max(...allT) + BUCKET_MS[bucket] : undefined
+      setStats({ events: ev.reduce((s, b) => s + b.count, 0), mails: ml.reduce((s, b) => s + b.count, 0), findings: fd.length, notes: notes.length, span: tMin != null && tMax != null ? [tMin, tMax] : null })
+      const fm: Marker[] = fd.map((f: Finding) => ({ ts: f.ts as number, kind: 'finding', severity: f.severity, title: f.title, sub: `${f.ruleId} · ${fmtNum(f.count)} row(s)`, open: () => setView('findings') }))
+      const nm: Marker[] = notes.map((n) => ({ ts: n.ts, kind: 'note', severity: n.severity ?? 'info', title: n.text, sub: n.link ? `${n.link.source} ${n.link.label ?? n.link.id}` : 'case timeline', open: () => { if (n.link && (n.link.source === 'events' || n.link.source === 'mails')) { setFocus({ source: n.link.source, id: Number(n.link.id) }); setView(n.link.source) } else setView('case') } }))
+      setMarkers([...fm, ...nm].sort((a, b) => a.ts - b.ts))
+      const maxEv = Math.max(1, ...ev.map((b) => b.count))
+      const axis = { axisLine: { lineStyle: { color: t.line2 } }, axisLabel: { color: t.fg3, fontFamily: t.mono, fontSize: 10 }, splitLine: { show: false } }
       c.setOption(
         {
           backgroundColor: 'transparent',
           animation: false,
-          textStyle: { fontFamily: 'JetBrains Mono Variable, monospace', color: '#97a3b3' },
-          tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, backgroundColor: '#10161f', borderColor: '#2a3648', textStyle: { color: '#e8edf3', fontSize: 11 }, formatter: (params: { seriesName: string; value: [number, number, ...unknown[]]; marker: string }[]) => { const t = params[0]?.value?.[0]; return `<b>${fmtTs(t as number)}</b><br/>` + params.map((p) => `${p.marker} ${p.seriesName}: ${p.seriesName === 'findings' ? String(p.value[2] ?? '') : p.value[1]}`).join('<br/>') } },
-          legend: { top: 4, textStyle: { color: '#97a3b3' } },
-          grid: [{ left: 60, right: 20, top: 40, height: '55%' }, { left: 60, right: 20, top: '72%', height: '18%' }],
-          xAxis: [{ type: 'time', gridIndex: 0, min: tMin, max: tMax, axisLine: { lineStyle: { color: '#2a3648' } }, splitLine: { show: false } }, { type: 'time', gridIndex: 1, min: tMin, max: tMax, axisLine: { lineStyle: { color: '#2a3648' } } }],
-          yAxis: [{ type: 'value', gridIndex: 0, name: 'events', minInterval: 1, splitLine: { lineStyle: { color: '#1d2836' } } }, { type: 'value', gridIndex: 1, name: 'mails', minInterval: 1, splitLine: { lineStyle: { color: '#1d2836' } } }],
-          dataZoom: [{ type: 'slider', xAxisIndex: [0, 1], bottom: 8, height: 18, borderColor: '#2a3648', backgroundColor: '#0b0f15', fillerColor: 'rgba(57,211,255,0.15)', textStyle: { color: '#97a3b3' } }, { type: 'inside', xAxisIndex: [0, 1] }],
-          brush: { xAxisIndex: [0, 1], brushType: 'lineX', brushStyle: { color: 'rgba(57,211,255,0.12)', borderColor: '#39d3ff' }, throttleType: 'debounce', throttleDelay: 200 },
+          textStyle: { fontFamily: t.mono, color: t.fg2 },
+          tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, backgroundColor: t.surface, borderColor: t.line2, textStyle: { color: t.fg1, fontSize: 11 }, formatter: (params: { seriesName: string; value: [number, number, ...unknown[]]; marker: string }[]) => { const ts = params[0]?.value?.[0]; return `<b>${fmtTs(ts as number)}</b><br/>` + params.map((p) => `${p.marker} ${p.seriesName}: ${p.seriesName === 'findings' || p.seriesName === 'case timeline' ? String(p.value[2] ?? '') : fmtNum(p.value[1])}`).join('<br/>') } },
+          legend: { top: 2, textStyle: { color: t.fg2, fontSize: 11 }, itemWidth: 12, itemHeight: 8 },
+          grid: [{ left: 56, right: 16, top: 30, height: '54%' }, { left: 56, right: 16, top: '70%', height: '17%' }],
+          xAxis: [{ type: 'time', gridIndex: 0, min: tMin, max: tMax, ...axis }, { type: 'time', gridIndex: 1, min: tMin, max: tMax, ...axis }],
+          yAxis: [{ type: 'value', gridIndex: 0, name: 'events', nameTextStyle: { color: t.fg3, fontSize: 10 }, minInterval: 1, axisLabel: axis.axisLabel, splitLine: { lineStyle: { color: t.line } } }, { type: 'value', gridIndex: 1, name: 'mails', nameTextStyle: { color: t.fg3, fontSize: 10 }, minInterval: 1, axisLabel: axis.axisLabel, splitLine: { lineStyle: { color: t.line } } }],
+          dataZoom: [{ type: 'slider', xAxisIndex: [0, 1], bottom: 6, height: 16, borderColor: t.line2, backgroundColor: t.surface, fillerColor: `${t.accent}22`, handleStyle: { color: t.accent }, textStyle: { color: t.fg3, fontSize: 10 } }, { type: 'inside', xAxisIndex: [0, 1] }],
+          toolbox: { show: false },
+          brush: { xAxisIndex: [0, 1], brushType: 'lineX', brushStyle: { color: `${t.accent}1f`, borderColor: t.accent }, throttleType: 'debounce', throttleDelay: 200 },
           series: [
-            { name: 'events', type: 'bar', xAxisIndex: 0, yAxisIndex: 0, data: ev.map((b) => [b.t, b.count]), itemStyle: { color: '#39d3ff' }, large: true, barMaxWidth: 12 },
-            { name: 'findings', type: 'scatter', xAxisIndex: 0, yAxisIndex: 0, symbolSize: 9, data: fd.map((f) => ({ value: [f.ts, maxEv * 1.05, `${f.severity}: ${f.title}`], itemStyle: { color: sevColor[f.severity] ?? '#fff' } })), tooltip: { formatter: (p: { value: [number, number, string] }) => `${fmtTs(p.value[0])}<br/>${p.value[2]}` } },
-            { name: 'mails', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: ml.map((b) => [b.t, b.count]), itemStyle: { color: '#a78bfa' }, barMaxWidth: 12 },
+            { name: 'events', type: 'bar', xAxisIndex: 0, yAxisIndex: 0, data: ev.map((b) => [b.t, b.count]), itemStyle: { color: t.accent, opacity: 0.85 }, large: true, barMaxWidth: 12 },
+            { name: 'findings', type: 'scatter', xAxisIndex: 0, yAxisIndex: 0, symbolSize: 8, z: 5, data: fd.map((f) => ({ value: [f.ts, maxEv * 1.04, `${f.severity}: ${f.title}`], itemStyle: { color: t.sev[f.severity] ?? t.fg2 } })) },
+            ...(showNotes && notes.length ? [{ name: 'case timeline', type: 'scatter', xAxisIndex: 0, yAxisIndex: 0, symbol: 'diamond', symbolSize: 11, z: 6, data: notes.map((n) => ({ value: [n.ts, maxEv * 1.12, n.text.slice(0, 80)], itemStyle: { color: t.sev[n.severity ?? 'info'] ?? t.fg1, borderColor: t.fg1, borderWidth: 1 } })) }] : []),
+            { name: 'mails', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: ml.map((b) => [b.t, b.count]), itemStyle: { color: t.mails, opacity: 0.85 }, barMaxWidth: 12 },
           ],
         },
         true,
@@ -68,7 +125,7 @@ export function TimelineView() {
     })
     const onBrush = (p: { areas?: { coordRange: [number, number] }[] }) => {
       const area = p.areas?.[0]
-      if (area) setSel({ from: area.coordRange[0], to: area.coordRange[1] })
+      setSel(area ? { from: area.coordRange[0], to: area.coordRange[1] } : null)
     }
     c.on('brushEnd', onBrush as never)
     const onResize = () => c.resize()
@@ -78,8 +135,10 @@ export function TimelineView() {
       c.off('brushEnd', onBrush as never)
       window.removeEventListener('resize', onResize)
     }
-  }, [kase, bucket, useFilters, eventsFilter, mailsFilter, rulesVersion, jobs.length])
+  }, [kase, bucket, useFilters, showNotes, eventsFilter, mailsFilter, rulesVersion, jobs.length, theme, setView, setFocus])
   useEffect(() => () => { chart.current?.dispose(); chart.current = null }, [])
+
+  const inRange = useMemo(() => (sel ? markers.filter((m) => m.ts >= sel.from && m.ts <= sel.to) : markers), [markers, sel])
   if (!kase) return null
   const apply = (target: 'events' | 'mails') => {
     if (!sel) return
@@ -88,20 +147,56 @@ export function TimelineView() {
     else setMailsFilter((f) => ({ ...f, timeRange: tr }))
     setView(target)
   }
-  const fd = stats.findings
+  const clear = () => {
+    setSel(null)
+    chart.current?.dispatchAction({ type: 'brush', areas: [] })
+  }
   return (
     <div className="view">
       <div className="view-header">
-        <h1>Timeline</h1>
-        <span className="sub">{stats.events.toLocaleString('en-US')} events · {stats.mails.toLocaleString('en-US')} mails · {fd} finding markers</span>
+        <div className="desc">
+          <h1>Timeline</h1>
+          <span className="sub">{fmtNum(stats.events)} events · {fmtNum(stats.mails)} mails · {fmtNum(stats.findings)} findings · {fmtNum(stats.notes)} case timeline entr{stats.notes === 1 ? 'y' : 'ies'}{stats.span ? ` · ${fmtTs(stats.span[0])} → ${fmtTs(stats.span[1])}` : ''}</span>
+        </div>
         <span className="spacer" />
-        <label className="checkbox small"><input type="checkbox" checked={useFilters} onChange={(e) => setUseFilters(e.target.checked)} /> apply current view filters</label>
-        <select className="select" value={bucket} onChange={(e) => setBucket(e.target.value as Bucket)}><option value="minute">per minute</option><option value="hour">per hour</option><option value="day">per day</option></select>
-        {sel && (<><span className="mono small dim">{fmtTs(sel.from)} → {fmtTs(sel.to)}</span><button className="btn sm primary" onClick={() => apply('events')}>events in range</button><button className="btn sm primary" onClick={() => apply('mails')}>mails in range</button></>)}
+        <div className="segmented" title="bucket">
+          {(['minute', 'hour', 'day'] as Bucket[]).map((b) => <button key={b} className={classNames(bucket === b && 'active')} onClick={() => setBucket(b)}>{b}</button>)}
+        </div>
+        <button className={classNames('pill', useFilters && 'active')} onClick={() => setUseFilters(!useFilters)} title="apply the Events and Mails page filters to the histograms">page filters</button>
+        <button className={classNames('pill', showNotes && 'active')} onClick={() => setShowNotes(!showNotes)} title="draw the curated case timeline entries"><IconClock /> case timeline</button>
       </div>
-      <div className="view-body" style={{ padding: 8 }}>
-        <div ref={ref} className="timeline-chart" style={{ height: '100%' }} />
-        <div className="hint" style={{ padding: '0 8px' }}>drag on the chart to select a time range · scroll to zoom · finding markers use the rule severity colour</div>
+      {sel && (
+        <div className="bulkbar">
+          <b>{fmtTs(sel.from)} → {fmtTs(sel.to)}</b>
+          <span className="muted">{fmtNum(inRange.length)} marker(s) in range</span>
+          <span className="spacer" />
+          <button className="btn xs" onClick={() => apply('events')}>events in range</button>
+          <button className="btn xs" onClick={() => apply('mails')}>mails in range</button>
+          <button className="btn xs ghost" onClick={clear}>clear</button>
+        </div>
+      )}
+      <div className="pane" style={{ flex: 1, height: 'auto', borderTop: 0, gridTemplateColumns: '1fr 360px' }}>
+        <div className="pane-main" style={{ padding: '4px 8px 0' }}>
+          <div ref={ref} className="timeline-chart" style={{ flex: 1, minHeight: 240 }} />
+          <div className="hint" style={{ padding: '2px 8px 6px' }}>drag on the chart to select a range · scroll to zoom · dots are findings, diamonds are case timeline entries</div>
+        </div>
+        <div className="pane-side" style={{ padding: 0 }}>
+          <div className="panel-h">{sel ? 'In the selected range' : 'Findings and case timeline'} <span className="muted">({fmtNum(inRange.length)})</span></div>
+          <div className="story">
+            {!inRange.length && <div className="muted small" style={{ padding: 14 }}>{markers.length ? 'nothing in this range' : 'run the rules or add entries to the case timeline'}</div>}
+            {inRange.slice(0, 400).map((m, i) => (
+              <div key={i} className="step" style={{ gridTemplateColumns: '150px 14px 1fr' }} onClick={m.open}>
+                <span className="t">{fmtTs(m.ts)}</span>
+                <Dot sev={m.severity} />
+                <span>
+                  <div className="title ellipsis" title={m.title}>{m.title}{m.kind === 'note' && <Badge className="small" title="curated case timeline entry">timeline</Badge>}</div>
+                  {m.sub && <div className="sub">{m.kind === 'finding' ? <Sev sev={m.severity} /> : null} {m.sub}</div>}
+                </span>
+              </div>
+            ))}
+            {inRange.length > 400 && <div className="muted small" style={{ padding: 8 }}>{fmtNum(inRange.length - 400)} more - narrow the range</div>}
+          </div>
+        </div>
       </div>
     </div>
   )

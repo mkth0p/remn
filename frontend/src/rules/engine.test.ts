@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { compileCond, parseDuration, parseThreshold, ruleEventIds, ruleFields, runRule, validateRule, type Rule, type RuleDiag } from './engine'
+import { compileCond, parseDuration, parseThreshold, ruleApplicable, ruleChannels, ruleEventIds, ruleFields, runRule, validateRule, type Rule, type RuleDiag } from './engine'
 
 const T0 = Date.UTC(2026, 8, 1, 22, 0, 0)
 let id = 1
@@ -140,5 +140,25 @@ describe('validateRule', () => {
     expect(validateRule({ id: 'a', title: 't', severity: 'nope', source: 'events' }).ok).toBe(false)
     expect(validateRule({ id: 'a', title: 't', severity: 'low', source: 'events', where: { 'x|re': '(' } }).ok).toBe(false)
     expect(validateRule({ id: 'a', title: 't', severity: 'low', source: 'events', threshold: 'lots' }).ok).toBe(false)
+  })
+})
+
+describe('applicability', () => {
+  const present = { eventIds: new Set([4624, 4625]), channels: ['security', 'system'] }
+  const rule = (where: Rule['where']): Rule => ({ id: 'r', title: 'r', severity: 'low', source: 'events', where })
+  it('pins channels like event ids: exact, contains, any_of (all alternatives), all_of (any member)', () => {
+    expect(ruleChannels({ channel: 'Security', eventId: 4688 })).toEqual([{ value: 'security', contains: false }])
+    expect(ruleChannels({ 'channel|contains': 'sysmon' })).toEqual([{ value: 'sysmon', contains: true }])
+    expect(ruleChannels({ any_of: [{ 'channel|contains': 'sysmon', eventId: 1 }, { channel: 'Security', eventId: 4688 }] })).toEqual([{ value: 'sysmon', contains: true }, { value: 'security', contains: false }])
+    expect(ruleChannels({ any_of: [{ channel: 'Security' }, { 'image|contains': 'x' }] })).toBeNull()
+    expect(ruleChannels({ all_of: [{ 'image|contains': 'x' }, { channel: 'System' }] })).toEqual([{ value: 'system', contains: false }])
+    expect(ruleChannels({ 'image|contains': 'x' })).toBeNull()
+  })
+  it('skips rules whose event ids or channels are absent and keeps the rest', () => {
+    expect(ruleApplicable(rule({ eventId: 4688 }), present)).toEqual({ ok: false, detail: 'no event id 4688 in this evidence' })
+    expect(ruleApplicable(rule({ eventId: 4624, 'channel|contains': 'sysmon' }), present)).toEqual({ ok: false, detail: 'no "sysmon" channel in this evidence' })
+    expect(ruleApplicable(rule({ eventId: 4624, channel: 'Security' }), present)).toEqual({ ok: true })
+    expect(ruleApplicable(rule({ targetUser: 'alice' }), present)).toEqual({ ok: true })
+    expect(ruleApplicable({ ...rule({ 'risk|gte': 80 }), source: 'mails' }, { eventIds: new Set(), channels: [] })).toEqual({ ok: true })
   })
 })

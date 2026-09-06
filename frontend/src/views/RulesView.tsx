@@ -24,6 +24,7 @@ const DIAG_LABEL: Record<RuleDiag['reason'], { label: string; sev: string }> = {
   all_excluded: { label: 'all excluded', sev: 'info' },
   outside_time_window: { label: 'time filter', sev: 'info' },
   below_threshold: { label: 'below threshold', sev: 'info' },
+  not_applicable: { label: 'not applicable', sev: 'info' },
 }
 
 /** Rows rendered at once; the search box narrows the rest (the packs bring ~3,000 rules). */
@@ -173,7 +174,8 @@ export function RulesView() {
             const fired = Object.values(lastRun.byRule ?? {}).filter((n) => n > 0).length
             const noData = lastRun.diagnostics.filter((d) => d.reason === 'no_selector_match').length
             const needSet = lastRun.diagnostics.filter((d) => d.reason === 'missing_setting').length
-            return ` · last run ${fmtTs(lastRun.ts)}: ${fired} fired, ${noData} without matching data${needSet ? `, ${needSet} need Settings` : ''}`
+            const notApp = lastRun.diagnostics.filter((d) => d.reason === 'not_applicable').length
+            return ` · last run ${fmtTs(lastRun.ts)}: ${fired} fired, ${noData} without matching data${notApp ? `, ${notApp} not applicable to this evidence (their event ids or channels are absent)` : ''}${needSet ? `, ${needSet} need Settings` : ''}`
           })()}
         </span>
         <span className="spacer" />

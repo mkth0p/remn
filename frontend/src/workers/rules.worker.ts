@@ -3,7 +3,7 @@
  * Rule worker: runs the YAML rules against IndexedDB and stores findings.
  */
 import { getDb, type MailRow } from '../db/schema'
-import { compileCond, ruleEventIds, ruleFields, runRule, type Rule, type RuleDiag } from '../rules/engine'
+import { compileCond, ruleApplicable, ruleEventIds, ruleFields, runRule, type PresentSelectors, type Rule, type RuleDiag } from '../rules/engine'
 import type { Row, SettingsLike } from '../rules/filter'
 import { replaceFindings } from '../data/findingReviews'
 
@@ -118,6 +118,13 @@ async function run(req: RunRequest): Promise<void> {
   }
   const order = rules.map((rule, i) => ({ rule, i, k: subsetKey(rule) ?? '' })).sort((a, b) => (a.k < b.k ? -1 : a.k > b.k ? 1 : a.i - b.i))
   const eventCount = keepByKey.has('*') ? await db.events.where('caseId').equals(caseId).count() : 0
+  // what the evidence contains: rules pinned to absent event ids / channels are skipped (see ruleApplicable)
+  let present: PresentSelectors | null = null
+  if (rules.some((r) => r.source === 'events')) {
+    const idKeys = (await db.events.where('[caseId+eventId]').between([caseId, -Infinity], [caseId, Infinity]).uniqueKeys()) as unknown as [number, number][]
+    const channels = ((await db.events.orderBy('channel').uniqueKeys()) as unknown[]).map((c) => String(c).toLowerCase())
+    present = { eventIds: new Set(idKeys.map((k) => Number(k[1])).filter((n) => Number.isFinite(n))), channels }
+  }
   const cache = new Map<string, Row[]>()
   let cached = 0
   const subset = async (k: string, ids: number[] | null, pred: (r: Row) => boolean): Promise<Row[]> => {
@@ -140,6 +147,16 @@ async function run(req: RunRequest): Promise<void> {
     if (rule.enabled === false) continue
     const t0 = Date.now()
     try {
+      if (present && rule.source === 'events') {
+        const app = ruleApplicable(rule, present)
+        if (!app.ok) {
+          await replaceFindings(caseId, [rule.id], [])
+          byRule[rule.id] = 0
+          diagnostics.push({ ruleId: rule.id, reason: 'not_applicable', detail: app.detail, matched: 0, afterExclude: 0, afterTime: 0 })
+          post({ type: 'progress', index: i + 1, total: rules.length, ruleId: rule.id, findings: 0, ms: Date.now() - t0, rows: 0 })
+          continue
+        }
+      }
       let rows: Row[]
       let thenRows: (() => Row[]) | undefined
       const fields = ruleFields(rule.where)

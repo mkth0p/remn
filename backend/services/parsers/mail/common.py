@@ -57,7 +57,7 @@ MAIL_WEIGHTS: dict[str, int] = {
     "url_malformed": 10, "html_form_password": 70, "html_form_external": 50, "attachment_risky": 0,
     "empty_subject": 10, "reply_without_thread": 15, "subject_re_fwd_spoof": 20, "many_attachments": 5,
     "encrypted_body": 15, "calendar_invite": 5, "rtf_only_body": 10, "no_body": 10, "html_only": 5,
-    "exchange_internal": 0, "calendar_item": 0, "gateway_spam_verdict": 40, "gateway_bulk_verdict": 5,
+    "exchange_internal": 0, "calendar_item": 0, "gateway_spam_verdict": 50, "gateway_bulk_verdict": 5,
     "scripted_mailer": 8, "url_tracker_redirect": 2, "url_own_domain": 0, "deleted_item": 0, "orphan_item": 0,
 }
 
@@ -83,8 +83,14 @@ STRONG_FLAGS = {
     "replyto_lookalike_internal", "display_name_email_mismatch", "mixed_script_display_name",
     "suspicious_mailer", "bec_pattern", "credential_phishing_pattern", "internal_spoof", "hidden_text", "bidi_override",
     "url_text_href_mismatch", "url_ip_literal", "url_userinfo", "url_data_uri", "url_script_uri",
-    "url_executable_download", "url_credential_keywords", "html_form_password", "html_form_external",
+    "url_executable_download", "url_credential_keywords", "html_form_password",
+    # the receiving gateway already judged the message spam/phishing (SCL >= 5, SFV:SPM/BLK): an
+    # independent classifier's verdict carries the score on its own
+    "gateway_spam_verdict",
 }
+# html_form_external (a form posting to another domain) is deliberately not strong: newsletters
+# and notification mail carry search / subscribe forms posting to their ESP; a credential form is
+# html_form_password, which is strong. Measured on the SpamAssassin hard_ham corpus.
 
 
 @dataclass

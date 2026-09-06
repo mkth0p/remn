@@ -125,8 +125,9 @@ async function saveDiagnostics(caseId: number, res: RuleRunSummary): Promise<voi
   }
   const noData = res.diagnostics.filter((d) => d.reason === 'no_selector_match').length
   const needSettings = res.diagnostics.filter((d) => d.reason === 'missing_setting').length
-  if (noData || needSettings) {
-    toast('info', `${res.total} finding(s) · ${noData} rule(s) had no matching events in this case${needSettings ? ` · ${needSettings} need Settings (internal domains, VIPs…)` : ''} — see the Rules view`, 9000)
+  const notApplicable = res.diagnostics.filter((d) => d.reason === 'not_applicable').length
+  if (noData || needSettings || notApplicable) {
+    toast('info', `${res.total} finding(s) · ${notApplicable ? `${notApplicable} rule(s) not applicable to this evidence · ` : ''}${noData} rule(s) had no matching events${needSettings ? ` · ${needSettings} need Settings (internal domains, VIPs…)` : ''} — see the Rules view`, 9000)
   }
 }
 

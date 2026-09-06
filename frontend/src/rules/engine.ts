@@ -167,7 +167,7 @@ function timePred(rule: Rule, settings: SettingsLike | undefined, tsField: strin
 /** Why a rule produced zero findings (emitted through RunOptions.onDiag). */
 export interface RuleDiag {
   ruleId: string
-  reason: 'missing_setting' | 'no_selector_match' | 'all_excluded' | 'outside_time_window' | 'below_threshold'
+  reason: 'missing_setting' | 'no_selector_match' | 'all_excluded' | 'outside_time_window' | 'below_threshold' | 'not_applicable'
   detail?: string
   matched: number
   afterExclude: number
@@ -426,6 +426,65 @@ export function ruleEventIds(cond: RuleCond | undefined): number[] | null {
     }
   }
   return null
+}
+
+export interface ChannelSelector {
+  value: string
+  contains: boolean
+}
+
+/** Channel conditions a rule's `where` pins down (exact names or distinctive tokens), or null when it does not. */
+export function ruleChannels(cond: RuleCond | undefined): ChannelSelector[] | null {
+  if (!cond) return null
+  const direct: ChannelSelector[] = []
+  for (const [key, value] of Object.entries(cond)) {
+    const [field, op] = key.split('|')
+    if (field !== 'channel') continue
+    if (!op || op === 'eq' || op === 'in') for (const v of Array.isArray(value) ? value : [value]) direct.push({ value: String(v).toLowerCase(), contains: false })
+    else if (op === 'contains' || op === 'contains_any') for (const v of Array.isArray(value) ? value : [value]) direct.push({ value: String(v).toLowerCase(), contains: true })
+  }
+  if (direct.length) return direct
+  for (const [key, value] of Object.entries(cond)) {
+    if (/^any_of(_\d+)?$/.test(key) && Array.isArray(value)) {
+      const all: ChannelSelector[] = []
+      for (const alt of value) {
+        const c = ruleChannels(alt as RuleCond)
+        if (!c) return null
+        all.push(...c)
+      }
+      if (all.length) return all
+    }
+  }
+  for (const [key, value] of Object.entries(cond)) {
+    if (/^all_of(_\d+)?$/.test(key) && Array.isArray(value)) {
+      for (const m of value) {
+        const c = ruleChannels(m as RuleCond)
+        if (c) return c
+      }
+    }
+  }
+  return null
+}
+
+export interface PresentSelectors {
+  /** distinct event ids of the case (exact) */
+  eventIds: Set<number>
+  /** distinct channel names, lower-cased; a superset is safe (it can only keep a rule) */
+  channels: string[]
+}
+
+/**
+ * Whether an event rule can match anything in this case: a rule pinned to event ids or channels
+ * that the evidence does not contain (most of the Sigma packs on a mail-only or Security-only
+ * case) is skipped and reported as not applicable instead of being run and counted as silent.
+ */
+export function ruleApplicable(rule: Rule, present: PresentSelectors): { ok: true } | { ok: false; detail: string } {
+  if (rule.source !== 'events') return { ok: true }
+  const ids = ruleEventIds(rule.where)
+  if (ids && ids.length && !ids.some((id) => present.eventIds.has(id))) return { ok: false, detail: `no event ${ids.length === 1 ? 'id' : 'ids'} ${ids.slice(0, 6).join(', ')}${ids.length > 6 ? '…' : ''} in this evidence` }
+  const chans = ruleChannels(rule.where)
+  if (chans && chans.length && !chans.some((c) => present.channels.some((p) => (c.contains ? p.includes(c.value) : p === c.value)))) return { ok: false, detail: `no "${chans[0].value}" channel in this evidence` }
+  return { ok: true }
 }
 
 /** Fields a rule reads (to decide whether mail bodies must be joined). */

@@ -161,7 +161,8 @@ def test_rule_diagnostics_explain_silent_rules(store):
     ]
     res = R.run_rules(store, rules, settings)
     d = {x["ruleId"]: x for x in res["diagnostics"]}
-    assert d["absent"]["reason"] == "no_selector_match" and "1102" in (d["absent"]["detail"] or "")
+    # an event id the evidence does not contain is reported as not applicable before the rule runs
+    assert d["absent"]["reason"] == "not_applicable" and "1102" in (d["absent"]["detail"] or "")
     assert d["vip"]["reason"] == "missing_setting" and "vip_names" in d["vip"]["detail"]
     assert d["req"]["reason"] == "missing_setting" and "internal_ips" in d["req"]["detail"]
     assert d["excl"]["reason"] == "all_excluded" and d["excl"]["matched"] == 1

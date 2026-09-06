@@ -1,0 +1,417 @@
+{
+ "diagnostics": {
+  "m365-anonymous-sharing": "no_selector_match",
+  "m365-app-registered": "no_selector_match",
+  "m365-audit-disabled": "no_selector_match",
+  "m365-conditional-access-change": "no_selector_match",
+  "m365-ediscovery-search": "no_selector_match",
+  "m365-junk-config-changed": "no_selector_match",
+  "m365-legacy-protocol-enabled": "no_selector_match",
+  "m365-mailbox-folder-anonymous": "no_selector_match",
+  "m365-mailbox-permission": "no_selector_match",
+  "m365-mailitemsaccessed-sync-delegate": "no_selector_match",
+  "m365-mass-download": "no_selector_match",
+  "m365-mfa-or-password-change": "no_selector_match",
+  "m365-signin-mfa-failed-then-success": "no_selector_match",
+  "m365-transport-rule-change": "no_selector_match",
+  "m365-transport-rule-exfil": "no_selector_match",
+  "mail-bec-pattern": "no_selector_match",
+  "mail-calendar-lure": "no_selector_match",
+  "mail-campaign-cluster": "no_selector_match",
+  "mail-container-attachment-review": "no_selector_match",
+  "mail-deleted-message-with-indicators": "no_selector_match",
+  "mail-display-name-contains-email": "no_selector_match",
+  "mail-encrypted-archive": "no_selector_match",
+  "mail-external-origin-suspicious-hop": "no_selector_match",
+  "mail-first-contact-with-lure": "no_selector_match",
+  "mail-forged-headers": "no_selector_match",
+  "mail-hidden-or-obfuscated-content": "no_selector_match",
+  "mail-high-risk-score": "no_selector_match",
+  "mail-internal-domain-from-outside": "no_selector_match",
+  "mail-internal-name-external-domain": "below_threshold",
+  "mail-links-bad-reputation": "no_selector_match",
+  "mail-macro-document": "no_selector_match",
+  "mail-mass-recipients": "no_selector_match",
+  "mail-nested-forwarded-risky": "no_selector_match",
+  "mail-punycode-or-mixed-script-sender": "no_selector_match",
+  "mail-returnpath-mismatch-unauthenticated": "no_selector_match",
+  "mail-same-name-different-domain": "below_threshold",
+  "mail-sender-auth-regression": "no_selector_match",
+  "mail-sender-burst": "below_threshold",
+  "mail-sent-outside-business-hours": "outside_time_window",
+  "mail-single-mail-domain-risky": "below_threshold",
+  "mail-suspicious-links": "no_selector_match",
+  "mail-unsolicited-new-sender-attachment": "no_selector_match",
+  "mail-vip-impersonation": "no_selector_match",
+  "mail-yara-match": "no_selector_match",
+  "win-account-lockouts": "not_applicable",
+  "win-admin-share-access": "not_applicable",
+  "win-anonymous-logon": "no_selector_match",
+  "win-applocker-codeintegrity-block": "not_applicable",
+  "win-asrep-roasting": "not_applicable",
+  "win-audit-policy-changed": "not_applicable",
+  "win-bits-download": "no_selector_match",
+  "win-credential-dumping": "no_selector_match",
+  "win-defender-detection": "not_applicable",
+  "win-defender-disabled": "not_applicable",
+  "win-event-log-cleared": "not_applicable",
+  "win-event-log-service-stopped": "not_applicable",
+  "win-explicit-credentials-4648": "not_applicable",
+  "win-kerberoasting": "not_applicable",
+  "win-kerberos-preauth-bruteforce": "not_applicable",
+  "win-kerberos-user-enumeration": "not_applicable",
+  "win-logon-weekend": "outside_time_window",
+  "win-new-firewall-rule": "not_applicable",
+  "win-ntlm-bruteforce-4776": "not_applicable",
+  "win-pass-the-hash-hint": "no_selector_match",
+  "win-password-reset-by-other": "not_applicable",
+  "win-password-spraying": "below_threshold",
+  "win-process-from-suspicious-path": "no_selector_match",
+  "win-psexec-pattern": "no_selector_match",
+  "win-rdp-bruteforce-rdpcorets": "not_applicable",
+  "win-rdp-enabled-registry": "not_applicable",
+  "win-registry-run-key": "not_applicable",
+  "win-remote-thread-injection": "not_applicable",
+  "win-scheduled-task-created": "not_applicable",
+  "win-scheduled-task-suspicious-content": "not_applicable",
+  "win-shadow-copy-deletion": "no_selector_match",
+  "win-special-privileges-non-admin": "not_applicable",
+  "win-suspicious-dns-sysmon": "no_selector_match",
+  "win-time-changed": "no_selector_match",
+  "win-unsigned-driver-loaded": "not_applicable",
+  "win-usb-mass-storage": "no_selector_match",
+  "win-username-enumeration": "no_selector_match",
+  "win-winrm-remote-shell": "no_selector_match",
+  "win-wmi-persistence": "not_applicable"
+ },
+ "errors": [],
+ "findings": {
+  "m365-app-consent": [
+   "m365-app-consent|105"
+  ],
+  "m365-inbox-rule-any": [
+   "m365-inbox-rule-any|80"
+  ],
+  "m365-inbox-rule-forwarding": [
+   "m365-inbox-rule-forwarding|80"
+  ],
+  "m365-inbox-rule-hiding": [
+   "m365-inbox-rule-hiding|80"
+  ],
+  "m365-mailbox-forwarding": [
+   "m365-mailbox-forwarding|103"
+  ],
+  "m365-mailitemsaccessed-burst": [
+   "m365-mailitemsaccessed-burst|alice@contoso.com\u0001185.220.101.44|29804245"
+  ],
+  "m365-privileged-role-assigned": [
+   "m365-privileged-role-assigned|106"
+  ],
+  "m365-role-assigned-any": [
+   "m365-role-assigned-any|106"
+  ],
+  "m365-signin-bruteforce-account": [
+   "m365-signin-bruteforce-account|alice@contoso.com|29804234"
+  ],
+  "m365-signin-legacy-auth": [
+   "m365-signin-legacy-auth|46"
+  ],
+  "m365-signin-password-spray": [
+   "m365-signin-password-spray|185.220.101.44|29804230"
+  ],
+  "m365-signin-risky": [
+   "m365-signin-risky|104"
+  ],
+  "m365-signin-two-countries-24h": [
+   "m365-signin-two-countries-24h|alice@contoso.com|29804070"
+  ],
+  "m365-signin-unexpected-country": [
+   "m365-signin-unexpected-country|104",
+   "m365-signin-unexpected-country|46"
+  ],
+  "mail-attachment-disguised": [
+   "mail-attachment-disguised|7"
+  ],
+  "mail-auth-failed": [
+   "mail-auth-failed|10",
+   "mail-auth-failed|11"
+  ],
+  "mail-bank-detail-change": [
+   "mail-bank-detail-change|4"
+  ],
+  "mail-credential-phishing": [
+   "mail-credential-phishing|10"
+  ],
+  "mail-critical-risk-score": [
+   "mail-critical-risk-score|10",
+   "mail-critical-risk-score|11",
+   "mail-critical-risk-score|6",
+   "mail-critical-risk-score|7",
+   "mail-critical-risk-score|8"
+  ],
+  "mail-dmarc-fail-with-lure": [
+   "mail-dmarc-fail-with-lure|10",
+   "mail-dmarc-fail-with-lure|11"
+  ],
+  "mail-executable-attachment": [
+   "mail-executable-attachment|7"
+  ],
+  "mail-html-attachment": [
+   "mail-html-attachment|11",
+   "mail-html-attachment|3",
+   "mail-html-attachment|6",
+   "mail-html-attachment|8"
+  ],
+  "mail-html-capabilities-review": [
+   "mail-html-capabilities-review|1",
+   "mail-html-capabilities-review|11",
+   "mail-html-capabilities-review|3",
+   "mail-html-capabilities-review|6",
+   "mail-html-capabilities-review|8"
+  ],
+  "mail-html-smuggling": [
+   "mail-html-smuggling|11",
+   "mail-html-smuggling|6",
+   "mail-html-smuggling|8"
+  ],
+  "mail-link-text-mismatch": [
+   "mail-link-text-mismatch|10"
+  ],
+  "mail-lookalike-brand-domain": [
+   "mail-lookalike-brand-domain|10",
+   "mail-lookalike-brand-domain|11"
+  ],
+  "mail-lookalike-internal-domain": [
+   "mail-lookalike-internal-domain|10",
+   "mail-lookalike-internal-domain|11"
+  ],
+  "mail-pdf-active-content": [
+   "mail-pdf-active-content|2"
+  ],
+  "mail-pdf-link-lure": [
+   "mail-pdf-link-lure|2"
+  ],
+  "mail-replyto-diverted": [
+   "mail-replyto-diverted|5",
+   "mail-replyto-diverted|9"
+  ],
+  "win-account-lifecycle-short": [
+   "win-account-lifecycle-short|backdoor"
+  ],
+  "win-audit-log-cleared": [
+   "win-audit-log-cleared|91"
+  ],
+  "win-bruteforce-4625-by-account": [
+   "win-bruteforce-4625-by-account|alice|29804250"
+  ],
+  "win-bruteforce-4625-by-ip": [
+   "win-bruteforce-4625-by-ip|203.0.113.9|29804250"
+  ],
+  "win-logon-outside-business-hours": [
+   "win-logon-outside-business-hours|2"
+  ],
+  "win-lolbin-suspicious-commandline": [
+   "win-lolbin-suspicious-commandline|83"
+  ],
+  "win-office-spawns-shell": [
+   "win-office-spawns-shell|84"
+  ],
+  "win-powershell-encoded-command": [
+   "win-powershell-encoded-command|84"
+  ],
+  "win-powershell-suspicious-scriptblock": [
+   "win-powershell-suspicious-scriptblock|97"
+  ],
+  "win-rdp-logon-any": [
+   "win-rdp-logon-any|2",
+   "win-rdp-logon-any|81"
+  ],
+  "win-rdp-logon-external": [
+   "win-rdp-logon-external|2",
+   "win-rdp-logon-external|81"
+  ],
+  "win-service-installed-any": [
+   "win-service-installed-any|93"
+  ],
+  "win-service-installed-suspicious": [
+   "win-service-installed-suspicious|93"
+  ],
+  "win-sysmon-network-lolbin": [
+   "win-sysmon-network-lolbin|88"
+  ],
+  "win-user-account-created": [
+   "win-user-account-created|94"
+  ],
+  "win-user-added-privileged-group": [
+   "win-user-added-privileged-group|95"
+  ]
+ },
+ "rules": [
+  "m365-anonymous-sharing",
+  "m365-app-consent",
+  "m365-app-registered",
+  "m365-audit-disabled",
+  "m365-conditional-access-change",
+  "m365-ediscovery-search",
+  "m365-inbox-rule-any",
+  "m365-inbox-rule-forwarding",
+  "m365-inbox-rule-hiding",
+  "m365-junk-config-changed",
+  "m365-legacy-protocol-enabled",
+  "m365-mailbox-folder-anonymous",
+  "m365-mailbox-forwarding",
+  "m365-mailbox-permission",
+  "m365-mailitemsaccessed-burst",
+  "m365-mailitemsaccessed-sync-delegate",
+  "m365-mass-download",
+  "m365-mfa-or-password-change",
+  "m365-privileged-role-assigned",
+  "m365-role-assigned-any",
+  "m365-signin-bruteforce-account",
+  "m365-signin-legacy-auth",
+  "m365-signin-mfa-failed-then-success",
+  "m365-signin-password-spray",
+  "m365-signin-risky",
+  "m365-signin-two-countries-24h",
+  "m365-signin-unexpected-country",
+  "m365-transport-rule-change",
+  "m365-transport-rule-exfil",
+  "mail-attachment-disguised",
+  "mail-auth-failed",
+  "mail-bank-detail-change",
+  "mail-bec-pattern",
+  "mail-calendar-lure",
+  "mail-campaign-cluster",
+  "mail-container-attachment-review",
+  "mail-credential-phishing",
+  "mail-critical-risk-score",
+  "mail-deleted-message-with-indicators",
+  "mail-display-name-contains-email",
+  "mail-dmarc-fail-with-lure",
+  "mail-encrypted-archive",
+  "mail-executable-attachment",
+  "mail-external-origin-suspicious-hop",
+  "mail-first-contact-with-lure",
+  "mail-forged-headers",
+  "mail-hidden-or-obfuscated-content",
+  "mail-high-risk-score",
+  "mail-html-attachment",
+  "mail-html-capabilities-review",
+  "mail-html-smuggling",
+  "mail-internal-domain-from-outside",
+  "mail-internal-name-external-domain",
+  "mail-link-text-mismatch",
+  "mail-links-bad-reputation",
+  "mail-lookalike-brand-domain",
+  "mail-lookalike-internal-domain",
+  "mail-macro-document",
+  "mail-mass-recipients",
+  "mail-nested-forwarded-risky",
+  "mail-pdf-active-content",
+  "mail-pdf-link-lure",
+  "mail-punycode-or-mixed-script-sender",
+  "mail-replyto-diverted",
+  "mail-returnpath-mismatch-unauthenticated",
+  "mail-same-name-different-domain",
+  "mail-sender-auth-regression",
+  "mail-sender-burst",
+  "mail-sent-outside-business-hours",
+  "mail-single-mail-domain-risky",
+  "mail-suspicious-links",
+  "mail-unsolicited-new-sender-attachment",
+  "mail-vip-impersonation",
+  "mail-yara-match",
+  "win-account-lifecycle-short",
+  "win-account-lockouts",
+  "win-admin-share-access",
+  "win-anonymous-logon",
+  "win-applocker-codeintegrity-block",
+  "win-asrep-roasting",
+  "win-audit-log-cleared",
+  "win-audit-policy-changed",
+  "win-bits-download",
+  "win-bruteforce-4625-by-account",
+  "win-bruteforce-4625-by-ip",
+  "win-credential-dumping",
+  "win-defender-detection",
+  "win-defender-disabled",
+  "win-event-log-cleared",
+  "win-event-log-service-stopped",
+  "win-explicit-credentials-4648",
+  "win-kerberoasting",
+  "win-kerberos-preauth-bruteforce",
+  "win-kerberos-user-enumeration",
+  "win-logon-outside-business-hours",
+  "win-logon-weekend",
+  "win-lolbin-suspicious-commandline",
+  "win-new-firewall-rule",
+  "win-ntlm-bruteforce-4776",
+  "win-office-spawns-shell",
+  "win-pass-the-hash-hint",
+  "win-password-reset-by-other",
+  "win-password-spraying",
+  "win-powershell-encoded-command",
+  "win-powershell-suspicious-scriptblock",
+  "win-process-from-suspicious-path",
+  "win-psexec-pattern",
+  "win-rdp-bruteforce-rdpcorets",
+  "win-rdp-enabled-registry",
+  "win-rdp-logon-any",
+  "win-rdp-logon-external",
+  "win-registry-run-key",
+  "win-remote-thread-injection",
+  "win-scheduled-task-created",
+  "win-scheduled-task-suspicious-content",
+  "win-service-installed-any",
+  "win-service-installed-suspicious",
+  "win-shadow-copy-deletion",
+  "win-special-privileges-non-admin",
+  "win-suspicious-dns-sysmon",
+  "win-sysmon-network-lolbin",
+  "win-time-changed",
+  "win-unsigned-driver-loaded",
+  "win-usb-mass-storage",
+  "win-user-account-created",
+  "win-user-added-privileged-group",
+  "win-username-enumeration",
+  "win-winrm-remote-shell",
+  "win-wmi-persistence"
+ ],
+ "settings": {
+  "admin_accounts": [
+   "administrator",
+   "adm-*"
+  ],
+  "brands": [
+   "contoso"
+  ],
+  "businessHours": {
+   "end": 19,
+   "start": 8,
+   "tz": "Europe/Paris"
+  },
+  "expected_countries": [
+   "FR"
+  ],
+  "internal_domains": [
+   "contoso.com",
+   "interne.fr"
+  ],
+  "internal_ips": [
+   "10.0.0.0/8",
+   "192.168.0.0/16"
+  ],
+  "service_accounts": [
+   "svc_backup"
+  ],
+  "trusted_senders": [],
+  "vip_names": [
+   "lefevre marie",
+   "alice martin"
+  ],
+  "weekendDays": [
+   0,
+   6
+  ]
+ }
+}
