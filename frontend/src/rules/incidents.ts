@@ -42,6 +42,8 @@ const IP_FIELDS = ['ipAddress', 'sourceIp', 'clientIp', 'ip']
 const MAX_REFS = 5000
 
 const rank = (s: Severity) => ORDER.indexOf(s)
+/** the analyst's rescoring wins over the rule's severity */
+export const effectiveSeverity = (f: Pick<Finding, 'severity' | 'severityOverride'>): Severity => f.severityOverride ?? f.severity
 
 /** The entity an event finding is about, in priority order user > host > ip. */
 export function primaryEntity(f: Finding): { field: string; value: string } | null {
@@ -63,7 +65,7 @@ export function deriveStatus(members: Finding[]): Status {
 }
 
 function sortMembers(members: Finding[]): Finding[] {
-  return [...members].sort((a, b) => rank(a.severity) - rank(b.severity) || b.count - a.count || (a.ts ?? 0) - (b.ts ?? 0))
+  return [...members].sort((a, b) => rank(effectiveSeverity(a)) - rank(effectiveSeverity(b)) || b.count - a.count || (a.ts ?? 0) - (b.ts ?? 0))
 }
 
 function finish(id: string, kind: IncidentKind, members: Finding[], title?: string, subtitle?: string): Incident {
@@ -86,7 +88,7 @@ function finish(id: string, kind: IncidentKind, members: Finding[], title?: stri
     kind,
     title: title ?? lead.title,
     subtitle: sub,
-    severity: lead.severity,
+    severity: effectiveSeverity(lead),
     source: sources.size === 1 ? findings[0].source : 'mixed',
     ts: times.length ? Math.min(...times) : null,
     tsEnd: ends.length ? Math.max(...ends) : null,
@@ -168,8 +170,11 @@ export function buildIncidents(findings: Finding[], opts: { gapMs?: number } = {
 }
 
 /** Counts per severity (findings or incidents alike). */
-export function sevCounts(rows: { severity: Severity }[]): Record<string, number> {
+export function sevCounts(rows: { severity: Severity; severityOverride?: Severity }[]): Record<string, number> {
   const c: Record<string, number> = {}
-  for (const r of rows) c[r.severity] = (c[r.severity] ?? 0) + 1
+  for (const r of rows) {
+    const s = r.severityOverride ?? r.severity
+    c[s] = (c[s] ?? 0) + 1
+  }
   return c
 }

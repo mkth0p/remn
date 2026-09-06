@@ -560,6 +560,24 @@ and every artifact that ties a step to the mail is a labelled edge back to the s
 domain, attachment or sender. Its "all chains" mode draws every chain of the case against
 the sender addresses, link domains, IPs and hosts they share, and lists the shared ones.
 
+The Review page is where a case gets cleared. It walks the analyst through every
+attack chain (by score) and then every incident (by severity), one card at a time,
+with `j` / `k` to move and `r` / `e` / `f` / `x` for reviewed, confirmed, false positive
+and in-or-out of the report. A chain card takes a verdict (confirmed, unsure, benign),
+a severity, an inclusion switch and a narrative that replaces the automatic summary in
+the report; "draft with the analyst" asks the local model for a first version from the
+chain's steps alone. An incident card takes a decision (which writes the status of every
+member finding), a rescore (members above the target take an override, the rule
+severity stays visible), an inclusion switch and a note printed with the incident. The
+same bar sets what the report contains: the severity floor, the chain detail level
+(steps tied to the mail or carrying a finding, plus weighted steps, or every step), and
+the sections (chains, case timeline, tasks, notes, indicators, evidence, false
+positives, reviewed items only). Decisions live on the findings and in the case's
+key-value store, travel with the bundle, and the Report page prints from them: attack
+chains with narrative and step table, incidents with their notes and member findings
+at the effective severity, then indicators, timeline, tasks, notes and the findings
+timeline. The Report page says how many items still have no decision.
+
 Case notes hold what the analyst decides to keep: a curated timeline (entries added
 with the "timeline" button on findings, mails, events and chain steps, each linked
 back to its row, or typed by hand), a task checklist and markdown notes. The three

@@ -10,7 +10,7 @@ import { loadRules, type LoadedRule } from '../data/rules'
 import { findingsStaleness, runEnabledRules, type Staleness } from '../data/findingsState'
 import { getSource } from '../data/source'
 import { getDb, type Finding, type Severity } from '../db/schema'
-import { buildIncidents, sevCounts, type Incident } from '../rules/incidents'
+import { buildIncidents, effectiveSeverity, sevCounts, type Incident } from '../rules/incidents'
 import { useStore } from '../state/store'
 import { classNames, fmtNum, fmtTs } from '../util/format'
 import { exportCsv, exportJson } from '../util/export'
@@ -238,7 +238,7 @@ export function FindingsView() {
   }
 
   const columns: Column<Finding>[] = [
-    { key: 'severity', label: 'severity', width: 104, render: (r) => <Sev sev={r.severity} /> },
+    { key: 'severity', label: 'severity', width: 104, render: (r) => <Sev sev={effectiveSeverity(r)}>{effectiveSeverity(r)}{r.severityOverride ? <span className="muted" title={`rule severity ${r.severity}, rescored on the Review page`}>*</span> : null}</Sev> },
     { key: 'title', label: 'finding', width: 'minmax(280px, 1.6fr)', render: (r) => <span className="sans ellipsis" title={r.description}>{r.title}{r.escalation ? <span className="muted"> · {r.escalation}</span> : null}</span> },
     { key: 'entities', label: 'entities', width: 'minmax(220px, 1fr)', render: (r) => Object.entries(r.entities).map(([k, v]) => `${k}=${v}`).join(' · ') },
     { key: 'attack', label: 'att&ck', width: 130, render: (r) => <span className="row" style={{ gap: 4 }}>{r.attack.slice(0, 2).map((t) => <Badge key={t} sev="outline">{t}</Badge>)}{r.attack.length > 2 ? <span className="muted">+{r.attack.length - 2}</span> : null}</span> },

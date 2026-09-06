@@ -8,7 +8,7 @@ export interface EntityRef {
   value: string
 }
 
-export type View = 'home' | 'dashboard' | 'evidence' | 'events' | 'mails' | 'findings' | 'chains' | 'timeline' | 'iocs' | 'ai' | 'case' | 'report' | 'rules' | 'settings'
+export type View = 'home' | 'dashboard' | 'evidence' | 'events' | 'mails' | 'findings' | 'chains' | 'timeline' | 'iocs' | 'ai' | 'review' | 'case' | 'report' | 'rules' | 'settings'
 
 export interface ConsoleLine {
   id: number
@@ -66,6 +66,9 @@ interface State {
   /** progress of the rule run in flight (manual, or automatic after ingest) */
   rulesRun: { done: number; total: number; rule: string; reason: 'manual' | 'ingest' } | null
   setRulesRun: (r: State['rulesRun']) => void
+  /** chain to open when the Chains page mounts (Review page hand-off) */
+  focusChain: string | null
+  setFocusChain: (id: string | null) => void
   aiPrompt: string | null
   setAiPrompt: (p: string | null) => void
   counts: { events: number; mails: number; findings: number; iocs: number; evidence: number }
@@ -126,6 +129,8 @@ export const useStore = create<State>((set) => ({
   setEntity: (entity) => set({ entity }),
   rulesRun: null,
   setRulesRun: (rulesRun) => set({ rulesRun }),
+  focusChain: null,
+  setFocusChain: (focusChain) => set({ focusChain }),
   aiPrompt: null,
   setAiPrompt: (aiPrompt) => set({ aiPrompt }),
   counts: { events: 0, mails: 0, findings: 0, iocs: 0, evidence: 0 },

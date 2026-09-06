@@ -458,3 +458,18 @@ label.field > span { font-weight: 500; }
 .chain-graph { flex: 1; min-height: 320px; }
 .chain-graph-insights { padding: 6px 12px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 4px 18px; background: var(--surface-2); }
 .chain-graph-key { padding: 4px 12px; border-top: 1px solid var(--line); background: var(--surface-2); }
+
+/* review workflow */
+.review-rail .item { display: grid; grid-template-columns: 14px 1fr auto; gap: 2px 10px; padding: 8px 12px; border-bottom: 1px solid var(--line); cursor: pointer; align-items: start; }
+.review-rail .item:hover { background: var(--surface-2); }
+.review-rail .item.active { background: var(--accent-dim); }
+.review-rail .item.done .title { color: var(--fg-3); }
+.review-rail .item .title { font-weight: 500; color: var(--fg-1); }
+.review-rail .item .sub { font-size: 11px; color: var(--fg-3); font-family: var(--mono); }
+.review-card { max-width: 980px; display: flex; flex-direction: column; gap: 16px; }
+.review-card .head { display: flex; align-items: flex-start; gap: 12px; }
+.review-card .head h2 { font-size: 16px; font-weight: 600; color: var(--fg-1); margin: 0; }
+.review-card .controls { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-lg); }
+.review-card .controls .lbl { font-size: 11px; color: var(--fg-3); text-transform: uppercase; letter-spacing: 0.05em; margin-right: 6px; }
+.review-progress { height: 4px; background: var(--surface-3); border-radius: 2px; overflow: hidden; }
+.review-progress > div { height: 100%; background: var(--accent); }

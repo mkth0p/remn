@@ -290,6 +290,10 @@ export interface Finding {
   notes?: string
   createdAt: number
   escalation?: string
+  /** analyst rescoring (Review page); the rule severity stays in `severity` */
+  severityOverride?: Severity
+  /** kept out of the report whatever its severity */
+  reportExclude?: boolean
 }
 
 export interface Ioc {
@@ -416,7 +420,7 @@ export function setDb(db: RemnDB | null): void {
 }
 
 /** kv keys that belong to one case (mirrors CASE_KV_PREFIXES in data/caseState.ts, kept here to avoid a schema -> data import). */
-export const CASE_KV_KEYS = (caseId: number) => ['chains', 'ruleDiags', 'baseline', 'mail-calibration', 'report-summary', 'finding-reviews'].map((p) => `${p}-${caseId}`)
+export const CASE_KV_KEYS = (caseId: number) => ['chains', 'ruleDiags', 'baseline', 'mail-calibration', 'report-summary', 'finding-reviews', 'chain-reviews', 'report-settings', 'findingCounts'].map((p) => `${p}-${caseId}`)
 
 export async function deleteCaseData(db: RemnDB, caseId: number): Promise<void> {
   await db.transaction('rw', [db.events, db.mails, db.mailBodies, db.attachments, db.urls, db.findings, db.iocs, db.facets, db.aiSessions, db.savedSearches, db.evidence, db.caseNotes, db.kv], async () => {

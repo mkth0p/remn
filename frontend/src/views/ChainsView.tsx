@@ -45,7 +45,7 @@ export function ChainsView() {
   const [tab, setTab] = useState<'story' | 'graph' | 'entities' | 'json'>('story')
   const [graphMode, setGraphMode] = useState<'chain' | 'campaign'>('chain')
   useEffect(() => {
-    if (kase?.id) loadChains(kase.id).then((r) => { setRes(r); setOpen(r?.chains[0]?.id ?? null); setStepIdx(null) })
+    if (kase?.id) loadChains(kase.id).then((r) => { const want = useStore.getState().focusChain; useStore.getState().setFocusChain(null); setRes(r); setOpen(want && r?.chains.some((c) => c.id === want) ? want : r?.chains[0]?.id ?? null); setStepIdx(null) })
   }, [kase?.id])
   const chain = useMemo(() => res?.chains.find((c) => c.id === open) ?? null, [res, open])
   const step = chain && stepIdx != null ? chain.steps[stepIdx] : null

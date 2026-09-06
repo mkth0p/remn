@@ -7,7 +7,7 @@ import { migrateCaseToServer } from './data/migrate'
 import { getSource } from './data/source'
 import { setLocalTime } from './util/format'
 import { getTransport } from './ai/transport'
-import { IconAi, IconDashboard, IconEvents, IconEvidence, IconFindings, IconIoc, IconMail, IconReport, IconRules, IconSettings, IconTerminal, IconTimeline, IconPivot, IconLink, IconFile, IconArrowLeft } from './components/Icons'
+import { IconAi, IconDashboard, IconEvents, IconEvidence, IconFindings, IconIoc, IconMail, IconReport, IconRules, IconSettings, IconTerminal, IconTimeline, IconPivot, IconLink, IconFile, IconArrowLeft, IconCheck } from './components/Icons'
 import { ConsolePanel, Toasts } from './components/ConsolePanel'
 import { TokenGate } from './components/TokenGate'
 import { EntityPanel } from './components/EntityPanel'
@@ -23,6 +23,7 @@ import { IocsView } from './views/IocsView'
 import { AiView } from './views/AiView'
 import { ReportView } from './views/ReportView'
 import { CaseView } from './views/CaseView'
+import { ReviewView } from './views/ReviewView'
 import { HomeView } from './views/HomeView'
 import { RulesView } from './views/RulesView'
 import { SettingsView } from './views/SettingsView'
@@ -40,6 +41,7 @@ const NAV: { id: View; label: string; icon: React.ComponentType; count?: 'events
   { id: 'rules', label: 'Rules', icon: IconRules },
   { id: 'iocs', label: 'Indicators', icon: IconIoc, count: 'iocs' },
   { id: 'ai', label: 'AI analyst', icon: IconAi, section: 'assist' },
+  { id: 'review', label: 'Review', icon: IconCheck },
   { id: 'case', label: 'Case notes', icon: IconFile },
   { id: 'report', label: 'Report', icon: IconReport },
   { id: 'settings', label: 'Settings', icon: IconSettings },
@@ -259,6 +261,7 @@ export default function App() {
         {view === 'rules' && <RulesView />}
         {view === 'iocs' && <IocsView />}
         {view === 'ai' && <AiView />}
+        {view === 'review' && <ReviewView />}
         {view === 'case' && <CaseView />}
         {view === 'report' && <ReportView />}
         {view === 'settings' && <SettingsView />}
