@@ -495,8 +495,7 @@ the top bar stores the choice in this browser (`remn-theme`) and both modes shar
 same tokens in `frontend/src/ui/theme.css`. The wordmark and view titles use
 [Gulax](https://velvetyne.fr/fonts/gulax/) by Morgan Gilbert (Velvetyne, SIL Open Font
 License 1.1; licence and copyright files ship in `frontend/public/fonts/`). The wordmark
-opens an About page: what the tool reads and produces, how a case flows, where the
-data lives, the keyboard shortcuts and the credits, with the live rule and pack counts.
+opens a short intro page: one sentence, what goes in, what comes out, where it stays.
 
 The Findings view is a triage queue. Its default unit is the incident: every finding
 on one mail (the rules that fired, the score band, the attack chain it seeded) is one

@@ -442,18 +442,13 @@ label.field > span { font-weight: 500; }
 
 .pane.max { flex: 1 1 auto; height: auto; min-height: 0; border-top: 0; }
 
-/* home page */
+/* intro page behind the wordmark */
 .brand.click { cursor: pointer; }
 .brand.click:hover .wordmark, .brand.click:hover .mark { color: var(--accent); }
-.home { display: flex; flex-direction: column; gap: 16px; max-width: 1240px; }
-.home-hero { padding: 26px 28px 20px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); display: flex; flex-direction: column; gap: 12px; }
-.home-hero .wordmark { font-family: var(--display); font-size: 44px; letter-spacing: 0.22em; color: var(--fg-1); line-height: 1; }
-.home-hero .lead { font-size: 14px; line-height: 1.55; color: var(--fg); max-width: 860px; margin: 0; }
-.home-grid .card h3 { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--fg-1); margin: 0 0 8px; }
-.home-grid .card h3 svg { width: 15px; height: 15px; color: var(--accent); }
-.home-grid .card ul, .home-grid .card ol { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; line-height: 1.5; color: var(--fg); }
-.home-grid .card li b { color: var(--fg-1); font-weight: 600; }
-.home .keys td { padding: 5px 8px; }
-.home kbd { font-family: var(--mono); font-size: 11px; padding: 1px 6px; border: 1px solid var(--line-2); border-bottom-width: 2px; border-radius: 4px; background: var(--surface-2); color: var(--fg-1); }
-@media (max-width: 1100px) { .home-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 760px) { .home-grid { grid-template-columns: 1fr; } }
+.intro { display: flex; flex-direction: column; gap: 18px; max-width: 640px; padding: 56px 40px; }
+.intro .wordmark { font-family: var(--display); font-size: 56px; letter-spacing: 0.22em; color: var(--fg-1); line-height: 1; }
+.intro .lead { font-size: 15px; line-height: 1.5; color: var(--fg-1); margin: 0; }
+.intro dl { display: grid; grid-template-columns: 60px 1fr; gap: 8px 16px; margin: 6px 0; padding: 14px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font-size: 13px; line-height: 1.5; }
+.intro dt { font-family: var(--mono); font-size: 11px; color: var(--fg-3); padding-top: 3px; }
+.intro dd { margin: 0; color: var(--fg); }
+.intro .foot { font-size: 11px; color: var(--fg-3); line-height: 1.7; margin-top: 8px; }
