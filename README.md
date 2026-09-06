@@ -553,7 +553,12 @@ Chains are read as stories: the left list ranks them by severity and score, the
 middle column is the ordered narrative (time and offset from the seed mail, source
 icon for mailbox / Microsoft 365 / host, what happened, and the artifact or finding
 that tied the step to the seed), and the right column details the selected step and
-opens its rows. `j` / `k` move between steps.
+opens its rows. `j` / `k` move between steps. The Graph tab draws the same chain as a
+time-ordered swimlane graph (attacker side, mailbox, identity, Microsoft 365, host,
+machines and IPs): repeated actions fold into one node, routine runs into one grey dot,
+and every artifact that ties a step to the mail is a labelled edge back to the seed's
+domain, attachment or sender. Its "all chains" mode draws every chain of the case against
+the sender addresses, link domains, IPs and hosts they share, and lists the shared ones.
 
 Case notes hold what the analyst decides to keep: a curated timeline (entries added
 with the "timeline" button on findings, mails, events and chain steps, each linked

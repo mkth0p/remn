@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Badge, Dot, Sev, Spinner, Tabs } from '../components/ui'
 import { IconAi, IconCloud, IconHost, IconMail, IconPlay } from '../components/Icons'
 import { buildChains, loadChains, type Chain, type ChainResult, type ChainStep } from '../data/chains'
 import { toast, useStore } from '../state/store'
 import { AddToTimeline } from '../components/AddToTimeline'
+import { ChainGraph } from '../components/ChainGraph'
 import { fmtNum, fmtTs } from '../util/format'
 
 type StepKind = 'mail' | 'm365' | 'host'
@@ -41,7 +42,8 @@ export function ChainsView() {
   const [hours, setHours] = useState(72)
   const [open, setOpen] = useState<string | null>(null)
   const [stepIdx, setStepIdx] = useState<number | null>(null)
-  const [tab, setTab] = useState<'story' | 'entities' | 'json'>('story')
+  const [tab, setTab] = useState<'story' | 'graph' | 'entities' | 'json'>('story')
+  const [graphMode, setGraphMode] = useState<'chain' | 'campaign'>('chain')
   useEffect(() => {
     if (kase?.id) loadChains(kase.id).then((r) => { setRes(r); setOpen(r?.chains[0]?.id ?? null); setStepIdx(null) })
   }, [kase?.id])
@@ -87,6 +89,39 @@ export function ChainsView() {
     setAiPrompt(`Walk me through attack chain ${c.id} for ${c.identityLabel} (score ${c.score}, ${c.steps.length} steps from ${new Date(c.start).toISOString()} to ${new Date(c.end).toISOString()}). Seed mail id ${c.seed.id} "${c.seed.subject}" from ${c.seed.fromAddr}. Steps: ${c.steps.slice(0, 25).map((s) => `${offset(s.offsetMin)} ${s.title}${s.artifacts.length ? ' [' + s.artifacts.join('; ') + ']' : ''}`).join(' | ')}. Which steps confirm compromise, which are routine, and what should be checked or contained next?`)
     setView('ai')
   }
+  const openChainFromGraph = useCallback((id: string) => { setOpen(id); setStepIdx(null); setGraphMode('chain') }, [])
+  const stepPane = chain && step && (
+                    <div className="pane-side">
+                      <div className="col" style={{ gap: 14 }}>
+                        <div className="section">
+                          <h3>Step {stepIdx! + 1} of {chain.steps.length}</h3>
+                          <div style={{ fontWeight: 500, color: 'var(--fg-1)' }}>{step.title}</div>
+                          <div className="kv">
+                            <div className="k">source</div><div className="v">{KIND_LABEL[stepKind(step)]}</div>
+                            <div className="k">time</div><div className="v">{fmtTs(step.ts)}{step.tsEnd && step.tsEnd > step.ts ? ` → ${fmtTs(step.tsEnd)}` : ''}</div>
+                            <div className="k">offset</div><div className="v">{offset(step.offsetMin)} from the seed mail</div>
+                            <div className="k">rows</div><div className="v">{fmtNum(step.count)}</div>
+                            {step.operation != null && (<><div className="k">operation</div><div className="v">{String(step.operation)}</div></>)}
+                            {step.computer && (<><div className="k">computer</div><div className="v click" onClick={() => setEntity({ kind: 'host', value: step.computer! })}>{step.computer}</div></>)}
+                            {step.ipAddress && (<><div className="k">ip</div><div className="v click" onClick={() => setEntity({ kind: 'ip', value: step.ipAddress! })}>{step.ipAddress}</div></>)}
+                            <div className="k">weight</div><div className="v">+{step.weight} to the chain score</div>
+                          </div>
+                        </div>
+                        <div className="section">
+                          <h3>Why it is in the chain</h3>
+                          {!step.artifacts.length && !step.findings.length && <div className="muted small">same identity inside the window, no artifact link and no finding (routine step, low weight)</div>}
+                          {step.artifacts.map((a, j) => <div key={j} className="row" style={{ gap: 6 }}><Dot sev={strongArtifact(a) ? 'critical' : 'high'} /><span className="small">{a}</span></div>)}
+                          {step.findings.map((f) => <div key={f.ruleId} className="row" style={{ gap: 6 }}><Dot sev={f.severity} /><span className="small">{f.title}</span><span className="mono small muted">{f.ruleId}</span></div>)}
+                        </div>
+                        <div className="row" style={{ gap: 6 }}>
+                          <button className="btn sm" onClick={() => openRows(step)}>open {step.kind === 'mail' ? 'the mail' : `${fmtNum(Math.min(step.count, 500))} row(s)`}</button>
+                          <AddToTimeline ts={step.ts} text={`${chain.identityLabel}: ${step.title}${step.artifacts.length ? ' (' + step.artifacts.join('; ') + ')' : ''}`} link={{ source: step.kind === 'mail' && step.id != null ? 'mails' : 'chains', id: step.kind === 'mail' && step.id != null ? step.id : `${chain.id}#${stepIdx}`, label: step.kind === 'mail' ? step.title : `${chain.identityLabel} step ${stepIdx! + 1}` }} severity={step.findings[0]?.severity ?? (step.artifacts.length ? 'high' : 'info')} />
+                          <button className="btn sm ghost" onClick={() => setStepIdx(null)}>close</button>
+                        </div>
+                        <div className="hint">j / k move between steps</div>
+                      </div>
+                    </div>
+  )
   const sevCounts = (res?.chains ?? []).reduce<Record<string, number>>((m, c) => ((m[c.severity] = (m[c.severity] ?? 0) + 1), m), {})
   return (
     <div className="view">
@@ -109,7 +144,7 @@ export function ChainsView() {
           )}
           {res && res.chains.length === 0 && <div className="muted small" style={{ padding: 14 }}>No chain: no recipient of a seed mail has correlated activity in the window.</div>}
           {res?.chains.map((c) => (
-            <div key={c.id} className={'group-row' + (open === c.id ? ' active' : '')} style={{ display: 'grid', gridTemplateColumns: '14px 1fr auto', gap: '2px 10px', padding: '10px 14px', cursor: 'pointer', alignItems: 'start' }} onClick={() => { setOpen(c.id); setStepIdx(null); setTab('story') }}>
+            <div key={c.id} className={'group-row' + (open === c.id ? ' active' : '')} style={{ display: 'grid', gridTemplateColumns: '14px 1fr auto', gap: '2px 10px', padding: '10px 14px', cursor: 'pointer', alignItems: 'start' }} onClick={() => { setOpen(c.id); setStepIdx(null) }}>
               <Dot sev={c.severity} />
               <div style={{ minWidth: 0 }}>
                 <div className="ellipsis" style={{ fontWeight: 600, color: 'var(--fg-1)' }}>{c.identityLabel}</div>
@@ -161,7 +196,7 @@ export function ChainsView() {
                   {(chain.relatedSeeds?.length ?? 0) > 0 && <span className="muted">+{chain.relatedSeeds!.length} related mail(s) to the same identity</span>}
                 </div>
               </div>
-              <Tabs tabs={[{ id: 'story' as const, label: 'Story' }, { id: 'entities' as const, label: 'Seed' }, { id: 'json' as const, label: 'JSON' }]} active={tab} onChange={setTab} />
+              <Tabs tabs={[{ id: 'story' as const, label: 'Story' }, { id: 'graph' as const, label: 'Graph' }, { id: 'entities' as const, label: 'Seed' }, { id: 'json' as const, label: 'JSON' }]} active={tab} onChange={setTab} />
               {tab === 'story' && (
                 <div className="pane" style={{ flex: 1, height: 'auto', borderTop: 0, gridTemplateColumns: step ? '1fr 340px' : '1fr' }}>
                   <div className="pane-main" style={{ overflow: 'auto' }}>
@@ -197,38 +232,22 @@ export function ChainsView() {
                       })}
                     </div>
                   </div>
-                  {step && (
-                    <div className="pane-side">
-                      <div className="col" style={{ gap: 14 }}>
-                        <div className="section">
-                          <h3>Step {stepIdx! + 1} of {chain.steps.length}</h3>
-                          <div style={{ fontWeight: 500, color: 'var(--fg-1)' }}>{step.title}</div>
-                          <div className="kv">
-                            <div className="k">source</div><div className="v">{KIND_LABEL[stepKind(step)]}</div>
-                            <div className="k">time</div><div className="v">{fmtTs(step.ts)}{step.tsEnd && step.tsEnd > step.ts ? ` → ${fmtTs(step.tsEnd)}` : ''}</div>
-                            <div className="k">offset</div><div className="v">{offset(step.offsetMin)} from the seed mail</div>
-                            <div className="k">rows</div><div className="v">{fmtNum(step.count)}</div>
-                            {step.operation != null && (<><div className="k">operation</div><div className="v">{String(step.operation)}</div></>)}
-                            {step.computer && (<><div className="k">computer</div><div className="v click" onClick={() => setEntity({ kind: 'host', value: step.computer! })}>{step.computer}</div></>)}
-                            {step.ipAddress && (<><div className="k">ip</div><div className="v click" onClick={() => setEntity({ kind: 'ip', value: step.ipAddress! })}>{step.ipAddress}</div></>)}
-                            <div className="k">weight</div><div className="v">+{step.weight} to the chain score</div>
-                          </div>
-                        </div>
-                        <div className="section">
-                          <h3>Why it is in the chain</h3>
-                          {!step.artifacts.length && !step.findings.length && <div className="muted small">same identity inside the window, no artifact link and no finding (routine step, low weight)</div>}
-                          {step.artifacts.map((a, j) => <div key={j} className="row" style={{ gap: 6 }}><Dot sev={strongArtifact(a) ? 'critical' : 'high'} /><span className="small">{a}</span></div>)}
-                          {step.findings.map((f) => <div key={f.ruleId} className="row" style={{ gap: 6 }}><Dot sev={f.severity} /><span className="small">{f.title}</span><span className="mono small muted">{f.ruleId}</span></div>)}
-                        </div>
-                        <div className="row" style={{ gap: 6 }}>
-                          <button className="btn sm" onClick={() => openRows(step)}>open {step.kind === 'mail' ? 'the mail' : `${fmtNum(Math.min(step.count, 500))} row(s)`}</button>
-                          <AddToTimeline ts={step.ts} text={`${chain.identityLabel}: ${step.title}${step.artifacts.length ? ' (' + step.artifacts.join('; ') + ')' : ''}`} link={{ source: step.kind === 'mail' && step.id != null ? 'mails' : 'chains', id: step.kind === 'mail' && step.id != null ? step.id : `${chain.id}#${stepIdx}`, label: step.kind === 'mail' ? step.title : `${chain.identityLabel} step ${stepIdx! + 1}` }} severity={step.findings[0]?.severity ?? (step.artifacts.length ? 'high' : 'info')} />
-                          <button className="btn sm ghost" onClick={() => setStepIdx(null)}>close</button>
-                        </div>
-                        <div className="hint">j / k move between steps</div>
+                  {stepPane}
+                </div>
+              )}
+              {tab === 'graph' && (
+                <div className="pane" style={{ flex: 1, height: 'auto', borderTop: 0, gridTemplateColumns: step && graphMode === 'chain' ? '1fr 340px' : '1fr' }}>
+                  <div className="pane-main" style={{ overflow: 'hidden' }}>
+                    <div className="row" style={{ padding: '6px 12px', gap: 10, borderBottom: '1px solid var(--line)' }}>
+                      <div className="segmented">
+                        <button className={graphMode === 'chain' ? 'active' : ''} onClick={() => setGraphMode('chain')}>this chain</button>
+                        <button className={graphMode === 'campaign' ? 'active' : ''} onClick={() => setGraphMode('campaign')}>all chains</button>
                       </div>
+                      <span className="small muted">{graphMode === 'chain' ? 'time runs left to right, one lane per source; routine runs are folded into one node' : `${res?.chains.length ?? 0} chains against the sender addresses, link domains, IPs and hosts they share`}</span>
                     </div>
-                  )}
+                    <ChainGraph mode={graphMode} chain={chain} chains={res?.chains ?? []} selectedStep={stepIdx} onStep={setStepIdx} onEntity={setEntity} onChain={openChainFromGraph} />
+                  </div>
+                  {graphMode === 'chain' && stepPane}
                 </div>
               )}
               {tab === 'entities' && (

@@ -452,3 +452,9 @@ label.field > span { font-weight: 500; }
 .intro dt { font-family: var(--mono); font-size: 11px; color: var(--fg-3); padding-top: 3px; }
 .intro dd { margin: 0; color: var(--fg); }
 .intro .foot { font-size: 11px; color: var(--fg-3); line-height: 1.7; margin-top: 8px; }
+
+/* chain graphs */
+.chain-graph-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.chain-graph { flex: 1; min-height: 320px; }
+.chain-graph-insights { padding: 6px 12px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 4px 18px; background: var(--surface-2); }
+.chain-graph-key { padding: 4px 12px; border-top: 1px solid var(--line); background: var(--surface-2); }
