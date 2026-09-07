@@ -8,7 +8,7 @@ _What leaves the machine, what is stored where, hardening in place._
   the end of each request. Every `/api` call needs the `X-Forensic-Client`
   header (cookie-less CSRF protection); cross-origin preflights are refused.
   With `FORENSIC_AUTH_TOKEN` set, the header value must equal the token
-  (see "Remote access").
+  (see [remote access](setup.md#remote-access-home-server-mode)).
 * Parsed content is treated as hostile: React escaping, HTML previews in a
   sandboxed iframe with DOMPurify, images blocked, links disabled and defanged.
   Attachments are analysed statically, never opened or executed.
@@ -16,12 +16,16 @@ _What leaves the machine, what is stored where, hardening in place._
   workers from the app origin only, WebAssembly allowed for hashing, frames only for
   the sandboxed mail and report documents, no object or base tags) as a `<meta>` tag
   in `index.html` and as a header from the server, which adds `frame-ancestors 'none'`.
-  Every response also carries `X-Frame-Options: DENY`, `nosniff`, a `no-referrer`
-  policy, same-origin opener and resource policies, and API bodies get a CSP that
-  forbids rendering them. The theme bootstrap is an external file for that reason.
+  The script files carry the same policy, because a web worker takes its policy from
+  the response that served its script (the hashing and ingest workers need WebAssembly,
+  the API and the browser database). Every response also carries `X-Frame-Options:
+  DENY`, `nosniff`, a `no-referrer` policy, same-origin opener and resource policies,
+  and API bodies get a closed CSP (`default-src 'none'; sandbox`) that forbids rendering
+  them. The theme bootstrap is an external file for that reason.
 * Markdown from the model and from notes is escaped before the light markup pass
   (no links or raw HTML are produced); JSON views are escaped; the report is built
-  from escaped cells and printed from a sandboxed frame. Links whose target comes
+  from escaped cells and printed from a frame that runs no script but keeps the app's
+  origin, which the browser requires before the page may call print on it. Links whose target comes
   from data (reputation providers, pack manifests, ATT&CK ids) pass through a
   scheme check and get `rel="noopener noreferrer"`; anything but http(s) is dropped.
 * The raw SQL endpoint and the analyst's `sql` tool accept one read statement
