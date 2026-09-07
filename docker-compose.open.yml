@@ -1,0 +1,35 @@
+# One run configuration in one file: the full image (PST and YARA), no host check, no token,
+# port 8300 on this machine only, for a reverse proxy in front (deploy/apache-remn.conf) that
+# decides who gets in.
+#
+#   sudo docker compose -f docker-compose.open.yml up -d --build     # build and start
+#   sudo docker compose -f docker-compose.open.yml logs -f            # watch it
+#   sudo docker compose -f docker-compose.open.yml down               # stop and remove (-v drops the data too)
+#
+# Nothing here asks who you are: anyone the proxy lets through can read and delete every
+# server-store case. That is what this file chooses. docker-compose.yml is the guarded default,
+# bound to loopback with a host list and a token.
+services:
+  remn:
+    build:
+      context: .
+      args:
+        EXTRA_PIP: yara-python libpff-python
+    image: remn
+    ports:
+      - "127.0.0.1:8300:8000"
+    environment:
+      FORENSIC_ALLOWED_HOSTS: "*"
+      FORENSIC_AUTH_TOKEN: ""
+      # an Ollama on the host machine, for the server proxy transport
+      OLLAMA_HOST: http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - remn-data:/app/backend/data
+      - remn-tmp:/app/backend/tmp
+    restart: unless-stopped
+
+volumes:
+  remn-data:
+  remn-tmp:

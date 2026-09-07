@@ -130,7 +130,13 @@ If the container starts but the page does not load, check these in order:
   already decides who gets in, both checks can be switched off: `REMN_HOSTS='*'` accepts
   any host name and an empty `REMN_TOKEN` (the default) asks for nothing. The server then
   prints a warning at start, because anyone who reaches the port can read and delete
-  every server-store case; that is the trade-off being made.
+  every server-store case; that is the trade-off being made. `docker-compose.open.yml`
+  is that configuration in one file, full build included, on port 8300 of the machine
+  itself, with `deploy/apache-remn.conf` as the matching Apache virtual host:
+
+  ```
+  sudo docker compose -f docker-compose.open.yml up -d --build
+  ```
 - **`docker run` without `-p`.** The container listens on 8000 inside; publish it with
   `-p 127.0.0.1:8000:8000`.
 

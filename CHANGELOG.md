@@ -11,6 +11,10 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 - Fixed: on the development server a fresh browser got two "Case 1" cases, because React
   runs the boot effect twice there and both runs saw an empty case table. The default case
   is now created inside one transaction.
+- Compose takes `REMN_BIND`, `REMN_HOSTS` and `REMN_TOKEN` to publish the container on a
+  network; `REMN_HOSTS='*'` switches the host check off. `docker-compose.open.yml` is the
+  behind-a-proxy configuration in one file (full build, no checks, port 8300 on loopback),
+  with `deploy/apache-remn.conf` as the matching virtual host.
 
 ## 0.1.1 (2026-09-07)
 
