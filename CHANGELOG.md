@@ -22,6 +22,9 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   time, pip removed from the runtime image (extras go in through `--build-arg EXTRA_PIP`),
   and a CI job that builds, runs and Trivy-scans the image, failing on critical or high
   findings that have a fix. The compose file takes the host port from `REMN_PORT`.
+- Docker full build: Python packages are installed in a build stage with a compiler and
+  copied into the runtime image, so `--build-arg EXTRA_PIP="yara-python libpff-python"`
+  (or `REMN_EXTRA_PIP` with compose) gives a container with PST and YARA support.
 
 ## 0.1.0 (2026-09-07)
 

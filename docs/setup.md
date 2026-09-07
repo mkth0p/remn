@@ -89,19 +89,28 @@ If the container starts but the page does not load, check these in order:
 - **`docker run` without `-p`.** The container listens on 8000 inside; publish it with
   `-p 127.0.0.1:8000:8000`.
 
-Not in the image: PST support (libpff needs a build), YARA, GeoLite2 and the offline
-lists (mount them under `/app/backend/data`), and the Claude Code connector, which runs
-the `claude` command line on the host. Extra Python packages go in at build time, since
-the runtime image keeps no package manager:
+The default build is the core: everything in `requirements.txt`, no PST or YARA. The
+full build adds the optional packages; they are named at build time because the runtime
+image keeps no package manager, and a build stage with a compiler takes care of libpff:
 
 ```
-docker build --build-arg EXTRA_PIP="yara-python" -t remn .
+docker build --build-arg EXTRA_PIP="yara-python libpff-python" -t remn .
 ```
+
+or, with compose, `REMN_EXTRA_PIP="yara-python libpff-python" docker compose up --build`
+(`set REMN_EXTRA_PIP=yara-python libpff-python` first in a Windows command prompt). The
+health endpoint, `/api/health`, reports what the running server has under `optional`.
+
+Still not in the image: GeoLite2 and the offline lists, which are data the operator
+downloads under licence (mount your `backend/data` folder at `/app/backend/data`), YARA
+rules themselves (drop `.yar` files under that folder's `yara/`), and the Claude Code
+connector, which runs the `claude` command line on the host.
 
 The image is built from base images pinned by digest, takes Debian's security updates at
-build time, and continuous integration scans every build with Trivy, failing on critical
-or high findings that have a fix. Findings without a fix from Debian yet (zlib and tar at
-the time of writing) stay visible in a scan but do not fail the build.
+build time, runs as a non-root user with neither a compiler nor pip, and continuous
+integration scans every build with Trivy, failing on critical or high findings that have
+a fix. Findings without a fix from Debian yet (zlib and tar at the time of writing) stay
+visible in a scan but do not fail the build.
 
 ## Remote access
 

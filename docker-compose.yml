@@ -3,7 +3,11 @@
 # browser-store cases live in the browser, as always.
 services:
   remn:
-    build: .
+    build:
+      context: .
+      args:
+        # the optional Python packages; REMN_EXTRA_PIP="yara-python libpff-python" docker compose up --build
+        EXTRA_PIP: ${REMN_EXTRA_PIP:-}
     image: remn
     ports:
       # host port; REMN_PORT=8020 docker compose up when 8000 is taken (a dev server, for instance)
