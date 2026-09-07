@@ -99,8 +99,21 @@ docker compose up --build
 `docker-compose.yml` publishes the port on 127.0.0.1 only, keeps the server store and
 the upload area in named volumes (`remn-data`, `remn-tmp`), and points `OLLAMA_HOST` at an
 Ollama on the host machine for the server proxy transport (the browser-direct transport
-needs nothing from the container). For remote access add the machine's name or address to
-`FORENSIC_ALLOWED_HOSTS` and set `FORENSIC_AUTH_TOKEN`, as in the remote access section.
+needs nothing from the container).
+
+If the container starts but the page does not load, check these in order:
+
+- **Port 8000 is already taken**, typically by a REMN dev server on the same machine.
+  Compose then stops with "ports are not available". Pick another host port:
+  `REMN_PORT=8020 docker compose up`, then open http://127.0.0.1:8020.
+- **The address.** The port is bound to 127.0.0.1, so http://localhost:8000 and
+  http://127.0.0.1:8000 work from the same machine and nothing else does. Reaching it by
+  the machine's name or address, or from another machine, needs the remote-access setup:
+  publish on `0.0.0.0` in the compose file, add the name or address to
+  `FORENSIC_ALLOWED_HOSTS` (Django answers 400 otherwise) and set `FORENSIC_AUTH_TOKEN`,
+  as in the remote access section above.
+- **`docker run` without `-p`.** The container listens on 8000 inside; publish it with
+  `-p 127.0.0.1:8000:8000`.
 
 Not in the image: PST support (libpff needs a build), YARA, GeoLite2 and the offline
 lists (mount them under `/app/backend/data`), and the Claude Code connector, which runs
