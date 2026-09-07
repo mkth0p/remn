@@ -21,7 +21,7 @@ jobs:
           code=$(sed -n 's/^VERSION = "\(.*\)"/\1/p' backend/api/views/health.py)
           echo "tag $tag, code $code"
           test "$tag" = "$code"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
