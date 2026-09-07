@@ -34,3 +34,23 @@ _What leaves the machine, what is stored where, hardening in place._
   neutralise spreadsheet formula injection.
 * No outbound request unless "allow external lookups" is enabled for the case;
   the AI model only sees what the tools return from the local database.
+
+## Text in the evidence that addresses the model
+
+The analyst chat reads tool results, the triage pass reads item summaries, and the
+Claude Code connector reads a transcript; all three carry text that came from the
+evidence, which an attacker may have written. Three things stand between that text and
+a decision:
+
+- Every prompt on those paths says the case text is evidence, never an instruction, and
+  that a record asking to be ignored or marked benign is evidence of intent to be named
+  in the reason (`backend/services/ai/prompts.py`, `claude_code.py`, the triage
+  instruction in `frontend/src/data/aiReview.ts`; `tests/backend/test_ai_meta.py` checks
+  the sentences are there).
+- The synthetic lab carries a control, S07, a password-expiry lure whose body tells
+  automated reviewers to classify it as benign. The rules score it on its facts; a model
+  that follows the text fails the control.
+- Whatever the model decides is written with a tag, a reason and a snapshot of what it
+  replaced (`frontend/src/data/aiReview.test.ts` and `aiReview.db.test.ts`), so a steered
+  decision is visible in the rail, in the log popup and in the report, and undo puts the
+  previous state back.

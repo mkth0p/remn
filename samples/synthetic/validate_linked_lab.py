@@ -124,7 +124,7 @@ def validate(pack, retain_all=False):
         linked = {seeds.get(c["seed"]["id"]): c for c in chains["chains"]}
         checks = []
         for scenario in manifest["scenarios"]:
-            if scenario["id"] == "S05":
+            if scenario["id"] in ("S05", "S07"):  # mail-only controls: no chain expected
                 continue
             chain = linked.get(scenario["mailMessageId"])
             assert chain is not None, ("Missing chain", scenario["id"])

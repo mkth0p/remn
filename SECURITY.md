@@ -27,8 +27,10 @@ credentials or exploit details in a public issue. Reports are acknowledged withi
 - No sandboxed execution: attachments are analysed statically (structure, macros,
   scripts, URLs, YARA), never opened or run.
 - Model output is untrusted. Evidence text reaches the model, so a crafted mail can try
-  to steer it. Decisions the model takes are tagged, logged and undoable, and never
-  bypass the analyst.
+  to steer it. Every prompt that carries case text says that text is evidence, never an
+  instruction; the synthetic lab has a control mail (S07) that tries exactly this; and
+  decisions the model takes are tagged, logged and undoable, and never bypass the
+  analyst.
 
 ## Scope of a report
 
