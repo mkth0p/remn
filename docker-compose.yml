@@ -5,7 +5,8 @@
 # Variables (all optional):
 #   REMN_PORT       host port, default 8000
 #   REMN_BIND       host address to publish on, default 127.0.0.1 (this machine only); 0.0.0.0 for the network
-#   REMN_HOSTS      extra names or addresses browsers reach it by (comma list); needed with REMN_BIND=0.0.0.0
+#   REMN_HOSTS      extra names or addresses browsers reach it by (comma list); needed with REMN_BIND=0.0.0.0;
+#                   '*' accepts any name, for a setup whose own proxy or firewall decides who gets in
 #   REMN_TOKEN      shared access token; required by the server before it answers on anything but loopback
 #   REMN_EXTRA_PIP  optional Python packages for the full build ("yara-python libpff-python")
 # Example, reachable on the network by address:

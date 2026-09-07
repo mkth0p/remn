@@ -126,6 +126,11 @@ If the container starts but the page does not load, check these in order:
 
   The traffic is plain HTTP, so this is for a network you trust; the remote-access
   section below covers HTTPS and access from outside.
+- **Behind your own protection.** When a reverse proxy, a VPN or a firewall in front
+  already decides who gets in, both checks can be switched off: `REMN_HOSTS='*'` accepts
+  any host name and an empty `REMN_TOKEN` (the default) asks for nothing. The server then
+  prints a warning at start, because anyone who reaches the port can read and delete
+  every server-store case; that is the trade-off being made.
 - **`docker run` without `-p`.** The container listens on 8000 inside; publish it with
   `-p 127.0.0.1:8000:8000`.
 
