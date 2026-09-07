@@ -1,6 +1,15 @@
 # docker compose up --build
 # Then open http://127.0.0.1:8000. Cases in the server store live in the remn-data volume;
 # browser-store cases live in the browser, as always.
+#
+# Variables (all optional):
+#   REMN_PORT       host port, default 8000
+#   REMN_BIND       host address to publish on, default 127.0.0.1 (this machine only); 0.0.0.0 for the network
+#   REMN_HOSTS      extra names or addresses browsers reach it by (comma list); needed with REMN_BIND=0.0.0.0
+#   REMN_TOKEN      shared access token; required by the server before it answers on anything but loopback
+#   REMN_EXTRA_PIP  optional Python packages for the full build ("yara-python libpff-python")
+# Example, reachable on the network by address:
+#   REMN_BIND=0.0.0.0 REMN_HOSTS=192.0.2.10 REMN_TOKEN=$(openssl rand -hex 24) docker compose up -d --build
 services:
   remn:
     build:
@@ -10,13 +19,13 @@ services:
         EXTRA_PIP: ${REMN_EXTRA_PIP:-}
     image: remn
     ports:
-      # host port; REMN_PORT=8020 docker compose up when 8000 is taken (a dev server, for instance)
-      - "127.0.0.1:${REMN_PORT:-8000}:8000"
+      # host address and port; REMN_PORT=8020 when 8000 is taken, REMN_BIND=0.0.0.0 to publish on the network
+      - "${REMN_BIND:-127.0.0.1}:${REMN_PORT:-8000}:8000"
     environment:
-      # hosts the browser reaches this container by; add the machine's name or address for remote access
-      FORENSIC_ALLOWED_HOSTS: localhost,127.0.0.1
-      # a shared token for remote access; leave empty on a loopback-only setup (see docs/setup.md)
-      FORENSIC_AUTH_TOKEN: ""
+      # names or addresses the browser reaches this container by; localhost and 127.0.0.1 are always accepted
+      FORENSIC_ALLOWED_HOSTS: ${REMN_HOSTS:-}
+      # the shared access token; the server refuses to answer beyond loopback without one (see docs/setup.md)
+      FORENSIC_AUTH_TOKEN: ${REMN_TOKEN:-}
       # an Ollama on the host machine, for the server proxy transport
       OLLAMA_HOST: http://host.docker.internal:11434
     extra_hosts:

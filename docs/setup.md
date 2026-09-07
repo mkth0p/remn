@@ -113,11 +113,19 @@ If the container starts but the page does not load, check these in order:
   machine. Compose then stops with "ports are not available". Pick another host port:
   `REMN_PORT=8020 docker compose up` (`set REMN_PORT=8020` first in a Windows command
   prompt), then open http://127.0.0.1:8020.
-- **The address.** The port is bound to 127.0.0.1, so http://localhost:8000 and
-  http://127.0.0.1:8000 work from the same machine and nothing else does. Reaching it by
-  the machine's name or address, or from another machine, needs the remote-access setup
-  below: publish on `0.0.0.0` in the compose file, add the name or address to
-  `FORENSIC_ALLOWED_HOSTS` (Django answers 400 otherwise) and set `FORENSIC_AUTH_TOKEN`.
+- **The address.** By default the port is bound to 127.0.0.1, so http://localhost:8000
+  and http://127.0.0.1:8000 work from the same machine and nothing else does: a browser
+  on another computer gets a refused connection. Publishing on the network takes three
+  variables: `REMN_BIND=0.0.0.0`, `REMN_HOSTS` with the name or address browsers will use
+  (Django answers 400 to any other), and `REMN_TOKEN`, which every analyst pastes once
+  when the page asks for it. For example, on a machine reached as 192.0.2.10:
+
+  ```
+  REMN_BIND=0.0.0.0 REMN_HOSTS=192.0.2.10 REMN_TOKEN=$(openssl rand -hex 24) docker compose up -d --build
+  ```
+
+  The traffic is plain HTTP, so this is for a network you trust; the remote-access
+  section below covers HTTPS and access from outside.
 - **`docker run` without `-p`.** The container listens on 8000 inside; publish it with
   `-p 127.0.0.1:8000:8000`.
 
