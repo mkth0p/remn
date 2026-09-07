@@ -92,18 +92,33 @@ export function ReportView() {
     campaignInsights: settings.includeGraphs && selection.chains.length > 1 ? buildCampaignGraph(selection.chains).insights.slice(0, 8).map((x) => x.text) : [],
     incidents, findings: shown, iocs, timeline: curated, tasks, notes: analystNotes, undecided, fontData,
   })
-  // the report is built from case data: print it from a sandboxed frame (opaque origin, no access to the case database)
+  /** The report in its own tab: the browser's own print-to-PDF, or to keep it open next to the case. */
+  const openReport = () => {
+    const url = URL.createObjectURL(new Blob([html()], { type: 'text/html' }))
+    const w = window.open(url, '_blank')
+    if (w) w.opener = null
+    else toast('err', 'the browser blocked the new tab: allow pop-ups for this site, or use "download HTML"', 0)
+    setTimeout(() => URL.revokeObjectURL(url), 120_000)
+  }
+  // the report is built from case data: it prints from a frame that runs no script (so nothing in it can
+  // reach the case database) but keeps the app's origin, which the browser needs before it lets the page
+  // call print() on the frame; a sandbox without allow-same-origin makes that call a SecurityError
   const printReport = () => {
     const frame = document.createElement('iframe')
-    frame.setAttribute('sandbox', 'allow-modals')
+    frame.setAttribute('sandbox', 'allow-same-origin allow-modals')
     frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0'
     frame.srcdoc = html()
     frame.onload = () => {
       try {
+        frame.contentWindow?.focus()
         frame.contentWindow?.print()
-      } finally {
-        setTimeout(() => frame.remove(), 60_000)
+      } catch (e) {
+        frame.remove()
+        toast('err', `the browser refused to print from the page (${(e as Error).message}); the report opens in a new tab, print it from there`, 0)
+        openReport()
+        return
       }
+      setTimeout(() => frame.remove(), 60_000)
     }
     document.body.appendChild(frame)
   }
@@ -118,6 +133,7 @@ export function ReportView() {
         <button className="btn sm" onClick={() => setView('review')}><IconCheck /> review and choose contents</button>
         <button className="btn sm" onClick={generateSummary} disabled={busy}>{busy ? <Spinner /> : <IconAi />} AI executive summary</button>
         <button className="btn sm primary" onClick={() => downloadBlob(`${kase.name.replace(/[^a-z0-9_-]+/gi, '_')}-report.html`, new Blob([html()], { type: 'text/html' }))}><IconDownload /> download HTML</button>
+        <button className="btn sm" onClick={openReport}>open in a tab</button>
         <button className="btn sm" onClick={printReport}>print / PDF</button>
       </div>
       <div className="view-body col" style={{ gap: 14 }}>
