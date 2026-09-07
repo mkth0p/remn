@@ -224,7 +224,6 @@ def _nest_mail(r: dict[str, Any]) -> dict[str, Any]:
     """Reshape a flat mails-table row (+joined children) into the nested
     build_row shape that MailWriter.add (and therefore /import) consumes."""
     r = dict(r)
-    r.pop("id", None)
     r["auth"] = {k: r.pop(k, None) for k in ("spf", "dkim", "dmarc", "compauth")}
     rt_list = r.pop("replyToList", None) or []
     rt_addr, rt_dom = r.pop("replyToAddr", None), r.pop("replyToDomain", None)
@@ -271,7 +270,6 @@ def export_rows(request: HttpRequest, key: str):
                         r["data"] = json.loads(r["data"])
                     except ValueError:
                         pass
-                r.pop("id", None)
                 yield ndjson_line({"type": "event", **r})
         last = -1
         while True:
@@ -320,8 +318,9 @@ def import_rows(request: HttpRequest, key: str):
     except ValueError:
         return JsonResponse({"error": "bad evidenceId"}, status=400)
     include_raw = request.GET.get("raw", "1") not in ("0", "false")
-    ew = EventWriter(st, evidence_id, include_raw=include_raw)
-    mw = MailWriter(st, evidence_id, keep_bodies=True)
+    preserve_ids = request.GET.get("preserveIds") == "1"
+    ew = EventWriter(st, evidence_id, include_raw=include_raw, preserve_ids=preserve_ids)
+    mw = MailWriter(st, evidence_id, keep_bodies=True, preserve_ids=preserve_ids)
     n_e = n_m = 0
     stats = evtx_parser.Stats()
     mstats = MailStats()

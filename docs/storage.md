@@ -27,6 +27,25 @@ the conversion when a file above the threshold is dropped. Settings in `.env`:
 `FORENSIC_CASES_DIR`, `FORENSIC_STORE_THRESHOLD_MB` (the suggestion threshold, default
 150), `FORENSIC_MAX_CHUNKED_GB` (default 64), `FORENSIC_CHUNK_MB` (default 16).
 
+Migration transfers bounded pages to a new server store, preserves event and mail IDs,
+and retains findings, reviews, narratives and links. Only a completed transfer switches
+the case's storage and removes browser evidence. A failed transfer leaves the browser
+case available. Finish ingestion before migrating.
+
+## Portable case backups
+
+Report exports a `.remn.ndjson` backup to a selected file, or through temporary browser
+file storage. Rows are streamed and checksummed without collecting the whole dataset in
+memory. The backup includes chain snapshots, review decisions, report settings, notes and
+AI undo history. Import verifies the entire checksum before creating a case, remaps row
+IDs and links, and removes partial imports on failure. Keep ingestion and analysis idle
+while exporting to obtain a consistent snapshot.
+
+Legacy `.remn.json` browser backups remain supported and require memory for their JSON
+document. Older server backups omitted row IDs, so their investigation links cannot be
+recovered reliably; import rejects those explicitly. Original evidence files are separate
+from these parsed-data backups and should be retained separately.
+
 Measured on a laptop with 200,000 synthetic events and 55 Windows rules
 (`samples/synthetic/scale_test.py`):
 
@@ -38,8 +57,8 @@ Measured on a laptop with 200,000 synthetic events and 55 Windows rules
 | full-text search across 20 columns | about 0.5 s |
 | 55 rules (bursts, spraying, out-of-hours, LOLBins, …) | about 20 s |
 
-A 1 GB Security.evtx (about 3.5 million events) therefore ingests in a few minutes and
-queries stay interactive. Per-row rules that match more than 200 rows are collapsed into
+Those timings are measurements of that synthetic case, not a throughput guarantee for
+multi-gigabyte real evidence. Per-row rules that match more than 200 rows are collapsed into
 one finding per entity (user, host, IP, …) with a count, instead of thousands of identical
 alerts.
 

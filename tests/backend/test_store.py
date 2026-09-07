@@ -479,11 +479,12 @@ def test_export_roundtrip(tmp_path):
         for ln in lines:
             kinds[ln["type"]] = kinds.get(ln["type"], 0) + 1
         assert kinds == {"evidence": 2, "event": 50, "mail": 5}
+        assert all(isinstance(row.get("id"), int) for row in lines)
 
         # rebuild into a fresh store with the same writers /import uses
         dst = reg.get(str(uuid.uuid4()))
-        ew2 = EventWriter(dst, 1)
-        mw2 = MailWriter(dst, 2)
+        ew2 = EventWriter(dst, 1, preserve_ids=True)
+        mw2 = MailWriter(dst, 2, preserve_ids=True)
         for ln in lines:
             t = ln.pop("type")
             if t == "evidence":

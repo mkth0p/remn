@@ -1,6 +1,7 @@
 import { getDb, type Finding } from '../db/schema'
 
-type Review = Pick<Finding, 'status' | 'notes' | 'createdAt' | 'severityOverride' | 'reportExclude' | 'chainUnlinked' | 'decidedBy' | 'aiReason' | 'notesBy'>
+type Review = Pick<Finding, 'status' | 'notes' | 'createdAt' | 'severityOverride' | 'reportExclude' | 'chainUnlinked' | 'decidedBy' | 'aiReason' | 'notesBy'> &
+  Partial<Pick<Finding, 'source' | 'refs' | 'ruleId'>>
 
 const decided = (f: Finding) => f.status !== 'new' || !!f.notes || !!f.severityOverride || !!f.reportExclude || !!f.chainUnlinked || !!f.aiReason
 
@@ -33,6 +34,9 @@ export async function rememberReviews(caseId: number, findings: Finding[]): Prom
   for (const f of findings) {
     if (decided(f))
       saved[f.key] = {
+        source: f.source,
+        refs: f.refs,
+        ruleId: f.ruleId,
         status: f.status,
         notes: f.notes,
         createdAt: f.createdAt,
