@@ -5,15 +5,17 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+## 0.1.0 (2026-09-07)
+
+The first tagged state of the tool.
+
 - Repository scaffolding: Apache-2.0 licence and third-party notices, CI on every push
   (pytest, ruff, typecheck, ESLint, Prettier, vitest, build, bundle budget), release
   workflow, ruff and ESLint/Prettier configuration with pre-commit hooks, documentation
-  split into `docs/`, contributing and security policies.
-
-## 0.1.0
-
-The state of the tool in September 2026, before any release.
-
+  split into `docs/`, contributing and security policies, a Dockerfile and compose file.
+- Evidence text is framed as data on every path the model reads it; the synthetic lab
+  carries a prompt-injection control (S07); the tag, reason, snapshot and undo around a
+  model decision are covered by tests.
 - Ingestion of Windows event logs (EVTX, archives), mailboxes (PST/OST, mbox, eml, msg)
   and Microsoft 365 audit and Entra sign-in exports; SHA-256 chain of custody; browser
   (IndexedDB) and server (DuckDB) stores; chunked resumable uploads and background jobs.
