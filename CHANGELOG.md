@@ -3,7 +3,7 @@
 Versions follow semantic versioning; the number lives in `backend/api/views/health.py`
 and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
-## Unreleased
+## 0.1.1 (2026-09-07)
 
 - Fixed: an account with the same name in another organisation
   (`alice@other-tenant.example`, `OTHER\alice`) joined `alice@northstar.example`'s

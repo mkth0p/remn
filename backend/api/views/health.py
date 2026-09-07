@@ -13,7 +13,7 @@ from services.analysis.attachments import yara_scan
 from services.parsers.mail import pst
 from services.reputation.base import registry
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 
 
 @require_GET
