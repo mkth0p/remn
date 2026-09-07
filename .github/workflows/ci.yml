@@ -77,6 +77,9 @@ jobs:
           for i in $(seq 1 20); do curl -fs -H "X-Forensic-Client: 1" http://127.0.0.1:8000/api/health > /dev/null && break; sleep 2; done
           curl -fs -H "X-Forensic-Client: 1" http://127.0.0.1:8000/api/health | head -c 200; echo
           docker rm -f remn
+      # pip is not in the runtime image, but Trivy records the libraries pip vendors (msgpack, setuptools, ...)
+      # from the base layer without a file path, so their removal in a later layer is invisible to it;
+      # the pip directory is skipped for that reason and no other
       - name: Scan
         uses: aquasecurity/trivy-action@0.28.0
         with:
@@ -84,4 +87,5 @@ jobs:
           format: table
           severity: CRITICAL,HIGH
           ignore-unfixed: true
+          skip-dirs: usr/local/lib/python3.13/site-packages/pip
           exit-code: "1"
