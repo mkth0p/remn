@@ -5,6 +5,15 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- Fixed: with the built frontend served by the Python API (run.py, Docker), every upload
+  failed and a failed row could not be removed. The middleware put the API's closed policy
+  (`default-src 'none'; sandbox`) on script assets too, and a web worker takes its policy
+  from its own script's response, so the hashing and ingest workers could neither compile
+  WebAssembly nor reach the API or the browser database. Scripts now carry the page's
+  policy; a test pins both. A browser that loaded the earlier build keeps the old header
+  in its cache (the files are content-hashed and immutable): reload once with the cache
+  bypassed (Ctrl+F5) after updating.
+
 ## 0.1.0 (2026-09-07)
 
 The first tagged state of the tool.

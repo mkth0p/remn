@@ -60,8 +60,12 @@ class SecurityHeadersMiddleware:
         resp.setdefault("Cross-Origin-Opener-Policy", "same-origin")
         resp.setdefault("Cross-Origin-Resource-Policy", "same-origin")
         resp.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
-        if not request.path.startswith("/api/") and str(resp.get("Content-Type", "")).startswith("text/html"):
-            resp.setdefault("Content-Security-Policy", CSP)
-        else:
+        ct = str(resp.get("Content-Type", ""))
+        if request.path.startswith("/api/"):
+            # API bodies are data: nothing in them may run, embed or be framed
             resp.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; sandbox")
+        elif ct.startswith("text/html") or ct.startswith("text/javascript") or ct.startswith("application/javascript"):
+            # the app pages, and the scripts: a web worker takes its policy from its own script's response,
+            # so the hashing and ingest workers must get the page's policy (wasm, connect-src), not the API one
+            resp.setdefault("Content-Security-Policy", CSP)
         return resp
