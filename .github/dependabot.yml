@@ -14,6 +14,13 @@ updates:
     groups:
       javascript:
         patterns: ["*"]
+    ignore:
+      # a new TypeScript major has to wait for typescript-eslint to accept it
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+      # js-yaml 5 changed its module shape; the rule loader and its tests are written against 4
+      - dependency-name: js-yaml
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
