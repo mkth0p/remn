@@ -104,5 +104,14 @@ needs nothing from the container). For remote access add the machine's name or a
 
 Not in the image: PST support (libpff needs a build), YARA, GeoLite2 and the offline
 lists (mount them under `/app/backend/data`), and the Claude Code connector, which runs
-the `claude` command line on the host. To add the optional Python packages, build with a
-requirements file of your own or run `pip install` in a derived image.
+the `claude` command line on the host. Extra Python packages go in at build time, since
+the runtime image keeps no package manager:
+
+```
+docker build --build-arg EXTRA_PIP="yara-python" -t remn .
+```
+
+The image is built from base images pinned by digest, takes Debian's security updates at
+build time, and CI scans every build with Trivy, failing on critical or high findings that
+have a fix. Findings without a fix from Debian yet (zlib, tar at the time of writing)
+stay visible in a scan but do not fail the build.

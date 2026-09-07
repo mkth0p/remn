@@ -63,3 +63,25 @@ jobs:
           size=$(stat -c %s dist/assets/index-*.js | sort -n | tail -1)
           echo "largest bundle: $size bytes"
           test "$size" -lt 2000000
+
+  image:
+    name: image (build, scan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build
+        run: docker build --pull -t remn:ci .
+      - name: Serves
+        run: |
+          docker run -d --name remn -p 127.0.0.1:8000:8000 remn:ci
+          for i in $(seq 1 20); do curl -fs -H "X-Forensic-Client: 1" http://127.0.0.1:8000/api/health > /dev/null && break; sleep 2; done
+          curl -fs -H "X-Forensic-Client: 1" http://127.0.0.1:8000/api/health | head -c 200; echo
+          docker rm -f remn
+      - name: Scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: remn:ci
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
