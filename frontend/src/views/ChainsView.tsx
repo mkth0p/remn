@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Badge, Dot, Sev, Spinner, Tabs } from '../components/ui'
 import { IconAi, IconCloud, IconHost, IconMail, IconPlay } from '../components/Icons'
-import { buildChains, EVENT_CAP, loadChains, type Chain, type ChainResult, type ChainStep } from '../data/chains'
+import { buildChains, EVENT_CAP, chainCoverageWarnings, loadChains, type Chain, type ChainResult, type ChainStep } from '../data/chains'
 import { toast, useStore } from '../state/store'
 import { AddToTimeline } from '../components/AddToTimeline'
 import { ChainGraph } from '../components/ChainGraph'
@@ -110,7 +110,7 @@ export function ChainsView() {
   }
   const ask = (c: Chain) => {
     setAiPrompt(
-      `Walk me through attack chain ${c.id} for ${c.identityLabel} (score ${c.score}, ${c.steps.length} steps from ${new Date(c.start).toISOString()} to ${new Date(c.end).toISOString()}). Seed mail id ${c.seed.id} "${c.seed.subject}" from ${c.seed.fromAddr}. Steps: ${c.steps
+      `Walk me through attack chain ${c.id} for ${c.identityLabel} (score ${c.score}, ${c.steps.length} steps from ${new Date(c.start).toISOString()} to ${new Date(c.end).toISOString()}). Seed ${c.seed.source ?? 'mails'} id ${c.seed.id} "${c.seed.subject}" from ${c.seed.fromAddr}. Steps: ${c.steps
         .slice(0, 25)
         .map((s) => `${offset(s.offsetMin)} ${s.title}${s.artifacts.length ? ' [' + s.artifacts.join('; ') + ']' : ''}`)
         .join(' | ')}. Which steps confirm compromise, which are routine, and what should be checked or contained next?`,
@@ -134,7 +134,7 @@ export function ChainsView() {
               {step.tsEnd && step.tsEnd > step.ts ? ` → ${fmtTs(step.tsEnd)}` : ''}
             </div>
             <div className="k">offset</div>
-            <div className="v">{offset(step.offsetMin)} from the seed mail</div>
+            <div className="v">{offset(step.offsetMin)} from the seed record</div>
             <div className="k">rows</div>
             <div className="v">{fmtNum(step.count)}</div>
             {step.operation != null && (
@@ -232,18 +232,23 @@ export function ChainsView() {
           {busy ? <Spinner /> : <IconPlay />} build chains
         </button>
       </div>
+      {chainCoverageWarnings(res?.stats).map((w) => (
+        <div className="panel" role="status" key={w}>
+          Incomplete analysis: {w} Narrow the case evidence or analysis window before treating an absent chain as a negative result.
+        </div>
+      ))}
       <div className="split" style={{ gridTemplateColumns: '320px 1fr' }}>
         <div className="left">
           {!res && (
             <div className="muted small" style={{ padding: 14, lineHeight: 1.5 }}>
               A chain starts from a suspicious mail (risk above the threshold, or carrying a medium+ finding) and follows what its recipient did next across the mailbox, Microsoft 365 / Entra audit
               rows and Windows events: replies to the sender, sign-ins, mailbox rules, consent grants, role changes, processes spawned by Outlook or a browser, DNS queries and files that name the
-              mail's links or attachments.
+              mail's links or attachments. Authentication campaigns also work with Windows or Entra logs alone: at least ten failures for one account, source IP and destination within thirty minutes.
             </div>
           )}
           {res && res.chains.length === 0 && (
             <div className="muted small" style={{ padding: 14 }}>
-              No chain: no recipient of a seed mail has correlated activity in the window.
+              No qualifying mail-led activity or authentication campaign was found in the analysed records.
             </div>
           )}
           {res?.chains.map((c) => (
@@ -388,10 +393,10 @@ export function ChainsView() {
                       <div
                         className="step"
                         onClick={() => {
-                          setFocus({ source: 'mails', id: chain.seed.id })
-                          setView('mails')
+                          setFocus({ source: chain.seed.source ?? 'mails', id: chain.seed.id })
+                          setView(chain.seed.source ?? 'mails')
                         }}
-                        title="open the seed mail"
+                        title="open the seed record"
                       >
                         <span className="t">
                           {fmtTs(chain.seed.ts)}
@@ -406,7 +411,7 @@ export function ChainsView() {
                             {chain.seed.subject || '(no subject)'} <Badge sev={chain.seed.risk >= 80 ? 'critical' : chain.seed.risk >= 60 ? 'high' : 'medium'}>risk {chain.seed.risk}</Badge>
                           </div>
                           <div className="sub">
-                            from {chain.seed.fromAddr}
+                            {chain.seed.source === 'events' ? 'Authentication event' : `from ${chain.seed.fromAddr}`}
                             {chain.seed.urlDomains.length ? ` · links ${chain.seed.urlDomains.join(', ')}` : ''}
                             {chain.seed.attachments.length ? ` · attachments ${chain.seed.attachments.join(', ')}` : ''}
                           </div>
@@ -501,8 +506,8 @@ export function ChainsView() {
                       <div
                         className="v click"
                         onClick={() => {
-                          setFocus({ source: 'mails', id: chain.seed.id })
-                          setView('mails')
+                          setFocus({ source: chain.seed.source ?? 'mails', id: chain.seed.id })
+                          setView(chain.seed.source ?? 'mails')
                         }}
                       >
                         {chain.seed.subject || '(no subject)'}

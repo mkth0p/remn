@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { getSource } from '../data/source'
-import { loadChains, type Chain } from '../data/chains'
+import { chainCoverageWarnings, loadChains, type Chain } from '../data/chains'
 import { listNotes } from '../data/caseNotes'
 import { chainSeverity, effectiveSeverity, loadChainReviews, loadReportSettings, selectForReport, type ChainReview, type ReportSettings } from '../data/review'
 import { getDb, type CaseNote, type Evidence, type Finding, type Ioc } from '../db/schema'
@@ -30,6 +30,7 @@ export function ReportView() {
   const [evidence, setEvidence] = useState<Evidence[]>([])
   const [findings, setFindings] = useState<Finding[]>([])
   const [chains, setChains] = useState<Chain[]>([])
+  const [coverageWarnings, setCoverageWarnings] = useState<string[]>([])
   const [reviews, setReviews] = useState<Record<string, ChainReview>>({})
   const [settings, setSettings] = useState<ReportSettings | null>(null)
   const [iocs, setIocs] = useState<Ioc[]>([])
@@ -56,7 +57,10 @@ export function ReportView() {
       .catch(() => setIocs([]))
     db.kv.get(`report-summary-${kase.id}`).then((k) => setSummary((k?.value as string) ?? ''))
     listNotes(kase.id).then(setNotes)
-    loadChains(kase.id).then((r) => setChains(r?.chains ?? []))
+    loadChains(kase.id).then((r) => {
+      setChains(r?.chains ?? [])
+      setCoverageWarnings(chainCoverageWarnings(r?.stats))
+    })
     loadChainReviews(kase.id).then(setReviews)
     loadReportSettings(kase.id).then(setSettings)
   }, [kase, rulesVersion])
@@ -113,6 +117,7 @@ export function ReportView() {
       evidence,
       chains: selection.chains,
       reviews,
+      coverageWarnings,
       membersOf,
       graphs,
       campaignInsights:
@@ -243,7 +248,7 @@ export function ReportView() {
               <div className="panel-b col">
                 <div className="row">
                   <button className="btn sm" onClick={() => exportCaseBundle(kase, setProgress).catch((e) => toast('err', e.message))}>
-                    <IconDownload /> export case bundle (.remn.json)
+                    <IconDownload /> export case bundle (.remn.ndjson)
                   </button>
                   <span className="small dim">{progress}</span>
                 </div>

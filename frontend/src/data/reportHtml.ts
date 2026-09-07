@@ -25,6 +25,7 @@ export interface ReportData {
   /** PNG data URLs by chain id, plus 'campaign' */
   graphs: Record<string, string>
   campaignInsights: string[]
+  coverageWarnings?: string[]
   /** incidents other than chains */
   incidents: Incident[]
   /** every finding the report carries */
@@ -216,7 +217,7 @@ function chainCard(c: Chain, d: ReportData): string {
     : `<div class="narr"><p>${h(c.summary)}</p></div>`
   return `<div class="card chain">
 <div class="card-head">${pill(chainSeverity(c, r))}<h3>${h(c.identityLabel)}</h3>${verdictPill(r?.verdict)}${meter(c)}</div>
-<div class="card-meta">Seed mail “${h(c.seed.subject)}” from <code>${h(c.seed.fromAddr ?? '')}</code> at ${fmtTs(c.seed.ts)} (risk ${c.seed.risk}) · ${c.steps.length} steps from ${fmtTs(c.start)} to ${fmtTs(c.end)} · ${c.artifactLinks} tie(s) to the mail${c.entities.attackerAddresses.length ? ` · attacker <code>${h(c.entities.attackerAddresses.join(', '))}</code>` : ''}${c.entities.ips.length ? ` · IPs <code>${h(c.entities.ips.join(', '))}</code>` : ''}${c.entities.hosts.length ? ` · hosts <code>${h(c.entities.hosts.join(', '))}</code>` : ''}</div>
+<div class="card-meta">Seed ${c.seed.source === 'events' ? 'event' : 'mail'} “${h(c.seed.subject)}” from <code>${h(c.seed.fromAddr ?? '')}</code> at ${fmtTs(c.seed.ts)} (risk ${c.seed.risk}) · ${c.steps.length} steps from ${fmtTs(c.start)} to ${fmtTs(c.end)} · ${c.artifactLinks} artifact tie(s)${c.entities.attackerAddresses.length ? ` · attacker <code>${h(c.entities.attackerAddresses.join(', '))}</code>` : ''}${c.entities.ips.length ? ` · IPs <code>${h(c.entities.ips.join(', '))}</code>` : ''}${c.entities.hosts.length ? ` · hosts <code>${h(c.entities.hosts.join(', '))}</code>` : ''}</div>
 ${narrative}
 ${d.settings.includeGraphs ? img(d.graphs[c.id], `graph of the chain for ${c.identityLabel}`, 'Steps by lane and time: diamond = seed mail, box = step (size = weight, colour = worst finding), grey dot = folded routine steps, green edges = ties to the mail.') : ''}
 ${table(
@@ -387,6 +388,7 @@ export function buildReportHtml(d: ReportData): string {
     d.fontData && /^[A-Za-z0-9+/=]+$/.test(d.fontData) ? `@font-face{font-family:'Gulax';src:url(data:font/woff2;base64,${d.fontData}) format('woff2');font-weight:400;font-style:normal}` : ''
   const generated = new Date(d.generatedAt).toISOString().replace('T', ' ').slice(0, 19) + 'Z'
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>REMN report · ${h(kase.name)}</title><style>${font}${CSS}</style></head><body>
+${(d.coverageWarnings ?? []).map((w) => `<div class="card">Incomplete chain analysis: ${h(w)}</div>`).join('')}
 <div class="cover-page">
 <div class="cover">
 <div class="brand"><span class="wordmark">REMN</span><span class="tag">forensic analysis report</span></div>

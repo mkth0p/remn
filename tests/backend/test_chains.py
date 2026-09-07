@@ -131,7 +131,7 @@ def test_chain_links_mail_host_and_m365_by_identity_and_artifacts():
     res = C.build_chains(mails, events, findings, {"expected_countries": ["FR"], "internal_domains": ["contoso.com"]})
     assert res["stats"]["seeds"] == 2 and len(res["chains"]) == 1, res["stats"]
     c = res["chains"][0]
-    assert c["identity"] == "alice" and c["identityLabel"] == VICTIM and c["severity"] == "critical" and c["score"] >= 80
+    assert c["identity"] == VICTIM and c["identityLabel"] == VICTIM and c["severity"] == "critical" and c["score"] >= 80
     assert c["seed"]["id"] == 1 and c["seed"]["findings"][0]["ruleId"] == "mail-credential-phishing"
     assert [s["seed"]["id"] if isinstance(s, dict) and "seed" in s else s["id"] for s in c["relatedSeeds"]] == [3]
     steps = c["steps"]
@@ -241,7 +241,7 @@ def test_chains_for_store_selects_identities_via_sql(store):
     res = C.chains_for_store(store, {"expected_countries": ["FR"]}, findings, seed_min_risk=45)
     assert len(res["chains"]) == 1
     c = res["chains"][0]
-    assert c["identity"] == "alice" and res["stats"]["events"] > 30
+    assert c["identity"] == VICTIM and res["stats"]["events"] > 30
     assert any(s["kind"] == "mail" and "same thread" in s["artifacts"] for s in c["steps"])
     assert any("DNS query evil-login.net" in s["title"] and s["artifacts"] for s in c["steps"])
     assert any("role assigned" in s["title"] for s in c["steps"])
@@ -258,7 +258,7 @@ def test_build_endpoint_accepts_posted_rows():
     )
     assert r.status_code == 200, r.content
     body = r.json()
-    assert len(body["chains"]) == 1 and body["chains"][0]["identity"] == "alice" and body["stats"]["chains"] == 1
+    assert len(body["chains"]) == 1 and body["chains"][0]["identity"] == VICTIM and body["stats"]["chains"] == 1
     r2 = c.post("/api/chains/build", json.dumps({"storeKey": "00000000-0000-0000-0000-000000000000"}), content_type="application/json", **HDR)
     assert r2.status_code == 404
 
@@ -452,3 +452,67 @@ def test_identity_realms():
     assert C.netbios_hints({"user": "OTHER\\alice", "upn": "alice@other-tenant.example"}) == [("other", "other-tenant.example")]
     assert C.netbios_hints({"targetUser": "alice", "targetDomain": "NORTHSTAR"}) == []
     assert not C.realm_matches("northstar.example", "other-tenant.example", "dns", internal, set())
+
+
+def test_two_tenants_same_name_keep_independent_chains():
+    mails = []
+    for base, domain in [(1, "northstar.example"), (101, "other-tenant.example")]:
+        user = f"alice@{domain}"
+        thread = f"<seed@{domain}>"
+        mails += [_mail(base, 5, "Password expiry", PHISHER, [user], 90, message_id=thread), _mail(base + 1, 12, "RE", user, [PHISHER], 0, in_reply_to=thread)]
+    result = C.build_chains(mails, [])
+    assert {c["identity"] for c in result["chains"]} == {"alice@northstar.example", "alice@other-tenant.example"}
+    assert all(not c.get("relatedSeeds") for c in result["chains"])
+
+
+def auth_events(cloud=False, success=True):
+    events = []
+    for i in range(12 + int(success)):
+        ok = i == 12
+        ev = _ev(4624 if ok else 4625, i, id=100 + i, targetUser="alice", targetDomain="CONTOSO", ipAddress="203.0.113.25")
+        if cloud:
+            ev.update(
+                provider="EntraID", channel="Entra", category="m365", eventId=None, operation="SignIn", upn="alice@contoso.com", status="0" if ok else "50126"
+            )
+        events.append(ev)
+    return events
+
+
+@pytest.mark.parametrize("cloud", [False, True])
+@pytest.mark.parametrize("success", [False, True])
+def test_authentication_campaign_needs_no_mail(cloud, success):
+    events = auth_events(cloud, success)
+    result = C.build_chains([], events)
+    assert len(result["chains"]) == 1
+    chain = result["chains"][0]
+    assert chain["seed"]["source"] == "events"
+    assert chain["severity"] == ("high" if success else "medium")
+    assert chain["steps"][0]["count"] == 12
+    assert {ref for s in chain["steps"] for ref in s["refs"]} == {e["id"] for e in events}
+
+
+def test_auth_campaign_excludes_other_account_ip_host_and_tenant_success():
+    failures = auth_events(success=False)
+    for changes in [{"targetUser": "bob"}, {"targetDomain": "OTHER"}, {"ipAddress": "203.0.113.26"}, {"computer": "PC2"}]:
+        success = {**auth_events()[-1], **changes}
+        chain = C.build_chains([], failures + [success])["chains"][0]
+        assert chain["severity"] == "medium"
+    assert C.build_chains([], failures[:9])["chains"] == []
+    assert C.build_chains([], [{**r, "ts": ms(i * 60)} for i, r in enumerate(failures)])["chains"] == []
+
+
+def test_store_auth_campaign_and_visible_cap(store, monkeypatch):
+    writer = EventWriter(store, 1)
+    for row in auth_events():
+        writer.add(row)
+    writer.flush()
+    assert C.chains_for_store(store, {}, [])["chains"][0]["seed"]["source"] == "events"
+    monkeypatch.setattr(C, "EVENT_CAP", 5)
+    result = C.chains_for_store(store, {}, [])
+    assert result["stats"]["authEventsTruncated"] == 1
+    assert result["chains"] == []
+
+
+def test_foreign_qualified_identity_is_not_bypassed_by_bare_alias():
+    identities = C.event_identities({"upn": "alice@other.example", "subjectUser": "alice"})
+    assert len(identities) == 1 and identities[0][2] == "other.example"

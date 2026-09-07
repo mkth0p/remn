@@ -113,8 +113,8 @@ export function buildChainGraph(chain: Chain): Graph {
   add({
     id: 'seed',
     label: chain.seed.subject || '(no subject)',
-    sub: `seed mail · risk ${seedRisk}`,
-    lane: 'mail',
+    sub: `seed ${chain.seed.source === 'events' ? 'event' : 'mail'} · risk ${seedRisk}`,
+    lane: chain.seed.source === 'events' ? (chain.steps[0]?.origin === 'm365' ? 'cloud' : 'host') : 'mail',
     kind: 'seed',
     x: 0,
     severity: riskSeverity(seedRisk),

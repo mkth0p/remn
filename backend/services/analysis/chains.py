@@ -199,7 +199,8 @@ def event_identities(ev: dict[str, Any]) -> list[tuple[str, str, str | None, str
             continue
         seen.add((k, realm))
         out.append((k, str(raw), realm, kind))
-    return out
+    scoped = {k for k, _, realm, _ in out if realm}
+    return [entry for entry in out if entry[2] or entry[0] not in scoped]
 
 
 # ---------------------------------------------------------------------------
@@ -580,6 +581,7 @@ def build_chains(
         if int(m.get("risk") or 0) >= seed_min_risk or top_f >= 2:
             seeds.append(m)
     seeds.sort(key=lambda m: -(int(m.get("risk") or 0)))
+    seeds_truncated = len(seeds) > 300
     seeds = seeds[:300]
 
     # index events and mails by identity; each entry keeps the realm the account was seen in
@@ -641,6 +643,7 @@ def build_chains(
                         }
                     )
             # events of that identity in the window, in the recipient's organisation
+            seen_events: set[int] = set()
             for ev, ev_realm, ev_kind in ev_by_id.get(ident, []):
                 ts = int(ev["ts"])
                 if ts < t0 - before_ms:
@@ -649,6 +652,9 @@ def build_chains(
                     break
                 if not realm_matches(rcpt_domain, ev_realm, ev_kind, internal, known_labels, netbios_map):
                     continue
+                if id(ev) in seen_events:
+                    continue
+                seen_events.add(id(ev))
                 cls = _m365_step(ev, art, settings) if _is_m365(ev) else _host_step(ev, art)
                 if cls is None:
                     continue
@@ -724,9 +730,10 @@ def build_chains(
                     attacker.append(m.group(1).strip("smtp:"))
             chains.append(
                 {
-                    "identity": ident,
+                    "identity": rcpt.lower(),
                     "identityLabel": rcpt,
                     "seed": {
+                        "source": "mails",
                         "id": seed.get("id"),
                         "ts": t0,
                         "subject": (seed.get("subject") or "")[:200],
@@ -762,11 +769,154 @@ def build_chains(
             dup.setdefault("relatedSeeds", []).append(c["seed"])
             continue
         kept.append(c)
+    coverage = [{r for s in c["steps"] if s["source"] == "events" for r in (s.get("refs") or [s.get("id")])} for c in kept]
+    for campaign in authentication_chains(events, f_by_ref):
+        refs = {r for s in campaign["steps"] for r in s["refs"]}
+        if not any(refs <= covered for covered in coverage):
+            kept.append(campaign)
+    kept.sort(key=lambda c: -c["score"])
+    chains_truncated = len(kept) > max_chains
     kept = kept[:max_chains]
     for c in kept:
-        c["id"] = f"chain-{c['identity']}-{c['seed']['id']}"
-        c["summary"] = _summary(c)
-    return {"chains": kept, "stats": {"seeds": len(seeds), "identities": len(ev_by_id), "events": len(events), "mails": len(mails), "chains": len(kept)}}
+        c.setdefault("id", f"chain-{c['identity']}-{c['seed']['id']}")
+        c.setdefault("summary", _summary(c))
+    return {
+        "chains": kept,
+        "stats": {
+            "seeds": len(seeds),
+            "identities": len(ev_by_id),
+            "events": len(events),
+            "mails": len(mails),
+            "chains": len(kept),
+            "seedsTruncated": int(seeds_truncated),
+            "chainsTruncated": int(chains_truncated),
+        },
+    }
+
+
+def authentication_outcome(ev: dict[str, Any]) -> str | None:
+    """Only explicit authentication outcomes; MFA challenges and unrelated errors are not password guesses."""
+    if not _is_m365(ev):
+        return {4625: "failure", 4624: "success"}.get(ev.get("eventId"))
+    op = str(ev.get("operation") or "").lower()
+    status = str(ev.get("status") or "").lower()
+    if op == "userloginfailed":
+        return "failure"
+    if op == "userloggedin":
+        return "success" if status in ("success", "succeeded", "0") else None
+    if "signin" in op or "sign-in" in op:
+        if status in ("50126", "50034", "50053"):
+            return "failure"
+        if status == "0":
+            return "success"
+    return None
+
+
+def authentication_chains(events: list[dict[str, Any]], findings: dict) -> list[dict[str, Any]]:
+    """Ten failures in thirty minutes for the same scoped account, source IP and destination.
+
+    A following success is evidence to investigate, not proof of compromise. Failure-only
+    campaigns stay medium. No mail, cross-source event or pre-existing finding is required.
+    """
+    groups: dict[tuple[str, str, str, str], list[tuple[dict, str]]] = defaultdict(list)
+    for ev in events:
+        outcome = authentication_outcome(ev)
+        ip = str(ev.get("ipAddress") or "").strip()
+        raw = ev.get("upn") or (ev.get("data") or {}).get("UserId") or ev.get("targetUser")
+        if not outcome or not raw or not ip or ip in ("-", "0.0.0.0", "::"):
+            continue
+        # Administrator is a valid brute-force target, even though mail-led chains skip it.
+        user = str(raw).strip().lower()
+        if user in ("-", "system", "anonymous logon") or user.endswith("$"):
+            continue
+        if "@" not in user and "\\" not in user:
+            user = str(ev.get("targetDomain") or ev.get("computer") or "unknown").lower() + "\\" + user
+        origin = "m365" if _is_m365(ev) else "host"
+        host = str(ev.get("computer") or "").lower()
+        groups[(user, ip, host, origin)].append((ev, outcome))
+    out = []
+    for (user, ip, host, origin), rows in groups.items():
+        rows.sort(key=lambda r: (r[0]["ts"], r[0].get("id") or 0))
+        start = 0
+        while start < len(rows):
+            if rows[start][1] != "failure":
+                start += 1
+                continue
+            stop = start
+            deadline = rows[start][0]["ts"] + 30 * 60_000
+            while stop < len(rows) and rows[stop][0]["ts"] <= deadline:
+                stop += 1
+            window = rows[start:stop]
+            failed = [r for r, outcome in window if outcome == "failure"]
+            if len(failed) < 10:
+                start += 1
+                continue
+            threshold_ts = failed[9]["ts"]
+            successes = [r for r, outcome in window if outcome == "success" and r["ts"] > threshold_ts]
+            seed = failed[0]
+            steps = []
+            for title, batch, weight in [
+                ("Repeated authentication failures", failed, 5),
+                ("Successful login after repeated failures — verify legitimacy", successes, 10),
+            ]:
+                if not batch:
+                    continue
+                refs = [r["id"] for r in batch if r.get("id") is not None]
+                steps.append(
+                    {
+                        "kind": "event",
+                        "source": "events",
+                        "origin": origin,
+                        "id": refs[0] if refs else None,
+                        "refs": refs,
+                        "ts": batch[0]["ts"],
+                        "tsEnd": batch[-1]["ts"],
+                        "count": len(batch),
+                        "title": title,
+                        "weight": weight,
+                        "artifacts": [f"same account, source IP {ip} and destination"],
+                        "findings": _fsum([f for ref in refs for f in findings.get(("events", ref), [])]),
+                        "offsetMin": (batch[0]["ts"] - seed["ts"]) / 60_000,
+                        "ipAddress": ip,
+                        "computer": host,
+                    }
+                )
+            score = 75 if successes else 50
+            out.append(
+                {
+                    "id": f"auth-chain-{origin}-{user}-{ip}-{host}-{seed.get('id')}",
+                    "identity": f"auth:{origin}:{user}:{ip}:{host}",
+                    "identityLabel": user,
+                    "kind": "authentication",
+                    "seed": {
+                        "source": "events",
+                        "id": seed.get("id"),
+                        "ts": seed["ts"],
+                        "subject": "Authentication campaign",
+                        "fromAddr": None,
+                        "risk": score,
+                        "flags": [],
+                        "findings": [],
+                        "urlDomains": [],
+                        "attachments": [],
+                    },
+                    "steps": steps,
+                    "start": seed["ts"],
+                    "end": max(s["tsEnd"] for s in steps),
+                    "score": score,
+                    "severity": "high" if successes else "medium",
+                    "artifactLinks": 0,
+                    "entities": {"user": user, "ips": [ip], "hosts": [host] if host else [], "attackerAddresses": [], "domains": []},
+                    "summary": f"{len(failed)} authentication failures for {user} from {ip} within 30 minutes"
+                    + (
+                        f", followed by {len(successes)} successful login(s). Verify whether the success was legitimate."
+                        if successes
+                        else ". No subsequent successful login observed in this window."
+                    ),
+                }
+            )
+            start = stop
+    return out
 
 
 def _fsum(fs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -808,13 +958,10 @@ def chains_for_store(store: Any, settings: dict[str, Any] | None, findings: list
         extra = Q.search(store, "mails", {"conditions": [{"field": "id", "op": "in", "value": ref_ids}]}, limit=500, full=True)["rows"]
         have = {m["id"] for m in seeds}
         seeds += [m for m in extra if m["id"] not in have]
-    if not seeds:
-        return {"chains": [], "stats": {"seeds": 0, "identities": 0, "events": 0, "mails": 0, "chains": 0}}
     idents = sorted({k for m in seeds for r in mail_recipients(m) for k in [identity_key(r)] if k})
-    if not idents:
-        return {"chains": [], "stats": {"seeds": len(seeds), "identities": 0, "events": 0, "mails": len(seeds), "chains": 0}}
-    t_min = min(int(m["date"]) for m in seeds if m.get("date") is not None) - 300_000
-    t_max = max(int(m["date"]) for m in seeds if m.get("date") is not None) + int(window_hours * 3600_000)
+    idents = idents or ["__no_mail_recipient__"]
+    t_min = min((int(m["date"]) for m in seeds if m.get("date") is not None), default=0) - 300_000
+    t_max = max((int(m["date"]) for m in seeds if m.get("date") is not None), default=0) + int(window_hours * 3600_000)
     cur = store.cursor()
     ph = ", ".join("?" for _ in idents)
     ident_cond = " OR ".join(_IDENT_SQL.format(col=f'"{c}"') + f" IN ({ph})" for c in ("targetUser", "subjectUser", "user", "upn"))
@@ -823,6 +970,15 @@ def chains_for_store(store: Any, settings: dict[str, Any] | None, findings: list
     events = rows_to_dicts(cur)
     events_truncated = len(events) > EVENT_CAP
     events = events[:EVENT_CAP]
+    # Authentication-only cases have no seed mail. Keep their selection independent of
+    # mail windows and of the much larger pool of unrelated host/cloud activity.
+    cur.execute(
+        f"SELECT * FROM events WHERE ts IS NOT NULL AND (\"eventId\" IN (4624,4625) OR lower(operation) IN ('signin','sign-in','userloginfailed','userloggedin')) ORDER BY ts, id LIMIT {EVENT_CAP + 1}"
+    )
+    auth = rows_to_dicts(cur)
+    auth_truncated = len(auth) > EVENT_CAP
+    have_events = {r["id"] for r in events}
+    events.extend(r for r in auth[:EVENT_CAP] if r["id"] not in have_events)
     for r in events:
         if isinstance(r.get("data"), str):
             try:
@@ -831,8 +987,13 @@ def chains_for_store(store: Any, settings: dict[str, Any] | None, findings: list
                 r["data"] = json.loads(r["data"])
             except ValueError:
                 pass
-    cur.execute(f"SELECT * FROM mails WHERE date BETWEEN ? AND ? AND {_IDENT_SQL.format(col='"fromAddr"')} IN ({ph}) LIMIT 5000", [t_min, t_max] + idents)
+    cur.execute(
+        f"SELECT * FROM mails WHERE date BETWEEN ? AND ? AND {_IDENT_SQL.format(col='"fromAddr"')} IN ({ph}) ORDER BY date, id LIMIT 5001",
+        [t_min, t_max] + idents,
+    )
     replies = Q._parse_json_cols(rows_to_dicts(cur), "mails") if hasattr(Q, "_parse_json_cols") else rows_to_dicts(cur)
+    replies_truncated = len(replies) > 5000
+    replies = replies[:5000]
     have = {m["id"] for m in seeds}
     mails = seeds + [m for m in replies if m["id"] not in have]
     result = build_chains(
@@ -845,4 +1006,7 @@ def chains_for_store(store: Any, settings: dict[str, Any] | None, findings: list
         **{k: v for k, v in opts.items() if k in ("before_minutes", "collapse_minutes", "min_score", "max_chains")},
     )
     result["stats"]["eventsTruncated"] = events_truncated
+    result["stats"]["authEventsTruncated"] = int(auth_truncated)
+    result["stats"]["repliesTruncated"] = int(replies_truncated)
+    result["stats"]["seedsTruncated"] = int(result["stats"]["seedsTruncated"] or len(seeds) >= 300 or len(ref_ids) >= 500)
     return result

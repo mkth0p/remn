@@ -232,7 +232,16 @@ export async function executeTool(name: string, args: Record<string, unknown>, k
           from: iso(c.start),
           to: iso(c.end),
           summary: c.summary,
-          seed: { mailId: c.seed.id, subject: c.seed.subject, from: c.seed.fromAddr, at: iso(c.seed.ts), risk: c.seed.risk, flags: c.seed.flags, findings: c.seed.findings.map((f) => f.title) },
+          seed: {
+            source: c.seed.source ?? 'mails',
+            id: c.seed.id,
+            subject: c.seed.subject,
+            from: c.seed.fromAddr,
+            at: iso(c.seed.ts),
+            risk: c.seed.risk,
+            flags: c.seed.flags,
+            findings: c.seed.findings.map((f) => f.title),
+          },
           entities: c.entities,
           steps: c.steps
             .filter((st) => stepVisible(st, 'weighted'))

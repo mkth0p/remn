@@ -77,8 +77,9 @@ export const chainFindingKey = (c: Chain) => `chain|${c.identity}|${c.seed.id}`
 
 /** Row ids a chain is made of: its seed mail(s) and every step (folded runs carry their rows in refs). */
 export function chainCoverage(c: Chain): { mails: Set<number>; events: Set<number> } {
-  const mails = new Set<number>([c.seed.id, ...(c.relatedSeeds ?? []).map((x) => x.id)])
+  const mails = new Set<number>()
   const events = new Set<number>()
+  for (const seed of [c.seed, ...(c.relatedSeeds ?? [])]) (seed.source === 'events' ? events : mails).add(seed.id)
   for (const s of c.steps) {
     const set = s.source === 'mails' ? mails : events
     if (s.id != null) set.add(s.id)
