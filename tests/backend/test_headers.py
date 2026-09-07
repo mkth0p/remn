@@ -39,3 +39,21 @@ def test_scripts_and_pages_get_the_app_policy(tmp_path):
         style = c.get("/assets/index-abc123.css")
         assert style.status_code == 200
         assert not style.has_header("Content-Security-Policy")
+
+
+def test_root_files_are_served_as_files_and_missing_ones_are_404(tmp_path):
+    """A browser asking for an icon must get the icon or a 404, never the page: HTML shown as an icon is blank."""
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<!doctype html><html><body>REMN</body></html>", encoding="utf-8")
+    (dist / "favicon-32.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    with override_settings(FRONTEND_DIST=dist):
+        c = Client()
+        icon = c.get("/favicon-32.png")
+        assert icon.status_code == 200
+        assert icon["Content-Type"] == "image/png"
+        assert c.get("/favicon.ico").status_code == 404
+        assert c.get("/robots.txt").status_code == 404
+        page = c.get("/cases/12/findings")
+        assert page.status_code == 200
+        assert page["Content-Type"].startswith("text/html")

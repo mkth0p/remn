@@ -35,6 +35,10 @@ def index(request, path: str = ""):
         if candidate.is_file():
             content_type, _ = mimetypes.guess_type(str(candidate))
             return FileResponse(open(candidate, "rb"), content_type=content_type or "application/octet-stream")
+        # a path that names a file (favicon.ico, robots.txt) and does not exist is a 404, not the page:
+        # a browser given HTML for an icon shows nothing, and never asks again
+        if "." in path.rsplit("/", 1)[-1]:
+            raise Http404()
     index_file = dist / "index.html"
     if not index_file.is_file():
         return HttpResponse(
