@@ -29,7 +29,8 @@ without the fixture being regenerated.
 (ignored by git), runs the mail scoring over them with default case settings and prints
 the band distribution with recall on the phishing sets and the false-positive rate on the
 legitimate ones. Numbers from 2026-09-06, defaults only, no sender baseline, no internal
-domains configured, so they are a floor:
+domains configured. These measurements describe those datasets and settings, not a floor
+or a prediction for another mailbox:
 
 | corpus | kind | mails | high or above | medium or above |
 |---|---|---|---|---|
@@ -43,8 +44,19 @@ moved the right way: the receiving gateway's own spam verdict (Exchange SCL 5 or
 SFV:SPM or BLK) counts as a strong indicator (Phishing Pot went from 38% to 63% at high),
 and a form posting to another domain no longer counts on its own while a password field
 still does (hard_ham went from 46% to 14% at high). The remaining hard_ham "medium" band
-is 2003-era commercial mail without any authentication headers; on a modern mailbox
-those mails carry DKIM and a List-Id and score lower.
+is 2003-era commercial mail without authentication headers. Modern authentication and
+sender history can change these scores; their effect needs measurement on the target mailbox.
+
+An independent modern synthetic holdout (`tools/calibrate_mail.py --holdout`) covers six
+legitimate supplier, IT, document-sharing and renewal messages and three credential-stealing
+attachments from an authenticated supplier. CI checks mail-score false positives and rule-pack
+false positives separately, and requires all three malicious controls to remain high. It is
+kept separate from the calibration fixtures. This is a regression check, not measured accuracy
+on real modern mail; use a reviewed manifest of your own samples for that measurement.
+
+The browser regression starts the production Python server with built assets and exercises
+upload, hashing/ingestion workers, detection, analyst review, streamed export and restore.
+It runs in CI and is required by the release workflow before packaging.
 
 What the harness does not cover: Windows event detection has no public ground truth
 with labelled attacks that fits a drop-in; the EVTX-ATTACK-SAMPLES archive below is the

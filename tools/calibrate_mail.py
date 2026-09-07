@@ -107,11 +107,17 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--synthetic", action="store_true")
+    source.add_argument("--holdout", action="store_true", help="Evaluate the independent modern synthetic holdout")
     source.add_argument("--manifest", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--export-fixture", type=Path, help="Export normalized synthetic rows for cross-engine regression tests")
     args = parser.parse_args()
-    if args.synthetic:
+    if args.holdout:
+        from mail_calibration import SETTINGS
+        from modern_mail_holdout import examples
+
+        data, settings = examples(), SETTINGS
+    elif args.synthetic:
         from mail_calibration import SETTINGS, examples
 
         data, settings = examples(), SETTINGS
