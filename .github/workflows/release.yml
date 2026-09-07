@@ -1,0 +1,56 @@
+name: Release
+
+# Tag a commit "vX.Y.Z" (matching VERSION in backend/api/views/health.py) and push the tag:
+# the frontend is built, the backend and rules are packed with it, and a GitHub release
+# carries the archive. Nothing else is published.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version matches the tag
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          code=$(sed -n 's/^VERSION = "\(.*\)"/\1/p' backend/api/views/health.py)
+          echo "tag $tag, code $code"
+          test "$tag" = "$code"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build the frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+      - name: Pack
+        run: |
+          name="remn-${GITHUB_REF_NAME}"
+          mkdir -p "out/$name"
+          cp -r backend rules tools LICENSE THIRD_PARTY_NOTICES.md README.md CHANGELOG.md SECURITY.md docs .env.example "out/$name/"
+          rm -rf "out/$name/backend/tmp" "out/$name/backend/data/cases" "out/$name/backend/data/claude-cwd" "out/$name/docs/images"
+          find "out/$name" -name __pycache__ -type d -prune -exec rm -rf {} +
+          mkdir -p "out/$name/frontend"
+          cp -r frontend/dist "out/$name/frontend/dist"
+          (cd out && zip -qr "$name.zip" "$name")
+          ls -l out/*.zip
+      - name: Changelog excerpt
+        id: notes
+        run: |
+          awk -v tag="${GITHUB_REF_NAME#v}" '
+            /^## / { if (found) exit; if (index($0, tag)) { found = 1; next } }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          test -s notes.md || echo "See CHANGELOG.md." > notes.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: notes.md
+          files: out/*.zip
