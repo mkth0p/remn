@@ -29,6 +29,8 @@ const cspPlugin = () => ({
   transformIndexHtml: (html: string) => html.replace('<meta charset="UTF-8" />', `<meta charset="UTF-8" />\n    <meta http-equiv="Content-Security-Policy" content="${CSP}" />`),
 })
 
+const BUILD_ID = Date.now().toString(36)
+
 export default defineConfig({
   plugins: [react(), cspPlugin()],
   resolve: {
@@ -41,12 +43,18 @@ export default defineConfig({
       '/api': { target: 'http://127.0.0.1:8000', changeOrigin: false },
     },
   },
-  worker: { format: 'es' },
+  // every build gets its own file names: assets are served immutable for a year, and a build that
+  // changes only headers (a content security policy, say) must still reach browsers that cached the
+  // previous one; index.html is served no-store and points at the new names
+  worker: { format: 'es', rollupOptions: { output: { entryFileNames: `assets/[name]-[hash].${BUILD_ID}.js`, chunkFileNames: `assets/[name]-[hash].${BUILD_ID}.js` } } },
   build: {
     outDir: 'dist',
     emptyOutDir: true,
     sourcemap: false,
     chunkSizeWarningLimit: 1500,
+    rollupOptions: {
+      output: { entryFileNames: `assets/[name]-[hash].${BUILD_ID}.js`, chunkFileNames: `assets/[name]-[hash].${BUILD_ID}.js`, assetFileNames: `assets/[name]-[hash].${BUILD_ID}[extname]` },
+    },
   },
   test: {
     environment: 'node',

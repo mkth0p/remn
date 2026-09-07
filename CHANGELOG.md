@@ -10,9 +10,9 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   (`default-src 'none'; sandbox`) on script assets too, and a web worker takes its policy
   from its own script's response, so the hashing and ingest workers could neither compile
   WebAssembly nor reach the API or the browser database. Scripts now carry the page's
-  policy; a test pins both. A browser that loaded the earlier build keeps the old header
-  in its cache (the files are content-hashed and immutable): reload once with the cache
-  bypassed (Ctrl+F5) after updating.
+  policy; a test pins both. Because the files are served immutable, a browser that loaded
+  the earlier build would keep the old header in its cache, so every build now gets its
+  own file names and a rebuilt server reaches every browser without a cache clear.
 
 ## 0.1.0 (2026-09-07)
 
