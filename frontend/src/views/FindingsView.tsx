@@ -8,12 +8,13 @@ import { IconArrowLeft, IconCircle, IconFindings, IconInfo, IconPlay, IconSearch
 import { RescoreButton } from '../components/RescoreButton'
 import { loadRules, type LoadedRule } from '../data/rules'
 import { findingsStaleness, runEnabledRules, type Staleness } from '../data/findingsState'
+import { resetFindingSeverityOverrides } from '../data/findingReviews'
 import { getSource } from '../data/source'
 import { getDb, type Finding, type Severity } from '../db/schema'
 import { buildIncidents, chainMembership, effectiveSeverity, sevCounts, type Incident } from '../rules/incidents'
 import { loadChains, type Chain } from '../data/chains'
 import { chainSeverity, loadChainReviews, type ChainReview } from '../data/review'
-import { useStore } from '../state/store'
+import { toast, useStore } from '../state/store'
 import { classNames, fmtNum, fmtTs } from '../util/format'
 import { exportCsv, exportJson } from '../util/export'
 import { attackHref } from '../util/safe'
@@ -42,6 +43,17 @@ function relatedChains(f: Finding, all: Finding[]): Finding[] {
 }
 
 const StatusBadge = ({ s }: { s: string }) => <Badge sev={STATUS_SEV[s as Status] ?? 'info'}>{STATUS_LABEL[s as Status] ?? s}</Badge>
+const FindingSeverity = ({ finding }: { finding: Finding }) => <span title={finding.severityOverride ? `Review severity override: ${finding.severityOverride}; rule: ${finding.severity}` : undefined}><Sev sev={effectiveSeverity(finding)}>{effectiveSeverity(finding)}{finding.severityOverride ? '*' : ''}</Sev></span>
+const OverrideLabel = ({ finding }: { finding: Finding }) => finding.severityOverride ? <span className="small muted">review override; rule: {finding.severity}</span> : null
+
+function SeverityOverrideNotice({ findings, busy, onReset, chain = false }: { findings: Finding[]; busy: boolean; onReset: () => void; chain?: boolean }) {
+  if (!findings.some((f) => f.severityOverride)) return null
+  return <div className="section">
+    <h3>Review severity override</h3>
+    <p className="small muted">A saved review overrides the rule severity for the findings marked with *. Rule refreshes preserve these overrides. Resetting keeps review status and notes.{chain ? ' Chain severity is managed separately on the Review page.' : ''}</p>
+    <button className="btn sm" disabled={busy} onClick={onReset}>{busy ? 'resetting…' : chain ? 'reset finding overrides' : 'reset to rule severity'}</button>
+  </div>
+}
 
 /**
  * Findings triage. The default view is incidents: every finding on one mail, or about one
@@ -81,11 +93,12 @@ export function FindingsView() {
   const [previous, setPrevious] = useState<Record<string, number> | null>(null)
   const [stale, setStale] = useState<Staleness | null>(null)
   const [prevalence, setPrevalence] = useState<Record<string, number | null>>({})
+  const [resettingSeverity, setResettingSeverity] = useState(false)
 
   const reload = useCallback(() => {
     if (!kase?.id) return
     const db = getDb()
-    db.findings.where('caseId').equals(kase.id).toArray().then((f) => setAll(f.sort((a, b) => ORDER.indexOf(a.severity) - ORDER.indexOf(b.severity) || (b.ts ?? 0) - (a.ts ?? 0))))
+    db.findings.where('caseId').equals(kase.id).toArray().then((f) => setAll(f.sort((a, b) => ORDER.indexOf(effectiveSeverity(a)) - ORDER.indexOf(effectiveSeverity(b)) || (b.ts ?? 0) - (a.ts ?? 0))))
     db.kv.get(`ruleDiags-${kase.id}`).then((k) => setLastRun((k?.value as LastRun) ?? null))
     loadChains(kase.id).then((r) => setChains(r?.chains ?? []))
     loadChainReviews(kase.id).then(setChainReviews)
@@ -115,13 +128,21 @@ export function FindingsView() {
   const rows = useMemo(() => {
     const needle = q.toLowerCase()
     const base = status === 'false_positive' || showFp ? all : active
-    return base.filter((f) => (!sev || f.severity === sev) && (!status || f.status === status) && (!source || f.source === source) && (!needle || `${f.title} ${f.ruleId} ${JSON.stringify(f.entities)} ${f.attack.join(' ')}`.toLowerCase().includes(needle)))
-  }, [all, active, sev, status, source, q, showFp])
+    return base.filter((f) => (group === 'incident' || !sev || effectiveSeverity(f) === sev) && (!status || f.status === status) && (!source || f.source === source) && (!needle || `${f.title} ${f.ruleId} ${JSON.stringify(f.entities)} ${f.attack.join(' ')}`.toLowerCase().includes(needle)))
+  }, [all, active, sev, status, source, q, showFp, group])
   const incidentOpts = useMemo(() => ({ chains, severityOf: (c: Chain) => chainSeverity(c, chainReviews[c.id]) }), [chains, chainReviews])
-  const incidents = useMemo(() => (group === 'incident' ? buildIncidents(rows, incidentOpts) : []), [rows, group, incidentOpts])
+  const incidents = useMemo(() => (group === 'incident' ? buildIncidents(rows, incidentOpts).filter((i) => !sev || i.severity === sev) : []), [rows, group, incidentOpts, sev])
+  const shownRows = useMemo(() => group === 'incident' ? [...new Map(incidents.flatMap((i) => i.findings).map((f) => [f.id, f])).values()] : rows, [group, incidents, rows])
   const allIncidents = useMemo(() => buildIncidents(active, incidentOpts), [active, incidentOpts])
   const membership = useMemo(() => chainMembership(all, chains), [all, chains])
   const counts = useMemo(() => (group === 'incident' ? sevCounts(allIncidents) : sevCounts(active)), [active, allIncidents, group])
+  // Open details must follow a reset or rule refresh, including replacement row IDs.
+  useEffect(() => {
+    setSelected((prev) => prev ? all.find((f) => f.key === prev.key) ?? null : null)
+    const current = buildIncidents(all, incidentOpts)
+    setIncident((prev) => prev ? current.find((i) => i.id === prev.id) ?? null : null)
+    setParent((prev) => prev ? current.find((i) => i.id === prev.id) ?? null : null)
+  }, [all, incidentOpts])
   const groups = useMemo(() => {
     if (!group || group === 'incident') return []
     const m = new Map<string, { key: string; label: string; items: Finding[] }>()
@@ -141,7 +162,7 @@ export function FindingsView() {
         const e = m.get(t) ?? { id: t, findings: 0, rules: new Set<string>(), worst: 'info' as Severity }
         e.findings++
         e.rules.add(f.ruleId)
-        if (ORDER.indexOf(f.severity) < ORDER.indexOf(e.worst)) e.worst = f.severity
+        if (ORDER.indexOf(effectiveSeverity(f)) < ORDER.indexOf(e.worst)) e.worst = effectiveSeverity(f)
         m.set(t, e)
       }
     }
@@ -212,6 +233,19 @@ export function FindingsView() {
     setPicked(new Set())
     reload()
   }
+  const resetSeverityFor = async (findings: Finding[]) => {
+    if (resettingSeverity) return
+    setResettingSeverity(true)
+    try {
+      await resetFindingSeverityOverrides(kase.id!, findings.filter((f) => f.severityOverride).map((f) => f.id!))
+      useStore.getState().bumpRules()
+      toast('ok', 'Rule severity restored. Review status and notes kept.')
+    } catch (e) {
+      toast('err', `Severity reset failed: ${(e as Error).message}`)
+    } finally {
+      setResettingSeverity(false)
+    }
+  }
   const openRefs = (source: 'events' | 'mails' | 'mixed', refs: number[]) => {
     if (!refs.length || source === 'mixed') return
     if (source === 'events') setEventsFilter({ conditions: [{ field: 'id', op: 'in', value: refs.slice(0, REFS_OPEN) }], sort: { field: 'ts', dir: 'asc' } })
@@ -246,7 +280,7 @@ export function FindingsView() {
   }
 
   const columns: Column<Finding>[] = [
-    { key: 'severity', label: 'severity', width: 104, render: (r) => <Sev sev={effectiveSeverity(r)}>{effectiveSeverity(r)}{r.severityOverride ? <span className="muted" title={`rule severity ${r.severity}, rescored on the Review page`}>*</span> : null}</Sev> },
+    { key: 'severity', label: 'severity', width: 104, render: (r) => <FindingSeverity finding={r} /> },
     { key: 'title', label: 'finding', width: 'minmax(280px, 1.6fr)', render: (r) => <span className="sans ellipsis" title={r.description}>{r.title}{r.escalation ? <span className="muted"> · {r.escalation}</span> : null}{r.id != null && membership.has(r.id) && r.ruleId !== 'chain' ? <> <Badge sev="outline" title="its rows are steps of an attack chain: decided with the chain on the Review page">chain</Badge></> : null}{r.chainUnlinked ? <> <Badge sev="outline" title="taken out of its attack chain: decided on its own">unlinked</Badge></> : null}</span> },
     { key: 'entities', label: 'entities', width: 'minmax(220px, 1fr)', render: (r) => Object.entries(r.entities).map(([k, v]) => `${k}=${v}`).join(' · ') },
     { key: 'attack', label: 'att&ck', width: 130, render: (r) => <span className="row" style={{ gap: 4 }}>{r.attack.slice(0, 2).map((t) => <Badge key={t} sev="outline">{t}</Badge>)}{r.attack.length > 2 ? <span className="muted">+{r.attack.length - 2}</span> : null}</span> },
@@ -256,7 +290,7 @@ export function FindingsView() {
     { key: 'status', label: 'status', width: 110, render: (r) => <StatusBadge s={r.status} /> },
   ]
   const incidentColumns: Column<Incident>[] = [
-    { key: 'severity', label: 'severity', width: 104, render: (r) => <Sev sev={r.severity} /> },
+    { key: 'severity', label: 'severity', width: 104, render: (r) => <span title={r.kind !== 'chain' && r.findings.some((f) => f.severityOverride) ? 'Includes review severity overrides; open the incident to see the rule severities or reset.' : undefined}><Sev sev={r.severity}>{r.severity}{r.kind !== 'chain' && r.findings.some((f) => f.severityOverride) ? '*' : ''}</Sev></span> },
     { key: 'title', label: 'incident', width: 'minmax(300px, 1.8fr)', render: (r) => <span className="sans ellipsis" title={r.subtitle}><span style={{ color: 'var(--fg-1)' }}>{r.title}</span><span className="muted"> · {r.subtitle}</span></span> },
     { key: 'kind', label: 'kind', width: 74, render: (r) => KIND_LABEL[r.kind] },
     { key: 'findings', label: 'findings', width: 130, render: (r) => <span className="row" style={{ gap: 6 }}><span className="mono">{fmtNum(r.findings.length)}</span><span style={{ width: 70 }}><SevBar counts={sevCounts(r.findings)} /></span></span> },
@@ -268,8 +302,8 @@ export function FindingsView() {
 
   const memberRow = (f: Finding, from: Incident | null) => (
     <tr key={f.id} onClick={() => openFinding(f, from)} style={{ cursor: 'pointer' }}>
-      <td style={{ width: 100 }}><Sev sev={f.severity} /></td>
-      <td className="sans">{f.title}{f.escalation ? <span className="muted"> · {f.escalation}</span> : null}</td>
+      <td style={{ width: 100 }}><FindingSeverity finding={f} /></td>
+      <td className="sans">{f.title}{f.escalation ? <span className="muted"> · {f.escalation}</span> : null}{f.severityOverride && <div><OverrideLabel finding={f} /></div>}</td>
       <td className="muted">{f.ruleId}</td>
       <td style={{ width: 60 }}>{fmtNum(f.count)}</td>
       <td style={{ width: 150 }} className="nowrap">{fmtTs(f.ts)}</td>
@@ -286,8 +320,8 @@ export function FindingsView() {
         </div>
         <span className="spacer" />
         <button className="btn ghost sm" onClick={() => setView('rules')}>manage rules</button>
-        <button className="btn ghost sm" onClick={() => exportCsv('findings.csv', rows.map((f) => ({ severity: f.severity, title: f.title, ruleId: f.ruleId, entities: JSON.stringify(f.entities), count: f.count, first: f.ts ? new Date(f.ts).toISOString() : '', last: f.tsEnd ? new Date(f.tsEnd).toISOString() : '', source: f.source, status: f.status, attack: f.attack.join(' '), refs: f.refs.slice(0, 50).join(' '), notes: f.notes })))}>csv</button>
-        <button className="btn ghost sm" onClick={() => exportJson('findings.json', rows)}>json</button>
+        <button className="btn ghost sm" onClick={() => exportCsv('findings.csv', shownRows.map((f) => ({ severity: f.severity, severityOverride: f.severityOverride, title: f.title, ruleId: f.ruleId, entities: JSON.stringify(f.entities), count: f.count, first: f.ts ? new Date(f.ts).toISOString() : '', last: f.tsEnd ? new Date(f.tsEnd).toISOString() : '', source: f.source, status: f.status, attack: f.attack.join(' '), refs: f.refs.slice(0, 50).join(' '), notes: f.notes })))}>csv</button>
+        <button className="btn ghost sm" onClick={() => exportJson('findings.json', shownRows)}>json</button>
         <RescoreButton key={kase.id} />
         <button className="btn primary" onClick={run} disabled={!!running}><IconPlay /> run rules</button>
       </div>
@@ -343,7 +377,7 @@ export function FindingsView() {
                 ))}
               </div>
               <span className="spacer" />
-              <span className="mono small dim">{group === 'incident' ? `${fmtNum(incidents.length)} incident(s) · ${fmtNum(rows.length)} finding(s)` : `${fmtNum(rows.length)} shown`}</span>
+              <span className="mono small dim">{group === 'incident' ? `${fmtNum(incidents.length)} incident(s) · ${fmtNum(shownRows.length)} finding(s)` : `${fmtNum(rows.length)} shown`}</span>
             </div>
           </div>
           {picked.size > 0 && (
@@ -388,7 +422,7 @@ export function FindingsView() {
                   <div key={g.key}>
                     <div className="group-row" onClick={() => toggleGroup(g.key)}>
                       <span className="caret">{openGroups.has(g.key) ? '▾' : '▸'}</span>
-                      <Dot sev={g.items[0].severity} />
+                      <Dot sev={effectiveSeverity(g.items[0])} />
                       <span className="name ellipsis" style={{ maxWidth: 520 }}>{g.label}</span>
                       {group === 'ruleId' && <span className="mono small muted">{g.key}</span>}
                       <span className="count">{fmtNum(g.items.length)}</span>
@@ -418,6 +452,7 @@ export function FindingsView() {
                   <span>{fmtTs(incident.ts)}{incident.tsEnd && incident.tsEnd !== incident.ts ? ` → ${fmtTs(incident.tsEnd)}` : ''}</span>
                   <span>{fmtNum(incident.refs.length)} row(s)</span>
                   <StatusBadge s={incident.status} />
+                  {incident.findings.some((f) => f.severityOverride) && <Badge>review severity override</Badge>}
                 </>}
                 onClose={() => setIncident(null)}
                 footer={<>
@@ -429,6 +464,7 @@ export function FindingsView() {
                   {incident.source !== 'mixed' && <button className="btn sm primary" onClick={() => openRefs(incident.source, incident.refs)}>open {fmtNum(Math.min(incident.refs.length, REFS_OPEN))} row(s)</button>}
                 </>}
               >
+                <SeverityOverrideNotice findings={incident.findings} busy={resettingSeverity} onReset={() => resetSeverityFor(incident.findings)} chain={incident.kind === 'chain'} />
                 <div className="section">
                   <h3>Findings</h3>
                   <div className="small muted">{incident.subtitle}. {incident.kind === 'chain' ? 'These findings have their rows among the steps of the attack chain: the verdict on the Review page decides them together, and a finding can be unlinked there to be decided on its own.' : 'The status of the incident is set on every finding below; open one for its own detail.'}</div>
@@ -453,20 +489,21 @@ export function FindingsView() {
             )}
             {selected && (
               <Flyout
-                title={<span className="row" style={{ gap: 8 }}>{parent && <button className="btn icon ghost sm" title="back to the incident" onClick={() => { setSelected(null); setIncident(parent); setParent(null) }}><IconArrowLeft /></button>}<Sev sev={selected.severity} /><span>{selected.title}</span></span>}
+                title={<span className="row" style={{ gap: 8 }}>{parent && <button className="btn icon ghost sm" title="back to the incident" onClick={() => { setSelected(null); setIncident(parent); setParent(null) }}><IconArrowLeft /></button>}<FindingSeverity finding={selected} /><span>{selected.title}</span></span>}
                 meta={<>
                   <span className="mono">{selected.ruleId}</span>
                   <span>{selected.source}</span>
                   <span>{fmtTs(selected.ts)}{selected.tsEnd && selected.tsEnd !== selected.ts ? ` → ${fmtTs(selected.tsEnd)}` : ''}</span>
                   <span>{fmtNum(selected.count)} row(s)</span>
                   <StatusBadge s={selected.status} />
+                  <OverrideLabel finding={selected} />
                   {selected.confidence && <span title="rule confidence">confidence {selected.confidence}</span>}
                   {inheritedReview(selected) && <span title="the status was set on an earlier evaluation of this finding key and carried over by the last run">status carried over from {fmtTs(selected.createdAt)}</span>}
                 </>}
                 tabs={<Tabs tabs={[{ id: 'overview', label: 'Overview' }, { id: 'table', label: 'Table' }, { id: 'json', label: 'JSON' }]} active={flyTab} onChange={setFlyTab} />}
                 onClose={() => { setSelected(null); setParent(null) }}
                 footer={<>
-                  <AddToTimeline ts={selected.ts} text={selected.title} link={{ source: 'findings', id: selected.id!, label: selected.ruleId }} severity={selected.severity} />
+                  <AddToTimeline ts={selected.ts} text={selected.title} link={{ source: 'findings', id: selected.id!, label: selected.ruleId }} severity={effectiveSeverity(selected)} />
                   <span className="small muted">status</span>
                   <div className="segmented">{STATUSES.map((s) => <button key={s} className={classNames(selected.status === s && 'active')} onClick={() => setStatusFor([selected.id!], s)}>{STATUS_LABEL[s]}</button>)}</div>
                   <span className="spacer" />
@@ -474,6 +511,7 @@ export function FindingsView() {
                   <button className="btn sm primary" onClick={() => openRefs(selected.source, selected.refs)}>open {fmtNum(Math.min(selected.refs.length, REFS_OPEN))} row(s)</button>
                 </>}
               >
+                <SeverityOverrideNotice findings={[selected]} busy={resettingSeverity} onReset={() => resetSeverityFor([selected])} />
                 {flyTab === 'overview' && (
                   <>
                     <div className="section">

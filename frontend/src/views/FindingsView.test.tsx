@@ -37,8 +37,65 @@ afterEach(async () => {
 })
 
 const sub = () => document.querySelector('.view-header .sub')?.textContent ?? ''
+const flyoutSeverity = () => document.querySelector('.flyout-h .sev')?.textContent
+
+async function loadInvoice(override: Finding['severityOverride'] | null = 'high') {
+  await db.findings.clear()
+  await db.findings.bulkAdd([
+    f({ ruleId: 'mail-replyto-diverted', key: 'mail-replyto-diverted|3307', severity: 'medium', severityOverride: override ?? undefined, title: 'Reply-To diverted to another domain', refs: [3307], status: 'reviewed', notes: 'Supplier confirmed', entities: { fromAddr: 'reports@vendor.example', subject: '[S05] Invoice for completed work' } }),
+    f({ ruleId: 'mail-bank-detail-change', severity: 'low', title: 'Bank details change request', refs: [3307], status: 'reviewed', notes: 'Verified independently', entities: { fromAddr: 'reports@vendor.example', subject: '[S05] Invoice for completed work' } }),
+  ])
+  await act(async () => { render(<FindingsView />) })
+  await waitFor(() => expect(sub()).toContain('1 incident(s) · 2 finding(s)'), WAIT)
+}
 
 describe('FindingsView', () => {
+  it('explains the saved high override and resets the incident to medium without changing review decisions', async () => {
+    await loadInvoice()
+    const severityFilter = Array.from(document.querySelectorAll('select')).find((s) => Array.from(s.options).some((o) => o.value === 'critical'))!
+    fireEvent.change(severityFilter, { target: { value: 'high' } })
+    fireEvent.keyDown(window, { key: 'j' })
+    await waitFor(() => expect(flyoutSeverity()).toBe('high'), WAIT)
+    // Severity filtering keeps the low member as part of this high incident.
+    expect(document.querySelectorAll('.flyout table tr')).toHaveLength(2)
+    expect(document.querySelector('.flyout table tr .sev')?.textContent).toBe('high*')
+    expect(screen.getByText('review override; rule: medium')).toBeTruthy()
+    const before = await db.findings.toArray()
+    fireEvent.click(screen.getByRole('button', { name: 'reset to rule severity' }))
+    await waitFor(() => expect(flyoutSeverity()).toBe('medium'), WAIT)
+    expect(document.querySelector('.flyout table tr .sev')?.textContent).toBe('medium')
+    expect(screen.queryByRole('button', { name: 'reset to rule severity' })).toBeNull()
+    const after = await db.findings.toArray()
+    expect(after).toEqual(before.map(({ severityOverride: _override, ...rest }) => rest))
+    expect(document.querySelector('.kpi.high')?.textContent).toContain('0')
+    expect(document.querySelector('.kpi.medium')?.textContent).toContain('1')
+    expect(screen.getByText('no incident matches the filters')).toBeTruthy()
+  }, TEST_TIMEOUT)
+
+  it('shows and resets an individual override and updates the incident when navigating back', async () => {
+    await loadInvoice()
+    fireEvent.keyDown(window, { key: 'j' })
+    await waitFor(() => expect(flyoutSeverity()).toBe('high'), WAIT)
+    fireEvent.click(document.querySelector('.flyout table tr')!)
+    await waitFor(() => expect(flyoutSeverity()).toBe('high*'), WAIT)
+    expect(document.querySelector('.flyout-h')?.textContent).toContain('review override; rule: medium')
+    fireEvent.click(screen.getByRole('button', { name: 'reset to rule severity' }))
+    await waitFor(() => expect(flyoutSeverity()).toBe('medium'), WAIT)
+    fireEvent.click(screen.getByTitle('back to the incident'))
+    await waitFor(() => expect(flyoutSeverity()).toBe('medium'), WAIT)
+    expect(document.querySelectorAll('.flyout table tr')).toHaveLength(2)
+    expect(screen.queryByText('Review severity override')).toBeNull()
+  }, TEST_TIMEOUT)
+
+  it('uses rule severity without offering a reset when no override is saved', async () => {
+    await loadInvoice(null)
+    await waitFor(() => expect(document.querySelector('.kpi.high')?.textContent).toContain('0'), WAIT)
+    fireEvent.keyDown(window, { key: 'j' })
+    await waitFor(() => expect(flyoutSeverity()).toBe('medium'), WAIT)
+    expect(screen.queryByText('Review severity override')).toBeNull()
+    expect(document.querySelectorAll('.flyout table tr')).toHaveLength(2)
+  }, TEST_TIMEOUT)
+
   it('groups four findings into two incidents and flags that rules never ran on the evidence', async () => {
     await act(async () => {
       render(<FindingsView />)

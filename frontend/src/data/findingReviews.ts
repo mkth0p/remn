@@ -4,6 +4,22 @@ type Review = Pick<Finding, 'status' | 'notes' | 'createdAt' | 'severityOverride
 
 const decided = (f: Finding) => f.status !== 'new' || !!f.notes || !!f.severityOverride || !!f.reportExclude || !!f.chainUnlinked || !!f.aiReason
 
+/** Explicitly reset severity only, including the copy retained across rule refreshes. */
+export async function resetFindingSeverityOverrides(caseId: number, ids: number[]): Promise<void> {
+  const db = getDb()
+  const uniqueIds = [...new Set(ids)]
+  if (!uniqueIds.length) return
+  await db.transaction('rw', [db.findings, db.kv], async () => {
+    const rows = await db.findings.bulkGet(uniqueIds)
+    if (rows.some((f) => !f || f.caseId !== caseId)) throw new Error('Findings changed. Refresh the view and retry.')
+    await db.findings.where('id').anyOf(uniqueIds).modify((f) => { delete f.severityOverride })
+    const key = `finding-reviews-${caseId}`
+    const saved = ((await db.kv.get(key))?.value as Record<string, Review>) ?? {}
+    for (const f of rows) if (saved[f!.key]) delete saved[f!.key].severityOverride
+    await db.kv.put({ key, value: saved })
+  })
+}
+
 /** Keep decisions when a calibrated rule stops matching and later matches again. */
 export async function rememberReviews(caseId: number, findings: Finding[]): Promise<Map<string, Review>> {
   const db = getDb()

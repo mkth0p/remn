@@ -527,6 +527,12 @@ and the flyouts carry About, Investigation (entity pages, referenced rows), Insi
 the rule) and Notes. The ATT&CK tab counts techniques observed against the enabled
 rules that map to them.
 
+Findings with a saved review severity override show an asterisk and the original
+rule severity in their detail. The incident uses the review severity too. In an
+incident or finding, **reset to rule severity** clears only the severity override;
+review status, notes and other decisions remain. The reset also clears the saved
+override used during rule refreshes, so it does not return after rerunning rules.
+
 Findings are only as fresh as the last rule run, and that is where the Mails and
 Findings pages used to disagree: a mail scored at ingest showed as phishing on the
 Mails page while the Findings page still reflected an older run. Three things keep
