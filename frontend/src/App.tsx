@@ -97,6 +97,7 @@ export default function App() {
   const pending = useStore((s) => s.pendingIngest)
   const setPending = useStore((s) => s.setPendingIngest)
   const [cases, setCases] = useState<Case[]>([])
+  const casesVersion = useStore((s) => s.casesVersion)
   const [showConsole, setShowConsole] = useState(false)
   const [newCase, setNewCase] = useState<{ name: string; storage: 'browser' | 'server' } | null>(null)
   const [global, setGlobal] = useState('')
@@ -128,12 +129,14 @@ export default function App() {
       getTransport()
         .ping()
         .then((r) => useStore.getState().setAiStatus({ reachable: r.reachable, error: r.error, models: r.models, checkedAt: Date.now() }))
-      let all = await db.cases.toArray()
-      if (!all.length) {
-        const id = await db.cases.add({ name: 'Case 1', createdAt: Date.now(), updatedAt: Date.now(), settings: defaultSettings(), storage: 'browser' })
-        all = await db.cases.toArray()
-        await db.kv.put({ key: 'lastCase', value: id })
-      }
+      // one transaction, so two boots in flight (React runs effects twice in development) create one default case
+      const all = await db.transaction('rw', db.cases, db.kv, async () => {
+        if ((await db.cases.count()) === 0) {
+          const id = await db.cases.add({ name: 'Case 1', createdAt: Date.now(), updatedAt: Date.now(), settings: defaultSettings(), storage: 'browser' })
+          await db.kv.put({ key: 'lastCase', value: id })
+        }
+        return db.cases.toArray()
+      })
       setCases(all)
       const last = (await db.kv.get('lastCase'))?.value as number | undefined
       const current = all.find((c) => c.id === last) ?? all[0]
@@ -179,6 +182,10 @@ export default function App() {
       getDb().kv.put({ key: 'lastCase', value: kase.id })
     }
   }, [kase, jobs.length, view])
+
+  useEffect(() => {
+    if (casesVersion > 0) getDb().cases.toArray().then(setCases)
+  }, [casesVersion])
 
   useEffect(() => {
     const onDrop = (e: DragEvent) => {

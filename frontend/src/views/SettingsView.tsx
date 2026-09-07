@@ -4,6 +4,7 @@ import { toast, useStore } from '../state/store'
 import { fmtBytes, getLocalTime, setLocalTime } from '../util/format'
 import { Badge, ListInput, Progress, Toggle } from '../components/ui'
 import { refreshCounts } from '../data/ingest'
+import { removeCase } from '../data/caseState'
 import { migrateCaseToServer } from '../data/migrate'
 import { getSource } from '../data/source'
 import { API_HEADERS } from '../api/client'
@@ -85,6 +86,22 @@ export function SettingsView() {
     await deleteCaseData(getDb(), kase.id!)
     await refreshCounts(kase)
     toast('ok', 'case data deleted')
+  }
+  const destroy = async () => {
+    if (
+      !confirm(`Delete case "${kase.name}" entirely: ${isServer ? 'server store, ' : ''}evidence rows, findings, notes, sessions, custom rules, settings and the case itself? This cannot be undone.`)
+    )
+      return
+    try {
+      const { next, serverCleared } = await removeCase(kase)
+      setCurrentCase(next)
+      useStore.getState().bumpCases()
+      useStore.getState().setView('dashboard')
+      toast('ok', `case "${kase.name}" deleted`)
+      if (!serverCleared) toast('warn', 'the server store could not be removed (server unreachable); delete its folder under backend/data/cases', 0)
+    } catch (e) {
+      toast('err', `delete failed: ${(e as Error).message}`, 0)
+    }
   }
   const migrate = async () => {
     const total = counts.events + counts.mails
@@ -535,7 +552,11 @@ export function SettingsView() {
                 <button className="btn danger sm" onClick={wipe}>
                   delete all case data{isServer ? ' (browser + server store)' : ' from this browser'}
                 </button>
+                <button className="btn danger sm" onClick={destroy}>
+                  delete this case
+                </button>
               </div>
+              <div className="hint">The first empties the case and keeps it; the second removes the case itself and switches to another one.</div>
             </div>
           </div>
         </div>

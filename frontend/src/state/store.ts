@@ -39,6 +39,9 @@ interface State {
   setView: (v: View) => void
   currentCase: Case | null
   setCurrentCase: (c: Case | null) => void
+  /** bumped when a case is created or deleted outside App, so the case list reloads */
+  casesVersion: number
+  bumpCases: () => void
   updateSettings: (patch: Partial<CaseSettings>) => void
   health: Health | null
   setHealth: (h: Health | null) => void
@@ -93,6 +96,8 @@ export const useStore = create<State>((set) => ({
   setView: (view) => set({ view }),
   currentCase: null,
   setCurrentCase: (currentCase) => set({ currentCase }),
+  casesVersion: 0,
+  bumpCases: () => set((s) => ({ casesVersion: s.casesVersion + 1 })),
   updateSettings: (patch) => set((s) => (s.currentCase ? { currentCase: { ...s.currentCase, settings: { ...s.currentCase.settings, ...patch }, updatedAt: Date.now() } } : {})),
   health: null,
   setHealth: (health) => set({ health }),

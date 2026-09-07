@@ -3,6 +3,15 @@
 Versions follow semantic versioning; the number lives in `backend/api/views/health.py`
 and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
+## Unreleased
+
+- Settings has a "delete this case" button next to "delete all case data". The first removes
+  the case itself (server store, browser records, custom rules, settings) and switches to the
+  most recently updated remaining case, or a fresh one; the second empties the case and keeps it.
+- Fixed: on the development server a fresh browser got two "Case 1" cases, because React
+  runs the boot effect twice there and both runs saw an empty case table. The default case
+  is now created inside one transaction.
+
 ## 0.1.1 (2026-09-07)
 
 - Fixed: an account with the same name in another organisation

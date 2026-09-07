@@ -1,4 +1,5 @@
-import { getDb } from '../db/schema'
+import { API_HEADERS } from '../api/client'
+import { defaultSettings, deleteCase, getDb, type Case } from '../db/schema'
 import { rememberReviews } from './findingReviews'
 
 /**
@@ -27,4 +28,29 @@ export async function clearDerivedState(caseId: number): Promise<{ findings: num
     await db.facets.where('caseId').equals(caseId).delete()
     return { findings: findings.length, chains }
   })
+}
+
+/**
+ * Delete a case entirely: its server store when it has one, every browser record, custom rules,
+ * and the case row. Returns the case to show next: the most recently updated of the remaining
+ * ones, or a fresh browser case when none is left. serverCleared is false when the server store
+ * could not be removed (server down); the browser side is deleted regardless, like the wipe.
+ */
+export async function removeCase(kase: Case): Promise<{ next: Case; serverCleared: boolean }> {
+  const db = getDb()
+  let serverCleared = true
+  if (kase.storage === 'server' && kase.serverKey) {
+    serverCleared = await fetch(`/api/store/${kase.serverKey}`, { method: 'DELETE', headers: API_HEADERS })
+      .then((r) => r.ok || r.status === 404)
+      .catch(() => false)
+  }
+  await deleteCase(db, kase.id!)
+  const rest = (await db.cases.toArray()).sort((a, b) => b.updatedAt - a.updatedAt)
+  let next = rest[0]
+  if (!next) {
+    const id = await db.cases.add({ name: 'Case 1', createdAt: Date.now(), updatedAt: Date.now(), settings: defaultSettings(), storage: 'browser' })
+    next = (await db.cases.get(id))!
+  }
+  await db.kv.put({ key: 'lastCase', value: next.id })
+  return { next: { ...next, settings: { ...defaultSettings(), ...next.settings } }, serverCleared }
 }

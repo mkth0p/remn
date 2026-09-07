@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultSettings, deleteCaseData, deleteEvidenceData, RemnDB, setDb, type Case } from '../db/schema'
-import { clearDerivedState } from './caseState'
+import { clearDerivedState, removeCase } from './caseState'
 import { buildChains, loadChains } from './chains'
 import { pruneOrphanFindings, replaceFindings } from './findingReviews'
 
-vi.mock('../api/client', () => ({ apiPost: vi.fn() }))
+vi.mock('../api/client', () => ({ apiPost: vi.fn(), API_HEADERS: {} }))
 vi.mock('./rules', () => ({ settingsForRules: (k: Case) => ({ internal_domains: k.settings.internalDomains }) }))
 
 const kase: Case = { id: 1, name: 'Stale', storage: 'browser', createdAt: 1, updatedAt: 1, settings: defaultSettings() }
@@ -87,5 +87,43 @@ describe('derived state follows the evidence', () => {
     expect(await pruneOrphanFindings(1, ['mail-x'])).toBe(1)
     expect((await db.findings.toArray()).map((f) => f.ruleId).sort()).toEqual(['chain', 'mail-x'])
     expect(((await db.kv.get('finding-reviews-1'))?.value as Record<string, unknown>)['sigma-gone|1']).toMatchObject({ status: 'reviewed', notes: 'seen' })
+  })
+})
+
+describe('deleting a case', () => {
+  const other: Case = { id: 2, name: 'Other', storage: 'browser', createdAt: 2, updatedAt: 2, settings: defaultSettings() }
+  it('removes the rows, rules, derived state and the case row of that case only, and hands over the next one', async () => {
+    await db.cases.bulkAdd([kase, other])
+    for (const caseId of [1, 2]) {
+      await db.events.add({ caseId, evidenceId: 1, ts: 1, eventId: 4624, channel: 'Security', data: {} } as never)
+      await db.mails.add({ caseId, evidenceId: 1, date: 1, subject: 's', fromAddr: 'x@y.z', to: [], cc: [], bcc: [], flags: [], risk: 1 } as never)
+      await db.findings.add(finding(`f-${caseId}`) as never)
+      await db.customRules.add({ caseId, ruleId: `custom-${caseId}`, yaml: 'id: x' } as never)
+      await db.kv.put({ key: `chains-${caseId}`, value: { chains: [] } })
+    }
+    await db.kv.put({ key: 'lastCase', value: 1 })
+
+    const { next, serverCleared } = await removeCase(kase)
+    expect(serverCleared).toBe(true)
+    expect(next.id).toBe(2)
+    expect(await db.cases.get(1)).toBeUndefined()
+    expect(await db.events.where('caseId').equals(1).count()).toBe(0)
+    expect(await db.mails.where('caseId').equals(1).count()).toBe(0)
+    expect(await db.findings.where('caseId').equals(1).count()).toBe(0)
+    expect(await db.customRules.where('caseId').equals(1).count()).toBe(0)
+    expect(await db.kv.get('chains-1')).toBeUndefined()
+    expect(await db.events.where('caseId').equals(2).count()).toBe(1)
+    expect(await db.customRules.where('caseId').equals(2).count()).toBe(1)
+    expect(await db.kv.get('chains-2')).toBeDefined()
+    expect((await db.kv.get('lastCase'))?.value).toBe(2)
+  })
+
+  it('creates a fresh browser case when the last one goes', async () => {
+    await db.cases.add(kase)
+    const { next } = await removeCase(kase)
+    expect(next.id).not.toBe(1)
+    expect(next.storage).toBe('browser')
+    expect(await db.cases.count()).toBe(1)
+    expect((await db.kv.get('lastCase'))?.value).toBe(next.id)
   })
 })

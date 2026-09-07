@@ -219,6 +219,12 @@ context (internal IP ranges, expected sign-in countries, admin and service accou
 business hours and time zone; whether external reputation lookups are allowed; and the
 AI transport and model, described on the [AI page](ai.md).
 
+At the bottom are the two destructive actions. "Delete all case data" empties the case
+(every row, finding, note and session, and the server store when it has one) and keeps
+the case with its settings. "Delete this case" removes the case itself, custom rules and
+settings included, and switches to the most recently updated remaining case, or to a
+fresh one when none is left. Both ask for confirmation and neither can be undone.
+
 ## Interface tests
 
 Component tests run under jsdom with `fake-indexeddb` (`*.test.tsx` next to the views:

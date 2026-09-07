@@ -444,6 +444,15 @@ export async function deleteCaseData(db: RemnDB, caseId: number): Promise<void> 
   )
 }
 
+/** Everything of a case, the case row included: rows, derived state, custom rules, and the last-case pointer when it was this one. */
+export async function deleteCase(db: RemnDB, caseId: number): Promise<void> {
+  await deleteCaseData(db, caseId)
+  await db.customRules.where('caseId').equals(caseId).delete()
+  await db.cases.delete(caseId)
+  const last = await db.kv.get('lastCase')
+  if (last?.value === caseId) await db.kv.delete('lastCase')
+}
+
 export async function deleteEvidenceData(db: RemnDB, caseId: number, evidenceId: number): Promise<void> {
   await db.transaction('rw', [db.events, db.mails, db.mailBodies, db.attachments, db.urls, db.evidence], async () => {
     await db.events.where('[caseId+evidenceId]').equals([caseId, evidenceId]).delete()
