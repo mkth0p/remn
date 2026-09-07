@@ -51,6 +51,8 @@ mail, Windows and Microsoft 365 activity comes with the repository:
 .venv\Scripts\python.exe samples\synthetic\make_linked_lab.py --out samples\generated\lab
 ```
 
+With Docker instead: `docker compose up --build`, then the same address.
+
 For development, run the API with `manage.py runserver` and the frontend with
 `npm run dev`; see [docs/setup.md](docs/setup.md).
 

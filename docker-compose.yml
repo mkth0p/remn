@@ -1,0 +1,26 @@
+# docker compose up --build
+# Then open http://127.0.0.1:8000. Cases in the server store live in the remn-data volume;
+# browser-store cases live in the browser, as always.
+services:
+  remn:
+    build: .
+    image: remn
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      # hosts the browser reaches this container by; add the machine's name or address for remote access
+      FORENSIC_ALLOWED_HOSTS: localhost,127.0.0.1
+      # a shared token for remote access; leave empty on a loopback-only setup (see docs/setup.md)
+      FORENSIC_AUTH_TOKEN: ""
+      # an Ollama on the host machine, for the server proxy transport
+      OLLAMA_HOST: http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - remn-data:/app/backend/data
+      - remn-tmp:/app/backend/tmp
+    restart: unless-stopped
+
+volumes:
+  remn-data:
+  remn-tmp:

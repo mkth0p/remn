@@ -87,3 +87,22 @@ samples/            local EVTX exports (gitignored) + synthetic/ mail generator 
 tests/backend/      pytest suite
 backend/data/       lists/ (offline block lists), yara/ (rules), geoip/ (GeoLite2 .mmdb)
 ```
+
+## Docker
+
+One container serves the API and the built frontend on port 8000:
+
+```
+docker compose up --build
+```
+
+`docker-compose.yml` publishes the port on 127.0.0.1 only, keeps the server store and
+the upload area in named volumes (`remn-data`, `remn-tmp`), and points `OLLAMA_HOST` at an
+Ollama on the host machine for the server proxy transport (the browser-direct transport
+needs nothing from the container). For remote access add the machine's name or address to
+`FORENSIC_ALLOWED_HOSTS` and set `FORENSIC_AUTH_TOKEN`, as in the remote access section.
+
+Not in the image: PST support (libpff needs a build), YARA, GeoLite2 and the offline
+lists (mount them under `/app/backend/data`), and the Claude Code connector, which runs
+the `claude` command line on the host. To add the optional Python packages, build with a
+requirements file of your own or run `pip install` in a derived image.
