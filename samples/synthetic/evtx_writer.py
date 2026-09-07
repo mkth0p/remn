@@ -5,6 +5,7 @@ Format references:
 https://github.com/libyal/libevtx/blob/main/documentation/Windows%20XML%20Event%20Log%20(EVTX).asciidoc
 https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-even6/c73573ae-1c90-43a2-a65f-ad7501155956
 """
+
 from __future__ import annotations
 
 import struct
@@ -29,7 +30,7 @@ class BinXml:
         encoded = value.encode("utf-16le")
         hash_value = 0
         for char in value:
-            hash_value = (hash_value * 65599 + ord(char)) & 0xffff
+            hash_value = (hash_value * 65599 + ord(char)) & 0xFFFF
         self.names.append((self.offset + len(self.buf), hash_value))
         self.buf.extend(struct.pack("<IHH", 0, hash_value, len(encoded) // 2) + encoded + b"\0\0")
 
@@ -84,8 +85,20 @@ class EvtxWriter:
     def _flush(self):
         if self.pos == 512:
             return
-        struct.pack_into("<8sQQQQIIII", self.buf, 0, b"ElfChnk\0", self.first, self.count, self.first, self.count,
-                         128, self.last_offset, self.pos, zlib.crc32(self.buf[512:self.pos]))
+        struct.pack_into(
+            "<8sQQQQIIII",
+            self.buf,
+            0,
+            b"ElfChnk\0",
+            self.first,
+            self.count,
+            self.first,
+            self.count,
+            128,
+            self.last_offset,
+            self.pos,
+            zlib.crc32(self.buf[512 : self.pos]),
+        )
         struct.pack_into("<64I", self.buf, 128, *self.buckets)
         struct.pack_into("<I", self.buf, 124, zlib.crc32(self.buf[:120] + self.buf[128:512]))
         self.fh.write(self.buf)
@@ -106,8 +119,8 @@ class EvtxWriter:
             xml.buf.append(0)
         self.count += 1
         self.last_offset = self.pos
-        struct.pack_into("<IIQQ", self.buf, self.pos, 0x2a2a, size, self.count, int(ts_ms) * 10000 + 116444736000000000)
-        self.buf[self.pos + 24:self.pos + 24 + len(xml.buf)] = xml.buf
+        struct.pack_into("<IIQQ", self.buf, self.pos, 0x2A2A, size, self.count, int(ts_ms) * 10000 + 116444736000000000)
+        self.buf[self.pos + 24 : self.pos + 24 + len(xml.buf)] = xml.buf
         for offset, hash_value in xml.names:
             bucket = hash_value % 64
             struct.pack_into("<I", self.buf, offset, self.buckets[bucket])
@@ -134,13 +147,29 @@ class EvtxWriter:
 
 
 def event_node(record_id, date, provider, channel, host, event_id, data, level=4):
-    system = element("System", children=[
-        element("Provider", attrs={"Name": provider}), element("EventID", event_id), element("Version", 0),
-        element("Level", level), element("Task", 0), element("Opcode", 0), element("Keywords", "0x8000000000000000"),
-        element("TimeCreated", attrs={"SystemTime": date}), element("EventRecordID", record_id),
-        element("Execution", attrs={"ProcessID": 1000, "ThreadID": 1001}), element("Channel", channel),
-        element("Computer", host), element("Security", attrs={"UserID": "S-1-5-18"}),
-    ])
-    return element("Event", attrs={"xmlns": "http://schemas.microsoft.com/win/2004/08/events/event"}, children=[
-        system, element("EventData", children=[element("Data", value, {"Name": key}) for key, value in data.items()]),
-    ])
+    system = element(
+        "System",
+        children=[
+            element("Provider", attrs={"Name": provider}),
+            element("EventID", event_id),
+            element("Version", 0),
+            element("Level", level),
+            element("Task", 0),
+            element("Opcode", 0),
+            element("Keywords", "0x8000000000000000"),
+            element("TimeCreated", attrs={"SystemTime": date}),
+            element("EventRecordID", record_id),
+            element("Execution", attrs={"ProcessID": 1000, "ThreadID": 1001}),
+            element("Channel", channel),
+            element("Computer", host),
+            element("Security", attrs={"UserID": "S-1-5-18"}),
+        ],
+    )
+    return element(
+        "Event",
+        attrs={"xmlns": "http://schemas.microsoft.com/win/2004/08/events/event"},
+        children=[
+            system,
+            element("EventData", children=[element("Data", value, {"Name": key}) for key, value in data.items()]),
+        ],
+    )

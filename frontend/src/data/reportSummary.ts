@@ -18,7 +18,9 @@ export async function draftExecutiveSummary(kase: Case, opts: { signal?: AbortSi
     loadChains(caseId),
     loadChainReviews(caseId),
     loadReportSettings(caseId),
-    getSource(kase).listIocs({ onlyBad: true, limit: 500 }).catch(() => ({ rows: [] })),
+    getSource(kase)
+      .listIocs({ onlyBad: true, limit: 500 })
+      .catch(() => ({ rows: [] })),
   ])
   const chains = chainRes?.chains ?? []
   const selection = selectForReport(findings, chains, reviews, settings)
@@ -26,11 +28,20 @@ export async function draftExecutiveSummary(kase: Case, opts: { signal?: AbortSi
   const data = {
     case: { name: kase.name, analyst: kase.analyst, settings: { internalDomains: kase.settings.internalDomains } },
     summary: await getSource(kase).summary(),
-    chains: selection.chains.slice(0, 10).map((c) => ({ recipient: c.identityLabel, severity: chainSeverity(c, reviews[c.id]), verdict: reviews[c.id]?.verdict, narrative: reviews[c.id]?.narrative || c.summary })),
+    chains: selection.chains
+      .slice(0, 10)
+      .map((c) => ({ recipient: c.identityLabel, severity: chainSeverity(c, reviews[c.id]), verdict: reviews[c.id]?.verdict, narrative: reviews[c.id]?.narrative || c.summary })),
     incidents: incidents.slice(0, 40).map((i) => ({ title: i.title, severity: i.severity, status: i.status, findings: i.findings.map((f) => f.title), entities: i.entities, note: i.lead.notes })),
     iocs: iocRes.rows.slice(0, 40).map((i) => ({ kind: i.kind, value: i.value, verdict: i.verdict, tags: i.tags })),
   }
-  const msgs = await runAgent([{ role: 'user', content: `Write the executive summary for this investigation:\n\`\`\`json\n${JSON.stringify(data).slice(0, 60000)}\n\`\`\`` }], kase, { mode: 'report', tools: false, think: false, maxIterations: 1, signal: opts.signal, model: opts.model })
+  const msgs = await runAgent([{ role: 'user', content: `Write the executive summary for this investigation:\n\`\`\`json\n${JSON.stringify(data).slice(0, 60000)}\n\`\`\`` }], kase, {
+    mode: 'report',
+    tools: false,
+    think: false,
+    maxIterations: 1,
+    signal: opts.signal,
+    model: opts.model,
+  })
   const last = [...msgs].reverse().find((m) => m.role === 'assistant')
   const text = (last?.content ?? '').trim()
   if (!text || text.startsWith('⚠')) throw new Error(text.replace(/^⚠\s*/, '') || 'the model returned nothing')

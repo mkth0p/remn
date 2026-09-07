@@ -18,7 +18,21 @@ interface Props {
   version: number
 }
 
-function FacetBlock({ ds, source, def, conditions, onToggle, version }: { ds: DataSource; source: 'events' | 'mails'; def: FacetDef; conditions: Condition[]; onToggle: Props['onToggle']; version: number }) {
+function FacetBlock({
+  ds,
+  source,
+  def,
+  conditions,
+  onToggle,
+  version,
+}: {
+  ds: DataSource
+  source: 'events' | 'mails'
+  def: FacetDef
+  conditions: Condition[]
+  onToggle: Props['onToggle']
+  version: number
+}) {
   const [open, setOpen] = useState(!!def.open)
   const [items, setItems] = useState<FacetItem[]>([])
   const [q, setQ] = useState('')
@@ -36,8 +50,18 @@ function FacetBlock({ ds, source, def, conditions, onToggle, version }: { ds: Da
       alive = false
     }
   }, [open, ds, source, def.field, version])
-  const active = new Set(conditions.filter((c) => c.field === def.field && (c.op === 'eq' || c.op === 'in' || c.op === 'contains')).flatMap((c) => (Array.isArray(c.value) ? c.value : [c.value])).map((v) => String(v).toLowerCase()))
-  const negated = new Set(conditions.filter((c) => c.field === def.field && (c.op === 'ne' || c.op === 'nin' || c.op === 'not_contains')).flatMap((c) => (Array.isArray(c.value) ? c.value : [c.value])).map((v) => String(v).toLowerCase()))
+  const active = new Set(
+    conditions
+      .filter((c) => c.field === def.field && (c.op === 'eq' || c.op === 'in' || c.op === 'contains'))
+      .flatMap((c) => (Array.isArray(c.value) ? c.value : [c.value]))
+      .map((v) => String(v).toLowerCase()),
+  )
+  const negated = new Set(
+    conditions
+      .filter((c) => c.field === def.field && (c.op === 'ne' || c.op === 'nin' || c.op === 'not_contains'))
+      .flatMap((c) => (Array.isArray(c.value) ? c.value : [c.value]))
+      .map((v) => String(v).toLowerCase()),
+  )
   const shown = items.filter((i) => !q || i.value.toLowerCase().includes(q.toLowerCase())).slice(0, limit)
   const max = items[0]?.count ?? 1
   return (
@@ -52,7 +76,11 @@ function FacetBlock({ ds, source, def, conditions, onToggle, version }: { ds: Da
         <>
           {items.length > 8 && <input className="input mono facet-filter" placeholder="filter…" value={q} onChange={(e) => setQ(e.target.value)} style={{ padding: '3px 8px', fontSize: 11 }} />}
           <div className="facet-list">
-            {!items.length && !loading && <div className="muted small" style={{ padding: '2px 6px' }}>no values</div>}
+            {!items.length && !loading && (
+              <div className="muted small" style={{ padding: '2px 6px' }}>
+                no values
+              </div>
+            )}
             {shown.map((it) => {
               const key = it.value.toLowerCase()
               return (

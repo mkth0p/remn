@@ -1,9 +1,10 @@
 """Sender baselining + campaign clustering: pure pass, store write-back, rules, endpoint."""
+
 from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -17,7 +18,7 @@ from services.store.casestore import StoreRegistry, rows_to_dicts
 from services.store.writers import MailWriter
 
 HDR = {"HTTP_X_FORENSIC_CLIENT": "1"}
-T0 = datetime(2026, 8, 1, 9, 0, tzinfo=timezone.utc)
+T0 = datetime(2026, 8, 1, 9, 0, tzinfo=UTC)
 RULES = Path(__file__).resolve().parents[2] / "rules" / "mail" / "baseline.yaml"
 
 
@@ -26,9 +27,21 @@ def ms(days: float) -> int:
 
 
 def _m(mid, days, frm, to, subject, spf="pass", dkim="pass", dmarc="pass", urls=(), atts=(), risk=20, flags=()):
-    return {"id": mid, "date": ms(days), "fromAddr": frm, "fromRegistrable": frm.split("@")[1], "to": [{"addr": a, "domain": a.split("@")[1], "name": ""} for a in to],
-            "subject": subject, "spf": spf, "dkim": dkim, "dmarc": dmarc, "flags": list(flags), "risk": risk,
-            "urls": [{"domain": d, "host": d, "url": f"https://{d}/x"} for d in urls], "attachments": [{"name": n, "sha256": h} for n, h in atts]}
+    return {
+        "id": mid,
+        "date": ms(days),
+        "fromAddr": frm,
+        "fromRegistrable": frm.split("@")[1],
+        "to": [{"addr": a, "domain": a.split("@")[1], "name": ""} for a in to],
+        "subject": subject,
+        "spf": spf,
+        "dkim": dkim,
+        "dmarc": dmarc,
+        "flags": list(flags),
+        "risk": risk,
+        "urls": [{"domain": d, "host": d, "url": f"https://{d}/x"} for d in urls],
+        "attachments": [{"name": n, "sha256": h} for n, h in atts],
+    }
 
 
 def scenario():
@@ -40,9 +53,33 @@ def scenario():
     mails.append(_m(30, 3, "alice@contoso.com", ["jo@partner.org"], "Quote request", flags=["exchange_internal"]))
     mails.append(_m(31, 4, "jo@partner.org", ["alice@contoso.com"], "RE: Quote request"))
     # newcomer with lure wording, never contacted -> new + unsolicited
-    mails.append(_m(40, 20, "billing@evil-login.net", ["alice@contoso.com"], "Invoice overdue", urls=["evil-login.net"], risk=70, flags=["lexicon_financial", "url_login_link"]))
+    mails.append(
+        _m(
+            40,
+            20,
+            "billing@evil-login.net",
+            ["alice@contoso.com"],
+            "Invoice overdue",
+            urls=["evil-login.net"],
+            risk=70,
+            flags=["lexicon_financial", "url_login_link"],
+        )
+    )
     # vendor.com passed 6 times, then a spoof fails auth -> regression
-    mails.append(_m(41, 45, "news@vendor.com", ["alice@contoso.com"], "Urgent: update your bank details", spf="fail", dkim="none", dmarc="fail", risk=75, flags=["spf_fail", "dmarc_fail"]))
+    mails.append(
+        _m(
+            41,
+            45,
+            "news@vendor.com",
+            ["alice@contoso.com"],
+            "Urgent: update your bank details",
+            spf="fail",
+            dkim="none",
+            dmarc="fail",
+            risk=75,
+            flags=["spf_fail", "dmarc_fail"],
+        )
+    )
     # campaign: same lure to three mailboxes from rotating senders
     for i, (frm, to) in enumerate([("a1@rot.example", "alice@contoso.com"), ("a2@rot.example", "bob@contoso.com"), ("a3@rot.example", "carol@contoso.com")]):
         mails.append(_m(50 + i, 30 + i * 0.01, frm, [to], f"Your package 4409{i} is waiting", urls=["track-parcel.top"], risk=60, flags=["url_suspicious_tld"]))
@@ -82,10 +119,17 @@ def test_store_roundtrip_and_rules(store):
     ctx = ParseContext(internal_domains=["contoso.com"])
     w = MailWriter(store, 1)
     for m in scenario():
-        headers = [("From", f"<{m['fromAddr']}>"), ("To", ", ".join(f"<{t['addr']}>" for t in m["to"])), ("Subject", m["subject"]),
-                   ("Date", (T0 + timedelta(milliseconds=m["date"] - ms(0))).strftime("%a, %d %b %Y %H:%M:%S +0000")),
-                   ("Message-ID", f"<{m['id']}@{m['fromRegistrable']}>"),
-                   ("Authentication-Results", f"spf={m['spf']} smtp.mailfrom={m['fromRegistrable']}; dkim={m['dkim']} header.d={m['fromRegistrable']}; dmarc={m['dmarc']} header.from={m['fromRegistrable']}")]
+        headers = [
+            ("From", f"<{m['fromAddr']}>"),
+            ("To", ", ".join(f"<{t['addr']}>" for t in m["to"])),
+            ("Subject", m["subject"]),
+            ("Date", (T0 + timedelta(milliseconds=m["date"] - ms(0))).strftime("%a, %d %b %Y %H:%M:%S +0000")),
+            ("Message-ID", f"<{m['id']}@{m['fromRegistrable']}>"),
+            (
+                "Authentication-Results",
+                f"spf={m['spf']} smtp.mailfrom={m['fromRegistrable']}; dkim={m['dkim']} header.d={m['fromRegistrable']}; dmarc={m['dmarc']} header.from={m['fromRegistrable']}",
+            ),
+        ]
         html = "<html><body><p>" + m["subject"] + "</p>" + "".join(f'<a href="{u["url"]}">link</a>' for u in m["urls"]) + "</body></html>"
         row = build_row(headers, None, html, [], ctx, folder="Inbox", size=None, extra={})
         row["risk"] = m["risk"]
@@ -95,7 +139,9 @@ def test_store_roundtrip_and_rules(store):
     summary = B.enrich_store(store, {"internal_domains": ["contoso.com"]})
     assert summary["updated"] == len(scenario()) and summary["campaigns"] >= 1
     cur = store.cursor()
-    cur.execute('SELECT "fromAddr", subject, "senderPrevalence", "senderSolicited", "senderAuthRegression", "campaignSize", "campaignSenders" FROM mails ORDER BY id')
+    cur.execute(
+        'SELECT "fromAddr", subject, "senderPrevalence", "senderSolicited", "senderAuthRegression", "campaignSize", "campaignSenders" FROM mails ORDER BY id'
+    )
     rows = rows_to_dicts(cur)
     by_subject = {r["subject"]: r for r in rows}
     assert by_subject["RE: Quote request"]["senderSolicited"] is True
@@ -118,9 +164,13 @@ def test_store_roundtrip_and_rules(store):
 
 def test_endpoint_with_posted_rows():
     c = Client()
-    r = c.post("/api/enrich/mails", json.dumps({"mails": scenario(), "settings": {"internal_domains": ["contoso.com"]}}), content_type="application/json", **HDR)
+    r = c.post(
+        "/api/enrich/mails", json.dumps({"mails": scenario(), "settings": {"internal_domains": ["contoso.com"]}}), content_type="application/json", **HDR
+    )
     assert r.status_code == 200, r.content
     body = r.json()
     rows = {x["id"]: x for x in body["rows"]}
     assert rows[40]["senderPrevalence"] == "new" and rows[41]["senderAuthRegression"] is True and body["summary"]["campaigns"] == 2
-    assert c.post("/api/enrich/mails", json.dumps({"storeKey": "00000000-0000-0000-0000-000000000000"}), content_type="application/json", **HDR).status_code == 404
+    assert (
+        c.post("/api/enrich/mails", json.dumps({"storeKey": "00000000-0000-0000-0000-000000000000"}), content_type="application/json", **HDR).status_code == 404
+    )

@@ -66,7 +66,14 @@ const isRoutine = (s: ChainStep) => s.weight <= 1 && !s.artifacts.length && !s.f
 /** widest graph before adjacent unpinned steps are folded together */
 export const MAX_COLUMNS = 14
 /** "sign-in from NL via Other clients" and "sign-in from FR via Browser" fold together; numbers and IPs are wildcards */
-const titleKey = (t: string) => t.toLowerCase().replace(/\s*×\d+$/, '').replace(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g, '#').replace(/\d+/g, '#').replace(/ (?:from|on|by|via|to) .*$/, '').slice(0, 48)
+const titleKey = (t: string) =>
+  t
+    .toLowerCase()
+    .replace(/\s*×\d+$/, '')
+    .replace(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g, '#')
+    .replace(/\d+/g, '#')
+    .replace(/ (?:from|on|by|via|to) .*$/, '')
+    .slice(0, 48)
 const laneOf = (s: ChainStep): Lane => (s.kind === 'mail' ? 'mail' : s.origin === 'm365' ? 'cloud' : 'host')
 
 function offset(min: number): string {
@@ -79,10 +86,17 @@ function offset(min: number): string {
 function routineSummary(steps: ChainStep[]): string {
   const heads = new Map<string, number>()
   for (const s of steps) {
-    const h = s.title.replace(/\s*×\d+$/, '').split(/ (?:from|on|by|via|to) /)[0].slice(0, 28)
+    const h = s.title
+      .replace(/\s*×\d+$/, '')
+      .split(/ (?:from|on|by|via|to) /)[0]
+      .slice(0, 28)
     heads.set(h, (heads.get(h) ?? 0) + 1)
   }
-  return Array.from(heads.entries()).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([h, n]) => (n > 1 ? `${h} ×${n}` : h)).join(', ')
+  return Array.from(heads.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([h, n]) => (n > 1 ? `${h} ×${n}` : h))
+    .join(', ')
 }
 
 export function buildChainGraph(chain: Chain): Graph {
@@ -96,8 +110,30 @@ export function buildChainGraph(chain: Chain): Graph {
   }
   const ensure = (id: string, make: () => GNode) => byId.get(id) ?? add(make())
   const seedRisk = chain.seed.risk
-  add({ id: 'seed', label: chain.seed.subject || '(no subject)', sub: `seed mail · risk ${seedRisk}`, lane: 'mail', kind: 'seed', x: 0, severity: riskSeverity(seedRisk), weight: 6, linked: true, ts: chain.seed.ts, detail: chain.seed.findings.map((f) => `${f.severity}: ${f.title}`) })
-  add({ id: 'victim', label: chain.identityLabel, sub: 'recipient', lane: 'identity', kind: 'user', x: 0, weight: 5, linked: true, entity: { kind: 'user', value: chain.entities.user || chain.identityLabel } })
+  add({
+    id: 'seed',
+    label: chain.seed.subject || '(no subject)',
+    sub: `seed mail · risk ${seedRisk}`,
+    lane: 'mail',
+    kind: 'seed',
+    x: 0,
+    severity: riskSeverity(seedRisk),
+    weight: 6,
+    linked: true,
+    ts: chain.seed.ts,
+    detail: chain.seed.findings.map((f) => `${f.severity}: ${f.title}`),
+  })
+  add({
+    id: 'victim',
+    label: chain.identityLabel,
+    sub: 'recipient',
+    lane: 'identity',
+    kind: 'user',
+    x: 0,
+    weight: 5,
+    linked: true,
+    entity: { kind: 'user', value: chain.entities.user || chain.identityLabel },
+  })
   edges.push({ source: 'seed', target: 'victim', kind: 'recipient', label: 'delivered to' })
   if (chain.seed.fromAddr) {
     const id = `address:${chain.seed.fromAddr}`
@@ -117,7 +153,8 @@ export function buildChainGraph(chain: Chain): Graph {
 
   // --- steps: fold what repeats, keep what ties to the mail
   const ordered = chain.steps.map((s, i) => ({ s, i })).sort((a, b) => a.s.ts - b.s.ts || a.i - b.i)
-  const hasArtifact = (st: ChainStep) => st.artifacts.some((a) => a.startsWith('mail ') || a === 'victim engaged with the sender' || a === 'forwarding rule' || a === 'mailbox forwarding' || a === 'same thread')
+  const hasArtifact = (st: ChainStep) =>
+    st.artifacts.some((a) => a.startsWith('mail ') || a === 'victim engaged with the sender' || a === 'forwarding rule' || a === 'mailbox forwarding' || a === 'same thread')
   type Group = { items: { s: ChainStep; i: number }[]; lane: Lane; key: string; pinned: boolean; routine: boolean }
   const groups: Group[] = []
   for (const it of ordered) {
@@ -131,7 +168,10 @@ export function buildChainGraph(chain: Chain): Graph {
     if (joins) last.items.push(it)
     else groups.push({ items: [it], lane, key, pinned, routine })
   }
-  const majorityLane = (g: Group): Lane => { const lanes = g.items.map((x) => laneOf(x.s)); return LANES.find((l) => lanes.filter((x) => x === l).length >= lanes.length / 2) ?? g.lane }
+  const majorityLane = (g: Group): Lane => {
+    const lanes = g.items.map((x) => laneOf(x.s))
+    return LANES.find((l) => lanes.filter((x) => x === l).length >= lanes.length / 2) ?? g.lane
+  }
   for (const g of groups) if (g.routine) g.lane = majorityLane(g)
   // still too wide: merge adjacent unpinned groups (same lane first, then any) until it fits
   const mergeOnce = (sameLane: boolean): boolean => {
@@ -148,7 +188,9 @@ export function buildChainGraph(chain: Chain): Graph {
     }
     return false
   }
-  while (groups.length > MAX_COLUMNS && (mergeOnce(true) || mergeOnce(false))) { /* fold */ }
+  while (groups.length > MAX_COLUMNS && (mergeOnce(true) || mergeOnce(false))) {
+    /* fold */
+  }
 
   let col = 1
   let prev = 'victim'
@@ -163,9 +205,34 @@ export function buildChainGraph(chain: Chain): Graph {
     const titles = Array.from(new Set(g.items.map((x) => x.s.title.replace(/\s*×\d+$/, ''))))
     const label = allRoutine && n > 1 ? `${n} routine steps` : n === 1 ? titles[0] : g.key !== '*' ? `${titles[0]} ×${n}` : `${n} steps: ${routineSummary(g.items.map((x) => x.s))}`
     const last = g.items[n - 1].s
-    const sub = allRoutine && n > 1 ? `${routineSummary(g.items.map((x) => x.s))} · ${offset(first.offsetMin)} → ${offset(last.offsetMin)}` : n === 1 ? `${offset(first.offsetMin)}${first.count > 1 ? ` · ×${first.count}` : ''}` : `${offset(first.offsetMin)} → ${offset(last.offsetMin)} · ${rows} row${rows === 1 ? '' : 's'}`
+    const sub =
+      allRoutine && n > 1
+        ? `${routineSummary(g.items.map((x) => x.s))} · ${offset(first.offsetMin)} → ${offset(last.offsetMin)}`
+        : n === 1
+          ? `${offset(first.offsetMin)}${first.count > 1 ? ` · ×${first.count}` : ''}`
+          : `${offset(first.offsetMin)} → ${offset(last.offsetMin)} · ${rows} row${rows === 1 ? '' : 's'}`
     const sev = worstSeverity(findings) ?? (artifacts.some((a) => a.startsWith('mail ') || a === 'victim engaged with the sender') ? 'high' : undefined)
-    add({ id, label, sub, lane: g.lane, kind: allRoutine ? 'routine' : 'step', x: col++, severity: allRoutine ? undefined : sev, weight: Math.max(...g.items.map((x) => x.s.weight)), linked: g.pinned || findings.length > 0, stepIdx: n === 1 ? g.items[0].i : undefined, stepIdxs: n > 1 ? g.items.map((x) => x.i) : undefined, ts: first.ts, detail: n === 1 ? [...first.artifacts, ...first.findings.map((f) => `${f.severity}: ${f.title}`)] : [...titles.slice(0, 6).map((t) => (n > 1 ? `${g.items.filter((x) => x.s.title.replace(/\s*×\d+$/, '') === t).length}× ${t}` : t)), ...Array.from(new Set(findings.map((f) => `${f.severity}: ${f.title}`))).slice(0, 6)] })
+    add({
+      id,
+      label,
+      sub,
+      lane: g.lane,
+      kind: allRoutine ? 'routine' : 'step',
+      x: col++,
+      severity: allRoutine ? undefined : sev,
+      weight: Math.max(...g.items.map((x) => x.s.weight)),
+      linked: g.pinned || findings.length > 0,
+      stepIdx: n === 1 ? g.items[0].i : undefined,
+      stepIdxs: n > 1 ? g.items.map((x) => x.i) : undefined,
+      ts: first.ts,
+      detail:
+        n === 1
+          ? [...first.artifacts, ...first.findings.map((f) => `${f.severity}: ${f.title}`)]
+          : [
+              ...titles.slice(0, 6).map((t) => (n > 1 ? `${g.items.filter((x) => x.s.title.replace(/\s*×\d+$/, '') === t).length}× ${t}` : t)),
+              ...Array.from(new Set(findings.map((f) => `${f.severity}: ${f.title}`))).slice(0, 6),
+            ],
+    })
     edges.push({ source: prev, target: id, kind: 'sequence' })
     prev = id
     for (const a of artifacts) {
@@ -195,7 +262,14 @@ export function buildChainGraph(chain: Chain): Graph {
         }
       }
     }
-    const ips = Array.from(new Set(g.items.map((x) => x.s.ipAddress).filter(Boolean).map(String))).slice(0, 3)
+    const ips = Array.from(
+      new Set(
+        g.items
+          .map((x) => x.s.ipAddress)
+          .filter(Boolean)
+          .map(String),
+      ),
+    ).slice(0, 3)
     for (const ip of ips) {
       const iid = `ip:${ip}`
       ensure(iid, () => ({ id: iid, label: ip, sub: 'source ip', lane: 'infra', kind: 'ip', x: 0, weight: 2, linked: false, entity: { kind: 'ip', value: ip } }))
@@ -254,12 +328,56 @@ export function buildCampaignGraph(chains: Chain[]): Graph & { insights: Campaig
     edges.push({ source: `chain:${chainId}`, target: id, kind: 'entity', label })
   }
   for (const c of chains) {
-    add({ id: `chain:${c.id}`, label: c.identityLabel, sub: `${c.severity} · score ${c.score} · ${c.steps.length} steps`, lane: 'identity', kind: 'chain', x: 0, severity: c.severity, weight: 4 + Math.round(c.score / 25), linked: true, score: c.score, chainId: c.id, entity: { kind: 'user', value: c.entities.user || c.identityLabel } })
-    if (c.seed.fromAddr) link(c.id, `address:${c.seed.fromAddr}`, () => ({ id: `address:${c.seed.fromAddr}`, label: c.seed.fromAddr!, sub: 'sender', lane: 'attacker', kind: 'address', x: 0, weight: 3, linked: true, entity: { kind: 'address', value: c.seed.fromAddr! } }), 'seed from')
-    for (const a of c.entities.attackerAddresses) if (a !== c.seed.fromAddr) link(c.id, `address:${a}`, () => ({ id: `address:${a}`, label: a, sub: 'attacker address', lane: 'attacker', kind: 'address', x: 0, weight: 3, linked: true, entity: { kind: 'address', value: a } }))
-    for (const d of c.entities.domains) link(c.id, `domain:${d}`, () => ({ id: `domain:${d}`, label: d, sub: 'link domain', lane: 'attacker', kind: 'domain', x: 0, weight: 2, linked: false, entity: { kind: 'domain', value: d } }))
-    for (const ip of c.entities.ips) link(c.id, `ip:${ip}`, () => ({ id: `ip:${ip}`, label: ip, sub: 'ip', lane: 'infra', kind: 'ip', x: 0, weight: 2, linked: false, entity: { kind: 'ip', value: ip } }))
-    for (const h of c.entities.hosts) link(c.id, `host:${h}`, () => ({ id: `host:${h}`, label: h.split('.')[0], sub: 'host', lane: 'infra', kind: 'host', x: 0, weight: 3, linked: false, entity: { kind: 'host', value: h } }))
+    add({
+      id: `chain:${c.id}`,
+      label: c.identityLabel,
+      sub: `${c.severity} · score ${c.score} · ${c.steps.length} steps`,
+      lane: 'identity',
+      kind: 'chain',
+      x: 0,
+      severity: c.severity,
+      weight: 4 + Math.round(c.score / 25),
+      linked: true,
+      score: c.score,
+      chainId: c.id,
+      entity: { kind: 'user', value: c.entities.user || c.identityLabel },
+    })
+    if (c.seed.fromAddr)
+      link(
+        c.id,
+        `address:${c.seed.fromAddr}`,
+        () => ({
+          id: `address:${c.seed.fromAddr}`,
+          label: c.seed.fromAddr!,
+          sub: 'sender',
+          lane: 'attacker',
+          kind: 'address',
+          x: 0,
+          weight: 3,
+          linked: true,
+          entity: { kind: 'address', value: c.seed.fromAddr! },
+        }),
+        'seed from',
+      )
+    for (const a of c.entities.attackerAddresses)
+      if (a !== c.seed.fromAddr)
+        link(c.id, `address:${a}`, () => ({
+          id: `address:${a}`,
+          label: a,
+          sub: 'attacker address',
+          lane: 'attacker',
+          kind: 'address',
+          x: 0,
+          weight: 3,
+          linked: true,
+          entity: { kind: 'address', value: a },
+        }))
+    for (const d of c.entities.domains)
+      link(c.id, `domain:${d}`, () => ({ id: `domain:${d}`, label: d, sub: 'link domain', lane: 'attacker', kind: 'domain', x: 0, weight: 2, linked: false, entity: { kind: 'domain', value: d } }))
+    for (const ip of c.entities.ips)
+      link(c.id, `ip:${ip}`, () => ({ id: `ip:${ip}`, label: ip, sub: 'ip', lane: 'infra', kind: 'ip', x: 0, weight: 2, linked: false, entity: { kind: 'ip', value: ip } }))
+    for (const h of c.entities.hosts)
+      link(c.id, `host:${h}`, () => ({ id: `host:${h}`, label: h.split('.')[0], sub: 'host', lane: 'infra', kind: 'host', x: 0, weight: 3, linked: false, entity: { kind: 'host', value: h } }))
   }
   const insights: CampaignInsight[] = []
   for (const n of nodes) {

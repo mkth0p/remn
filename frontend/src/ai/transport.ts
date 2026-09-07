@@ -374,7 +374,11 @@ class ClaudeCodeTransport implements AiTransport {
   }
 
   queryJson(question: string, context: Record<string, unknown>, model?: string) {
-    return apiPost<{ query: Record<string, unknown> | null; raw: string; model: string }>('/api/ai/claude/query', { question, context, model: pickClaudeModel(model, useStore.getState().aiConfig.claudeModel) })
+    return apiPost<{ query: Record<string, unknown> | null; raw: string; model: string }>('/api/ai/claude/query', {
+      question,
+      context,
+      model: pickClaudeModel(model, useStore.getState().aiConfig.claudeModel),
+    })
   }
 
   async listModels(): Promise<ModelInfo[]> {

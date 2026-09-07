@@ -4,6 +4,7 @@ one port with waitress (no debug mode, threaded, streaming responses).
 
     .venv\\Scripts\\python.exe backend\\run.py [--port 8000]
 """
+
 from __future__ import annotations
 
 import argparse

@@ -7,23 +7,65 @@ lookalike of it. The first real Outlook export (2026-09-04) flagged teams.mail.m
 "mail"), contoso.onmicrosoft.com ("microsoft", distance 2), service-now.com and
 credit-agricole.fr (hyphen stripped == brand) - together 80 % of the lookalike findings.
 """
+
 from __future__ import annotations
 
 from services.reference.notification_senders import NOTIFICATION_SENDERS
 
 # Closed brand gTLDs: delegated to the brand, not open for registration. Open TLDs that
 # happen to be brand names too (.live, .ing, .free) are deliberately NOT here.
-BRAND_TLDS: frozenset[str] = frozenset({
-    "microsoft", "office", "windows", "xbox", "skype", "hotmail", "azure", "bing",
-    "google", "gmail", "youtube", "android", "chrome", "amazon", "apple", "netflix", "adobe",
-    "dhl", "fedex", "orange", "sfr", "bnpparibas", "sap", "ovh",
-})
+BRAND_TLDS: frozenset[str] = frozenset(
+    {
+        "microsoft",
+        "office",
+        "windows",
+        "xbox",
+        "skype",
+        "hotmail",
+        "azure",
+        "bing",
+        "google",
+        "gmail",
+        "youtube",
+        "android",
+        "chrome",
+        "amazon",
+        "apple",
+        "netflix",
+        "adobe",
+        "dhl",
+        "fedex",
+        "orange",
+        "sfr",
+        "bnpparibas",
+        "sap",
+        "ovh",
+    }
+)
 
 _BRAND_DOMAINS: dict[str, tuple[str, ...]] = {
-    "microsoft": ("microsoft.com", "onmicrosoft.com", "microsoftonline.com", "office.com", "office365.com",
-                  "live.com", "outlook.com", "hotmail.com", "msn.com", "sharepointonline.com", "sharepoint.com",
-                  "azure.com", "windows.net", "windows.com", "skype.com", "xbox.com", "bing.com", "yammer.com",
-                  "mail.microsoft", "microsoft.net"),
+    "microsoft": (
+        "microsoft.com",
+        "onmicrosoft.com",
+        "microsoftonline.com",
+        "office.com",
+        "office365.com",
+        "live.com",
+        "outlook.com",
+        "hotmail.com",
+        "msn.com",
+        "sharepointonline.com",
+        "sharepoint.com",
+        "azure.com",
+        "windows.net",
+        "windows.com",
+        "skype.com",
+        "xbox.com",
+        "bing.com",
+        "yammer.com",
+        "mail.microsoft",
+        "microsoft.net",
+    ),
     "google": ("google.com", "googlemail.com", "gmail.com", "youtube.com", "googleapis.com", "withgoogle.com", "google.fr"),
     "amazon": ("amazon.com", "amazon.fr", "amazon.de", "amazon.co.uk", "amazonaws.com", "amazonses.com"),
     "apple": ("apple.com", "icloud.com", "me.com", "mac.com"),
@@ -77,6 +119,4 @@ _BRAND_DOMAINS: dict[str, tuple[str, ...]] = {
     "sap": ("sap.com",),
 }
 
-BRAND_OWNED_DOMAINS: frozenset[str] = frozenset(
-    d for doms in _BRAND_DOMAINS.values() for d in doms
-) | frozenset(NOTIFICATION_SENDERS)
+BRAND_OWNED_DOMAINS: frozenset[str] = frozenset(d for doms in _BRAND_DOMAINS.values() for d in doms) | frozenset(NOTIFICATION_SENDERS)

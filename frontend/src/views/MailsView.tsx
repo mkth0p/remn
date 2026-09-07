@@ -27,7 +27,43 @@ const FACETS: FacetDef[] = [
   { field: 'sourceFormat', label: 'Source format' },
   { field: 'sourceName', label: 'Source file' },
 ]
-const FIELDS = ['subject', 'fromName', 'fromNameNorm', 'fromAddr', 'fromDomain', 'fromRegistrable', 'replyTo.addr', 'returnPath', 'to.addr', 'originIp', 'originHelo', 'hopCount', 'messageId', 'xMailer', 'risk', 'flags', 'folder', 'sourceName', 'urlCount', 'attachmentCount', 'maxAttachmentRisk', 'attachments.name', 'attachments.realExt', 'attachments.sha256', 'attachments.flags', 'urls.host', 'urls.domain', 'urls.flags', 'auth.spf', 'auth.dkim', 'auth.dmarc', 'textPreview', 'bodyText', 'sourceFormat', 'reputation.worst']
+const FIELDS = [
+  'subject',
+  'fromName',
+  'fromNameNorm',
+  'fromAddr',
+  'fromDomain',
+  'fromRegistrable',
+  'replyTo.addr',
+  'returnPath',
+  'to.addr',
+  'originIp',
+  'originHelo',
+  'hopCount',
+  'messageId',
+  'xMailer',
+  'risk',
+  'flags',
+  'folder',
+  'sourceName',
+  'urlCount',
+  'attachmentCount',
+  'maxAttachmentRisk',
+  'attachments.name',
+  'attachments.realExt',
+  'attachments.sha256',
+  'attachments.flags',
+  'urls.host',
+  'urls.domain',
+  'urls.flags',
+  'auth.spf',
+  'auth.dkim',
+  'auth.dmarc',
+  'textPreview',
+  'bodyText',
+  'sourceFormat',
+  'reputation.worst',
+]
 const LIMIT = 3000
 const QUIET_FLAGS = /^(spf_none|dkim_none|dmarc_none|html_only|from_webmail|single_hop|no_origin_ip)$/
 
@@ -54,17 +90,32 @@ export function MailsView() {
   const [version, setVersion] = useState(0)
   const [menu, setMenu] = useState(false)
   // bottom pane height (% of the page), remembered per browser; the grip above the pane drags it
-  const [paneH, setPaneH] = useState(() => { try { return Number(localStorage.getItem('remn-mail-pane')) || 55 } catch { return 55 } })
+  const [paneH, setPaneH] = useState(() => {
+    try {
+      return Number(localStorage.getItem('remn-mail-pane')) || 55
+    } catch {
+      return 55
+    }
+  })
   const [paneMax, setPaneMax] = useState(false)
   const rightRef = useRef<HTMLDivElement>(null)
-  useEffect(() => { try { localStorage.setItem('remn-mail-pane', String(paneH)) } catch { /* private mode */ } }, [paneH])
+  useEffect(() => {
+    try {
+      localStorage.setItem('remn-mail-pane', String(paneH))
+    } catch {
+      /* private mode */
+    }
+  }, [paneH])
   const startDrag = (e: React.PointerEvent) => {
     const el = rightRef.current
     if (!el) return
     e.preventDefault()
     const rect = el.getBoundingClientRect()
     const move = (ev: PointerEvent) => setPaneH(Math.min(92, Math.max(20, Math.round(((rect.bottom - ev.clientY) / rect.height) * 100))))
-    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
     setPaneMax(false)
@@ -87,7 +138,9 @@ export function MailsView() {
       .catch((e) => alive && setError((e as Error).message))
       .finally(() => alive && setLoading(false))
     setTotal(null)
-    ds.countMails(filter).then((n) => alive && setTotal(n)).catch(() => undefined)
+    ds.countMails(filter)
+      .then((n) => alive && setTotal(n))
+      .catch(() => undefined)
     return () => {
       alive = false
     }
@@ -95,10 +148,21 @@ export function MailsView() {
   const selectedId = selected?.id
   useEffect(() => {
     let alive = true
-    if (selectedId != null && ds) ds.getMail(selectedId).then((r) => { if (alive) setSelected(r?.row ?? null) }).catch(() => { if (alive) setSelected(null) })
-    return () => { alive = false }
+    if (selectedId != null && ds)
+      ds.getMail(selectedId)
+        .then((r) => {
+          if (alive) setSelected(r?.row ?? null)
+        })
+        .catch(() => {
+          if (alive) setSelected(null)
+        })
+    return () => {
+      alive = false
+    }
   }, [ds, selectedId, version, rulesVersion])
-  useEffect(() => { setSelected(null) }, [kase?.id])
+  useEffect(() => {
+    setSelected(null)
+  }, [kase?.id])
   useEffect(() => {
     if (focus?.source === 'mails' && ds) {
       ds.getMail(focus.id).then((r) => r && setSelected(r.row))
@@ -152,24 +216,129 @@ export function MailsView() {
   const columns: Column<MailRow>[] = useMemo(
     () => [
       { key: 'date', label: 'date (UTC)', width: 138, render: (r) => fmtTs(r.date) },
-      { key: 'risk', label: 'risk', width: 62, render: (r) => <span className="row" style={{ gap: 6 }}><Dot sev={riskSev(r.risk)} /><span className="mono">{r.risk}</span></span> },
-      { key: 'fromAddr', label: 'from', width: 'minmax(180px, 0.9fr)', click: (r) => toggleFacet('fromAddr', r.fromAddr), title: (r) => `${r.fromName} <${r.fromAddr}>`, render: (r) => (r.fromName ? <span><span style={{ color: 'var(--fg-1)' }}>{r.fromName}</span> <span className="muted">{r.fromAddr}</span></span> : r.fromAddr) },
-      { key: 'to', label: 'to', width: 'minmax(120px, 0.6fr)', render: (r) => { const t = r.to ?? []; return t.length ? <span title={t.map((x) => x.addr).join(', ')}>{t[0].addr || t[0].name}{t.length > 1 ? <span className="muted"> +{t.length - 1}</span> : null}</span> : <span className="muted">(undisclosed)</span> } },
+      {
+        key: 'risk',
+        label: 'risk',
+        width: 62,
+        render: (r) => (
+          <span className="row" style={{ gap: 6 }}>
+            <Dot sev={riskSev(r.risk)} />
+            <span className="mono">{r.risk}</span>
+          </span>
+        ),
+      },
+      {
+        key: 'fromAddr',
+        label: 'from',
+        width: 'minmax(180px, 0.9fr)',
+        click: (r) => toggleFacet('fromAddr', r.fromAddr),
+        title: (r) => `${r.fromName} <${r.fromAddr}>`,
+        render: (r) =>
+          r.fromName ? (
+            <span>
+              <span style={{ color: 'var(--fg-1)' }}>{r.fromName}</span> <span className="muted">{r.fromAddr}</span>
+            </span>
+          ) : (
+            r.fromAddr
+          ),
+      },
+      {
+        key: 'to',
+        label: 'to',
+        width: 'minmax(120px, 0.6fr)',
+        render: (r) => {
+          const t = r.to ?? []
+          return t.length ? (
+            <span title={t.map((x) => x.addr).join(', ')}>
+              {t[0].addr || t[0].name}
+              {t.length > 1 ? <span className="muted"> +{t.length - 1}</span> : null}
+            </span>
+          ) : (
+            <span className="muted">(undisclosed)</span>
+          )
+        },
+      },
       { key: 'subject', label: 'subject', width: 'minmax(220px, 1.4fr)', render: (r) => <span style={{ color: 'var(--fg-1)' }}>{r.subject || <span className="muted">(no subject)</span>}</span> },
-      { key: 'attachmentCount', label: '', width: 44, render: (r) => (r.attachmentCount ? <span className="row" style={{ gap: 3, color: r.maxAttachmentRisk >= 60 ? 'var(--sev-high)' : 'var(--fg-2)' }} title={`${r.attachmentCount} attachment(s), max risk ${r.maxAttachmentRisk}`}><IconPaperclip />{r.attachmentCount}</span> : null) },
-      { key: 'flags', label: 'flags', width: 'minmax(180px, 1fr)', render: (r) => { const fl = (r.flags ?? []).filter((f) => !QUIET_FLAGS.test(f)); return <span className="row" style={{ gap: 3, overflow: 'hidden' }}>{fl.slice(0, 4).map((f) => <Flag key={f} name={f} />)}{fl.length > 4 ? <span className="muted">+{fl.length - 4}</span> : null}</span> } },
-      { key: 'sourceName', label: 'source', width: 130, title: (r) => `${r.sourceName ?? ''} · ${r.folder ?? ''}`, render: (r) => <span className="muted">{(r.sourceName ?? '').replace(/^.*[\\/]/, '') || r.sourceFormat}{r.folder ? ` / ${r.folder}` : ''}</span> },
+      {
+        key: 'attachmentCount',
+        label: '',
+        width: 44,
+        render: (r) =>
+          r.attachmentCount ? (
+            <span
+              className="row"
+              style={{ gap: 3, color: r.maxAttachmentRisk >= 60 ? 'var(--sev-high)' : 'var(--fg-2)' }}
+              title={`${r.attachmentCount} attachment(s), max risk ${r.maxAttachmentRisk}`}
+            >
+              <IconPaperclip />
+              {r.attachmentCount}
+            </span>
+          ) : null,
+      },
+      {
+        key: 'flags',
+        label: 'flags',
+        width: 'minmax(180px, 1fr)',
+        render: (r) => {
+          const fl = (r.flags ?? []).filter((f) => !QUIET_FLAGS.test(f))
+          return (
+            <span className="row" style={{ gap: 3, overflow: 'hidden' }}>
+              {fl.slice(0, 4).map((f) => (
+                <Flag key={f} name={f} />
+              ))}
+              {fl.length > 4 ? <span className="muted">+{fl.length - 4}</span> : null}
+            </span>
+          )
+        },
+      },
+      {
+        key: 'sourceName',
+        label: 'source',
+        width: 130,
+        title: (r) => `${r.sourceName ?? ''} · ${r.folder ?? ''}`,
+        render: (r) => (
+          <span className="muted">
+            {(r.sourceName ?? '').replace(/^.*[\\/]/, '') || r.sourceFormat}
+            {r.folder ? ` / ${r.folder}` : ''}
+          </span>
+        ),
+      },
     ],
     [toggleFacet],
   )
   if (!kase || !ds) return null
   const sort = filter.sort ?? { field: 'date', dir: 'desc' as const }
-  const exportCsvRows = () => exportCsv('mails.csv', rows.map((r) => ({ id: r.id, date: r.dateIso, risk: r.risk, from: r.fromAddr, fromName: r.fromName, subject: r.subject, to: (r.to ?? []).map((t) => t.addr).join(';'), replyTo: (r.replyTo ?? []).map((t) => t.addr).join(';'), originIp: r.originIp, spf: r.auth?.spf, dkim: r.auth?.dkim, dmarc: r.auth?.dmarc, flags: (r.flags ?? []).join(' '), attachments: (r.attachments ?? []).map((a) => `${a.name}(${a.risk})`).join(';'), hashes: (r.attachments ?? []).map((a) => a.sha256).join(';'), urls: (r.urls ?? []).map((u) => u.defanged).join(' '), folder: r.folder, source: r.sourceName })))
+  const exportCsvRows = () =>
+    exportCsv(
+      'mails.csv',
+      rows.map((r) => ({
+        id: r.id,
+        date: r.dateIso,
+        risk: r.risk,
+        from: r.fromAddr,
+        fromName: r.fromName,
+        subject: r.subject,
+        to: (r.to ?? []).map((t) => t.addr).join(';'),
+        replyTo: (r.replyTo ?? []).map((t) => t.addr).join(';'),
+        originIp: r.originIp,
+        spf: r.auth?.spf,
+        dkim: r.auth?.dkim,
+        dmarc: r.auth?.dmarc,
+        flags: (r.flags ?? []).join(' '),
+        attachments: (r.attachments ?? []).map((a) => `${a.name}(${a.risk})`).join(';'),
+        hashes: (r.attachments ?? []).map((a) => a.sha256).join(';'),
+        urls: (r.urls ?? []).map((u) => u.defanged).join(' '),
+        folder: r.folder,
+        source: r.sourceName,
+      })),
+    )
   return (
     <div className="view">
       <div className="split">
         <div className="left">
-          <div className="panel-h">Filters <span className="muted">({ds.kind === 'server' ? 'server store' : 'browser store'})</span></div>
+          <div className="panel-h">
+            Filters <span className="muted">({ds.kind === 'server' ? 'server store' : 'browser store'})</span>
+          </div>
           <Facets ds={ds} source="mails" fields={FACETS} conditions={filter.conditions ?? []} onToggle={toggleFacet} version={version + rulesVersion} />
         </div>
         <div className="right relative" ref={rightRef}>
@@ -184,35 +353,73 @@ export function MailsView() {
               <span className="row relative" style={{ gap: 4 }}>
                 <BaselineButton />
                 <RescoreButton key={kase?.id} />
-                <button className="btn icon ghost sm" title="export" onClick={() => setMenu(!menu)}><IconMore /></button>
+                <button className="btn icon ghost sm" title="export" onClick={() => setMenu(!menu)}>
+                  <IconMore />
+                </button>
                 {menu && (
                   <div className="menu" style={{ position: 'absolute', right: 0, top: '100%', zIndex: 25 }} onMouseLeave={() => setMenu(false)}>
-                    <button className="btn ghost sm" onClick={() => { exportCsvRows(); setMenu(false) }}>export CSV ({rows.length})</button>
-                    <button className="btn ghost sm" onClick={() => { exportJson('mails.json', rows); setMenu(false) }}>export JSON ({rows.length})</button>
+                    <button
+                      className="btn ghost sm"
+                      onClick={() => {
+                        exportCsvRows()
+                        setMenu(false)
+                      }}
+                    >
+                      export CSV ({rows.length})
+                    </button>
+                    <button
+                      className="btn ghost sm"
+                      onClick={() => {
+                        exportJson('mails.json', rows)
+                        setMenu(false)
+                      }}
+                    >
+                      export JSON ({rows.length})
+                    </button>
                   </div>
                 )}
               </span>
             }
           />
-          {!paneMax && <TimeHistogram ds={ds} source="mails" filter={filter} version={version + rulesVersion} onRange={(from, to) => setFilter({ ...filter, timeRange: { from: new Date(from).toISOString(), to: new Date(to).toISOString() } })} />}
+          {!paneMax && (
+            <TimeHistogram
+              ds={ds}
+              source="mails"
+              filter={filter}
+              version={version + rulesVersion}
+              onRange={(from, to) => setFilter({ ...filter, timeRange: { from: new Date(from).toISOString(), to: new Date(to).toISOString() } })}
+            />
+          )}
           {!paneMax && (truncated || error) && (
             <div className="row small dim" style={{ padding: '3px 16px', gap: 12, borderBottom: '1px solid var(--line)' }}>
               {truncated && <span className="mono">showing the first {LIMIT.toLocaleString('en-US')} rows - narrow the filter or change the sort</span>}
               {error && <span style={{ color: 'var(--danger)' }}>{error}</span>}
             </div>
           )}
-          {!paneMax && <VirtualTable
-            rows={rows}
-            columns={columns}
-            rowKey={(r) => r.id!}
-            onRowClick={setSelected}
-            selectedKey={selected?.id ?? null}
-            sort={sort}
-            onSort={(field) => setFilter({ ...filter, sort: { field, dir: sort.field === field && sort.dir === 'desc' ? 'asc' : 'desc' } })}
-            rowClass={(r) => (r.risk >= 80 ? 'sev-critical' : r.risk >= 60 ? 'sev-high' : r.risk >= 40 ? 'sev-medium' : undefined)}
-            empty={loading ? 'loading…' : 'no mails match - load a mailbox in Evidence or relax the filter'}
-          />}
-          {selected && !paneMax && <div className="pane-grip" onPointerDown={startDrag} onDoubleClick={() => { setPaneH(55); setPaneMax(false) }} title="drag to resize the message pane · double-click to reset" />}
+          {!paneMax && (
+            <VirtualTable
+              rows={rows}
+              columns={columns}
+              rowKey={(r) => r.id!}
+              onRowClick={setSelected}
+              selectedKey={selected?.id ?? null}
+              sort={sort}
+              onSort={(field) => setFilter({ ...filter, sort: { field, dir: sort.field === field && sort.dir === 'desc' ? 'asc' : 'desc' } })}
+              rowClass={(r) => (r.risk >= 80 ? 'sev-critical' : r.risk >= 60 ? 'sev-high' : r.risk >= 40 ? 'sev-medium' : undefined)}
+              empty={loading ? 'loading…' : 'no mails match - load a mailbox in Evidence or relax the filter'}
+            />
+          )}
+          {selected && !paneMax && (
+            <div
+              className="pane-grip"
+              onPointerDown={startDrag}
+              onDoubleClick={() => {
+                setPaneH(55)
+                setPaneMax(false)
+              }}
+              title="drag to resize the message pane · double-click to reset"
+            />
+          )}
           {selected && <MailDetail row={selected} onClose={() => setSelected(null)} layout="pane" paneHeight={`${paneMax ? 94 : paneH}%`} paneMax={paneMax} onPaneMax={setPaneMax} />}
         </div>
       </div>

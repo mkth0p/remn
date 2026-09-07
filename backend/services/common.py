@@ -1,4 +1,5 @@
 """Small helpers shared by parsers and analyzers."""
+
 from __future__ import annotations
 
 import functools
@@ -6,13 +7,12 @@ import hashlib
 import ipaddress
 import json
 import re
-from datetime import datetime, timedelta, timezone
+from collections.abc import Iterable
+from datetime import UTC, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
-from typing import Any, BinaryIO, Iterable
+from typing import Any, BinaryIO
 
-_ISO_RE = re.compile(
-    r"^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:[.,](\d+))?\s*(Z|UTC|[+-]\d{2}:?\d{2})?$"
-)
+_ISO_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:[.,](\d+))?\s*(Z|UTC|[+-]\d{2}:?\d{2})?$")
 
 
 def parse_timestamp(value: Any) -> tuple[int | None, str | None]:
@@ -38,7 +38,7 @@ def parse_timestamp(value: Any) -> tuple[int | None, str | None]:
                     hh, mm = int(tz[1:3]), int(tz[-2:])
                     dt = dt.replace(tzinfo=timezone(sign * timedelta(hours=hh, minutes=mm)))
                 else:
-                    dt = dt.replace(tzinfo=timezone.utc)
+                    dt = dt.replace(tzinfo=UTC)
         if dt is None:
             try:
                 dt = parsedate_to_datetime(s)
@@ -50,9 +50,9 @@ def parse_timestamp(value: Any) -> tuple[int | None, str | None]:
             except ValueError:
                 return None, None
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     try:
-        dt = dt.astimezone(timezone.utc)
+        dt = dt.astimezone(UTC)
         ms = int(dt.timestamp() * 1000)
     except (OverflowError, OSError, ValueError):
         return None, None

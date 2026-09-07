@@ -1,4 +1,5 @@
 """Spamhaus ZEN (IP) and DBL (domain) lookups over DNS, with optional DQS key."""
+
 from __future__ import annotations
 
 import ipaddress
@@ -6,19 +7,31 @@ import ipaddress
 from services.reputation.base import Provider, Verdict
 
 ZEN_CODES = {
-    "127.0.0.2": ("SBL", "spam source"), "127.0.0.3": ("CSS", "snowshoe / compromised host"),
-    "127.0.0.4": ("XBL", "exploited host (bot, proxy)"), "127.0.0.5": ("XBL", "exploited host"),
-    "127.0.0.6": ("XBL", "exploited host"), "127.0.0.7": ("XBL", "exploited host"),
-    "127.0.0.9": ("SBL", "DROP listed (hijacked netblock)"), "127.0.0.10": ("PBL", "end-user / dynamic IP policy block"),
+    "127.0.0.2": ("SBL", "spam source"),
+    "127.0.0.3": ("CSS", "snowshoe / compromised host"),
+    "127.0.0.4": ("XBL", "exploited host (bot, proxy)"),
+    "127.0.0.5": ("XBL", "exploited host"),
+    "127.0.0.6": ("XBL", "exploited host"),
+    "127.0.0.7": ("XBL", "exploited host"),
+    "127.0.0.9": ("SBL", "DROP listed (hijacked netblock)"),
+    "127.0.0.10": ("PBL", "end-user / dynamic IP policy block"),
     "127.0.0.11": ("PBL", "end-user / dynamic IP policy block"),
 }
 DBL_CODES = {
-    "127.0.1.2": "spam domain", "127.0.1.4": "phishing domain", "127.0.1.5": "malware domain", "127.0.1.6": "botnet C&C domain",
-    "127.0.1.102": "abused legit spam", "127.0.1.103": "abused spammed redirector", "127.0.1.104": "abused legit phish",
-    "127.0.1.105": "abused legit malware", "127.0.1.106": "abused legit botnet C&C", "127.0.1.255": "IP queries not allowed on DBL",
+    "127.0.1.2": "spam domain",
+    "127.0.1.4": "phishing domain",
+    "127.0.1.5": "malware domain",
+    "127.0.1.6": "botnet C&C domain",
+    "127.0.1.102": "abused legit spam",
+    "127.0.1.103": "abused spammed redirector",
+    "127.0.1.104": "abused legit phish",
+    "127.0.1.105": "abused legit malware",
+    "127.0.1.106": "abused legit botnet C&C",
+    "127.0.1.255": "IP queries not allowed on DBL",
 }
 ERROR_CODES = {
-    "127.255.255.252": "typing error in DNSBL name", "127.255.255.254": "query via public/open resolver is blocked - use a DQS key",
+    "127.255.255.252": "typing error in DNSBL name",
+    "127.255.255.254": "query via public/open resolver is blocked - use a DQS key",
     "127.255.255.255": "excessive query volume",
 }
 
@@ -74,6 +87,13 @@ class Spamhaus(Provider):
         desc = "; ".join(c[1] for _, c in listed if c)
         only_pbl = all(c and c[0] == "PBL" for _, c in listed)
         verdict = "suspicious" if only_pbl else "malicious"
-        return Verdict(self.name, kind, value, verdict, 40 if only_pbl else 90, tags=tags,
-                       details={"listed": desc, "codes": results, "query": qname},
-                       link=f"https://check.spamhaus.org/results/?query={value}")
+        return Verdict(
+            self.name,
+            kind,
+            value,
+            verdict,
+            40 if only_pbl else 90,
+            tags=tags,
+            details={"listed": desc, "codes": results, "query": qname},
+            link=f"https://check.spamhaus.org/results/?query={value}",
+        )

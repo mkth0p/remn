@@ -24,7 +24,22 @@ export async function migrateCaseToServer(kase: Case, onProgress?: (msg: string)
   let total = 0
   for (const ev of evidence) {
     onProgress?.(`${ev.name}: evidence record`)
-    await postBatch(key, ev.id!, [JSON.stringify({ type: 'evidence', id: ev.id, name: ev.name, kind: ev.kind, format: ev.format, size: ev.size, sha256Client: ev.sha256Client, sha256Server: ev.sha256Server, count: ev.count, stats: ev.stats, addedAt: ev.addedAt, status: ev.status })])
+    await postBatch(key, ev.id!, [
+      JSON.stringify({
+        type: 'evidence',
+        id: ev.id,
+        name: ev.name,
+        kind: ev.kind,
+        format: ev.format,
+        size: ev.size,
+        sha256Client: ev.sha256Client,
+        sha256Server: ev.sha256Server,
+        count: ev.count,
+        stats: ev.stats,
+        addedAt: ev.addedAt,
+        status: ev.status,
+      }),
+    ])
     let lines: string[] = []
     let n = 0
     if (ev.kind === 'evtx') {
@@ -48,7 +63,10 @@ export async function migrateCaseToServer(kase: Case, onProgress?: (msg: string)
       const mails = await db.mails.where('[caseId+evidenceId]').equals([caseId, ev.id!]).toArray()
       for (let i = 0; i < mails.length; i += 200) {
         const slice = mails.slice(i, i + 200)
-        const bodies = await db.mailBodies.where('mailId').anyOf(slice.map((m) => m.id!)).toArray()
+        const bodies = await db.mailBodies
+          .where('mailId')
+          .anyOf(slice.map((m) => m.id!))
+          .toArray()
         const byId = new Map(bodies.map((b) => [b.mailId, b]))
         const batch = slice.map((m) => {
           const { id, caseId: _c, evidenceId: _e, ...rest } = m

@@ -2,12 +2,14 @@
 PST / OST parsing with libpff (pypff). Optional dependency: install
 ``libpff-python`` (build) or ``libpff-python-windows`` (community wheel).
 """
+
 from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Iterator
 from email.utils import format_datetime
-from typing import Any, Iterator
+from typing import Any
 
 from services.parsers.mail.common import Header, ParseContext, RawAttachment, build_row
 
@@ -103,7 +105,9 @@ def _headers_from_message(message: Any, props: dict[int, Any]) -> tuple[list[Hea
             sender_name = message.sender_name
         except Exception:  # noqa: BLE001
             sender_name = None
-    sender_addr = props.get(PR_SENT_REPRESENTING_SMTP) or props.get(PR_SENDER_SMTP_ADDRESS) or props.get(PR_SENT_REPRESENTING_EMAIL) or props.get(PR_SENDER_EMAIL_ADDRESS)
+    sender_addr = (
+        props.get(PR_SENT_REPRESENTING_SMTP) or props.get(PR_SENDER_SMTP_ADDRESS) or props.get(PR_SENT_REPRESENTING_EMAIL) or props.get(PR_SENDER_EMAIL_ADDRESS)
+    )
     if sender_addr and "@" not in str(sender_addr):
         # X.500 / EX address: keep it as the name, no SMTP address
         extra["senderExchangeAddress"] = str(sender_addr)[:300]
@@ -254,8 +258,16 @@ def _message_row(message: Any, folder: str, ctx: ParseContext, index: int) -> di
         row = build_row(headers, text, html, attachments, ctx, folder=folder, size=None, extra=extra)
     except Exception as exc:  # noqa: BLE001
         log.warning("pst message %d failed: %s", index, exc)
-        row = {"folder": folder, "subject": "(unparseable message)", "flags": ["parse_error"], "risk": 10,
-               "error": str(exc)[:200], "attachments": [], "urls": [], "sourceFormat": "pst"}
+        row = {
+            "folder": folder,
+            "subject": "(unparseable message)",
+            "flags": ["parse_error"],
+            "risk": 10,
+            "error": str(exc)[:200],
+            "attachments": [],
+            "urls": [],
+            "sourceFormat": "pst",
+        }
     row["sourceIndex"] = index
     try:
         row["pstIdentifier"] = message.identifier

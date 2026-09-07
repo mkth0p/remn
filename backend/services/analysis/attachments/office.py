@@ -1,4 +1,5 @@
 """Office / RTF document analysis with oletools (macros, XLM, DDE, external templates, OLE objects)."""
+
 from __future__ import annotations
 
 import io
@@ -11,7 +12,7 @@ log = logging.getLogger(__name__)
 
 _DDE_RE = re.compile(rb"(?i)DDE(?:AUTO)?\b|\\ddeauto|\\dde\b|\bDDE\x00(?:A\x00U\x00T\x00O\x00)?")
 _DDE_FIELD_RE = re.compile(rb"(?i)(?:<w:instrText[^>]*>\s*)?DDE(?:AUTO)?[\s\"'\\][^<]{0,200}")
-_EXT_REL_RE = re.compile(rb'(?is)<Relationship\b[^>]*?/?>')
+_EXT_REL_RE = re.compile(rb"(?is)<Relationship\b[^>]*?/?>")
 _ATTR_RE = re.compile(rb'(?is)\b(Type|Target|TargetMode|Id)="([^"]*)"')
 _MSO_RE = re.compile(rb"(?i)mso-?script|vbscript:|javascript:")
 _RTF_OBJ_RE = re.compile(rb"(?i)\\object|\\objdata|\\objupdate|\\objocx|\\objemb|\\objautlink|\\objclass\s*([A-Za-z0-9._]+)")
@@ -49,8 +50,17 @@ def _rels_external(data: bytes) -> list[dict[str, Any]]:
 
 
 def _ooxml_inventory(data: bytes) -> dict[str, Any]:
-    inv: dict[str, Any] = {"vbaProject": False, "embeddings": [], "activeX": 0, "xlmSheets": 0, "customXml": 0,
-                           "settingsDde": False, "macroSheets": 0, "oleObjects": 0, "names": 0}
+    inv: dict[str, Any] = {
+        "vbaProject": False,
+        "embeddings": [],
+        "activeX": 0,
+        "xlmSheets": 0,
+        "customXml": 0,
+        "settingsDde": False,
+        "macroSheets": 0,
+        "oleObjects": 0,
+        "names": 0,
+    }
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
             names = zf.namelist()
@@ -69,7 +79,12 @@ def _ooxml_inventory(data: bytes) -> dict[str, Any]:
                     inv["customXml"] += 1
             for n in names:
                 low = n.lower()
-                if low in ("word/document.xml", "word/settings.xml", "xl/workbook.xml") or low.startswith("word/header") or low.startswith("word/footer") or low.startswith("xl/worksheets/"):
+                if (
+                    low in ("word/document.xml", "word/settings.xml", "xl/workbook.xml")
+                    or low.startswith("word/header")
+                    or low.startswith("word/footer")
+                    or low.startswith("xl/worksheets/")
+                ):
                     try:
                         content = zf.read(n)
                     except Exception:  # noqa: BLE001
@@ -88,8 +103,18 @@ def analyze_office(data: bytes, ext: str, real_ext: str) -> dict[str, Any]:
     ooxml (inventory), ole (streams), dde (bool), encrypted (bool), rtf (dict|None).
     """
     flags: set[str] = set()
-    out: dict[str, Any] = {"flags": [], "macros": None, "externalRelations": [], "ooxml": None,
-                           "ole": None, "dde": False, "encrypted": False, "rtf": None, "xlm": None, "urls": []}
+    out: dict[str, Any] = {
+        "flags": [],
+        "macros": None,
+        "externalRelations": [],
+        "ooxml": None,
+        "ole": None,
+        "dde": False,
+        "encrypted": False,
+        "rtf": None,
+        "xlm": None,
+        "urls": [],
+    }
     is_zip = data[:2] == b"PK"
     is_ole = data[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
     is_rtf = data[:5].lower() == b"{\\rtf"
@@ -145,7 +170,9 @@ def analyze_office(data: bytes, ext: str, real_ext: str) -> dict[str, Any]:
                         "lastSavedBy": (meta.last_saved_by or b"").decode("utf-8", "replace") if isinstance(meta.last_saved_by, bytes) else meta.last_saved_by,
                         "created": str(meta.create_time) if meta.create_time else None,
                         "modified": str(meta.last_saved_time) if meta.last_saved_time else None,
-                        "creatingApp": (meta.creating_application or b"").decode("utf-8", "replace") if isinstance(meta.creating_application, bytes) else meta.creating_application,
+                        "creatingApp": (meta.creating_application or b"").decode("utf-8", "replace")
+                        if isinstance(meta.creating_application, bytes)
+                        else meta.creating_application,
                     }
                 except Exception:  # noqa: BLE001
                     pass
@@ -238,8 +265,18 @@ def _analyze_vba(data: bytes, ext: str) -> dict[str, Any] | None:
         log.warning("oletools unavailable: %s", exc)
         return None
     fname = f"attachment.{ext or 'bin'}"
-    result: dict[str, Any] = {"hasMacros": False, "modules": [], "autoExec": [], "suspicious": [], "iocs": [],
-                              "obfuscation": [], "stomped": False, "xlm": None, "codePreview": None, "error": None}
+    result: dict[str, Any] = {
+        "hasMacros": False,
+        "modules": [],
+        "autoExec": [],
+        "suspicious": [],
+        "iocs": [],
+        "obfuscation": [],
+        "stomped": False,
+        "xlm": None,
+        "codePreview": None,
+        "error": None,
+    }
     vba = None
     try:
         vba = VBA_Parser(fname, data=data)
@@ -247,10 +284,9 @@ def _analyze_vba(data: bytes, ext: str) -> dict[str, Any] | None:
         if vba.detect_vba_macros():
             result["hasMacros"] = True
             code_all: list[str] = []
-            for (_fn, stream_path, vba_filename, vba_code) in vba.extract_all_macros():
+            for _fn, stream_path, vba_filename, vba_code in vba.extract_all_macros():
                 code = vba_code if isinstance(vba_code, str) else (vba_code or b"").decode("utf-8", "replace")
-                result["modules"].append({"stream": str(stream_path)[:120], "name": str(vba_filename)[:120],
-                                          "lines": code.count("\n") + 1, "size": len(code)})
+                result["modules"].append({"stream": str(stream_path)[:120], "name": str(vba_filename)[:120], "lines": code.count("\n") + 1, "size": len(code)})
                 code_all.append(code)
             joined = "\n".join(code_all)
             result["codePreview"] = joined[:4000]
@@ -279,7 +315,7 @@ def _analyze_vba(data: bytes, ext: str) -> dict[str, Any] | None:
             if vba.detect_xlm_macros():
                 xlm_code = []
                 try:
-                    for (_fn, stream_path, vba_filename, vba_code) in vba.extract_all_macros():
+                    for _fn, stream_path, vba_filename, vba_code in vba.extract_all_macros():
                         if "xlm" in str(stream_path).lower() or "macro" in str(vba_filename).lower():
                             xlm_code.append(vba_code if isinstance(vba_code, str) else str(vba_code))
                 except Exception:  # noqa: BLE001

@@ -13,11 +13,16 @@ export function RescoreButton() {
   const [notice, setNotice] = useState('')
   useEffect(() => {
     let alive = true
-    if (kase?.id) getDb().kv.get(`mail-calibration-${kase.id}`).then((r) => {
-      const state = (r?.value as { state?: string })?.state
-      if (alive) setNotice(state && state !== 'done' ? 'Previous refresh is incomplete. Rescore again to finish.' : '')
-    })
-    return () => { alive = false }
+    if (kase?.id)
+      getDb()
+        .kv.get(`mail-calibration-${kase.id}`)
+        .then((r) => {
+          const state = (r?.value as { state?: string })?.state
+          if (alive) setNotice(state && state !== 'done' ? 'Previous refresh is incomplete. Rescore again to finish.' : '')
+        })
+    return () => {
+      alive = false
+    }
   }, [kase?.id])
   if (!kase) return null
   const run = async () => {
@@ -32,7 +37,11 @@ export function RescoreButton() {
       if (result.errors.length) throw new Error(`Scores updated; ${result.errors.length} rule(s) failed. See Rules diagnostics and retry.`)
       await getDb().kv.put({ key: `mail-calibration-${kase.id}`, value: { state: 'done', at: Date.now(), summary } })
       if (useStore.getState().currentCase?.id === kase.id) await refreshCounts(kase)
-      toast('ok', `${summary.mails} mails rescored: high/critical ${summary.highBefore} → ${summary.highAfter}. Findings refreshed.${summary.limited ? ` ${summary.limited} need original evidence for full attachment analysis.` : ''}`, 12000)
+      toast(
+        'ok',
+        `${summary.mails} mails rescored: high/critical ${summary.highBefore} → ${summary.highAfter}. Findings refreshed.${summary.limited ? ` ${summary.limited} need original evidence for full attachment analysis.` : ''}`,
+        12000,
+      )
       setNotice(summary.limited ? `${summary.limited} messages have incomplete attachment analysis; see message details.` : '')
     } catch (e) {
       setNotice((e as Error).message)
@@ -43,9 +52,22 @@ export function RescoreButton() {
       useStore.getState().bumpRules()
     }
   }
-  return <span className="row small" style={{ gap: 6 }}>
-    <button className="btn xs" disabled={busy} onClick={run} title="Update sender history, recalibrate retained mail and attachment facts, then refresh enabled mail rules. Evidence IDs and raw records are preserved.">{busy ? <Spinner /> : null} rescore + refresh findings</button>
-    {progress && <span role="status">{progress}</span>}
-    {notice && <span className="muted" role="status">{notice}</span>}
-  </span>
+  return (
+    <span className="row small" style={{ gap: 6 }}>
+      <button
+        className="btn xs"
+        disabled={busy}
+        onClick={run}
+        title="Update sender history, recalibrate retained mail and attachment facts, then refresh enabled mail rules. Evidence IDs and raw records are preserved."
+      >
+        {busy ? <Spinner /> : null} rescore + refresh findings
+      </button>
+      {progress && <span role="status">{progress}</span>}
+      {notice && (
+        <span className="muted" role="status">
+          {notice}
+        </span>
+      )}
+    </span>
+  )
 }

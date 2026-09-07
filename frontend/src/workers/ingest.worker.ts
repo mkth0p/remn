@@ -148,7 +148,11 @@ function accumulateEvent(caseId: number, row: Record<string, unknown>, fc: Facet
 
 function accumulateMail(caseId: number, m: MailRow, fc: FacetCounter, ic: IocCounter): void {
   for (const f of MAIL_FACETS) {
-    if (f === 'attExt') fc.add(f, (m.attachments ?? []).map((a) => a.realExt || a.ext || '?'))
+    if (f === 'attExt')
+      fc.add(
+        f,
+        (m.attachments ?? []).map((a) => a.realExt || a.ext || '?'),
+      )
     else if (f === 'riskBand') fc.add(f, m.risk >= 80 ? 'critical' : m.risk >= 60 ? 'high' : m.risk >= 40 ? 'medium' : m.risk >= 20 ? 'low' : 'clean')
     else fc.add(f, (m as Record<string, unknown>)[f])
   }
@@ -174,14 +178,20 @@ async function rebuild(caseId: number): Promise<void> {
   const fcMails = new FacetCounter()
   const ic = new IocCounter()
   let rows = 0
-  await db.events.where('caseId').equals(caseId).each((row) => {
-    accumulateEvent(caseId, row as unknown as Record<string, unknown>, fcEvents, ic)
-    rows++
-  })
-  await db.mails.where('caseId').equals(caseId).each((m) => {
-    accumulateMail(caseId, m, fcMails, ic)
-    rows++
-  })
+  await db.events
+    .where('caseId')
+    .equals(caseId)
+    .each((row) => {
+      accumulateEvent(caseId, row as unknown as Record<string, unknown>, fcEvents, ic)
+      rows++
+    })
+  await db.mails
+    .where('caseId')
+    .equals(caseId)
+    .each((m) => {
+      accumulateMail(caseId, m, fcMails, ic)
+      rows++
+    })
   const old = await db.iocs.where('caseId').equals(caseId).toArray()
   const checked = new Map(old.filter((i) => i.checkedAt).map((i) => [i.kind + ':' + i.value, i]))
   for (const x of ic.map.values()) {
@@ -232,7 +242,11 @@ async function ingest(req: IngestRequest): Promise<void> {
   const form = new FormData()
   form.append('file', file, file.name)
   if (kind === 'evtx') form.append('raw', req.includeRaw ? '1' : '0')
-  else form.append('settings', JSON.stringify({ internalDomains: req.settings.internalDomains, brands: req.settings.brands, vipNames: req.settings.vipNames, trustedSenders: req.settings.trustedSenders ?? [] }))
+  else
+    form.append(
+      'settings',
+      JSON.stringify({ internalDomains: req.settings.internalDomains, brands: req.settings.brands, vipNames: req.settings.vipNames, trustedSenders: req.settings.trustedSenders ?? [] }),
+    )
 
   const fc = new FacetCounter()
   const ic = new IocCounter()
@@ -257,7 +271,13 @@ async function ingest(req: IngestRequest): Promise<void> {
     for (const r of rows) {
       const { bodyText, bodyHtml, headersText, visibleText, ...rest } = r as Record<string, unknown>
       mails.push(rest as MailRow)
-      bodies.push({ caseId, bodyText: (bodyText as string) ?? null, bodyHtml: (bodyHtml as string) ?? null, headersText: (headersText as string) ?? null, visibleText: (visibleText as string) ?? null })
+      bodies.push({
+        caseId,
+        bodyText: (bodyText as string) ?? null,
+        bodyHtml: (bodyHtml as string) ?? null,
+        headersText: (headersText as string) ?? null,
+        visibleText: (visibleText as string) ?? null,
+      })
     }
     const keys = (await db.mails.bulkAdd(mails, { allKeys: true })) as number[]
     const bodyRows: MailBody[] = bodies.map((b, i) => ({ ...b, mailId: keys[i] }))

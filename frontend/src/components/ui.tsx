@@ -186,7 +186,14 @@ export function ListInput({ value, onChange, placeholder, mono }: { value: strin
       value={text}
       placeholder={placeholder}
       onChange={(e) => setText(e.target.value)}
-      onBlur={() => onChange(text.split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean))}
+      onBlur={() =>
+        onChange(
+          text
+            .split(/[\n,;]+/)
+            .map((s) => s.trim())
+            .filter(Boolean),
+        )
+      }
     />
   )
 }
@@ -205,14 +212,35 @@ export function Sev({ sev, children }: { sev: Severity | string; children?: Reac
 }
 
 /** KPI tile: icon, value with delta, label. tone colours the icon well. */
-export function Kpi({ icon, value, label, delta, tone, onClick, title }: { icon?: ReactNode; value: ReactNode; label: ReactNode; delta?: number | null; tone?: string; onClick?: () => void; title?: string }) {
+export function Kpi({
+  icon,
+  value,
+  label,
+  delta,
+  tone,
+  onClick,
+  title,
+}: {
+  icon?: ReactNode
+  value: ReactNode
+  label: ReactNode
+  delta?: number | null
+  tone?: string
+  onClick?: () => void
+  title?: string
+}) {
   return (
     <div className={classNames('kpi', tone, onClick && 'click')} onClick={onClick} title={title}>
       {icon && <div className="icon">{icon}</div>}
       <div className="body">
         <div className="value">
           {value}
-          {delta != null && delta !== 0 && <span className={classNames('delta', delta > 0 ? 'up' : 'down')}>{delta > 0 ? '+' : ''}{delta}</span>}
+          {delta != null && delta !== 0 && (
+            <span className={classNames('delta', delta > 0 ? 'up' : 'down')}>
+              {delta > 0 ? '+' : ''}
+              {delta}
+            </span>
+          )}
         </div>
         <div className="label">{label}</div>
       </div>
@@ -221,7 +249,23 @@ export function Kpi({ icon, value, label, delta, tone, onClick, title }: { icon?
 }
 
 /** Right-hand flyout over a list: header (title + meta), optional tabs, body sections, footer actions. */
-export function Flyout({ title, meta, tabs, onClose, footer, children, width }: { title: ReactNode; meta?: ReactNode; tabs?: ReactNode; onClose: () => void; footer?: ReactNode; children: ReactNode; width?: string }) {
+export function Flyout({
+  title,
+  meta,
+  tabs,
+  onClose,
+  footer,
+  children,
+  width,
+}: {
+  title: ReactNode
+  meta?: ReactNode
+  tabs?: ReactNode
+  onClose: () => void
+  footer?: ReactNode
+  children: ReactNode
+  width?: string
+}) {
   useEffect(() => {
     const h = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
     window.addEventListener('keydown', h)
@@ -234,7 +278,9 @@ export function Flyout({ title, meta, tabs, onClose, footer, children, width }: 
           <div className="t">{title}</div>
           {meta && <div className="m">{meta}</div>}
         </div>
-        <button className="btn ghost sm icon" onClick={onClose} aria-label="close"><IconClose /></button>
+        <button className="btn ghost sm icon" onClick={onClose} aria-label="close">
+          <IconClose />
+        </button>
       </div>
       {tabs}
       <div className="flyout-b">{children}</div>
@@ -256,4 +302,3 @@ export function ThemeToggle() {
     </button>
   )
 }
-

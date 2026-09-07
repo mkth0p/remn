@@ -1,0 +1,25 @@
+# Backend, tools, generators and tests. Long lines are accepted (the code favours one idea per line
+# over wrapping); one-line statements and single-letter loop names are deliberate in the parsers.
+target-version = "py313"
+line-length = 160
+extend-exclude = ["backend/data", "backend/tmp", "frontend", "samples/public", "samples/generated", "samples/m365", "rules"]
+
+[lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501", "E701", "E702", "E741", "B905", "UP031"]
+
+[lint.per-file-ignores]
+# scripts set up Django or sys.path before importing the project
+"backend/run.py" = ["E402"]
+"backend/manage.py" = ["E402"]
+"tools/*.py" = ["E402"]
+"samples/synthetic/*.py" = ["E402"]
+# the lab generator defines per-scenario helpers inside its loops and calls them within the same iteration
+"samples/synthetic/make_linked_lab.py" = ["E402", "B023"]
+"tests/**/*.py" = ["E402"]
+
+[lint.isort]
+known-first-party = ["api", "forensic", "services"]
+
+[format]
+quote-style = "double"

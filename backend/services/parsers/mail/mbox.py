@@ -1,10 +1,12 @@
 """MBOX parsing (Thunderbird, Google Takeout, Apple Mail exports)."""
+
 from __future__ import annotations
 
 import logging
 import mailbox
 import re
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
 from services.parsers.mail.common import ParseContext, parse_message_bytes
 
@@ -26,8 +28,15 @@ def iter_mbox(path: str, ctx: ParseContext, folder: str = "mbox") -> Iterator[di
                 row = parse_message_bytes(data, ctx, folder=folder)
             except Exception as exc:  # noqa: BLE001
                 log.warning("mbox message %d failed: %s", i, exc)
-                row = {"folder": folder, "subject": "(unparseable message)", "flags": ["parse_error"], "risk": 10,
-                       "error": str(exc)[:200], "attachments": [], "urls": []}
+                row = {
+                    "folder": folder,
+                    "subject": "(unparseable message)",
+                    "flags": ["parse_error"],
+                    "risk": 10,
+                    "error": str(exc)[:200],
+                    "attachments": [],
+                    "urls": [],
+                }
             row["sourceIndex"] = i
             row["sourceFormat"] = "mbox"
             # Gmail Takeout labels

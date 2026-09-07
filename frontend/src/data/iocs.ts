@@ -20,7 +20,10 @@ export async function checkReputation(kase: Case, iocs: Ioc[], onProgress?: (don
     const slice = items.slice(i, i + 25)
     let resp: LookupResponse
     try {
-      resp = await lookupReputation(slice.map((x) => ({ kind: x.kind, value: x.value })), providers)
+      resp = await lookupReputation(
+        slice.map((x) => ({ kind: x.kind, value: x.value })),
+        providers,
+      )
     } catch (e) {
       log('err', `reputation lookup failed: ${(e as Error).message}`)
       toast('err', `reputation lookup failed: ${(e as Error).message}`)
@@ -45,7 +48,11 @@ export async function checkReputation(kase: Case, iocs: Ioc[], onProgress?: (don
 /** Browser store only: copy the worst verdict of a mail's IOCs onto the mail row for the rules. */
 export async function mirrorToMails(caseId: number): Promise<void> {
   const db = getDb()
-  const iocs = await db.iocs.where('caseId').equals(caseId).filter((i) => !!i.verdict && i.verdict !== 'unknown').toArray()
+  const iocs = await db.iocs
+    .where('caseId')
+    .equals(caseId)
+    .filter((i) => !!i.verdict && i.verdict !== 'unknown')
+    .toArray()
   if (!iocs.length) return
   const byKey = new Map(iocs.map((i) => [`${i.kind}:${i.value}`, i.verdict as string]))
   const rank: Record<string, number> = { malicious: 3, suspicious: 2, clean: 1 }

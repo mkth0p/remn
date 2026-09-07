@@ -1,4 +1,5 @@
 """Outlook .msg parsing with extract-msg."""
+
 from __future__ import annotations
 
 import logging
@@ -33,8 +34,7 @@ def _headers_from_msg(msg: Any) -> tuple[list[Header], bool]:
     except Exception:  # noqa: BLE001
         sender = None
     add("From", sender)
-    for attr, name in (("to", "To"), ("cc", "Cc"), ("bcc", "Bcc"), ("subject", "Subject"), ("messageId", "Message-ID"),
-                       ("inReplyTo", "In-Reply-To")):
+    for attr, name in (("to", "To"), ("cc", "Cc"), ("bcc", "Bcc"), ("subject", "Subject"), ("messageId", "Message-ID"), ("inReplyTo", "In-Reply-To")):
         try:
             add(name, getattr(msg, attr, None))
         except Exception:  # noqa: BLE001
@@ -53,7 +53,15 @@ def _headers_from_msg(msg: Any) -> tuple[list[Header], bool]:
 def parse_msg_bytes(data: bytes, ctx: ParseContext, folder: str = "", depth: int = 0) -> dict[str, Any]:
     import extract_msg
 
-    msg = extract_msg.openMsg(data, delayAttachments=False, attachmentErrorBehavior=getattr(extract_msg.enums, "ErrorBehavior", None) and extract_msg.enums.ErrorBehavior.SUPPRESS_ALL) if hasattr(extract_msg, "enums") else extract_msg.openMsg(data)
+    msg = (
+        extract_msg.openMsg(
+            data,
+            delayAttachments=False,
+            attachmentErrorBehavior=getattr(extract_msg.enums, "ErrorBehavior", None) and extract_msg.enums.ErrorBehavior.SUPPRESS_ALL,
+        )
+        if hasattr(extract_msg, "enums")
+        else extract_msg.openMsg(data)
+    )
     try:
         headers, synthetic = _headers_from_msg(msg)
         try:
@@ -90,7 +98,15 @@ def parse_msg_bytes(data: bytes, ctx: ParseContext, folder: str = "", depth: int
                             blob = payload.exportBytes() if hasattr(payload, "exportBytes") else payload.asBytes()
                         except Exception:  # noqa: BLE001
                             blob = b""
-                        attachments.append(RawAttachment((name or "embedded") + (".msg" if not str(name or "").lower().endswith((".msg", ".eml")) else ""), blob, "application/vnd.ms-outlook", False, cid))
+                        attachments.append(
+                            RawAttachment(
+                                (name or "embedded") + (".msg" if not str(name or "").lower().endswith((".msg", ".eml")) else ""),
+                                blob,
+                                "application/vnd.ms-outlook",
+                                False,
+                                cid,
+                            )
+                        )
                 except Exception as exc:  # noqa: BLE001
                     log.debug("msg attachment failed: %s", exc)
         except Exception as exc:  # noqa: BLE001

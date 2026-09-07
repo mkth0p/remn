@@ -39,7 +39,22 @@ def test_compose_system_matches_golden_fixture():
 
 def test_tool_names_cover_frontend_handlers():
     # every tool the browser executor implements must be declared to the model
-    expected = {"get_case_summary", "search_events", "aggregate_events", "timeline_events", "get_event",
-                "search_mails", "aggregate_mails", "timeline_mails", "get_mail", "list_findings",
-                "regex_test", "lookup_ioc", "pivot", "sql", "get_chain", "suggest_review"}
+    expected = {
+        "get_case_summary",
+        "search_events",
+        "aggregate_events",
+        "timeline_events",
+        "get_event",
+        "search_mails",
+        "aggregate_mails",
+        "timeline_mails",
+        "get_mail",
+        "list_findings",
+        "regex_test",
+        "lookup_ioc",
+        "pivot",
+        "sql",
+        "get_chain",
+        "suggest_review",
+    }
     assert set(TOOL_NAMES) == expected

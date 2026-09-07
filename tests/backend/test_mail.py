@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import io
-
 import make_samples
 
 from services.analysis.headers import parse_received, received_chain
@@ -93,23 +91,52 @@ def test_received_chain_origin_ip():
 
 def test_normalize_name():
     assert normalize_name("Marie Lefevre") == normalize_name("LEFEVRE, Marie") == normalize_name("Lefèvre Marie")
-    assert normalize_name('Marie Lefevre <ceo@x.com>') == "lefevre marie"
+    assert normalize_name("Marie Lefevre <ceo@x.com>") == "lefevre marie"
 
 
 def test_spoof_mail_full_analysis():
-    row = parse_message_bytes(make_samples.mail(
-        '"Marie Lefevre" <marie.lefevre@interne-fr.co>', "j.dupont@interne.fr", "URGENT: facture",
-        "Je suis en reunion, virement urgent, confidentiel", html=make_samples.SPOOF_HTML,
-        attachments=[("Facture.docm", make_samples.docm_with_macro(), "application", "vnd.ms-word.document.macroEnabled.12"),
-                     ("Document.html", make_samples.html_smuggle(), "text", "html")],
-        extra_headers=make_samples.RECEIVED_BAD, reply_to="marie.lefevre.dg@gmail.com", date="Tue, 01 Sep 2026 22:13:40 +0000"), CTX)
+    row = parse_message_bytes(
+        make_samples.mail(
+            '"Marie Lefevre" <marie.lefevre@interne-fr.co>',
+            "j.dupont@interne.fr",
+            "URGENT: facture",
+            "Je suis en reunion, virement urgent, confidentiel",
+            html=make_samples.SPOOF_HTML,
+            attachments=[
+                ("Facture.docm", make_samples.docm_with_macro(), "application", "vnd.ms-word.document.macroEnabled.12"),
+                ("Document.html", make_samples.html_smuggle(), "text", "html"),
+            ],
+            extra_headers=make_samples.RECEIVED_BAD,
+            reply_to="marie.lefevre.dg@gmail.com",
+            date="Tue, 01 Sep 2026 22:13:40 +0000",
+        ),
+        CTX,
+    )
     f = set(row["flags"])
     assert row["fromDomain"] == "interne-fr.co" and row["fromNameNorm"] == "lefevre marie"
     assert row["originIp"] == "185.220.101.4"
-    assert {"spf_fail", "dmarc_fail", "returnpath_mismatch", "replyto_mismatch", "replyto_webmail", "suspicious_mailer", "high_priority",
-            "sender_lookalike_internal", "hidden_text", "url_text_href_mismatch", "url_ip_literal", "url_tracking_pixel",
-            "lexicon_urgency", "lexicon_financial", "lexicon_availability", "lexicon_secrecy",
-            "att_office_macro", "att_office_external_template", "att_html_smuggling", "att_html_credential_harvest"} <= f
+    assert {
+        "spf_fail",
+        "dmarc_fail",
+        "returnpath_mismatch",
+        "replyto_mismatch",
+        "replyto_webmail",
+        "suspicious_mailer",
+        "high_priority",
+        "sender_lookalike_internal",
+        "hidden_text",
+        "url_text_href_mismatch",
+        "url_ip_literal",
+        "url_tracking_pixel",
+        "lexicon_urgency",
+        "lexicon_financial",
+        "lexicon_availability",
+        "lexicon_secrecy",
+        "att_office_macro",
+        "att_office_external_template",
+        "att_html_smuggling",
+        "att_html_credential_harvest",
+    } <= f
     assert row["risk"] >= 90
     assert row["attachmentCount"] == 2 and row["attachments"][0]["sha256"]
     assert row["auth"]["spf"] == "fail" and row["auth"]["dmarc"] == "fail"
@@ -118,21 +145,42 @@ def test_spoof_mail_full_analysis():
 
 
 def test_legit_mail_low_risk():
-    row = parse_message_bytes(make_samples.mail(
-        '"Marie Lefevre" <marie.lefevre@interne.fr>', "j.dupont@interne.fr", "Point hebdo", "Bonjour Jean, on se voit jeudi.",
-        extra_headers=[("Received", "from EXCH01.interne.fr (10.0.0.12) by EXCH02.interne.fr (10.0.0.13) with Microsoft SMTP Server id 15.2; Tue, 01 Sep 2026 09:02:11 +0000"),
-                       ("Authentication-Results", "mx.interne.fr; spf=pass smtp.mailfrom=interne.fr; dkim=pass header.d=interne.fr; dmarc=pass header.from=interne.fr")],
-        date="Tue, 01 Sep 2026 09:02:10 +0000"), CTX)
+    row = parse_message_bytes(
+        make_samples.mail(
+            '"Marie Lefevre" <marie.lefevre@interne.fr>',
+            "j.dupont@interne.fr",
+            "Point hebdo",
+            "Bonjour Jean, on se voit jeudi.",
+            extra_headers=[
+                (
+                    "Received",
+                    "from EXCH01.interne.fr (10.0.0.12) by EXCH02.interne.fr (10.0.0.13) with Microsoft SMTP Server id 15.2; Tue, 01 Sep 2026 09:02:11 +0000",
+                ),
+                (
+                    "Authentication-Results",
+                    "mx.interne.fr; spf=pass smtp.mailfrom=interne.fr; dkim=pass header.d=interne.fr; dmarc=pass header.from=interne.fr",
+                ),
+            ],
+            date="Tue, 01 Sep 2026 09:02:10 +0000",
+        ),
+        CTX,
+    )
     assert row["lookalike"]["internal"] is True
     assert row["risk"] < 30
     assert not any(f.startswith("sender_lookalike") for f in row["flags"])
 
 
 def test_bec_giftcard():
-    row = parse_message_bytes(make_samples.mail(
-        '"Marie Lefevre" <ceo.office.2026@gmail.com>', "j.dupont@interne.fr", "Are you at your desk?",
-        "I need you to buy 5 Apple gift cards today. Scratch the cards and send me the codes. I am in a meeting, cannot talk. Keep this between us. Marie",
-        reply_to=f"marie@{make_samples.PUNY_LOOKALIKE}"), CTX)
+    row = parse_message_bytes(
+        make_samples.mail(
+            '"Marie Lefevre" <ceo.office.2026@gmail.com>',
+            "j.dupont@interne.fr",
+            "Are you at your desk?",
+            "I need you to buy 5 Apple gift cards today. Scratch the cards and send me the codes. I am in a meeting, cannot talk. Keep this between us. Marie",
+            reply_to=f"marie@{make_samples.PUNY_LOOKALIKE}",
+        ),
+        CTX,
+    )
     f = set(row["flags"])
     assert {"lexicon_gift_card", "lexicon_availability", "lexicon_secrecy", "from_webmail", "replyto_mismatch"} <= f
     assert row["replyToLookalike"] is not None and "punycode" in row["replyToLookalike"]["flags"]
@@ -148,14 +196,27 @@ def test_corporate_it_notice_scores_low():
         "https://intranet.interne.fr/password/reset</a> "
         '<a href="https://forms.office.com/r/satisfaction">IT satisfaction survey</a>'
     )
-    row = parse_message_bytes(make_samples.mail(
-        '"IT Department" <it-notifications@interne.fr>', "j.dupont@interne.fr",
-        "Action required: your password expires in 3 days",
-        "Your password expires in 3 days. Sign in and update your password before the deadline.\nIT department",
-        html=html,
-        extra_headers=[("Received", "from EXCH01.interne.fr (10.0.0.12) by EXCH02.interne.fr (10.0.0.13) with Microsoft SMTP Server id 15.2; Tue, 01 Sep 2026 09:02:11 +0000"),
-                       ("Authentication-Results", "mx.interne.fr; spf=pass smtp.mailfrom=interne.fr; dkim=pass header.d=interne.fr; dmarc=pass header.from=interne.fr")],
-        date="Tue, 01 Sep 2026 09:02:10 +0000"), CTX)
+    row = parse_message_bytes(
+        make_samples.mail(
+            '"IT Department" <it-notifications@interne.fr>',
+            "j.dupont@interne.fr",
+            "Action required: your password expires in 3 days",
+            "Your password expires in 3 days. Sign in and update your password before the deadline.\nIT department",
+            html=html,
+            extra_headers=[
+                (
+                    "Received",
+                    "from EXCH01.interne.fr (10.0.0.12) by EXCH02.interne.fr (10.0.0.13) with Microsoft SMTP Server id 15.2; Tue, 01 Sep 2026 09:02:11 +0000",
+                ),
+                (
+                    "Authentication-Results",
+                    "mx.interne.fr; spf=pass smtp.mailfrom=interne.fr; dkim=pass header.d=interne.fr; dmarc=pass header.from=interne.fr",
+                ),
+            ],
+            date="Tue, 01 Sep 2026 09:02:10 +0000",
+        ),
+        CTX,
+    )
     f = set(row["flags"])
     assert "credential_phishing_pattern" not in f and "bec_pattern" not in f
     assert "url_text_href_mismatch" not in f and "url_credential_keywords" not in f and "url_free_hosting" not in f
@@ -164,15 +225,24 @@ def test_corporate_it_notice_scores_low():
 
 
 def test_authenticated_newsletter_scores_low():
-    row = parse_message_bytes(make_samples.mail(
-        '"Acme News" <news@newsletter.acme-corp.com>', "j.dupont@interne.fr",
-        "Action required: update your billing preferences before the deadline",
-        "New invoice portal! Sign in to your account: https://billing.acme-corp.com/account\nUnsubscribe: https://newsletter.acme-corp.com/unsub?u=1",
-        extra_headers=[("List-Id", "<news.acme-corp.com>"), ("List-Unsubscribe", "<https://newsletter.acme-corp.com/unsub?u=1>"),
-                       ("X-Mailer", "Mailchimp Mailer"), ("Reply-To", "marketing@acme-mailing.com"),
-                       ("Received", "from mail12.sendgrid.net (mail12.sendgrid.net [167.89.0.12]) by mx.interne.fr with ESMTPS id 4; Mon, 31 Aug 2026 10:00:00 +0000"),
-                       ("Authentication-Results", "mx.interne.fr; spf=pass smtp.mailfrom=bounce.acme-corp.com; dkim=pass header.d=acme-corp.com; dmarc=pass")],
-        date="Mon, 31 Aug 2026 09:59:30 +0000"), CTX)
+    row = parse_message_bytes(
+        make_samples.mail(
+            '"Acme News" <news@newsletter.acme-corp.com>',
+            "j.dupont@interne.fr",
+            "Action required: update your billing preferences before the deadline",
+            "New invoice portal! Sign in to your account: https://billing.acme-corp.com/account\nUnsubscribe: https://newsletter.acme-corp.com/unsub?u=1",
+            extra_headers=[
+                ("List-Id", "<news.acme-corp.com>"),
+                ("List-Unsubscribe", "<https://newsletter.acme-corp.com/unsub?u=1>"),
+                ("X-Mailer", "Mailchimp Mailer"),
+                ("Reply-To", "marketing@acme-mailing.com"),
+                ("Received", "from mail12.sendgrid.net (mail12.sendgrid.net [167.89.0.12]) by mx.interne.fr with ESMTPS id 4; Mon, 31 Aug 2026 10:00:00 +0000"),
+                ("Authentication-Results", "mx.interne.fr; spf=pass smtp.mailfrom=bounce.acme-corp.com; dkim=pass header.d=acme-corp.com; dmarc=pass"),
+            ],
+            date="Mon, 31 Aug 2026 09:59:30 +0000",
+        ),
+        CTX,
+    )
     f = set(row["flags"])
     assert "credential_phishing_pattern" not in f and "replyto_mismatch" not in f and "message_id_domain_mismatch" not in f
     assert row["risk"] <= 20, (row["risk"], sorted(f))
@@ -182,8 +252,12 @@ def test_synthetic_headers_from_pst_not_penalised():
     """MSG/PST exports without transport headers must not be treated as forged mail."""
     from services.parsers.mail.common import build_row
 
-    headers = [("From", '"IT Department" <it@interne.fr>'), ("To", "j.dupont@interne.fr"),
-               ("Subject", "Your password expires in 3 days"), ("Date", "Tue, 01 Sep 2026 09:02:10 +0000")]
+    headers = [
+        ("From", '"IT Department" <it@interne.fr>'),
+        ("To", "j.dupont@interne.fr"),
+        ("Subject", "Your password expires in 3 days"),
+        ("Date", "Tue, 01 Sep 2026 09:02:10 +0000"),
+    ]
     text = "Your password expires in 3 days. Sign in and update your password before the deadline."
     row = build_row(headers, text, None, [], CTX, extra={"sourceFormat": "msg", "syntheticHeaders": True})
     f = set(row["flags"])
@@ -196,25 +270,43 @@ def test_synthetic_headers_from_pst_not_penalised():
 
 def test_arc_pass_restores_trust_on_forwarded_mail():
     """Mailing-list forwarding breaks SPF/DKIM; a valid ARC seal must keep the mail quiet."""
-    row = parse_message_bytes(make_samples.mail(
-        '"IT Department" <it@interne.fr>', "liste-tech@interne.fr", "Action required: password expiry",
-        "Your password expires soon. Sign in and update it: https://intranet.interne.fr/reset",
-        extra_headers=[("Received", "from lists.partner.org (lists.partner.org [203.0.113.44]) by mx.interne.fr with ESMTP id 5; Tue, 01 Sep 2026 09:05:00 +0000"),
-                       ("Authentication-Results", "mx.interne.fr; spf=fail smtp.mailfrom=lists.partner.org; dkim=fail; dmarc=fail header.from=interne.fr; arc=pass")],
-        date="Tue, 01 Sep 2026 09:02:10 +0000"), CTX)
+    row = parse_message_bytes(
+        make_samples.mail(
+            '"IT Department" <it@interne.fr>',
+            "liste-tech@interne.fr",
+            "Action required: password expiry",
+            "Your password expires soon. Sign in and update it: https://intranet.interne.fr/reset",
+            extra_headers=[
+                ("Received", "from lists.partner.org (lists.partner.org [203.0.113.44]) by mx.interne.fr with ESMTP id 5; Tue, 01 Sep 2026 09:05:00 +0000"),
+                ("Authentication-Results", "mx.interne.fr; spf=fail smtp.mailfrom=lists.partner.org; dkim=fail; dmarc=fail header.from=interne.fr; arc=pass"),
+            ],
+            date="Tue, 01 Sep 2026 09:02:10 +0000",
+        ),
+        CTX,
+    )
     f = set(row["flags"])
     assert "credential_phishing_pattern" not in f and "internal_spoof" not in f
     assert row["risk"] <= 35, (row["risk"], sorted(f))
 
 
 def test_credential_lure_from_suspicious_sender_still_high():
-    row = parse_message_bytes(make_samples.mail(
-        '"IT Department" <it-support-desk@secure-mail-check.top>', "j.dupont@interne.fr",
-        "Action required: your password expires today",
-        "Your password expires today. Sign in immediately to keep your mailbox: http://185.220.101.4/owa/login",
-        extra_headers=[("Received", "from mail.secure-mail-check.top (mail.secure-mail-check.top [185.220.101.4]) by mx.interne.fr with ESMTP id 9; Wed, 02 Sep 2026 03:12:00 +0000"),
-                       ("Received-SPF", "fail (mx.interne.fr: 185.220.101.4 is not allowed)")],
-        date="Wed, 02 Sep 2026 03:11:30 +0000"), CTX)
+    row = parse_message_bytes(
+        make_samples.mail(
+            '"IT Department" <it-support-desk@secure-mail-check.top>',
+            "j.dupont@interne.fr",
+            "Action required: your password expires today",
+            "Your password expires today. Sign in immediately to keep your mailbox: http://185.220.101.4/owa/login",
+            extra_headers=[
+                (
+                    "Received",
+                    "from mail.secure-mail-check.top (mail.secure-mail-check.top [185.220.101.4]) by mx.interne.fr with ESMTP id 9; Wed, 02 Sep 2026 03:12:00 +0000",
+                ),
+                ("Received-SPF", "fail (mx.interne.fr: 185.220.101.4 is not allowed)"),
+            ],
+            date="Wed, 02 Sep 2026 03:11:30 +0000",
+        ),
+        CTX,
+    )
     f = set(row["flags"])
     assert "credential_phishing_pattern" in f
     assert {"url_ip_literal", "url_credential_keywords", "spf_fail"} <= f
@@ -227,13 +319,23 @@ def test_marketing_preheader_and_click_tracker_stay_low():
         '<span style="display:none">Summer offers inside - do not miss out</span>'
         '<a href="https://acme.us1.list-manage.com/track/click?u=abc&id=42">https://shop.acme-corp.com/offers</a>'
     )
-    row = parse_message_bytes(make_samples.mail(
-        '"Acme Shop" <news@acme-corp.com>', "j.dupont@interne.fr", "Our summer offers",
-        "See our offers online.", html=html,
-        extra_headers=[("List-Id", "<news.acme-corp.com>"), ("List-Unsubscribe", "<https://acme-corp.com/u>"),
-                       ("Received", "from mail12.sendgrid.net (mail12.sendgrid.net [167.89.0.12]) by mx.interne.fr with ESMTPS id 4; Mon, 31 Aug 2026 10:00:00 +0000"),
-                       ("Authentication-Results", "mx.interne.fr; spf=pass smtp.mailfrom=acme-corp.com; dkim=pass header.d=acme-corp.com; dmarc=pass")],
-        date="Mon, 31 Aug 2026 09:59:30 +0000"), CTX)
+    row = parse_message_bytes(
+        make_samples.mail(
+            '"Acme Shop" <news@acme-corp.com>',
+            "j.dupont@interne.fr",
+            "Our summer offers",
+            "See our offers online.",
+            html=html,
+            extra_headers=[
+                ("List-Id", "<news.acme-corp.com>"),
+                ("List-Unsubscribe", "<https://acme-corp.com/u>"),
+                ("Received", "from mail12.sendgrid.net (mail12.sendgrid.net [167.89.0.12]) by mx.interne.fr with ESMTPS id 4; Mon, 31 Aug 2026 10:00:00 +0000"),
+                ("Authentication-Results", "mx.interne.fr; spf=pass smtp.mailfrom=acme-corp.com; dkim=pass header.d=acme-corp.com; dmarc=pass"),
+            ],
+            date="Mon, 31 Aug 2026 09:59:30 +0000",
+        ),
+        CTX,
+    )
     f = set(row["flags"])
     assert "hidden_preheader" in f and "hidden_text" not in f
     assert row["risk"] <= 20, (row["risk"], sorted(f))  # mismatch demoted from strong in bulk context
@@ -243,10 +345,15 @@ def test_pst_synthetic_headers_not_penalised():
     """A .msg/.pst export without transport headers must not be treated as header forgery."""
     from services.parsers.mail.common import build_row
 
-    headers = [("From", '"IT Department" <it@interne.fr>'), ("To", "j.dupont@interne.fr"),
-               ("Subject", "Your password expires soon"), ("Date", "Tue, 01 Sep 2026 09:02:10 +0000")]
-    row = build_row(headers, "Your password expires soon. Sign in urgently and update it.", None, [], CTX,
-                    extra={"sourceFormat": "msg", "syntheticHeaders": True})
+    headers = [
+        ("From", '"IT Department" <it@interne.fr>'),
+        ("To", "j.dupont@interne.fr"),
+        ("Subject", "Your password expires soon"),
+        ("Date", "Tue, 01 Sep 2026 09:02:10 +0000"),
+    ]
+    row = build_row(
+        headers, "Your password expires soon. Sign in urgently and update it.", None, [], CTX, extra={"sourceFormat": "msg", "syntheticHeaders": True}
+    )
     f = set(row["flags"])
     assert not ({"no_message_id", "no_received", "single_hop", "spf_none", "dkim_none", "dmarc_none"} & f)
     assert "credential_phishing_pattern" not in f
@@ -270,13 +377,23 @@ def test_mbox_split(tmp_path):
 def test_trusted_notification_sender_capped():
     """Teams-style notification: colleague's display name on an authenticated
     microsoft.com sender must be flagged trusted_sender and capped at 10."""
-    row = parse_message_bytes(make_samples.mail(
-        '"Marie Lefevre" <noreply@email.teams.microsoft.com>', "j.dupont@interne.fr",
-        "Marie Lefevre mentioned you in a conversation",
-        "Marie Lefevre mentioned you in Projet Alpha.\nOpen Microsoft Teams to reply.",
-        extra_headers=[("Received", "from mail-eastus.protection.outlook.com (52.100.0.10) by mx.interne.fr with ESMTPS id 9; Tue, 01 Sep 2026 10:00:00 +0000"),
-                       ("Authentication-Results", "mx.interne.fr; spf=pass smtp.mailfrom=email.teams.microsoft.com; dkim=pass header.d=microsoft.com; dmarc=pass header.from=email.teams.microsoft.com")],
-        date="Tue, 01 Sep 2026 09:59:58 +0000"), CTX)
+    row = parse_message_bytes(
+        make_samples.mail(
+            '"Marie Lefevre" <noreply@email.teams.microsoft.com>',
+            "j.dupont@interne.fr",
+            "Marie Lefevre mentioned you in a conversation",
+            "Marie Lefevre mentioned you in Projet Alpha.\nOpen Microsoft Teams to reply.",
+            extra_headers=[
+                ("Received", "from mail-eastus.protection.outlook.com (52.100.0.10) by mx.interne.fr with ESMTPS id 9; Tue, 01 Sep 2026 10:00:00 +0000"),
+                (
+                    "Authentication-Results",
+                    "mx.interne.fr; spf=pass smtp.mailfrom=email.teams.microsoft.com; dkim=pass header.d=microsoft.com; dmarc=pass header.from=email.teams.microsoft.com",
+                ),
+            ],
+            date="Tue, 01 Sep 2026 09:59:58 +0000",
+        ),
+        CTX,
+    )
     f = set(row["flags"])
     assert "trusted_sender" in f
     assert row["fromRegistrable"] == "microsoft.com"
@@ -285,13 +402,23 @@ def test_trusted_notification_sender_capped():
 
 def test_trusted_sender_needs_passing_auth():
     """The same Teams-style mail with failing SPF must NOT get the trusted cap."""
-    row = parse_message_bytes(make_samples.mail(
-        '"Marie Lefevre" <noreply@email.teams.microsoft.com>', "j.dupont@interne.fr",
-        "Marie Lefevre mentioned you in a conversation",
-        "Marie Lefevre mentioned you in Projet Alpha.\nOpen Microsoft Teams to reply.",
-        extra_headers=[("Received", "from evil-relay.example.net (203.0.113.7) by mx.interne.fr with ESMTPS id 9; Tue, 01 Sep 2026 10:00:00 +0000"),
-                       ("Authentication-Results", "mx.interne.fr; spf=fail smtp.mailfrom=email.teams.microsoft.com; dkim=fail; dmarc=fail header.from=email.teams.microsoft.com")],
-        date="Tue, 01 Sep 2026 09:59:58 +0000"), CTX)
+    row = parse_message_bytes(
+        make_samples.mail(
+            '"Marie Lefevre" <noreply@email.teams.microsoft.com>',
+            "j.dupont@interne.fr",
+            "Marie Lefevre mentioned you in a conversation",
+            "Marie Lefevre mentioned you in Projet Alpha.\nOpen Microsoft Teams to reply.",
+            extra_headers=[
+                ("Received", "from evil-relay.example.net (203.0.113.7) by mx.interne.fr with ESMTPS id 9; Tue, 01 Sep 2026 10:00:00 +0000"),
+                (
+                    "Authentication-Results",
+                    "mx.interne.fr; spf=fail smtp.mailfrom=email.teams.microsoft.com; dkim=fail; dmarc=fail header.from=email.teams.microsoft.com",
+                ),
+            ],
+            date="Tue, 01 Sep 2026 09:59:58 +0000",
+        ),
+        CTX,
+    )
     f = set(row["flags"])
     assert "trusted_sender" not in f
     assert row["risk"] > 10, (row["risk"], sorted(f))
@@ -300,35 +427,60 @@ def test_trusted_sender_needs_passing_auth():
 def test_user_trusted_sender_list_applies_without_auth():
     """Analyst-listed senders are capped even when headers cannot be verified
     (their explicit call), matching addresses exactly and domains by suffix."""
-    ctx = ParseContext(internal_domains=["interne.fr"], vip_names=["Marie Lefevre"],
-                       trusted_senders=["notifications.partner-tool.io", "facture@fournisseur.fr"])
-    row = parse_message_bytes(make_samples.mail(
-        '"Partner Tool" <alerts@mail.notifications.partner-tool.io>', "j.dupont@interne.fr",
-        "Weekly digest", "Here is your weekly digest.",
-        date="Tue, 01 Sep 2026 09:59:58 +0000"), ctx)
+    ctx = ParseContext(
+        internal_domains=["interne.fr"], vip_names=["Marie Lefevre"], trusted_senders=["notifications.partner-tool.io", "facture@fournisseur.fr"]
+    )
+    row = parse_message_bytes(
+        make_samples.mail(
+            '"Partner Tool" <alerts@mail.notifications.partner-tool.io>',
+            "j.dupont@interne.fr",
+            "Weekly digest",
+            "Here is your weekly digest.",
+            date="Tue, 01 Sep 2026 09:59:58 +0000",
+        ),
+        ctx,
+    )
     assert "trusted_sender" in set(row["flags"])
     assert row["risk"] <= 10, (row["risk"], sorted(row["flags"]))
-    row2 = parse_message_bytes(make_samples.mail(
-        '"Compta" <facture@fournisseur.fr>', "j.dupont@interne.fr",
-        "Facture 2026-091", "Veuillez trouver la facture jointe.",
-        date="Tue, 01 Sep 2026 09:59:58 +0000"), ctx)
+    row2 = parse_message_bytes(
+        make_samples.mail(
+            '"Compta" <facture@fournisseur.fr>',
+            "j.dupont@interne.fr",
+            "Facture 2026-091",
+            "Veuillez trouver la facture jointe.",
+            date="Tue, 01 Sep 2026 09:59:58 +0000",
+        ),
+        ctx,
+    )
     assert "trusted_sender" in set(row2["flags"])
     # a different address on the same domain is NOT matched by an address entry
-    row3 = parse_message_bytes(make_samples.mail(
-        '"Compta" <autre@fournisseur.fr>', "j.dupont@interne.fr",
-        "Facture 2026-092", "Autre facture.",
-        date="Tue, 01 Sep 2026 09:59:58 +0000"), ctx)
+    row3 = parse_message_bytes(
+        make_samples.mail(
+            '"Compta" <autre@fournisseur.fr>', "j.dupont@interne.fr", "Facture 2026-092", "Autre facture.", date="Tue, 01 Sep 2026 09:59:58 +0000"
+        ),
+        ctx,
+    )
     assert "trusted_sender" not in set(row3["flags"])
 
 
 def test_trusted_sender_strong_flags_still_score():
     """A trusted relay must not silence strong indicators (compromised account)."""
-    row = parse_message_bytes(make_samples.mail(
-        '"Marie Lefevre" <noreply@email.teams.microsoft.com>', "j.dupont@interne.fr",
-        "Urgent wire transfer needed",
-        "I need you to buy gift cards urgently and keep this confidential. Send the codes by reply.",
-        extra_headers=[("Authentication-Results", "mx.interne.fr; spf=pass smtp.mailfrom=email.teams.microsoft.com; dkim=pass header.d=microsoft.com; dmarc=pass header.from=email.teams.microsoft.com")],
-        date="Tue, 01 Sep 2026 09:59:58 +0000"), CTX)
+    row = parse_message_bytes(
+        make_samples.mail(
+            '"Marie Lefevre" <noreply@email.teams.microsoft.com>',
+            "j.dupont@interne.fr",
+            "Urgent wire transfer needed",
+            "I need you to buy gift cards urgently and keep this confidential. Send the codes by reply.",
+            extra_headers=[
+                (
+                    "Authentication-Results",
+                    "mx.interne.fr; spf=pass smtp.mailfrom=email.teams.microsoft.com; dkim=pass header.d=microsoft.com; dmarc=pass header.from=email.teams.microsoft.com",
+                )
+            ],
+            date="Tue, 01 Sep 2026 09:59:58 +0000",
+        ),
+        CTX,
+    )
     f = set(row["flags"])
     if "bec_pattern" in f:
         assert row["risk"] >= 60, (row["risk"], sorted(f))
@@ -360,13 +512,10 @@ def test_pst_rtf_only_message_builds_row():
     fake = SimpleNamespace(plain_text_body=None, html_body=None, rtf_body=RTF_FIXTURE.read_bytes())
     text, html = pst._bodies(fake)
     assert isinstance(text, str) and html is None
-    headers = [("From", "<notification@example.com>"), ("To", "<user@interne.fr>"),
-               ("Subject", "Votre code"), ("Date", "Tue, 1 Sep 2026 21:55:41 +0200")]
-    row = build_row(headers, text, html, [], ParseContext(internal_domains=["interne.fr"]),
-                    folder="Inbox", size=None, extra={"sourceFormat": "pst"})
+    headers = [("From", "<notification@example.com>"), ("To", "<user@interne.fr>"), ("Subject", "Votre code"), ("Date", "Tue, 1 Sep 2026 21:55:41 +0200")]
+    row = build_row(headers, text, html, [], ParseContext(internal_domains=["interne.fr"]), folder="Inbox", size=None, extra={"sourceFormat": "pst"})
     assert "parse_error" not in row["flags"]
     assert "connexion" in json.dumps(row, default=str)
-
 
 
 # --- PST orphan / deleted items ---------------------------------------------------------
@@ -401,10 +550,17 @@ class _FakeFolder:
 
 class _FakePst:
     def __init__(self):
-        self.root = _FakeFolder("Top of Outlook data file", [], [
-            _FakeFolder("Inbox", [_FakeMsg("Hello", "normal mail", 1)]),
-            _FakeFolder("Deleted Items", [_FakeMsg("Invoice overdue - verify your password now", "urgent: confirm your password at https://evil-login.net/login", 2)]),
-        ])
+        self.root = _FakeFolder(
+            "Top of Outlook data file",
+            [],
+            [
+                _FakeFolder("Inbox", [_FakeMsg("Hello", "normal mail", 1)]),
+                _FakeFolder(
+                    "Deleted Items",
+                    [_FakeMsg("Invoice overdue - verify your password now", "urgent: confirm your password at https://evil-login.net/login", 2)],
+                ),
+            ],
+        )
         self.number_of_orphan_items = 2
         self._orphans = [_FakeMsg("Re: wire transfer", "please send the payment to the new IBAN", 3), _FakeFolder("stray folder", [])]
 

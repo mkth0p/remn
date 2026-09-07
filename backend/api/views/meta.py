@@ -1,4 +1,5 @@
 """Static reference data for the UI: event descriptions, flag descriptions, bundled rules."""
+
 from __future__ import annotations
 
 import logging
@@ -35,24 +36,32 @@ def load_rules(rules_dir: Path) -> list[dict]:
             out.append({"file": str(path.relative_to(rules_dir)).replace("\\", "/"), "yaml": text, "rule": docs[0]})
         else:
             for i, d in enumerate(docs):
-                out.append({"file": f"{str(path.relative_to(rules_dir)).replace(chr(92), '/')}#{i}", "yaml": yaml.safe_dump(d, sort_keys=False, allow_unicode=True), "rule": d})
+                out.append(
+                    {
+                        "file": f"{str(path.relative_to(rules_dir)).replace(chr(92), '/')}#{i}",
+                        "yaml": yaml.safe_dump(d, sort_keys=False, allow_unicode=True),
+                        "rule": d,
+                    }
+                )
     return out
 
 
 @require_GET
 def meta(request):
     events = [{"provider": prov, "eventId": eid, "description": desc, "category": cat} for (prov, eid), (desc, cat) in eventids._EVENTS.items()]
-    return JsonResponse({
-        "events": events,
-        "notes": {str(k): v for k, v in eventids.NOTES.items()},
-        "logonTypes": {str(k): v for k, v in eventids.LOGON_TYPES.items()},
-        "statusCodes": eventids.STATUS_CODES,
-        "kerberosFailures": eventids.KERBEROS_FAILURES,
-        "ticketEncryption": eventids.TICKET_ENCRYPTION,
-        "flags": flags.FLAGS,
-        "mailWeights": MAIL_WEIGHTS,
-        "mailStrongFlags": sorted(STRONG_FLAGS),
-        "dangerousExtensions": DANGEROUS_EXT,
-        "rules": load_rules(settings.RULES_DIR),
-        "packs": packs.list_packs(),
-    })
+    return JsonResponse(
+        {
+            "events": events,
+            "notes": {str(k): v for k, v in eventids.NOTES.items()},
+            "logonTypes": {str(k): v for k, v in eventids.LOGON_TYPES.items()},
+            "statusCodes": eventids.STATUS_CODES,
+            "kerberosFailures": eventids.KERBEROS_FAILURES,
+            "ticketEncryption": eventids.TICKET_ENCRYPTION,
+            "flags": flags.FLAGS,
+            "mailWeights": MAIL_WEIGHTS,
+            "mailStrongFlags": sorted(STRONG_FLAGS),
+            "dangerousExtensions": DANGEROUS_EXT,
+            "rules": load_rules(settings.RULES_DIR),
+            "packs": packs.list_packs(),
+        }
+    )

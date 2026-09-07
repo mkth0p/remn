@@ -42,7 +42,17 @@ describe('helpers', () => {
 })
 
 describe('runRule', () => {
-  const brute: Rule = { id: 'bf', title: 'brute', severity: 'high', source: 'events', where: { eventId: 4625, 'ipAddress|exists': true }, group_by: ['ipAddress'], window: '5m', threshold: '>= 5', then: { where: { eventId: 4624 }, join: ['ipAddress'], within: '15m', severity: 'critical', title: 'success after burst' } }
+  const brute: Rule = {
+    id: 'bf',
+    title: 'brute',
+    severity: 'high',
+    source: 'events',
+    where: { eventId: 4625, 'ipAddress|exists': true },
+    group_by: ['ipAddress'],
+    window: '5m',
+    threshold: '>= 5',
+    then: { where: { eventId: 4624 }, join: ['ipAddress'], within: '15m', severity: 'critical', title: 'success after burst' },
+  }
   it('detects a burst inside a sliding window and escalates on follow-up', () => {
     const rows = [
       ...Array.from({ length: 6 }, (_, i) => ev(4625, i * 30, { ipAddress: '10.9.9.9', targetUser: 'admin' })),
@@ -68,7 +78,15 @@ describe('runRule', () => {
     expect(runRule(spray, { rows: rows.slice(0, 2) })).toHaveLength(0)
   })
   it('produces one finding per row for simple rules and applies time conditions', () => {
-    const night: Rule = { id: 'night', title: 'n', severity: 'medium', source: 'events', where: { eventId: 4624, 'logonType|in': [2, 10] }, time: { outside_business_hours: true }, exclude: { 'targetUser|in_setting': 'service_accounts' } }
+    const night: Rule = {
+      id: 'night',
+      title: 'n',
+      severity: 'medium',
+      source: 'events',
+      where: { eventId: 4624, 'logonType|in': [2, 10] },
+      time: { outside_business_hours: true },
+      exclude: { 'targetUser|in_setting': 'service_accounts' },
+    }
     const rows = [ev(4624, 0, { logonType: 10, targetUser: 'alice' }), ev(4624, 0, { logonType: 10, targetUser: 'svc_x' }), ev(4624, 12 * 3600, { logonType: 10, targetUser: 'alice' })]
     const settings = { businessHours: { start: 8, end: 19, tz: 'UTC' }, weekendDays: [0, 6], service_accounts: ['svc_x'] }
     const f = runRule(night, { rows, settings })
@@ -77,7 +95,10 @@ describe('runRule', () => {
   })
   it('excludes trusted senders via flag and via domain-suffix setting', () => {
     const vip: Rule = {
-      id: 'vip', title: 'v', severity: 'critical', source: 'mails',
+      id: 'vip',
+      title: 'v',
+      severity: 'critical',
+      source: 'mails',
       where: { 'fromNameNorm|in_setting': 'vip_names', 'fromRegistrable|nin_setting': 'internal_domains' },
       exclude: { any_of: [{ 'flags|contains': 'trusted_sender' }, { 'fromRegistrable|in_setting': 'trusted_senders' }, { 'fromAddr|in_setting': 'trusted_senders' }] },
       entities: ['fromNameNorm', 'fromRegistrable'],
@@ -106,7 +127,12 @@ describe('runRule', () => {
   })
   it('escalates severity with then_flags', () => {
     const r: Rule = { id: 'macro', title: 'm', severity: 'high', source: 'mails', where: { 'flags|contains': 'att_office_macro' }, then_flags: [{ att_macro_autoexec: 'critical' }] }
-    const f = runRule(r, { rows: [{ id: 1, date: T0, flags: ['att_office_macro', 'att_macro_autoexec'] }, { id: 2, date: T0, flags: ['att_office_macro'] }] })
+    const f = runRule(r, {
+      rows: [
+        { id: 1, date: T0, flags: ['att_office_macro', 'att_macro_autoexec'] },
+        { id: 2, date: T0, flags: ['att_office_macro'] },
+      ],
+    })
     expect(f.map((x) => x.severity)).toEqual(['critical', 'high'])
   })
 })
@@ -149,7 +175,17 @@ describe('applicability', () => {
   it('pins channels like event ids: exact, contains, any_of (all alternatives), all_of (any member)', () => {
     expect(ruleChannels({ channel: 'Security', eventId: 4688 })).toEqual([{ value: 'security', contains: false }])
     expect(ruleChannels({ 'channel|contains': 'sysmon' })).toEqual([{ value: 'sysmon', contains: true }])
-    expect(ruleChannels({ any_of: [{ 'channel|contains': 'sysmon', eventId: 1 }, { channel: 'Security', eventId: 4688 }] })).toEqual([{ value: 'sysmon', contains: true }, { value: 'security', contains: false }])
+    expect(
+      ruleChannels({
+        any_of: [
+          { 'channel|contains': 'sysmon', eventId: 1 },
+          { channel: 'Security', eventId: 4688 },
+        ],
+      }),
+    ).toEqual([
+      { value: 'sysmon', contains: true },
+      { value: 'security', contains: false },
+    ])
     expect(ruleChannels({ any_of: [{ channel: 'Security' }, { 'image|contains': 'x' }] })).toBeNull()
     expect(ruleChannels({ all_of: [{ 'image|contains': 'x' }, { channel: 'System' }] })).toEqual([{ value: 'system', contains: false }])
     expect(ruleChannels({ 'image|contains': 'x' })).toBeNull()

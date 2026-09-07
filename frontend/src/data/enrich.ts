@@ -18,7 +18,8 @@ type ScoreUpdate = Pick<MailRow, 'id' | 'risk' | 'flags' | 'attachments' | 'maxA
 export async function applyScoreBatch(caseId: number, requested: number[], updates: ScoreUpdate[]): Promise<void> {
   const db = getDb()
   const ids = new Set(requested)
-  if (updates.length !== ids.size || new Set(updates.map((r) => r.id)).size !== ids.size || updates.some((r) => r.id == null || !ids.has(r.id))) throw new Error('Incomplete or invalid rescore response')
+  if (updates.length !== ids.size || new Set(updates.map((r) => r.id)).size !== ids.size || updates.some((r) => r.id == null || !ids.has(r.id)))
+    throw new Error('Incomplete or invalid rescore response')
   await db.transaction('rw', [db.mails, db.attachments], async () => {
     for (const r of updates) {
       const current = await db.mails.get(r.id!)
@@ -36,14 +37,23 @@ export async function applyScoreBatch(caseId: number, requested: number[], updat
 
 async function rebuildScoreFacets(caseId: number): Promise<void> {
   const db = getDb()
-  const counts = new Map<string, Map<string, number>>([['flags', new Map()], ['riskBand', new Map()]])
-  await db.mails.where('caseId').equals(caseId).each((m) => {
-    const band = m.risk >= 80 ? 'critical' : m.risk >= 60 ? 'high' : m.risk >= 40 ? 'medium' : m.risk >= 20 ? 'low' : 'clean'
-    for (const [field, values] of [['flags', m.flags], ['riskBand', [band]]] as [string, string[]][]) {
-      const c = counts.get(field)!
-      for (const v of new Set(values)) c.set(v, (c.get(v) ?? 0) + 1)
-    }
-  })
+  const counts = new Map<string, Map<string, number>>([
+    ['flags', new Map()],
+    ['riskBand', new Map()],
+  ])
+  await db.mails
+    .where('caseId')
+    .equals(caseId)
+    .each((m) => {
+      const band = m.risk >= 80 ? 'critical' : m.risk >= 60 ? 'high' : m.risk >= 40 ? 'medium' : m.risk >= 20 ? 'low' : 'clean'
+      for (const [field, values] of [
+        ['flags', m.flags],
+        ['riskBand', [band]],
+      ] as [string, string[]][]) {
+        const c = counts.get(field)!
+        for (const v of new Set(values)) c.set(v, (c.get(v) ?? 0) + 1)
+      }
+    })
   await db.transaction('rw', db.facets, async () => {
     for (const [field, entries] of counts) {
       await db.facets.where('[caseId+source+field]').equals([caseId, 'mails', field]).delete()
@@ -75,10 +85,19 @@ export async function rescoreMails(kase: Case, onProgress?: (text: string) => vo
       const max = (await db.mails.where('caseId').equals(caseId).reverse().first())?.id ?? 0
       for (;;) {
         if (last >= max) break
-        const rows = await db.mails.where('id').between(last, max, false, true).filter((m) => m.caseId === caseId).limit(100).toArray()
+        const rows = await db.mails
+          .where('id')
+          .between(last, max, false, true)
+          .filter((m) => m.caseId === caseId)
+          .limit(100)
+          .toArray()
         if (!rows.length) break
         const result = await apiPost<{ rows: ScoreUpdate[]; summary: RescoreSummary }>('/api/enrich/mails/rescore', { mails: rows, settings })
-        await applyScoreBatch(caseId, rows.map((m) => m.id!), result.rows)
+        await applyScoreBatch(
+          caseId,
+          rows.map((m) => m.id!),
+          result.rows,
+        )
         summary.version = result.summary.version
         for (const k of ['mails', 'changed', 'limited', 'highBefore', 'highAfter'] as const) summary[k] += result.summary[k]
         last = rows[rows.length - 1].id!
@@ -132,9 +151,20 @@ export async function baselineSenders(kase: Case): Promise<BaselineSummary> {
   const db = getDb()
   const all = await db.mails.where('caseId').equals(kase.id!).toArray()
   const mails = all.map((m) => ({
-    id: m.id, date: m.date, fromAddr: m.fromAddr, fromRegistrable: m.fromRegistrable, to: m.to, cc: m.cc, bcc: m.bcc, subject: m.subject,
-    spf: m.auth?.spf ?? null, dkim: m.auth?.dkim ?? null, dmarc: m.auth?.dmarc ?? null, flags: m.flags,
-    urls: (m.urls ?? []).map((u) => ({ domain: u.domain })), attachments: (m.attachments ?? []).map((a) => ({ name: a.name, sha256: a.sha256 })),
+    id: m.id,
+    date: m.date,
+    fromAddr: m.fromAddr,
+    fromRegistrable: m.fromRegistrable,
+    to: m.to,
+    cc: m.cc,
+    bcc: m.bcc,
+    subject: m.subject,
+    spf: m.auth?.spf ?? null,
+    dkim: m.auth?.dkim ?? null,
+    dmarc: m.auth?.dmarc ?? null,
+    flags: m.flags,
+    urls: (m.urls ?? []).map((u) => ({ domain: u.domain })),
+    attachments: (m.attachments ?? []).map((a) => ({ name: a.name, sha256: a.sha256 })),
   }))
   const r = await apiPost<{ rows: EnrichRow[]; summary: BaselineSummary }>('/api/enrich/mails', { mails, settings })
   const updates = r.rows.map((row) => {

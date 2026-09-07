@@ -3,12 +3,14 @@ Evidence ingestion for browser-stored cases. The server never stores anything:
 the upload lives in a request-scoped temp file (or a completed chunked upload),
 is hashed, parsed and streamed back as NDJSON.
 """
+
 from __future__ import annotations
 
 import io
 import json
 import logging
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
 from django.conf import settings
 from django.http import HttpRequest, JsonResponse, StreamingHttpResponse
@@ -168,8 +170,16 @@ def ingest_mail(request: HttpRequest):
     tmp_dir = str(settings.FILE_UPLOAD_TEMP_DIR)
 
     def gen() -> Iterator[bytes]:
-        yield ndjson_line({"type": "meta", "format": fmt, "name": src.name, "size": src.size, "sha256": src.sha256,
-                           "settings": {"internalDomains": ctx.internal_domains, "brands": ctx.brands, "vipNames": ctx.vip_names}})
+        yield ndjson_line(
+            {
+                "type": "meta",
+                "format": fmt,
+                "name": src.name,
+                "size": src.size,
+                "sha256": src.sha256,
+                "settings": {"internalDomains": ctx.internal_domains, "brands": ctx.brands, "vipNames": ctx.vip_names},
+            }
+        )
         n = 0
         msrc = MailSource(src.name, src.path, src.data, ctx, tmp_dir)
         try:

@@ -3,6 +3,7 @@ Reference data for Windows event logs: event ID descriptions, logon types,
 NTSTATUS failure reasons, investigative notes and one-line summaries used in
 the events table and in tooltips.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -613,9 +614,7 @@ def summarize(ev: dict[str, Any]) -> str:
             parts.append(ev["serviceName"])
         if ev.get("serviceFile"):
             parts.append(f"-> {ev['serviceFile']}")
-    elif (is_security and eid in (4698, 4699, 4700, 4701, 4702)) or (
-        "taskscheduler" in prov.lower() and eid in (106, 140, 141)
-    ):
+    elif (is_security and eid in (4698, 4699, 4700, 4701, 4702)) or ("taskscheduler" in prov.lower() and eid in (106, 140, 141)):
         parts.append(desc)
         if ev.get("taskName"):
             parts.append(ev["taskName"])

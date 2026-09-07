@@ -3,6 +3,7 @@ Filter DSL -> DuckDB SQL. Same semantics as frontend/src/rules/filter.ts:
 case-insensitive string comparison, arrays flatten (attachments.flags matches
 any attachment), settings-backed operators, regex, time and hour ranges.
 """
+
 from __future__ import annotations
 
 import ipaddress
@@ -14,9 +15,35 @@ from services.parsers.mail.common import normalize_name
 from services.reference import lists as reference_lists
 from services.store.casestore import EVENT_COLUMNS, EVENT_INT, MAIL_COLUMNS, MAIL_INT, MAIL_LIST, q
 
-OPS = {"eq", "ne", "in", "nin", "contains", "not_contains", "contains_any", "contains_all", "startswith", "not_startswith",
-       "endswith", "not_endswith", "re", "not_re", "gt", "gte", "lt", "lte", "exists", "empty", "in_setting", "nin_setting",
-       "levenshtein", "length", "contains_cs", "startswith_cs", "endswith_cs"}
+OPS = {
+    "eq",
+    "ne",
+    "in",
+    "nin",
+    "contains",
+    "not_contains",
+    "contains_any",
+    "contains_all",
+    "startswith",
+    "not_startswith",
+    "endswith",
+    "not_endswith",
+    "re",
+    "not_re",
+    "gt",
+    "gte",
+    "lt",
+    "lte",
+    "exists",
+    "empty",
+    "in_setting",
+    "nin_setting",
+    "levenshtein",
+    "length",
+    "contains_cs",
+    "startswith_cs",
+    "endswith_cs",
+}
 
 EVENT_COLS = {n for n, _ in EVENT_COLUMNS}
 MAIL_COLS = {n for n, _ in MAIL_COLUMNS}
@@ -25,13 +52,44 @@ ATT_COLS = {"name", "ext", "realExt", "realMime", "size", "sha256", "md5", "risk
 URL_COLS = {"url", "normalized", "defanged", "host", "domain", "scheme", "flags", "text", "source", "date"}
 ATT_INT = {"size", "risk", "date"}
 BODY_COLS = {"bodyText", "bodyHtml", "headersText", "visibleText"}
-MAIL_ALIASES = {"auth.spf": "spf", "auth.dkim": "dkim", "auth.dmarc": "dmarc", "auth.compauth": "compauth",
-                "reputation.worst": "reputationWorst", "reputation.originIp.verdict": "reputationOriginIp",
-                "replyTo.addr": "replyToList", "replyTo.domain": "replyToDomain", "to.addr": "toList", "cc.addr": "ccList", "bcc.addr": "bccList",
-                "sender.addr": "senderAddr"}
-TEXT_FIELDS_EVENTS = ["summary", "targetUser", "subjectUser", "ipAddress", "computer", "commandLine", "processName", "serviceName",
-                      "serviceFile", "scriptBlockText", "message", "workstation", "provider", "channel", "taskName", "objectName", "image",
-                      "query", "destinationIp", "targetFilename", "targetObject", "raw"]
+MAIL_ALIASES = {
+    "auth.spf": "spf",
+    "auth.dkim": "dkim",
+    "auth.dmarc": "dmarc",
+    "auth.compauth": "compauth",
+    "reputation.worst": "reputationWorst",
+    "reputation.originIp.verdict": "reputationOriginIp",
+    "replyTo.addr": "replyToList",
+    "replyTo.domain": "replyToDomain",
+    "to.addr": "toList",
+    "cc.addr": "ccList",
+    "bcc.addr": "bccList",
+    "sender.addr": "senderAddr",
+}
+TEXT_FIELDS_EVENTS = [
+    "summary",
+    "targetUser",
+    "subjectUser",
+    "ipAddress",
+    "computer",
+    "commandLine",
+    "processName",
+    "serviceName",
+    "serviceFile",
+    "scriptBlockText",
+    "message",
+    "workstation",
+    "provider",
+    "channel",
+    "taskName",
+    "objectName",
+    "image",
+    "query",
+    "destinationIp",
+    "targetFilename",
+    "targetObject",
+    "raw",
+]
 TEXT_FIELDS_MAILS = ["subject", "fromName", "fromAddr", "fromDomain", "originIp", "textPreview", "messageId", "folder", "returnPath"]
 
 
@@ -117,8 +175,10 @@ def _threshold(v: Any) -> tuple[str, int]:
 
 def _ipv4_int_sql(expr: str) -> str:
     parts = f"string_split({expr}, '.')"
-    return (f"(CASE WHEN regexp_matches({expr}, '^\\d{{1,3}}\\.\\d{{1,3}}\\.\\d{{1,3}}\\.\\d{{1,3}}$') THEN "
-            f"try_cast({parts}[1] AS BIGINT) * 16777216 + try_cast({parts}[2] AS BIGINT) * 65536 + try_cast({parts}[3] AS BIGINT) * 256 + try_cast({parts}[4] AS BIGINT) END)")
+    return (
+        f"(CASE WHEN regexp_matches({expr}, '^\\d{{1,3}}\\.\\d{{1,3}}\\.\\d{{1,3}}\\.\\d{{1,3}}$') THEN "
+        f"try_cast({parts}[1] AS BIGINT) * 16777216 + try_cast({parts}[2] AS BIGINT) * 65536 + try_cast({parts}[3] AS BIGINT) * 256 + try_cast({parts}[4] AS BIGINT) END)"
+    )
 
 
 def resolve(field_name: str, ctx: Ctx) -> Expr:
@@ -130,8 +190,8 @@ def resolve(field_name: str, ctx: Ctx) -> Expr:
         if f in EVENT_COLS:
             return Expr(f"{a}{q(f)}", "num" if f in EVENT_INT else "text")
         if f.startswith("data."):
-            return Expr(f"json_extract_string({a}\"data\", {_json_path(f[5:])})", "text")
-        return Expr(f"json_extract_string({a}\"data\", {_json_path(f)})", "text")
+            return Expr(f'json_extract_string({a}"data", {_json_path(f[5:])})', "text")
+        return Expr(f'json_extract_string({a}"data", {_json_path(f)})', "text")
     if tbl == "mails":
         if f in MAIL_ALIASES:
             f = MAIL_ALIASES[f]
@@ -144,28 +204,31 @@ def resolve(field_name: str, ctx: Ctx) -> Expr:
             kind = "list" if f in MAIL_LIST else ("num" if f in MAIL_INT else ("bool" if f in MAIL_BOOL else "text"))
             return Expr(f"{a}{q(f)}", kind)
         if f in BODY_COLS:
-            return Expr(f"(SELECT b.{q(f)} FROM mail_bodies b WHERE b.\"mailId\" = {a or 'mails.'}id)", "text")
+            return Expr(f'(SELECT b.{q(f)} FROM mail_bodies b WHERE b."mailId" = {a or "mails."}id)', "text")
         if f.startswith("auth."):
-            return Expr(f"json_extract_string({a}\"auth\", {_json_path(f[5:])})", "text")
+            return Expr(f'json_extract_string({a}"auth", {_json_path(f[5:])})', "text")
         if f.startswith("lookalike."):
-            return Expr(f"json_extract_string({a}\"lookalike\", {_json_path(f[10:])})", "text")
+            return Expr(f'json_extract_string({a}"lookalike", {_json_path(f[10:])})', "text")
         if f.startswith("htmlInfo."):
-            return Expr(f"json_extract_string({a}\"htmlInfo\", {_json_path(f[9:])})", "text")
+            return Expr(f'json_extract_string({a}"htmlInfo", {_json_path(f[9:])})', "text")
         if f.startswith("keywordHits."):
-            return Expr(f"json_extract_string({a}\"keywordHits\", {_json_path(f[12:])})", "text")
+            return Expr(f'json_extract_string({a}"keywordHits", {_json_path(f[12:])})', "text")
         raise FilterError(f"unknown mail field {field_name!r}")
     if tbl == "attachments":
         if f in ATT_COLS:
             return Expr(f"{a}{q(f)}", "list" if f == "flags" else ("bool" if f == "inline" else ("num" if f in ATT_INT else "text")))
-        return Expr(f"json_extract_string({a}\"details\", {_json_path(f)})", "text")
+        return Expr(f'json_extract_string({a}"details", {_json_path(f)})', "text")
     if tbl == "urls":
         if f in URL_COLS:
             return Expr(f"{a}{q(f)}", "list" if f == "flags" else ("num" if f == "date" else "text"))
         if f == "subdomain":
             # host minus the registrable domain ("www.foo.co.uk" -> "www"); NULL when there is none
             h, d = f'{a}"host"', f'{a}"domain"'
-            return Expr(f"(CASE WHEN {h} IS NULL OR {d} IS NULL OR {d} = '' OR {h} = {d} OR NOT ends_with({h}, '.' || {d}) "
-                        f"THEN NULL ELSE left({h}, length({h}) - length({d}) - 1) END)", "text")
+            return Expr(
+                f"(CASE WHEN {h} IS NULL OR {d} IS NULL OR {d} = '' OR {h} = {d} OR NOT ends_with({h}, '.' || {d}) "
+                f"THEN NULL ELSE left({h}, length({h}) - length({d}) - 1) END)",
+                "text",
+            )
         if f == "fragment":
             u = f'{a}"url"'
             return Expr(f"(CASE WHEN strpos({u}, '#') > 0 THEN substr({u}, strpos({u}, '#') + 1) ELSE NULL END)", "text")
@@ -185,11 +248,19 @@ def compile_condition(field_name: str, op: str, value: Any, ctx: Ctx) -> str:
             # "no attachment matches" semantics for negative operators. Only the positive form is
             # compiled: params are bound positionally, so compiling the negated form too would leave
             # its "?" values unbound (urls.domain|nin failed with an argument-count mismatch).
-            positive_op = {"ne": "eq", "nin": "in", "not_contains": "contains", "not_startswith": "startswith", "not_endswith": "endswith", "not_re": "re", "nin_setting": "in_setting"}[op]
+            positive_op = {
+                "ne": "eq",
+                "nin": "in",
+                "not_contains": "contains",
+                "not_startswith": "startswith",
+                "not_endswith": "endswith",
+                "not_re": "re",
+                "nin_setting": "in_setting",
+            }[op]
             inner_pos = compile_condition(field_name.split(".", 1)[1], positive_op, value, sub)
-            return f"NOT EXISTS (SELECT 1 FROM {child} c WHERE c.\"mailId\" = mails.id AND ({inner_pos}))"
+            return f'NOT EXISTS (SELECT 1 FROM {child} c WHERE c."mailId" = mails.id AND ({inner_pos}))'
         inner = compile_condition(field_name.split(".", 1)[1], op, value, sub)
-        return f"EXISTS (SELECT 1 FROM {child} c WHERE c.\"mailId\" = mails.id AND ({inner}))"
+        return f'EXISTS (SELECT 1 FROM {child} c WHERE c."mailId" = mails.id AND ({inner}))'
 
     e = resolve(field_name, ctx)
     vals = value if isinstance(value, list) else ([] if value is None else [value])
@@ -221,7 +292,10 @@ def compile_condition(field_name: str, op: str, value: Any, ctx: Ctx) -> str:
             return f"NOT list_has_any({lowlist}, [{', '.join(ctx.p(_norm(v)) for v in vals)}])" if vals else "TRUE"
         if op in ("startswith", "not_startswith", "endswith", "not_endswith"):
             neg = op.startswith("not_")
-            pat = " OR ".join(f"x LIKE {ctx.p((_like_escape(_norm(v)) + '%') if 'start' in op else ('%' + _like_escape(_norm(v))))} ESCAPE '\\'" for v in vals) or "FALSE"
+            pat = (
+                " OR ".join(f"x LIKE {ctx.p((_like_escape(_norm(v)) + '%') if 'start' in op else ('%' + _like_escape(_norm(v))))} ESCAPE '\\'" for v in vals)
+                or "FALSE"
+            )
             cond = f"list_bool_or(list_transform({lowlist}, x -> ({pat})))"
             return f"NOT coalesce({cond}, FALSE)" if neg else f"coalesce({cond}, FALSE)"
         if op in ("re", "not_re"):
@@ -250,7 +324,11 @@ def compile_condition(field_name: str, op: str, value: Any, ctx: Ctx) -> str:
         elif not vals or vals[0] in (None, ""):
             cond = f"({sql} IS NULL OR CAST({sql} AS VARCHAR) = '')"
         elif e.kind == "num" or isinstance(vals[0], (int, float)) and not isinstance(vals[0], bool):
-            cond = f"try_cast({sql} AS DOUBLE) = {ctx.p(float(vals[0]) if isinstance(vals[0], (int, float)) else _num(vals[0]))}" if e.kind != "num" or not isinstance(vals[0], (int, float)) else f"{sql} = {ctx.p(int(vals[0]))}"
+            cond = (
+                f"try_cast({sql} AS DOUBLE) = {ctx.p(float(vals[0]) if isinstance(vals[0], (int, float)) else _num(vals[0]))}"
+                if e.kind != "num" or not isinstance(vals[0], (int, float))
+                else f"{sql} = {ctx.p(int(vals[0]))}"
+            )
         else:
             cond = f"{low} = {ctx.p(_norm(vals[0]))}"
         return f"NOT coalesce({cond}, FALSE)" if op == "ne" else f"coalesce({cond}, FALSE)"

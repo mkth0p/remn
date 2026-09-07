@@ -93,4 +93,3 @@ describe('forgetUpload', () => {
     expect(await forgetUpload({ name: 'other.bin', size: 1, lastModified: 2 })).toBe(false)
   })
 })
-

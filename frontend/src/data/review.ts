@@ -36,7 +36,19 @@ export interface ReportSettings {
   onlyReviewed: boolean
 }
 
-export const DEFAULT_REPORT: ReportSettings = { minSeverity: 'medium', includeChains: true, includeGraphs: true, chainDetail: 'weighted', includeTimeline: true, includeTasks: true, includeNotes: true, includeIocs: true, includeEvidence: true, includeFp: false, onlyReviewed: false }
+export const DEFAULT_REPORT: ReportSettings = {
+  minSeverity: 'medium',
+  includeChains: true,
+  includeGraphs: true,
+  chainDetail: 'weighted',
+  includeTimeline: true,
+  includeTasks: true,
+  includeNotes: true,
+  includeIocs: true,
+  includeEvidence: true,
+  includeFp: false,
+  onlyReviewed: false,
+}
 
 export interface ChainReview {
   verdict?: Verdict
@@ -127,8 +139,21 @@ export interface ReviewItem {
  */
 export function reviewQueue(incidents: Incident[], chains: Chain[], reviews: Record<string, ChainReview>): ReviewItem[] {
   const byChain = new Map(incidents.filter((i) => i.kind === 'chain' && i.chain).map((i) => [i.chain!.id, i]))
-  const cs: ReviewItem[] = [...chains].sort((a, b) => b.score - a.score).map((c) => ({ id: `chain:${c.id}`, kind: 'chain', title: c.identityLabel, sub: `chain · score ${c.score} · ${c.steps.length} steps${byChain.get(c.id) ? ` · ${byChain.get(c.id)!.findings.length} findings` : ''}`, severity: chainSeverity(c, reviews[c.id]), done: !!reviews[c.id]?.verdict, chain: c, incident: byChain.get(c.id) }))
-  const is: ReviewItem[] = incidents.filter((i) => i.kind !== 'chain').map((i) => ({ id: `incident:${i.id}`, kind: 'incident', title: i.title, sub: i.subtitle, severity: i.severity, done: i.status !== 'new', incident: i }))
+  const cs: ReviewItem[] = [...chains]
+    .sort((a, b) => b.score - a.score)
+    .map((c) => ({
+      id: `chain:${c.id}`,
+      kind: 'chain',
+      title: c.identityLabel,
+      sub: `chain · score ${c.score} · ${c.steps.length} steps${byChain.get(c.id) ? ` · ${byChain.get(c.id)!.findings.length} findings` : ''}`,
+      severity: chainSeverity(c, reviews[c.id]),
+      done: !!reviews[c.id]?.verdict,
+      chain: c,
+      incident: byChain.get(c.id),
+    }))
+  const is: ReviewItem[] = incidents
+    .filter((i) => i.kind !== 'chain')
+    .map((i) => ({ id: `incident:${i.id}`, kind: 'incident', title: i.title, sub: i.subtitle, severity: i.severity, done: i.status !== 'new', incident: i }))
   return [...cs, ...is]
 }
 

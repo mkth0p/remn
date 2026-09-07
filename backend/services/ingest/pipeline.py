@@ -3,6 +3,7 @@ Shared ingestion pipeline: format detection, archive walking (zip / tar of
 EVTX files or mail corpora), mail statistics. Used by the NDJSON streaming
 views (browser storage) and by the server-store jobs.
 """
+
 from __future__ import annotations
 
 import io
@@ -12,11 +13,11 @@ import re
 import tarfile
 import tempfile
 import zipfile
-from typing import Any, Callable, Iterator
+from collections.abc import Callable, Iterator
+from typing import Any
 
 from services.common import sha256_file
-from services.parsers import evtx_parser
-from services.parsers import m365
+from services.parsers import evtx_parser, m365
 from services.parsers.mail import mbox as mbox_mod
 from services.parsers.mail import pst as pst_mod
 from services.parsers.mail.common import ParseContext, parse_message_bytes
@@ -265,18 +266,52 @@ class MailStats:
             self.flags[fl] = self.flags.get(fl, 0) + 1
 
     def to_dict(self) -> dict[str, Any]:
-        return {"count": self.count, "errors": self.errors, "flagged": self.flagged, "maxRisk": self.max_risk, "files": self.files,
-                "firstTs": self.first, "lastTs": self.last, "attachments": self.attachments, "riskyAttachments": self.risky_attachments,
-                "domains": dict(sorted(self.domains.items(), key=lambda kv: -kv[1])[:100]),
-                "folders": dict(sorted(self.folders.items(), key=lambda kv: -kv[1])[:100]),
-                "flags": dict(sorted(self.flags.items(), key=lambda kv: -kv[1])[:150])}
+        return {
+            "count": self.count,
+            "errors": self.errors,
+            "flagged": self.flagged,
+            "maxRisk": self.max_risk,
+            "files": self.files,
+            "firstTs": self.first,
+            "lastTs": self.last,
+            "attachments": self.attachments,
+            "riskyAttachments": self.risky_attachments,
+            "domains": dict(sorted(self.domains.items(), key=lambda kv: -kv[1])[:100]),
+            "folders": dict(sorted(self.folders.items(), key=lambda kv: -kv[1])[:100]),
+            "flags": dict(sorted(self.flags.items(), key=lambda kv: -kv[1])[:150]),
+        }
 
 
 def _error_row(folder: str, exc: Exception, fmt: str) -> dict[str, Any]:
-    return {"folder": folder, "subject": "(unparseable message)", "flags": ["parse_error"], "risk": 10, "error": str(exc)[:200],
-            "attachments": [], "urls": [], "sourceFormat": fmt, "fromName": "", "fromNameNorm": "", "fromAddr": "", "fromDomain": "",
-            "fromRegistrable": "", "replyTo": [], "to": [], "cc": [], "bcc": [], "hops": [], "auth": {}, "keywordHits": {},
-            "recipientCount": 0, "hopCount": 0, "urlCount": 0, "attachmentCount": 0, "maxAttachmentRisk": 0, "lookalike": {}, "date": None}
+    return {
+        "folder": folder,
+        "subject": "(unparseable message)",
+        "flags": ["parse_error"],
+        "risk": 10,
+        "error": str(exc)[:200],
+        "attachments": [],
+        "urls": [],
+        "sourceFormat": fmt,
+        "fromName": "",
+        "fromNameNorm": "",
+        "fromAddr": "",
+        "fromDomain": "",
+        "fromRegistrable": "",
+        "replyTo": [],
+        "to": [],
+        "cc": [],
+        "bcc": [],
+        "hops": [],
+        "auth": {},
+        "keywordHits": {},
+        "recipientCount": 0,
+        "hopCount": 0,
+        "urlCount": 0,
+        "attachmentCount": 0,
+        "maxAttachmentRisk": 0,
+        "lookalike": {},
+        "date": None,
+    }
 
 
 def iter_mbox_fileobj(fileobj: Any, ctx: ParseContext, folder: str) -> Iterator[dict[str, Any]]:
@@ -381,7 +416,9 @@ class MailSource:
         for member in iter_archive(self.path, self.data, self.format):
             low = member.name.lower()
             base = low.rsplit("/", 1)[-1]
-            if base.startswith((".", "__macosx")) or low.endswith((".png", ".jpg", ".jpeg", ".gif", ".md", ".html", ".htm", ".json", ".xml", ".csv", ".yml", ".yaml", ".py", ".txt.gz", ".evtx")):
+            if base.startswith((".", "__macosx")) or low.endswith(
+                (".png", ".jpg", ".jpeg", ".gif", ".md", ".html", ".htm", ".json", ".xml", ".csv", ".yml", ".yaml", ".py", ".txt.gz", ".evtx")
+            ):
                 if not low.endswith(".txt"):
                     continue
             folder = member.name.rsplit("/", 1)[0] if "/" in member.name else ""

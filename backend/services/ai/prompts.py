@@ -1,4 +1,5 @@
 """System prompts and field catalogs for the AI mode."""
+
 from __future__ import annotations
 
 EVENT_FIELDS = """
@@ -163,7 +164,9 @@ def compose_system(mode: str, context: dict) -> str:
     if context.get("storage") == "server":
         from services.store.queries import SCHEMA_DOC
 
-        extra.append("This case is stored server-side in DuckDB: the `sql` tool is available and preferred for aggregations, joins and window functions.\n" + SCHEMA_DOC)
+        extra.append(
+            "This case is stored server-side in DuckDB: the `sql` tool is available and preferred for aggregations, joins and window functions.\n" + SCHEMA_DOC
+        )
     else:
         extra.append("This case is stored in the browser: the `sql` tool is NOT available; use the search/aggregate tools.")
     return (system + "\n\n" + "\n".join(extra)).strip()
@@ -172,10 +175,10 @@ def compose_system(mode: str, context: dict) -> str:
 def prompts_version() -> str:
     """Stable content hash used by the browser to know when cached AI meta is stale."""
     import hashlib
+    import json
 
     from services.ai.tools import QUERY_SCHEMA, TOOLS
     from services.store.queries import SCHEMA_DOC
-    import json
 
     payload = json.dumps({"p": SYSTEM_BY_MODE, "t": TOOLS, "q": QUERY_SCHEMA, "s": SCHEMA_DOC}, sort_keys=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]

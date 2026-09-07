@@ -1,4 +1,5 @@
 """Optional YARA scanning of attachments (yara-python + rules dropped in a directory)."""
+
 from __future__ import annotations
 
 import logging
@@ -78,6 +79,13 @@ def scan(data: bytes, timeout: int = 20) -> list[dict[str, Any]] | None:
             strings = len(m.strings)
         except Exception:  # noqa: BLE001
             strings = 0
-        out.append({"rule": m.rule, "namespace": getattr(m, "namespace", None), "tags": list(m.tags),
-                    "meta": {k: str(v)[:200] for k, v in dict(m.meta).items()}, "strings": strings})
+        out.append(
+            {
+                "rule": m.rule,
+                "namespace": getattr(m, "namespace", None),
+                "tags": list(m.tags),
+                "meta": {k: str(v)[:200] for k, v in dict(m.meta).items()},
+                "strings": strings,
+            }
+        )
     return out

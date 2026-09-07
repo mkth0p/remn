@@ -1,4 +1,5 @@
 """Convert parser rows into store rows (events, mails, attachments, urls, bodies, IOCs) and write them in batches."""
+
 from __future__ import annotations
 
 import json
@@ -6,7 +7,18 @@ import re
 from typing import Any
 
 from services.common import is_public_ip
-from services.store.casestore import ATTACHMENT_COLUMNS, CaseStore, EVENT_COLUMNS, EVENT_INT, MAIL_COLUMNS, MAIL_INT, MAIL_BOOL, MAIL_JSON, MAIL_LIST, URL_COLUMNS, as_bool
+from services.store.casestore import (
+    ATTACHMENT_COLUMNS,
+    EVENT_COLUMNS,
+    MAIL_BOOL,
+    MAIL_COLUMNS,
+    MAIL_INT,
+    MAIL_JSON,
+    MAIL_LIST,
+    URL_COLUMNS,
+    CaseStore,
+    as_bool,
+)
 
 EVENT_NAMES = [n for n, _ in EVENT_COLUMNS]
 MAIL_NAMES = [n for n, _ in MAIL_COLUMNS]
@@ -173,9 +185,9 @@ class MailWriter:
             if name in ("id", "evidenceId"):
                 continue
             if name == "replyToAddr":
-                out[name] = (reply_to[0].get("addr") if reply_to else None)
+                out[name] = reply_to[0].get("addr") if reply_to else None
             elif name == "replyToDomain":
-                out[name] = (reply_to[0].get("domain") if reply_to else None)
+                out[name] = reply_to[0].get("domain") if reply_to else None
             elif name == "replyToList":
                 out[name] = [x.get("addr") for x in reply_to if x.get("addr")]
             elif name in ("toList", "ccList", "bccList"):
@@ -202,19 +214,56 @@ class MailWriter:
                 out[name] = v if (v is None or isinstance(v, str)) else str(v)
         self.mails.append(out)
         if self.keep_bodies:
-            self.bodies.append({"mailId": mail_id, "bodyText": row.get("bodyText"), "bodyHtml": row.get("bodyHtml"),
-                                "headersText": row.get("headersText"), "visibleText": row.get("visibleText")})
+            self.bodies.append(
+                {
+                    "mailId": mail_id,
+                    "bodyText": row.get("bodyText"),
+                    "bodyHtml": row.get("bodyHtml"),
+                    "headersText": row.get("headersText"),
+                    "visibleText": row.get("visibleText"),
+                }
+            )
         for a in row.get("attachments") or []:
-            self.attachments.append({
-                "id": 0, "mailId": mail_id, "evidenceId": self.evidence_id, "name": a.get("name"), "ext": a.get("ext"), "realExt": a.get("realExt"),
-                "realMime": a.get("realMime"), "size": _int(a.get("size")), "sha256": a.get("sha256"), "md5": a.get("md5"), "risk": _int(a.get("risk")),
-                "flags": list(a.get("flags") or []), "category": a.get("category"), "inline": bool(a.get("inline")), "details": _json(a.get("details")),
-                "date": _int(row.get("date")), "fromAddr": row.get("fromAddr"), "mailSubject": row.get("subject"),
-            })
+            self.attachments.append(
+                {
+                    "id": 0,
+                    "mailId": mail_id,
+                    "evidenceId": self.evidence_id,
+                    "name": a.get("name"),
+                    "ext": a.get("ext"),
+                    "realExt": a.get("realExt"),
+                    "realMime": a.get("realMime"),
+                    "size": _int(a.get("size")),
+                    "sha256": a.get("sha256"),
+                    "md5": a.get("md5"),
+                    "risk": _int(a.get("risk")),
+                    "flags": list(a.get("flags") or []),
+                    "category": a.get("category"),
+                    "inline": bool(a.get("inline")),
+                    "details": _json(a.get("details")),
+                    "date": _int(row.get("date")),
+                    "fromAddr": row.get("fromAddr"),
+                    "mailSubject": row.get("subject"),
+                }
+            )
         for u in row.get("urls") or []:
-            self.urls.append({"id": 0, "mailId": mail_id, "evidenceId": self.evidence_id, "url": u.get("url"), "normalized": u.get("normalized"),
-                              "defanged": u.get("defanged"), "host": u.get("host"), "domain": u.get("domain"), "scheme": u.get("scheme"),
-                              "flags": list(u.get("flags") or []), "text": u.get("text"), "source": u.get("source"), "date": _int(row.get("date"))})
+            self.urls.append(
+                {
+                    "id": 0,
+                    "mailId": mail_id,
+                    "evidenceId": self.evidence_id,
+                    "url": u.get("url"),
+                    "normalized": u.get("normalized"),
+                    "defanged": u.get("defanged"),
+                    "host": u.get("host"),
+                    "domain": u.get("domain"),
+                    "scheme": u.get("scheme"),
+                    "flags": list(u.get("flags") or []),
+                    "text": u.get("text"),
+                    "source": u.get("source"),
+                    "date": _int(row.get("date")),
+                }
+            )
         mail_iocs(row, self.iocs)
         if len(self.mails) >= 500:
             self.flush()

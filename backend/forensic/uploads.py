@@ -6,6 +6,7 @@ Windows opens with O_TEMPORARY: the parsers (pyevtx-rs, libpff) could not open
 the same path a second time. We create the file with delete=False and unlink
 it ourselves when the request is closed.
 """
+
 from __future__ import annotations
 
 import logging

@@ -3,6 +3,7 @@ Chunked uploads for large evidence: init -> PUT chunks (append at offset) ->
 complete (size check + SHA-256). Files live under FILE_UPLOAD_TEMP_DIR/uploads
 until an ingestion consumes (and deletes) them.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -89,7 +90,7 @@ def init(request: HttpRequest):
         return JsonResponse({"error": "invalid JSON"}, status=400)
     name = str(body.get("name") or "upload")[:255]
     size = int(body.get("size") or 0)
-    limit = settings.FORENSIC_MAX_CHUNKED_GB * 1024 ** 3
+    limit = settings.FORENSIC_MAX_CHUNKED_GB * 1024**3
     if size <= 0 or size > limit:
         return JsonResponse({"error": f"size must be between 1 byte and {settings.FORENSIC_MAX_CHUNKED_GB} GB"}, status=400)
     upload_id = uuid.uuid4().hex

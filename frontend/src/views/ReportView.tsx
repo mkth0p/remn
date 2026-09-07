@@ -38,13 +38,22 @@ export function ReportView() {
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState('')
   const [fontData, setFontData] = useState<string | undefined>(undefined)
-  useEffect(() => { loadReportFont().then(setFontData) }, [])
+  useEffect(() => {
+    loadReportFont().then(setFontData)
+  }, [])
   useEffect(() => {
     if (!kase?.id) return
     const db = getDb()
     db.evidence.where('caseId').equals(kase.id).toArray().then(setEvidence)
-    db.findings.where('caseId').equals(kase.id).toArray().then((f) => setFindings(f.sort((a, b) => ORDER.indexOf(effectiveSeverity(a)) - ORDER.indexOf(effectiveSeverity(b)) || (a.ts ?? 0) - (b.ts ?? 0))))
-    getSource(kase).listIocs({ onlyBad: true, limit: 500 }).then((r) => setIocs(r.rows)).catch(() => setIocs([]))
+    db.findings
+      .where('caseId')
+      .equals(kase.id)
+      .toArray()
+      .then((f) => setFindings(f.sort((a, b) => ORDER.indexOf(effectiveSeverity(a)) - ORDER.indexOf(effectiveSeverity(b)) || (a.ts ?? 0) - (b.ts ?? 0))))
+    getSource(kase)
+      .listIocs({ onlyBad: true, limit: 500 })
+      .then((r) => setIocs(r.rows))
+      .catch(() => setIocs([]))
     db.kv.get(`report-summary-${kase.id}`).then((k) => setSummary((k?.value as string) ?? ''))
     listNotes(kase.id).then(setNotes)
     loadChains(kase.id).then((r) => setChains(r?.chains ?? []))
@@ -55,10 +64,19 @@ export function ReportView() {
   // graph pictures for the report, drawn off-screen from the same models as the Chains page
   const [graphs, setGraphs] = useState<Record<string, string>>({})
   useEffect(() => {
-    if (!settings?.includeGraphs || !selection.chains.length) { setGraphs({}); return }
+    if (!settings?.includeGraphs || !selection.chains.length) {
+      setGraphs({})
+      return
+    }
     const out: Record<string, string> = {}
-    for (const c of selection.chains) { const png = renderGraphPng({ mode: 'chain', chain: c }); if (png) out[c.id] = png }
-    if (selection.chains.length > 1) { const png = renderGraphPng({ mode: 'campaign', chains: selection.chains }); if (png) out['campaign'] = png }
+    for (const c of selection.chains) {
+      const png = renderGraphPng({ mode: 'chain', chain: c })
+      if (png) out[c.id] = png
+    }
+    if (selection.chains.length > 1) {
+      const png = renderGraphPng({ mode: 'campaign', chains: selection.chains })
+      if (png) out['campaign'] = png
+    }
     setGraphs(out)
   }, [selection.chains, settings?.includeGraphs])
   if (!kase || !settings) return null
@@ -86,12 +104,32 @@ export function ReportView() {
     }
   }
 
-  const html = () => buildReportHtml({
-    kase, generatedAt: Date.now(), settings, summary, evidence,
-    chains: selection.chains, reviews, membersOf, graphs,
-    campaignInsights: settings.includeGraphs && selection.chains.length > 1 ? buildCampaignGraph(selection.chains).insights.slice(0, 8).map((x) => x.text) : [],
-    incidents, findings: shown, iocs, timeline: curated, tasks, notes: analystNotes, undecided, fontData,
-  })
+  const html = () =>
+    buildReportHtml({
+      kase,
+      generatedAt: Date.now(),
+      settings,
+      summary,
+      evidence,
+      chains: selection.chains,
+      reviews,
+      membersOf,
+      graphs,
+      campaignInsights:
+        settings.includeGraphs && selection.chains.length > 1
+          ? buildCampaignGraph(selection.chains)
+              .insights.slice(0, 8)
+              .map((x) => x.text)
+          : [],
+      incidents,
+      findings: shown,
+      iocs,
+      timeline: curated,
+      tasks,
+      notes: analystNotes,
+      undecided,
+      fontData,
+    })
   /** The report in its own tab: the browser's own print-to-PDF, or to keep it open next to the case. */
   const openReport = () => {
     const url = URL.createObjectURL(new Blob([html()], { type: 'text/html' }))
@@ -130,14 +168,27 @@ export function ReportView() {
       <div className="view-header">
         <div className="desc">
           <h1>Report</h1>
-          <span className="sub">{selection.chains.length} chain(s) · {incidents.length} incident(s) · {shown.length} finding(s) from {settings.minSeverity} up · {iocs.length} flagged IOC(s) · {evidence.length} evidence file(s){undecided ? ` · ${fmtNum(undecided)} item(s) not yet reviewed` : ' · everything reviewed'}</span>
+          <span className="sub">
+            {selection.chains.length} chain(s) · {incidents.length} incident(s) · {shown.length} finding(s) from {settings.minSeverity} up · {iocs.length} flagged IOC(s) · {evidence.length} evidence
+            file(s){undecided ? ` · ${fmtNum(undecided)} item(s) not yet reviewed` : ' · everything reviewed'}
+          </span>
         </div>
         <span className="spacer" />
-        <button className="btn sm" onClick={() => setView('review')}><IconCheck /> review and choose contents</button>
-        <button className="btn sm" onClick={generateSummary} disabled={busy}>{busy ? <Spinner /> : <IconAi />} AI executive summary</button>
-        <button className="btn sm primary" onClick={() => downloadBlob(`${kase.name.replace(/[^a-z0-9_-]+/gi, '_')}-report.html`, new Blob([html()], { type: 'text/html' }))}><IconDownload /> download HTML</button>
-        <button className="btn sm" onClick={openReport}>open in a tab</button>
-        <button className="btn sm" onClick={printReport}>print / PDF</button>
+        <button className="btn sm" onClick={() => setView('review')}>
+          <IconCheck /> review and choose contents
+        </button>
+        <button className="btn sm" onClick={generateSummary} disabled={busy}>
+          {busy ? <Spinner /> : <IconAi />} AI executive summary
+        </button>
+        <button className="btn sm primary" onClick={() => downloadBlob(`${kase.name.replace(/[^a-z0-9_-]+/gi, '_')}-report.html`, new Blob([html()], { type: 'text/html' }))}>
+          <IconDownload /> download HTML
+        </button>
+        <button className="btn sm" onClick={openReport}>
+          open in a tab
+        </button>
+        <button className="btn sm" onClick={printReport}>
+          print / PDF
+        </button>
       </div>
       <div className="view-body col" style={{ gap: 14 }}>
         {undecided > 0 && (
@@ -145,24 +196,43 @@ export function ReportView() {
             <b>{fmtNum(undecided)} item(s) have no decision yet.</b>
             <span>The report prints whatever passes the severity floor; the Review page lets you confirm, dismiss, rescore and annotate first.</span>
             <span className="spacer" />
-            <button className="btn xs" onClick={() => setView('review')}>go to Review</button>
+            <button className="btn xs" onClick={() => setView('review')}>
+              go to Review
+            </button>
           </div>
         )}
         <div className="grid-2">
           <div className="panel">
             <div className="panel-h">executive summary</div>
             <div className="panel-b">
-              {summary ? <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(summary) }} /> : <div className="muted small">Click "AI executive summary" to have the local model draft it from the reviewed chains and incidents, or write your own below.</div>}
-              <textarea className="textarea" style={{ marginTop: 8, minHeight: 120 }} value={summary} onChange={(e) => setSummary(e.target.value)} onBlur={() => getDb().kv.put({ key: `report-summary-${kase.id}`, value: summary })} placeholder="edit the summary…" />
+              {summary ? (
+                <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(summary) }} />
+              ) : (
+                <div className="muted small">Click "AI executive summary" to have the local model draft it from the reviewed chains and incidents, or write your own below.</div>
+              )}
+              <textarea
+                className="textarea"
+                style={{ marginTop: 8, minHeight: 120 }}
+                value={summary}
+                onChange={(e) => setSummary(e.target.value)}
+                onBlur={() => getDb().kv.put({ key: `report-summary-${kase.id}`, value: summary })}
+                placeholder="edit the summary…"
+              />
             </div>
           </div>
           <div className="col">
             <div className="panel">
-              <div className="panel-h">contents <span className="muted">· set on the Review page</span></div>
+              <div className="panel-h">
+                contents <span className="muted">· set on the Review page</span>
+              </div>
               <div className="panel-b row wrap" style={{ gap: 8 }}>
                 <Badge sev="accent">from {settings.minSeverity} up</Badge>
                 <Badge>{settings.includeChains ? `chains · steps: ${settings.chainDetail}` : 'no chains'}</Badge>
-                {ORDER.map((s) => <Badge key={s} sev={s}>{s} {bySev[s] ?? 0}</Badge>)}
+                {ORDER.map((s) => (
+                  <Badge key={s} sev={s}>
+                    {s} {bySev[s] ?? 0}
+                  </Badge>
+                ))}
                 <Badge sev={settings.includeTimeline ? 'ok' : 'info'}>timeline {curated.length}</Badge>
                 <Badge sev={settings.includeTasks ? 'ok' : 'info'}>tasks {tasks.length}</Badge>
                 <Badge sev={settings.includeNotes ? 'ok' : 'info'}>notes {analystNotes.length}</Badge>
@@ -171,8 +241,23 @@ export function ReportView() {
             <div className="panel">
               <div className="panel-h">case bundle (move the case to another machine)</div>
               <div className="panel-b col">
-                <div className="row"><button className="btn sm" onClick={() => exportCaseBundle(kase, setProgress).catch((e) => toast('err', e.message))}><IconDownload /> export case bundle (.remn.json)</button><span className="small dim">{progress}</span></div>
-                <Dropzone compact multiple={false} onFiles={(f) => importCaseBundle(f[0], setProgress).then((id) => toast('ok', `case imported (#${id}) - switch to it from the case selector`)).catch((e) => toast('err', e.message, 0))}><div className="big">drop a bundle to import</div></Dropzone>
+                <div className="row">
+                  <button className="btn sm" onClick={() => exportCaseBundle(kase, setProgress).catch((e) => toast('err', e.message))}>
+                    <IconDownload /> export case bundle (.remn.json)
+                  </button>
+                  <span className="small dim">{progress}</span>
+                </div>
+                <Dropzone
+                  compact
+                  multiple={false}
+                  onFiles={(f) =>
+                    importCaseBundle(f[0], setProgress)
+                      .then((id) => toast('ok', `case imported (#${id}) - switch to it from the case selector`))
+                      .catch((e) => toast('err', e.message, 0))
+                  }
+                >
+                  <div className="big">drop a bundle to import</div>
+                </Dropzone>
                 <div className="hint">The bundle contains every row of the case and a SHA-256 of its content, verified at import.</div>
               </div>
             </div>
@@ -180,7 +265,9 @@ export function ReportView() {
         </div>
         <div className="panel">
           <div className="panel-h">preview</div>
-          <div className="panel-b"><iframe title="report preview" sandbox="" srcDoc={html()} style={{ width: '100%', height: 560, background: '#fff', border: '1px solid var(--line-2)', borderRadius: 4 }} /></div>
+          <div className="panel-b">
+            <iframe title="report preview" sandbox="" srcDoc={html()} style={{ width: '100%', height: 560, background: '#fff', border: '1px solid var(--line-2)', borderRadius: 4 }} />
+          </div>
         </div>
       </div>
     </div>

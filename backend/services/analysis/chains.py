@@ -21,18 +21,35 @@ of the rule run are attached to the steps they reference, and the chain is score
 Pure functions over plain dict rows so the same code serves the DuckDB store and rows posted
 from a browser-stored case.
 """
+
 from __future__ import annotations
 
 import math
 import re
 from collections import defaultdict
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Identity
 # ---------------------------------------------------------------------------
-_SKIP_IDENTITIES = {"", "-", "system", "anonymous logon", "local service", "network service", "local system", "administrateur", "administrator",
-                    "window manager", "font driver host", "nt authority", "unknown", "null", "none"}
+_SKIP_IDENTITIES = {
+    "",
+    "-",
+    "system",
+    "anonymous logon",
+    "local service",
+    "network service",
+    "local system",
+    "administrateur",
+    "administrator",
+    "window manager",
+    "font driver host",
+    "nt authority",
+    "unknown",
+    "null",
+    "none",
+}
 
 
 def identity_key(value: Any) -> str | None:
@@ -97,7 +114,9 @@ def event_identities(ev: dict[str, Any]) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 # Seed artifacts
 # ---------------------------------------------------------------------------
-_MAIL_CLIENTS_RE = re.compile(r"(?i)(outlook|winword|excel|powerpnt|onenote|acrord32|acrobat|msedge|chrome|firefox|iexplore|brave|opera|thunderbird|teams)\.exe")
+_MAIL_CLIENTS_RE = re.compile(
+    r"(?i)(outlook|winword|excel|powerpnt|onenote|acrord32|acrobat|msedge|chrome|firefox|iexplore|brave|opera|thunderbird|teams)\.exe"
+)
 _LOLBIN_RE = re.compile(r"(?i)\\(cmd|powershell|pwsh|wscript|cscript|mshta|rundll32|regsvr32|certutil|bitsadmin|msiexec|curl|wmic|hh|installutil|msbuild)\.exe")
 _LEGACY_CLIENT_RE = re.compile(r"(?i)^(other clients|imap|pop|smtp|authenticated smtp|exchange activesync|exchange web services|exchange online powershell)")
 
@@ -162,7 +181,9 @@ def is_link(artifact: str) -> bool:
     return artifact.startswith("mail ") or artifact in _LINK_ARTIFACTS
 
 
-def score_chain(seed_risk: int, steps: list[dict[str, Any]], routine_ids: set[int], artifact_links: int, top_seed: int, top_step: int) -> tuple[int, dict[str, Any]]:
+def score_chain(
+    seed_risk: int, steps: list[dict[str, Any]], routine_ids: set[int], artifact_links: int, top_seed: int, top_step: int
+) -> tuple[int, dict[str, Any]]:
     """Bounded, additive score with the contribution of each part, so the interface can explain it.
 
     seed 0-30 (mail risk), links 0-30 (steps tied to the mail by an artifact), steps 0-20 (weight of
@@ -186,25 +207,76 @@ def score_chain(seed_risk: int, steps: list[dict[str, Any]], routine_ids: set[in
         linked = any(s["findings"] for s in steps)
         cap = 79 if linked or max(int(s["weight"]) for s in steps) >= 3 else 54
     score = min(100, total, cap or 100)
-    return score, {"seed": seed_pts, "links": links_pts, "steps": steps_pts, "findings": findings_pts, "sources": sources_pts, "cap": cap, "linkSteps": len(link_steps)}
+    return score, {
+        "seed": seed_pts,
+        "links": links_pts,
+        "steps": steps_pts,
+        "findings": findings_pts,
+        "sources": sources_pts,
+        "cap": cap,
+        "linkSteps": len(link_steps),
+    }
+
 
 _M365_WEIGHTS = {
-    "new-inboxrule": (4, "inbox rule created"), "set-inboxrule": (4, "inbox rule changed"), "updateinboxrules": (3, "inbox rules updated"),
-    "set-mailbox": (3, "mailbox settings changed"), "consent to application.": (4, "OAuth consent granted"),
-    "add oauth2permissiongrant.": (4, "OAuth permission granted"), "add app role assignment grant to user.": (3, "app role granted"),
-    "add member to role.": (5, "directory role assigned"), "add-mailboxpermission": (4, "mailbox permission granted"),
-    "add-mailboxfolderpermission": (3, "folder permission granted"), "add-recipientpermission": (4, "send-as granted"),
-    "update user.": (3, "user account updated"), "user registered security info.": (4, "security info registered"),
-    "reset user password.": (3, "password reset"), "change user password.": (2, "password changed"),
-    "set-casmailbox": (3, "protocol settings changed"), "new-transportrule": (5, "transport rule created"), "set-transportrule": (5, "transport rule changed"),
-    "set-mailboxjunkemailconfiguration": (2, "junk configuration changed"), "searchcreated": (2, "eDiscovery search"), "searchexportdownloaded": (3, "eDiscovery export"),
-    "mailitemsaccessed": (1, "mailbox items accessed"), "userloggedin": (1, "sign-in"), "userloginfailed": (1, "failed sign-in"),
-    "filedownloaded": (1, "file downloaded"), "filesyncdownloadedfull": (1, "files synced down"), "sharingset": (2, "sharing changed"),
-    "anonymouslinkcreated": (3, "anonymous link created"), "update conditional access policy.": (4, "conditional access changed"),
-    "add service principal.": (3, "service principal added"), "add application.": (3, "application registered"),
+    "new-inboxrule": (4, "inbox rule created"),
+    "set-inboxrule": (4, "inbox rule changed"),
+    "updateinboxrules": (3, "inbox rules updated"),
+    "set-mailbox": (3, "mailbox settings changed"),
+    "consent to application.": (4, "OAuth consent granted"),
+    "add oauth2permissiongrant.": (4, "OAuth permission granted"),
+    "add app role assignment grant to user.": (3, "app role granted"),
+    "add member to role.": (5, "directory role assigned"),
+    "add-mailboxpermission": (4, "mailbox permission granted"),
+    "add-mailboxfolderpermission": (3, "folder permission granted"),
+    "add-recipientpermission": (4, "send-as granted"),
+    "update user.": (3, "user account updated"),
+    "user registered security info.": (4, "security info registered"),
+    "reset user password.": (3, "password reset"),
+    "change user password.": (2, "password changed"),
+    "set-casmailbox": (3, "protocol settings changed"),
+    "new-transportrule": (5, "transport rule created"),
+    "set-transportrule": (5, "transport rule changed"),
+    "set-mailboxjunkemailconfiguration": (2, "junk configuration changed"),
+    "searchcreated": (2, "eDiscovery search"),
+    "searchexportdownloaded": (3, "eDiscovery export"),
+    "mailitemsaccessed": (1, "mailbox items accessed"),
+    "userloggedin": (1, "sign-in"),
+    "userloginfailed": (1, "failed sign-in"),
+    "filedownloaded": (1, "file downloaded"),
+    "filesyncdownloadedfull": (1, "files synced down"),
+    "sharingset": (2, "sharing changed"),
+    "anonymouslinkcreated": (3, "anonymous link created"),
+    "update conditional access policy.": (4, "conditional access changed"),
+    "add service principal.": (3, "service principal added"),
+    "add application.": (3, "application registered"),
 }
-_COLLAPSE_OPS = {"mailitemsaccessed", "filedownloaded", "filesyncdownloadedfull", "fileaccessed", "filemodified", "filepreviewed", "userloggedin", "userloginfailed",
-                 "signin", "4624", "4625", "4672", "4634", "4647", "4776", "4768", "4769", "5140", "5145", "3", "22", "7", "11", "10"}
+_COLLAPSE_OPS = {
+    "mailitemsaccessed",
+    "filedownloaded",
+    "filesyncdownloadedfull",
+    "fileaccessed",
+    "filemodified",
+    "filepreviewed",
+    "userloggedin",
+    "userloginfailed",
+    "signin",
+    "4624",
+    "4625",
+    "4672",
+    "4634",
+    "4647",
+    "4776",
+    "4768",
+    "4769",
+    "5140",
+    "5145",
+    "3",
+    "22",
+    "7",
+    "11",
+    "10",
+}
 
 
 def _lower(v: Any) -> str:
@@ -375,9 +447,19 @@ def _collapse_key(ev: dict[str, Any]) -> str:
     return f"host|{ev.get('eventId')}|{_lower(ev.get('computer'))}|{_lower(ev.get('image') or ev.get('processName'))}"
 
 
-def build_chains(mails: Iterable[dict[str, Any]], events: Iterable[dict[str, Any]], findings: Iterable[dict[str, Any]] | None = None,
-                 settings: dict[str, Any] | None = None, *, seed_min_risk: int = 45, window_hours: float = 72.0,
-                 before_minutes: float = 5.0, collapse_minutes: float = 10.0, min_score: int = 20, max_chains: int = 100) -> dict[str, Any]:
+def build_chains(
+    mails: Iterable[dict[str, Any]],
+    events: Iterable[dict[str, Any]],
+    findings: Iterable[dict[str, Any]] | None = None,
+    settings: dict[str, Any] | None = None,
+    *,
+    seed_min_risk: int = 45,
+    window_hours: float = 72.0,
+    before_minutes: float = 5.0,
+    collapse_minutes: float = 10.0,
+    min_score: int = 20,
+    max_chains: int = 100,
+) -> dict[str, Any]:
     settings = settings or {}
     mails = [m for m in mails if isinstance(m, dict)]
     events = [e for e in events if isinstance(e, dict) and e.get("ts") is not None]
@@ -443,9 +525,20 @@ def build_chains(mails: Iterable[dict[str, Any]], events: Iterable[dict[str, Any
                 to_phisher = bool(set(mail_recipients(m)) & art["senders"])
                 same_thread = bool(m.get("inReplyTo") and seed.get("messageId") and str(m["inReplyTo"]).strip() == str(seed["messageId"]).strip())
                 if to_phisher or same_thread:
-                    steps.append({"kind": "mail", "source": "mails", "id": m.get("id"), "ts": int(m["date"]), "tsEnd": int(m["date"]), "count": 1,
-                                  "title": f"reply to the sender: {m.get('subject') or ''}"[:200], "weight": 4, "artifacts": ["victim engaged with the sender"] + (["same thread"] if same_thread else []),
-                                  "findings": _fsum(f_by_ref.get(("mails", int(m["id"])) if m.get("id") is not None else ("mails", -1)) or [])})
+                    steps.append(
+                        {
+                            "kind": "mail",
+                            "source": "mails",
+                            "id": m.get("id"),
+                            "ts": int(m["date"]),
+                            "tsEnd": int(m["date"]),
+                            "count": 1,
+                            "title": f"reply to the sender: {m.get('subject') or ''}"[:200],
+                            "weight": 4,
+                            "artifacts": ["victim engaged with the sender"] + (["same thread"] if same_thread else []),
+                            "findings": _fsum(f_by_ref.get(("mails", int(m["id"])) if m.get("id") is not None else ("mails", -1)) or []),
+                        }
+                    )
             # events of that identity in the window
             for ev in ev_by_id.get(ident, []):
                 ts = int(ev["ts"])
@@ -475,10 +568,24 @@ def build_chains(mails: Iterable[dict[str, Any]], events: Iterable[dict[str, Any
                     last["tsEnd"] = ts
                     last["refs"].append(ev.get("id"))
                     continue
-                step = {"kind": "event", "source": "events", "id": ev.get("id"), "refs": [ev.get("id")], "ts": ts, "tsEnd": ts, "count": 1,
-                        "title": title, "weight": w, "artifacts": notes, "findings": _fsum(fs or []), "_key": key,
-                        "ipAddress": ev.get("ipAddress"), "computer": ev.get("computer"), "origin": "m365" if _is_m365(ev) else "host",
-                        "operation": ev.get("operation") or ev.get("eventId")}
+                step = {
+                    "kind": "event",
+                    "source": "events",
+                    "id": ev.get("id"),
+                    "refs": [ev.get("id")],
+                    "ts": ts,
+                    "tsEnd": ts,
+                    "count": 1,
+                    "title": title,
+                    "weight": w,
+                    "artifacts": notes,
+                    "findings": _fsum(fs or []),
+                    "_key": key,
+                    "ipAddress": ev.get("ipAddress"),
+                    "computer": ev.get("computer"),
+                    "origin": "m365" if _is_m365(ev) else "host",
+                    "operation": ev.get("operation") or ev.get("eventId"),
+                }
                 steps.append(step)
                 if not unique:
                     last_by_key[key] = step
@@ -512,16 +619,37 @@ def build_chains(mails: Iterable[dict[str, Any]], events: Iterable[dict[str, Any
                 m = re.search(r"forward(?:ing)? to ([^\s,]+)", s["title"])
                 if m:
                     attacker.append(m.group(1).strip("smtp:"))
-            chains.append({
-                "identity": ident, "identityLabel": labels.get(ident) or rcpt,
-                "seed": {"id": seed.get("id"), "ts": t0, "subject": (seed.get("subject") or "")[:200], "fromAddr": seed.get("fromAddr"),
-                         "risk": int(seed.get("risk") or 0), "flags": list(seed.get("flags") or [])[:12], "findings": _fsum(seed_findings or []),
-                         "urlDomains": sorted(art["domains"])[:10], "attachments": sorted(art["attachments"])[:10]},
-                "steps": steps, "start": t0, "end": max(s["tsEnd"] for s in steps), "score": score, "severity": severity,
-                "artifactLinks": artifact_links, "scoreBreakdown": breakdown,
-                "entities": {"user": labels.get(ident) or rcpt, "ips": ips[:20], "hosts": hosts[:20], "attackerAddresses": sorted(set(attacker))[:10],
-                             "domains": sorted(art["domains"])[:10]},
-            })
+            chains.append(
+                {
+                    "identity": ident,
+                    "identityLabel": labels.get(ident) or rcpt,
+                    "seed": {
+                        "id": seed.get("id"),
+                        "ts": t0,
+                        "subject": (seed.get("subject") or "")[:200],
+                        "fromAddr": seed.get("fromAddr"),
+                        "risk": int(seed.get("risk") or 0),
+                        "flags": list(seed.get("flags") or [])[:12],
+                        "findings": _fsum(seed_findings or []),
+                        "urlDomains": sorted(art["domains"])[:10],
+                        "attachments": sorted(art["attachments"])[:10],
+                    },
+                    "steps": steps,
+                    "start": t0,
+                    "end": max(s["tsEnd"] for s in steps),
+                    "score": score,
+                    "severity": severity,
+                    "artifactLinks": artifact_links,
+                    "scoreBreakdown": breakdown,
+                    "entities": {
+                        "user": labels.get(ident) or rcpt,
+                        "ips": ips[:20],
+                        "hosts": hosts[:20],
+                        "attackerAddresses": sorted(set(attacker))[:10],
+                        "domains": sorted(art["domains"])[:10],
+                    },
+                }
+            )
     # one chain per identity per 24 h: keep the best, attach the others as related seeds
     chains.sort(key=lambda c: -c["score"])
     kept: list[dict[str, Any]] = []
@@ -532,7 +660,7 @@ def build_chains(mails: Iterable[dict[str, Any]], events: Iterable[dict[str, Any
             continue
         kept.append(c)
     kept = kept[:max_chains]
-    for i, c in enumerate(kept):
+    for c in kept:
         c["id"] = f"chain-{c['identity']}-{c['seed']['id']}"
         c["summary"] = _summary(c)
     return {"chains": kept, "stats": {"seeds": len(seeds), "identities": len(ev_by_id), "events": len(events), "mails": len(mails), "chains": len(kept)}}
@@ -568,7 +696,9 @@ def chains_for_store(store: Any, settings: dict[str, Any] | None, findings: list
     seed_min_risk = int(opts.get("seed_min_risk", 45))
     window_hours = float(opts.get("window_hours", 72.0))
     ref_ids = sorted({int(r) for f in (findings or []) if f.get("source") == "mails" for r in (f.get("refs") or []) if str(r).lstrip("-").isdigit()})[:500]
-    seeds = Q.search(store, "mails", {"conditions": [{"field": "risk", "op": "gte", "value": seed_min_risk}]}, limit=300, sort={"field": "risk", "dir": "desc"}, full=True)["rows"]
+    seeds = Q.search(
+        store, "mails", {"conditions": [{"field": "risk", "op": "gte", "value": seed_min_risk}]}, limit=300, sort={"field": "risk", "dir": "desc"}, full=True
+    )["rows"]
     if ref_ids:
         extra = Q.search(store, "mails", {"conditions": [{"field": "id", "op": "in", "value": ref_ids}]}, limit=500, full=True)["rows"]
         have = {m["id"] for m in seeds}
@@ -594,9 +724,16 @@ def chains_for_store(store: Any, settings: dict[str, Any] | None, findings: list
                 r["data"] = json.loads(r["data"])
             except ValueError:
                 pass
-    cur.execute(f"SELECT * FROM mails WHERE date BETWEEN ? AND ? AND {_IDENT_SQL.format(col='\"fromAddr\"')} IN ({ph}) LIMIT 5000", [t_min, t_max] + idents)
+    cur.execute(f"SELECT * FROM mails WHERE date BETWEEN ? AND ? AND {_IDENT_SQL.format(col='"fromAddr"')} IN ({ph}) LIMIT 5000", [t_min, t_max] + idents)
     replies = Q._parse_json_cols(rows_to_dicts(cur), "mails") if hasattr(Q, "_parse_json_cols") else rows_to_dicts(cur)
     have = {m["id"] for m in seeds}
     mails = seeds + [m for m in replies if m["id"] not in have]
-    return build_chains(mails, events, findings, settings, seed_min_risk=seed_min_risk, window_hours=window_hours,
-                        **{k: v for k, v in opts.items() if k in ("before_minutes", "collapse_minutes", "min_score", "max_chains")})
+    return build_chains(
+        mails,
+        events,
+        findings,
+        settings,
+        seed_min_risk=seed_min_risk,
+        window_hours=window_hours,
+        **{k: v for k, v in opts.items() if k in ("before_minutes", "collapse_minutes", "min_score", "max_chains")},
+    )

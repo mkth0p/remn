@@ -1,4 +1,5 @@
 """Rules pinned to event ids / channels absent from the evidence are skipped and reported, not run silently."""
+
 from __future__ import annotations
 
 import uuid
@@ -22,8 +23,19 @@ def store(tmp_path):
 
 
 def _ev(i: int, **kw):
-    row = {"id": i, "ts": T0 + i * 1000, "tsIso": "2025-09-02T08:00:00Z", "eventId": 4624, "channel": "Security", "provider": "Microsoft-Windows-Security-Auditing",
-           "computer": "WS-1", "recordId": i, "summary": "logon", "targetUser": "alice", "raw": "{}"}
+    row = {
+        "id": i,
+        "ts": T0 + i * 1000,
+        "tsIso": "2025-09-02T08:00:00Z",
+        "eventId": 4624,
+        "channel": "Security",
+        "provider": "Microsoft-Windows-Security-Auditing",
+        "computer": "WS-1",
+        "recordId": i,
+        "summary": "logon",
+        "targetUser": "alice",
+        "raw": "{}",
+    }
     row.update(kw)
     return row
 
@@ -31,7 +43,10 @@ def _ev(i: int, **kw):
 def test_channel_selectors_mirror_the_browser_engine():
     assert R._rule_channels({"channel": "Security", "eventId": 4688}) == [("security", False)]
     assert R._rule_channels({"channel|contains": "sysmon"}) == [("sysmon", True)]
-    assert R._rule_channels({"any_of": [{"channel|contains": "sysmon", "eventId": 1}, {"channel": "Security", "eventId": 4688}]}) == [("sysmon", True), ("security", False)]
+    assert R._rule_channels({"any_of": [{"channel|contains": "sysmon", "eventId": 1}, {"channel": "Security", "eventId": 4688}]}) == [
+        ("sysmon", True),
+        ("security", False),
+    ]
     # an alternative without a channel pin unpins the whole rule
     assert R._rule_channels({"any_of": [{"channel": "Security"}, {"image|contains": "x"}]}) is None
     assert R._rule_channels({"all_of": [{"image|contains": "x"}, {"channel": "System"}]}) == [("system", False)]
@@ -41,7 +56,10 @@ def test_channel_selectors_mirror_the_browser_engine():
 def test_not_applicable_reasons():
     ids, chans = {4624, 4625}, {"security"}
     assert R.rule_not_applicable({"source": "events", "where": {"eventId": 4688}}, ids, chans) == "no event id 4688 in this evidence"
-    assert R.rule_not_applicable({"source": "events", "where": {"eventId": 4624, "channel|contains": "sysmon"}}, ids, chans) == 'no "sysmon" channel in this evidence'
+    assert (
+        R.rule_not_applicable({"source": "events", "where": {"eventId": 4624, "channel|contains": "sysmon"}}, ids, chans)
+        == 'no "sysmon" channel in this evidence'
+    )
     assert R.rule_not_applicable({"source": "events", "where": {"eventId": 4624, "channel": "Security"}}, ids, chans) is None
     assert R.rule_not_applicable({"source": "events", "where": {"targetUser": "alice"}}, ids, chans) is None
     assert R.rule_not_applicable({"source": "mails", "where": {"risk|gte": 80}}, set(), set()) is None

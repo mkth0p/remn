@@ -26,14 +26,23 @@ export function HomeView() {
           <dd>in this browser, or in a DuckDB store on your server for large cases; the analyst model is your own Ollama, or Claude through a Claude Code sign-in on the server</dd>
         </dl>
         <div className="row" style={{ gap: 8 }}>
-          {hasEvidence ? <button className="btn primary" onClick={() => setView('findings')}>open the findings</button> : <button className="btn primary" onClick={() => setView('evidence')}>add evidence</button>}
-          <button className="btn ghost" onClick={() => setView('settings')}>settings</button>
+          {hasEvidence ? (
+            <button className="btn primary" onClick={() => setView('findings')}>
+              open the findings
+            </button>
+          ) : (
+            <button className="btn primary" onClick={() => setView('evidence')}>
+              add evidence
+            </button>
+          )}
+          <button className="btn ghost" onClick={() => setView('settings')}>
+            settings
+          </button>
         </div>
         <div className="foot mono">
           {health ? `v${health.version}` : 'server offline'} · {fmtNum(bundled)} rules, {packs} community pack{packs === 1 ? '' : 's'}
           {kase && hasEvidence ? ` · ${kase.name}: ${fmtNum(counts.events)} events, ${fmtNum(counts.mails)} mails, ${fmtNum(counts.findings)} findings` : ''}
-          <br />
-          j / k move, / searches, Esc closes · type in Gulax by Velvetyne · rules from SigmaHQ and Sublime
+          <br />j / k move, / searches, Esc closes · type in Gulax by Velvetyne · rules from SigmaHQ and Sublime
         </div>
       </div>
     </div>

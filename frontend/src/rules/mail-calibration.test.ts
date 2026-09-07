@@ -25,13 +25,29 @@ describe('mail calibration across rule engines', () => {
     expect([...high].sort()).toEqual(malicious.sort())
   })
 
-  for (const window of [undefined, '10m']) it(`preserves the strongest escalation beyond the reference cap, window=${window}`, () => {
-    const rows = Array.from({ length: MAX_REFS + 2 }, (_, i) => ({ id: i + 1, date: i * 1000, fromAddr: 'sender@example.org', subject: 'file', flags: [i === MAX_REFS + 1 ? 'att_macro_vba_stomping' : 'att_office_macro'] }))
-    const rule: Rule = { id: 'macro-review', title: 'Macro review', source: 'mails', severity: 'medium', confidence: 'low', where: {}, then_flags: [{ att_macro_vba_stomping: 'critical' }], ...(window ? { group_by: ['fromAddr'], threshold: '>= 2', window } : {}) }
-    const found = runRule(rule, { rows })
-    expect(found).toHaveLength(1)
-    expect(found[0]).toMatchObject({ severity: 'critical', confidence: 'low', escalation: 'att_macro_vba_stomping' })
-    expect(found[0].refs).toHaveLength(MAX_REFS)
-    expect(found[0].refs).toContain(MAX_REFS + 2)
-  })
+  for (const window of [undefined, '10m'])
+    it(`preserves the strongest escalation beyond the reference cap, window=${window}`, () => {
+      const rows = Array.from({ length: MAX_REFS + 2 }, (_, i) => ({
+        id: i + 1,
+        date: i * 1000,
+        fromAddr: 'sender@example.org',
+        subject: 'file',
+        flags: [i === MAX_REFS + 1 ? 'att_macro_vba_stomping' : 'att_office_macro'],
+      }))
+      const rule: Rule = {
+        id: 'macro-review',
+        title: 'Macro review',
+        source: 'mails',
+        severity: 'medium',
+        confidence: 'low',
+        where: {},
+        then_flags: [{ att_macro_vba_stomping: 'critical' }],
+        ...(window ? { group_by: ['fromAddr'], threshold: '>= 2', window } : {}),
+      }
+      const found = runRule(rule, { rows })
+      expect(found).toHaveLength(1)
+      expect(found[0]).toMatchObject({ severity: 'critical', confidence: 'low', escalation: 'att_macro_vba_stomping' })
+      expect(found[0].refs).toHaveLength(MAX_REFS)
+      expect(found[0].refs).toContain(MAX_REFS + 2)
+    })
 })

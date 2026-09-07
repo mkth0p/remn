@@ -1,9 +1,11 @@
 """Thin wrapper around the Ollama Python client (streaming chat, structured output, model listing)."""
+
 from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -26,8 +28,13 @@ class OllamaService:
     def ping(self) -> dict[str, Any]:
         try:
             models = self.list_models()
-            return {"reachable": True, "host": self.host, "models": models, "defaultModel": self.default_model,
-                    "defaultAvailable": any(m["name"] == self.default_model or m["name"].split(":")[0] == self.default_model.split(":")[0] for m in models)}
+            return {
+                "reachable": True,
+                "host": self.host,
+                "models": models,
+                "defaultModel": self.default_model,
+                "defaultAvailable": any(m["name"] == self.default_model or m["name"].split(":")[0] == self.default_model.split(":")[0] for m in models),
+            }
         except Exception as exc:  # noqa: BLE001
             return {"reachable": False, "host": self.host, "error": str(exc)[:200], "models": [], "defaultModel": self.default_model}
 
@@ -36,14 +43,16 @@ class OllamaService:
         out: list[dict[str, Any]] = []
         for m in getattr(resp, "models", []) or []:
             details = getattr(m, "details", None)
-            out.append({
-                "name": getattr(m, "model", None) or getattr(m, "name", None),
-                "size": getattr(m, "size", None),
-                "modifiedAt": str(getattr(m, "modified_at", "") or ""),
-                "family": getattr(details, "family", None) if details else None,
-                "parameterSize": getattr(details, "parameter_size", None) if details else None,
-                "quantization": getattr(details, "quantization_level", None) if details else None,
-            })
+            out.append(
+                {
+                    "name": getattr(m, "model", None) or getattr(m, "name", None),
+                    "size": getattr(m, "size", None),
+                    "modifiedAt": str(getattr(m, "modified_at", "") or ""),
+                    "family": getattr(details, "family", None) if details else None,
+                    "parameterSize": getattr(details, "parameter_size", None) if details else None,
+                    "quantization": getattr(details, "quantization_level", None) if details else None,
+                }
+            )
         return out
 
     def capabilities(self, model: str) -> list[str]:
@@ -57,8 +66,15 @@ class OllamaService:
             log.debug("show %s failed: %s", model, exc)
             return []
 
-    def chat_stream(self, messages: list[dict[str, Any]], model: str | None = None, tools: list[dict[str, Any]] | None = None,
-                    think: bool | None = None, options: dict[str, Any] | None = None, fmt: Any = None) -> Iterator[dict[str, Any]]:
+    def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        think: bool | None = None,
+        options: dict[str, Any] | None = None,
+        fmt: Any = None,
+    ) -> Iterator[dict[str, Any]]:
         """
         Yield normalised chunks: {"type": "token"|"thinking"|"tool_calls"|"done"|"error", ...}
         """
@@ -117,8 +133,14 @@ class OllamaService:
             yield {"type": "tool_calls", "calls": pending_calls}
             yield {"type": "done", "model": model, "stats": {}}
 
-    def chat_json(self, messages: list[dict[str, Any]], schema: dict[str, Any], model: str | None = None,
-                  think: bool | None = False, options: dict[str, Any] | None = None) -> dict[str, Any]:
+    def chat_json(
+        self,
+        messages: list[dict[str, Any]],
+        schema: dict[str, Any],
+        model: str | None = None,
+        think: bool | None = False,
+        options: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Non-streaming structured output. Returns {"data": parsed|None, "raw": text, "model": ...}."""
         model = model or self.default_model
         opts = {"num_ctx": self.num_ctx, "temperature": 0}
@@ -142,7 +164,7 @@ class OllamaService:
             start, end = text.find("{"), text.rfind("}")
             if start != -1 and end > start:
                 try:
-                    data = json.loads(text[start:end + 1])
+                    data = json.loads(text[start : end + 1])
                 except ValueError:
                     data = None
         return {"data": data, "raw": text, "model": model}

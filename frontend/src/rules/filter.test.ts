@@ -8,7 +8,10 @@ const row = {
   ipAddress: '10.1.2.3',
   logonType: 3,
   flags: ['spf_fail', 'att_office_macro'],
-  attachments: [{ name: 'a.docm', flags: ['office_macro'] }, { name: 'b.pdf', flags: ['pdf_javascript'] }],
+  attachments: [
+    { name: 'a.docm', flags: ['office_macro'] },
+    { name: 'b.pdf', flags: ['pdf_javascript'] },
+  ],
   data: { LogonType: '3', Status: '0xc000006d' },
   raw: '{"System":{"EventID":4625}}',
 }
@@ -72,10 +75,23 @@ describe('ipInCidr', () => {
 
 describe('compileFilter', () => {
   it('applies time range, conditions, regex and text', () => {
-    const f = compileFilter({ conditions: [{ field: 'eventId', op: 'eq', value: 4625 }], timeRange: { from: '2026-09-01T00:00:00Z', to: '2026-09-02T00:00:00Z' }, regex: { field: '*', pattern: 'EventID":4625' }, text: 'administrator' })
+    const f = compileFilter({
+      conditions: [{ field: 'eventId', op: 'eq', value: 4625 }],
+      timeRange: { from: '2026-09-01T00:00:00Z', to: '2026-09-02T00:00:00Z' },
+      regex: { field: '*', pattern: 'EventID":4625' },
+      text: 'administrator',
+    })
     expect(f(row)).toBe(true)
     expect(f({ ...row, ts: Date.UTC(2026, 8, 3) })).toBe(false)
-    expect(compileFilter({ conditions: [{ field: 'eventId', op: 'eq', value: 4624 }, { field: 'eventId', op: 'eq', value: 4625 }], logic: 'or' })(row)).toBe(true)
+    expect(
+      compileFilter({
+        conditions: [
+          { field: 'eventId', op: 'eq', value: 4624 },
+          { field: 'eventId', op: 'eq', value: 4625 },
+        ],
+        logic: 'or',
+      })(row),
+    ).toBe(true)
   })
   it('handles hour ranges with time zones', () => {
     // 22:13 UTC = 00:13 in Europe/Paris (CEST) -> outside 8-19
@@ -89,14 +105,32 @@ describe('compileFilter', () => {
 
 describe('extractEventIds', () => {
   it('finds pinned ids for index pre-selection', () => {
-    expect(extractEventIds([{ field: 'eventId', op: 'in', value: [4624, 4625] }, { field: 'x', op: 'eq', value: 1 }])).toEqual([4624, 4625])
+    expect(
+      extractEventIds([
+        { field: 'eventId', op: 'in', value: [4624, 4625] },
+        { field: 'x', op: 'eq', value: 1 },
+      ]),
+    ).toEqual([4624, 4625])
     expect(extractEventIds([{ field: 'eventId', op: 'ne', value: 1 }])).toBeNull()
-    expect(extractEventIds([{ field: 'eventId', op: 'eq', value: 1 }, { field: 'y', op: 'eq', value: 2 }], 'or')).toBeNull()
+    expect(
+      extractEventIds(
+        [
+          { field: 'eventId', op: 'eq', value: 1 },
+          { field: 'y', op: 'eq', value: 2 },
+        ],
+        'or',
+      ),
+    ).toBeNull()
   })
 })
 
 describe('length, built-in lists and derived url fields', () => {
-  const row = { subject: 'short', fromRegistrable: 'google.com', to: [{ addr: 'a@x.com' }, { addr: 'b@x.com' }], urls: [{ url: 'https://www.tracker.top/p#frag-1', host: 'www.tracker.top', domain: 'tracker.top' }] }
+  const row = {
+    subject: 'short',
+    fromRegistrable: 'google.com',
+    to: [{ addr: 'a@x.com' }, { addr: 'b@x.com' }],
+    urls: [{ url: 'https://www.tracker.top/p#frag-1', host: 'www.tracker.top', domain: 'tracker.top' }],
+  }
   it('compares text and list lengths against a threshold', () => {
     expect(matchCondition(row, { field: 'subject', op: 'length', value: '< 10' })).toBe(true)
     expect(matchCondition(row, { field: 'subject', op: 'length', value: '>= 10' })).toBe(false)

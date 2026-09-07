@@ -1,4 +1,5 @@
 """Enrichment passes: sender baselining + campaign clustering (server store, or rows posted by a browser case)."""
+
 from __future__ import annotations
 
 import json
@@ -7,9 +8,9 @@ import logging
 from django.http import HttpRequest, JsonResponse
 from django.views.decorators.http import require_POST
 
+from api.jobs import manager
 from services.analysis import baseline
 from services.analysis import rescore as calibration
-from api.jobs import manager
 from services.store.casestore import registry
 
 log = logging.getLogger(__name__)

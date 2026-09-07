@@ -1,4 +1,5 @@
 """Claude Code connector: transcript rendering, the JSON tool-call protocol, stream parsing with a fake command line, and the API views."""
+
 from __future__ import annotations
 
 import json
@@ -30,21 +31,27 @@ def test_render_prompt_transcript_headings():
     p = cc.render_prompt(msgs)
     assert p.startswith("User:\nHow many mails?")
     assert 'Assistant:\n{"tool_calls": [{"name": "search_mails", "arguments": {"limit": 5}}]}' in p
-    assert "Tool result (search_mails):\n{\"total\": 7}" in p
+    assert 'Tool result (search_mails):\n{"total": 7}' in p
     assert p.endswith("User:\nand now?")
     assert "ignored here" not in p
 
 
-@pytest.mark.parametrize("text,expected", [
-    ('{"tool_calls":[{"name":"list_findings","arguments":{}}]}', [{"name": "list_findings", "arguments": {}}]),
-    ('```json\n{"tool_calls":[{"name":"search_mails","arguments":{"text":"invoice"}}]}\n```', [{"name": "search_mails", "arguments": {"text": "invoice"}}]),
-    ('Let me look.\n{"tool_calls":[{"name":"get_event","arguments":{"id":3}}]}', [{"name": "get_event", "arguments": {"id": 3}}]),
-    ('{"tool_calls":[{"name":"x","arguments":"not a dict"}]}', [{"name": "x", "arguments": {}}]),
-    ('{"tool_calls":[{"name":"a","arguments":{}}]}\nTool result (a): {"x": 1}\n{"tool_calls":[{"name":"b","arguments":{}}]}', [{"name": "a", "arguments": {}}]),
-    ("The mailbox holds three phishing mails.", None),
-    ('{"answer": "no tools here"}', None),
-    ('{"tool_calls": []}', None),
-])
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ('{"tool_calls":[{"name":"list_findings","arguments":{}}]}', [{"name": "list_findings", "arguments": {}}]),
+        ('```json\n{"tool_calls":[{"name":"search_mails","arguments":{"text":"invoice"}}]}\n```', [{"name": "search_mails", "arguments": {"text": "invoice"}}]),
+        ('Let me look.\n{"tool_calls":[{"name":"get_event","arguments":{"id":3}}]}', [{"name": "get_event", "arguments": {"id": 3}}]),
+        ('{"tool_calls":[{"name":"x","arguments":"not a dict"}]}', [{"name": "x", "arguments": {}}]),
+        (
+            '{"tool_calls":[{"name":"a","arguments":{}}]}\nTool result (a): {"x": 1}\n{"tool_calls":[{"name":"b","arguments":{}}]}',
+            [{"name": "a", "arguments": {}}],
+        ),
+        ("The mailbox holds three phishing mails.", None),
+        ('{"answer": "no tools here"}', None),
+        ('{"tool_calls": []}', None),
+    ],
+)
 def test_parse_tool_calls(text, expected):
     assert cc.parse_tool_calls(text) == expected
 
@@ -117,9 +124,16 @@ def _delta(text: str) -> dict:
 
 
 def _result(text: str, is_error: bool = False) -> dict:
-    return {"type": "result", "subtype": "error_during_execution" if is_error else "success", "is_error": is_error, "result": text,
-            "duration_ms": 1234, "stop_reason": "end_turn", "total_cost_usd": 0.00123,
-            "usage": {"input_tokens": 10, "cache_read_input_tokens": 90, "output_tokens": 5}}
+    return {
+        "type": "result",
+        "subtype": "error_during_execution" if is_error else "success",
+        "is_error": is_error,
+        "result": text,
+        "duration_ms": 1234,
+        "stop_reason": "end_turn",
+        "total_cost_usd": 0.00123,
+        "usage": {"input_tokens": 10, "cache_read_input_tokens": 90, "output_tokens": 5},
+    }
 
 
 @pytest.fixture
@@ -135,7 +149,9 @@ def test_plain_answer_streams_tokens(fake_cli):
     fake_cli.script = [
         {"type": "stream_event", "event": {"type": "message_start", "message": {"model": "claude-sonnet-5"}}},
         {"type": "stream_event", "event": {"type": "content_block_delta", "delta": {"type": "thinking_delta", "thinking": "hmm"}}},
-        _delta("The "), _delta("mailbox "), _delta("holds three phishing mails."),
+        _delta("The "),
+        _delta("mailbox "),
+        _delta("holds three phishing mails."),
         _result("The mailbox holds three phishing mails."),
     ]
     chunks = list(cc.chat_stream([{"role": "user", "content": "q"}], "SYS", model="sonnet", tools=TOOLS))
@@ -151,7 +167,9 @@ def test_plain_answer_streams_tokens(fake_cli):
 
 def test_json_reply_is_held_back_and_becomes_tool_calls(fake_cli):
     fake_cli.script = [
-        _delta('{"tool_'), _delta('calls":[{"name":"search_mails",'), _delta('"arguments":{"text":"invoice"}}]}'),
+        _delta('{"tool_'),
+        _delta('calls":[{"name":"search_mails",'),
+        _delta('"arguments":{"text":"invoice"}}]}'),
         _result('{"tool_calls":[{"name":"search_mails","arguments":{"text":"invoice"}}]}'),
     ]
     chunks = list(cc.chat_stream([{"role": "user", "content": "q"}], "SYS", tools=TOOLS))
@@ -199,7 +217,7 @@ def test_missing_binary_is_an_error_chunk(monkeypatch):
 
 
 def test_chat_json_parses_fenced_object(fake_cli):
-    fake_cli.script = [_delta("```json\n{\"text\": \"invoice\", \"limit\": 5}\n```"), _result("```json\n{\"text\": \"invoice\", \"limit\": 5}\n```")]
+    fake_cli.script = [_delta('```json\n{"text": "invoice", "limit": 5}\n```'), _result('```json\n{"text": "invoice", "limit": 5}\n```')]
     res = cc.chat_json([{"role": "user", "content": "mails about invoices"}], "QUERY", {"type": "object"})
     assert res["data"] == {"text": "invoice", "limit": 5}
 
@@ -213,7 +231,12 @@ def test_status_view_reports_disabled_connector():
         assert r.status_code == 200
         body = r.json()
         assert body["enabled"] is False and body["available"] is False and "switched off" in body["error"]
-        assert c.post("/api/ai/claude/chat", data=json.dumps({"messages": [{"role": "user", "content": "hi"}]}), content_type="application/json", **HDR).status_code == 403
+        assert (
+            c.post(
+                "/api/ai/claude/chat", data=json.dumps({"messages": [{"role": "user", "content": "hi"}]}), content_type="application/json", **HDR
+            ).status_code
+            == 403
+        )
         assert c.post("/api/ai/claude/query", data=json.dumps({"question": "hi"}), content_type="application/json", **HDR).status_code == 403
     cc.reset_status_cache()
 
@@ -221,7 +244,12 @@ def test_status_view_reports_disabled_connector():
 def test_chat_view_streams_sse_from_fake_cli(fake_cli):
     fake_cli.script = [_delta("Hello "), _delta("analyst."), _result("Hello analyst.")]
     c = Client()
-    r = c.post("/api/ai/claude/chat", data=json.dumps({"messages": [{"role": "user", "content": "hi"}], "mode": "free", "tools": False, "model": "haiku"}), content_type="application/json", **HDR)
+    r = c.post(
+        "/api/ai/claude/chat",
+        data=json.dumps({"messages": [{"role": "user", "content": "hi"}], "mode": "free", "tools": False, "model": "haiku"}),
+        content_type="application/json",
+        **HDR,
+    )
     assert r.status_code == 200
     events = _sse_events(r)
     assert "".join(e["content"] for e in events if e["type"] == "token") == "Hello analyst."

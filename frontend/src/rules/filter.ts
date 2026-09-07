@@ -5,10 +5,33 @@
 import { BUILTIN_LISTS } from '../reference/lists'
 
 export type Op =
-  | 'eq' | 'ne' | 'in' | 'nin' | 'contains' | 'not_contains' | 'contains_any' | 'contains_all'
-  | 'startswith' | 'not_startswith' | 'endswith' | 'not_endswith' | 're' | 'not_re'
-  | 'gt' | 'gte' | 'lt' | 'lte' | 'exists' | 'empty' | 'in_setting' | 'nin_setting' | 'levenshtein' | 'length'
-  | 'contains_cs' | 'startswith_cs' | 'endswith_cs'
+  | 'eq'
+  | 'ne'
+  | 'in'
+  | 'nin'
+  | 'contains'
+  | 'not_contains'
+  | 'contains_any'
+  | 'contains_all'
+  | 'startswith'
+  | 'not_startswith'
+  | 'endswith'
+  | 'not_endswith'
+  | 're'
+  | 'not_re'
+  | 'gt'
+  | 'gte'
+  | 'lt'
+  | 'lte'
+  | 'exists'
+  | 'empty'
+  | 'in_setting'
+  | 'nin_setting'
+  | 'levenshtein'
+  | 'length'
+  | 'contains_cs'
+  | 'startswith_cs'
+  | 'endswith_cs'
 
 export interface Condition {
   field: string
@@ -135,7 +158,7 @@ const regexCache = new Map<string, RegExp | null>()
 export function compileRegex(pattern: string, flags = 'i'): RegExp | null {
   const key = flags + '/' + pattern
   if (regexCache.has(key)) return regexCache.get(key) ?? null
-  let re: RegExp | null = null
+  let re: RegExp | null
   try {
     // Python-style inline flags (?i) -> JS flags
     let p = pattern
@@ -188,7 +211,7 @@ export function ipInCidr(ip: string, cidr: string): boolean {
   const netN = ipToInt(net)
   if (ipN === null || netN === null || !Number.isFinite(bits)) return false
   const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0
-  return ((ipN & mask) >>> 0) === ((netN & mask) >>> 0)
+  return (ipN & mask) >>> 0 === (netN & mask) >>> 0
 }
 
 /** A case-settings list by snake or camel name, else a built-in reference list of that name (tranco_10k). */
@@ -239,7 +262,10 @@ export function matchCondition(row: Row, c: Condition, settings?: SettingsLike):
   let wanted = c.value
   // LLM-built filters often pass "a,b,c" instead of ["a","b","c"] for list operators
   if (typeof wanted === 'string' && wanted.includes(',') && (op === 'in' || op === 'nin' || op === 'contains_any' || op === 'contains_all')) {
-    wanted = wanted.split(',').map((s) => s.trim()).filter(Boolean)
+    wanted = wanted
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
   }
   const actArr = toArray(actual)
   const actStr = actArr.map(norm)
@@ -347,7 +373,29 @@ export function matchCondition(row: Row, c: Condition, settings?: SettingsLike):
   }
 }
 
-const TEXT_FIELDS_EVENTS = ['summary', 'targetUser', 'subjectUser', 'ipAddress', 'computer', 'commandLine', 'processName', 'serviceName', 'serviceFile', 'scriptBlockText', 'message', 'workstation', 'provider', 'channel', 'taskName', 'objectName', 'image', 'query', 'destinationIp', 'targetFilename', 'targetObject']
+const TEXT_FIELDS_EVENTS = [
+  'summary',
+  'targetUser',
+  'subjectUser',
+  'ipAddress',
+  'computer',
+  'commandLine',
+  'processName',
+  'serviceName',
+  'serviceFile',
+  'scriptBlockText',
+  'message',
+  'workstation',
+  'provider',
+  'channel',
+  'taskName',
+  'objectName',
+  'image',
+  'query',
+  'destinationIp',
+  'targetFilename',
+  'targetObject',
+]
 const TEXT_FIELDS_MAILS = ['subject', 'fromName', 'fromAddr', 'fromDomain', 'originIp', 'textPreview', 'messageId', 'folder', 'flags', 'returnPath']
 
 export function toMs(v: string | number | null | undefined): number | null {
@@ -456,7 +504,9 @@ export function extractEventIds(conds: Condition[] | undefined, logic: 'and' | '
   for (const c of conds) {
     if (c.field !== 'eventId') continue
     if (c.op === 'eq' || c.op === 'in') {
-      const ids = toArray(c.value).map(numeric).filter((n): n is number => n !== null)
+      const ids = toArray(c.value)
+        .map(numeric)
+        .filter((n): n is number => n !== null)
       if (ids.length) sets.push(ids)
     }
   }

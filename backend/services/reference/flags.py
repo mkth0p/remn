@@ -1,4 +1,5 @@
 """Human descriptions of analysis flags (mail, url, attachment, sender) for tooltips and reports."""
+
 from __future__ import annotations
 
 FLAGS: dict[str, str] = {
@@ -245,6 +246,6 @@ def describe_flag(flag: str) -> str:
     if flag in FLAGS:
         return FLAGS[flag]
     for prefix in ("att_", "nested_", "archive_entry_", "sender_", "replyto_", "url_"):
-        if flag.startswith(prefix) and flag[len(prefix):] in FLAGS:
-            return FLAGS[flag[len(prefix):]]
+        if flag.startswith(prefix) and flag[len(prefix) :] in FLAGS:
+            return FLAGS[flag[len(prefix) :]]
     return flag.replace("_", " ")

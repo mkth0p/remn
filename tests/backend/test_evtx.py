@@ -16,11 +16,19 @@ def _sample_event(event_id: int, provider: str, data: dict, user_data: dict | No
         "Event": {
             "System": {
                 "Provider": {"#attributes": {"Name": provider, "Guid": "{54849625-5478-4994-A5BA-3E3B0328C30D}"}},
-                "EventID": event_id, "Version": 2, "Level": 0, "Task": 12544, "Opcode": 0, "Keywords": "0x8010000000000000",
+                "EventID": event_id,
+                "Version": 2,
+                "Level": 0,
+                "Task": 12544,
+                "Opcode": 0,
+                "Keywords": "0x8010000000000000",
                 "TimeCreated": {"#attributes": {"SystemTime": "2026-09-01T22:13:40.123456Z"}},
-                "EventRecordID": 4242, "Correlation": {"#attributes": {"ActivityID": "{ABC}"}},
+                "EventRecordID": 4242,
+                "Correlation": {"#attributes": {"ActivityID": "{ABC}"}},
                 "Execution": {"#attributes": {"ProcessID": 720, "ThreadID": 1234}},
-                "Channel": "Security", "Computer": "WS01.corp.local", "Security": {"#attributes": {"UserID": "S-1-5-18"}},
+                "Channel": "Security",
+                "Computer": "WS01.corp.local",
+                "Security": {"#attributes": {"UserID": "S-1-5-18"}},
             },
             "EventData": data,
         }
@@ -31,11 +39,24 @@ def _sample_event(event_id: int, provider: str, data: dict, user_data: dict | No
 
 
 def test_flatten_4625_maps_fields_and_summary():
-    ev = _sample_event(4625, "Microsoft-Windows-Security-Auditing", {
-        "SubjectUserSid": "S-1-0-0", "SubjectUserName": "-", "TargetUserName": "administrator", "TargetDomainName": "CORP",
-        "Status": "0xc000006d", "SubStatus": "0xc000006a", "LogonType": 3, "IpAddress": "10.1.2.3", "IpPort": 51234,
-        "WorkstationName": "KALI", "AuthenticationPackageName": "NTLM", "FailureReason": "%%2313",
-    })
+    ev = _sample_event(
+        4625,
+        "Microsoft-Windows-Security-Auditing",
+        {
+            "SubjectUserSid": "S-1-0-0",
+            "SubjectUserName": "-",
+            "TargetUserName": "administrator",
+            "TargetDomainName": "CORP",
+            "Status": "0xc000006d",
+            "SubStatus": "0xc000006a",
+            "LogonType": 3,
+            "IpAddress": "10.1.2.3",
+            "IpPort": 51234,
+            "WorkstationName": "KALI",
+            "AuthenticationPackageName": "NTLM",
+            "FailureReason": "%%2313",
+        },
+    )
     row = evtx_parser.flatten(ev, {"event_record_id": 4242, "timestamp": "2026-09-01 22:13:40.123456 UTC"})
     assert row["eventId"] == 4625
     assert row["ts"] == 1788300820123
@@ -60,18 +81,38 @@ def test_flatten_classic_event_id_with_qualifiers_and_param_fields():
 
 
 def test_flatten_userdata_rdp_and_log_cleared():
-    ev = _sample_event(21, "Microsoft-Windows-TerminalServices-LocalSessionManager", {}, user_data={"EventXML": {"User": "CORP\\bob", "SessionID": 3, "Address": "203.0.113.9"}})
+    ev = _sample_event(
+        21,
+        "Microsoft-Windows-TerminalServices-LocalSessionManager",
+        {},
+        user_data={"EventXML": {"User": "CORP\\bob", "SessionID": 3, "Address": "203.0.113.9"}},
+    )
     row = evtx_parser.flatten(ev, None, include_raw=False)
     assert row["targetUser"] == "CORP\\bob" and row["ipAddress"] == "203.0.113.9" and row["sessionId"] == 3
     assert row["category"] == "rdp"
-    ev2 = _sample_event(1102, "Microsoft-Windows-Security-Auditing", {}, user_data={"LogFileCleared": {"SubjectUserName": "eve", "SubjectDomainName": "CORP", "SubjectLogonId": "0x1"}})
+    ev2 = _sample_event(
+        1102,
+        "Microsoft-Windows-Security-Auditing",
+        {},
+        user_data={"LogFileCleared": {"SubjectUserName": "eve", "SubjectDomainName": "CORP", "SubjectLogonId": "0x1"}},
+    )
     row2 = evtx_parser.flatten(ev2, None, include_raw=False)
     assert row2["subjectUser"] == "eve" and row2["category"] == "log-tampering"
     assert row2["summary"].startswith("The audit log was cleared by CORP\\eve")
 
 
 def test_flatten_group_event_sets_group_name():
-    ev = _sample_event(4732, "Microsoft-Windows-Security-Auditing", {"MemberName": "CN=eve,DC=corp", "MemberSid": "S-1-5-21-1", "TargetUserName": "Administrators", "TargetDomainName": "Builtin", "SubjectUserName": "admin"})
+    ev = _sample_event(
+        4732,
+        "Microsoft-Windows-Security-Auditing",
+        {
+            "MemberName": "CN=eve,DC=corp",
+            "MemberSid": "S-1-5-21-1",
+            "TargetUserName": "Administrators",
+            "TargetDomainName": "Builtin",
+            "SubjectUserName": "admin",
+        },
+    )
     row = evtx_parser.flatten(ev, None, include_raw=False)
     assert row["groupName"] == "Administrators" and row["memberName"] == "CN=eve,DC=corp"
 

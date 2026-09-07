@@ -27,6 +27,7 @@ Row conventions (shared with the EVTX parser so rules can mix both):
                 Actor, AppAccessContext.*; Entra: appDisplayName, clientAppUsed, country, city,
                 riskLevelDuringSignIn, riskState, conditionalAccessStatus, errorCode ...
 """
+
 from __future__ import annotations
 
 import csv
@@ -35,8 +36,9 @@ import json
 import logging
 import os
 import re
-from datetime import datetime, timezone
-from typing import Any, Iterator
+from collections.abc import Iterator
+from datetime import UTC, datetime
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -45,15 +47,36 @@ ENTRA_PROVIDER = "Microsoft Entra ID Sign-in"
 FORMATS = ("m365-ual-csv", "m365-ual-json", "entra-signin-json", "entra-signin-csv")
 
 _WORKLOAD_CATEGORY = {
-    "exchange": "M365 Exchange", "azureactivedirectory": "M365 Entra", "sharepoint": "M365 SharePoint", "onedrive": "M365 OneDrive",
-    "microsoftteams": "M365 Teams", "securitycompliancecenter": "M365 Compliance", "compliance": "M365 Compliance",
-    "threatintelligence": "M365 Defender", "microsoftdefenderforidentity": "M365 Defender", "powerbi": "M365 Power BI",
-    "microsoftflow": "M365 Power Automate", "powerapps": "M365 Power Apps", "dynamics365": "M365 Dynamics",
+    "exchange": "M365 Exchange",
+    "azureactivedirectory": "M365 Entra",
+    "sharepoint": "M365 SharePoint",
+    "onedrive": "M365 OneDrive",
+    "microsoftteams": "M365 Teams",
+    "securitycompliancecenter": "M365 Compliance",
+    "compliance": "M365 Compliance",
+    "threatintelligence": "M365 Defender",
+    "microsoftdefenderforidentity": "M365 Defender",
+    "powerbi": "M365 Power BI",
+    "microsoftflow": "M365 Power Automate",
+    "powerapps": "M365 Power Apps",
+    "dynamics365": "M365 Dynamics",
 }
-_PRIVILEGED_ROLES = ("global administrator", "company administrator", "privileged role administrator", "exchange administrator",
-                     "security administrator", "conditional access administrator", "application administrator",
-                     "cloud application administrator", "authentication administrator", "privileged authentication administrator",
-                     "user administrator", "helpdesk administrator", "sharepoint administrator", "global reader")
+_PRIVILEGED_ROLES = (
+    "global administrator",
+    "company administrator",
+    "privileged role administrator",
+    "exchange administrator",
+    "security administrator",
+    "conditional access administrator",
+    "application administrator",
+    "cloud application administrator",
+    "authentication administrator",
+    "privileged authentication administrator",
+    "user administrator",
+    "helpdesk administrator",
+    "sharepoint administrator",
+    "global reader",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -62,7 +85,7 @@ _PRIVILEGED_ROLES = ("global administrator", "company administrator", "privilege
 def detect_format(name: str, head: bytes) -> str | None:
     """Return one of FORMATS for a UAL / Entra export, else None."""
     n = (name or "").lower()
-    if not n.endswith((".csv", ".json", ".jsonl", ".ndjson", ".txt", ".log")) and not head[:1] in (b"[", b"{"):
+    if not n.endswith((".csv", ".json", ".jsonl", ".ndjson", ".txt", ".log")) and head[:1] not in (b"[", b"{"):
         return None
     text = head.lstrip(b"\xef\xbb\xbf").decode("utf-8", "replace").lstrip()
     low = text.lower()
@@ -75,8 +98,11 @@ def detect_format(name: str, head: bytes) -> str | None:
     header = low.split("\n", 1)[0]
     if "auditdata" in header:
         return "m365-ual-csv"
-    if ("userprincipalname" in header and ("createddatetime" in header or "ipaddress" in header)) or \
-       ("sign-in identifier" in header) or ("username" in header and "ip address" in header and ("application" in header or "status" in header)):
+    if (
+        ("userprincipalname" in header and ("createddatetime" in header or "ipaddress" in header))
+        or ("sign-in identifier" in header)
+        or ("username" in header and "ip address" in header and ("application" in header or "status" in header))
+    ):
         return "entra-signin-csv"
     return None
 
@@ -105,7 +131,7 @@ def parse_ts(v: Any) -> tuple[int | None, str | None]:
         return None, None
     if isinstance(v, (int, float)):
         ms = int(v if v > 10_000_000_000 else v * 1000)
-        return ms, datetime.fromtimestamp(ms / 1000, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+        return ms, datetime.fromtimestamp(ms / 1000, tz=UTC).isoformat().replace("+00:00", "Z")
     s = str(v).strip()
     if not s:
         return None, None
@@ -123,8 +149,8 @@ def parse_ts(v: Any) -> tuple[int | None, str | None]:
     if dt is None:
         return None, None
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    dt = dt.astimezone(timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
+    dt = dt.astimezone(UTC)
     return int(dt.timestamp() * 1000), dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
@@ -228,14 +254,25 @@ def ual_row(a: dict[str, Any], record_type: Any = None) -> dict[str, Any]:
     if op.lower() in ("new-inboxrule", "set-inboxrule", "remove-inboxrule", "enable-inboxrule", "disable-inboxrule") and data.get("Name"):
         obj = str(data["Name"])
     row: dict[str, Any] = {
-        "ts": ts, "tsIso": iso, "eventId": None, "recordId": _int(record_type if record_type is not None else a.get("RecordType")),
+        "ts": ts,
+        "tsIso": iso,
+        "eventId": None,
+        "recordId": _int(record_type if record_type is not None else a.get("RecordType")),
         "level": 3 if str(result or "").lower() in ("failed", "false", "failure") else 4,
         "levelName": "Warning" if str(result or "").lower() in ("failed", "false", "failure") else "Information",
-        "provider": UAL_PROVIDER, "channel": workload or "Unknown", "computer": None,
+        "provider": UAL_PROVIDER,
+        "channel": workload or "Unknown",
+        "computer": None,
         "category": _WORKLOAD_CATEGORY.get(workload.lower(), f"M365 {workload}" if workload else "M365"),
-        "description": op, "operation": op, "objectName": obj[:500] or None,
-        "user": user or None, "upn": user or None, "subjectUser": user or None, "targetUser": target,
-        "ipAddress": ip, "status": str(result) if result not in (None, "") else None,
+        "description": op,
+        "operation": op,
+        "objectName": obj[:500] or None,
+        "user": user or None,
+        "upn": user or None,
+        "subjectUser": user or None,
+        "targetUser": target,
+        "ipAddress": ip,
+        "status": str(result) if result not in (None, "") else None,
         "workstation": (str(_first(a, "ClientInfoString", "UserAgent") or "")[:200] or None),
         "data": data,
     }
@@ -303,16 +340,43 @@ def _int(v: Any) -> int | None:
 # Entra sign-in rows
 # ---------------------------------------------------------------------------
 _PORTAL_MAP = {
-    "date (utc)": "createdDateTime", "date": "createdDateTime", "username": "userPrincipalName", "user": "userDisplayName",
-    "user id": "userId", "ip address": "ipAddress", "location": "location", "application": "appDisplayName",
-    "application id": "appId", "resource": "resourceDisplayName", "client app": "clientAppUsed", "browser": "browser",
-    "operating system": "operatingSystem", "status": "status", "failure reason": "failureReason", "sign-in error code": "errorCode",
-    "conditional access": "conditionalAccessStatus", "risk state": "riskState", "risk level (aggregate)": "riskLevelAggregated",
-    "risk level (sign-in)": "riskLevelDuringSignIn", "risk level - aggregate": "riskLevelAggregated", "risk level - sign-in": "riskLevelDuringSignIn",
-    "risk detail": "riskDetail", "multifactor authentication result": "mfaResult", "authentication requirement": "authenticationRequirement",
-    "user agent": "userAgent", "request id": "requestId", "correlation id": "correlationId", "interactive": "isInteractive",
-    "compliant": "isCompliant", "managed": "isManaged", "device id": "deviceId", "user type": "userType",
-    "country or region": "country", "country": "country", "city": "city", "state": "state",
+    "date (utc)": "createdDateTime",
+    "date": "createdDateTime",
+    "username": "userPrincipalName",
+    "user": "userDisplayName",
+    "user id": "userId",
+    "ip address": "ipAddress",
+    "location": "location",
+    "application": "appDisplayName",
+    "application id": "appId",
+    "resource": "resourceDisplayName",
+    "client app": "clientAppUsed",
+    "browser": "browser",
+    "operating system": "operatingSystem",
+    "status": "status",
+    "failure reason": "failureReason",
+    "sign-in error code": "errorCode",
+    "conditional access": "conditionalAccessStatus",
+    "risk state": "riskState",
+    "risk level (aggregate)": "riskLevelAggregated",
+    "risk level (sign-in)": "riskLevelDuringSignIn",
+    "risk level - aggregate": "riskLevelAggregated",
+    "risk level - sign-in": "riskLevelDuringSignIn",
+    "risk detail": "riskDetail",
+    "multifactor authentication result": "mfaResult",
+    "authentication requirement": "authenticationRequirement",
+    "user agent": "userAgent",
+    "request id": "requestId",
+    "correlation id": "correlationId",
+    "interactive": "isInteractive",
+    "compliant": "isCompliant",
+    "managed": "isManaged",
+    "device id": "deviceId",
+    "user type": "userType",
+    "country or region": "country",
+    "country": "country",
+    "city": "city",
+    "state": "state",
 }
 
 
@@ -354,33 +418,69 @@ def entra_row(o: dict[str, Any]) -> dict[str, Any]:
     risk_signin = g.get("riskLevelDuringSignIn")
     risk_agg = g.get("riskLevelAggregated")
     data: dict[str, Any] = {
-        "appDisplayName": g.get("appDisplayName"), "appId": g.get("appId"), "resourceDisplayName": g.get("resourceDisplayName"),
-        "clientAppUsed": g.get("clientAppUsed"), "conditionalAccessStatus": g.get("conditionalAccessStatus"),
-        "riskLevelDuringSignIn": risk_signin, "riskLevelAggregated": risk_agg, "riskState": g.get("riskState"), "riskDetail": g.get("riskDetail"),
+        "appDisplayName": g.get("appDisplayName"),
+        "appId": g.get("appId"),
+        "resourceDisplayName": g.get("resourceDisplayName"),
+        "clientAppUsed": g.get("clientAppUsed"),
+        "conditionalAccessStatus": g.get("conditionalAccessStatus"),
+        "riskLevelDuringSignIn": risk_signin,
+        "riskLevelAggregated": risk_agg,
+        "riskState": g.get("riskState"),
+        "riskDetail": g.get("riskDetail"),
         "riskEventTypes": _scalar(g.get("riskEventTypes_v2") or g.get("riskEventTypes")),
-        "country": country, "city": city, "state": state,
-        "browser": dev.get("browser") or g.get("browser"), "operatingSystem": dev.get("operatingSystem") or g.get("operatingSystem"),
-        "deviceId": dev.get("deviceId") or g.get("deviceId"), "isCompliant": dev.get("isCompliant", g.get("isCompliant")), "isManaged": dev.get("isManaged", g.get("isManaged")),
-        "errorCode": err, "failureReason": failure, "authenticationRequirement": g.get("authenticationRequirement"),
-        "isInteractive": g.get("isInteractive"), "userAgent": g.get("userAgent"), "correlationId": g.get("correlationId"),
-        "userType": g.get("userType"), "userDisplayName": g.get("userDisplayName"), "mfaResult": g.get("mfaResult"),
-        "tokenIssuerType": g.get("tokenIssuerType"), "signInEventTypes": _scalar(g.get("signInEventTypes")),
+        "country": country,
+        "city": city,
+        "state": state,
+        "browser": dev.get("browser") or g.get("browser"),
+        "operatingSystem": dev.get("operatingSystem") or g.get("operatingSystem"),
+        "deviceId": dev.get("deviceId") or g.get("deviceId"),
+        "isCompliant": dev.get("isCompliant", g.get("isCompliant")),
+        "isManaged": dev.get("isManaged", g.get("isManaged")),
+        "errorCode": err,
+        "failureReason": failure,
+        "authenticationRequirement": g.get("authenticationRequirement"),
+        "isInteractive": g.get("isInteractive"),
+        "userAgent": g.get("userAgent"),
+        "correlationId": g.get("correlationId"),
+        "userType": g.get("userType"),
+        "userDisplayName": g.get("userDisplayName"),
+        "mfaResult": g.get("mfaResult"),
+        "tokenIssuerType": g.get("tokenIssuerType"),
+        "signInEventTypes": _scalar(g.get("signInEventTypes")),
     }
     data = {k: _scalar(v) for k, v in data.items() if v not in (None, "")}
     risk_txt = ""
     if (risk_signin and str(risk_signin).lower() not in ("none", "hidden")) or (g.get("riskState") and str(g.get("riskState")).lower() not in ("none",)):
         risk_txt = f" risk={risk_signin or risk_agg or ''}/{g.get('riskState') or ''}"
-    summary = (f"Sign-in {'ok' if success else 'FAILED (' + str(err) + ')'}: {user or '?'} from {ip or '?'}"
-               f"{' (' + str(country) + ')' if country else ''} via {g.get('clientAppUsed') or '?'} to {g.get('appDisplayName') or '?'}{risk_txt}")
+    summary = (
+        f"Sign-in {'ok' if success else 'FAILED (' + str(err) + ')'}: {user or '?'} from {ip or '?'}"
+        f"{' (' + str(country) + ')' if country else ''} via {g.get('clientAppUsed') or '?'} to {g.get('appDisplayName') or '?'}{risk_txt}"
+    )
     return {
-        "ts": ts, "tsIso": iso, "eventId": None, "recordId": None,
-        "level": 4 if success else 3, "levelName": "Information" if success else "Warning",
-        "provider": ENTRA_PROVIDER, "channel": "Entra SignIn", "computer": None, "category": "Entra sign-in",
-        "description": "Sign-in" if success else "Sign-in failure", "operation": "SignIn",
-        "user": user or None, "upn": user or None, "subjectUser": user or None, "targetUser": user or None,
-        "ipAddress": ip, "status": str(err) if err is not None else "0", "statusText": failure, "failureReason": failure,
-        "workstation": (str(g.get("userAgent") or "")[:200] or None), "objectName": g.get("appDisplayName"),
-        "data": data, "summary": summary[:500],
+        "ts": ts,
+        "tsIso": iso,
+        "eventId": None,
+        "recordId": None,
+        "level": 4 if success else 3,
+        "levelName": "Information" if success else "Warning",
+        "provider": ENTRA_PROVIDER,
+        "channel": "Entra SignIn",
+        "computer": None,
+        "category": "Entra sign-in",
+        "description": "Sign-in" if success else "Sign-in failure",
+        "operation": "SignIn",
+        "user": user or None,
+        "upn": user or None,
+        "subjectUser": user or None,
+        "targetUser": user or None,
+        "ipAddress": ip,
+        "status": str(err) if err is not None else "0",
+        "statusText": failure,
+        "failureReason": failure,
+        "workstation": (str(g.get("userAgent") or "")[:200] or None),
+        "objectName": g.get("appDisplayName"),
+        "data": data,
+        "summary": summary[:500],
     }
 
 
@@ -389,7 +489,7 @@ def entra_row(o: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 def _open_text(path: str | None, data: bytes | None) -> io.TextIOBase:
     if path:
-        return open(path, "r", encoding="utf-8-sig", errors="replace", newline="")
+        return open(path, encoding="utf-8-sig", errors="replace", newline="")
     return io.TextIOWrapper(io.BytesIO(data or b""), encoding="utf-8-sig", errors="replace", newline="")
 
 

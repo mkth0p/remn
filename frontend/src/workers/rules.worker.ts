@@ -91,7 +91,12 @@ function keepFor(fields: Set<string>): Keep {
 function subsetKey(rule: Rule): string | null {
   if (rule.source !== 'events') return null
   const ids = ruleEventIds(rule.where)
-  return ids ? ids.slice().sort((a, b) => a - b).join(',') : '*'
+  return ids
+    ? ids
+        .slice()
+        .sort((a, b) => a - b)
+        .join(',')
+    : '*'
 }
 
 const CACHE_ROWS = 250_000
@@ -177,7 +182,11 @@ async function run(req: RunRequest): Promise<void> {
         }
       }
       const found = runRule(rule, { rows, settings, thenRows: thenRows ? () => thenRows!() : undefined, onDiag: (d) => diagnostics.push(d) })
-      const count = await replaceFindings(caseId, [rule.id], found.map((f) => ({ ...f })))
+      const count = await replaceFindings(
+        caseId,
+        [rule.id],
+        found.map((f) => ({ ...f })),
+      )
       byRule[rule.id] = count
       total += count
       post({ type: 'progress', index: i + 1, total: rules.length, ruleId: rule.id, findings: count, ms: Date.now() - t0, rows: rows.length })

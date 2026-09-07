@@ -3,16 +3,18 @@ Server-store endpoints (DuckDB case store for gigabyte-scale cases): ingestion
 jobs, bulk import, search / aggregate / timeline / facets / detail / pivot,
 IOCs and reputation, rule runs, read-only SQL, deletion.
 """
+
 from __future__ import annotations
 
 import json
 import logging
 import time
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
 from django.conf import settings
 from django.http import HttpRequest, JsonResponse, StreamingHttpResponse
-from django.views.decorators.http import require_GET, require_POST, require_http_methods
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from api.jobs import Job, manager
 from api.views.upload import discard_upload, get_upload
@@ -118,8 +120,20 @@ def ingest(request: HttpRequest, key: str):
     keep_bodies = bool(options.get("keepBodies", True))
     tmp_dir = str(settings.FILE_UPLOAD_TEMP_DIR)
 
-    st.upsert_evidence({"id": evidence_id, "name": name, "kind": kind, "size": meta.get("size"), "sha256Client": sha_client or None,
-                        "sha256Server": meta.get("sha256"), "count": 0, "stats": None, "addedAt": evidence.get("addedAt") or int(time.time() * 1000), "status": "parsing"})
+    st.upsert_evidence(
+        {
+            "id": evidence_id,
+            "name": name,
+            "kind": kind,
+            "size": meta.get("size"),
+            "sha256Client": sha_client or None,
+            "sha256Server": meta.get("sha256"),
+            "count": 0,
+            "stats": None,
+            "addedAt": evidence.get("addedAt") or int(time.time() * 1000),
+            "status": "parsing",
+        }
+    )
 
     def run(job: Job) -> dict[str, Any]:
         job.update(rows=0, bytes=meta.get("size"), phase="parsing", name=name)
@@ -155,17 +169,49 @@ def ingest(request: HttpRequest, key: str):
                 stats = src2.stats.to_dict()
                 fmt = src2.format
         except Exception:
-            st.upsert_evidence({"id": evidence_id, "name": name, "kind": kind, "size": meta.get("size"), "sha256Client": sha_client or None,
-                                "sha256Server": meta.get("sha256"), "count": count, "stats": None, "addedAt": evidence.get("addedAt"), "status": "error"})
+            st.upsert_evidence(
+                {
+                    "id": evidence_id,
+                    "name": name,
+                    "kind": kind,
+                    "size": meta.get("size"),
+                    "sha256Client": sha_client or None,
+                    "sha256Server": meta.get("sha256"),
+                    "count": count,
+                    "stats": None,
+                    "addedAt": evidence.get("addedAt"),
+                    "status": "error",
+                }
+            )
             raise
         finally:
             discard_upload(upload_id)
         integrity = "verified" if (sha_client and sha_client == meta.get("sha256")) else ("mismatch" if sha_client else "pending")
-        st.upsert_evidence({"id": evidence_id, "name": name, "kind": kind, "format": fmt, "size": meta.get("size"), "sha256Client": sha_client or None,
-                            "sha256Server": meta.get("sha256"), "count": count, "stats": stats, "addedAt": evidence.get("addedAt"), "status": "done"})
+        st.upsert_evidence(
+            {
+                "id": evidence_id,
+                "name": name,
+                "kind": kind,
+                "format": fmt,
+                "size": meta.get("size"),
+                "sha256Client": sha_client or None,
+                "sha256Server": meta.get("sha256"),
+                "count": count,
+                "stats": stats,
+                "addedAt": evidence.get("addedAt"),
+                "status": "done",
+            }
+        )
         job.update(rows=count, phase="done", seconds=round(time.time() - t0, 1))
-        return {"count": count, "stats": stats, "sha256Server": meta.get("sha256"), "integrity": integrity, "format": fmt, "evidenceId": evidence_id,
-                "seconds": round(time.time() - t0, 1)}
+        return {
+            "count": count,
+            "stats": stats,
+            "sha256Server": meta.get("sha256"),
+            "integrity": integrity,
+            "format": fmt,
+            "evidenceId": evidence_id,
+            "seconds": round(time.time() - t0, 1),
+        }
 
     job = manager.submit("ingest", key, run, label=name)
     return JsonResponse({"jobId": job.id})
@@ -325,8 +371,20 @@ def _query(request: HttpRequest, key: str, fn):
 
 @require_POST
 def search(request: HttpRequest, key: str):
-    return _query(request, key, lambda st, b: Q.search(st, str(b.get("source") or "events"), b.get("filter"), int(b.get("limit") or 2000), int(b.get("offset") or 0),
-                                                       b.get("sort"), b.get("settings"), bool(b.get("full"))))
+    return _query(
+        request,
+        key,
+        lambda st, b: Q.search(
+            st,
+            str(b.get("source") or "events"),
+            b.get("filter"),
+            int(b.get("limit") or 2000),
+            int(b.get("offset") or 0),
+            b.get("sort"),
+            b.get("settings"),
+            bool(b.get("full")),
+        ),
+    )
 
 
 @require_POST
@@ -336,12 +394,20 @@ def count(request: HttpRequest, key: str):
 
 @require_POST
 def aggregate(request: HttpRequest, key: str):
-    return _query(request, key, lambda st, b: Q.aggregate(st, str(b.get("source") or "events"), b.get("filter"), str(b.get("field") or "eventId"), int(b.get("limit") or 25), b.get("settings")))
+    return _query(
+        request,
+        key,
+        lambda st, b: Q.aggregate(
+            st, str(b.get("source") or "events"), b.get("filter"), str(b.get("field") or "eventId"), int(b.get("limit") or 25), b.get("settings")
+        ),
+    )
 
 
 @require_POST
 def timeline(request: HttpRequest, key: str):
-    return _query(request, key, lambda st, b: Q.timeline(st, str(b.get("source") or "events"), b.get("filter"), str(b.get("bucket") or "hour"), b.get("settings")))
+    return _query(
+        request, key, lambda st, b: Q.timeline(st, str(b.get("source") or "events"), b.get("filter"), str(b.get("bucket") or "hour"), b.get("settings"))
+    )
 
 
 @require_GET
@@ -350,7 +416,9 @@ def facets(request: HttpRequest, key: str):
     if err:
         return err
     try:
-        return JsonResponse(Q.facets(st, request.GET.get("source", "events"), request.GET.get("field", "eventId"), int(request.GET.get("limit", "50"))), safe=False)
+        return JsonResponse(
+            Q.facets(st, request.GET.get("source", "events"), request.GET.get("field", "eventId"), int(request.GET.get("limit", "50"))), safe=False
+        )
     except FilterError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
 
@@ -380,8 +448,18 @@ def iocs(request: HttpRequest, key: str):
     if err:
         return err
     g = request.GET
-    return JsonResponse(Q.list_iocs(st, g.get("kind") or None, g.get("q") or None, g.get("bad") in ("1", "true"), g.get("unchecked") in ("1", "true"),
-                                    int(g.get("limit", "500")), int(g.get("offset", "0")), g.get("sort", "verdict")))
+    return JsonResponse(
+        Q.list_iocs(
+            st,
+            g.get("kind") or None,
+            g.get("q") or None,
+            g.get("bad") in ("1", "true"),
+            g.get("unchecked") in ("1", "true"),
+            int(g.get("limit", "500")),
+            int(g.get("offset", "0")),
+            g.get("sort", "verdict"),
+        )
+    )
 
 
 @require_POST
@@ -460,7 +538,7 @@ def job_events(request: HttpRequest, job_id: str):
             d = job.to_dict(with_result=job.status in ("done", "error", "cancelled"))
             snap = json.dumps(d.get("progress")) + d["status"]
             if snap != last:
-                yield f"data: {json.dumps(d)}\n\n".encode("utf-8")
+                yield f"data: {json.dumps(d)}\n\n".encode()
                 last = snap
             if d["status"] in ("done", "error", "cancelled"):
                 break

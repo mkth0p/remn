@@ -1,0 +1,31 @@
+# pre-commit install   (once per clone)
+# The hooks call the project's own tools, so the venv and frontend/node_modules must exist.
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: ruff check --fix
+        language: system
+        types: [python]
+      - id: ruff-format
+        name: ruff format
+        entry: ruff format
+        language: system
+        types: [python]
+      - id: prettier
+        name: prettier
+        entry: npx --prefix frontend prettier --write
+        language: system
+        files: ^frontend/src/.*\.(ts|tsx|css)$
+      - id: eslint
+        name: eslint
+        entry: npx --prefix frontend eslint --max-warnings=1000
+        language: system
+        files: ^frontend/src/.*\.(ts|tsx)$
+      - id: no-evidence
+        name: no evidence files
+        entry: evidence files never enter the repository
+        language: fail
+        files: \.(evtx|pst|ost|msg|mbox|eml)$
+        exclude: ^samples/synthetic/

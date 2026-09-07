@@ -150,7 +150,10 @@ export async function importCaseBundle(file: File, onProgress?: (msg: string) =>
     let sent = 0
     for (const [eid, rows] of byEvidence) {
       for (let i = 0; i < rows.length; i += 4000) {
-        const body = rows.slice(i, i + 4000).map((r) => JSON.stringify(r)).join('\n')
+        const body = rows
+          .slice(i, i + 4000)
+          .map((r) => JSON.stringify(r))
+          .join('\n')
         const resp = await fetch(`/api/store/${kase.serverKey}/import?evidenceId=${eid}`, { method: 'POST', headers: { ...API_HEADERS, 'Content-Type': 'application/x-ndjson' }, body })
         if (!resp.ok) throw new Error(`server import failed (${resp.status})`)
         sent += Math.min(4000, rows.length - i)
@@ -168,7 +171,7 @@ export async function importCaseBundle(file: File, onProgress?: (msg: string) =>
   const remap = (r: { id?: number; caseId: number; evidenceId?: number }) => {
     const { id, ...rest } = r
     void id
-    return { ...rest, caseId: newId, evidenceId: r.evidenceId != null ? evidenceMap.get(r.evidenceId) ?? r.evidenceId : undefined }
+    return { ...rest, caseId: newId, evidenceId: r.evidenceId != null ? (evidenceMap.get(r.evidenceId) ?? r.evidenceId) : undefined }
   }
   onProgress?.('events…')
   const events = ((b.events as { id?: number; caseId: number; evidenceId?: number }[]) ?? []).map(remap)

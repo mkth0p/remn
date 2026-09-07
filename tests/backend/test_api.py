@@ -49,9 +49,14 @@ def test_frontend_placeholder_when_not_built():
 
 def test_ingest_eml_streams_rows(tmp_path):
     c = Client()
-    data = make_samples.mail('"Marie Lefevre" <marie.lefevre@interne-fr.co>', "j@interne.fr", "URGENT", "virement urgent",
-                             attachments=[("x.docm", make_samples.docm_with_macro(), "application", "octet-stream")],
-                             extra_headers=make_samples.RECEIVED_BAD)
+    data = make_samples.mail(
+        '"Marie Lefevre" <marie.lefevre@interne-fr.co>',
+        "j@interne.fr",
+        "URGENT",
+        "virement urgent",
+        attachments=[("x.docm", make_samples.docm_with_macro(), "application", "octet-stream")],
+        extra_headers=make_samples.RECEIVED_BAD,
+    )
     p = tmp_path / "spoof.eml"
     p.write_bytes(data)
     with open(p, "rb") as fh:
@@ -126,7 +131,12 @@ def test_reputation_lookup_validates_input():
     c = Client()
     r = c.post("/api/reputation/lookup", data="not json", content_type="application/json", **HDR)
     assert r.status_code == 400
-    r = c.post("/api/reputation/lookup", data=json.dumps({"items": [{"kind": "ip", "value": "10.0.0.1"}], "providers": ["offline"]}), content_type="application/json", **HDR)
+    r = c.post(
+        "/api/reputation/lookup",
+        data=json.dumps({"items": [{"kind": "ip", "value": "10.0.0.1"}], "providers": ["offline"]}),
+        content_type="application/json",
+        **HDR,
+    )
     assert r.status_code == 200
     body = r.json()
     assert body["results"] and body["results"][0]["provider"] == "offline"

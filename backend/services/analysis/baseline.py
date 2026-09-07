@@ -20,18 +20,29 @@ are in one place. The pass writes per-mail columns the rules and the DSL can use
 
 Pure over plain dict rows, so it serves the DuckDB store and rows posted from a browser case.
 """
+
 from __future__ import annotations
 
 import hashlib
 import json
 import re
 from collections import defaultdict
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 from services.analysis.lookalike import registrable
 
-ENRICH_COLUMNS = ("senderPrevalence", "senderPriorCount", "senderFirstSeen", "senderDaysKnown", "senderSolicited", "senderAuthRegression",
-                  "campaignId", "campaignSize", "campaignSenders")
+ENRICH_COLUMNS = (
+    "senderPrevalence",
+    "senderPriorCount",
+    "senderFirstSeen",
+    "senderDaysKnown",
+    "senderSolicited",
+    "senderAuthRegression",
+    "campaignId",
+    "campaignSize",
+    "campaignSenders",
+)
 
 _PREFIX_RE = re.compile(r"^\s*(?:(?:re|fw|fwd|tr|aw|sv|vs|wg|r|i)\s*:\s*)+", re.I)
 _WS_RE = re.compile(r"\s+")

@@ -1,27 +1,86 @@
 """Read queries over a case store: search, count, aggregate, timeline, facets, pivot, summary, detail, IOCs, raw SQL."""
+
 from __future__ import annotations
 
 import json
 import re
 import threading
+from datetime import UTC
 from typing import Any
 
 import duckdb
 
-from services.store.casestore import CaseStore, MAIL_JSON, q, rows_to_dicts
-from services.store.sqlfilter import Ctx, FilterError, TEXT_FIELDS_EVENTS, TEXT_FIELDS_MAILS, compile_filter, order_by, resolve
+from services.store.casestore import MAIL_JSON, CaseStore, q, rows_to_dicts
+from services.store.sqlfilter import TEXT_FIELDS_EVENTS, Ctx, FilterError, compile_filter, order_by, resolve
 
 HARD_CAP = 20000
-EVENT_LIST_COLUMNS = [c for c in (
-    "id", "evidenceId", "sourceFile", "recordId", "ts", "tsIso", "eventId", "level", "levelName", "provider", "channel", "computer",
-    "category", "description", "summary", "targetUser", "targetDomain", "subjectUser", "subjectDomain", "logonType", "logonTypeName",
-    "ipAddress", "ipPort", "workstation", "status", "subStatus", "statusText", "authPackage", "processName", "commandLine",
-    "parentProcessName", "serviceName", "serviceFile", "taskName", "memberName", "groupName", "shareName", "relativeTargetName",
-    "objectName", "scriptBlockText", "image", "parentImage", "destinationIp", "destinationPort", "query", "targetFilename",
-    "targetObject", "threatName", "path", "message", "userSid", "processId", "threadId", "activityId", "keywords", "task", "opcode")]
+EVENT_LIST_COLUMNS = [
+    c
+    for c in (
+        "id",
+        "evidenceId",
+        "sourceFile",
+        "recordId",
+        "ts",
+        "tsIso",
+        "eventId",
+        "level",
+        "levelName",
+        "provider",
+        "channel",
+        "computer",
+        "category",
+        "description",
+        "summary",
+        "targetUser",
+        "targetDomain",
+        "subjectUser",
+        "subjectDomain",
+        "logonType",
+        "logonTypeName",
+        "ipAddress",
+        "ipPort",
+        "workstation",
+        "status",
+        "subStatus",
+        "statusText",
+        "authPackage",
+        "processName",
+        "commandLine",
+        "parentProcessName",
+        "serviceName",
+        "serviceFile",
+        "taskName",
+        "memberName",
+        "groupName",
+        "shareName",
+        "relativeTargetName",
+        "objectName",
+        "scriptBlockText",
+        "image",
+        "parentImage",
+        "destinationIp",
+        "destinationPort",
+        "query",
+        "targetFilename",
+        "targetObject",
+        "threatName",
+        "path",
+        "message",
+        "userSid",
+        "processId",
+        "threadId",
+        "activityId",
+        "keywords",
+        "task",
+        "opcode",
+    )
+]
 MAIL_LIST_EXCLUDE = {"hops", "htmlInfo", "hiddenText", "references"}
 BUCKET_MS = {"minute": 60_000, "hour": 3_600_000, "day": 86_400_000}
-_SQL_FORBIDDEN = re.compile(r"(?i)\b(attach|detach|copy|export|import|install|load|pragma|set|reset|create|insert|update|delete|drop|alter|call|checkpoint|vacuum|force|read_csv|read_json|read_parquet|read_text|read_blob|glob|getenv)\b")
+_SQL_FORBIDDEN = re.compile(
+    r"(?i)\b(attach|detach|copy|export|import|install|load|pragma|set|reset|create|insert|update|delete|drop|alter|call|checkpoint|vacuum|force|read_csv|read_json|read_parquet|read_text|read_blob|glob|getenv)\b"
+)
 
 
 def _ctx(source: str, settings: dict[str, Any] | None) -> Ctx:
@@ -44,8 +103,16 @@ def _parse_json_cols(rows: list[dict[str, Any]], source: str) -> list[dict[str, 
     return rows
 
 
-def search(store: CaseStore, source: str, flt: dict[str, Any] | None, limit: int = 2000, offset: int = 0,
-           sort: dict[str, Any] | None = None, settings: dict[str, Any] | None = None, full: bool = False) -> dict[str, Any]:
+def search(
+    store: CaseStore,
+    source: str,
+    flt: dict[str, Any] | None,
+    limit: int = 2000,
+    offset: int = 0,
+    sort: dict[str, Any] | None = None,
+    settings: dict[str, Any] | None = None,
+    full: bool = False,
+) -> dict[str, Any]:
     ctx = _ctx(source, settings)
     where = compile_filter(flt, ctx)
     order = order_by(sort or (flt or {}).get("sort"), ctx)
@@ -93,15 +160,16 @@ def _group_expr(source: str, field: str, ctx: Ctx) -> tuple[str, str]:
     return "", f"CAST({e.sql} AS VARCHAR)"
 
 
-def aggregate(store: CaseStore, source: str, flt: dict[str, Any] | None, field: str, limit: int = 25,
-              settings: dict[str, Any] | None = None) -> dict[str, Any]:
+def aggregate(store: CaseStore, source: str, flt: dict[str, Any] | None, field: str, limit: int = 25, settings: dict[str, Any] | None = None) -> dict[str, Any]:
     ctx = _ctx(source, settings)
     where = compile_filter(flt, ctx)
     ts_field = "date" if source == "mails" else "ts"
     suffix, expr = _group_expr(source, field, ctx)
     limit = max(1, min(int(limit), 5000))
-    sql = (f"SELECT coalesce({expr}, '(empty)') AS value, count(*) AS count, min({q(ts_field)}) AS first, max({q(ts_field)}) AS last "
-           f"FROM {source}{suffix} WHERE {where} GROUP BY 1 ORDER BY count DESC, value LIMIT {limit}")
+    sql = (
+        f"SELECT coalesce({expr}, '(empty)') AS value, count(*) AS count, min({q(ts_field)}) AS first, max({q(ts_field)}) AS last "
+        f"FROM {source}{suffix} WHERE {where} GROUP BY 1 ORDER BY count DESC, value LIMIT {limit}"
+    )
     cur = store.cursor()
     cur.execute(sql, ctx.params)
     groups = rows_to_dicts(cur)
@@ -111,14 +179,12 @@ def aggregate(store: CaseStore, source: str, flt: dict[str, Any] | None, field: 
     return {"field": field, "groups": groups, "total": int(totals[0]), "distinct": int(totals[1])}
 
 
-def timeline(store: CaseStore, source: str, flt: dict[str, Any] | None, bucket: str = "hour",
-             settings: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+def timeline(store: CaseStore, source: str, flt: dict[str, Any] | None, bucket: str = "hour", settings: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     ctx = _ctx(source, settings)
     where = compile_filter(flt, ctx)
     ts_field = "date" if source == "mails" else "ts"
     size = BUCKET_MS.get(bucket, BUCKET_MS["hour"])
-    sql = (f"SELECT ({q(ts_field)} // {size}) * {size} AS t, count(*) AS count FROM {source} "
-           f"WHERE {q(ts_field)} IS NOT NULL AND {where} GROUP BY 1 ORDER BY 1")
+    sql = f"SELECT ({q(ts_field)} // {size}) * {size} AS t, count(*) AS count FROM {source} WHERE {q(ts_field)} IS NOT NULL AND {where} GROUP BY 1 ORDER BY 1"
     cur = store.cursor()
     cur.execute(sql, ctx.params)
     return [{"t": int(t), "count": int(c)} for t, c in cur.fetchall()]
@@ -161,8 +227,11 @@ def get_row(store: CaseStore, source: str, row_id: int) -> dict[str, Any] | None
 
 def pivot(store: CaseStore, value: str) -> dict[str, Any]:
     needle = "%" + value.strip().lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-    res: dict[str, Any] = {"value": value, "events": {"count": 0, "first": None, "last": None, "byEventId": {}, "fields": {}},
-                           "mails": {"count": 0, "first": None, "last": None, "fields": {}}}
+    res: dict[str, Any] = {
+        "value": value,
+        "events": {"count": 0, "first": None, "last": None, "byEventId": {}, "fields": {}},
+        "mails": {"count": 0, "first": None, "last": None, "fields": {}},
+    }
     if not value.strip():
         return res
     cur = store.cursor()
@@ -174,7 +243,9 @@ def pivot(store: CaseStore, value: str) -> dict[str, Any]:
     c, first, last = cur.fetchone()
     res["events"].update({"count": int(c), "first": first, "last": last})
     if c:
-        cur.execute(f"SELECT \"eventId\", count(*) FROM events WHERE {hits} OR lower(\"raw\") LIKE ? ESCAPE '\\' GROUP BY 1 ORDER BY 2 DESC LIMIT 12", params + [needle])
+        cur.execute(
+            f'SELECT "eventId", count(*) FROM events WHERE {hits} OR lower("raw") LIKE ? ESCAPE \'\\\' GROUP BY 1 ORDER BY 2 DESC LIMIT 12', params + [needle]
+        )
         res["events"]["byEventId"] = {str(k): int(v) for k, v in cur.fetchall()}
         for f in ev_fields:
             n = cur.execute(f"SELECT count(*) FROM events WHERE lower({q(f)}) LIKE ? ESCAPE '\\'", [needle]).fetchone()[0]
@@ -183,8 +254,10 @@ def pivot(store: CaseStore, value: str) -> dict[str, Any]:
     m_fields = ["fromAddr", "fromName", "fromDomain", "subject", "originIp", "returnPath", "messageId", "textPreview", "replyToAddr"]
     mhits = " OR ".join(f"lower({q(f)}) LIKE ? ESCAPE '\\'" for f in m_fields)
     mparams = [needle] * len(m_fields)
-    extra = ('OR EXISTS (SELECT 1 FROM urls u WHERE u."mailId" = mails.id AND lower(u.url) LIKE ? ESCAPE \'\\\') '
-             'OR EXISTS (SELECT 1 FROM attachments a WHERE a."mailId" = mails.id AND (lower(a.sha256) = ? OR lower(a.md5) = ? OR lower(a.name) LIKE ? ESCAPE \'\\\'))')
+    extra = (
+        "OR EXISTS (SELECT 1 FROM urls u WHERE u.\"mailId\" = mails.id AND lower(u.url) LIKE ? ESCAPE '\\') "
+        "OR EXISTS (SELECT 1 FROM attachments a WHERE a.\"mailId\" = mails.id AND (lower(a.sha256) = ? OR lower(a.md5) = ? OR lower(a.name) LIKE ? ESCAPE '\\'))"
+    )
     v = value.strip().lower()
     cur.execute(f"SELECT count(*), min(date), max(date) FROM mails WHERE {mhits} {extra}", mparams + [needle, v, v, needle])
     c, first, last = cur.fetchone()
@@ -204,7 +277,9 @@ def summary(store: CaseStore) -> dict[str, Any]:
     ml = cur.execute("SELECT min(date), max(date) FROM mails").fetchone()
     top_ids = cur.execute('SELECT "eventId", count(*) FROM events GROUP BY 1 ORDER BY 2 DESC LIMIT 15').fetchall()
     top_comp = cur.execute("SELECT computer, count(*) FROM events WHERE computer IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 10").fetchall()
-    top_send = cur.execute('SELECT "fromAddr", count(*) FROM mails WHERE "fromAddr" IS NOT NULL AND "fromAddr" <> \'\' GROUP BY 1 ORDER BY 2 DESC LIMIT 10').fetchall()
+    top_send = cur.execute(
+        'SELECT "fromAddr", count(*) FROM mails WHERE "fromAddr" IS NOT NULL AND "fromAddr" <> \'\' GROUP BY 1 ORDER BY 2 DESC LIMIT 10'
+    ).fetchall()
     top_flags = cur.execute("SELECT f, count(*) FROM mails, UNNEST(flags) AS t(f) GROUP BY 1 ORDER BY 2 DESC LIMIT 15").fetchall()
     evidence = rows_to_dicts(cur.execute("SELECT * FROM evidence ORDER BY id"), json_columns=("stats",))
     return {
@@ -223,13 +298,21 @@ def summary(store: CaseStore) -> dict[str, Any]:
 def _iso(ms: Any) -> str | None:
     if ms is None:
         return None
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    return datetime.fromtimestamp(int(ms) / 1000, tz=timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return datetime.fromtimestamp(int(ms) / 1000, tz=UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-def list_iocs(store: CaseStore, kind: str | None = None, text: str | None = None, only_bad: bool = False,
-              unchecked: bool = False, limit: int = 500, offset: int = 0, sort: str = "verdict") -> dict[str, Any]:
+def list_iocs(
+    store: CaseStore,
+    kind: str | None = None,
+    text: str | None = None,
+    only_bad: bool = False,
+    unchecked: bool = False,
+    limit: int = 500,
+    offset: int = 0,
+    sort: str = "verdict",
+) -> dict[str, Any]:
     params: list[Any] = []
     where = ["TRUE"]
     if kind:
@@ -242,18 +325,26 @@ def list_iocs(store: CaseStore, kind: str | None = None, text: str | None = None
         where.append("r.verdict IN ('malicious', 'suspicious')")
     if unchecked:
         where.append('r."checkedAt" IS NULL')
-    order = {"verdict": "CASE r.verdict WHEN 'malicious' THEN 3 WHEN 'suspicious' THEN 2 WHEN 'clean' THEN 1 ELSE 0 END DESC, count DESC",
-             "count": "count DESC", "first": '"firstSeen" ASC', "last": '"lastSeen" DESC', "value": "i.value ASC"}.get(sort, "count DESC")
+    order = {
+        "verdict": "CASE r.verdict WHEN 'malicious' THEN 3 WHEN 'suspicious' THEN 2 WHEN 'clean' THEN 1 ELSE 0 END DESC, count DESC",
+        "count": "count DESC",
+        "first": '"firstSeen" ASC',
+        "last": '"lastSeen" DESC',
+        "value": "i.value ASC",
+    }.get(sort, "count DESC")
     base = f"""
         FROM (SELECT kind, value, sum(count) AS count, min("firstSeen") AS "firstSeen", max("lastSeen") AS "lastSeen",
                      list_distinct(flatten(list(sources))) AS sources, list(DISTINCT "evidenceId") AS evidence
               FROM iocs GROUP BY kind, value) i
         LEFT JOIN ioc_reputation r ON r.kind = i.kind AND r.value = i.value
-        WHERE {' AND '.join(where)}"""
+        WHERE {" AND ".join(where)}"""
     cur = store.cursor()
     total = int(cur.execute(f"SELECT count(*) {base}", params).fetchone()[0])
     limit = max(1, min(int(limit), 5000))
-    cur.execute(f'SELECT i.kind, i.value, i.count, i."firstSeen", i."lastSeen", i.sources, i.evidence, r.verdict, r.tags, r.summary, r.verdicts, r."checkedAt" {base} ORDER BY {order} LIMIT {limit} OFFSET {int(offset)}', params)
+    cur.execute(
+        f'SELECT i.kind, i.value, i.count, i."firstSeen", i."lastSeen", i.sources, i.evidence, r.verdict, r.tags, r.summary, r.verdicts, r."checkedAt" {base} ORDER BY {order} LIMIT {limit} OFFSET {int(offset)}',
+        params,
+    )
     rows = rows_to_dicts(cur, json_columns=("summary", "verdicts"))
     kinds = {k: int(v) for k, v in cur.execute("SELECT kind, count(*) FROM (SELECT DISTINCT kind, value FROM iocs) GROUP BY 1").fetchall()}
     return {"rows": rows, "total": total, "kinds": kinds, "offset": offset, "limit": limit}

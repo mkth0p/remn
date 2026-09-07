@@ -12,8 +12,59 @@ import { chainMembership } from '../rules/incidents'
 import { saveSuggestion, type Decision } from '../data/aiReview'
 import { stepVisible } from '../data/review'
 
-const EVENT_COLS = ['id', 'tsIso', 'eventId', 'provider', 'channel', 'computer', 'sourceFile', 'summary', 'targetUser', 'targetDomain', 'subjectUser', 'logonType', 'ipAddress', 'workstation', 'statusText', 'processName', 'commandLine', 'parentProcessName', 'serviceName', 'serviceFile', 'taskName', 'memberName', 'groupName', 'shareName', 'relativeTargetName', 'image', 'destinationIp', 'destinationPort', 'query', 'targetFilename', 'targetObject', 'threatName', 'path']
-const MAIL_COLS = ['id', 'dateIso', 'subject', 'folder', 'fromName', 'fromAddr', 'fromDomain', 'replyTo', 'returnPath', 'originIp', 'risk', 'flags', 'urlCount', 'attachmentCount', 'maxAttachmentRisk', 'textPreview']
+const EVENT_COLS = [
+  'id',
+  'tsIso',
+  'eventId',
+  'provider',
+  'channel',
+  'computer',
+  'sourceFile',
+  'summary',
+  'targetUser',
+  'targetDomain',
+  'subjectUser',
+  'logonType',
+  'ipAddress',
+  'workstation',
+  'statusText',
+  'processName',
+  'commandLine',
+  'parentProcessName',
+  'serviceName',
+  'serviceFile',
+  'taskName',
+  'memberName',
+  'groupName',
+  'shareName',
+  'relativeTargetName',
+  'image',
+  'destinationIp',
+  'destinationPort',
+  'query',
+  'targetFilename',
+  'targetObject',
+  'threatName',
+  'path',
+]
+const MAIL_COLS = [
+  'id',
+  'dateIso',
+  'subject',
+  'folder',
+  'fromName',
+  'fromAddr',
+  'fromDomain',
+  'replyTo',
+  'returnPath',
+  'originIp',
+  'risk',
+  'flags',
+  'urlCount',
+  'attachmentCount',
+  'maxAttachmentRisk',
+  'textPreview',
+]
 
 const MAX_ROWS = 100
 const MAX_CHARS = 60_000
@@ -58,7 +109,10 @@ export async function executeTool(name: string, args: Record<string, unknown>, k
           storage: ds.kind,
           ...sum,
           findingsBySeverity: bySeverity,
-          topFindings: findings.sort((a, b) => order.indexOf(a.severity) - order.indexOf(b.severity)).slice(0, 15).map((f) => ({ id: f.id, ruleId: f.ruleId, title: f.title, severity: f.severity, count: f.count, entities: f.entities, tsIso: iso(f.ts) })),
+          topFindings: findings
+            .sort((a, b) => order.indexOf(a.severity) - order.indexOf(b.severity))
+            .slice(0, 15)
+            .map((f) => ({ id: f.id, ruleId: f.ruleId, title: f.title, severity: f.severity, count: f.count, entities: f.entities, tsIso: iso(f.ts) })),
         })
       }
       case 'search_events': {
@@ -75,7 +129,13 @@ export async function executeTool(name: string, args: Record<string, unknown>, k
         const bucket = (['minute', 'hour', 'day'].includes(String(args.bucket)) ? args.bucket : 'hour') as Bucket
         const res = await ds.timelineEvents(clampFilter(args.filter), bucket)
         const limit = Math.min(Number(args.limit) || 200, 500)
-        const top = res.length > limit ? [...res].sort((a, b) => b.count - a.count).slice(0, limit).sort((a, b) => a.t - b.t) : res
+        const top =
+          res.length > limit
+            ? [...res]
+                .sort((a, b) => b.count - a.count)
+                .slice(0, limit)
+                .sort((a, b) => a.t - b.t)
+            : res
         return cap({ bucket, buckets: res.length, shown: top.length, series: top.map((b) => ({ tIso: iso(b.t), count: b.count })) })
       }
       case 'get_event': {
@@ -88,7 +148,15 @@ export async function executeTool(name: string, args: Record<string, unknown>, k
       case 'search_mails': {
         const limit = Math.min(Number(args.limit) || 30, MAX_ROWS)
         const res = await ds.searchMails(clampFilter(args.filter), limit)
-        return cap({ count: res.rows.length, truncated: res.truncated, rows: res.rows.map((r) => ({ ...project(r as Record<string, unknown>, MAIL_COLS), attachments: (r.attachments ?? []).map((a) => ({ name: a.name, realExt: a.realExt, size: a.size, risk: a.risk, flags: a.flags })), urls: (r.urls ?? []).slice(0, 10).map((u) => ({ url: u.defanged, flags: u.flags })) })) })
+        return cap({
+          count: res.rows.length,
+          truncated: res.truncated,
+          rows: res.rows.map((r) => ({
+            ...project(r as Record<string, unknown>, MAIL_COLS),
+            attachments: (r.attachments ?? []).map((a) => ({ name: a.name, realExt: a.realExt, size: a.size, risk: a.risk, flags: a.flags })),
+            urls: (r.urls ?? []).slice(0, 10).map((u) => ({ url: u.defanged, flags: u.flags })),
+          })),
+        })
       }
       case 'aggregate_mails': {
         const res = await ds.aggregateMails(clampFilter(args.filter), String(args.field || 'fromDomain'), Math.min(Number(args.limit) || 25, 100))
@@ -103,7 +171,11 @@ export async function executeTool(name: string, args: Record<string, unknown>, k
         const r = await ds.getMail(Number(args.id))
         if (!r) return JSON.stringify({ error: 'not found' })
         const row = r.row
-        const out: Record<string, unknown> = { ...row, attachments: (row.attachments ?? []).map((a) => ({ ...a, details: undefined })), urls: (row.urls ?? []).slice(0, 40).map((u) => ({ url: u.defanged, host: u.host, flags: u.flags, text: u.text })) }
+        const out: Record<string, unknown> = {
+          ...row,
+          attachments: (row.attachments ?? []).map((a) => ({ ...a, details: undefined })),
+          urls: (row.urls ?? []).slice(0, 40).map((u) => ({ url: u.defanged, host: u.host, flags: u.flags, text: u.text })),
+        }
         if (args.includeBody && r.body) {
           out.bodyText = (r.body.bodyText || r.body.visibleText || '').slice(0, 6000)
           if (r.body.headersText) out.headersText = r.body.headersText.slice(0, 6000)
@@ -114,11 +186,30 @@ export async function executeTool(name: string, args: Record<string, unknown>, k
       case 'list_findings': {
         const sev = args.severity ? String(args.severity) : null
         const src = args.source ? String(args.source) : null
-        const rows = await db.findings.where('caseId').equals(caseId).filter((f) => (!sev || f.severity === sev) && (!src || f.source === src)).toArray()
+        const rows = await db.findings
+          .where('caseId')
+          .equals(caseId)
+          .filter((f) => (!sev || f.severity === sev) && (!src || f.source === src))
+          .toArray()
         const order = ['critical', 'high', 'medium', 'low', 'info']
         rows.sort((a, b) => order.indexOf(a.severity) - order.indexOf(b.severity))
         const limit = Math.min(Number(args.limit) || 50, 200)
-        return cap({ count: rows.length, findings: rows.slice(0, limit).map((f) => ({ id: f.id, ruleId: f.ruleId, title: f.title, severity: f.severity, source: f.source, tsIso: iso(f.ts), count: f.count, entities: f.entities, attack: f.attack, status: f.status, refs: f.refs.slice(0, 10) })) })
+        return cap({
+          count: rows.length,
+          findings: rows.slice(0, limit).map((f) => ({
+            id: f.id,
+            ruleId: f.ruleId,
+            title: f.title,
+            severity: f.severity,
+            source: f.source,
+            tsIso: iso(f.ts),
+            count: f.count,
+            entities: f.entities,
+            attack: f.attack,
+            status: f.status,
+            refs: f.refs.slice(0, 10),
+          })),
+        })
       }
       case 'get_chain': {
         const res = await loadChains(caseId)
@@ -132,12 +223,34 @@ export async function executeTool(name: string, args: Record<string, unknown>, k
         const linked = findings.filter((f) => f.id != null && membership.get(f.id) === c.id && f.ruleId !== 'chain')
         const unlinked = findings.filter((f) => f.chainUnlinked)
         return cap({
-          id: c.id, recipient: c.identityLabel, score: c.score, severity: c.severity, scoreBreakdown: c.scoreBreakdown ?? null, artifactLinks: c.artifactLinks, from: iso(c.start), to: iso(c.end), summary: c.summary,
+          id: c.id,
+          recipient: c.identityLabel,
+          score: c.score,
+          severity: c.severity,
+          scoreBreakdown: c.scoreBreakdown ?? null,
+          artifactLinks: c.artifactLinks,
+          from: iso(c.start),
+          to: iso(c.end),
+          summary: c.summary,
           seed: { mailId: c.seed.id, subject: c.seed.subject, from: c.seed.fromAddr, at: iso(c.seed.ts), risk: c.seed.risk, flags: c.seed.flags, findings: c.seed.findings.map((f) => f.title) },
           entities: c.entities,
-          steps: c.steps.filter((st) => stepVisible(st, 'weighted')).slice(0, 40).map((st) => ({ at: iso(st.ts), offsetMin: Math.round(st.offsetMin), kind: st.kind === 'mail' ? 'mail' : st.origin ?? 'host', rowId: st.id, title: st.title, weight: st.weight, ties: st.artifacts, findings: st.findings.map((f) => f.title) })),
+          steps: c.steps
+            .filter((st) => stepVisible(st, 'weighted'))
+            .slice(0, 40)
+            .map((st) => ({
+              at: iso(st.ts),
+              offsetMin: Math.round(st.offsetMin),
+              kind: st.kind === 'mail' ? 'mail' : (st.origin ?? 'host'),
+              rowId: st.id,
+              title: st.title,
+              weight: st.weight,
+              ties: st.artifacts,
+              findings: st.findings.map((f) => f.title),
+            })),
           stepsTotal: c.steps.length,
-          linkedFindings: linked.slice(0, 40).map((f) => ({ id: f.id, ruleId: f.ruleId, severity: f.severityOverride ?? f.severity, title: f.title, source: f.source, rows: f.count, status: f.status })),
+          linkedFindings: linked
+            .slice(0, 40)
+            .map((f) => ({ id: f.id, ruleId: f.ruleId, severity: f.severityOverride ?? f.severity, title: f.title, source: f.source, rows: f.count, status: f.status })),
           unlinkedFindings: unlinked.slice(0, 20).map((f) => ({ id: f.id, ruleId: f.ruleId, title: f.title })),
         })
       }
@@ -146,7 +259,11 @@ export async function executeTool(name: string, args: Record<string, unknown>, k
         if (!reason) return cap({ error: 'reason is required' })
         const sevRaw = args.severity ? String(args.severity).toLowerCase() : ''
         const severity = ['critical', 'high', 'medium', 'low', 'info'].includes(sevRaw) ? (sevRaw as Finding['severity']) : undefined
-        const decRaw = args.decision ? String(args.decision).toLowerCase().replace(/[\s-]+/g, '_') : ''
+        const decRaw = args.decision
+          ? String(args.decision)
+              .toLowerCase()
+              .replace(/[\s-]+/g, '_')
+          : ''
         const decision = ['reviewed', 'escalated', 'false_positive', 'confirmed', 'benign', 'unsure'].includes(decRaw) ? (decRaw as Decision) : undefined
         const include = typeof args.include === 'boolean' ? args.include : undefined
         let target = ''

@@ -12,7 +12,12 @@ export async function resetFindingSeverityOverrides(caseId: number, ids: number[
   await db.transaction('rw', [db.findings, db.kv], async () => {
     const rows = await db.findings.bulkGet(uniqueIds)
     if (rows.some((f) => !f || f.caseId !== caseId)) throw new Error('Findings changed. Refresh the view and retry.')
-    await db.findings.where('id').anyOf(uniqueIds).modify((f) => { delete f.severityOverride })
+    await db.findings
+      .where('id')
+      .anyOf(uniqueIds)
+      .modify((f) => {
+        delete f.severityOverride
+      })
     const key = `finding-reviews-${caseId}`
     const saved = ((await db.kv.get(key))?.value as Record<string, Review>) ?? {}
     for (const f of rows) if (saved[f!.key]) delete saved[f!.key].severityOverride
@@ -26,7 +31,18 @@ export async function rememberReviews(caseId: number, findings: Finding[]): Prom
   const key = `finding-reviews-${caseId}`
   const saved = ((await db.kv.get(key))?.value as Record<string, Review>) ?? {}
   for (const f of findings) {
-    if (decided(f)) saved[f.key] = { status: f.status, notes: f.notes, createdAt: f.createdAt, severityOverride: f.severityOverride, reportExclude: f.reportExclude, chainUnlinked: f.chainUnlinked, decidedBy: f.decidedBy, aiReason: f.aiReason, notesBy: f.notesBy }
+    if (decided(f))
+      saved[f.key] = {
+        status: f.status,
+        notes: f.notes,
+        createdAt: f.createdAt,
+        severityOverride: f.severityOverride,
+        reportExclude: f.reportExclude,
+        chainUnlinked: f.chainUnlinked,
+        decidedBy: f.decidedBy,
+        aiReason: f.aiReason,
+        notesBy: f.notesBy,
+      }
   }
   await db.kv.put({ key, value: saved })
   return new Map([...Object.entries(saved), ...findings.map((f) => [f.key, f] as [string, Review])])
@@ -44,7 +60,20 @@ export async function replaceFindings(caseId: number, ruleIds: string[], finding
     const now = Date.now()
     const rows = findings.map((f) => {
       const prev = reviews.get(String(f.key))
-      return { ...f, id: undefined, caseId, createdAt: prev?.createdAt ?? now, status: prev?.status ?? 'new', notes: prev?.notes, severityOverride: prev?.severityOverride, reportExclude: prev?.reportExclude, chainUnlinked: prev?.chainUnlinked, decidedBy: prev?.decidedBy, aiReason: prev?.aiReason, notesBy: prev?.notesBy } as Finding
+      return {
+        ...f,
+        id: undefined,
+        caseId,
+        createdAt: prev?.createdAt ?? now,
+        status: prev?.status ?? 'new',
+        notes: prev?.notes,
+        severityOverride: prev?.severityOverride,
+        reportExclude: prev?.reportExclude,
+        chainUnlinked: prev?.chainUnlinked,
+        decidedBy: prev?.decidedBy,
+        aiReason: prev?.aiReason,
+        notesBy: prev?.notesBy,
+      } as Finding
     })
     for (let i = 0; i < rows.length; i += 2000) await db.findings.bulkAdd(rows.slice(i, i + 2000))
     return rows.length
@@ -57,7 +86,11 @@ export async function pruneOrphanFindings(caseId: number, knownRuleIds: Iterable
   const known = new Set(knownRuleIds)
   known.add('chain')
   return db.transaction('rw', [db.findings, db.kv], async () => {
-    const orphans = await db.findings.where('caseId').equals(caseId).filter((f) => !known.has(f.ruleId)).toArray()
+    const orphans = await db.findings
+      .where('caseId')
+      .equals(caseId)
+      .filter((f) => !known.has(f.ruleId))
+      .toArray()
     if (!orphans.length) return 0
     await rememberReviews(caseId, orphans)
     await db.findings.bulkDelete(orphans.map((f) => f.id!))

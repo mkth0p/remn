@@ -2,12 +2,14 @@
 Mail header analysis: Received chain (origin IP, hops, delays), authentication
 results (SPF / DKIM / DMARC / ARC), sender consistency and header oddities.
 """
+
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from email.header import decode_header, make_header
 from email.utils import getaddresses, parseaddr
-from typing import Any, Iterable
+from typing import Any
 
 from services.analysis.lookalike import registrable
 from services.common import is_public_ip, normalize_ip, parse_timestamp
@@ -24,26 +26,118 @@ _HELO_RE = re.compile(r"(?is)^(?P<helo>[^\s(]+)?\s*(?:\((?P<comment>[^)]*)\))?")
 _AUTH_PAIR_RE = re.compile(r"(?i)\b(spf|dkim|dmarc|arc|compauth|iprev|auth|dara|x-sid)\s*=\s*([a-z]+)")
 _AUTH_PROP_RE = re.compile(r"(?i)\b(header\.d|header\.i|header\.from|smtp\.mailfrom|smtp\.helo|reason|action|policy\.\w+)\s*=\s*([^\s;()]+)")
 
-WEBMAIL_HINTS = ("gmail.com", "outlook.com", "hotmail.com", "yahoo.com", "protonmail.com", "proton.me",
-                 "icloud.com", "aol.com", "gmx.com", "gmx.fr", "laposte.net", "orange.fr", "free.fr",
-                 "sfr.fr", "wanadoo.fr", "yandex.com", "mail.ru", "zoho.com", "live.com", "live.fr", "msn.com")
-BULK_MAILERS = ("sendgrid", "mailchimp", "mailgun", "amazonses", "sparkpost", "mandrill", "constantcontact",
-                "sendinblue", "brevo", "mailjet", "hubspot", "salesforce", "zendesk", "postmark", "elasticemail")
+WEBMAIL_HINTS = (
+    "gmail.com",
+    "outlook.com",
+    "hotmail.com",
+    "yahoo.com",
+    "protonmail.com",
+    "proton.me",
+    "icloud.com",
+    "aol.com",
+    "gmx.com",
+    "gmx.fr",
+    "laposte.net",
+    "orange.fr",
+    "free.fr",
+    "sfr.fr",
+    "wanadoo.fr",
+    "yandex.com",
+    "mail.ru",
+    "zoho.com",
+    "live.com",
+    "live.fr",
+    "msn.com",
+)
+BULK_MAILERS = (
+    "sendgrid",
+    "mailchimp",
+    "mailgun",
+    "amazonses",
+    "sparkpost",
+    "mandrill",
+    "constantcontact",
+    "sendinblue",
+    "brevo",
+    "mailjet",
+    "hubspot",
+    "salesforce",
+    "zendesk",
+    "postmark",
+    "elasticemail",
+)
 # Registrable domains of mail platforms whose HELO names never match the sender's domain
 # (Exchange Online mailbox servers, Google, ESPs, security gateways, big webmail).
-MAIL_INFRA_DOMAINS = frozenset({
-    "outlook.com", "office365.com", "office.com", "microsoft.com", "svc.ms", "exchangelabs.com",
-    "google.com", "googlemail.com", "gmail.com", "amazonses.com", "sendgrid.net", "mailgun.org",
-    "mailgun.net", "mandrillapp.com", "sparkpostmail.com", "mcsv.net", "mcdlv.net", "rsgsv.net",
-    "exacttarget.com", "salesforce.com", "mailjet.com", "sendinblue.com", "brevo.com", "postmarkapp.com",
-    "mimecast.com", "pphosted.com", "ppe-hosted.com", "messagelabs.com", "iphmx.com", "mailanyone.net",
-    "barracudanetworks.com", "proofpoint.com", "secureserver.net", "ovh.net", "gandi.net", "zendesk.com",
-    "hubspotemail.net", "mailchimp.com", "constantcontact.com", "icloud.com", "apple.com", "yahoo.com",
-    "yahoodns.net", "protonmail.ch", "proton.me",
-})
-SUSPICIOUS_MAILERS = ("php", "python", "swiftmailer", "phpmailer", "nodemailer", "sendblaster", "mass",
-                      "bulk", "turbo", "the bat", "fastmail sender", "xmail", "gammadyne", "sendmail",
-                      "leaf", "advanced mass", "email spider", "mailbomber", "smtpsend")
+MAIL_INFRA_DOMAINS = frozenset(
+    {
+        "outlook.com",
+        "office365.com",
+        "office.com",
+        "microsoft.com",
+        "svc.ms",
+        "exchangelabs.com",
+        "google.com",
+        "googlemail.com",
+        "gmail.com",
+        "amazonses.com",
+        "sendgrid.net",
+        "mailgun.org",
+        "mailgun.net",
+        "mandrillapp.com",
+        "sparkpostmail.com",
+        "mcsv.net",
+        "mcdlv.net",
+        "rsgsv.net",
+        "exacttarget.com",
+        "salesforce.com",
+        "mailjet.com",
+        "sendinblue.com",
+        "brevo.com",
+        "postmarkapp.com",
+        "mimecast.com",
+        "pphosted.com",
+        "ppe-hosted.com",
+        "messagelabs.com",
+        "iphmx.com",
+        "mailanyone.net",
+        "barracudanetworks.com",
+        "proofpoint.com",
+        "secureserver.net",
+        "ovh.net",
+        "gandi.net",
+        "zendesk.com",
+        "hubspotemail.net",
+        "mailchimp.com",
+        "constantcontact.com",
+        "icloud.com",
+        "apple.com",
+        "yahoo.com",
+        "yahoodns.net",
+        "protonmail.ch",
+        "proton.me",
+    }
+)
+SUSPICIOUS_MAILERS = (
+    "php",
+    "python",
+    "swiftmailer",
+    "phpmailer",
+    "nodemailer",
+    "sendblaster",
+    "mass",
+    "bulk",
+    "turbo",
+    "the bat",
+    "fastmail sender",
+    "xmail",
+    "gammadyne",
+    "sendmail",
+    "leaf",
+    "advanced mass",
+    "email spider",
+    "mailbomber",
+    "smtpsend",
+)
 
 
 def decode_mime(value: str | None) -> str:
@@ -94,8 +188,18 @@ def domain_of(addr: str | None) -> str:
 # ---------------------------------------------------------------------------
 def parse_received(value: str) -> dict[str, Any]:
     v = re.sub(r"\s+", " ", value or "").strip()
-    hop: dict[str, Any] = {"raw": v[:1000], "from": None, "fromHelo": None, "fromIp": None, "by": None,
-                           "with": None, "id": None, "for": None, "date": None, "ts": None}
+    hop: dict[str, Any] = {
+        "raw": v[:1000],
+        "from": None,
+        "fromHelo": None,
+        "fromIp": None,
+        "by": None,
+        "with": None,
+        "id": None,
+        "for": None,
+        "date": None,
+        "ts": None,
+    }
     if ";" in v:
         body, _, date = v.rpartition(";")
         hop["date"] = date.strip()
@@ -187,8 +291,17 @@ def received_chain(headers: list[Header]) -> dict[str, Any]:
 # Authentication results
 # ---------------------------------------------------------------------------
 def parse_auth_results(headers: list[Header]) -> dict[str, Any]:
-    out: dict[str, Any] = {"spf": None, "dkim": None, "dmarc": None, "arc": None, "compauth": None,
-                           "dkimDomain": None, "spfDomain": None, "dmarcPolicy": None, "raw": []}
+    out: dict[str, Any] = {
+        "spf": None,
+        "dkim": None,
+        "dmarc": None,
+        "arc": None,
+        "compauth": None,
+        "dkimDomain": None,
+        "spfDomain": None,
+        "dmarcPolicy": None,
+        "raw": [],
+    }
     for name in ("Authentication-Results", "ARC-Authentication-Results", "X-MS-Exchange-Authentication-Results"):
         for val in header_values(headers, name):
             v = re.sub(r"\s+", " ", val)
@@ -313,9 +426,23 @@ def analyze_headers(headers: list[Header], date_ms: int | None = None) -> dict[s
             and not (has_list or is_bulk)
             and (not dkim_reg or registrable(mid_dom) != dkim_reg)
             and mid_dom not in ("mail.gmail.com",)
-            and not mid_dom.endswith((".outlook.com", ".prod.outlook.com", "google.com", ".amazonses.com", ".sendgrid.net",
-                                      ".mcsv.net", ".rsgsv.net", ".mailchimpapp.net", ".exchangelabs.com", ".mimecast.com",
-                                      ".pphosted.com", ".sfmc-content.com", ".mktomail.com"))
+            and not mid_dom.endswith(
+                (
+                    ".outlook.com",
+                    ".prod.outlook.com",
+                    "google.com",
+                    ".amazonses.com",
+                    ".sendgrid.net",
+                    ".mcsv.net",
+                    ".rsgsv.net",
+                    ".mailchimpapp.net",
+                    ".exchangelabs.com",
+                    ".mimecast.com",
+                    ".pphosted.com",
+                    ".sfmc-content.com",
+                    ".mktomail.com",
+                )
+            )
         ):
             flags.append("message_id_domain_mismatch")
     if not first_header(headers, "Date"):
@@ -360,8 +487,7 @@ def analyze_headers(headers: list[Header], date_ms: int | None = None) -> dict[s
     helo_reg = registrable(helo) if helo and "." in helo else ""
     # A foreign HELO is normal when SPF authorises the sending host, or when the host belongs to
     # a known mail platform (Exchange Online mailbox servers, Google, ESPs, security gateways).
-    if (helo_reg and from_reg and helo_reg != from_reg and not rdns
-            and auth["spf"] != "pass" and helo_reg not in MAIL_INFRA_DOMAINS):
+    if helo_reg and from_reg and helo_reg != from_reg and not rdns and auth["spf"] != "pass" and helo_reg not in MAIL_INFRA_DOMAINS:
         flags.append("helo_domain_mismatch")
 
     return {

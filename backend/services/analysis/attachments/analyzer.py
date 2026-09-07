@@ -2,6 +2,7 @@
 Attachment orchestrator: identifies the real type, runs the specialised
 analyzers and produces flags + a 0-100 risk score. Bytes are never returned.
 """
+
 from __future__ import annotations
 
 import logging
@@ -21,39 +22,121 @@ MAX_ANALYZE_BYTES = 60 * 1024 * 1024
 
 # Flag -> weight; correlated observations contribute once per feature family.
 WEIGHTS: dict[str, int] = {
-    "executable": 95, "installer": 85, "script": 90, "shortcut": 85, "help": 80, "onenote": 40, "disk_image": 50,
-    "xll": 90, "double_extension": 60, "rtlo_filename": 85, "padded_filename": 50, "extension_mismatch": 45,
-    "extension_mismatch_executable": 95, "zero_width_filename": 40, "mixed_script_filename": 35,
-    "office_macro": 40, "macro_autoexec": 50, "macro_suspicious": 82, "macro_ioc": 65, "macro_obfuscated": 75,
-    "macro_vba_stomping": 90, "office_xlm": 85, "office_dde": 85, "office_external_template": 85,
-    "office_external_object": 80, "office_external_relation": 45, "office_remote_image": 30, "office_ole_object": 60,
-    "office_activex": 50, "office_encrypted": 55, "office_iqy_remote": 85, "csv_formula_injection": 70,
-    "rtf_object": 65, "rtf_equation_editor": 95, "rtf_objupdate": 85, "rtf_package": 80,
-    "pdf_javascript": 35, "pdf_auto_action": 25, "pdf_launch": 90, "pdf_embedded_file": 30, "pdf_rich_media": 30,
-    "pdf_xfa": 25, "pdf_submit_form": 35, "pdf_remote_goto": 35, "pdf_encrypted": 20, "pdf_encrypted_empty_password": 20,
-    "pdf_obfuscated_names": 35, "pdf_header_offset": 45, "pdf_trailing_data": 30, "pdf_link_lure": 45,
-    "pdf_image_only": 25, "pdf_form": 20, "pdf_parse_error": 25, "pdf_jbig2": 30, "pdf_incremental_updates": 10,
-    "encrypted_archive": 35, "archive_contains_executable": 90, "archive_contains_script": 88,
-    "archive_contains_shortcut": 85, "archive_contains_disk_image": 60, "archive_contains_office_macro": 40,
-    "archive_contains_legacy_office": 25, "archive_contains_html": 25, "archive_contains_onenote": 40,
-    "nested_archive": 30, "archive_single_executable": 92, "archive_single_lure": 25, "zip_bomb": 80,
-    "archive_path_traversal": 70, "archive_many_entries": 20, "archive_corrupt": 30, "unsupported_archive_format": 35,
-    "disk_image_contains_executable": 90, "disk_image_contains_shortcut": 90, "archive_partially_analyzed": 5,
-    "html_smuggling": 90, "html_smuggling_possible": 45, "html_embedded_payload": 75, "html_obfuscated": 55,
-    "html_dynamic_code": 50, "html_script": 35, "html_event_handler": 30, "html_password_form": 70,
-    "html_credential_harvest": 90, "html_email_form": 45, "html_brand_lure": 40, "html_prefilled_email": 60,
-    "html_meta_refresh": 55, "html_js_redirect": 55, "html_hidden_iframe": 65, "svg_script": 40,
-    "html_redirect_only": 40, "html_script_only": 35, "html_callback_lure": 40, "html_attachment": 20,
-    "html_file_download": 25, "html_embedded_document": 15,
-    "nested_mail": 25, "empty_file": 15, "yara_match": 90, "calendar_lure": 20, "archive": 25, "office_legacy": 30,
-    "rtf": 25, "mail": 15, "vcard": 5, "large_attachment": 5, "office_parse_error": 20,
+    "executable": 95,
+    "installer": 85,
+    "script": 90,
+    "shortcut": 85,
+    "help": 80,
+    "onenote": 40,
+    "disk_image": 50,
+    "xll": 90,
+    "double_extension": 60,
+    "rtlo_filename": 85,
+    "padded_filename": 50,
+    "extension_mismatch": 45,
+    "extension_mismatch_executable": 95,
+    "zero_width_filename": 40,
+    "mixed_script_filename": 35,
+    "office_macro": 40,
+    "macro_autoexec": 50,
+    "macro_suspicious": 82,
+    "macro_ioc": 65,
+    "macro_obfuscated": 75,
+    "macro_vba_stomping": 90,
+    "office_xlm": 85,
+    "office_dde": 85,
+    "office_external_template": 85,
+    "office_external_object": 80,
+    "office_external_relation": 45,
+    "office_remote_image": 30,
+    "office_ole_object": 60,
+    "office_activex": 50,
+    "office_encrypted": 55,
+    "office_iqy_remote": 85,
+    "csv_formula_injection": 70,
+    "rtf_object": 65,
+    "rtf_equation_editor": 95,
+    "rtf_objupdate": 85,
+    "rtf_package": 80,
+    "pdf_javascript": 35,
+    "pdf_auto_action": 25,
+    "pdf_launch": 90,
+    "pdf_embedded_file": 30,
+    "pdf_rich_media": 30,
+    "pdf_xfa": 25,
+    "pdf_submit_form": 35,
+    "pdf_remote_goto": 35,
+    "pdf_encrypted": 20,
+    "pdf_encrypted_empty_password": 20,
+    "pdf_obfuscated_names": 35,
+    "pdf_header_offset": 45,
+    "pdf_trailing_data": 30,
+    "pdf_link_lure": 45,
+    "pdf_image_only": 25,
+    "pdf_form": 20,
+    "pdf_parse_error": 25,
+    "pdf_jbig2": 30,
+    "pdf_incremental_updates": 10,
+    "encrypted_archive": 35,
+    "archive_contains_executable": 90,
+    "archive_contains_script": 88,
+    "archive_contains_shortcut": 85,
+    "archive_contains_disk_image": 60,
+    "archive_contains_office_macro": 40,
+    "archive_contains_legacy_office": 25,
+    "archive_contains_html": 25,
+    "archive_contains_onenote": 40,
+    "nested_archive": 30,
+    "archive_single_executable": 92,
+    "archive_single_lure": 25,
+    "zip_bomb": 80,
+    "archive_path_traversal": 70,
+    "archive_many_entries": 20,
+    "archive_corrupt": 30,
+    "unsupported_archive_format": 35,
+    "disk_image_contains_executable": 90,
+    "disk_image_contains_shortcut": 90,
+    "archive_partially_analyzed": 5,
+    "html_smuggling": 90,
+    "html_smuggling_possible": 45,
+    "html_embedded_payload": 75,
+    "html_obfuscated": 55,
+    "html_dynamic_code": 50,
+    "html_script": 35,
+    "html_event_handler": 30,
+    "html_password_form": 70,
+    "html_credential_harvest": 90,
+    "html_email_form": 45,
+    "html_brand_lure": 40,
+    "html_prefilled_email": 60,
+    "html_meta_refresh": 55,
+    "html_js_redirect": 55,
+    "html_hidden_iframe": 65,
+    "svg_script": 40,
+    "html_redirect_only": 40,
+    "html_script_only": 35,
+    "html_callback_lure": 40,
+    "html_attachment": 20,
+    "html_file_download": 25,
+    "html_embedded_document": 15,
+    "nested_mail": 25,
+    "empty_file": 15,
+    "yara_match": 90,
+    "calendar_lure": 20,
+    "archive": 25,
+    "office_legacy": 30,
+    "rtf": 25,
+    "mail": 15,
+    "vcard": 5,
+    "large_attachment": 5,
+    "office_parse_error": 20,
 }
 
 
 def _base_flag(flag: str) -> str:
     for prefix in ("nested_", "archive_entry_", "archive_contains_", "disk_image_contains_"):
         if flag.startswith(prefix):
-            return _base_flag(flag[len(prefix):])
+            return _base_flag(flag[len(prefix) :])
     return flag
 
 
@@ -65,10 +148,15 @@ def _score(flags: list[str]) -> int:
     groups: dict[str, int] = {}
     for flag in set(flags):
         base = _base_flag(flag)
-        family = ("office" if base.startswith(("office_", "macro_", "rtf")) else
-                  "execution" if base in EXEC_CATEGORIES or base == "archive_single_executable" else
-                  "disguise" if base in {"double_extension", "rtlo_filename", "extension_mismatch_executable", "padded_filename", "extension_mismatch"} else
-                  base.split("_", 1)[0])
+        family = (
+            "office"
+            if base.startswith(("office_", "macro_", "rtf"))
+            else "execution"
+            if base in EXEC_CATEGORIES or base == "archive_single_executable"
+            else "disguise"
+            if base in {"double_extension", "rtlo_filename", "extension_mismatch_executable", "padded_filename", "extension_mismatch"}
+            else base.split("_", 1)[0]
+        )
         groups[family] = max(groups.get(family, 0), WEIGHTS.get(flag, WEIGHTS.get(base, 5)))
     weights = sorted(groups.values(), reverse=True)
     score = weights[0] + sum(5 for w in weights[1:] if w >= 40)
@@ -105,8 +193,9 @@ def rescore_attachment(summary: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def analyze_attachment(name: str | None, data: bytes, declared_mime: str | None = None,
-                       depth: int = 0, inline: bool = False, content_id: str | None = None) -> dict[str, Any]:
+def analyze_attachment(
+    name: str | None, data: bytes, declared_mime: str | None = None, depth: int = 0, inline: bool = False, content_id: str | None = None
+) -> dict[str, Any]:
     name = name or "(unnamed)"
     size = len(data)
     flags: set[str] = set()
@@ -120,10 +209,22 @@ def analyze_attachment(name: str | None, data: bytes, declared_mime: str | None 
     real_category = DANGEROUS_EXT.get(real_ext)
 
     result: dict[str, Any] = {
-        "name": name[:300], "ext": ext, "size": size, "declaredMime": (declared_mime or "")[:120],
-        "realExt": real_ext, "realMime": real["mime"], "realType": real["description"], "category": category,
-        "sha256": sha256_bytes(data) if data else None, "md5": md5_bytes(data) if data else None,
-        "inline": inline, "contentId": content_id, "depth": depth, "flags": [], "risk": 0, "details": details,
+        "name": name[:300],
+        "ext": ext,
+        "size": size,
+        "declaredMime": (declared_mime or "")[:120],
+        "realExt": real_ext,
+        "realMime": real["mime"],
+        "realType": real["description"],
+        "category": category,
+        "sha256": sha256_bytes(data) if data else None,
+        "md5": md5_bytes(data) if data else None,
+        "inline": inline,
+        "contentId": content_id,
+        "depth": depth,
+        "flags": [],
+        "risk": 0,
+        "details": details,
     }
     if size == 0:
         flags.add("empty_file")
@@ -150,10 +251,43 @@ def analyze_attachment(name: str | None, data: bytes, declared_mime: str | None 
     else:
         try:
             kind = real_ext or ext
-            if kind in ("docx", "xlsx", "pptx", "ooxml", "vsdx", "doc", "xls", "ppt", "ole", "rtf", "docm", "xlsm", "pptm",
-                        "dotm", "xlam", "xlsb", "office_encrypted", "odt", "ods", "odp", "odf", "pub", "mdb", "slk", "iqy", "csv",
-                        "mht", "mhtml", "xml") and (category in ("office", "office_macro", "office_legacy", "rtf", "data", "text", "html") or real_category in ("office", "office_macro", "office_legacy", "rtf")):
-                if kind in ("mht", "mhtml", "html", "xml") and not (data[:2] == b"PK" or data[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" or data[:5].lower() == b"{\\rtf"):
+            if kind in (
+                "docx",
+                "xlsx",
+                "pptx",
+                "ooxml",
+                "vsdx",
+                "doc",
+                "xls",
+                "ppt",
+                "ole",
+                "rtf",
+                "docm",
+                "xlsm",
+                "pptm",
+                "dotm",
+                "xlam",
+                "xlsb",
+                "office_encrypted",
+                "odt",
+                "ods",
+                "odp",
+                "odf",
+                "pub",
+                "mdb",
+                "slk",
+                "iqy",
+                "csv",
+                "mht",
+                "mhtml",
+                "xml",
+            ) and (
+                category in ("office", "office_macro", "office_legacy", "rtf", "data", "text", "html")
+                or real_category in ("office", "office_macro", "office_legacy", "rtf")
+            ):
+                if kind in ("mht", "mhtml", "html", "xml") and not (
+                    data[:2] == b"PK" or data[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" or data[:5].lower() == b"{\\rtf"
+                ):
                     pass
                 else:
                     off = _office.analyze_office(data, ext, real_ext)
@@ -169,7 +303,25 @@ def analyze_attachment(name: str | None, data: bytes, declared_mime: str | None 
                 pdf = _pdf.analyze_pdf(data)
                 details["pdf"] = pdf
                 flags.update(pdf["flags"])
-            if real_ext in ("zip", "jar", "apk", "appx", "gz", "tgz", "tar", "bz2", "xz", "rar", "7z", "cab", "iso", "img", "vhd", "vhdx", "one") and real_ext not in ("docx", "xlsx", "pptx"):
+            if real_ext in (
+                "zip",
+                "jar",
+                "apk",
+                "appx",
+                "gz",
+                "tgz",
+                "tar",
+                "bz2",
+                "xz",
+                "rar",
+                "7z",
+                "cab",
+                "iso",
+                "img",
+                "vhd",
+                "vhdx",
+                "one",
+            ) and real_ext not in ("docx", "xlsx", "pptx"):
                 if real_ext == "one":
                     flags.add("onenote")
                     details["onenote"] = _onenote(data)
@@ -251,7 +403,7 @@ def _onenote(data: bytes) -> dict[str, Any]:
             break
         count += 1
         start = idx + 36
-        head = data[start:start + 16]
+        head = data[start : start + 16]
         if head.startswith(b"MZ"):
             embedded.append("exe")
         elif head.startswith(b"PK"):
@@ -267,8 +419,9 @@ def _onenote(data: bytes) -> dict[str, Any]:
         elif head[:2] in (b"\xff\xd8",) or head.startswith(b"\x89PNG"):
             embedded.append("image")
         else:
-            txt = head.lower()
-            if any(k in data[start:start + 4096].lower() for k in (b"powershell", b"cmd.exe", b"wscript", b"cscript", b"mshta", b"createobject", b"@echo off")):
+            if any(
+                k in data[start : start + 4096].lower() for k in (b"powershell", b"cmd.exe", b"wscript", b"cscript", b"mshta", b"createobject", b"@echo off")
+            ):
                 embedded.append("script")
             else:
                 embedded.append("unknown")
@@ -303,10 +456,33 @@ def _lnk(data: bytes) -> dict[str, Any]:
             if s not in out["strings"]:
                 out["strings"].append(s[:300])
         joined = " ".join(out["strings"]).lower()
-        out["suspicious"] = [k for k in ("powershell", "cmd.exe", "mshta", "wscript", "cscript", "rundll32", "regsvr32",
-                                          "certutil", "bitsadmin", "curl", "http", "-enc", "-w hidden", "iex", "invoke",
-                                          "downloadstring", "\\\\", "conhost", "forfiles", "msiexec", "explorer.exe ")
-                             if k in joined]
+        out["suspicious"] = [
+            k
+            for k in (
+                "powershell",
+                "cmd.exe",
+                "mshta",
+                "wscript",
+                "cscript",
+                "rundll32",
+                "regsvr32",
+                "certutil",
+                "bitsadmin",
+                "curl",
+                "http",
+                "-enc",
+                "-w hidden",
+                "iex",
+                "invoke",
+                "downloadstring",
+                "\\\\",
+                "conhost",
+                "forfiles",
+                "msiexec",
+                "explorer.exe ",
+            )
+            if k in joined
+        ]
     except Exception as exc:  # noqa: BLE001
         out["error"] = str(exc)[:100]
     out["strings"] = out["strings"][:40]
@@ -319,7 +495,7 @@ def _pe(data: bytes) -> dict[str, Any]:
         import struct
 
         e_lfanew = struct.unpack_from("<I", data, 0x3C)[0]
-        if data[e_lfanew:e_lfanew + 4] == b"PE\x00\x00":
+        if data[e_lfanew : e_lfanew + 4] == b"PE\x00\x00":
             machine = struct.unpack_from("<H", data, e_lfanew + 4)[0]
             characteristics = struct.unpack_from("<H", data, e_lfanew + 22)[0]
             timestamp = struct.unpack_from("<I", data, e_lfanew + 8)[0]

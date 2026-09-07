@@ -31,7 +31,8 @@ const KINDS = {
     title: 'Sublime rules import',
     endpoint: '/api/rules/convert/sublime',
     hint: 'Sublime Security detection rules (MQL): one .yml or a .zip of the sublime-rules repository',
-    blurb: 'Rules relying on Sublime-only features (ML classifiers, link analysis, sender profiles, file explosion, screenshots) are skipped rather than weakened; approximations are listed as warnings.',
+    blurb:
+      'Rules relying on Sublime-only features (ML classifiers, link analysis, sender profiles, file explosion, screenshots) are skipped rather than weakened; approximations are listed as warnings.',
   },
 } as const
 
@@ -87,34 +88,50 @@ export function RuleImport({ kind }: { kind: keyof typeof KINDS }) {
           {res.summary.reasons.length > 0 && (
             <div className="muted mono" style={{ fontSize: 12, marginBottom: 8 }}>
               {res.summary.reasons.map(([why, n]) => (
-                <div key={why}>{n} × {why}</div>
+                <div key={why}>
+                  {n} × {why}
+                </div>
               ))}
             </div>
           )}
           <div className="row" style={{ gap: 8, marginBottom: 8 }}>
-            <button className={`btn xs${showSkipped ? '' : ' primary'}`} onClick={() => setShowSkipped(false)}>converted ({res.summary.converted})</button>
-            <button className={`btn xs${showSkipped ? ' primary' : ''}`} onClick={() => setShowSkipped(true)}>skipped ({res.summary.skipped})</button>
+            <button className={`btn xs${showSkipped ? '' : ' primary'}`} onClick={() => setShowSkipped(false)}>
+              converted ({res.summary.converted})
+            </button>
+            <button className={`btn xs${showSkipped ? ' primary' : ''}`} onClick={() => setShowSkipped(true)}>
+              skipped ({res.summary.skipped})
+            </button>
           </div>
           <div style={{ maxHeight: 360, overflow: 'auto', border: '1px solid var(--line)', borderRadius: 6 }}>
             <table className="table compact">
               <tbody>
                 {listed.map((r) => (
                   <tr key={r.id + (r.file ?? '')}>
-                    <td className="mono" style={{ fontSize: 12 }}>{r.id}</td>
+                    <td className="mono" style={{ fontSize: 12 }}>
+                      {r.id}
+                    </td>
                     <td>{r.title}</td>
-                    <td className="muted" style={{ fontSize: 12 }}>{r.ok ? r.warnings.join('; ') : r.error}</td>
+                    <td className="muted" style={{ fontSize: 12 }}>
+                      {r.ok ? r.warnings.join('; ') : r.error}
+                    </td>
                   </tr>
                 ))}
                 {listed.length === 0 && (
-                  <tr><td className="muted">nothing here</td></tr>
+                  <tr>
+                    <td className="muted">nothing here</td>
+                  </tr>
                 )}
               </tbody>
             </table>
           </div>
           <div className="row" style={{ marginTop: 12, gap: 8 }}>
             <span className="spacer" />
-            <button className="btn" onClick={() => setRes(null)}>cancel</button>
-            <button className="btn primary" onClick={add} disabled={!res.summary.converted}>add {res.summary.converted} rule(s) as custom rules</button>
+            <button className="btn" onClick={() => setRes(null)}>
+              cancel
+            </button>
+            <button className="btn primary" onClick={add} disabled={!res.summary.converted}>
+              add {res.summary.converted} rule(s) as custom rules
+            </button>
           </div>
         </Modal>
       )}

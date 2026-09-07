@@ -4,11 +4,13 @@ Lookalike / spoofed domain detection.
 Works fully offline: tldextract runs on its bundled public-suffix snapshot
 (no network fetch), confusable_homoglyphs on its bundled Unicode tables.
 """
+
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from functools import lru_cache
-from typing import Any, Iterable
+from typing import Any
 
 import idna
 import tldextract
@@ -21,22 +23,100 @@ from services.reference.brand_domains import BRAND_OWNED_DOMAINS, BRAND_TLDS  # 
 # Small default brand list: registrable second-level labels that phishing
 # campaigns imitate most often. The UI settings can extend it.
 DEFAULT_BRANDS: tuple[str, ...] = (
-    "microsoft", "office365", "office", "outlook", "onedrive", "sharepoint", "live", "hotmail",
-    "google", "gmail", "apple", "icloud", "amazon", "paypal", "docusign", "dropbox", "adobe",
-    "dhl", "ups", "fedex", "chronopost", "laposte", "colissimo", "netflix", "facebook",
-    "instagram", "linkedin", "whatsapp", "orange", "sfr", "free", "bouygues", "ameli",
-    "impots", "gouv", "caf", "edf", "engie", "bnpparibas", "societegenerale", "creditagricole",
-    "lcl", "caisse-epargne", "boursorama", "banquepopulaire", "cic", "creditmutuel",
-    "labanquepostale", "ing", "revolut", "n26", "visa", "mastercard", "ovh", "zoom", "teams",
-    "webex", "okta", "github", "slack", "servicenow", "salesforce", "hubspot", "sap",
+    "microsoft",
+    "office365",
+    "office",
+    "outlook",
+    "onedrive",
+    "sharepoint",
+    "live",
+    "hotmail",
+    "google",
+    "gmail",
+    "apple",
+    "icloud",
+    "amazon",
+    "paypal",
+    "docusign",
+    "dropbox",
+    "adobe",
+    "dhl",
+    "ups",
+    "fedex",
+    "chronopost",
+    "laposte",
+    "colissimo",
+    "netflix",
+    "facebook",
+    "instagram",
+    "linkedin",
+    "whatsapp",
+    "orange",
+    "sfr",
+    "free",
+    "bouygues",
+    "ameli",
+    "impots",
+    "gouv",
+    "caf",
+    "edf",
+    "engie",
+    "bnpparibas",
+    "societegenerale",
+    "creditagricole",
+    "lcl",
+    "caisse-epargne",
+    "boursorama",
+    "banquepopulaire",
+    "cic",
+    "creditmutuel",
+    "labanquepostale",
+    "ing",
+    "revolut",
+    "n26",
+    "visa",
+    "mastercard",
+    "ovh",
+    "zoom",
+    "teams",
+    "webex",
+    "okta",
+    "github",
+    "slack",
+    "servicenow",
+    "salesforce",
+    "hubspot",
+    "sap",
 )
 
 _DIGIT_SWAPS = str.maketrans({"0": "o", "1": "l", "3": "e", "4": "a", "5": "s", "7": "t", "8": "b", "9": "g"})
 _STRIP_RE = re.compile(r"[^a-z0-9]")
 _LOOKALIKE_TOKENS = (
-    "secure", "security", "login", "signin", "verify", "verification", "account", "update",
-    "support", "service", "billing", "invoice", "portal", "auth", "sso", "mail", "webmail",
-    "helpdesk", "it", "admin", "notice", "alert", "confirm", "pay", "payment",
+    "secure",
+    "security",
+    "login",
+    "signin",
+    "verify",
+    "verification",
+    "account",
+    "update",
+    "support",
+    "service",
+    "billing",
+    "invoice",
+    "portal",
+    "auth",
+    "sso",
+    "mail",
+    "webmail",
+    "helpdesk",
+    "it",
+    "admin",
+    "notice",
+    "alert",
+    "confirm",
+    "pay",
+    "payment",
 )
 
 

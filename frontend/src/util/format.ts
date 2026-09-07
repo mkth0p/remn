@@ -129,7 +129,10 @@ export function renderMarkdown(md: string): string {
     if (/^\|.*\|\s*$/.test(line)) {
       closeList()
       if (/^\|\s*:?-+/.test(line)) continue
-      const cells = line.slice(1, -1).split('|').map((c) => c.trim())
+      const cells = line
+        .slice(1, -1)
+        .split('|')
+        .map((c) => c.trim())
       if (!inTable) {
         out.push('<table>')
         inTable = true

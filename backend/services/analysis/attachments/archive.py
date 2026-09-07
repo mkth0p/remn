@@ -1,4 +1,5 @@
 """Archive and disk-image attachment analysis (zip/tar/gz + heuristics for rar/7z/iso)."""
+
 from __future__ import annotations
 
 import gzip
@@ -7,7 +8,8 @@ import logging
 import re
 import tarfile
 import zipfile
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from services.analysis.attachments.magic import DANGEROUS_EXT, EXEC_CATEGORIES, analyze_name, extension_of
 
@@ -15,7 +17,9 @@ log = logging.getLogger(__name__)
 
 MAX_NESTED_BYTES = 15 * 1024 * 1024
 MAX_ENTRIES_ANALYZED = 40
-_UTF16_EXE_RE = re.compile(rb"(?i)\.\x00(?:e\x00x\x00e|l\x00n\x00k|d\x00l\x00l|j\x00s|v\x00b\x00s|b\x00a\x00t|c\x00m\x00d|h\x00t\x00a|p\x00s\x001|s\x00c\x00r|m\x00s\x00i|w\x00s\x00f|c\x00p\x00l)\x00")
+_UTF16_EXE_RE = re.compile(
+    rb"(?i)\.\x00(?:e\x00x\x00e|l\x00n\x00k|d\x00l\x00l|j\x00s|v\x00b\x00s|b\x00a\x00t|c\x00m\x00d|h\x00t\x00a|p\x00s\x001|s\x00c\x00r|m\x00s\x00i|w\x00s\x00f|c\x00p\x00l)\x00"
+)
 _ASCII_EXE_RE = re.compile(rb"(?i)[A-Z0-9_\-. ]{1,60}\.(exe|lnk|dll|js|vbs|bat|cmd|hta|ps1|scr|msi|wsf|cpl)\b")
 
 
@@ -51,18 +55,35 @@ def _entry_flags(names: list[str]) -> set[str]:
     return flags
 
 
-def analyze_archive(data: bytes, ext: str, real_ext: str,
-                    analyze_nested: Callable[[str, bytes, int], dict[str, Any]] | None = None,
-                    depth: int = 0) -> dict[str, Any]:
+def analyze_archive(
+    data: bytes, ext: str, real_ext: str, analyze_nested: Callable[[str, bytes, int], dict[str, Any]] | None = None, depth: int = 0
+) -> dict[str, Any]:
     flags: set[str] = set()
-    out: dict[str, Any] = {"flags": [], "format": real_ext or ext, "entries": [], "entryCount": 0,
-                           "encrypted": False, "uncompressedSize": 0, "ratio": None, "nested": []}
+    out: dict[str, Any] = {
+        "flags": [],
+        "format": real_ext or ext,
+        "entries": [],
+        "entryCount": 0,
+        "encrypted": False,
+        "uncompressedSize": 0,
+        "ratio": None,
+        "nested": [],
+    }
     fmt = real_ext or ext
     entries: list[dict[str, Any]] = []
 
     def add_entry(name: str, size: int, csize: int | None, encrypted: bool, is_dir: bool) -> None:
-        entries.append({"name": name[:300], "size": size, "compressedSize": csize, "encrypted": encrypted,
-                        "dir": is_dir, "ext": extension_of(name), "category": DANGEROUS_EXT.get(extension_of(name))})
+        entries.append(
+            {
+                "name": name[:300],
+                "size": size,
+                "compressedSize": csize,
+                "encrypted": encrypted,
+                "dir": is_dir,
+                "ext": extension_of(name),
+                "category": DANGEROUS_EXT.get(extension_of(name)),
+            }
+        )
 
     try:
         if fmt in ("zip", "jar", "apk", "docx", "xlsx", "pptx", "ooxml", "zipx", "appx"):
@@ -171,7 +192,7 @@ def analyze_archive(data: bytes, ext: str, real_ext: str,
             names = set()
             for m in _UTF16_EXE_RE.finditer(data[:20_000_000]):
                 start = max(0, m.start() - 120)
-                chunk = data[start:m.end()]
+                chunk = data[start : m.end()]
                 try:
                     txt = chunk.decode("utf-16-le", "ignore")
                 except Exception:  # noqa: BLE001
@@ -207,8 +228,9 @@ def analyze_archive(data: bytes, ext: str, real_ext: str,
     return out
 
 
-def _analyze_tar(data: bytes, out: dict[str, Any], flags: set[str],
-                 analyze_nested: Callable[[str, bytes, int], dict[str, Any]] | None, depth: int) -> dict[str, Any]:
+def _analyze_tar(
+    data: bytes, out: dict[str, Any], flags: set[str], analyze_nested: Callable[[str, bytes, int], dict[str, Any]] | None, depth: int
+) -> dict[str, Any]:
     out["format"] = "tar"
     entries: list[dict[str, Any]] = []
     try:
@@ -217,8 +239,17 @@ def _analyze_tar(data: bytes, out: dict[str, Any], flags: set[str],
             out["entryCount"] = len(members)
             analyzed = 0
             for m in members[:2000]:
-                entries.append({"name": m.name[:300], "size": m.size, "compressedSize": None, "encrypted": False,
-                                "dir": m.isdir(), "ext": extension_of(m.name), "category": DANGEROUS_EXT.get(extension_of(m.name))})
+                entries.append(
+                    {
+                        "name": m.name[:300],
+                        "size": m.size,
+                        "compressedSize": None,
+                        "encrypted": False,
+                        "dir": m.isdir(),
+                        "ext": extension_of(m.name),
+                        "category": DANGEROUS_EXT.get(extension_of(m.name)),
+                    }
+                )
                 out["uncompressedSize"] += m.size
                 if analyze_nested and depth < 2 and m.isfile() and 0 < m.size <= MAX_NESTED_BYTES and analyzed < MAX_ENTRIES_ANALYZED:
                     cat = DANGEROUS_EXT.get(extension_of(m.name))

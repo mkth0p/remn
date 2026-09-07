@@ -32,9 +32,14 @@ export async function searchEvents(caseId: number, filter: Filter, opts: { limit
   const sort = filter.sort ?? { field: 'ts', dir: 'desc' }
   const ids = extractEventIds(filter.conditions, filter.logic)
   let rows: EventRow[]
-  let truncated = false
+  let truncated: boolean
   if (ids && ids.length && ids.length <= 50) {
-    rows = await db.events.where('[caseId+eventId]').anyOf(ids.map((id) => [caseId, id] as [number, number])).filter((r) => pred(r as Record<string, unknown>)).limit(HARD_CAP).toArray()
+    rows = await db.events
+      .where('[caseId+eventId]')
+      .anyOf(ids.map((id) => [caseId, id] as [number, number]))
+      .filter((r) => pred(r as Record<string, unknown>))
+      .limit(HARD_CAP)
+      .toArray()
     truncated = rows.length >= HARD_CAP
     sortRows(rows as Record<string, unknown>[], sort.field, sort.dir)
     if (rows.length > limit) {
@@ -48,11 +53,17 @@ export async function searchEvents(caseId: number, filter: Filter, opts: { limit
   let coll = db.events.where('[caseId+ts]').between([caseId, from], [caseId, to], true, true)
   if (sort.field === 'ts' && sort.dir === 'desc') coll = coll.reverse()
   if (sort.field === 'ts') {
-    rows = await coll.filter((r) => pred(r as Record<string, unknown>)).limit(limit + 1).toArray()
+    rows = await coll
+      .filter((r) => pred(r as Record<string, unknown>))
+      .limit(limit + 1)
+      .toArray()
     truncated = rows.length > limit
     return { rows: rows.slice(0, limit), truncated }
   }
-  rows = await coll.filter((r) => pred(r as Record<string, unknown>)).limit(HARD_CAP).toArray()
+  rows = await coll
+    .filter((r) => pred(r as Record<string, unknown>))
+    .limit(HARD_CAP)
+    .toArray()
   truncated = rows.length >= HARD_CAP
   sortRows(rows as Record<string, unknown>[], sort.field, sort.dir)
   if (rows.length > limit) {
@@ -68,7 +79,11 @@ export async function countEvents(caseId: number, filter: Filter, settings?: Set
   const hasConds = !!(filter.conditions?.length || filter.regex?.pattern || filter.text || filter.hourRange)
   const ids = extractEventIds(filter.conditions, filter.logic)
   if (ids && ids.length && ids.length <= 50) {
-    return db.events.where('[caseId+eventId]').anyOf(ids.map((id) => [caseId, id] as [number, number])).filter((r) => pred(r as Record<string, unknown>)).count()
+    return db.events
+      .where('[caseId+eventId]')
+      .anyOf(ids.map((id) => [caseId, id] as [number, number]))
+      .filter((r) => pred(r as Record<string, unknown>))
+      .count()
   }
   const from = pred.from ?? Dexie.minKey
   const to = pred.to ?? Dexie.maxKey
@@ -96,7 +111,10 @@ async function eachEvent(caseId: number, filter: Filter, settings: SettingsLike 
     }
   }
   if (ids && ids.length && ids.length <= 50) {
-    await db.events.where('[caseId+eventId]').anyOf(ids.map((id) => [caseId, id] as [number, number])).each(visit)
+    await db.events
+      .where('[caseId+eventId]')
+      .anyOf(ids.map((id) => [caseId, id] as [number, number]))
+      .each(visit)
   } else {
     const from = pred.from ?? Dexie.minKey
     const to = pred.to ?? Dexie.maxKey
@@ -164,10 +182,17 @@ export async function searchMails(caseId: number, filter: Filter, opts: { limit?
   const to = pred.to ?? Dexie.maxKey
   let coll = db.mails.where('[caseId+date]').between([caseId, from], [caseId, to], true, true)
   if (sort.field === 'date' && sort.dir === 'desc') coll = coll.reverse()
-  let rows = await coll.filter((r) => pred(r as Record<string, unknown>)).limit(sort.field === 'date' ? limit + 1 : HARD_CAP).toArray()
+  let rows = await coll
+    .filter((r) => pred(r as Record<string, unknown>))
+    .limit(sort.field === 'date' ? limit + 1 : HARD_CAP)
+    .toArray()
   // mails without a date are not in the [caseId+date] index: append them when no time range is set
   if (pred.from == null && pred.to == null) {
-    const undated = await db.mails.where('caseId').equals(caseId).filter((r) => r.date == null && pred(r as Record<string, unknown>)).toArray()
+    const undated = await db.mails
+      .where('caseId')
+      .equals(caseId)
+      .filter((r) => r.date == null && pred(r as Record<string, unknown>))
+      .toArray()
     rows = rows.concat(undated)
   }
   if (sort.field !== 'date') sortRows(rows as Record<string, unknown>[], sort.field, sort.dir)
@@ -178,7 +203,11 @@ export async function searchMails(caseId: number, filter: Filter, opts: { limit?
 export async function countMails(caseId: number, filter: Filter, settings?: SettingsLike): Promise<number> {
   const db = getDb()
   const pred = compileFilter(filter, { source: 'mails', settings })
-  return db.mails.where('caseId').equals(caseId).filter((r) => pred(r as Record<string, unknown>)).count()
+  return db.mails
+    .where('caseId')
+    .equals(caseId)
+    .filter((r) => pred(r as Record<string, unknown>))
+    .count()
 }
 
 export async function aggregateMails(caseId: number, filter: Filter, field: string, limit = 25, settings?: SettingsLike): Promise<{ groups: AggGroup[]; total: number; distinct: number }> {
@@ -252,7 +281,26 @@ export async function pivot(caseId: number, value: string, maxScan = 400000): Pr
     mails: { count: 0, first: null, last: null, fields: {} },
   }
   if (!needle) return res
-  const EV_FIELDS = ['ipAddress', 'targetUser', 'subjectUser', 'computer', 'workstation', 'destinationIp', 'sourceIp', 'processName', 'serviceName', 'image', 'query', 'commandLine', 'targetFilename', 'hashes', 'message', 'scriptBlockText', 'memberName', 'objectName']
+  const EV_FIELDS = [
+    'ipAddress',
+    'targetUser',
+    'subjectUser',
+    'computer',
+    'workstation',
+    'destinationIp',
+    'sourceIp',
+    'processName',
+    'serviceName',
+    'image',
+    'query',
+    'commandLine',
+    'targetFilename',
+    'hashes',
+    'message',
+    'scriptBlockText',
+    'memberName',
+    'objectName',
+  ]
   let scanned = 0
   await db.events
     .where('caseId')

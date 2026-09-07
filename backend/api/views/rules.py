@@ -1,4 +1,5 @@
 """Rule-format import endpoints: Sigma (event logs) and Sublime MQL (mail)."""
+
 from __future__ import annotations
 
 import io
@@ -65,11 +66,12 @@ def _convert(request: HttpRequest, converter, what: str):
         if not r.get("ok"):
             key = str(r.get("error") or "?").split(" (")[0][:80]
             reasons[key] = reasons.get(key, 0) + 1
-    return JsonResponse({
-        "rules": results,
-        "summary": {"total": len(results), "converted": ok, "skipped": len(results) - ok,
-                    "reasons": sorted(reasons.items(), key=lambda kv: -kv[1])[:20]},
-    })
+    return JsonResponse(
+        {
+            "rules": results,
+            "summary": {"total": len(results), "converted": ok, "skipped": len(results) - ok, "reasons": sorted(reasons.items(), key=lambda kv: -kv[1])[:20]},
+        }
+    )
 
 
 @require_POST

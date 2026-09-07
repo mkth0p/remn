@@ -57,7 +57,35 @@ const GROUPABLE: Record<string, string[]> = {
 export const sevRank = (s: Severity | string | undefined): number => Math.max(0, SEVERITIES.indexOf((s || 'info') as Severity))
 export const maxSeverity = (a: Severity, b: Severity | undefined): Severity => (b && sevRank(b) > sevRank(a) ? b : a)
 
-const OPS = new Set<string>(['eq', 'ne', 'in', 'nin', 'contains', 'not_contains', 'contains_any', 'contains_all', 'startswith', 'not_startswith', 'endswith', 'not_endswith', 're', 'not_re', 'gt', 'gte', 'lt', 'lte', 'exists', 'empty', 'in_setting', 'nin_setting', 'levenshtein', 'length', 'contains_cs', 'startswith_cs', 'endswith_cs'])
+const OPS = new Set<string>([
+  'eq',
+  'ne',
+  'in',
+  'nin',
+  'contains',
+  'not_contains',
+  'contains_any',
+  'contains_all',
+  'startswith',
+  'not_startswith',
+  'endswith',
+  'not_endswith',
+  're',
+  'not_re',
+  'gt',
+  'gte',
+  'lt',
+  'lte',
+  'exists',
+  'empty',
+  'in_setting',
+  'nin_setting',
+  'levenshtein',
+  'length',
+  'contains_cs',
+  'startswith_cs',
+  'endswith_cs',
+])
 
 type Pred = (row: Row) => boolean
 
@@ -114,13 +142,21 @@ export function parseThreshold(t: string | number | undefined): ((n: number) => 
   if (!m) return null
   const v = Number(m[2])
   switch (m[1] || '>=') {
-    case '>=': return (n) => n >= v
-    case '>': return (n) => n > v
-    case '<=': return (n) => n <= v
-    case '<': return (n) => n < v
-    case '==': case '=': return (n) => n === v
-    case '!=': return (n) => n !== v
-    default: return (n) => n >= v
+    case '>=':
+      return (n) => n >= v
+    case '>':
+      return (n) => n > v
+    case '<=':
+      return (n) => n <= v
+    case '<':
+      return (n) => n < v
+    case '==':
+    case '=':
+      return (n) => n === v
+    case '!=':
+      return (n) => n !== v
+    default:
+      return (n) => n >= v
   }
 }
 
@@ -206,7 +242,12 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
   const settings = opts.settings
   const tsField = rule.source === 'mails' ? 'date' : 'ts'
   const idField = opts.idField ?? 'id'
-  if (rule.require_setting && !((settings?.[rule.require_setting] as unknown[] | undefined)?.length || (settings?.[rule.require_setting.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())] as unknown[] | undefined)?.length)) {
+  if (
+    rule.require_setting &&
+    !(
+      (settings?.[rule.require_setting] as unknown[] | undefined)?.length || (settings?.[rule.require_setting.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())] as unknown[] | undefined)?.length
+    )
+  ) {
     opts.onDiag?.({ ruleId: rule.id, reason: 'missing_setting', detail: `setting "${rule.require_setting}" is empty`, matched: 0, afterExclude: 0, afterTime: 0 })
     return []
   }
@@ -247,7 +288,16 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
     }
     opts.onDiag({ ruleId: rule.id, reason, detail, matched: nWhere, afterExclude: nExcl, afterTime: matches.length })
   }
-  const base = () => ({ ruleId: rule.id, title: rule.title, description: rule.description, severity: rule.severity, confidence: rule.confidence, source: rule.source, attack: rule.attack ?? [], tags: rule.tags ?? [] })
+  const base = () => ({
+    ruleId: rule.id,
+    title: rule.title,
+    description: rule.description,
+    severity: rule.severity,
+    confidence: rule.confidence,
+    source: rule.source,
+    attack: rule.attack ?? [],
+    tags: rule.tags ?? [],
+  })
   const escalationFor = (rows: Row[]) => {
     let severity = rule.severity
     let escalation: string | undefined
@@ -293,7 +343,16 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
           escalation = flag
         }
       }
-      findings.push({ ...base(), severity: sev, key: `${rule.id}|${idOf(row)}`, ts: (row[tsField] as number) ?? null, entities: entitiesOf(row, entityFields), count: 1, refs: [idOf(row)], escalation })
+      findings.push({
+        ...base(),
+        severity: sev,
+        key: `${rule.id}|${idOf(row)}`,
+        ts: (row[tsField] as number) ?? null,
+        entities: entitiesOf(row, entityFields),
+        count: 1,
+        refs: [idOf(row)],
+        escalation,
+      })
     }
     emitZeroDiag()
     return findings
@@ -320,13 +379,23 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
       const first = rows[0]
       const last = rows[rows.length - 1]
       const ent = entitiesOf(first, entityFields)
-      if (rule.distinct) ent[rule.distinct] = Array.from(new Set(rows.map((r) => str(getPath(r, rule.distinct!))).filter(Boolean))).slice(0, 8).join(', ')
-      findings.push({ ...base(), ...escalationFor(rows), key: `${rule.id}|${groupKey(first, groupBy)}`, ts: (first[tsField] as number) ?? null, tsEnd: (last[tsField] as number) ?? null, entities: ent, count: rows.length })
+      if (rule.distinct)
+        ent[rule.distinct] = Array.from(new Set(rows.map((r) => str(getPath(r, rule.distinct!))).filter(Boolean)))
+          .slice(0, 8)
+          .join(', ')
+      findings.push({
+        ...base(),
+        ...escalationFor(rows),
+        key: `${rule.id}|${groupKey(first, groupBy)}`,
+        ts: (first[tsField] as number) ?? null,
+        tsEnd: (last[tsField] as number) ?? null,
+        entities: ent,
+        count: rows.length,
+      })
       if (findings.length >= maxFindings) break
       continue
     }
     // sliding window: detect bursts
-    let i = 0
     let open: { rows: Row[]; start: number; last: number } | null = null
     const win: Row[] = []
     for (const row of rows) {
@@ -347,7 +416,6 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
       if (threshold ? threshold(n) : n >= 1) {
         open = { rows: [...win], start: Number(win[0][tsField]) || 0, last: t }
       }
-      i++
     }
     if (open) findings.push(makeBurst(open))
     if (findings.length >= maxFindings) break
@@ -356,7 +424,10 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
   function makeBurst(b: { rows: Row[]; start: number; last: number }) {
     const first = b.rows[0]
     const ent = entitiesOf(first, entityFields)
-    if (rule.distinct) ent[rule.distinct] = Array.from(new Set(b.rows.map((r) => str(getPath(r, rule.distinct!))).filter(Boolean))).slice(0, 8).join(', ')
+    if (rule.distinct)
+      ent[rule.distinct] = Array.from(new Set(b.rows.map((r) => str(getPath(r, rule.distinct!))).filter(Boolean)))
+        .slice(0, 8)
+        .join(', ')
     return { ...base(), ...escalationFor(b.rows), key: `${rule.id}|${groupKey(first, groupBy)}|${Math.floor(b.start / 60000)}`, ts: b.start, tsEnd: b.last, entities: ent, count: b.rows.length }
   }
 
@@ -481,9 +552,11 @@ export interface PresentSelectors {
 export function ruleApplicable(rule: Rule, present: PresentSelectors): { ok: true } | { ok: false; detail: string } {
   if (rule.source !== 'events') return { ok: true }
   const ids = ruleEventIds(rule.where)
-  if (ids && ids.length && !ids.some((id) => present.eventIds.has(id))) return { ok: false, detail: `no event ${ids.length === 1 ? 'id' : 'ids'} ${ids.slice(0, 6).join(', ')}${ids.length > 6 ? '…' : ''} in this evidence` }
+  if (ids && ids.length && !ids.some((id) => present.eventIds.has(id)))
+    return { ok: false, detail: `no event ${ids.length === 1 ? 'id' : 'ids'} ${ids.slice(0, 6).join(', ')}${ids.length > 6 ? '…' : ''} in this evidence` }
   const chans = ruleChannels(rule.where)
-  if (chans && chans.length && !chans.some((c) => present.channels.some((p) => (c.contains ? p.includes(c.value) : p === c.value)))) return { ok: false, detail: `no "${chans[0].value}" channel in this evidence` }
+  if (chans && chans.length && !chans.some((c) => present.channels.some((p) => (c.contains ? p.includes(c.value) : p === c.value))))
+    return { ok: false, detail: `no "${chans[0].value}" channel in this evidence` }
   return { ok: true }
 }
 

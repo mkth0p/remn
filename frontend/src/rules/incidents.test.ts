@@ -90,9 +90,30 @@ describe('false positives', () => {
 })
 
 const chainOf = (id: string, seedId: number, stepIds: number[], score = 80): Chain => ({
-  id, identity: id, identityLabel: `${id}@corp.test`, start: 0, end: 10 * H, score, severity: 'high', artifactLinks: 1, summary: '',
+  id,
+  identity: id,
+  identityLabel: `${id}@corp.test`,
+  start: 0,
+  end: 10 * H,
+  score,
+  severity: 'high',
+  artifactLinks: 1,
+  summary: '',
   seed: { id: seedId, ts: 0, subject: 'Urgent invoice', fromAddr: 'x@evil.test', risk: 90, flags: [], findings: [], urlDomains: [], attachments: [] },
-  steps: stepIds.map((sid, i) => ({ kind: 'event' as const, source: 'events' as const, id: sid, refs: i === 0 ? [sid, sid + 100] : undefined, ts: (i + 1) * H, tsEnd: (i + 1) * H, count: 1, title: `step ${sid}`, weight: 2, artifacts: [], findings: [], offsetMin: 60 })),
+  steps: stepIds.map((sid, i) => ({
+    kind: 'event' as const,
+    source: 'events' as const,
+    id: sid,
+    refs: i === 0 ? [sid, sid + 100] : undefined,
+    ts: (i + 1) * H,
+    tsEnd: (i + 1) * H,
+    count: 1,
+    title: `step ${sid}`,
+    weight: 2,
+    artifacts: [],
+    findings: [],
+    offsetMin: 60,
+  })),
   entities: { user: id, ips: [], hosts: [], attackerAddresses: [], domains: [] },
 })
 

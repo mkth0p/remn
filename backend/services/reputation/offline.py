@@ -10,6 +10,7 @@ Offline providers for air-gapped work:
 * GeoIP - MaxMind GeoLite2 (City / ASN .mmdb) if ``maxminddb`` is importable and
   the databases are placed in ``backend/data/geoip``.
 """
+
 from __future__ import annotations
 
 import csv
@@ -71,8 +72,16 @@ class OfflineLists(Provider):
     def info(self) -> dict[str, Any]:
         d = super().info()
         self._maybe_load()
-        d.update({"files": self._files, "urls": len(self._urls), "domains": len(self._domains), "ips": len(self._ips) + len(self._nets), "hashes": len(self._hashes),
-                  "directory": str(self.dir) if self.dir else None})
+        d.update(
+            {
+                "files": self._files,
+                "urls": len(self._urls),
+                "domains": len(self._domains),
+                "ips": len(self._ips) + len(self._nets),
+                "hashes": len(self._hashes),
+                "directory": str(self.dir) if self.dir else None,
+            }
+        )
         return d
 
     def _maybe_load(self) -> None:
@@ -91,7 +100,14 @@ class OfflineLists(Provider):
                     log.warning("offline list %s failed: %s", p.name, exc)
             self._mtime = mtime
             self._files = len(files)
-            log.info("offline lists: %d files, %d urls, %d domains, %d ips, %d hashes", self._files, len(self._urls), len(self._domains), len(self._ips) + len(self._nets), len(self._hashes))
+            log.info(
+                "offline lists: %d files, %d urls, %d domains, %d ips, %d hashes",
+                self._files,
+                len(self._urls),
+                len(self._domains),
+                len(self._ips) + len(self._nets),
+                len(self._hashes),
+            )
 
     def _add(self, kind: str | None, value: str, source: str) -> None:
         v = value.strip().strip('"').lower()
@@ -243,8 +259,8 @@ class GeoIP(Provider):
         details: dict[str, Any] = {}
         if self._city:
             r = self._city.get(value) or {}
-            details["country"] = ((r.get("country") or {}).get("iso_code"))
-            details["city"] = (((r.get("city") or {}).get("names") or {}).get("en"))
+            details["country"] = (r.get("country") or {}).get("iso_code")
+            details["city"] = ((r.get("city") or {}).get("names") or {}).get("en")
             loc = r.get("location") or {}
             details["lat"], details["lon"] = loc.get("latitude"), loc.get("longitude")
         if self._asn:

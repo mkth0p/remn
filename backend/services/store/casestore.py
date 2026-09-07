@@ -4,20 +4,22 @@ under DATA_DIR/cases/<key>/case.duckdb. Column names are the same camelCase
 keys the browser rows use, so the filter DSL, the rules and the AI prompts
 work identically for browser-stored and server-stored cases.
 """
+
 from __future__ import annotations
 
+import importlib.util
 import json
 import logging
 import os
 import re
 import shutil
+import sys
 import threading
 import time
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
-import importlib.util
-import sys
 import duckdb
 
 # DuckDB probes for pandas while binding every "?" parameter. When pandas is not installed the
@@ -41,82 +43,331 @@ _B = ("BOOLEAN", pa.bool_())
 _LS = ("VARCHAR[]", pa.list_(pa.string()))
 
 EVENT_COLUMNS: list[tuple[str, tuple[str, Any]]] = [
-    ("id", _L), ("evidenceId", _I), ("sourceFile", _S), ("recordId", _L), ("ts", _L), ("tsIso", _S), ("eventId", _I),
-    ("qualifiers", _I), ("version", _I), ("level", _I), ("levelName", _S), ("task", _I), ("opcode", _I), ("keywords", _S),
-    ("provider", _S), ("providerGuid", _S), ("channel", _S), ("computer", _S), ("userSid", _S), ("processId", _I),
-    ("threadId", _I), ("activityId", _S), ("category", _S), ("description", _S), ("summary", _S),
-    ("targetUser", _S), ("targetDomain", _S), ("targetSid", _S), ("targetLogonId", _S), ("targetServer", _S),
-    ("subjectUser", _S), ("subjectDomain", _S), ("subjectSid", _S), ("subjectLogonId", _S),
-    ("logonType", _I), ("logonTypeName", _S), ("logonProcess", _S), ("authPackage", _S), ("elevatedToken", _S),
-    ("keyLength", _I), ("ipAddress", _S), ("ipPort", _I), ("workstation", _S), ("sourceIp", _S), ("sourcePort", _I),
-    ("status", _S), ("subStatus", _S), ("statusText", _S), ("failureReason", _S),
-    ("processName", _S), ("newProcessId", _S), ("callerProcessId", _S), ("commandLine", _S), ("parentProcessName", _S),
-    ("parentProcessId", _S), ("tokenElevationType", _S), ("serviceName", _S), ("serviceFile", _S), ("serviceType", _S),
-    ("serviceStartType", _S), ("serviceAccount", _S), ("serviceState", _S), ("taskName", _S), ("taskContent", _S),
-    ("memberName", _S), ("memberSid", _S), ("groupName", _S), ("groupDomain", _S), ("privilegeList", _S),
-    ("shareName", _S), ("shareLocalPath", _S), ("relativeTargetName", _S), ("objectName", _S), ("objectType", _S),
-    ("accessMask", _S), ("objectValueName", _S), ("newValue", _S), ("oldValue", _S), ("objectDn", _S),
-    ("attributeName", _S), ("attributeValue", _S), ("ticketEncryption", _S), ("ticketOptions", _S), ("preAuthType", _S),
-    ("scriptBlockText", _S), ("scriptBlockId", _S), ("path", _S), ("messageNumber", _I), ("messageTotal", _I),
-    ("payload", _S), ("deviceDescription", _S), ("deviceId", _S), ("className", _S), ("previousTime", _S), ("newTime", _S),
-    ("subcategoryGuid", _S), ("auditPolicyChanges", _S), ("channelCleared", _S), ("samAccountName", _S),
-    ("displayName", _S), ("upn", _S), ("sessionId", _I), ("user", _S), ("reason", _S),
-    ("param1", _S), ("param2", _S), ("param3", _S), ("param4", _S),
-    ("image", _S), ("parentImage", _S), ("parentCommandLine", _S), ("originalFileName", _S), ("hashes", _S),
-    ("currentDirectory", _S), ("integrityLevel", _S), ("processGuid", _S), ("parentProcessGuid", _S),
-    ("destinationIp", _S), ("destinationPort", _I), ("destinationHostname", _S), ("sourceHostname", _S), ("protocol", _S),
-    ("initiated", _S), ("query", _S), ("queryResults", _S), ("targetFilename", _S), ("targetObject", _S), ("details", _S),
-    ("eventType", _S), ("imageLoaded", _S), ("signed", _S), ("signature", _S), ("signatureStatus", _S), ("sourceImage", _S),
-    ("targetImage", _S), ("grantedAccess", _S), ("callTrace", _S), ("pipeName", _S), ("ruleName", _S), ("company", _S),
-    ("product", _S), ("wmiConsumer", _S), ("wmiFilter", _S), ("wmiQuery", _S), ("operation", _S), ("name", _S),
-    ("threatName", _S), ("severityName", _S), ("categoryName", _S), ("actionName", _S), ("detectionSource", _S),
-    ("url", _S), ("action", _S), ("direction", _S), ("applicationPath", _S), ("message", _S),
-    ("data", _S), ("raw", _S),
+    ("id", _L),
+    ("evidenceId", _I),
+    ("sourceFile", _S),
+    ("recordId", _L),
+    ("ts", _L),
+    ("tsIso", _S),
+    ("eventId", _I),
+    ("qualifiers", _I),
+    ("version", _I),
+    ("level", _I),
+    ("levelName", _S),
+    ("task", _I),
+    ("opcode", _I),
+    ("keywords", _S),
+    ("provider", _S),
+    ("providerGuid", _S),
+    ("channel", _S),
+    ("computer", _S),
+    ("userSid", _S),
+    ("processId", _I),
+    ("threadId", _I),
+    ("activityId", _S),
+    ("category", _S),
+    ("description", _S),
+    ("summary", _S),
+    ("targetUser", _S),
+    ("targetDomain", _S),
+    ("targetSid", _S),
+    ("targetLogonId", _S),
+    ("targetServer", _S),
+    ("subjectUser", _S),
+    ("subjectDomain", _S),
+    ("subjectSid", _S),
+    ("subjectLogonId", _S),
+    ("logonType", _I),
+    ("logonTypeName", _S),
+    ("logonProcess", _S),
+    ("authPackage", _S),
+    ("elevatedToken", _S),
+    ("keyLength", _I),
+    ("ipAddress", _S),
+    ("ipPort", _I),
+    ("workstation", _S),
+    ("sourceIp", _S),
+    ("sourcePort", _I),
+    ("status", _S),
+    ("subStatus", _S),
+    ("statusText", _S),
+    ("failureReason", _S),
+    ("processName", _S),
+    ("newProcessId", _S),
+    ("callerProcessId", _S),
+    ("commandLine", _S),
+    ("parentProcessName", _S),
+    ("parentProcessId", _S),
+    ("tokenElevationType", _S),
+    ("serviceName", _S),
+    ("serviceFile", _S),
+    ("serviceType", _S),
+    ("serviceStartType", _S),
+    ("serviceAccount", _S),
+    ("serviceState", _S),
+    ("taskName", _S),
+    ("taskContent", _S),
+    ("memberName", _S),
+    ("memberSid", _S),
+    ("groupName", _S),
+    ("groupDomain", _S),
+    ("privilegeList", _S),
+    ("shareName", _S),
+    ("shareLocalPath", _S),
+    ("relativeTargetName", _S),
+    ("objectName", _S),
+    ("objectType", _S),
+    ("accessMask", _S),
+    ("objectValueName", _S),
+    ("newValue", _S),
+    ("oldValue", _S),
+    ("objectDn", _S),
+    ("attributeName", _S),
+    ("attributeValue", _S),
+    ("ticketEncryption", _S),
+    ("ticketOptions", _S),
+    ("preAuthType", _S),
+    ("scriptBlockText", _S),
+    ("scriptBlockId", _S),
+    ("path", _S),
+    ("messageNumber", _I),
+    ("messageTotal", _I),
+    ("payload", _S),
+    ("deviceDescription", _S),
+    ("deviceId", _S),
+    ("className", _S),
+    ("previousTime", _S),
+    ("newTime", _S),
+    ("subcategoryGuid", _S),
+    ("auditPolicyChanges", _S),
+    ("channelCleared", _S),
+    ("samAccountName", _S),
+    ("displayName", _S),
+    ("upn", _S),
+    ("sessionId", _I),
+    ("user", _S),
+    ("reason", _S),
+    ("param1", _S),
+    ("param2", _S),
+    ("param3", _S),
+    ("param4", _S),
+    ("image", _S),
+    ("parentImage", _S),
+    ("parentCommandLine", _S),
+    ("originalFileName", _S),
+    ("hashes", _S),
+    ("currentDirectory", _S),
+    ("integrityLevel", _S),
+    ("processGuid", _S),
+    ("parentProcessGuid", _S),
+    ("destinationIp", _S),
+    ("destinationPort", _I),
+    ("destinationHostname", _S),
+    ("sourceHostname", _S),
+    ("protocol", _S),
+    ("initiated", _S),
+    ("query", _S),
+    ("queryResults", _S),
+    ("targetFilename", _S),
+    ("targetObject", _S),
+    ("details", _S),
+    ("eventType", _S),
+    ("imageLoaded", _S),
+    ("signed", _S),
+    ("signature", _S),
+    ("signatureStatus", _S),
+    ("sourceImage", _S),
+    ("targetImage", _S),
+    ("grantedAccess", _S),
+    ("callTrace", _S),
+    ("pipeName", _S),
+    ("ruleName", _S),
+    ("company", _S),
+    ("product", _S),
+    ("wmiConsumer", _S),
+    ("wmiFilter", _S),
+    ("wmiQuery", _S),
+    ("operation", _S),
+    ("name", _S),
+    ("threatName", _S),
+    ("severityName", _S),
+    ("categoryName", _S),
+    ("actionName", _S),
+    ("detectionSource", _S),
+    ("url", _S),
+    ("action", _S),
+    ("direction", _S),
+    ("applicationPath", _S),
+    ("message", _S),
+    ("data", _S),
+    ("raw", _S),
 ]
 EVENT_INT = {n for n, t in EVENT_COLUMNS if t in (_I, _L)}
 
 MAIL_COLUMNS: list[tuple[str, tuple[str, Any]]] = [
-    ("id", _L), ("evidenceId", _I), ("sourceIndex", _I), ("sourceFormat", _S), ("sourceName", _S), ("folder", _S),
-    ("subject", _S), ("date", _L), ("dateIso", _S), ("dateRaw", _S), ("fromName", _S), ("fromNameNorm", _S),
-    ("fromAddr", _S), ("fromDomain", _S), ("fromRegistrable", _S), ("senderAddr", _S), ("replyToAddr", _S),
-    ("replyToDomain", _S), ("replyToList", _LS), ("returnPath", _S), ("toList", _LS), ("ccList", _LS), ("bccList", _LS),
-    ("recipientCount", _I), ("messageId", _S), ("inReplyTo", _S), ("xMailer", _S), ("priority", _S), ("listId", _S),
-    ("originIp", _S), ("originIpSource", _S), ("originHelo", _S), ("originRdns", _S), ("hopCount", _I), ("totalDelayS", _I),
-    ("spf", _S), ("dkim", _S), ("dmarc", _S), ("compauth", _S), ("textPreview", _S), ("urlCount", _I),
-    ("attachmentCount", _I), ("maxAttachmentRisk", _I), ("risk", _I), ("flags", _LS), ("size", _L), ("contentType", _S),
-    ("reputationWorst", _S), ("reputationOriginIp", _S),
+    ("id", _L),
+    ("evidenceId", _I),
+    ("sourceIndex", _I),
+    ("sourceFormat", _S),
+    ("sourceName", _S),
+    ("folder", _S),
+    ("subject", _S),
+    ("date", _L),
+    ("dateIso", _S),
+    ("dateRaw", _S),
+    ("fromName", _S),
+    ("fromNameNorm", _S),
+    ("fromAddr", _S),
+    ("fromDomain", _S),
+    ("fromRegistrable", _S),
+    ("senderAddr", _S),
+    ("replyToAddr", _S),
+    ("replyToDomain", _S),
+    ("replyToList", _LS),
+    ("returnPath", _S),
+    ("toList", _LS),
+    ("ccList", _LS),
+    ("bccList", _LS),
+    ("recipientCount", _I),
+    ("messageId", _S),
+    ("inReplyTo", _S),
+    ("xMailer", _S),
+    ("priority", _S),
+    ("listId", _S),
+    ("originIp", _S),
+    ("originIpSource", _S),
+    ("originHelo", _S),
+    ("originRdns", _S),
+    ("hopCount", _I),
+    ("totalDelayS", _I),
+    ("spf", _S),
+    ("dkim", _S),
+    ("dmarc", _S),
+    ("compauth", _S),
+    ("textPreview", _S),
+    ("urlCount", _I),
+    ("attachmentCount", _I),
+    ("maxAttachmentRisk", _I),
+    ("risk", _I),
+    ("flags", _LS),
+    ("size", _L),
+    ("contentType", _S),
+    ("reputationWorst", _S),
+    ("reputationOriginIp", _S),
     # sender baseline / campaign enrichment (services/analysis/baseline.py), NULL until the pass runs
-    ("senderPrevalence", _S), ("senderPriorCount", _I), ("senderFirstSeen", _L), ("senderDaysKnown", _I), ("senderSolicited", _B),
-    ("senderAuthRegression", _B), ("campaignId", _S), ("campaignSize", _I), ("campaignSenders", _I),
+    ("senderPrevalence", _S),
+    ("senderPriorCount", _I),
+    ("senderFirstSeen", _L),
+    ("senderDaysKnown", _I),
+    ("senderSolicited", _B),
+    ("senderAuthRegression", _B),
+    ("campaignId", _S),
+    ("campaignSize", _I),
+    ("campaignSenders", _I),
     # JSON payloads (stored as text, parsed on read)
-    ("auth", _S), ("sender", _S), ("replyTo", _S), ("to", _S), ("cc", _S), ("bcc", _S), ("references", _S), ("hops", _S),
-    ("urls", _S), ("attachments", _S), ("keywordHits", _S), ("hiddenText", _S), ("lookalike", _S), ("replyToLookalike", _S),
-    ("htmlInfo", _S), ("reputation", _S), ("labels", _S), ("assessment", _S),
+    ("auth", _S),
+    ("sender", _S),
+    ("replyTo", _S),
+    ("to", _S),
+    ("cc", _S),
+    ("bcc", _S),
+    ("references", _S),
+    ("hops", _S),
+    ("urls", _S),
+    ("attachments", _S),
+    ("keywordHits", _S),
+    ("hiddenText", _S),
+    ("lookalike", _S),
+    ("replyToLookalike", _S),
+    ("htmlInfo", _S),
+    ("reputation", _S),
+    ("labels", _S),
+    ("assessment", _S),
 ]
 MAIL_INT = {n for n, t in MAIL_COLUMNS if t in (_I, _L)}
 MAIL_BOOL = {n for n, t in MAIL_COLUMNS if t == _B}
 MAIL_LIST = {n for n, t in MAIL_COLUMNS if t == _LS}
-MAIL_JSON = {"auth", "sender", "replyTo", "to", "cc", "bcc", "references", "hops", "urls", "attachments", "keywordHits",
-             "hiddenText", "lookalike", "replyToLookalike", "htmlInfo", "reputation", "labels", "assessment"}
+MAIL_JSON = {
+    "auth",
+    "sender",
+    "replyTo",
+    "to",
+    "cc",
+    "bcc",
+    "references",
+    "hops",
+    "urls",
+    "attachments",
+    "keywordHits",
+    "hiddenText",
+    "lookalike",
+    "replyToLookalike",
+    "htmlInfo",
+    "reputation",
+    "labels",
+    "assessment",
+}
 
 ATTACHMENT_COLUMNS: list[tuple[str, tuple[str, Any]]] = [
-    ("id", _L), ("mailId", _L), ("evidenceId", _I), ("name", _S), ("ext", _S), ("realExt", _S), ("realMime", _S),
-    ("size", _L), ("sha256", _S), ("md5", _S), ("risk", _I), ("flags", _LS), ("category", _S), ("inline", _B),
-    ("details", _S), ("date", _L), ("fromAddr", _S), ("mailSubject", _S),
+    ("id", _L),
+    ("mailId", _L),
+    ("evidenceId", _I),
+    ("name", _S),
+    ("ext", _S),
+    ("realExt", _S),
+    ("realMime", _S),
+    ("size", _L),
+    ("sha256", _S),
+    ("md5", _S),
+    ("risk", _I),
+    ("flags", _LS),
+    ("category", _S),
+    ("inline", _B),
+    ("details", _S),
+    ("date", _L),
+    ("fromAddr", _S),
+    ("mailSubject", _S),
 ]
 URL_COLUMNS: list[tuple[str, tuple[str, Any]]] = [
-    ("id", _L), ("mailId", _L), ("evidenceId", _I), ("url", _S), ("normalized", _S), ("defanged", _S), ("host", _S),
-    ("domain", _S), ("scheme", _S), ("flags", _LS), ("text", _S), ("source", _S), ("date", _L),
+    ("id", _L),
+    ("mailId", _L),
+    ("evidenceId", _I),
+    ("url", _S),
+    ("normalized", _S),
+    ("defanged", _S),
+    ("host", _S),
+    ("domain", _S),
+    ("scheme", _S),
+    ("flags", _LS),
+    ("text", _S),
+    ("source", _S),
+    ("date", _L),
 ]
 BODY_COLUMNS: list[tuple[str, tuple[str, Any]]] = [
-    ("mailId", _L), ("bodyText", _S), ("bodyHtml", _S), ("headersText", _S), ("visibleText", _S),
+    ("mailId", _L),
+    ("bodyText", _S),
+    ("bodyHtml", _S),
+    ("headersText", _S),
+    ("visibleText", _S),
 ]
 IOC_COLUMNS: list[tuple[str, tuple[str, Any]]] = [
-    ("kind", _S), ("value", _S), ("evidenceId", _I), ("count", _L), ("firstSeen", _L), ("lastSeen", _L), ("sources", _LS),
+    ("kind", _S),
+    ("value", _S),
+    ("evidenceId", _I),
+    ("count", _L),
+    ("firstSeen", _L),
+    ("lastSeen", _L),
+    ("sources", _LS),
 ]
 
-TABLES = {"events": EVENT_COLUMNS, "mails": MAIL_COLUMNS, "attachments": ATTACHMENT_COLUMNS, "urls": URL_COLUMNS,
-          "mail_bodies": BODY_COLUMNS, "iocs": IOC_COLUMNS}
+TABLES = {
+    "events": EVENT_COLUMNS,
+    "mails": MAIL_COLUMNS,
+    "attachments": ATTACHMENT_COLUMNS,
+    "urls": URL_COLUMNS,
+    "mail_bodies": BODY_COLUMNS,
+    "iocs": IOC_COLUMNS,
+}
 # No secondary ART indexes: they make bulk inserts an order of magnitude slower and DuckDB's
 # zone maps + parallel scans already answer the analytical filters used here in well under a second.
 INDEXES: list[str] = []
@@ -175,7 +426,9 @@ def _arrow_table(columns: list[tuple[str, tuple[str, Any]]], rows: list[dict[str
                         fixed.append(None)
                 arrays[name] = pa.array(fixed, type=patype)
             elif patype == pa.list_(pa.string()):
-                arrays[name] = pa.array([[str(x) for x in (v or [])] if isinstance(v, (list, tuple)) else ([] if v is None else [str(v)]) for v in values], type=patype)
+                arrays[name] = pa.array(
+                    [[str(x) for x in (v or [])] if isinstance(v, (list, tuple)) else ([] if v is None else [str(v)]) for v in values], type=patype
+                )
             elif patype == pa.bool_():
                 arrays[name] = pa.array([as_bool(v) for v in values], type=patype)
             else:
@@ -217,9 +470,13 @@ class CaseStore:
     def _init_schema(self) -> None:
         with self.lock:
             for t, cols in TABLES.items():
-                self._con.execute(_ddl(t, cols, pk='kind, value, "evidenceId"' if t == "iocs" else ("\"mailId\"" if t == "mail_bodies" else None)))
-            self._con.execute('CREATE TABLE IF NOT EXISTS evidence (id INTEGER PRIMARY KEY, name VARCHAR, kind VARCHAR, format VARCHAR, size BIGINT, "sha256Client" VARCHAR, "sha256Server" VARCHAR, count BIGINT, stats VARCHAR, "addedAt" BIGINT, status VARCHAR)')
-            self._con.execute('CREATE TABLE IF NOT EXISTS ioc_reputation (kind VARCHAR, value VARCHAR, verdict VARCHAR, tags VARCHAR[], summary VARCHAR, verdicts VARCHAR, "checkedAt" BIGINT, PRIMARY KEY (kind, value))')
+                self._con.execute(_ddl(t, cols, pk='kind, value, "evidenceId"' if t == "iocs" else ('"mailId"' if t == "mail_bodies" else None)))
+            self._con.execute(
+                'CREATE TABLE IF NOT EXISTS evidence (id INTEGER PRIMARY KEY, name VARCHAR, kind VARCHAR, format VARCHAR, size BIGINT, "sha256Client" VARCHAR, "sha256Server" VARCHAR, count BIGINT, stats VARCHAR, "addedAt" BIGINT, status VARCHAR)'
+            )
+            self._con.execute(
+                'CREATE TABLE IF NOT EXISTS ioc_reputation (kind VARCHAR, value VARCHAR, verdict VARCHAR, tags VARCHAR[], summary VARCHAR, verdicts VARCHAR, "checkedAt" BIGINT, PRIMARY KEY (kind, value))'
+            )
             self._con.execute("CREATE TABLE IF NOT EXISTS meta (key VARCHAR PRIMARY KEY, value VARCHAR)")
             # columns added after a store was created (enrichment passes): add them in place
             for t, cols in TABLES.items():
@@ -268,7 +525,7 @@ class CaseStore:
                         f'INSERT INTO iocs ({cols}) SELECT {cols} FROM _batch ON CONFLICT (kind, value, "evidenceId") DO UPDATE SET '
                         'count = iocs.count + excluded.count, "firstSeen" = least(coalesce(iocs."firstSeen", excluded."firstSeen"), coalesce(excluded."firstSeen", iocs."firstSeen")), '
                         '"lastSeen" = greatest(coalesce(iocs."lastSeen", excluded."lastSeen"), coalesce(excluded."lastSeen", iocs."lastSeen")), '
-                        'sources = list_distinct(list_concat(iocs.sources, excluded.sources))'
+                        "sources = list_distinct(list_concat(iocs.sources, excluded.sources))"
                     )
                 elif table == "mail_bodies":
                     con.execute(f"INSERT OR REPLACE INTO mail_bodies ({cols}) SELECT {cols} FROM _batch")
@@ -282,8 +539,19 @@ class CaseStore:
         with self.lock:
             self._con.execute(
                 'INSERT OR REPLACE INTO evidence (id, name, kind, format, size, "sha256Client", "sha256Server", count, stats, "addedAt", status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                [int(ev["id"]), ev.get("name"), ev.get("kind"), ev.get("format"), ev.get("size"), ev.get("sha256Client"), ev.get("sha256Server"),
-                 ev.get("count"), json.dumps(ev.get("stats")) if ev.get("stats") is not None else None, ev.get("addedAt"), ev.get("status")],
+                [
+                    int(ev["id"]),
+                    ev.get("name"),
+                    ev.get("kind"),
+                    ev.get("format"),
+                    ev.get("size"),
+                    ev.get("sha256Client"),
+                    ev.get("sha256Server"),
+                    ev.get("count"),
+                    json.dumps(ev.get("stats")) if ev.get("stats") is not None else None,
+                    ev.get("addedAt"),
+                    ev.get("status"),
+                ],
             )
 
     def delete_evidence(self, evidence_id: int) -> dict[str, int]:
@@ -293,7 +561,9 @@ class CaseStore:
             for t in ("events", "attachments", "urls", "iocs"):
                 out[t] = con.execute(f'SELECT count(*) FROM {t} WHERE "evidenceId" = ?', [evidence_id]).fetchone()[0]
                 con.execute(f'DELETE FROM {t} WHERE "evidenceId" = ?', [evidence_id])
-            out["mail_bodies"] = con.execute('SELECT count(*) FROM mail_bodies WHERE "mailId" IN (SELECT id FROM mails WHERE "evidenceId" = ?)', [evidence_id]).fetchone()[0]
+            out["mail_bodies"] = con.execute(
+                'SELECT count(*) FROM mail_bodies WHERE "mailId" IN (SELECT id FROM mails WHERE "evidenceId" = ?)', [evidence_id]
+            ).fetchone()[0]
             con.execute('DELETE FROM mail_bodies WHERE "mailId" IN (SELECT id FROM mails WHERE "evidenceId" = ?)', [evidence_id])
             out["mails"] = con.execute('SELECT count(*) FROM mails WHERE "evidenceId" = ?', [evidence_id]).fetchone()[0]
             con.execute('DELETE FROM mails WHERE "evidenceId" = ?', [evidence_id])
@@ -314,7 +584,15 @@ class CaseStore:
             for it in items:
                 self._con.execute(
                     'INSERT OR REPLACE INTO ioc_reputation (kind, value, verdict, tags, summary, verdicts, "checkedAt") VALUES (?, ?, ?, ?, ?, ?, ?)',
-                    [it["kind"], it["value"], it.get("verdict"), list(it.get("tags") or []), json.dumps(it.get("summary")), json.dumps(it.get("verdicts")), it.get("checkedAt")],
+                    [
+                        it["kind"],
+                        it["value"],
+                        it.get("verdict"),
+                        list(it.get("tags") or []),
+                        json.dumps(it.get("summary")),
+                        json.dumps(it.get("verdicts")),
+                        it.get("checkedAt"),
+                    ],
                 )
                 n += 1
         return n
@@ -362,7 +640,7 @@ class CaseStore:
                     GROUP BY m.id
                 ) sub WHERE mails.id = sub.id
             """)
-            return con.execute("SELECT count(*) FROM mails WHERE \"reputationWorst\" IS NOT NULL").fetchone()[0]
+            return con.execute('SELECT count(*) FROM mails WHERE "reputationWorst" IS NOT NULL').fetchone()[0]
 
     # -- reads --------------------------------------------------------------
     def counts(self) -> dict[str, int]:

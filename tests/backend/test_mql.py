@@ -1,4 +1,5 @@
 """Sublime MQL -> REMN converter: structural subset translates exactly, the rest is skipped."""
+
 from __future__ import annotations
 
 import uuid
@@ -14,8 +15,15 @@ from services.store.writers import MailWriter
 
 
 def _rule(source: str, **meta) -> dict:
-    doc = {"name": meta.get("name", "Test rule"), "id": meta.get("id", "aaaaaaaa-1111-2222-3333-444444444444"), "severity": meta.get("severity", "high"),
-           "type": "rule", "source": source, "attack_types": ["Credential Phishing"], "tactics_and_techniques": ["Impersonation: Brand"]}
+    doc = {
+        "name": meta.get("name", "Test rule"),
+        "id": meta.get("id", "aaaaaaaa-1111-2222-3333-444444444444"),
+        "severity": meta.get("severity", "high"),
+        "type": "rule",
+        "source": source,
+        "attack_types": ["Credential Phishing"],
+        "tactics_and_techniques": ["Impersonation: Brand"],
+    }
     return mql.convert_rule(doc)
 
 
@@ -130,8 +138,13 @@ and sender.display_name !~ 'apple developer team'
     ctx = ParseContext(internal_domains=["interne.fr"])
     wri = MailWriter(store, 1)
     for name in ("Apple Developer", "Appel Developer", "Apple Support"):
-        headers = [("From", f"{name} <x@evil-login.net>"), ("To", "<user@interne.fr>"), ("Subject", "hi"),
-                   ("Date", "Tue, 1 Sep 2026 11:00:00 +0200"), ("Message-ID", f"<{uuid.uuid4()}@x>")]
+        headers = [
+            ("From", f"{name} <x@evil-login.net>"),
+            ("To", "<user@interne.fr>"),
+            ("Subject", "hi"),
+            ("Date", "Tue, 1 Sep 2026 11:00:00 +0200"),
+            ("Message-ID", f"<{uuid.uuid4()}@x>"),
+        ]
         wri.add(build_row(headers, "body", None, [], ctx, folder="Inbox", size=None, extra={}))
     wri.flush()
     hits = R.run_rule(store, {"id": "lev", "title": "lev", "severity": "low", "source": "mails", "where": {"fromName|levenshtein": ["apple developer", 2]}}, {})
@@ -148,19 +161,39 @@ and strings.icontains(subject.subject, "invoice", "facture")
     ctx = ParseContext(internal_domains=["interne.fr"])
 
     def mail(subject, atts):
-        headers = [("From", "Vendor <billing@vendor-mail.com>"), ("To", "<user@interne.fr>"), ("Subject", subject),
-                   ("Date", "Tue, 1 Sep 2026 11:00:00 +0200"), ("Message-ID", f"<{uuid.uuid4()}@vendor-mail.com>")]
+        headers = [
+            ("From", "Vendor <billing@vendor-mail.com>"),
+            ("To", "<user@interne.fr>"),
+            ("Subject", subject),
+            ("Date", "Tue, 1 Sep 2026 11:00:00 +0200"),
+            ("Message-ID", f"<{uuid.uuid4()}@vendor-mail.com>"),
+        ]
         row = build_row(headers, "please see attached", None, [], ctx, folder="Inbox", size=None, extra={})
-        row["attachments"] = [{"name": n, "ext": n.rsplit(".", 1)[-1].lower(), "size": 10, "risk": 0, "flags": [], "sha256": None, "md5": None,
-                               "realExt": None, "realMime": None, "category": "document", "inline": False, "details": {}} for n in atts]
+        row["attachments"] = [
+            {
+                "name": n,
+                "ext": n.rsplit(".", 1)[-1].lower(),
+                "size": 10,
+                "risk": 0,
+                "flags": [],
+                "sha256": None,
+                "md5": None,
+                "realExt": None,
+                "realMime": None,
+                "category": "document",
+                "inline": False,
+                "details": {},
+            }
+            for n in atts
+        ]
         row["attachmentCount"] = len(atts)
         return row
 
     w = MailWriter(store, 1)
-    w.add(mail("Facture 2026-09", ["order.docm"]))          # hit: macro extension
-    w.add(mail("Invoice", ["Invoice.PDF.exe"]))             # hit: name match (case-insensitive)
-    w.add(mail("Invoice", ["report.pdf"]))                  # no: plain pdf
-    w.add(mail("Holiday photos", ["fun.xlsm"]))             # no: subject
+    w.add(mail("Facture 2026-09", ["order.docm"]))  # hit: macro extension
+    w.add(mail("Invoice", ["Invoice.PDF.exe"]))  # hit: name match (case-insensitive)
+    w.add(mail("Invoice", ["report.pdf"]))  # no: plain pdf
+    w.add(mail("Holiday photos", ["fun.xlsm"]))  # no: subject
     w.flush()
     hits = R.run_rule(store, r["rule"], {"internal_domains": ["interne.fr"]})
     assert sorted(ref for h in hits for ref in h["refs"]) == [1, 2], hits
@@ -181,18 +214,31 @@ def test_negative_child_operator_binds_and_means_none_matches(store):
     ctx = ParseContext(internal_domains=["contoso.com"])
     wri = MailWriter(store, 1)
     for i, links in enumerate((["https://a-site.com/x", "https://b-site.com/y"], ["https://b-site.com/z"])):
-        headers = [("From", f"<s{i}@ext.example>"), ("To", "<alice@contoso.com>"), ("Subject", f"m{i}"), ("Date", "Mon, 01 Sep 2026 09:00:00 +0000"), ("Message-ID", f"<m{i}@ext.example>")]
+        headers = [
+            ("From", f"<s{i}@ext.example>"),
+            ("To", "<alice@contoso.com>"),
+            ("Subject", f"m{i}"),
+            ("Date", "Mon, 01 Sep 2026 09:00:00 +0000"),
+            ("Message-ID", f"<m{i}@ext.example>"),
+        ]
         html = "<html><body>" + "".join(f'<a href="{u}">link</a>' for u in links) + "</body></html>"
         wri.add(build_row(headers, None, html, [], ctx, folder="Inbox", size=None, extra={}))
     wri.flush()
-    rule = {"id": "t-nin-child", "title": "t", "severity": "low", "source": "mails", "where": {"urls.domain|nin": ["a-site.com", "x-site.com", "y-site.com", "z-site.com"], "urls.url|contains": "b-site.com"}}
+    rule = {
+        "id": "t-nin-child",
+        "title": "t",
+        "severity": "low",
+        "source": "mails",
+        "where": {"urls.domain|nin": ["a-site.com", "x-site.com", "y-site.com", "z-site.com"], "urls.url|contains": "b-site.com"},
+    }
     hits = R.run_rule(store, rule, {})
     assert len(hits) == 1 and hits[0]["entities"].get("subject") == "m1", hits
 
 
 def test_doubled_quotes_lists_and_new_paths():
     """MQL escapes a quote by doubling it; the environment lists and the extra paths translate."""
-    ok = mql.convert_text("""name: q
+    ok = mql.convert_text(
+        """name: q
 source: |
   type.inbound
   and strings.icontains(subject.subject, 'I''ll call you')
@@ -202,7 +248,9 @@ source: |
   and length(subject.subject) < 12
   and strings.ends_with(headers.auth_summary.spf.details.designator, '.onmicrosoft.com')
   and any(body.links, .href_url.domain.subdomain is not null and .href_url.fragment is not null and .href_url.domain.valid)
-""", "q.yml")[0]
+""",
+        "q.yml",
+    )[0]
     assert ok["ok"], ok
     w = ok["rule"]["where"]
     assert w["subject|contains"] == "i'll call you".replace("i'", "I'") or w["subject|contains"] == "I'll call you"
@@ -219,10 +267,18 @@ source: |
 def test_length_builtin_list_and_derived_url_fields_on_sql_engine(store):
     ctx = ParseContext(internal_domains=["contoso.com"])
     wri = MailWriter(store, 1)
-    cases = [("short", "<a href='https://www.tracker.top/p#frag-1'>x</a>", "s0@google.com"),
-             ("a rather long subject line", "<a href='https://tracker.top/p'>x</a>", "s1@rare-sender.net")]
+    cases = [
+        ("short", "<a href='https://www.tracker.top/p#frag-1'>x</a>", "s0@google.com"),
+        ("a rather long subject line", "<a href='https://tracker.top/p'>x</a>", "s1@rare-sender.net"),
+    ]
     for i, (subject, html, frm) in enumerate(cases):
-        headers = [("From", f"<{frm}>"), ("To", "<alice@contoso.com>"), ("Subject", subject), ("Date", "Mon, 01 Sep 2026 09:00:00 +0000"), ("Message-ID", f"<n{i}@x.example>")]
+        headers = [
+            ("From", f"<{frm}>"),
+            ("To", "<alice@contoso.com>"),
+            ("Subject", subject),
+            ("Date", "Mon, 01 Sep 2026 09:00:00 +0000"),
+            ("Message-ID", f"<n{i}@x.example>"),
+        ]
         wri.add(build_row(headers, None, f"<html><body>{html}</body></html>", [], ctx, folder="Inbox", size=None, extra={}))
     wri.flush()
 
@@ -240,11 +296,18 @@ def test_length_builtin_list_and_derived_url_fields_on_sql_engine(store):
     assert hits({"fromRegistrable|in_setting": "tranco_10k"}) == ["short"]  # google.com is in the bundled list
     assert hits({"fromRegistrable|nin_setting": "tranco_10k"}) == ["a rather long subject line"]
     assert hits({"fromRegistrable|in_setting": "tranco_10k"}, {"tranco_10k": ["rare-sender.net"]}) == ["a rather long subject line"]  # a case setting overrides
-    assert R.diagnose_zero(store, {"id": "t", "title": "t", "severity": "low", "source": "mails", "where": {"fromRegistrable|in_setting": "tranco_10k", "subject": "zzz"}}, {})["reason"] == "no_selector_match"
+    assert (
+        R.diagnose_zero(
+            store, {"id": "t", "title": "t", "severity": "low", "source": "mails", "where": {"fromRegistrable|in_setting": "tranco_10k", "subject": "zzz"}}, {}
+        )["reason"]
+        == "no_selector_match"
+    )
 
 
 def test_case_sensitive_string_functions_keep_their_case(store):
-    r = _rule("type.inbound and strings.contains(subject.subject, 'hTTPs://') and strings.icontains(sender.display_name, 'DocuSign') and strings.starts_with(subject.subject, 'RE:') and strings.ends_with(sender.email.local_part, 'Admin')")
+    r = _rule(
+        "type.inbound and strings.contains(subject.subject, 'hTTPs://') and strings.icontains(sender.display_name, 'DocuSign') and strings.starts_with(subject.subject, 'RE:') and strings.ends_with(sender.email.local_part, 'Admin')"
+    )
     assert r["ok"], r
     w = r["rule"]["where"]
     assert w["subject|contains_cs"] == "hTTPs://" and w["fromName|contains"] == "DocuSign" and w["subject|startswith_cs"] == "RE:"
@@ -253,11 +316,21 @@ def test_case_sensitive_string_functions_keep_their_case(store):
     ctx = ParseContext(internal_domains=["interne.fr"])
     wri = MailWriter(store, 1)
     for subject in ("Click https://x.example/a", "Click hTTPs://x.example/a", "RE: hello"):
-        headers = [("From", "<a@ext.example>"), ("To", "<u@interne.fr>"), ("Subject", subject), ("Date", "Tue, 1 Sep 2026 11:00:00 +0200"), ("Message-ID", f"<{uuid.uuid4()}@x>")]
+        headers = [
+            ("From", "<a@ext.example>"),
+            ("To", "<u@interne.fr>"),
+            ("Subject", subject),
+            ("Date", "Tue, 1 Sep 2026 11:00:00 +0200"),
+            ("Message-ID", f"<{uuid.uuid4()}@x>"),
+        ]
         wri.add(build_row(headers, subject, None, [], ctx, folder="Inbox", size=None, extra={}))  # the link is in the body too
     wri.flush()
+
     def refs(where):
-        return sorted(ref for h in R.run_rule(store, {"id": "cs", "title": "cs", "severity": "low", "source": "mails", "where": where}, {}) for ref in h["refs"])
+        return sorted(
+            ref for h in R.run_rule(store, {"id": "cs", "title": "cs", "severity": "low", "source": "mails", "where": where}, {}) for ref in h["refs"]
+        )
+
     assert refs({"subject|contains_cs": "hTTPs://"}) == [2]
     assert refs({"subject|contains": "hTTPs://"}) == [1, 2]
     assert refs({"subject|startswith_cs": "RE:"}) == [3] and refs({"subject|startswith_cs": "re:"}) == []

@@ -40,7 +40,7 @@ describe('community rule packs', () => {
           compileCond(v.rule.where, {})
           if (v.rule.exclude) compileCond(v.rule.exclude, {})
         } catch (e) {
-          throw new Error(`${v.rule.id}: ${(e as Error).message}`)
+          throw new Error(`${v.rule.id}: ${(e as Error).message}`, { cause: e })
         }
         if (manifest.source === 'events' && !ruleEventIds(v.rule.where)) noPrefilter++
       }

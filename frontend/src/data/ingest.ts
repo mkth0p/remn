@@ -49,8 +49,16 @@ export async function ingestFile(file: File, kase: Case, kind: 'evtx' | 'mail' =
 
 async function createEvidence(file: File, kase: Case, kind: 'evtx' | 'mail'): Promise<number> {
   const evidence: Evidence = {
-    caseId: kase.id!, name: file.name, size: file.size, kind, integrity: 'pending', addedAt: Date.now(), lastModified: file.lastModified,
-    status: 'hashing', count: 0, analyst: kase.analyst,
+    caseId: kase.id!,
+    name: file.name,
+    size: file.size,
+    kind,
+    integrity: 'pending',
+    addedAt: Date.now(),
+    lastModified: file.lastModified,
+    status: 'hashing',
+    count: 0,
+    analyst: kase.analyst,
   }
   return getDb().evidence.add(evidence)
 }
@@ -80,7 +88,13 @@ export async function ingestToServer(file: File, kase: Case, kind: 'evtx' | 'mai
       options: {
         includeRaw: kase.settings.includeRaw !== false,
         keepBodies: kase.settings.keepBodies !== false,
-        settings: { internalDomains: kase.settings.internalDomains, brands: kase.settings.brands, vipNames: kase.settings.vipNames, trustedSenders: kase.settings.trustedSenders ?? [], analyzeAttachments: kase.settings.deepAttachments !== false },
+        settings: {
+          internalDomains: kase.settings.internalDomains,
+          brands: kase.settings.brands,
+          vipNames: kase.settings.vipNames,
+          trustedSenders: kase.settings.trustedSenders ?? [],
+          analyzeAttachments: kase.settings.deepAttachments !== false,
+        },
       },
     })
     const job = await waitForJob(serverJob, (j) => {
@@ -119,7 +133,13 @@ export async function ingestToBrowser(file: File, kase: Case, kind: 'evtx' | 'ma
 
   const worker = new Worker(new URL('../workers/ingest.worker.ts', import.meta.url), { type: 'module' })
   const req: IngestRequest = {
-    cmd: 'ingest', jobId, caseId: kase.id!, evidenceId, file, kind, includeRaw: kase.settings.includeRaw !== false,
+    cmd: 'ingest',
+    jobId,
+    caseId: kase.id!,
+    evidenceId,
+    file,
+    kind,
+    includeRaw: kase.settings.includeRaw !== false,
     settings: { internalDomains: kase.settings.internalDomains, brands: kase.settings.brands, vipNames: kase.settings.vipNames, trustedSenders: kase.settings.trustedSenders ?? [] },
     token: API_HEADERS['X-Forensic-Client'],
   }
@@ -236,10 +256,6 @@ export async function refreshCounts(kase: Case | number): Promise<void> {
     }
     return
   }
-  const [events, mails, iocs] = await Promise.all([
-    db.events.where('caseId').equals(caseId).count(),
-    db.mails.where('caseId').equals(caseId).count(),
-    db.iocs.where('caseId').equals(caseId).count(),
-  ])
+  const [events, mails, iocs] = await Promise.all([db.events.where('caseId').equals(caseId).count(), db.mails.where('caseId').equals(caseId).count(), db.iocs.where('caseId').equals(caseId).count()])
   useStore.getState().setCounts({ events, mails, findings, iocs, evidence })
 }

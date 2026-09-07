@@ -10,6 +10,7 @@ When ``FORENSIC_AUTH_TOKEN`` is set (remote/home-server deployments), the
 header value must equal the token; a wrong value gets 401 with code "auth"
 so the frontend can prompt for the token.
 """
+
 from __future__ import annotations
 
 import hmac
@@ -30,14 +31,10 @@ class ApiClientHeaderMiddleware:
                 return JsonResponse({"error": "preflight not supported"}, status=403)
             value = request.META.get(HEADER_NAME, "")
             if not value:
-                return JsonResponse(
-                    {"error": "missing X-Forensic-Client header"}, status=403
-                )
+                return JsonResponse({"error": "missing X-Forensic-Client header"}, status=403)
             token = settings.FORENSIC_AUTH_TOKEN
             if token and not hmac.compare_digest(value, token):
-                return JsonResponse(
-                    {"error": "invalid access token", "code": "auth"}, status=401
-                )
+                return JsonResponse({"error": "invalid access token", "code": "auth"}, status=401)
         return self.get_response(request)
 
 

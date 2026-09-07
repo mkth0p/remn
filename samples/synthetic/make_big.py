@@ -13,6 +13,7 @@ threads) with ~0.5% planted phishing so rules still find something.
 `evtx-zip` bundles the real .evtx exports from samples/ N times under distinct
 names. `blob` is upload-path-only random data.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -28,13 +29,18 @@ HERE = Path(__file__).resolve().parent
 
 FIRST = ["jean", "marie", "paul", "claire", "luc", "sophie", "hugo", "emma", "louis", "lea", "nadia", "karim", "ines", "thomas", "julie"]
 LAST = ["dupont", "lefevre", "martin", "bernard", "petit", "durand", "moreau", "laurent", "garcia", "roux", "fontaine", "chevalier"]
-SAAS = [("notifications@github.com", "github.com", "[repo] Pull request #%d review requested"),
-        ("noreply@email.teams.microsoft.com", "microsoft.com", "%s mentioned you in a conversation"),
-        ("jira@acme-corp.atlassian.net", "atlassian.net", "[JIRA] (PROJ-%d) status changed"),
-        ("no-reply@slack.com", "slack.com", "New message in #incident-%d"),
-        ("notification@service-now.example-itsm.com", "example-itsm.com", "Ticket INC00%d updated")]
-NEWSLETTERS = [("news@newsletter.acme-corp.com", "Weekly digest #%d"), ("info@techweekly-mail.com", "Tech weekly: issue %d"),
-               ("updates@vendor-portal.io", "Product update %d")]
+SAAS = [
+    ("notifications@github.com", "github.com", "[repo] Pull request #%d review requested"),
+    ("noreply@email.teams.microsoft.com", "microsoft.com", "%s mentioned you in a conversation"),
+    ("jira@acme-corp.atlassian.net", "atlassian.net", "[JIRA] (PROJ-%d) status changed"),
+    ("no-reply@slack.com", "slack.com", "New message in #incident-%d"),
+    ("notification@service-now.example-itsm.com", "example-itsm.com", "Ticket INC00%d updated"),
+]
+NEWSLETTERS = [
+    ("news@newsletter.acme-corp.com", "Weekly digest #%d"),
+    ("info@techweekly-mail.com", "Tech weekly: issue %d"),
+    ("updates@vendor-portal.io", "Product update %d"),
+]
 
 
 def _rand_person(rng: random.Random) -> tuple[str, str]:
@@ -45,7 +51,11 @@ def _rand_person(rng: random.Random) -> tuple[str, str]:
 def _attachment_mime(rng: random.Random) -> tuple[str, str, bytes]:
     kind = rng.random()
     if kind < 0.6:
-        return "rapport.pdf", "application/pdf", b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< >>\n%%EOF\n" + os.urandom(rng.randint(500, 4000))
+        return (
+            "rapport.pdf",
+            "application/pdf",
+            b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< >>\n%%EOF\n" + os.urandom(rng.randint(500, 4000)),
+        )
     if kind < 0.9:
         return "donnees.csv", "text/csv", ("col1;col2;col3\n" + "\n".join(f"{i};{i * 2};x" for i in range(rng.randint(20, 200)))).encode()
     return "presentation.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", b"PK\x03\x04" + os.urandom(rng.randint(800, 3000))
@@ -80,7 +90,7 @@ def gen_message(i: int, rng: random.Random, attach_ratio: float = 0.0) -> bytes:
         name, addr = _rand_person(rng)
         frm = f'"{name}" <{addr}>'
         subject = rng.choice(["RE: point projet", "compte rendu reunion", "planning semaine", "RE: budget 2026", "notes atelier"]) + f" ({i})"
-        body = ("Bonjour,\n\n" + "Voici les elements demandes. " * rng.randint(2, 40) + "\n\nCordialement,\n" + name)
+        body = "Bonjour,\n\n" + "Voici les elements demandes. " * rng.randint(2, 40) + "\n\nCordialement,\n" + name
         auth = "mx.interne.fr; spf=pass smtp.mailfrom=interne.fr; dkim=pass header.d=interne.fr; dmarc=pass header.from=interne.fr"
 
     lines = [
@@ -96,14 +106,24 @@ def gen_message(i: int, rng: random.Random, attach_ratio: float = 0.0) -> bytes:
     if attach_ratio and rng.random() < attach_ratio:
         name_, mime, data = _attachment_mime(rng)
         b64 = base64.b64encode(data).decode()
-        wrapped = "\n".join(b64[j:j + 76] for j in range(0, len(b64), 76))
+        wrapped = "\n".join(b64[j : j + 76] for j in range(0, len(b64), 76))
         boundary = f"----=_big_{i}"
         lines += [
-            f'Content-Type: multipart/mixed; boundary="{boundary}"', "",
-            f"--{boundary}", "Content-Type: text/plain; charset=utf-8", "", body, "",
-            f"--{boundary}", f'Content-Type: {mime}; name="{name_}"', "Content-Transfer-Encoding: base64",
-            f'Content-Disposition: attachment; filename="{name_}"', "", wrapped,
-            f"--{boundary}--", "",
+            f'Content-Type: multipart/mixed; boundary="{boundary}"',
+            "",
+            f"--{boundary}",
+            "Content-Type: text/plain; charset=utf-8",
+            "",
+            body,
+            "",
+            f"--{boundary}",
+            f'Content-Type: {mime}; name="{name_}"',
+            "Content-Transfer-Encoding: base64",
+            f'Content-Disposition: attachment; filename="{name_}"',
+            "",
+            wrapped,
+            f"--{boundary}--",
+            "",
         ]
     else:
         lines += ["Content-Type: text/plain; charset=utf-8", "", body, ""]
@@ -149,7 +169,7 @@ def write_blob(out: Path, gb: float, seed: int = 42, progress: bool = True) -> i
     chunk = bytes(rng.getrandbits(8) for _ in range(1024)) * 1024  # 1 MB, deterministic
     total = int(gb * 1024)
     with open(out, "wb") as fh:
-        for i in range(total):
+        for _ in range(total):
             fh.write(chunk)
     if progress:
         print(f"wrote {total} MB blob -> {out}")

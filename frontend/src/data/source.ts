@@ -133,7 +133,9 @@ class BrowserSource implements DataSource {
     const kinds: Record<string, number> = {}
     for (const r of rows) kinds[r.kind] = (kinds[r.kind] ?? 0) + 1
     const rank = (v: string | null | undefined) => ({ malicious: 3, suspicious: 2, clean: 1 })[v ?? ''] ?? 0
-    rows = rows.filter((i) => (!opts.kind || i.kind === opts.kind) && (!opts.q || i.value.includes(opts.q.toLowerCase())) && (!opts.onlyBad || rank(i.verdict) >= 2) && (!opts.unchecked || !i.checkedAt))
+    rows = rows.filter(
+      (i) => (!opts.kind || i.kind === opts.kind) && (!opts.q || i.value.includes(opts.q.toLowerCase())) && (!opts.onlyBad || rank(i.verdict) >= 2) && (!opts.unchecked || !i.checkedAt),
+    )
     rows.sort((a, b) => rank(b.verdict) - rank(a.verdict) || b.count - a.count)
     const total = rows.length
     const offset = opts.offset ?? 0
@@ -159,10 +161,10 @@ class BrowserSource implements DataSource {
     const { clearDerivedState } = await import('./caseState')
     const { rebuildDerived } = await import('./ingest')
     const { forgetUpload } = await import('./upload')
-    await deleteEvidenceData(db, this.id, evidenceId)  // events, mails, bodies, attachments, urls, evidence row
-    const cleared = await clearDerivedState(this.id)  // findings, chain snapshot, diagnostics (reviews archived)
-    if (ev) await forgetUpload(ev)  // resume record + server-side partial, if any
-    await rebuildDerived(this.id)  // facets and indicators from the rows that remain
+    await deleteEvidenceData(db, this.id, evidenceId) // events, mails, bodies, attachments, urls, evidence row
+    const cleared = await clearDerivedState(this.id) // findings, chain snapshot, diagnostics (reviews archived)
+    if (ev) await forgetUpload(ev) // resume record + server-side partial, if any
+    await rebuildDerived(this.id) // facets and indicators from the rows that remain
     return cleared
   }
 }

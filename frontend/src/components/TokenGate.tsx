@@ -33,10 +33,22 @@ export function TokenGate() {
     }
   }
   return (
-    <Modal title="Access token required" onClose={() => undefined} footer={<button className="btn primary" disabled={busy || !token.trim()} onClick={submit}>{busy ? 'checking…' : 'unlock'}</button>}>
+    <Modal
+      title="Access token required"
+      onClose={() => undefined}
+      footer={
+        <button className="btn primary" disabled={busy || !token.trim()} onClick={submit}>
+          {busy ? 'checking…' : 'unlock'}
+        </button>
+      }
+    >
       <div className="small muted">This REMN server is protected by a shared access token (set by whoever runs it, in the server's environment as FORENSIC_AUTH_TOKEN).</div>
       <input className="input mono" type="password" autoFocus placeholder="access token" value={token} onChange={(e) => setToken(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
-      {err && <div className="small" style={{ color: 'var(--red, #e5534b)' }}>{err}</div>}
+      {err && (
+        <div className="small" style={{ color: 'var(--red, #e5534b)' }}>
+          {err}
+        </div>
+      )}
       <div className="hint">The token is kept in this browser only (IndexedDB) and sent with every API request. It never goes to Ollama or any third party.</div>
     </Modal>
   )

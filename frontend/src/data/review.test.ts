@@ -5,9 +5,50 @@ import { buildIncidents } from '../rules/incidents'
 import { DEFAULT_REPORT, overridesForIncident, reviewQueue, selectForReport, stepVisible, verdictStatus } from './review'
 
 let seq = 1
-const f = (p: Partial<Finding> & { ruleId: string; severity: Finding['severity'] }): Finding => ({ id: seq++, caseId: 1, key: `${p.ruleId}|${seq}`, title: p.ruleId, source: 'mails', ts: 10, entities: {}, count: 1, refs: [seq], attack: [], status: 'new', createdAt: 0, ...p })
-const step = (p: Partial<ChainStep>): ChainStep => ({ kind: 'event', source: 'events', id: null, count: 1, weight: 1, artifacts: [], findings: [], offsetMin: 1, ts: 1, tsEnd: 1, title: 't', origin: 'm365', ...p })
-const chain = (id: string, score: number, severity: Chain['severity']): Chain => ({ id, identity: id, identityLabel: `${id}@corp.test`, start: 0, end: 1, score, severity, artifactLinks: 1, summary: '', seed: { id: 1, ts: 0, subject: 's', fromAddr: 'x@evil.test', risk: 90, flags: [], findings: [], urlDomains: [], attachments: [] }, steps: [], entities: { user: id, ips: [], hosts: [], attackerAddresses: [], domains: [] } })
+const f = (p: Partial<Finding> & { ruleId: string; severity: Finding['severity'] }): Finding => ({
+  id: seq++,
+  caseId: 1,
+  key: `${p.ruleId}|${seq}`,
+  title: p.ruleId,
+  source: 'mails',
+  ts: 10,
+  entities: {},
+  count: 1,
+  refs: [seq],
+  attack: [],
+  status: 'new',
+  createdAt: 0,
+  ...p,
+})
+const step = (p: Partial<ChainStep>): ChainStep => ({
+  kind: 'event',
+  source: 'events',
+  id: null,
+  count: 1,
+  weight: 1,
+  artifacts: [],
+  findings: [],
+  offsetMin: 1,
+  ts: 1,
+  tsEnd: 1,
+  title: 't',
+  origin: 'm365',
+  ...p,
+})
+const chain = (id: string, score: number, severity: Chain['severity']): Chain => ({
+  id,
+  identity: id,
+  identityLabel: `${id}@corp.test`,
+  start: 0,
+  end: 1,
+  score,
+  severity,
+  artifactLinks: 1,
+  summary: '',
+  seed: { id: 1, ts: 0, subject: 's', fromAddr: 'x@evil.test', risk: 90, flags: [], findings: [], urlDomains: [], attachments: [] },
+  steps: [],
+  entities: { user: id, ips: [], hosts: [], attackerAddresses: [], domains: [] },
+})
 
 describe('report selection', () => {
   it('applies the severity floor to the effective severity, drops excluded and false-positive findings, and honours chain verdicts', () => {
@@ -45,11 +86,7 @@ describe('report selection', () => {
   })
 
   it('rescoring an incident overrides the members above the target, or raises the lead', () => {
-    const [inc] = buildIncidents([
-      f({ ruleId: 'a', severity: 'critical', refs: [7] }),
-      f({ ruleId: 'b', severity: 'medium', refs: [7] }),
-      f({ ruleId: 'c', severity: 'low', refs: [7] }),
-    ])
+    const [inc] = buildIncidents([f({ ruleId: 'a', severity: 'critical', refs: [7] }), f({ ruleId: 'b', severity: 'medium', refs: [7] }), f({ ruleId: 'c', severity: 'low', refs: [7] })])
     const down = overridesForIncident(inc, 'medium')
     expect(down).toEqual([{ id: inc.findings[0].id, severityOverride: 'medium' }])
     const up = overridesForIncident(buildIncidents([f({ ruleId: 'd', severity: 'low', refs: [8] })])[0], 'high')

@@ -2,11 +2,13 @@
 Ollama proxy. The browser owns the conversation and executes tool calls
 against IndexedDB; the server only relays one model turn at a time.
 """
+
 from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
 from django.conf import settings
 from django.http import HttpRequest, JsonResponse, StreamingHttpResponse
@@ -22,7 +24,7 @@ MAX_MESSAGE_CHARS = 200_000
 
 
 def _sse(event: dict[str, Any]) -> bytes:
-    return f"data: {json.dumps(event, ensure_ascii=False)}\n\n".encode("utf-8")
+    return f"data: {json.dumps(event, ensure_ascii=False)}\n\n".encode()
 
 
 def _clean_messages(raw: Any) -> list[dict[str, Any]]:
@@ -37,9 +39,16 @@ def _clean_messages(raw: Any) -> list[dict[str, Any]]:
             continue
         msg: dict[str, Any] = {"role": role, "content": str(m.get("content") or "")[:MAX_MESSAGE_CHARS]}
         if role == "assistant" and m.get("tool_calls"):
-            msg["tool_calls"] = [{"function": {"name": str(c.get("name") or (c.get("function") or {}).get("name") or ""),
-                                               "arguments": c.get("arguments") if isinstance(c.get("arguments"), dict) else ((c.get("function") or {}).get("arguments") or {})}}
-                                 for c in m["tool_calls"] if isinstance(c, dict)]
+            msg["tool_calls"] = [
+                {
+                    "function": {
+                        "name": str(c.get("name") or (c.get("function") or {}).get("name") or ""),
+                        "arguments": c.get("arguments") if isinstance(c.get("arguments"), dict) else ((c.get("function") or {}).get("arguments") or {}),
+                    }
+                }
+                for c in m["tool_calls"]
+                if isinstance(c, dict)
+            ]
         if role == "tool" and m.get("tool_name"):
             msg["tool_name"] = str(m["tool_name"])[:100]
         out.append(msg)
@@ -53,17 +62,26 @@ def ai_meta(request: HttpRequest):
     from services.ai.tools import QUERY_SCHEMA, TOOLS
     from services.store.queries import SCHEMA_DOC
 
-    resp = JsonResponse({
-        "prompts": {"analyst": prompts.SYSTEM_ANALYST, "query": prompts.SYSTEM_QUERY, "explain": prompts.SYSTEM_EXPLAIN,
-                    "rule": prompts.SYSTEM_RULE, "report": prompts.SYSTEM_REPORT, "triage": prompts.SYSTEM_TRIAGE, "free": ""},
-        "tools": TOOLS,
-        "querySchema": QUERY_SCHEMA,
-        "schemaDoc": SCHEMA_DOC,
-        "numCtx": settings.OLLAMA_NUM_CTX,
-        "defaultModel": settings.OLLAMA_MODEL,
-        "limits": {"maxMessages": MAX_MESSAGES, "maxMessageChars": MAX_MESSAGE_CHARS},
-        "version": prompts.prompts_version(),
-    })
+    resp = JsonResponse(
+        {
+            "prompts": {
+                "analyst": prompts.SYSTEM_ANALYST,
+                "query": prompts.SYSTEM_QUERY,
+                "explain": prompts.SYSTEM_EXPLAIN,
+                "rule": prompts.SYSTEM_RULE,
+                "report": prompts.SYSTEM_REPORT,
+                "triage": prompts.SYSTEM_TRIAGE,
+                "free": "",
+            },
+            "tools": TOOLS,
+            "querySchema": QUERY_SCHEMA,
+            "schemaDoc": SCHEMA_DOC,
+            "numCtx": settings.OLLAMA_NUM_CTX,
+            "defaultModel": settings.OLLAMA_MODEL,
+            "limits": {"maxMessages": MAX_MESSAGES, "maxMessageChars": MAX_MESSAGE_CHARS},
+            "version": prompts.prompts_version(),
+        }
+    )
     resp["Cache-Control"] = "no-store"
     return resp
 
@@ -142,7 +160,9 @@ def chat(request: HttpRequest):
 
     def gen() -> Iterator[bytes]:
         try:
-            for chunk in svc.chat_stream(messages, model=model, tools=TOOLS if use_tools else None, think=think if isinstance(think, bool) else None, options=options):
+            for chunk in svc.chat_stream(
+                messages, model=model, tools=TOOLS if use_tools else None, think=think if isinstance(think, bool) else None, options=options
+            ):
                 yield _sse(chunk)
         except Exception as exc:  # noqa: BLE001
             log.warning("ai chat failed: %s", exc)

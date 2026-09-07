@@ -13,7 +13,11 @@ export function BaselineButton() {
     setBusy(true)
     try {
       const s = await baselineSenders(kase)
-      toast('ok', `baseline: ${s.newSenders} first-contact sender(s), ${s.unsolicitedNew} unsolicited, ${s.authRegressions} auth regression(s), ${s.campaigns} campaign(s) (largest ${s.largestCampaign})`, 8000)
+      toast(
+        'ok',
+        `baseline: ${s.newSenders} first-contact sender(s), ${s.unsolicitedNew} unsolicited, ${s.authRegressions} auth regression(s), ${s.campaigns} campaign(s) (largest ${s.largestCampaign})`,
+        8000,
+      )
       bump()
     } catch (e) {
       toast('err', `baseline: ${(e as Error).message}`, 0)

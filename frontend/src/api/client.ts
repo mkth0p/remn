@@ -58,11 +58,7 @@ export async function apiPostForm<T = unknown>(path: string, form: FormData, sig
 }
 
 /** Read an NDJSON body line by line (shared by evidence ingestion and the browser Ollama transport). */
-export async function readNdjsonBody(
-  resp: Response,
-  onRow: (row: Record<string, unknown>) => void | Promise<void>,
-  onBytes?: (n: number) => void,
-): Promise<void> {
+export async function readNdjsonBody(resp: Response, onRow: (row: Record<string, unknown>) => void | Promise<void>, onBytes?: (n: number) => void): Promise<void> {
   if (!resp.body) throw new ApiError(500, 'no response body')
   const reader = resp.body.getReader()
   const decoder = new TextDecoder('utf-8')
@@ -115,12 +111,7 @@ export async function streamNdjson(
 }
 
 /** Consume a Server-Sent-Events POST response. */
-export async function streamSse(
-  path: string,
-  body: unknown,
-  onEvent: (event: Record<string, unknown>) => void,
-  signal?: AbortSignal,
-): Promise<void> {
+export async function streamSse(path: string, body: unknown, onEvent: (event: Record<string, unknown>) => void, signal?: AbortSignal): Promise<void> {
   const resp = await fetch(path, {
     method: 'POST',
     headers: { ...API_HEADERS, 'Content-Type': 'application/json', Accept: 'text/event-stream' },
@@ -168,7 +159,16 @@ export interface Health {
   platform?: string
   limits: { maxUploadMb: number; inMemoryMb: number; maxChunkedGb?: number; chunkMb?: number }
   store?: { thresholdMb: number; casesDir: string }
-  ollama: { reachable: boolean; host: string; models: { name: string; size?: number; family?: string; parameterSize?: string }[]; defaultModel: string; defaultAvailable?: boolean; capabilities?: string[]; error?: string; numCtx?: number }
+  ollama: {
+    reachable: boolean
+    host: string
+    models: { name: string; size?: number; family?: string; parameterSize?: string }[]
+    defaultModel: string
+    defaultAvailable?: boolean
+    capabilities?: string[]
+    error?: string
+    numCtx?: number
+  }
   optional: { pst: boolean; yara: boolean; yaraRules: number; claudeCode?: boolean }
   providers: ProviderInfo[]
 }
@@ -229,7 +229,21 @@ export interface Verdict {
 }
 export interface LookupResponse {
   results: Verdict[]
-  summary: Record<string, { kind: string; value: string; verdict: string; providers: string[]; malicious: number; suspicious: number; clean: number; tags: string[]; geo: { country?: string; city?: string; org?: string } | null; asn: string | null }>
+  summary: Record<
+    string,
+    {
+      kind: string
+      value: string
+      verdict: string
+      providers: string[]
+      malicious: number
+      suspicious: number
+      clean: number
+      tags: string[]
+      geo: { country?: string; city?: string; org?: string } | null
+      asn: string | null
+    }
+  >
 }
 export const lookupReputation = (items: { kind: string; value: string }[], providers?: string[]) =>
   apiPost<LookupResponse>('/api/reputation/lookup', { items, providers: providers && providers.length ? providers : undefined })

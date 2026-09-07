@@ -203,7 +203,13 @@ export function buildIncidents(findings: Finding[], opts: IncidentOptions = {}):
     if (!members) continue
     const own = members.find((f) => f.ruleId === 'chain')
     const n = members.length - (own ? 1 : 0)
-    const inc = finish(`chain:${c.id}`, 'chain', members, `Attack chain · ${c.identityLabel}`, `score ${c.score} · ${c.steps.length} step${c.steps.length === 1 ? '' : 's'} · ${n} linked finding${n === 1 ? '' : 's'}`)
+    const inc = finish(
+      `chain:${c.id}`,
+      'chain',
+      members,
+      `Attack chain · ${c.identityLabel}`,
+      `score ${c.score} · ${c.steps.length} step${c.steps.length === 1 ? '' : 's'} · ${n} linked finding${n === 1 ? '' : 's'}`,
+    )
     inc.chain = c
     inc.severity = opts.severityOf ? opts.severityOf(c) : c.severity
     if (own) inc.lead = own
@@ -226,7 +232,9 @@ export function buildIncidents(findings: Finding[], opts: IncidentOptions = {}):
       if (!cluster) return
       const items = cluster.items
       const rules = new Set(items.map((f) => f.ruleId)).size
-      out.push(finish(`${key}|${n++}`, 'entity', items, e.value, `${sortMembers(items)[0].title} · ${items.length} finding${items.length === 1 ? '' : 's'} from ${rules} rule${rules === 1 ? '' : 's'}`))
+      out.push(
+        finish(`${key}|${n++}`, 'entity', items, e.value, `${sortMembers(items)[0].title} · ${items.length} finding${items.length === 1 ? '' : 's'} from ${rules} rule${rules === 1 ? '' : 's'}`),
+      )
       cluster = null
     }
     for (const f of timed) {
@@ -244,7 +252,18 @@ export function buildIncidents(findings: Finding[], opts: IncidentOptions = {}):
   }
   for (const members of groups) {
     const f = members[0]
-    out.push(finish(`group:${f.ruleId}|${f.key}`, 'group', members, f.title, Object.entries(f.entities).slice(0, 3).map(([k, v]) => `${k}=${v}`).join(' · ') || `${f.count} row(s)`))
+    out.push(
+      finish(
+        `group:${f.ruleId}|${f.key}`,
+        'group',
+        members,
+        f.title,
+        Object.entries(f.entities)
+          .slice(0, 3)
+          .map(([k, v]) => `${k}=${v}`)
+          .join(' · ') || `${f.count} row(s)`,
+      ),
+    )
   }
   return out.sort((a, b) => rank(a.severity) - rank(b.severity) || b.rules.length - a.rules.length || (b.ts ?? 0) - (a.ts ?? 0))
 }

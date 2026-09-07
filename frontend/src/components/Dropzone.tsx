@@ -36,7 +36,9 @@ export function Dropzone({ onFiles, accept, children, multiple = true, compact }
       {children ?? (
         <>
           <div className="big">drop evidence here</div>
-          <div className="small" style={{ marginTop: 4 }}>.evtx · .pst / .ost · .msg · .eml · .mbox · .zip of .eml · M365 audit / Entra sign-in exports (.csv / .json) — or click to browse</div>
+          <div className="small" style={{ marginTop: 4 }}>
+            .evtx · .pst / .ost · .msg · .eml · .mbox · .zip of .eml · M365 audit / Entra sign-in exports (.csv / .json) — or click to browse
+          </div>
         </>
       )}
     </div>

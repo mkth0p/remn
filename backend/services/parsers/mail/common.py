@@ -2,26 +2,34 @@
 Shared mail model: turns headers + bodies + attachments (from any container
 format) into one analysed row. Attachment bytes are analysed, never returned.
 """
+
 from __future__ import annotations
 
 import email
 import logging
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from email import policy
 from email.message import Message
-from typing import Any, Iterable
+from typing import Any
 
 from services.analysis.attachments.analyzer import analyze_attachment
 from services.analysis.body import analyze_body
 from services.analysis.headers import (
-    analyze_headers, decode_mime, domain_of, first_header, header_values, headers_to_text, parse_addresses,
+    analyze_headers,
+    decode_mime,
+    domain_of,
+    first_header,
+    header_values,
+    headers_to_text,
+    parse_addresses,
 )
 from services.analysis.lookalike import DEFAULT_BRANDS, analyze_domain, display_name_looks_like_email, registrable, split_domain
+from services.analysis.urls import _domain_in_text, extract_urls
+from services.common import parse_timestamp
 from services.reference.brand_domains import BRAND_OWNED_DOMAINS
 from services.reference.notification_senders import NOTIFICATION_SENDERS
-from services.analysis.urls import extract_urls, _domain_in_text
-from services.common import parse_timestamp
 
 log = logging.getLogger(__name__)
 
@@ -30,60 +38,200 @@ MAX_TEXT = 200_000
 MAX_HTML = 400_000
 
 MAIL_WEIGHTS: dict[str, int] = {
-    "spf_fail": 35, "dkim_fail": 30, "dmarc_fail": 45, "compauth_fail": 40, "spf_none": 10, "dkim_none": 5, "dmarc_none": 5,
-    "dkim_domain_unaligned": 15, "spf_domain_unaligned": 15, "returnpath_mismatch": 25, "sender_mismatch": 20,
-    "replyto_mismatch": 25, "replyto_webmail": 45, "no_message_id": 25, "malformed_message_id": 30,
-    "message_id_domain_mismatch": 8, "no_date": 20, "date_skew": 25, "received_time_travel": 20, "no_received": 10,
-    "single_hop": 5, "no_origin_ip": 2, "from_webmail": 8, "suspicious_mailer": 45, "bulk_mailer": 2,
-    "high_priority": 5, "unsubscribe_without_list": 5, "email_in_display_name": 20, "display_name_email_mismatch": 70,
-    "mixed_script_display_name": 55, "undisclosed_recipients": 20, "mass_recipients": 15, "helo_domain_mismatch": 15,
-    "sender_punycode": 25, "sender_mixed_script": 55, "sender_confusable": 35, "sender_lookalike_internal": 90,
-    "sender_lookalike_brand": 60, "sender_tld_swap": 70, "sender_subdomain_trick": 75, "sender_homoglyph": 75,
-    "sender_digit_substitution": 70, "sender_edit_distance": 60, "sender_brand_embedding": 55,
-    "replyto_lookalike_internal": 85, "replyto_lookalike_brand": 55,
-    "lexicon_urgency": 10, "lexicon_financial": 12, "lexicon_gift_card": 45, "lexicon_credentials": 12,
-    "lexicon_authority": 8, "lexicon_secrecy": 20, "lexicon_availability": 15, "lexicon_delivery": 8,
-    "lexicon_document_lure": 10, "bec_pattern": 75, "credential_phishing_pattern": 65, "zero_width_chars": 40,
+    "spf_fail": 35,
+    "dkim_fail": 30,
+    "dmarc_fail": 45,
+    "compauth_fail": 40,
+    "spf_none": 10,
+    "dkim_none": 5,
+    "dmarc_none": 5,
+    "dkim_domain_unaligned": 15,
+    "spf_domain_unaligned": 15,
+    "returnpath_mismatch": 25,
+    "sender_mismatch": 20,
+    "replyto_mismatch": 25,
+    "replyto_webmail": 45,
+    "no_message_id": 25,
+    "malformed_message_id": 30,
+    "message_id_domain_mismatch": 8,
+    "no_date": 20,
+    "date_skew": 25,
+    "received_time_travel": 20,
+    "no_received": 10,
+    "single_hop": 5,
+    "no_origin_ip": 2,
+    "from_webmail": 8,
+    "suspicious_mailer": 45,
+    "bulk_mailer": 2,
+    "high_priority": 5,
+    "unsubscribe_without_list": 5,
+    "email_in_display_name": 20,
+    "display_name_email_mismatch": 70,
+    "mixed_script_display_name": 55,
+    "undisclosed_recipients": 20,
+    "mass_recipients": 15,
+    "helo_domain_mismatch": 15,
+    "sender_punycode": 25,
+    "sender_mixed_script": 55,
+    "sender_confusable": 35,
+    "sender_lookalike_internal": 90,
+    "sender_lookalike_brand": 60,
+    "sender_tld_swap": 70,
+    "sender_subdomain_trick": 75,
+    "sender_homoglyph": 75,
+    "sender_digit_substitution": 70,
+    "sender_edit_distance": 60,
+    "sender_brand_embedding": 55,
+    "replyto_lookalike_internal": 85,
+    "replyto_lookalike_brand": 55,
+    "lexicon_urgency": 10,
+    "lexicon_financial": 12,
+    "lexicon_gift_card": 45,
+    "lexicon_credentials": 12,
+    "lexicon_authority": 8,
+    "lexicon_secrecy": 20,
+    "lexicon_availability": 15,
+    "lexicon_delivery": 8,
+    "lexicon_document_lure": 10,
+    "bec_pattern": 75,
+    "credential_phishing_pattern": 65,
+    "zero_width_chars": 40,
     "internal_spoof": 85,
-    "bidi_override": 50, "hidden_text": 45, "hidden_preheader": 3, "hidden_style": 5, "base64_blob": 20, "obfuscated_html": 45,
-    "html_script": 40, "html_form": 40, "html_embed": 30, "image_only": 40, "mixed_script_text": 30,
-    "url_ip_literal": 50, "url_private_ip": 20, "url_punycode": 25, "url_suspicious_tld": 35, "url_many_subdomains": 12,
-    "url_shortener": 30, "url_file_hosting": 8, "url_free_hosting": 35, "url_many_hyphens": 10, "url_long_host": 10,
-    "url_userinfo": 55, "url_unusual_port": 30, "url_long_url": 3, "url_double_encoded": 25,
-    "url_executable_download": 65, "url_credential_keywords": 40, "url_login_link": 5, "url_rewritten": 2,
-    "url_form_saas": 10, "url_email_in_url": 40, "url_base64_in_url": 25,
-    "url_open_redirect": 25, "url_text_href_mismatch": 60, "url_tracking_pixel": 5, "url_tracking": 3,
-    "url_form_action": 55, "url_meta_refresh": 45, "url_data_uri": 50, "url_script_uri": 60, "url_file_uri": 40,
-    "url_malformed": 10, "html_form_password": 70, "html_form_external": 50, "attachment_risky": 0,
-    "empty_subject": 10, "reply_without_thread": 15, "subject_re_fwd_spoof": 20, "many_attachments": 5,
-    "encrypted_body": 15, "calendar_invite": 5, "rtf_only_body": 10, "no_body": 10, "html_only": 5,
-    "exchange_internal": 0, "calendar_item": 0, "gateway_spam_verdict": 50, "gateway_bulk_verdict": 5,
-    "scripted_mailer": 8, "url_tracker_redirect": 2, "url_own_domain": 0, "deleted_item": 0, "orphan_item": 0,
+    "bidi_override": 50,
+    "hidden_text": 45,
+    "hidden_preheader": 3,
+    "hidden_style": 5,
+    "base64_blob": 20,
+    "obfuscated_html": 45,
+    "html_script": 40,
+    "html_form": 40,
+    "html_embed": 30,
+    "image_only": 40,
+    "mixed_script_text": 30,
+    "url_ip_literal": 50,
+    "url_private_ip": 20,
+    "url_punycode": 25,
+    "url_suspicious_tld": 35,
+    "url_many_subdomains": 12,
+    "url_shortener": 30,
+    "url_file_hosting": 8,
+    "url_free_hosting": 35,
+    "url_many_hyphens": 10,
+    "url_long_host": 10,
+    "url_userinfo": 55,
+    "url_unusual_port": 30,
+    "url_long_url": 3,
+    "url_double_encoded": 25,
+    "url_executable_download": 65,
+    "url_credential_keywords": 40,
+    "url_login_link": 5,
+    "url_rewritten": 2,
+    "url_form_saas": 10,
+    "url_email_in_url": 40,
+    "url_base64_in_url": 25,
+    "url_open_redirect": 25,
+    "url_text_href_mismatch": 60,
+    "url_tracking_pixel": 5,
+    "url_tracking": 3,
+    "url_form_action": 55,
+    "url_meta_refresh": 45,
+    "url_data_uri": 50,
+    "url_script_uri": 60,
+    "url_file_uri": 40,
+    "url_malformed": 10,
+    "html_form_password": 70,
+    "html_form_external": 50,
+    "attachment_risky": 0,
+    "empty_subject": 10,
+    "reply_without_thread": 15,
+    "subject_re_fwd_spoof": 20,
+    "many_attachments": 5,
+    "encrypted_body": 15,
+    "calendar_invite": 5,
+    "rtf_only_body": 10,
+    "no_body": 10,
+    "html_only": 5,
+    "exchange_internal": 0,
+    "calendar_item": 0,
+    "gateway_spam_verdict": 50,
+    "gateway_bulk_verdict": 5,
+    "scripted_mailer": 8,
+    "url_tracker_redirect": 2,
+    "url_own_domain": 0,
+    "deleted_item": 0,
+    "orphan_item": 0,
 }
 
 
 # Flags that indicate the SENDER itself is suspect (used to gate wording-based patterns).
 SENDER_SUSPICION = {
-    "from_webmail", "replyto_webmail", "replyto_mismatch", "display_name_email_mismatch", "mixed_script_display_name",
-    "suspicious_mailer", "spf_fail", "dkim_fail", "dmarc_fail", "compauth_fail", "no_message_id", "malformed_message_id",
-    "received_time_travel", "sender_lookalike_internal", "sender_lookalike_brand", "sender_punycode", "sender_mixed_script",
-    "sender_confusable", "sender_homoglyph", "sender_tld_swap", "sender_subdomain_trick", "sender_digit_substitution",
-    "sender_edit_distance", "sender_brand_embedding", "replyto_lookalike_internal", "replyto_lookalike_brand",
+    "from_webmail",
+    "replyto_webmail",
+    "replyto_mismatch",
+    "display_name_email_mismatch",
+    "mixed_script_display_name",
+    "suspicious_mailer",
+    "spf_fail",
+    "dkim_fail",
+    "dmarc_fail",
+    "compauth_fail",
+    "no_message_id",
+    "malformed_message_id",
+    "received_time_travel",
+    "sender_lookalike_internal",
+    "sender_lookalike_brand",
+    "sender_punycode",
+    "sender_mixed_script",
+    "sender_confusable",
+    "sender_homoglyph",
+    "sender_tld_swap",
+    "sender_subdomain_trick",
+    "sender_digit_substitution",
+    "sender_edit_distance",
+    "sender_brand_embedding",
+    "replyto_lookalike_internal",
+    "replyto_lookalike_brand",
 }
 URL_SUSPICION = {
-    "url_text_href_mismatch", "url_ip_literal", "url_punycode", "url_free_hosting", "url_shortener",
-    "url_executable_download", "url_credential_keywords", "url_userinfo", "url_data_uri", "url_script_uri",
-    "url_suspicious_tld", "url_open_redirect",
+    "url_text_href_mismatch",
+    "url_ip_literal",
+    "url_punycode",
+    "url_free_hosting",
+    "url_shortener",
+    "url_executable_download",
+    "url_credential_keywords",
+    "url_userinfo",
+    "url_data_uri",
+    "url_script_uri",
+    "url_suspicious_tld",
+    "url_open_redirect",
 }
 # Strong indicators carry the score on their own. Without at least one of them (or a risky
 # attachment), weak wording/link/header noise is capped so ordinary corporate mail stays low.
 STRONG_FLAGS = {
-    "sender_lookalike_internal", "sender_tld_swap", "sender_subdomain_trick", "sender_homoglyph",
-    "sender_digit_substitution", "sender_mixed_script",
-    "replyto_lookalike_internal", "display_name_email_mismatch", "mixed_script_display_name",
-    "suspicious_mailer", "bec_pattern", "credential_phishing_pattern", "internal_spoof", "hidden_text", "bidi_override",
-    "url_text_href_mismatch", "url_ip_literal", "url_userinfo", "url_data_uri", "url_script_uri",
-    "url_executable_download", "url_credential_keywords", "html_form_password",
+    "sender_lookalike_internal",
+    "sender_tld_swap",
+    "sender_subdomain_trick",
+    "sender_homoglyph",
+    "sender_digit_substitution",
+    "sender_mixed_script",
+    "replyto_lookalike_internal",
+    "display_name_email_mismatch",
+    "mixed_script_display_name",
+    "suspicious_mailer",
+    "bec_pattern",
+    "credential_phishing_pattern",
+    "internal_spoof",
+    "hidden_text",
+    "bidi_override",
+    "url_text_href_mismatch",
+    "url_ip_literal",
+    "url_userinfo",
+    "url_data_uri",
+    "url_script_uri",
+    "url_executable_download",
+    "url_credential_keywords",
+    "html_form_password",
     # the receiving gateway already judged the message spam/phishing (SCL >= 5, SFV:SPM/BLK): an
     # independent classifier's verdict carries the score on its own
     "gateway_spam_verdict",
@@ -155,11 +303,19 @@ def score_groups(flags: Iterable[str]) -> dict[str, int]:
     for f in set(flags):
         if f.startswith("att_") or f not in MAIL_WEIGHTS:
             continue
-        group = ("authentication" if f.startswith(("spf_", "dkim_", "dmarc_", "compauth_", "returnpath_")) else
-                 "identity" if f.startswith(("sender_", "replyto_", "display_name_", "mixed_script_display")) or f == "internal_spoof" else
-                 "wording" if f.startswith("lexicon_") else
-                 "links" if f.startswith("url_") else
-                 "content" if f in {"bec_pattern", "credential_phishing_pattern", "html_form_password", "html_form_external", "hidden_text", "bidi_override"} else "context")
+        group = (
+            "authentication"
+            if f.startswith(("spf_", "dkim_", "dmarc_", "compauth_", "returnpath_"))
+            else "identity"
+            if f.startswith(("sender_", "replyto_", "display_name_", "mixed_script_display")) or f == "internal_spoof"
+            else "wording"
+            if f.startswith("lexicon_")
+            else "links"
+            if f.startswith("url_")
+            else "content"
+            if f in {"bec_pattern", "credential_phishing_pattern", "html_form_password", "html_form_external", "hidden_text", "bidi_override"}
+            else "context"
+        )
         groups[group] = max(groups.get(group, 0), MAIL_WEIGHTS[f])
     return groups
 
@@ -198,9 +354,17 @@ def _score(flags: Iterable[str], attachment_risk: int, trust: dict[str, bool] | 
     return max(0, min(100, score))
 
 
-def build_row(headers: list[Header], body_text: str | None, body_html: str | None,
-              attachments: list[RawAttachment], ctx: ParseContext, folder: str = "",
-              size: int | None = None, extra: dict[str, Any] | None = None, depth: int = 0) -> dict[str, Any]:
+def build_row(
+    headers: list[Header],
+    body_text: str | None,
+    body_html: str | None,
+    attachments: list[RawAttachment],
+    ctx: ParseContext,
+    folder: str = "",
+    size: int | None = None,
+    extra: dict[str, Any] | None = None,
+    depth: int = 0,
+) -> dict[str, Any]:
     """Assemble and analyse one message."""
     extra = extra or {}
     date_raw = first_header(headers, "Date")
@@ -243,8 +407,11 @@ def build_row(headers: list[Header], body_text: str | None, body_html: str | Non
     # organisation's domains keeps the mismatch: that is the spoof pattern itself.
     auth0 = hdr["auth"] or {}
     sender_auth_basic = bool(
-        ((auth0.get("spf") == "pass" or auth0.get("dkim") == "pass") and auth0.get("dmarc") in ("pass", "bestguesspass", None)
-         and not ({"spf_fail", "dkim_fail", "dmarc_fail", "compauth_fail"} & flags))
+        (
+            (auth0.get("spf") == "pass" or auth0.get("dkim") == "pass")
+            and auth0.get("dmarc") in ("pass", "bestguesspass", None)
+            and not ({"spf_fail", "dkim_fail", "dmarc_fail", "compauth_fail"} & flags)
+        )
         or auth0.get("exoAuthAs") == "internal"
     )
     if sender_auth_basic and frm["registrable"]:
@@ -280,16 +447,35 @@ def build_row(headers: list[Header], body_text: str | None, body_html: str | Non
     # flag would fire on every message of the mailbox. Suppress them for synthetic headers.
     synthetic = bool(extra.get("syntheticHeaders"))
     if synthetic:
-        flags -= {"no_message_id", "malformed_message_id", "no_received", "single_hop", "no_origin_ip",
-                  "spf_none", "dkim_none", "dmarc_none", "no_date", "helo_domain_mismatch"}
+        flags -= {
+            "no_message_id",
+            "malformed_message_id",
+            "no_received",
+            "single_hop",
+            "no_origin_ip",
+            "spf_none",
+            "dkim_none",
+            "dmarc_none",
+            "no_date",
+            "helo_domain_mismatch",
+        }
     auth_hdr = hdr["auth"] or {}
     # Exchange organisation headers survive on mailbox exports. AuthAs=Internal is an
     # authenticated submission by a tenant user: Exchange neither DKIM-signs nor DMARC-evaluates
     # intra-tenant traffic, so its "none" results and mailbox-server HELO names mean nothing.
     exo_auth_internal = auth_hdr.get("exoAuthAs") == "internal"
     if exo_auth_internal:
-        flags -= {"spf_none", "dkim_none", "dmarc_none", "dkim_domain_unaligned", "spf_domain_unaligned",
-                  "helo_domain_mismatch", "message_id_domain_mismatch", "single_hop", "no_origin_ip"}
+        flags -= {
+            "spf_none",
+            "dkim_none",
+            "dmarc_none",
+            "dkim_domain_unaligned",
+            "spf_domain_unaligned",
+            "helo_domain_mismatch",
+            "message_id_domain_mismatch",
+            "single_hop",
+            "no_origin_ip",
+        }
         flags.add("exchange_internal")
     # without a configured internal-domain list, an authenticated tenant submission IS the organisation
     exo_internal = exo_auth_internal and (bool(look.get("internal")) or not ctx.internal_domains)
@@ -516,8 +702,10 @@ def split_message(msg: Message) -> tuple[str | None, str | None, list[RawAttachm
                 data = part.get_payload(decode=True) or b""
             attachments.append(RawAttachment(filename or "forwarded.eml", data, "message/rfc822", False, cid))
             continue
-        is_attachment = disp == "attachment" or (filename and disp != "inline" and not ctype.startswith("text/")) or (
-            not ctype.startswith("text/") and not ctype.startswith("multipart/") and (filename or disp)
+        is_attachment = (
+            disp == "attachment"
+            or (filename and disp != "inline" and not ctype.startswith("text/"))
+            or (not ctype.startswith("text/") and not ctype.startswith("multipart/") and (filename or disp))
         )
         if is_attachment or (disp == "inline" and filename and not ctype.startswith("text/")):
             data = part.get_payload(decode=True) or b""
@@ -556,8 +744,7 @@ def message_headers(msg: Message) -> list[Header]:
     return out
 
 
-def parse_message_bytes(data: bytes, ctx: ParseContext, folder: str = "", depth: int = 0,
-                        extra: dict[str, Any] | None = None) -> dict[str, Any]:
+def parse_message_bytes(data: bytes, ctx: ParseContext, folder: str = "", depth: int = 0, extra: dict[str, Any] | None = None) -> dict[str, Any]:
     msg = email.message_from_bytes(data, policy=policy.default)
     headers = message_headers(msg)
     text, html, attachments = split_message(msg)
@@ -573,8 +760,10 @@ def parse_nested_mail(name: str, data: bytes, depth: int) -> dict[str, Any]:
         row = parse_msg_bytes(data, ctx, folder="nested", depth=depth)
     else:
         row = parse_message_bytes(data, ctx, folder="nested", depth=depth)
-    compact = {k: row.get(k) for k in ("subject", "fromName", "fromAddr", "fromDomain", "date", "dateIso", "messageId",
-                                        "originIp", "flags", "risk", "urlCount", "attachmentCount")}
+    compact = {
+        k: row.get(k)
+        for k in ("subject", "fromName", "fromAddr", "fromDomain", "date", "dateIso", "messageId", "originIp", "flags", "risk", "urlCount", "attachmentCount")
+    }
     compact["attachments"] = [{k: a.get(k) for k in ("name", "size", "realExt", "sha256", "flags", "risk")} for a in row.get("attachments", [])]
     compact["urls"] = [u["defanged"] for u in row.get("urls", [])[:20]]
     return compact

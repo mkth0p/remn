@@ -6,6 +6,7 @@ It parses uploaded evidence in memory / temp files, streams results to the
 browser (which stores everything in IndexedDB) and proxies Ollama and the
 optional reputation providers.
 """
+
 from __future__ import annotations
 
 import os
@@ -37,9 +38,7 @@ DEBUG = _env_bool("FORENSIC_DEBUG", False)
 
 # Comma-separated extra hosts for remote/home-server deployments, e.g.
 # FORENSIC_ALLOWED_HOSTS=remn.example.com,100.64.0.12
-ALLOWED_HOSTS = ["127.0.0.1", "localhost"] + [
-    h.strip() for h in os.environ.get("FORENSIC_ALLOWED_HOSTS", "").split(",") if h.strip()
-]
+ALLOWED_HOSTS = ["127.0.0.1", "localhost"] + [h.strip() for h in os.environ.get("FORENSIC_ALLOWED_HOSTS", "").split(",") if h.strip()]
 
 # Shared access token for remote deployments. When set, every /api request must
 # send it as the X-Forensic-Client header value; when unset (local use), the

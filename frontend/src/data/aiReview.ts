@@ -3,7 +3,19 @@ import { getDb, type Case, type Finding, type Severity } from '../db/schema'
 import { useStore } from '../state/store'
 import { fmtTs } from '../util/format'
 import type { Chain } from './chains'
-import { applyChainVerdict, chainSeverity, loadChainReviews, overridesForIncident, saveChainReview, SEVERITIES, setChainUnlinked, stepVisible, type ChainReview, type ReviewItem, type Verdict } from './review'
+import {
+  applyChainVerdict,
+  chainSeverity,
+  loadChainReviews,
+  overridesForIncident,
+  saveChainReview,
+  SEVERITIES,
+  setChainUnlinked,
+  stepVisible,
+  type ChainReview,
+  type ReviewItem,
+  type Verdict,
+} from './review'
 import { effectiveSeverity, type Incident } from '../rules/incidents'
 
 /**
@@ -18,12 +30,45 @@ const CHAIN_DECISIONS: Decision[] = ['confirmed', 'benign', 'unsure']
 
 /** What models write instead of the exact words, and what each means. */
 const DECISION_ALIASES: Record<string, Decision> = {
-  confirm: 'confirmed', confirmed: 'confirmed', malicious: 'confirmed', true_positive: 'confirmed', tp: 'confirmed', compromised: 'confirmed',
-  escalate: 'escalated', escalated: 'escalated', escalation: 'escalated', action: 'escalated', needs_action: 'escalated',
-  benign: 'benign', dismiss: 'benign', dismissed: 'benign', not_malicious: 'benign', harmless: 'benign', noise: 'benign', legitimate: 'benign',
-  unsure: 'unsure', uncertain: 'unsure', inconclusive: 'unsure', unknown: 'unsure', needs_review: 'unsure', investigate: 'unsure', suspicious: 'unsure', undetermined: 'unsure',
-  reviewed: 'reviewed', review: 'reviewed', no_action: 'reviewed', close: 'reviewed', closed: 'reviewed', informational: 'reviewed', expected: 'reviewed', acknowledged: 'reviewed',
-  false_positive: 'false_positive', falsepositive: 'false_positive', fp: 'false_positive', misfire: 'false_positive', misfired: 'false_positive',
+  confirm: 'confirmed',
+  confirmed: 'confirmed',
+  malicious: 'confirmed',
+  true_positive: 'confirmed',
+  tp: 'confirmed',
+  compromised: 'confirmed',
+  escalate: 'escalated',
+  escalated: 'escalated',
+  escalation: 'escalated',
+  action: 'escalated',
+  needs_action: 'escalated',
+  benign: 'benign',
+  dismiss: 'benign',
+  dismissed: 'benign',
+  not_malicious: 'benign',
+  harmless: 'benign',
+  noise: 'benign',
+  legitimate: 'benign',
+  unsure: 'unsure',
+  uncertain: 'unsure',
+  inconclusive: 'unsure',
+  unknown: 'unsure',
+  needs_review: 'unsure',
+  investigate: 'unsure',
+  suspicious: 'unsure',
+  undetermined: 'unsure',
+  reviewed: 'reviewed',
+  review: 'reviewed',
+  no_action: 'reviewed',
+  close: 'reviewed',
+  closed: 'reviewed',
+  informational: 'reviewed',
+  expected: 'reviewed',
+  acknowledged: 'reviewed',
+  false_positive: 'false_positive',
+  falsepositive: 'false_positive',
+  fp: 'false_positive',
+  misfire: 'false_positive',
+  misfired: 'false_positive',
 }
 /** the same meaning said in the other kind's words */
 const TO_CHAIN: Partial<Record<Decision, Decision>> = { escalated: 'confirmed', reviewed: 'unsure', false_positive: 'benign' }
@@ -31,7 +76,10 @@ const TO_INCIDENT: Partial<Record<Decision, Decision>> = { confirmed: 'escalated
 
 /** A model's decision word as one of the item kind's decisions, or null when it means nothing known. */
 export function normaliseDecision(raw: unknown, kind: 'chain' | 'incident'): Decision | null {
-  const key = String(raw ?? '').toLowerCase().trim().replace(/[\s-]+/g, '_')
+  const key = String(raw ?? '')
+    .toLowerCase()
+    .trim()
+    .replace(/[\s-]+/g, '_')
   const d = DECISION_ALIASES[key]
   if (!d) return null
   const allowed = kind === 'chain' ? CHAIN_DECISIONS : INCIDENT_DECISIONS
@@ -102,8 +150,20 @@ export function describeIncident(inc: Incident): Record<string, unknown> {
     from: inc.ts ? new Date(inc.ts).toISOString() : null,
     to: inc.tsEnd ? new Date(inc.tsEnd).toISOString() : null,
     rows: inc.refs.length,
-    entities: Object.fromEntries(Object.entries(inc.entities).slice(0, 8).map(([k, v]) => [k, short(v, 80)])),
-    findings: inc.findings.slice(0, 12).map((f) => ({ id: f.id, rule: f.ruleId, severity: effectiveSeverity(f), title: short(f.title, 140), rows: f.count, ...(f.escalation ? { note: short(f.escalation, 120) } : {}), ...(f.notes ? { analystNote: short(f.notes, 200) } : {}) })),
+    entities: Object.fromEntries(
+      Object.entries(inc.entities)
+        .slice(0, 8)
+        .map(([k, v]) => [k, short(v, 80)]),
+    ),
+    findings: inc.findings.slice(0, 12).map((f) => ({
+      id: f.id,
+      rule: f.ruleId,
+      severity: effectiveSeverity(f),
+      title: short(f.title, 140),
+      rows: f.count,
+      ...(f.escalation ? { note: short(f.escalation, 120) } : {}),
+      ...(f.notes ? { analystNote: short(f.notes, 200) } : {}),
+    })),
   }
 }
 
@@ -118,10 +178,23 @@ export function describeChain(c: Chain, review: ChainReview | undefined, members
     severity: chainSeverity(c, review),
     scoreBreakdown: c.scoreBreakdown ?? null,
     artifactLinks: c.artifactLinks,
-    seed: { subject: short(c.seed.subject, 120), from: c.seed.fromAddr, at: new Date(c.seed.ts).toISOString(), risk: c.seed.risk, flags: c.seed.flags.slice(0, 10), findings: c.seed.findings.slice(0, 6).map((f) => short(f.title, 100)) },
-    steps: steps.map((s) => `+${Math.round(s.offsetMin)} min [${s.kind === 'mail' ? 'mail' : s.origin ?? 'host'}] ${short(s.title, 110)}${s.artifacts.length ? ' | ties: ' + short(s.artifacts.join('; '), 160) : ''}${s.findings.length ? ' | findings: ' + short(s.findings.map((f) => f.title).join('; '), 160) : ''}`),
+    seed: {
+      subject: short(c.seed.subject, 120),
+      from: c.seed.fromAddr,
+      at: new Date(c.seed.ts).toISOString(),
+      risk: c.seed.risk,
+      flags: c.seed.flags.slice(0, 10),
+      findings: c.seed.findings.slice(0, 6).map((f) => short(f.title, 100)),
+    },
+    steps: steps.map(
+      (s) =>
+        `+${Math.round(s.offsetMin)} min [${s.kind === 'mail' ? 'mail' : (s.origin ?? 'host')}] ${short(s.title, 110)}${s.artifacts.length ? ' | ties: ' + short(s.artifacts.join('; '), 160) : ''}${s.findings.length ? ' | findings: ' + short(s.findings.map((f) => f.title).join('; '), 160) : ''}`,
+    ),
     stepsNotShown: Math.max(0, c.steps.length - steps.length),
-    linkedFindings: members.filter((f) => f.ruleId !== 'chain').slice(0, 20).map((f) => ({ id: f.id, rule: f.ruleId, severity: effectiveSeverity(f), title: short(f.title, 120), source: f.source, rows: f.count })),
+    linkedFindings: members
+      .filter((f) => f.ruleId !== 'chain')
+      .slice(0, 20)
+      .map((f) => ({ id: f.id, rule: f.ruleId, severity: effectiveSeverity(f), title: short(f.title, 120), source: f.source, rows: f.count })),
   }
 }
 
@@ -250,7 +323,17 @@ export async function saveTriageRun(caseId: number, run: TriageRun): Promise<voi
   await getDb().kv.put({ key: `ai-triage-${caseId}`, value: run })
 }
 
-const snapshot = (f: Finding): FindingSnapshot => ({ id: f.id!, status: f.status, severityOverride: f.severityOverride, reportExclude: f.reportExclude, chainUnlinked: f.chainUnlinked, decidedBy: f.decidedBy, aiReason: f.aiReason, notes: f.notes, notesBy: f.notesBy })
+const snapshot = (f: Finding): FindingSnapshot => ({
+  id: f.id!,
+  status: f.status,
+  severityOverride: f.severityOverride,
+  reportExclude: f.reportExclude,
+  chainUnlinked: f.chainUnlinked,
+  decidedBy: f.decidedBy,
+  aiReason: f.aiReason,
+  notes: f.notes,
+  notesBy: f.notesBy,
+})
 
 /** Write one decision (incident status/severity/inclusion, or chain verdict/severity/inclusion/unlinks) and return the log entry with what it replaced. */
 export async function applyDecision(caseId: number, it: ReviewItem, d: ParsedDecision, reviews: Record<string, ChainReview>): Promise<TriageEntry> {
@@ -258,7 +341,19 @@ export async function applyDecision(caseId: number, it: ReviewItem, d: ParsedDec
   const inc = it.incident
   const findings = inc?.findings ?? []
   const before = { findings: findings.map(snapshot), chainReview: it.chain ? (reviews[it.chain.id] ?? null) : undefined }
-  const entry: TriageEntry = { id: it.id, kind: it.kind, title: it.title, decision: d.decision, severityBefore: it.severity, severityAfter: it.severity, includeBefore: true, includeAfter: true, unlinked: [], reason: d.reason, before }
+  const entry: TriageEntry = {
+    id: it.id,
+    kind: it.kind,
+    title: it.title,
+    decision: d.decision,
+    severityBefore: it.severity,
+    severityAfter: it.severity,
+    includeBefore: true,
+    includeAfter: true,
+    unlinked: [],
+    reason: d.reason,
+    before,
+  }
   if (it.kind === 'chain' && it.chain) {
     const c = it.chain
     const rev = reviews[c.id]
@@ -276,7 +371,7 @@ export async function applyDecision(caseId: number, it: ReviewItem, d: ParsedDec
     }
     if (Object.keys(patch).length) await saveChainReview(caseId, c.id, patch)
     entry.severityAfter = d.severity ?? chainSeverity(c, rev)
-    entry.includeAfter = d.include ?? (d.decision !== 'benign')
+    entry.includeAfter = d.include ?? d.decision !== 'benign'
     if (d.unlink.length) {
       await setChainUnlinked(d.unlink, true)
       entry.unlinked = d.unlink.map((id) => ({ id, title: findings.find((f) => f.id === id)?.title ?? String(id) }))
@@ -305,7 +400,19 @@ export async function applyDecision(caseId: number, it: ReviewItem, d: ParsedDec
 /** Put back what a decision replaced. */
 export async function undoEntry(caseId: number, entry: TriageEntry): Promise<void> {
   const db = getDb()
-  await Promise.all(entry.before.findings.map((s) => db.findings.update(s.id, { status: s.status, severityOverride: s.severityOverride, reportExclude: s.reportExclude, chainUnlinked: s.chainUnlinked, decidedBy: s.decidedBy, aiReason: s.aiReason, ...(entry.wrote === 'note' ? { notes: s.notes, notesBy: s.notesBy } : {}) })))
+  await Promise.all(
+    entry.before.findings.map((s) =>
+      db.findings.update(s.id, {
+        status: s.status,
+        severityOverride: s.severityOverride,
+        reportExclude: s.reportExclude,
+        chainUnlinked: s.chainUnlinked,
+        decidedBy: s.decidedBy,
+        aiReason: s.aiReason,
+        ...(entry.wrote === 'note' ? { notes: s.notes, notesBy: s.notesBy } : {}),
+      }),
+    ),
+  )
   if (entry.kind === 'chain' && entry.before.chainReview !== undefined) {
     const all = await loadChainReviews(caseId)
     const chainId = entry.id.replace(/^chain:/, '')
@@ -326,7 +433,8 @@ export interface TriageProgress {
   batches: number
 }
 
-const INSTRUCTION = 'Decide on every item below and reply with ONLY a JSON array, one object per item, in the same order: {"id": "<id as given>", "decision": "<exactly one of the item\'s "decisions" values: chains confirmed|benign|unsure, incidents escalated|reviewed|false_positive>", "severity": "<critical|high|medium|low|info>", "include": <true|false>, "reason": "<one or two factual sentences>", "unlink": [<finding ids that do not belong to the chain, chains only, usually empty>], "narrative": "<chains only: 4 to 7 sentences for the report>", "note": "<incidents only: 1 to 3 sentences printed with the incident>"}.'
+const INSTRUCTION =
+  'Decide on every item below and reply with ONLY a JSON array, one object per item, in the same order: {"id": "<id as given>", "decision": "<exactly one of the item\'s "decisions" values: chains confirmed|benign|unsure, incidents escalated|reviewed|false_positive>", "severity": "<critical|high|medium|low|info>", "include": <true|false>, "reason": "<one or two factual sentences>", "unlink": [<finding ids that do not belong to the chain, chains only, usually empty>], "narrative": "<chains only: 4 to 7 sentences for the report>", "note": "<incidents only: 1 to 3 sentences printed with the incident>"}.'
 
 export function batchSize(): number {
   return useStore.getState().aiConfig.transport === 'claude' ? 8 : 4
@@ -336,7 +444,19 @@ export function batchSize(): number {
  * Ask the model for a decision on each item, in batches, and either record them as suggestions
  * (apply: false) or write them (apply: true). Returns the log; the caller shows it.
  */
-export async function runTriage(kase: Case, items: ReviewItem[], reviews: Record<string, ChainReview>, opts: { apply: boolean; batch?: number; model?: string; signal?: AbortSignal; onProgress?: (p: TriageProgress) => void; /** run after the decisions (apply mode): drafts the executive summary */ draftSummary?: () => Promise<unknown> }): Promise<TriageRun> {
+export async function runTriage(
+  kase: Case,
+  items: ReviewItem[],
+  reviews: Record<string, ChainReview>,
+  opts: {
+    apply: boolean
+    batch?: number
+    model?: string
+    signal?: AbortSignal
+    onProgress?: (p: TriageProgress) => void
+    /** run after the decisions (apply mode): drafts the executive summary */ draftSummary?: () => Promise<unknown>
+  },
+): Promise<TriageRun> {
   const caseId = kase.id!
   const size = Math.max(1, opts.batch ?? batchSize())
   const batches: ReviewItem[][] = []
@@ -352,7 +472,7 @@ export async function runTriage(kase: Case, items: ReviewItem[], reviews: Record
     opts.onProgress?.({ done: b * size, total: items.length, batch: b + 1, batches: batches.length })
     const payload = batch.map((it) => describeItem(it, currentReviews))
     const prompt = `${INSTRUCTION}\n\nItems:\n${JSON.stringify(payload, null, 1).slice(0, 90_000)}`
-    let text = ''
+    let text: string
     try {
       const msgs = await runAgent([{ role: 'user', content: prompt }], kase, { mode: 'triage', tools: false, think: false, maxIterations: 1, model: opts.model, signal: opts.signal })
       const last = [...msgs].reverse().find((m) => m.role === 'assistant')
@@ -379,8 +499,32 @@ export async function runTriage(kase: Case, items: ReviewItem[], reviews: Record
         if (it.kind === 'chain') currentReviews = await loadChainReviews(caseId)
       } else {
         const target = it.kind === 'chain' ? `chain:${it.chain!.id}` : `incident:${it.incident!.id}`
-        await saveSuggestion(caseId, { target, severity: d.severity, decision: d.decision, include: d.include, unlink: d.unlink.length ? d.unlink : undefined, narrative: d.narrative, note: d.note, reason: d.reason, at: Date.now(), by: 'triage', model: run.model || undefined })
-        run.entries.push({ id: it.id, kind: it.kind, title: it.title, decision: d.decision, severityBefore: it.severity, severityAfter: d.severity ?? it.severity, includeBefore: true, includeAfter: d.include ?? true, unlinked: d.unlink.map((id) => ({ id, title: String(id) })), reason: d.reason, before: { findings: [] } })
+        await saveSuggestion(caseId, {
+          target,
+          severity: d.severity,
+          decision: d.decision,
+          include: d.include,
+          unlink: d.unlink.length ? d.unlink : undefined,
+          narrative: d.narrative,
+          note: d.note,
+          reason: d.reason,
+          at: Date.now(),
+          by: 'triage',
+          model: run.model || undefined,
+        })
+        run.entries.push({
+          id: it.id,
+          kind: it.kind,
+          title: it.title,
+          decision: d.decision,
+          severityBefore: it.severity,
+          severityAfter: d.severity ?? it.severity,
+          includeBefore: true,
+          includeAfter: d.include ?? true,
+          unlinked: d.unlink.map((id) => ({ id, title: String(id) })),
+          reason: d.reason,
+          before: { findings: [] },
+        })
       }
     }
   }
@@ -402,7 +546,12 @@ export async function applySuggestion(caseId: number, it: ReviewItem, s: Suggest
   const allowed = it.kind === 'chain' ? CHAIN_DECISIONS : INCIDENT_DECISIONS
   const decision: Decision = s.decision && allowed.includes(s.decision) ? s.decision : it.kind === 'chain' ? 'unsure' : 'reviewed'
   const memberIds = new Set((it.incident?.findings ?? []).map((f) => f.id))
-  const entry = await applyDecision(caseId, it, { id: it.id, decision, severity: s.severity, include: s.include, unlink: (s.unlink ?? []).filter((id) => memberIds.has(id)), reason: s.reason, narrative: s.narrative, note: s.note }, reviews)
+  const entry = await applyDecision(
+    caseId,
+    it,
+    { id: it.id, decision, severity: s.severity, include: s.include, unlink: (s.unlink ?? []).filter((id) => memberIds.has(id)), reason: s.reason, narrative: s.narrative, note: s.note },
+    reviews,
+  )
   await removeSuggestion(caseId, s.target)
   return entry
 }

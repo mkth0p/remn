@@ -173,14 +173,26 @@ export function foldSteps(steps: ChainStep[]): FoldedStep[] {
   return out
 }
 /** only a PNG data URL this app produced itself is embedded */
-const img = (src: string | undefined, alt: string, caption?: string) => (src && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(src) ? `<figure><img src="${src}" alt="${h(alt)}">${caption ? `<figcaption>${h(caption)}</figcaption>` : ''}</figure>` : '')
+const img = (src: string | undefined, alt: string, caption?: string) =>
+  src && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(src) ? `<figure><img src="${src}" alt="${h(alt)}">${caption ? `<figcaption>${h(caption)}</figcaption>` : ''}</figure>` : ''
 const md = (text: string) => renderMarkdown(text)
 const n = (x: number) => fmtNum(x)
 
 function meter(c: Chain): string {
   const b = c.scoreBreakdown
-  const parts: [string, number][] = b ? [['seed', b.seed], ['links', b.links], ['steps', b.steps], ['findings', b.findings], ['sources', b.sources]] : [['score', c.score]]
-  const total = Math.max(1, parts.reduce((s, [, v]) => s + v, 0))
+  const parts: [string, number][] = b
+    ? [
+        ['seed', b.seed],
+        ['links', b.links],
+        ['steps', b.steps],
+        ['findings', b.findings],
+        ['sources', b.sources],
+      ]
+    : [['score', c.score]]
+  const total = Math.max(
+    1,
+    parts.reduce((s, [, v]) => s + v, 0),
+  )
   const colours = ['#1b7f66', '#2fbf8f', '#2f6fdb', '#d9822b', '#8a95a3']
   const segs = parts.map(([k, v], i) => `<span title="${h(k)} ${v}" style="width:${((v / total) * 100).toFixed(1)}%;background:${colours[i % colours.length]}"></span>`).join('')
   return `<span class="meter" title="${h(parts.map(([k, v]) => `${k} ${v}`).join(' · '))}"><span class="bar">${segs}</span><span>score ${c.score}${b?.cap ? ` (capped ${b.cap})` : ''}</span></span>`
@@ -194,17 +206,43 @@ function chainCard(c: Chain, d: ReportData): string {
   const printed = folded.slice(0, MAX_STEP_ROWS)
   const left = folded.length - printed.length
   const members = d.membersOf.get(c.id) ?? []
-  const offset = (f: FoldedStep) => (f.n > 1 && f.offsetEnd !== f.offsetMin ? `${f.offsetMin >= 0 ? '+' : ''}${Math.round(f.offsetMin)} → ${f.offsetEnd >= 0 ? '+' : ''}${Math.round(f.offsetEnd)} min` : `${f.offsetMin >= 0 ? '+' : ''}${Math.round(f.offsetMin)} min`)
+  const offset = (f: FoldedStep) =>
+    f.n > 1 && f.offsetEnd !== f.offsetMin
+      ? `${f.offsetMin >= 0 ? '+' : ''}${Math.round(f.offsetMin)} → ${f.offsetEnd >= 0 ? '+' : ''}${Math.round(f.offsetEnd)} min`
+      : `${f.offsetMin >= 0 ? '+' : ''}${Math.round(f.offsetMin)} min`
   const when = (f: FoldedStep) => (f.n > 1 && f.tsEnd !== f.ts ? `${fmtTs(f.ts)}<span class="sub">to ${fmtTs(f.tsEnd)}</span>` : fmtTs(f.ts))
-  const narrative = r?.narrative ? `<div class="narr">${md(r.narrative)}</div>${r.narrativeBy === 'ai' ? '<div class="cap">narrative drafted by the model during triage</div>' : ''}` : `<div class="narr"><p>${h(c.summary)}</p></div>`
+  const narrative = r?.narrative
+    ? `<div class="narr">${md(r.narrative)}</div>${r.narrativeBy === 'ai' ? '<div class="cap">narrative drafted by the model during triage</div>' : ''}`
+    : `<div class="narr"><p>${h(c.summary)}</p></div>`
   return `<div class="card chain">
 <div class="card-head">${pill(chainSeverity(c, r))}<h3>${h(c.identityLabel)}</h3>${verdictPill(r?.verdict)}${meter(c)}</div>
 <div class="card-meta">Seed mail “${h(c.seed.subject)}” from <code>${h(c.seed.fromAddr ?? '')}</code> at ${fmtTs(c.seed.ts)} (risk ${c.seed.risk}) · ${c.steps.length} steps from ${fmtTs(c.start)} to ${fmtTs(c.end)} · ${c.artifactLinks} tie(s) to the mail${c.entities.attackerAddresses.length ? ` · attacker <code>${h(c.entities.attackerAddresses.join(', '))}</code>` : ''}${c.entities.ips.length ? ` · IPs <code>${h(c.entities.ips.join(', '))}</code>` : ''}${c.entities.hosts.length ? ` · hosts <code>${h(c.entities.hosts.join(', '))}</code>` : ''}</div>
 ${narrative}
 ${d.settings.includeGraphs ? img(d.graphs[c.id], `graph of the chain for ${c.identityLabel}`, 'Steps by lane and time: diamond = seed mail, box = step (size = weight, colour = worst finding), grey dot = folded routine steps, green edges = ties to the mail.') : ''}
-${table(['time (UTC)', 'offset', 'source', 'step', 'ties to the mail / findings'], printed.map((f) => { const s = f.step; return [`<span class="nowrap">${when(f)}</span>`, `<span class="nowrap">${offset(f)}</span>`, `<span class="lane ${s.kind === 'mail' ? 'mail' : s.origin === 'm365' ? 'm365' : 'host'}"></span>${h(s.kind === 'mail' ? 'mailbox' : s.origin === 'm365' ? 'Microsoft 365' : 'host')}`, h(s.title) + (f.n > 1 ? ` <span class="chip">×${f.n}</span>` : s.count > 1 ? ` <span class="chip">×${s.count}</span>` : '') + (s.computer || s.ipAddress ? `<span class="sub">${h([s.computer, s.ipAddress].filter(Boolean).join(' · '))}</span>` : ''), h([...s.artifacts, ...s.findings.map((x) => x.title)].join('; '))] }))}
+${table(
+  ['time (UTC)', 'offset', 'source', 'step', 'ties to the mail / findings'],
+  printed.map((f) => {
+    const s = f.step
+    return [
+      `<span class="nowrap">${when(f)}</span>`,
+      `<span class="nowrap">${offset(f)}</span>`,
+      `<span class="lane ${s.kind === 'mail' ? 'mail' : s.origin === 'm365' ? 'm365' : 'host'}"></span>${h(s.kind === 'mail' ? 'mailbox' : s.origin === 'm365' ? 'Microsoft 365' : 'host')}`,
+      h(s.title) +
+        (f.n > 1 ? ` <span class="chip">×${f.n}</span>` : s.count > 1 ? ` <span class="chip">×${s.count}</span>` : '') +
+        (s.computer || s.ipAddress ? `<span class="sub">${h([s.computer, s.ipAddress].filter(Boolean).join(' · '))}</span>` : ''),
+      h([...s.artifacts, ...s.findings.map((x) => x.title)].join('; ')),
+    ]
+  }),
+)}
 ${left || hidden ? `<div class="cap">${left ? `${left} more step row(s) not printed (open the chain in REMN for the full list)` : ''}${left && hidden ? ' · ' : ''}${hidden ? `${hidden} routine step(s) not printed at the “${h(d.settings.chainDetail)}” detail level` : ''}.</div>` : ''}
-${members.length ? `<div class="cap" style="margin-top:8px">${members.length} finding(s) linked to this chain, decided with it</div>${table(['severity', 'finding', 'rule', 'rows', 'status'], members.map((f) => [pill(effectiveSeverity(f)), h(f.title), `<code>${h(f.ruleId)}</code>`, String(f.count), statusPill(f.status)]))}` : ''}
+${
+  members.length
+    ? `<div class="cap" style="margin-top:8px">${members.length} finding(s) linked to this chain, decided with it</div>${table(
+        ['severity', 'finding', 'rule', 'rows', 'status'],
+        members.map((f) => [pill(effectiveSeverity(f)), h(f.title), `<code>${h(f.ruleId)}</code>`, String(f.count), statusPill(f.status)]),
+      )}`
+    : ''
+}
 ${r?.by === 'ai' && r.aiReason ? `<div class="cap">Triage note (model): ${h(r.aiReason)}</div>` : ''}
 </div>`
 }
@@ -212,10 +250,28 @@ ${r?.by === 'ai' && r.aiReason ? `<div class="cap">Triage note (model): ${h(r.ai
 function incidentCard(i: Incident): string {
   return `<div class="card inc ${h(i.severity)}">
 <div class="card-head">${pill(i.severity)}<h3>${h(i.title)}</h3>${statusPill(i.status)}</div>
-<div class="card-meta">${h(i.subtitle)} · ${fmtTs(i.ts)}${i.tsEnd && i.tsEnd !== i.ts ? ` → ${fmtTs(i.tsEnd)}` : ''} · ${n(i.refs.length)} row(s)${Object.keys(i.entities).length ? ' · ' + Object.entries(i.entities).slice(0, 6).map(([k, v]) => `<span class="chip">${h(k)}=${h(String(v))}</span>`).join('') : ''}</div>
+<div class="card-meta">${h(i.subtitle)} · ${fmtTs(i.ts)}${i.tsEnd && i.tsEnd !== i.ts ? ` → ${fmtTs(i.tsEnd)}` : ''} · ${n(i.refs.length)} row(s)${
+    Object.keys(i.entities).length
+      ? ' · ' +
+        Object.entries(i.entities)
+          .slice(0, 6)
+          .map(([k, v]) => `<span class="chip">${h(k)}=${h(String(v))}</span>`)
+          .join('')
+      : ''
+  }</div>
 ${i.lead.notes ? `<div class="note">${md(i.lead.notes)}</div>${i.lead.notesBy === 'ai' ? '<div class="cap">note drafted by the model during triage</div>' : ''}` : ''}
 ${i.lead.decidedBy === 'ai' && i.lead.aiReason ? `<div class="cap">Triage note (model): ${h(i.lead.aiReason)}</div>` : ''}
-${table(['severity', 'finding', 'rule', 'rows', 'first (UTC)', 'ATT&amp;CK'], i.findings.map((f) => [pill(effectiveSeverity(f)) + (f.severityOverride ? `<span class="sub">rule: ${h(f.severity)}</span>` : ''), h(f.title) + (f.escalation ? `<span class="sub">${h(f.escalation)}</span>` : ''), `<code>${h(f.ruleId)}</code>`, String(f.count), `<span class="nowrap">${fmtTs(f.ts)}</span>`, f.attack.map((t) => `<span class="chip">${h(t)}</span>`).join('')]))}
+${table(
+  ['severity', 'finding', 'rule', 'rows', 'first (UTC)', 'ATT&amp;CK'],
+  i.findings.map((f) => [
+    pill(effectiveSeverity(f)) + (f.severityOverride ? `<span class="sub">rule: ${h(f.severity)}</span>` : ''),
+    h(f.title) + (f.escalation ? `<span class="sub">${h(f.escalation)}</span>` : ''),
+    `<code>${h(f.ruleId)}</code>`,
+    String(f.count),
+    `<span class="nowrap">${fmtTs(f.ts)}</span>`,
+    f.attack.map((t) => `<span class="chip">${h(t)}</span>`).join(''),
+  ]),
+)}
 </div>`
 }
 
@@ -231,22 +287,104 @@ export function buildReportHtml(d: ReportData): string {
   }
   const sections: { id: string; title: string; count?: number; body: string }[] = []
   if (d.summary) sections.push({ id: 'summary', title: 'Executive summary', body: `<div class="narr">${md(d.summary)}</div>` })
-  if (settings.includeEvidence) sections.push({ id: 'evidence', title: 'Evidence and chain of custody', count: d.evidence.length, body: d.evidence.length ? table(['file', 'kind', 'size', 'rows', 'SHA-256', 'integrity', 'added (UTC)'], d.evidence.map((e) => [h(e.name), h(e.format || e.kind), fmtBytes(e.size), n(e.count), `<code>${h(e.sha256Client ?? '')}</code>`, h(e.integrity), `<span class="nowrap">${fmtTs(e.addedAt)}</span>`])) : '<div class="empty">No evidence file.</div>' })
+  if (settings.includeEvidence)
+    sections.push({
+      id: 'evidence',
+      title: 'Evidence and chain of custody',
+      count: d.evidence.length,
+      body: d.evidence.length
+        ? table(
+            ['file', 'kind', 'size', 'rows', 'SHA-256', 'integrity', 'added (UTC)'],
+            d.evidence.map((e) => [
+              h(e.name),
+              h(e.format || e.kind),
+              fmtBytes(e.size),
+              n(e.count),
+              `<code>${h(e.sha256Client ?? '')}</code>`,
+              h(e.integrity),
+              `<span class="nowrap">${fmtTs(e.addedAt)}</span>`,
+            ]),
+          )
+        : '<div class="empty">No evidence file.</div>',
+    })
   if (d.chains.length) {
-    const campaign = settings.includeGraphs && d.chains.length > 1 && d.graphs.campaign ? `<div class="card"><div class="card-head"><h3>Shared between chains</h3></div>${img(d.graphs.campaign, 'campaign graph', 'Chains and the senders, domains, IPs and hosts they share.')}<div class="cap">${d.campaignInsights.length ? d.campaignInsights.map((x) => h(x)).join(' · ') : 'no sender, domain, IP or host is shared between the chains'}</div></div>` : ''
-    sections.push({ id: 'chains', title: 'Attack chains', count: d.chains.length, body: `<p class="intro">A chain is a suspicious mail and what the recipient's accounts and machines did after it, scored on the seed, the ties to the mail, the steps, the findings and the sources involved. Findings whose rows are steps of a chain are decided with it.</p>${campaign}${d.chains.map((c) => chainCard(c, d)).join('\n')}` })
+    const campaign =
+      settings.includeGraphs && d.chains.length > 1 && d.graphs.campaign
+        ? `<div class="card"><div class="card-head"><h3>Shared between chains</h3></div>${img(d.graphs.campaign, 'campaign graph', 'Chains and the senders, domains, IPs and hosts they share.')}<div class="cap">${d.campaignInsights.length ? d.campaignInsights.map((x) => h(x)).join(' · ') : 'no sender, domain, IP or host is shared between the chains'}</div></div>`
+        : ''
+    sections.push({
+      id: 'chains',
+      title: 'Attack chains',
+      count: d.chains.length,
+      body: `<p class="intro">A chain is a suspicious mail and what the recipient's accounts and machines did after it, scored on the seed, the ties to the mail, the steps, the findings and the sources involved. Findings whose rows are steps of a chain are decided with it.</p>${campaign}${d.chains.map((c) => chainCard(c, d)).join('\n')}`,
+    })
   }
-  sections.push({ id: 'incidents', title: 'Incidents', count: d.incidents.length, body: `<p class="intro">Findings on the same mail, or about the same user, host or IP within six hours, are one incident.</p>${d.incidents.length ? d.incidents.map(incidentCard).join('\n') : '<div class="empty">No incident outside the attack chains passes the severity floor.</div>'}` })
-  if (settings.includeIocs) sections.push({ id: 'iocs', title: 'Indicators of compromise', count: d.iocs.length, body: d.iocs.length ? `<p class="intro">Indicators flagged by the reputation providers; values are defanged.</p>${table(['kind', 'indicator', 'verdict', 'tags', 'seen'], d.iocs.map((i) => [h(i.kind), `<code>${h(defang(i.value))}</code>`, h(i.verdict ?? ''), (i.tags ?? []).map((t) => `<span class="chip">${h(t)}</span>`).join(''), h(`${i.count} (${i.sources.join(', ')})`)]))}` : '<div class="empty">No indicator flagged: reputation checks were not run, or nothing was found malicious.</div>' })
-  if (settings.includeTimeline && d.timeline.length) sections.push({ id: 'timeline', title: 'Case timeline', count: d.timeline.length, body: `<ul class="tl">${d.timeline.map((t) => `<li class="${h(t.severity ?? 'info')}"><div class="t">${fmtTs(t.ts)}${t.link ? ` · ${h(`${t.link.source} ${t.link.label ?? t.link.id}`)}` : ''}</div><div>${h(t.text)}</div></li>`).join('')}</ul>` })
-  if (settings.includeTasks && d.tasks.length) sections.push({ id: 'tasks', title: 'Tasks', count: d.tasks.length, body: `<ul class="tasks">${d.tasks.map((t) => `<li class="${t.done ? 'done' : ''}"><span class="box">${t.done ? '✓' : ''}</span>${h(t.text)} <span class="dim">· ${fmtTs(t.updatedAt)}</span></li>`).join('')}</ul>` })
-  if (settings.includeNotes && d.notes.length) sections.push({ id: 'notes', title: 'Analyst notes', count: d.notes.length, body: `<div class="notes">${d.notes.map((x) => `<div class="n"><div class="cap">${fmtTs(x.createdAt)}</div>${md(x.text)}</div>`).join('')}</div>` })
+  sections.push({
+    id: 'incidents',
+    title: 'Incidents',
+    count: d.incidents.length,
+    body: `<p class="intro">Findings on the same mail, or about the same user, host or IP within six hours, are one incident.</p>${d.incidents.length ? d.incidents.map(incidentCard).join('\n') : '<div class="empty">No incident outside the attack chains passes the severity floor.</div>'}`,
+  })
+  if (settings.includeIocs)
+    sections.push({
+      id: 'iocs',
+      title: 'Indicators of compromise',
+      count: d.iocs.length,
+      body: d.iocs.length
+        ? `<p class="intro">Indicators flagged by the reputation providers; values are defanged.</p>${table(
+            ['kind', 'indicator', 'verdict', 'tags', 'seen'],
+            d.iocs.map((i) => [
+              h(i.kind),
+              `<code>${h(defang(i.value))}</code>`,
+              h(i.verdict ?? ''),
+              (i.tags ?? []).map((t) => `<span class="chip">${h(t)}</span>`).join(''),
+              h(`${i.count} (${i.sources.join(', ')})`),
+            ]),
+          )}`
+        : '<div class="empty">No indicator flagged: reputation checks were not run, or nothing was found malicious.</div>',
+    })
+  if (settings.includeTimeline && d.timeline.length)
+    sections.push({
+      id: 'timeline',
+      title: 'Case timeline',
+      count: d.timeline.length,
+      body: `<ul class="tl">${d.timeline.map((t) => `<li class="${h(t.severity ?? 'info')}"><div class="t">${fmtTs(t.ts)}${t.link ? ` · ${h(`${t.link.source} ${t.link.label ?? t.link.id}`)}` : ''}</div><div>${h(t.text)}</div></li>`).join('')}</ul>`,
+    })
+  if (settings.includeTasks && d.tasks.length)
+    sections.push({
+      id: 'tasks',
+      title: 'Tasks',
+      count: d.tasks.length,
+      body: `<ul class="tasks">${d.tasks.map((t) => `<li class="${t.done ? 'done' : ''}"><span class="box">${t.done ? '✓' : ''}</span>${h(t.text)} <span class="dim">· ${fmtTs(t.updatedAt)}</span></li>`).join('')}</ul>`,
+    })
+  if (settings.includeNotes && d.notes.length)
+    sections.push({
+      id: 'notes',
+      title: 'Analyst notes',
+      count: d.notes.length,
+      body: `<div class="notes">${d.notes.map((x) => `<div class="n"><div class="cap">${fmtTs(x.createdAt)}</div>${md(x.text)}</div>`).join('')}</div>`,
+    })
   const timed = [...d.findings].filter((f) => f.ts).sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0))
-  sections.push({ id: 'findings', title: 'Findings in time order', count: timed.length, body: timed.length ? table(['time (UTC)', 'severity', 'finding', 'entities'], timed.map((f) => [`<span class="nowrap">${fmtTs(f.ts)}</span>`, pill(effectiveSeverity(f)), h(f.title), `<code>${h(Object.values(f.entities).slice(0, 3).join(' · '))}</code>`])) : '<div class="empty">No dated finding.</div>' })
-  sections.push({ id: 'settings', title: 'Case settings', body: `<div class="settings">internal domains: ${h(kase.settings.internalDomains.join(', ') || '—')} · VIPs: ${h(kase.settings.vipNames.join(', ') || '—')} · business hours ${kase.settings.businessHours.start}h–${kase.settings.businessHours.end}h (${h(kase.settings.businessHours.tz)}) · external lookups ${kase.settings.networkAllowed ? 'enabled' : 'disabled'} · report floor ${h(settings.minSeverity)}${settings.onlyReviewed ? ' · reviewed items only' : ''}${settings.includeFp ? ' · false positives included' : ''} · chain steps: ${h(settings.chainDetail)}</div>` })
+  sections.push({
+    id: 'findings',
+    title: 'Findings in time order',
+    count: timed.length,
+    body: timed.length
+      ? table(
+          ['time (UTC)', 'severity', 'finding', 'entities'],
+          timed.map((f) => [`<span class="nowrap">${fmtTs(f.ts)}</span>`, pill(effectiveSeverity(f)), h(f.title), `<code>${h(Object.values(f.entities).slice(0, 3).join(' · '))}</code>`]),
+        )
+      : '<div class="empty">No dated finding.</div>',
+  })
+  sections.push({
+    id: 'settings',
+    title: 'Case settings',
+    body: `<div class="settings">internal domains: ${h(kase.settings.internalDomains.join(', ') || '—')} · VIPs: ${h(kase.settings.vipNames.join(', ') || '—')} · business hours ${kase.settings.businessHours.start}h–${kase.settings.businessHours.end}h (${h(kase.settings.businessHours.tz)}) · external lookups ${kase.settings.networkAllowed ? 'enabled' : 'disabled'} · report floor ${h(settings.minSeverity)}${settings.onlyReviewed ? ' · reviewed items only' : ''}${settings.includeFp ? ' · false positives included' : ''} · chain steps: ${h(settings.chainDetail)}</div>`,
+  })
 
   const num = (i: number) => String(i + 1).padStart(2, '0')
-  const font = d.fontData && /^[A-Za-z0-9+/=]+$/.test(d.fontData) ? `@font-face{font-family:'Gulax';src:url(data:font/woff2;base64,${d.fontData}) format('woff2');font-weight:400;font-style:normal}` : ''
+  const font =
+    d.fontData && /^[A-Za-z0-9+/=]+$/.test(d.fontData) ? `@font-face{font-family:'Gulax';src:url(data:font/woff2;base64,${d.fontData}) format('woff2');font-weight:400;font-style:normal}` : ''
   const generated = new Date(d.generatedAt).toISOString().replace('T', ' ').slice(0, 19) + 'Z'
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>REMN report · ${h(kase.name)}</title><style>${font}${CSS}</style></head><body>
 <div class="cover-page">

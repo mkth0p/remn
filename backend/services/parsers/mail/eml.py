@@ -1,7 +1,9 @@
 """EML (RFC 822) parsing."""
+
 from __future__ import annotations
 
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
 from services.parsers.mail.common import ParseContext, parse_message_bytes
 

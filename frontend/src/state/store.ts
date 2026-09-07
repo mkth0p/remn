@@ -93,8 +93,7 @@ export const useStore = create<State>((set) => ({
   setView: (view) => set({ view }),
   currentCase: null,
   setCurrentCase: (currentCase) => set({ currentCase }),
-  updateSettings: (patch) =>
-    set((s) => (s.currentCase ? { currentCase: { ...s.currentCase, settings: { ...s.currentCase.settings, ...patch }, updatedAt: Date.now() } } : {})),
+  updateSettings: (patch) => set((s) => (s.currentCase ? { currentCase: { ...s.currentCase, settings: { ...s.currentCase.settings, ...patch }, updatedAt: Date.now() } } : {})),
   health: null,
   setHealth: (health) => set({ health }),
   meta: null,

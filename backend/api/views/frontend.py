@@ -1,4 +1,5 @@
 """Serve the Vite build (frontend/dist) from Django on a single port."""
+
 from __future__ import annotations
 
 import mimetypes

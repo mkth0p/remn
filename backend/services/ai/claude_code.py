@@ -9,6 +9,7 @@ REMN tools; Claude asks for them through a JSON reply because the command line e
 tool API in this mode. Everything sent this way leaves the server for Anthropic through
 the Claude Code login of the account that runs the server.
 """
+
 from __future__ import annotations
 
 import json
@@ -21,8 +22,9 @@ import sys
 import tempfile
 import threading
 import time
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from django.conf import settings
 
@@ -108,7 +110,18 @@ def status(force: bool = False) -> dict[str, Any]:
     with _status_lock:
         if not force and _status_cache["value"] is not None and time.time() - _status_cache["at"] < 60:
             return dict(_status_cache["value"])
-    out: dict[str, Any] = {"enabled": enabled(), "available": False, "path": None, "version": None, "loggedIn": False, "account": None, "method": None, "error": None, "models": MODELS, "defaultModel": DEFAULT_MODEL}
+    out: dict[str, Any] = {
+        "enabled": enabled(),
+        "available": False,
+        "path": None,
+        "version": None,
+        "loggedIn": False,
+        "account": None,
+        "method": None,
+        "error": None,
+        "models": MODELS,
+        "defaultModel": DEFAULT_MODEL,
+    }
     if not enabled():
         out["error"] = "the Claude Code connector is switched off on this server (CLAUDE_CODE_ENABLED=0)"
     else:
@@ -126,7 +139,7 @@ def status(force: bool = False) -> dict[str, Any]:
                     out["available"] = True
                     rc, auth, err = _run([path, "auth", "status"])
                     try:
-                        info = json.loads(auth[auth.index("{"):]) if "{" in auth else {}
+                        info = json.loads(auth[auth.index("{") :]) if "{" in auth else {}
                     except ValueError:
                         info = {}
                     out["loggedIn"] = bool(info.get("loggedIn"))
@@ -165,7 +178,14 @@ def render_prompt(messages: list[dict[str, Any]]) -> str:
             calls = m.get("tool_calls") or []
             body = content
             if calls:
-                wire = [{"name": (c.get("function") or {}).get("name") or c.get("name"), "arguments": (c.get("function") or {}).get("arguments") or c.get("arguments") or {}} for c in calls if isinstance(c, dict)]
+                wire = [
+                    {
+                        "name": (c.get("function") or {}).get("name") or c.get("name"),
+                        "arguments": (c.get("function") or {}).get("arguments") or c.get("arguments") or {},
+                    }
+                    for c in calls
+                    if isinstance(c, dict)
+                ]
                 body = (body + "\n" if body else "") + json.dumps({"tool_calls": wire}, ensure_ascii=False)
             parts.append(f"Assistant:\n{body}")
         elif role == "tool":
@@ -222,8 +242,19 @@ def compose_system(system: str, tools: list[dict[str, Any]] | None) -> str:
 # one model turn
 # ---------------------------------------------------------------------------
 def _base_args(path: str, model: str | None) -> list[str]:
-    args = [path, "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
-            "--safe-mode", "--tools", "", "--disable-slash-commands", "--no-session-persistence"]
+    args = [
+        path,
+        "-p",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+        "--safe-mode",
+        "--tools",
+        "",
+        "--disable-slash-commands",
+        "--no-session-persistence",
+    ]
     m = (model or DEFAULT_MODEL).strip().lower()
     if not _MODEL_RE.match(m):
         m = DEFAULT_MODEL
@@ -313,10 +344,10 @@ def chat_stream(messages: list[dict[str, Any]], system: str, model: str | None =
         sys_file.close()
         args = _base_args(path, model) + ["--system-prompt-file", sys_file.name]
         proc = _Proc(args, prompt, _timeout())
-        text = ""            # what the model said (text blocks)
-        held = ""            # text not yet handed out while deciding whether it is a tool call
-        deciding = True      # still looking at the first characters
-        buffering = False    # looks like JSON: hold everything until the end
+        text = ""  # what the model said (text blocks)
+        held = ""  # text not yet handed out while deciding whether it is a tool call
+        deciding = True  # still looking at the first characters
+        buffering = False  # looks like JSON: hold everything until the end
         stats: dict[str, Any] = {}
         errors: list[str] = []
         used_model = model
@@ -374,7 +405,9 @@ def chat_stream(messages: list[dict[str, Any]], system: str, model: str | None =
                     usage = ev.get("usage") or {}
                     stats = {
                         "total_duration": int(float(ev.get("duration_ms") or 0) * 1_000_000),
-                        "prompt_eval_count": int(usage.get("input_tokens") or 0) + int(usage.get("cache_read_input_tokens") or 0) + int(usage.get("cache_creation_input_tokens") or 0),
+                        "prompt_eval_count": int(usage.get("input_tokens") or 0)
+                        + int(usage.get("cache_read_input_tokens") or 0)
+                        + int(usage.get("cache_creation_input_tokens") or 0),
                         "eval_count": int(usage.get("output_tokens") or 0),
                         "done_reason": str(ev.get("stop_reason") or ev.get("subtype") or ""),
                     }
@@ -435,7 +468,7 @@ def chat_json(question_messages: list[dict[str, Any]], system: str, schema: dict
         start, end = t.find("{"), t.rfind("}")
         if start != -1 and end > start:
             try:
-                data = json.loads(t[start: end + 1])
+                data = json.loads(t[start : end + 1])
             except ValueError:
                 data = None
     return {"data": data if isinstance(data, dict) else None, "raw": raw, "model": used}

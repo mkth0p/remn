@@ -3,14 +3,16 @@ Server-side rule engine over a case store. Same YAML DSL and finding shape as
 frontend/src/rules/engine.ts, executed with SQL (aggregates) plus a streaming
 burst detector for windowed rules.
 """
+
 from __future__ import annotations
 
 import re
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from services.store.casestore import CaseStore, q
-from services.store.sqlfilter import Ctx, FilterError, compile_cond, resolve, _setting
+from services.store.sqlfilter import Ctx, FilterError, _setting, compile_cond, resolve
 
 SEVERITIES = ["info", "low", "medium", "high", "critical"]
 _DUR = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(ms|s|m|h|d|w)?\s*$", re.I)
@@ -20,7 +22,20 @@ MAX_REFS = 5000  # mirrors rules/engine.ts MAX_REFS
 COLLAPSE_AFTER = 200
 # Entity fields that make sense as a collapse key (avoid grouping by free text such as subject/commandLine).
 _GROUPABLE = {
-    "events": ["computer", "targetUser", "subjectUser", "ipAddress", "processName", "serviceName", "memberName", "groupName", "shareName", "image", "destinationIp", "query"],
+    "events": [
+        "computer",
+        "targetUser",
+        "subjectUser",
+        "ipAddress",
+        "processName",
+        "serviceName",
+        "memberName",
+        "groupName",
+        "shareName",
+        "image",
+        "destinationIp",
+        "query",
+    ],
     "mails": ["fromAddr", "fromDomain", "fromRegistrable", "fromNameNorm", "originIp", "replyToDomain", "folder"],
 }
 
@@ -62,7 +77,11 @@ def _default_entities(rule: dict[str, Any]) -> list[str]:
         return list(rule["entities"])
     if rule.get("group_by"):
         return list(rule["group_by"])
-    return ["fromAddr", "fromDomain", "subject", "originIp"] if rule["source"] == "mails" else ["computer", "targetUser", "subjectUser", "ipAddress", "processName", "serviceName"]
+    return (
+        ["fromAddr", "fromDomain", "subject", "originIp"]
+        if rule["source"] == "mails"
+        else ["computer", "targetUser", "subjectUser", "ipAddress", "processName", "serviceName"]
+    )
 
 
 def _time_sql(rule: dict[str, Any], settings: dict[str, Any], ctx: Ctx, ts_field: str) -> str | None:
@@ -126,8 +145,15 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any]) -
         if not (settings.get(req) or settings.get(camel)):
             return []
     where = _where_sql(rule, settings, ctx, ts_field)
-    base = {"ruleId": rule["id"], "title": rule.get("title") or rule["id"], "description": rule.get("description"), "severity": rule.get("severity", "medium"),
-            "source": source, "attack": list(rule.get("attack") or []), "tags": list(rule.get("tags") or [])}
+    base = {
+        "ruleId": rule["id"],
+        "title": rule.get("title") or rule["id"],
+        "description": rule.get("description"),
+        "severity": rule.get("severity", "medium"),
+        "source": source,
+        "attack": list(rule.get("attack") or []),
+        "tags": list(rule.get("tags") or []),
+    }
     if rule.get("confidence"):
         base["confidence"] = rule["confidence"]
     entity_fields = _default_entities(rule)
@@ -153,7 +179,7 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any]) -
                 f["escalation"] = (f.get("escalation") or "") or f"collapsed: {total:,} matching rows"
             return out
         ents = _entity_exprs(entity_fields, ctx)
-        cols = ", ".join([f"id", q(ts_field)] + [f"{e} AS e{i}" for i, (_, e) in enumerate(ents)] + (["flags"] if source == "mails" else []))
+        cols = ", ".join(["id", q(ts_field)] + [f"{e} AS e{i}" for i, (_, e) in enumerate(ents)] + (["flags"] if source == "mails" else []))
         cur.execute(f"SELECT {cols} FROM {source} WHERE {where} ORDER BY {q(ts_field)} NULLS LAST LIMIT {MAX_FINDINGS}", ctx.params)
         for rec in cur.fetchall():
             rid, ts = rec[0], rec[1]
@@ -182,14 +208,27 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any]) -
     where = _where_sql(rule, settings, ctx, ts_field)
 
     if not window:
-        select = gkeys + [f"any_value({e})" for _, e in gexprs] + ["count(*)", f"count(DISTINCT {dexpr})" if dexpr else "count(*)", f"min({q(ts_field)})", f"max({q(ts_field)})",
-                          f"list(id ORDER BY {q(ts_field)})[1:{MAX_REFS}]", f"list_distinct(list({dexpr}))[1:8]" if dexpr else "[]",
-                          f"bool_or({any_sql})" if any_sql else "TRUE"] + [f"any_value({e})" for _, e in eexprs]
+        select = (
+            gkeys
+            + [f"any_value({e})" for _, e in gexprs]
+            + [
+                "count(*)",
+                f"count(DISTINCT {dexpr})" if dexpr else "count(*)",
+                f"min({q(ts_field)})",
+                f"max({q(ts_field)})",
+                f"list(id ORDER BY {q(ts_field)})[1:{MAX_REFS}]",
+                f"list_distinct(list({dexpr}))[1:8]" if dexpr else "[]",
+                f"bool_or({any_sql})" if any_sql else "TRUE",
+            ]
+            + [f"any_value({e})" for _, e in eexprs]
+        )
         if then_flags and source == "mails":
             select.append("list_distinct(flatten(list(flags)))")
             # Keep a reference to the strongest evidence even when refs are capped.
-            cases = " ".join("WHEN list_contains(flags, '" + flag.replace("'", "''") + "') THEN " + str(sev_rank(severity) * (len(then_flags) + 1) + len(then_flags) - i)
-                             for i, (flag, severity) in enumerate(sorted(then_flags, key=lambda item: sev_rank(item[1]), reverse=True)))
+            cases = " ".join(
+                "WHEN list_contains(flags, '" + flag.replace("'", "''") + "') THEN " + str(sev_rank(severity) * (len(then_flags) + 1) + len(then_flags) - i)
+                for i, (flag, severity) in enumerate(sorted(then_flags, key=lambda item: sev_rank(item[1]), reverse=True))
+            )
             select.append(f"arg_max(id, CASE {cases} ELSE 0 END)")
         having = []
         if threshold:
@@ -204,8 +243,8 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any]) -
         ng = len(gexprs)
         for rec in cur.fetchall():
             keyvals = rec[:ng]
-            disp = rec[ng:2 * ng]
-            n, d, first, last, ids, dvals, _anyok = rec[2 * ng:2 * ng + 7]
+            disp = rec[ng : 2 * ng]
+            n, d, first, last, ids, dvals, _anyok = rec[2 * ng : 2 * ng + 7]
             ents = _clean_entities([(gexprs[i][0], disp[i]) for i in range(ng)])
             ents.update(_clean_entities([(eexprs[i][0], rec[2 * ng + 7 + i]) for i in range(len(eexprs))]))
             if dexpr:  # the distinct values are the point of the finding: never let any_value() overwrite them
@@ -217,9 +256,19 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any]) -
                     if flag in (rec[-2] or []) and sev_rank(severity) > sev_rank(escalation.get("severity", base["severity"])):
                         escalation = {"severity": severity, "escalation": flag}
                 if escalation and rec[-1] not in refs:
-                    refs = refs[:MAX_REFS - 1] + [rec[-1]]
-            findings.append({**base, **escalation, "key": f"{rule['id']}|{chr(1).join(str(k) for k in keyvals)}", "ts": first, "tsEnd": last, "entities": ents,
-                             "count": int(d if dexpr else n), "refs": refs})
+                    refs = refs[: MAX_REFS - 1] + [rec[-1]]
+            findings.append(
+                {
+                    **base,
+                    **escalation,
+                    "key": f"{rule['id']}|{chr(1).join(str(k) for k in keyvals)}",
+                    "ts": first,
+                    "tsEnd": last,
+                    "entities": ents,
+                    "count": int(d if dexpr else n),
+                    "refs": refs,
+                }
+            )
     else:
         # streaming burst detection per group
         select = ["id", q(ts_field)] + gkeys + [e for _, e in gexprs] + ([dexpr] if dexpr else []) + ([any_sql] if any_sql else []) + [e for _, e in eexprs]
@@ -263,9 +312,19 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any]) -
             if escalation:
                 supporting = next(r[0] for r in b["rows"] if escalation["escalation"] in r[3])
                 if supporting not in refs:
-                    refs = refs[:MAX_REFS - 1] + [supporting]
-            buffered.append({**base, **escalation, "key": f"{rule['id']}|{chr(1).join(str(k) for k in (cur_key or ()))}|{b['start'] // 60000}", "ts": b["start"], "tsEnd": b["last"],
-                             "entities": ents, "count": len(b["rows"]), "refs": refs})
+                    refs = refs[: MAX_REFS - 1] + [supporting]
+            buffered.append(
+                {
+                    **base,
+                    **escalation,
+                    "key": f"{rule['id']}|{chr(1).join(str(k) for k in (cur_key or ()))}|{b['start'] // 60000}",
+                    "ts": b["start"],
+                    "tsEnd": b["last"],
+                    "entities": ents,
+                    "count": len(b["rows"]),
+                    "refs": refs,
+                }
+            )
 
         def flush_group() -> None:
             nonlocal win, open_burst, group_any
@@ -282,15 +341,15 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any]) -
                 break
             for rec in batch:
                 rid, ts = rec[0], int(rec[1])
-                key = tuple(rec[2:2 + ng])
+                key = tuple(rec[2 : 2 + ng])
                 pos = 2 + ng
-                disp = tuple(rec[pos:pos + ng])
+                disp = tuple(rec[pos : pos + ng])
                 pos += ng
                 dv = rec[pos] if dexpr else None
                 pos += 1 if dexpr else 0
                 anyv = rec[pos] if any_sql else True
                 pos += 1 if any_sql else 0
-                extra = tuple(rec[pos:pos + len(eexprs)])
+                extra = tuple(rec[pos : pos + len(eexprs)])
                 flags = (rec[-1] or []) if then_flags and source == "mails" else []
                 if key != cur_key:
                     if cur_key is not None:
@@ -339,7 +398,7 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any]) -
             parts = [cond, f"{q(ts_field)} >= {tctx.p(f.get('ts') or 0)}", f"{q(ts_field)} <= {tctx.p(end + within)}"]
             ok = True
             for j in join:
-                a, b = (j.split("=", 1) if "=" in j else (j, j))
+                a, b = j.split("=", 1) if "=" in j else (j, j)
                 want = f["entities"].get(a)
                 if not want:
                     ok = False
@@ -513,15 +572,26 @@ def diagnose_zero(store: CaseStore, rule: dict[str, Any], settings: dict[str, An
     if tsql:
         n_t = int(cur.execute(f"SELECT count(*) FROM {source} WHERE {w2} AND {tsql}", ctx2.params).fetchone()[0])
         if n_t == 0:
-            return {**base, "matched": n_where, "afterExclude": n_ex, "reason": "outside_time_window", "detail": "matching rows exist but none inside the rule's time condition"}
+            return {
+                **base,
+                "matched": n_where,
+                "afterExclude": n_ex,
+                "reason": "outside_time_window",
+                "detail": "matching rows exist but none inside the rule's time condition",
+            }
     detail = f"{n_t} row(s) matched but no group met {rule.get('threshold') or 'the threshold'}"
     if rule.get("window"):
         detail += f" within {rule['window']}"
     return {**base, "matched": n_where, "afterExclude": n_ex, "afterTime": n_t, "reason": "below_threshold", "detail": detail}
 
 
-def run_rules(store: CaseStore, rules: list[dict[str, Any]], settings: dict[str, Any],
-              progress: Callable[[dict[str, Any]], None] | None = None, cancelled: Callable[[], bool] | None = None) -> dict[str, Any]:
+def run_rules(
+    store: CaseStore,
+    rules: list[dict[str, Any]],
+    settings: dict[str, Any],
+    progress: Callable[[dict[str, Any]], None] | None = None,
+    cancelled: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
     all_findings: list[dict[str, Any]] = []
     by_rule: dict[str, int] = {}
     errors: list[dict[str, str]] = []
@@ -559,7 +629,16 @@ def run_rules(store: CaseStore, rules: list[dict[str, Any]], settings: dict[str,
             try:
                 diagnostics.append(diagnose_zero(store, rule, settings))
             except Exception as exc:  # noqa: BLE001
-                diagnostics.append({"ruleId": rule.get("id", "?"), "reason": "no_selector_match", "detail": f"diagnostic failed: {exc}"[:200], "matched": 0, "afterExclude": 0, "afterTime": 0})
+                diagnostics.append(
+                    {
+                        "ruleId": rule.get("id", "?"),
+                        "reason": "no_selector_match",
+                        "detail": f"diagnostic failed: {exc}"[:200],
+                        "matched": 0,
+                        "afterExclude": 0,
+                        "afterTime": 0,
+                    }
+                )
         if progress:
             progress({"index": i + 1, "total": len(rules), "ruleId": rule.get("id"), "findings": len(found), "ms": int((time.time() - t0) * 1000)})
     return {"findings": all_findings, "byRule": by_rule, "errors": errors, "diagnostics": diagnostics, "total": len(all_findings)}

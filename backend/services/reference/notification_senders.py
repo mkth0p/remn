@@ -10,6 +10,7 @@ Why: display-name rules (VIP impersonation, same-name-different-domain) fire on
 Teams/SharePoint/GitHub notifications because they legitimately carry a
 colleague's name on the vendor's domain.
 """
+
 from __future__ import annotations
 
 NOTIFICATION_SENDERS: dict[str, str] = {

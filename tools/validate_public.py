@@ -16,11 +16,11 @@ Usage:
 Scores use the default case settings (no internal domains, no VIPs, no baseline), so the numbers are a
 floor: the sender history and internal-domain rules only add signal on a real case.
 """
+
 from __future__ import annotations
 
 import argparse
 import collections
-import io
 import json
 import os
 import random
@@ -29,8 +29,9 @@ import tarfile
 import time
 import urllib.request
 import zipfile
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
@@ -44,12 +45,21 @@ CACHE = ROOT / "samples" / "public"
 BANDS = (("critical", 80), ("high", 60), ("medium", 40), ("low", 20), ("clean", 0))
 
 SOURCES = {
-    "nazario": [("phishing0.mbox", "https://monkey.org/~jose/phishing/phishing0.mbox"), ("phishing1.mbox", "https://monkey.org/~jose/phishing/phishing1.mbox"),
-                ("phishing2.mbox", "https://monkey.org/~jose/phishing/phishing2.mbox"), ("phishing3.mbox", "https://monkey.org/~jose/phishing/phishing3.mbox")],
+    "nazario": [
+        ("phishing0.mbox", "https://monkey.org/~jose/phishing/phishing0.mbox"),
+        ("phishing1.mbox", "https://monkey.org/~jose/phishing/phishing1.mbox"),
+        ("phishing2.mbox", "https://monkey.org/~jose/phishing/phishing2.mbox"),
+        ("phishing3.mbox", "https://monkey.org/~jose/phishing/phishing3.mbox"),
+    ],
     "easy_ham": [("20030228_easy_ham.tar.bz2", "https://spamassassin.apache.org/old/publiccorpus/20030228_easy_ham.tar.bz2")],
     "hard_ham": [("20030228_hard_ham.tar.bz2", "https://spamassassin.apache.org/old/publiccorpus/20030228_hard_ham.tar.bz2")],
     "phishpot": [("phishing_pot.zip", "https://codeload.github.com/rf-peixoto/phishing_pot/zip/refs/heads/main")],
-    "tika_pst": [("testPST.pst", "https://raw.githubusercontent.com/apache/tika/main/tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-microsoft-module/src/test/resources/test-documents/testPST.pst")],
+    "tika_pst": [
+        (
+            "testPST.pst",
+            "https://raw.githubusercontent.com/apache/tika/main/tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-microsoft-module/src/test/resources/test-documents/testPST.pst",
+        )
+    ],
     "invictus": [("auditrecords.7z", "https://raw.githubusercontent.com/invictus-ir/o365_dataset/main/auditrecords.7z")],
 }
 
@@ -85,8 +95,15 @@ def summarize(rows: list[dict[str, Any]], positive: bool) -> dict[str, Any]:
     flags = collections.Counter(f for r in rows for f in r.get("flags") or [])
     weak = [r for r in rows if int(r.get("risk") or 0) < 40] if positive else [r for r in rows if int(r.get("risk") or 0) >= 60]
     drivers = collections.Counter(f for r in weak for f in r.get("flags") or [])
-    return {"n": n, "bands": dict(bands), "rate60": round(at60 / n, 3) if n else None, "rate40": round(at40 / n, 3) if n else None,
-            "topFlags": flags.most_common(12), "outlierFlags": drivers.most_common(10), "positive": positive}
+    return {
+        "n": n,
+        "bands": dict(bands),
+        "rate60": round(at60 / n, 3) if n else None,
+        "rate40": round(at40 / n, 3) if n else None,
+        "topFlags": flags.most_common(12),
+        "outlierFlags": drivers.most_common(10),
+        "positive": positive,
+    }
 
 
 def eml_items_from_tar(path: Path, member_dir: str) -> Iterable[tuple[str, bytes]]:
@@ -129,9 +146,11 @@ def run_mail(corpus: str, sample: int | None, ctx: ParseContext) -> dict[str, An
 
 def run_pst(ctx: ParseContext) -> dict[str, Any]:
     from services.parsers.mail import pst
+
     if not pst.available():
         return {"skipped": "libpff-python not installed"}
     import pypff
+
     name, url = SOURCES["tika_pst"][0]
     f = pypff.file()
     f.open(str(fetch(name, url)))
@@ -144,6 +163,7 @@ def run_pst(ctx: ParseContext) -> dict[str, Any]:
 
 def run_invictus() -> dict[str, Any]:
     from services.parsers import m365
+
     name, url = SOURCES["invictus"][0]
     archive = fetch(name, url)
     csv_path = CACHE / "auditrecords.csv"
@@ -158,8 +178,14 @@ def run_invictus() -> dict[str, Any]:
     fmt = m365.detect_format(csv_path.name, head)
     rows = list(m365.iter_records(str(csv_path), None, fmt, stats=None, include_raw=False))
     ops = collections.Counter(r.get("operation") for r in rows)
-    return {"format": fmt, "n": len(rows), "operations": ops.most_common(10), "users": len({r.get("targetUser") for r in rows}),
-            "inboxRules": sum(v for k, v in ops.items() if "InboxRule" in str(k)), "spanDays": round((max(r["ts"] for r in rows) - min(r["ts"] for r in rows)) / 86_400_000, 1) if rows else 0}
+    return {
+        "format": fmt,
+        "n": len(rows),
+        "operations": ops.most_common(10),
+        "users": len({r.get("targetUser") for r in rows}),
+        "inboxRules": sum(v for k, v in ops.items() if "InboxRule" in str(k)),
+        "spanDays": round((max(r["ts"] for r in rows) - min(r["ts"] for r in rows)) / 86_400_000, 1) if rows else 0,
+    }
 
 
 def table(results: dict[str, Any]) -> str:
@@ -169,7 +195,9 @@ def table(results: dict[str, Any]) -> str:
             continue
         b = r["bands"]
         kind = "phishing" if r["positive"] else "legitimate"
-        lines.append(f"| {name} | {kind} | {r['n']} | {b.get('critical', 0)} | {b.get('high', 0)} | {b.get('medium', 0)} | {b.get('low', 0)} | {b.get('clean', 0)} | {r['rate60']:.0%} | {r['rate40']:.0%} |")
+        lines.append(
+            f"| {name} | {kind} | {r['n']} | {b.get('critical', 0)} | {b.get('high', 0)} | {b.get('medium', 0)} | {b.get('low', 0)} | {b.get('clean', 0)} | {r['rate60']:.0%} | {r['rate40']:.0%} |"
+        )
     return "\n".join(lines)
 
 

@@ -1,4 +1,5 @@
 """HTML / SVG / MHT attachment analysis: HTML smuggling, credential-harvesting forms, redirects."""
+
 from __future__ import annotations
 
 import base64
@@ -9,18 +10,43 @@ from services.analysis.urls import extract_urls
 
 _B64_RE = re.compile(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{1000,}={0,2}")
 _SMUGGLE_API = (
-    ("atob(", "atob"), ("msSaveOrOpenBlob", "msSaveOrOpenBlob"), ("msSaveBlob", "msSaveBlob"),
-    ("createObjectURL", "createObjectURL"), ("new Blob(", "Blob"), ("new File(", "File"),
-    ("download=", "download_attr"), (".download", "download_attr"), ("Uint8Array", "Uint8Array"),
-    ("charCodeAt", "charCodeAt"), ("fromCharCode", "fromCharCode"), ("unescape(", "unescape"),
-    ("decodeURIComponent", "decodeURIComponent"), ("eval(", "eval"), ("document.write", "document_write"),
-    ("Function(", "Function"), ("setTimeout(", "setTimeout"), ("XMLHttpRequest", "xhr"), ("fetch(", "fetch"),
-    ("navigator.msSaveOrOpenBlob", "msSaveOrOpenBlob"), ("application/octet-stream", "octet_stream"),
-    ("application/zip", "zip_mime"), ("application/x-msdownload", "exe_mime"), ("application/pdf", "pdf_mime"),
-    (".split('').reverse().join", "reverse_string"), ('.split("").reverse().join', "reverse_string"),
-    ("String.fromCharCode", "fromCharCode"), ("window.location", "location_redirect"), ("location.href", "location_redirect"),
-    ("location.replace", "location_redirect"), ("btoa(", "btoa"), ("WebAssembly", "wasm"), ("crypto.subtle", "webcrypto"),
-    ("CryptoJS", "cryptojs"), ("AES.decrypt", "aes_decrypt"), ("RC4", "rc4"), ("xor", "xor"),
+    ("atob(", "atob"),
+    ("msSaveOrOpenBlob", "msSaveOrOpenBlob"),
+    ("msSaveBlob", "msSaveBlob"),
+    ("createObjectURL", "createObjectURL"),
+    ("new Blob(", "Blob"),
+    ("new File(", "File"),
+    ("download=", "download_attr"),
+    (".download", "download_attr"),
+    ("Uint8Array", "Uint8Array"),
+    ("charCodeAt", "charCodeAt"),
+    ("fromCharCode", "fromCharCode"),
+    ("unescape(", "unescape"),
+    ("decodeURIComponent", "decodeURIComponent"),
+    ("eval(", "eval"),
+    ("document.write", "document_write"),
+    ("Function(", "Function"),
+    ("setTimeout(", "setTimeout"),
+    ("XMLHttpRequest", "xhr"),
+    ("fetch(", "fetch"),
+    ("navigator.msSaveOrOpenBlob", "msSaveOrOpenBlob"),
+    ("application/octet-stream", "octet_stream"),
+    ("application/zip", "zip_mime"),
+    ("application/x-msdownload", "exe_mime"),
+    ("application/pdf", "pdf_mime"),
+    (".split('').reverse().join", "reverse_string"),
+    ('.split("").reverse().join', "reverse_string"),
+    ("String.fromCharCode", "fromCharCode"),
+    ("window.location", "location_redirect"),
+    ("location.href", "location_redirect"),
+    ("location.replace", "location_redirect"),
+    ("btoa(", "btoa"),
+    ("WebAssembly", "wasm"),
+    ("crypto.subtle", "webcrypto"),
+    ("CryptoJS", "cryptojs"),
+    ("AES.decrypt", "aes_decrypt"),
+    ("RC4", "rc4"),
+    ("xor", "xor"),
 )
 _PASSWORD_INPUT = re.compile(r"(?i)<input[^>]*type\s*=\s*[\"']?password")
 _EMAIL_INPUT = re.compile(r"(?i)<input[^>]*(?:type\s*=\s*[\"']?email|name\s*=\s*[\"']?(?:email|user(?:name)?|login|login_email|identifier))")
@@ -30,7 +56,9 @@ _SCRIPT_RE = re.compile(r"(?is)<script\b[^>]*>(.*?)</script>")
 _SCRIPT_SRC = re.compile(r"(?i)<script[^>]*src\s*=\s*[\"']([^\"']+)")
 _ONLOAD = re.compile(r"(?i)\bon(?:load|error|mouseover|focus|click|pageshow|animationstart)\s*=")
 _HIDDEN_IFRAME = re.compile(r"(?is)<iframe[^>]*(?:width\s*=\s*[\"']?0|height\s*=\s*[\"']?0|display\s*:\s*none|visibility\s*:\s*hidden)")
-_BRAND_TITLE = re.compile(r"(?i)(microsoft|office ?365|outlook|onedrive|sharepoint|adobe|docusign|dropbox|google|gmail|paypal|apple|amazon|webmail|owa|sign ?in|log ?in|connexion|identifiez)")
+_BRAND_TITLE = re.compile(
+    r"(?i)(microsoft|office ?365|outlook|onedrive|sharepoint|adobe|docusign|dropbox|google|gmail|paypal|apple|amazon|webmail|owa|sign ?in|log ?in|connexion|identifiez)"
+)
 _LONG_STRING = re.compile(r"[\"'][A-Za-z0-9+/=%\\x]{5000,}[\"']")
 _HEX_ESC = re.compile(r"(?:\\x[0-9a-fA-F]{2}){40,}|(?:\\u[0-9a-fA-F]{4}){30,}|(?:%[0-9a-fA-F]{2}){40,}")
 _TEL_LURE = re.compile(r"(?i)(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}|\b0[1-9](?:[\s.-]?\d{2}){4}\b")
@@ -75,9 +103,21 @@ def _decode(data: bytes) -> str:
 def analyze_html(data: bytes, ext: str) -> dict[str, Any]:
     text = _decode(data[:8_000_000])
     flags: set[str] = set()
-    out: dict[str, Any] = {"flags": [], "apis": [], "scripts": 0, "externalScripts": [], "base64Bytes": 0,
-                           "base64Blobs": 0, "decodedBlobTypes": [], "forms": [], "redirect": None, "title": None,
-                           "urls": [], "passwordInput": False, "size": len(data)}
+    out: dict[str, Any] = {
+        "flags": [],
+        "apis": [],
+        "scripts": 0,
+        "externalScripts": [],
+        "base64Bytes": 0,
+        "base64Blobs": 0,
+        "decodedBlobTypes": [],
+        "forms": [],
+        "redirect": None,
+        "title": None,
+        "urls": [],
+        "passwordInput": False,
+        "size": len(data),
+    }
     m = re.search(r"(?is)<title[^>]*>(.*?)</title>", text)
     if m:
         out["title"] = re.sub(r"\s+", " ", m.group(1)).strip()[:200]
@@ -118,7 +158,9 @@ def analyze_html(data: bytes, ext: str) -> dict[str, Any]:
             out["decodedBlobTypes"].append("archive")
         else:
             out["decodedBlobTypes"].append("unknown")
-    out["dangerousDownload"] = bool(re.search(r"(?i)(?:\.download\s*=|download\s*=)\s*['\"][^'\"]*\.(?:exe|dll|scr|js|vbs|hta|lnk|iso|img|zip|docm|xlsm)['\"]", text))
+    out["dangerousDownload"] = bool(
+        re.search(r"(?i)(?:\.download\s*=|download\s*=)\s*['\"][^'\"]*\.(?:exe|dll|scr|js|vbs|hta|lnk|iso|img|zip|docm|xlsm)['\"]", text)
+    )
     out["obfuscated"] = bool(_LONG_STRING.search(text) or _HEX_ESC.search(text))
     flags.update(smuggling_flags(out))
     if out["obfuscated"]:

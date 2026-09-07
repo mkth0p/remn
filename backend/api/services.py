@@ -1,4 +1,5 @@
 """Lazily-built singletons shared by the views (Ollama client)."""
+
 from __future__ import annotations
 
 from functools import lru_cache

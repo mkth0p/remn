@@ -1,4 +1,5 @@
 """Microsoft 365 Unified Audit Log / Entra sign-in exports -> event rows -> BEC rules."""
+
 from __future__ import annotations
 
 import json
@@ -124,9 +125,22 @@ def test_bec_rules_fire_on_the_scenario(exports, store):
         if hits:
             fired[rule["id"]] = hits
     assert not errors, errors
-    expected = {"m365-inbox-rule-forwarding", "m365-inbox-rule-hiding", "m365-inbox-rule-any", "m365-mailbox-forwarding", "m365-mailitemsaccessed-burst",
-                "m365-app-consent", "m365-privileged-role-assigned", "m365-role-assigned-any", "m365-signin-risky", "m365-signin-legacy-auth",
-                "m365-signin-unexpected-country", "m365-signin-two-countries-24h", "m365-signin-password-spray", "m365-signin-bruteforce-account"}
+    expected = {
+        "m365-inbox-rule-forwarding",
+        "m365-inbox-rule-hiding",
+        "m365-inbox-rule-any",
+        "m365-mailbox-forwarding",
+        "m365-mailitemsaccessed-burst",
+        "m365-app-consent",
+        "m365-privileged-role-assigned",
+        "m365-role-assigned-any",
+        "m365-signin-risky",
+        "m365-signin-legacy-auth",
+        "m365-signin-unexpected-country",
+        "m365-signin-two-countries-24h",
+        "m365-signin-password-spray",
+        "m365-signin-bruteforce-account",
+    }
     missing = expected - set(fired)
     assert not missing, f"rules that should fire on the scenario: {missing}; fired={sorted(fired)}"
     # sanity: the quiet rules stay quiet

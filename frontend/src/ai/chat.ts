@@ -89,7 +89,11 @@ export async function runAgent(messages: ChatMessage[], kase: Case, opts: AgentO
     if (!content.trim() && !calls.length) {
       // Small models sometimes end a turn without text (e.g. an unparsable tool call). Nudge once.
       if (emptyRetries++ < 1) {
-        messages.push({ role: 'user', content: 'Your previous message was empty. Answer now in plain text, using the tool results above; do not call more tools unless strictly needed.', ts: Date.now() })
+        messages.push({
+          role: 'user',
+          content: 'Your previous message was empty. Answer now in plain text, using the tool results above; do not call more tools unless strictly needed.',
+          ts: Date.now(),
+        })
         continue
       }
       content = '(the model returned an empty message twice - try a smaller question, disable thinking, or pick another model)'

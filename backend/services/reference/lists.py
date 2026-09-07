@@ -5,6 +5,7 @@ define a list of that name (a case setting with the same name always wins, so an
     tranco_10k   the top 10,000 of the Tranco list (https://tranco-list.eu), see tranco.json for the
                  list id and fetch date. Regenerate with tools/import_community_rules.py tranco.
 """
+
 from __future__ import annotations
 
 import functools
@@ -19,7 +20,7 @@ def builtin_names() -> list[str]:
     return sorted(_FILES)
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def builtin_list(name: str) -> tuple[str, ...] | None:
     """The list's entries (lower-cased), or None when no built-in list has that name."""
     fname = _FILES.get(name)

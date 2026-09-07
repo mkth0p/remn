@@ -6,25 +6,27 @@ Manifest: {"settings": {"internal_domains": [...]}, "messages": [
   {"path": "relative/sample.eml", "label": "benign"|"malicious", "name": "optional label"}]}
 Nothing is executed and no network lookups are performed. Originals are read-only.
 """
+
 from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 import sys
 import tempfile
 import uuid
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "backend"), str(ROOT / "samples" / "synthetic")]
 
 import yaml
-from services.analysis.mail_calibration import VERSION, calibrate_mail
+
 from services.analysis.baseline import enrich
+from services.analysis.mail_calibration import VERSION, calibrate_mail
 from services.parsers.mail.common import ParseContext, parse_message_bytes
 from services.store.casestore import StoreRegistry
-from services.store.writers import MailWriter
 from services.store.rules import run_rule
+from services.store.writers import MailWriter
 
 
 def prepared_examples(examples, settings):
@@ -38,9 +40,16 @@ def evaluate(examples, settings, include_community=True, temp_dir=None):
     normal = {i for i, e in enumerate(examples, 1) if e["label"] == "benign"}
     bad = set(range(1, len(rows) + 1)) - normal
     scores = {i for i, r in enumerate(rows, 1) if r["risk"] >= 60}
-    output = {"version": VERSION, "messages": len(rows), "benign": len(normal), "malicious": len(bad),
-              "scoreHighFalsePositives": len(scores & normal), "scoreHighMalicious": len(scores & bad),
-              "examples": [{"name": e["name"], "label": e["label"], "risk": r["risk"], "flags": r["flags"]} for e, r in zip(examples, rows)], "packs": {}}
+    output = {
+        "version": VERSION,
+        "messages": len(rows),
+        "benign": len(normal),
+        "malicious": len(bad),
+        "scoreHighFalsePositives": len(scores & normal),
+        "scoreHighMalicious": len(scores & bad),
+        "examples": [{"name": e["name"], "label": e["label"], "risk": r["risk"], "flags": r["flags"]} for e, r in zip(examples, rows)],
+        "packs": {},
+    }
     packs = {"core": ROOT / "rules" / "mail"}
     if include_community:
         packs["sublime"] = ROOT / "rules" / "community" / "sublime"
@@ -67,16 +76,30 @@ def evaluate(examples, settings, include_community=True, temp_dir=None):
                             matched |= refs
                             high |= high_refs
                             if refs:
-                                per_rule.append({"ruleId": rule["id"], "findings": len(findings), "referencedMessages": len(refs),
-                                                 "benignReferences": len(refs & normal), "highFalsePositives": len(high_refs & normal),
-                                                 "highMalicious": len(high_refs & bad)})
+                                per_rule.append(
+                                    {
+                                        "ruleId": rule["id"],
+                                        "findings": len(findings),
+                                        "referencedMessages": len(refs),
+                                        "benignReferences": len(refs & normal),
+                                        "highFalsePositives": len(high_refs & normal),
+                                        "highMalicious": len(high_refs & bad),
+                                    }
+                                )
                         except Exception as exc:
                             errors.append({"ruleId": rule["id"], "error": str(exc)[:300]})
-                output["packs"][name] = {"referencedMessages": len(matched), "highFalsePositives": len(high & normal), "highMalicious": len(high & bad),
-                                         "rules": sorted(per_rule, key=lambda r: (-r["highFalsePositives"], r["ruleId"])), "errors": errors}
+                output["packs"][name] = {
+                    "referencedMessages": len(matched),
+                    "highFalsePositives": len(high & normal),
+                    "highMalicious": len(high & bad),
+                    "rules": sorted(per_rule, key=lambda r: (-r["highFalsePositives"], r["ruleId"])),
+                    "errors": errors,
+                }
         finally:
             reg.close_all()
-    output["note"] = "Counts refer to unique record references, not duplicate alerts. Large grouped findings may cap references. This labelled set does not establish accuracy on other mailboxes."
+    output["note"] = (
+        "Counts refer to unique record references, not duplicate alerts. Large grouped findings may cap references. This labelled set does not establish accuracy on other mailboxes."
+    )
     return output
 
 
@@ -89,7 +112,8 @@ def main():
     parser.add_argument("--export-fixture", type=Path, help="Export normalized synthetic rows for cross-engine regression tests")
     args = parser.parse_args()
     if args.synthetic:
-        from mail_calibration import examples, SETTINGS
+        from mail_calibration import SETTINGS, examples
+
         data, settings = examples(), SETTINGS
     else:
         manifest = json.loads(args.manifest.read_text(encoding="utf-8"))

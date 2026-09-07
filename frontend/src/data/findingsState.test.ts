@@ -13,7 +13,17 @@ beforeEach(() => {
 })
 afterEach(() => db.delete())
 
-const evidence = (addedAt: number, status: 'done' | 'error' = 'done') => ({ caseId: kase.id!, name: `f${addedAt}`, kind: 'mail' as const, size: 1, addedAt, status, count: 0, integrity: 'verified' as const, progress: 1 })
+const evidence = (addedAt: number, status: 'done' | 'error' = 'done') => ({
+  caseId: kase.id!,
+  name: `f${addedAt}`,
+  kind: 'mail' as const,
+  size: 1,
+  addedAt,
+  status,
+  count: 0,
+  integrity: 'verified' as const,
+  progress: 1,
+})
 
 describe('findingsStaleness', () => {
   it('reports evidence that finished after the last rule run', async () => {

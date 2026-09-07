@@ -67,7 +67,10 @@ export async function runEnabledRules(kase: Case, reason: RulesRun['reason'] = '
   useStore.getState().setRulesRun({ done: 0, total: enabled.length, rule: '', reason })
   try {
     const res = await runRulesFor(kase, enabled, (done, total, rule) => useStore.getState().setRulesRun({ done, total, rule, reason }))
-    const pruned = await pruneOrphanFindings(caseId, rules.map((r) => r.rule.id))
+    const pruned = await pruneOrphanFindings(
+      caseId,
+      rules.map((r) => r.rule.id),
+    )
     if (pruned) toast('info', `${pruned} finding(s) of rules that no longer exist were removed`)
     await db.kv.put({ key: `findingCounts-${caseId}`, value: { previous: before, at: Date.now() } })
     // a rescore whose findings refresh did not finish is complete once a full run succeeds

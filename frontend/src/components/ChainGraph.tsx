@@ -11,13 +11,31 @@ import { fmtTs } from '../util/format'
 echarts.use([GraphChart, TooltipComponent, LegendComponent, CanvasRenderer])
 
 export interface GraphTokens {
-  accent: string; line: string; line2: string; fg1: string; fg2: string; fg3: string; surface: string; surface2: string; mono: string; sans: string
+  accent: string
+  line: string
+  line2: string
+  fg1: string
+  fg2: string
+  fg3: string
+  surface: string
+  surface2: string
+  mono: string
+  sans: string
   sev: Record<string, string>
 }
 
 /** the light palette the printed report uses, whatever the app theme */
 export const PRINT_TOKENS: GraphTokens = {
-  accent: '#1b7f66', line: '#e3e6ea', line2: '#cfd5dc', fg1: '#111820', fg2: '#5b6876', fg3: '#8a95a3', surface: '#ffffff', surface2: '#f8f9fa', mono: 'Consolas, monospace', sans: 'Segoe UI, Arial, sans-serif',
+  accent: '#1b7f66',
+  line: '#e3e6ea',
+  line2: '#cfd5dc',
+  fg1: '#111820',
+  fg2: '#5b6876',
+  fg3: '#8a95a3',
+  surface: '#ffffff',
+  surface2: '#f8f9fa',
+  mono: 'Consolas, monospace',
+  sans: 'Segoe UI, Arial, sans-serif',
   sev: { critical: '#a8231f', high: '#d1403f', medium: '#d9822b', low: '#2f6fdb', info: '#8a95a3' },
 }
 
@@ -25,9 +43,23 @@ function tokens(): GraphTokens {
   const cs = getComputedStyle(document.documentElement)
   const v = (name: string, fallback: string) => cs.getPropertyValue(name).trim() || fallback
   return {
-    accent: v('--accent', '#1b7f66'), line: v('--line', '#e3e6ea'), line2: v('--line-2', '#cfd5dc'), fg1: v('--fg-1', '#111820'), fg2: v('--fg-2', '#5b6876'), fg3: v('--fg-3', '#8a95a3'),
-    surface: v('--surface', '#fff'), surface2: v('--surface-2', '#f8f9fa'), mono: v('--mono', 'monospace'), sans: v('--sans', 'sans-serif'),
-    sev: { critical: v('--sev-critical', '#a8231f'), high: v('--sev-high', '#d1403f'), medium: v('--sev-medium', '#d9822b'), low: v('--sev-low', '#2f6fdb'), info: v('--sev-info', '#8a95a3') } as Record<string, string>,
+    accent: v('--accent', '#1b7f66'),
+    line: v('--line', '#e3e6ea'),
+    line2: v('--line-2', '#cfd5dc'),
+    fg1: v('--fg-1', '#111820'),
+    fg2: v('--fg-2', '#5b6876'),
+    fg3: v('--fg-3', '#8a95a3'),
+    surface: v('--surface', '#fff'),
+    surface2: v('--surface-2', '#f8f9fa'),
+    mono: v('--mono', 'monospace'),
+    sans: v('--sans', 'sans-serif'),
+    sev: {
+      critical: v('--sev-critical', '#a8231f'),
+      high: v('--sev-high', '#d1403f'),
+      medium: v('--sev-medium', '#d9822b'),
+      low: v('--sev-low', '#2f6fdb'),
+      info: v('--sev-info', '#8a95a3'),
+    } as Record<string, string>,
   }
 }
 
@@ -51,7 +83,8 @@ export function graphOption(graph: Graph, mode: 'chain' | 'campaign', W: number,
     if (n.kind === 'user') return 20
     return 10 + Math.min(4, n.degree ?? 0) * 3
   }
-  const symbolOf = (n: GNode) => (n.kind === 'seed' ? 'diamond' : n.kind === 'step' || n.kind === 'chain' ? 'roundRect' : n.kind === 'user' ? 'circle' : n.kind === 'attachment' ? 'rect' : n.kind === 'routine' ? 'circle' : 'circle')
+  const symbolOf = (n: GNode) =>
+    n.kind === 'seed' ? 'diamond' : n.kind === 'step' || n.kind === 'chain' ? 'roundRect' : n.kind === 'user' ? 'circle' : n.kind === 'attachment' ? 'rect' : n.kind === 'routine' ? 'circle' : 'circle'
   const lanes = LANES.filter((l) => graph.nodes.some((n) => n.lane === l))
   const laneH = mode === 'chain' ? (H - 70) / Math.max(1, lanes.length) : 0
   const colW = mode === 'chain' ? Math.min(220, Math.max(96, (W - 200) / Math.max(1, graph.columns))) : 0
@@ -64,8 +97,18 @@ export function graphOption(graph: Graph, mode: 'chain' | 'campaign', W: number,
       value: n.sub ?? '',
       symbol: symbolOf(n),
       symbolSize: sizeOf(n),
-      itemStyle: { color: colorOf(n), borderColor: n.id === (selectedStep != null ? `step:${selectedStep}` : '') ? t.fg1 : n.linked ? t.fg1 : 'transparent', borderWidth: n.id === (selectedStep != null ? `step:${selectedStep}` : '') ? 3 : n.linked && n.kind !== 'seed' ? 1 : 0, opacity: n.kind === 'routine' ? 0.7 : 1 },
-      label: { show: true, position: n.lane === 'attacker' || n.lane === 'mail' ? 'top' : n.lane === 'infra' ? 'bottom' : mode === 'chain' && Math.round(n.x) % 2 === 1 ? 'top' : 'bottom', formatter: () => `{a|${trunc(n.label, mode === 'chain' ? maxChars : 26)}}${n.sub ? `\n{s|${trunc(n.sub, maxChars + 4)}}` : ''}`, rich: { a: { color: t.fg1, fontSize: 11, fontFamily: t.sans, lineHeight: 14 }, s: { color: t.fg3, fontSize: 10, fontFamily: t.mono, lineHeight: 13 } } },
+      itemStyle: {
+        color: colorOf(n),
+        borderColor: n.id === (selectedStep != null ? `step:${selectedStep}` : '') ? t.fg1 : n.linked ? t.fg1 : 'transparent',
+        borderWidth: n.id === (selectedStep != null ? `step:${selectedStep}` : '') ? 3 : n.linked && n.kind !== 'seed' ? 1 : 0,
+        opacity: n.kind === 'routine' ? 0.7 : 1,
+      },
+      label: {
+        show: true,
+        position: n.lane === 'attacker' || n.lane === 'mail' ? 'top' : n.lane === 'infra' ? 'bottom' : mode === 'chain' && Math.round(n.x) % 2 === 1 ? 'top' : 'bottom',
+        formatter: () => `{a|${trunc(n.label, mode === 'chain' ? maxChars : 26)}}${n.sub ? `\n{s|${trunc(n.sub, maxChars + 4)}}` : ''}`,
+        rich: { a: { color: t.fg1, fontSize: 11, fontFamily: t.sans, lineHeight: 14 }, s: { color: t.fg3, fontSize: 10, fontFamily: t.mono, lineHeight: 13 } },
+      },
       node: n,
     }
     return mode === 'chain' ? { ...base, x: 120 + n.x * colW, y: 40 + li * laneH + laneH / 2 + (n.lane === 'infra' ? 4 : 0), fixed: true } : base
@@ -74,37 +117,80 @@ export function graphOption(graph: Graph, mode: 'chain' | 'campaign', W: number,
     source: e.source,
     target: e.target,
     value: e.label ?? '',
-    lineStyle: e.kind === 'artifact' ? { color: t.accent, width: 2, curveness: 0.25, type: 'solid' } : e.kind === 'sequence' ? { color: t.fg2, width: 1.5, curveness: 0.1 } : e.kind === 'recipient' ? { color: t.fg2, width: 1.5, curveness: 0 } : { color: t.line2, width: 1, type: 'dashed', curveness: 0.15 },
+    lineStyle:
+      e.kind === 'artifact'
+        ? { color: t.accent, width: 2, curveness: 0.25, type: 'solid' }
+        : e.kind === 'sequence'
+          ? { color: t.fg2, width: 1.5, curveness: 0.1 }
+          : e.kind === 'recipient'
+            ? { color: t.fg2, width: 1.5, curveness: 0 }
+            : { color: t.line2, width: 1, type: 'dashed', curveness: 0.15 },
     symbol: e.kind === 'sequence' || e.kind === 'recipient' || e.kind === 'artifact' ? ['none', 'arrow'] : ['none', 'none'],
     symbolSize: 7,
     label: { show: !!e.label, formatter: e.label ?? '', fontSize: 9, fontFamily: t.mono, color: e.kind === 'artifact' ? t.accent : t.fg3, backgroundColor: t.surface, padding: [1, 3] },
   }))
   // lane names and separators live inside the graph (anchor nodes and edges) so they pan and zoom with it
   const right = mode === 'chain' ? 120 + Math.max(1, ...graph.nodes.map((n) => n.x)) * colW + 160 : 0
-  const laneNodes = mode === 'chain'
-    ? lanes.flatMap((l, i) => {
-        const yTop = 40 + i * laneH
-        const anchor = (id: string, x: number, y: number, label?: string) => ({ id, name: label ?? '', x, y, fixed: true, symbol: 'circle', symbolSize: 1, itemStyle: { color: 'transparent', borderWidth: 0 }, label: label ? { show: true, position: 'right', formatter: label, color: t.fg3, fontSize: 10, fontFamily: t.mono, distance: 4, opacity: 1 } : { show: false }, tooltip: { show: false }, emphasis: { disabled: true }, blur: { label: { opacity: 1 } }, silent: true })
-        return [anchor(`lane:${l}`, 8, yTop + 12, LANE_LABEL[l]), anchor(`lane:${l}:l`, 0, yTop), anchor(`lane:${l}:r`, right, yTop)]
-      })
-    : []
-  const laneLinks = mode === 'chain' ? lanes.map((l) => ({ source: `lane:${l}:l`, target: `lane:${l}:r`, lineStyle: { color: t.line, width: 1, type: 'solid', curveness: 0 }, symbol: ['none', 'none'], label: { show: false }, tooltip: { show: false }, emphasis: { disabled: true }, blur: { lineStyle: { opacity: 1 } }, silent: true })) : []
+  const laneNodes =
+    mode === 'chain'
+      ? lanes.flatMap((l, i) => {
+          const yTop = 40 + i * laneH
+          const anchor = (id: string, x: number, y: number, label?: string) => ({
+            id,
+            name: label ?? '',
+            x,
+            y,
+            fixed: true,
+            symbol: 'circle',
+            symbolSize: 1,
+            itemStyle: { color: 'transparent', borderWidth: 0 },
+            label: label ? { show: true, position: 'right', formatter: label, color: t.fg3, fontSize: 10, fontFamily: t.mono, distance: 4, opacity: 1 } : { show: false },
+            tooltip: { show: false },
+            emphasis: { disabled: true },
+            blur: { label: { opacity: 1 } },
+            silent: true,
+          })
+          return [anchor(`lane:${l}`, 8, yTop + 12, LANE_LABEL[l]), anchor(`lane:${l}:l`, 0, yTop), anchor(`lane:${l}:r`, right, yTop)]
+        })
+      : []
+  const laneLinks =
+    mode === 'chain'
+      ? lanes.map((l) => ({
+          source: `lane:${l}:l`,
+          target: `lane:${l}:r`,
+          lineStyle: { color: t.line, width: 1, type: 'solid', curveness: 0 },
+          symbol: ['none', 'none'],
+          label: { show: false },
+          tooltip: { show: false },
+          emphasis: { disabled: true },
+          blur: { lineStyle: { opacity: 1 } },
+          silent: true,
+        }))
+      : []
   return {
-      backgroundColor: 'transparent',
-      animation: !print && mode !== 'chain',
-      tooltip: {
-        show: !print,
-        trigger: 'item', backgroundColor: t.surface, borderColor: t.line2, textStyle: { color: t.fg1, fontSize: 11 }, confine: true,
-        formatter: (p: { dataType: string; data: { node?: GNode; value?: string; source?: string; target?: string } }) => {
-          if (p.dataType === 'edge') return String(p.data.value || '')
-          const n = p.data.node
-          if (!n) return ''
-          const lines = [`<b>${n.label}</b>`, n.sub ?? '', n.ts ? fmtTs(n.ts) : '', ...(n.detail ?? []).slice(0, 8)]
-          if (n.degree) lines.push(`in ${n.degree} chain(s)`)
-          return lines.filter(Boolean).map((s) => String(s).replace(/</g, '&lt;')).join('<br/>')
-        },
+    backgroundColor: 'transparent',
+    animation: !print && mode !== 'chain',
+    tooltip: {
+      show: !print,
+      trigger: 'item',
+      backgroundColor: t.surface,
+      borderColor: t.line2,
+      textStyle: { color: t.fg1, fontSize: 11 },
+      confine: true,
+      formatter: (p: { dataType: string; data: { node?: GNode; value?: string; source?: string; target?: string } }) => {
+        if (p.dataType === 'edge') return String(p.data.value || '')
+        const n = p.data.node
+        if (!n) return ''
+        const lines = [`<b>${n.label}</b>`, n.sub ?? '', n.ts ? fmtTs(n.ts) : '', ...(n.detail ?? []).slice(0, 8)]
+        if (n.degree) lines.push(`in ${n.degree} chain(s)`)
+        return lines
+          .filter(Boolean)
+          .map((s) => String(s).replace(/</g, '&lt;'))
+          .join('<br/>')
       },
-      series: [{
+    },
+    series: [
+      {
         type: 'graph',
         layout: mode === 'chain' ? 'none' : print ? 'circular' : 'force',
         circular: { rotateLabel: false },
@@ -119,8 +205,9 @@ export function graphOption(graph: Graph, mode: 'chain' | 'campaign', W: number,
         lineStyle: { opacity: 0.9 },
         emphasis: { focus: 'adjacency', lineStyle: { width: 3 } },
         labelLayout: { hideOverlap: false },
-      }],
-    }
+      },
+    ],
+  }
 }
 
 /** Render a chain or campaign graph to a PNG data URL (light palette, no animation) for the report; null when there is nothing to draw. */
@@ -188,17 +275,35 @@ export function ChainGraph({ mode, chain, chains, selectedStep, onStep, onEntity
       obs.disconnect()
     }
   }, [graph, mode, selectedStep, onStep, onEntity, onChain])
-  useEffect(() => () => { chartRef.current?.dispose(); chartRef.current = null }, [])
+  useEffect(
+    () => () => {
+      chartRef.current?.dispose()
+      chartRef.current = null
+    },
+    [],
+  )
 
   return (
     <div className="chain-graph-wrap">
       <div ref={ref} className="chain-graph" />
       {mode === 'campaign' && graph?.insights && (
         <div className="chain-graph-insights">
-          {graph.insights.length ? graph.insights.slice(0, 6).map((i) => <div key={i.text} className="small">{i.text}</div>) : <div className="small muted">no sender, domain, IP or host is shared between chains</div>}
+          {graph.insights.length ? (
+            graph.insights.slice(0, 6).map((i) => (
+              <div key={i.text} className="small">
+                {i.text}
+              </div>
+            ))
+          ) : (
+            <div className="small muted">no sender, domain, IP or host is shared between chains</div>
+          )}
         </div>
       )}
-      {mode === 'chain' && <div className="chain-graph-key small muted">diamond = seed mail · box = step (size = weight, colour = worst finding) · grey dot = collapsed routine steps · green edges = ties to the mail · scroll to zoom, drag to pan, click a node</div>}
+      {mode === 'chain' && (
+        <div className="chain-graph-key small muted">
+          diamond = seed mail · box = step (size = weight, colour = worst finding) · grey dot = collapsed routine steps · green edges = ties to the mail · scroll to zoom, drag to pan, click a node
+        </div>
+      )}
     </div>
   )
 }

@@ -13,10 +13,9 @@ class ApiConfig(AppConfig):
 
     def ready(self) -> None:
         # Wire the Django-independent services with the settings.
+        from api.views.upload import cleanup_stale
         from services.analysis.attachments import yara_scan
         from services.reputation.base import registry
-
-        from api.views.upload import cleanup_stale
         from services.store.casestore import registry as store_registry
 
         yara_scan.configure(settings.YARA_RULES_DIR)

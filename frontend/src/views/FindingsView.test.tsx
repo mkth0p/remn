@@ -13,11 +13,23 @@ vi.mock('../data/ingest', () => ({ refreshCounts: vi.fn(async () => undefined) }
 import { FindingsView } from './FindingsView'
 
 const WAIT = { timeout: 8000 }
-const TEST_TIMEOUT = 30_000  // jsdom + fake-indexeddb are slow on first render
+const TEST_TIMEOUT = 30_000 // jsdom + fake-indexeddb are slow on first render
 const kase: Case = { id: 1, name: 'Lab', storage: 'browser', createdAt: 1, updatedAt: 1, settings: defaultSettings() }
 let db: RemnDB
-const f = (p: Partial<Finding> & { ruleId: string; severity: Finding['severity'] }): Finding =>
-  ({ caseId: 1, key: `${p.ruleId}|${Math.random()}`, title: p.ruleId, source: 'mails', ts: 1_700_000_000_000, entities: {}, count: 1, refs: [1], attack: [], status: 'new', createdAt: 5, ...p })
+const f = (p: Partial<Finding> & { ruleId: string; severity: Finding['severity'] }): Finding => ({
+  caseId: 1,
+  key: `${p.ruleId}|${Math.random()}`,
+  title: p.ruleId,
+  source: 'mails',
+  ts: 1_700_000_000_000,
+  entities: {},
+  count: 1,
+  refs: [1],
+  attack: [],
+  status: 'new',
+  createdAt: 5,
+  ...p,
+})
 
 beforeEach(async () => {
   db = new RemnDB(`findings-${Math.random()}`)
@@ -42,111 +54,155 @@ const flyoutSeverity = () => document.querySelector('.flyout-h .sev')?.textConte
 async function loadInvoice(override: Finding['severityOverride'] | null = 'high') {
   await db.findings.clear()
   await db.findings.bulkAdd([
-    f({ ruleId: 'mail-replyto-diverted', key: 'mail-replyto-diverted|3307', severity: 'medium', severityOverride: override ?? undefined, title: 'Reply-To diverted to another domain', refs: [3307], status: 'reviewed', notes: 'Supplier confirmed', entities: { fromAddr: 'reports@vendor.example', subject: '[S05] Invoice for completed work' } }),
-    f({ ruleId: 'mail-bank-detail-change', severity: 'low', title: 'Bank details change request', refs: [3307], status: 'reviewed', notes: 'Verified independently', entities: { fromAddr: 'reports@vendor.example', subject: '[S05] Invoice for completed work' } }),
+    f({
+      ruleId: 'mail-replyto-diverted',
+      key: 'mail-replyto-diverted|3307',
+      severity: 'medium',
+      severityOverride: override ?? undefined,
+      title: 'Reply-To diverted to another domain',
+      refs: [3307],
+      status: 'reviewed',
+      notes: 'Supplier confirmed',
+      entities: { fromAddr: 'reports@vendor.example', subject: '[S05] Invoice for completed work' },
+    }),
+    f({
+      ruleId: 'mail-bank-detail-change',
+      severity: 'low',
+      title: 'Bank details change request',
+      refs: [3307],
+      status: 'reviewed',
+      notes: 'Verified independently',
+      entities: { fromAddr: 'reports@vendor.example', subject: '[S05] Invoice for completed work' },
+    }),
   ])
-  await act(async () => { render(<FindingsView />) })
+  await act(async () => {
+    render(<FindingsView />)
+  })
   await waitFor(() => expect(sub()).toContain('1 incident(s) · 2 finding(s)'), WAIT)
 }
 
 describe('FindingsView', () => {
-  it('explains the saved high override and resets the incident to medium without changing review decisions', async () => {
-    await loadInvoice()
-    const severityFilter = Array.from(document.querySelectorAll('select')).find((s) => Array.from(s.options).some((o) => o.value === 'critical'))!
-    fireEvent.change(severityFilter, { target: { value: 'high' } })
-    fireEvent.keyDown(window, { key: 'j' })
-    await waitFor(() => expect(flyoutSeverity()).toBe('high'), WAIT)
-    // Severity filtering keeps the low member as part of this high incident.
-    expect(document.querySelectorAll('.flyout table tr')).toHaveLength(2)
-    expect(document.querySelector('.flyout table tr .sev')?.textContent).toBe('high*')
-    expect(screen.getByText('review override; rule: medium')).toBeTruthy()
-    const before = await db.findings.toArray()
-    fireEvent.click(screen.getByRole('button', { name: 'reset to rule severity' }))
-    await waitFor(() => expect(flyoutSeverity()).toBe('medium'), WAIT)
-    expect(document.querySelector('.flyout table tr .sev')?.textContent).toBe('medium')
-    expect(screen.queryByRole('button', { name: 'reset to rule severity' })).toBeNull()
-    const after = await db.findings.toArray()
-    expect(after).toEqual(before.map(({ severityOverride: _override, ...rest }) => rest))
-    expect(document.querySelector('.kpi.high')?.textContent).toContain('0')
-    expect(document.querySelector('.kpi.medium')?.textContent).toContain('1')
-    expect(screen.getByText('no incident matches the filters')).toBeTruthy()
-  }, TEST_TIMEOUT)
+  it(
+    'explains the saved high override and resets the incident to medium without changing review decisions',
+    async () => {
+      await loadInvoice()
+      const severityFilter = Array.from(document.querySelectorAll('select')).find((s) => Array.from(s.options).some((o) => o.value === 'critical'))!
+      fireEvent.change(severityFilter, { target: { value: 'high' } })
+      fireEvent.keyDown(window, { key: 'j' })
+      await waitFor(() => expect(flyoutSeverity()).toBe('high'), WAIT)
+      // Severity filtering keeps the low member as part of this high incident.
+      expect(document.querySelectorAll('.flyout table tr')).toHaveLength(2)
+      expect(document.querySelector('.flyout table tr .sev')?.textContent).toBe('high*')
+      expect(screen.getByText('review override; rule: medium')).toBeTruthy()
+      const before = await db.findings.toArray()
+      fireEvent.click(screen.getByRole('button', { name: 'reset to rule severity' }))
+      await waitFor(() => expect(flyoutSeverity()).toBe('medium'), WAIT)
+      expect(document.querySelector('.flyout table tr .sev')?.textContent).toBe('medium')
+      expect(screen.queryByRole('button', { name: 'reset to rule severity' })).toBeNull()
+      const after = await db.findings.toArray()
+      expect(after).toEqual(before.map(({ severityOverride: _override, ...rest }) => rest))
+      expect(document.querySelector('.kpi.high')?.textContent).toContain('0')
+      expect(document.querySelector('.kpi.medium')?.textContent).toContain('1')
+      expect(screen.getByText('no incident matches the filters')).toBeTruthy()
+    },
+    TEST_TIMEOUT,
+  )
 
-  it('shows and resets an individual override and updates the incident when navigating back', async () => {
-    await loadInvoice()
-    fireEvent.keyDown(window, { key: 'j' })
-    await waitFor(() => expect(flyoutSeverity()).toBe('high'), WAIT)
-    fireEvent.click(document.querySelector('.flyout table tr')!)
-    await waitFor(() => expect(flyoutSeverity()).toBe('high*'), WAIT)
-    expect(document.querySelector('.flyout-h')?.textContent).toContain('review override; rule: medium')
-    fireEvent.click(screen.getByRole('button', { name: 'reset to rule severity' }))
-    await waitFor(() => expect(flyoutSeverity()).toBe('medium'), WAIT)
-    fireEvent.click(screen.getByTitle('back to the incident'))
-    await waitFor(() => expect(flyoutSeverity()).toBe('medium'), WAIT)
-    expect(document.querySelectorAll('.flyout table tr')).toHaveLength(2)
-    expect(screen.queryByText('Review severity override')).toBeNull()
-  }, TEST_TIMEOUT)
+  it(
+    'shows and resets an individual override and updates the incident when navigating back',
+    async () => {
+      await loadInvoice()
+      fireEvent.keyDown(window, { key: 'j' })
+      await waitFor(() => expect(flyoutSeverity()).toBe('high'), WAIT)
+      fireEvent.click(document.querySelector('.flyout table tr')!)
+      await waitFor(() => expect(flyoutSeverity()).toBe('high*'), WAIT)
+      expect(document.querySelector('.flyout-h')?.textContent).toContain('review override; rule: medium')
+      fireEvent.click(screen.getByRole('button', { name: 'reset to rule severity' }))
+      await waitFor(() => expect(flyoutSeverity()).toBe('medium'), WAIT)
+      fireEvent.click(screen.getByTitle('back to the incident'))
+      await waitFor(() => expect(flyoutSeverity()).toBe('medium'), WAIT)
+      expect(document.querySelectorAll('.flyout table tr')).toHaveLength(2)
+      expect(screen.queryByText('Review severity override')).toBeNull()
+    },
+    TEST_TIMEOUT,
+  )
 
-  it('uses rule severity without offering a reset when no override is saved', async () => {
-    await loadInvoice(null)
-    await waitFor(() => expect(document.querySelector('.kpi.high')?.textContent).toContain('0'), WAIT)
-    fireEvent.keyDown(window, { key: 'j' })
-    await waitFor(() => expect(flyoutSeverity()).toBe('medium'), WAIT)
-    expect(screen.queryByText('Review severity override')).toBeNull()
-    expect(document.querySelectorAll('.flyout table tr')).toHaveLength(2)
-  }, TEST_TIMEOUT)
+  it(
+    'uses rule severity without offering a reset when no override is saved',
+    async () => {
+      await loadInvoice(null)
+      await waitFor(() => expect(document.querySelector('.kpi.high')?.textContent).toContain('0'), WAIT)
+      fireEvent.keyDown(window, { key: 'j' })
+      await waitFor(() => expect(flyoutSeverity()).toBe('medium'), WAIT)
+      expect(screen.queryByText('Review severity override')).toBeNull()
+      expect(document.querySelectorAll('.flyout table tr')).toHaveLength(2)
+    },
+    TEST_TIMEOUT,
+  )
 
-  it('groups four findings into two incidents and flags that rules never ran on the evidence', async () => {
-    await act(async () => {
-      render(<FindingsView />)
-    })
-    await waitFor(() => expect(sub()).toContain('2 incident(s) · 4 finding(s)'), WAIT)
-    // findings exist but no run is recorded and one evidence file finished: the banner says so
-    await waitFor(() => expect(screen.getByText(/Findings are behind the evidence/)).toBeTruthy(), WAIT)
-    expect(screen.getByText(/1 evidence file added since the last run/)).toBeTruthy()
-    // severity tiles count incidents in the default view: both incidents are critical
-    const tile = document.querySelector('.kpi.critical')!
-    expect(tile.textContent).toContain('2')
-  }, TEST_TIMEOUT)
+  it(
+    'groups four findings into two incidents and flags that rules never ran on the evidence',
+    async () => {
+      await act(async () => {
+        render(<FindingsView />)
+      })
+      await waitFor(() => expect(sub()).toContain('2 incident(s) · 4 finding(s)'), WAIT)
+      // findings exist but no run is recorded and one evidence file finished: the banner says so
+      await waitFor(() => expect(screen.getByText(/Findings are behind the evidence/)).toBeTruthy(), WAIT)
+      expect(screen.getByText(/1 evidence file added since the last run/)).toBeTruthy()
+      // severity tiles count incidents in the default view: both incidents are critical
+      const tile = document.querySelector('.kpi.critical')!
+      expect(tile.textContent).toContain('2')
+    },
+    TEST_TIMEOUT,
+  )
 
-  it('switches to the rule grouping and expands a rule to its findings', async () => {
-    await act(async () => {
-      render(<FindingsView />)
-    })
-    await waitFor(() => expect(sub()).toContain('4 finding(s)'), WAIT)
-    fireEvent.click(screen.getByRole('button', { name: 'rule' }))
-    await waitFor(() => expect(document.querySelectorAll('.group-row').length).toBe(4), WAIT)
-    const names = Array.from(document.querySelectorAll('.group-row .name')).map((el) => el.textContent)
-    expect(names).toContain('Credential phishing')
-    fireEvent.click(screen.getByText('Credential phishing'))
-    await waitFor(() => expect(document.querySelector('.group-row + table')).toBeTruthy(), WAIT)
-  }, TEST_TIMEOUT)
+  it(
+    'switches to the rule grouping and expands a rule to its findings',
+    async () => {
+      await act(async () => {
+        render(<FindingsView />)
+      })
+      await waitFor(() => expect(sub()).toContain('4 finding(s)'), WAIT)
+      fireEvent.click(screen.getByRole('button', { name: 'rule' }))
+      await waitFor(() => expect(document.querySelectorAll('.group-row').length).toBe(4), WAIT)
+      const names = Array.from(document.querySelectorAll('.group-row .name')).map((el) => el.textContent)
+      expect(names).toContain('Credential phishing')
+      fireEvent.click(screen.getByText('Credential phishing'))
+      await waitFor(() => expect(document.querySelector('.group-row + table')).toBeTruthy(), WAIT)
+    },
+    TEST_TIMEOUT,
+  )
 
-  it('opens a finding from the rule grouping and writes a status change to the database', async () => {
-    await act(async () => {
-      render(<FindingsView />)
-    })
-    await waitFor(() => expect(sub()).toContain('4 finding(s)'), WAIT)
-    fireEvent.click(screen.getByRole('button', { name: 'rule' }))
-    await waitFor(() => expect(document.querySelectorAll('.group-row').length).toBe(4), WAIT)
-    fireEvent.click(screen.getByText('Security audit log cleared'))
-    await waitFor(() => expect(document.querySelector('.group-row + table tr')).toBeTruthy(), WAIT)
-    fireEvent.click(document.querySelector('.group-row + table tr')!)
-    await waitFor(() => expect(document.querySelector('.flyout')).toBeTruthy(), WAIT)
-    const fp = Array.from(document.querySelectorAll('.flyout-f .segmented button')).find((b) => b.textContent === 'false positive')!
-    fireEvent.click(fp)
-    await waitFor(async () => {
-      const row = await db.findings.where('ruleId').equals('win-log-cleared').first()
-      expect(row?.status).toBe('false_positive')
-    }, WAIT)
-    // a false positive leaves the queue and the counts: one incident remains, the toggle offers it back
-    fireEvent.click(screen.getByRole('button', { name: 'incidents' }))
-    await waitFor(() => expect(sub()).toContain('1 incident(s) · 3 finding(s)'), WAIT)
-    expect(sub()).toContain('1 false positive hidden')
-    fireEvent.click(screen.getByText(/show 1 false positive/))
-    await waitFor(() => {
-      expect(sub()).toContain('1 false positive')
-      expect(sub()).not.toContain('hidden')
-    }, WAIT)
-  }, TEST_TIMEOUT)
+  it(
+    'opens a finding from the rule grouping and writes a status change to the database',
+    async () => {
+      await act(async () => {
+        render(<FindingsView />)
+      })
+      await waitFor(() => expect(sub()).toContain('4 finding(s)'), WAIT)
+      fireEvent.click(screen.getByRole('button', { name: 'rule' }))
+      await waitFor(() => expect(document.querySelectorAll('.group-row').length).toBe(4), WAIT)
+      fireEvent.click(screen.getByText('Security audit log cleared'))
+      await waitFor(() => expect(document.querySelector('.group-row + table tr')).toBeTruthy(), WAIT)
+      fireEvent.click(document.querySelector('.group-row + table tr')!)
+      await waitFor(() => expect(document.querySelector('.flyout')).toBeTruthy(), WAIT)
+      const fp = Array.from(document.querySelectorAll('.flyout-f .segmented button')).find((b) => b.textContent === 'false positive')!
+      fireEvent.click(fp)
+      await waitFor(async () => {
+        const row = await db.findings.where('ruleId').equals('win-log-cleared').first()
+        expect(row?.status).toBe('false_positive')
+      }, WAIT)
+      // a false positive leaves the queue and the counts: one incident remains, the toggle offers it back
+      fireEvent.click(screen.getByRole('button', { name: 'incidents' }))
+      await waitFor(() => expect(sub()).toContain('1 incident(s) · 3 finding(s)'), WAIT)
+      expect(sub()).toContain('1 false positive hidden')
+      fireEvent.click(screen.getByText(/show 1 false positive/))
+      await waitFor(() => {
+        expect(sub()).toContain('1 false positive')
+        expect(sub()).not.toContain('hidden')
+      }, WAIT)
+    },
+    TEST_TIMEOUT,
+  )
 })

@@ -21,7 +21,7 @@ export interface LoadedRule {
 export function parseRuleYaml(text: string): { rules: Rule[]; errors: string[] } {
   const rules: Rule[] = []
   const errors: string[] = []
-  let docs: unknown[] = []
+  let docs: unknown[]
   try {
     docs = yaml.loadAll(text)
   } catch (e) {
@@ -61,12 +61,20 @@ export async function loadRules(caseId: number | null, strict = false): Promise<
       pr = await getPackRules(p.id)
     } catch (e) {
       log('err', `rule pack ${p.id}: ${(e as Error).message}`)
-      if (strict) throw new Error(`Could not load enabled rule pack ${p.id}: ${(e as Error).message}`)
+      if (strict) throw new Error(`Could not load enabled rule pack ${p.id}: ${(e as Error).message}`, { cause: e })
       continue
     }
     for (const r of pr.rules) {
       if (r.error || !r.rule) {
-        out.push({ rule: { id: r.file, title: r.file, severity: 'info', source: p.source }, yaml: r.yaml ?? '', file: r.file, origin: 'pack', pack: p.id, error: r.error ?? 'empty rule', enabled: false })
+        out.push({
+          rule: { id: r.file, title: r.file, severity: 'info', source: p.source },
+          yaml: r.yaml ?? '',
+          file: r.file,
+          origin: 'pack',
+          pack: p.id,
+          error: r.error ?? 'empty rule',
+          enabled: false,
+        })
         continue
       }
       const v = validateRule(r.rule)
@@ -127,7 +135,11 @@ async function saveDiagnostics(caseId: number, res: RuleRunSummary): Promise<voi
   const needSettings = res.diagnostics.filter((d) => d.reason === 'missing_setting').length
   const notApplicable = res.diagnostics.filter((d) => d.reason === 'not_applicable').length
   if (noData || needSettings || notApplicable) {
-    toast('info', `${res.total} finding(s) · ${notApplicable ? `${notApplicable} rule(s) not applicable to this evidence · ` : ''}${noData} rule(s) had no matching events${needSettings ? ` · ${needSettings} need Settings (internal domains, VIPs…)` : ''} — see the Rules view`, 9000)
+    toast(
+      'info',
+      `${res.total} finding(s) · ${notApplicable ? `${notApplicable} rule(s) not applicable to this evidence · ` : ''}${noData} rule(s) had no matching events${needSettings ? ` · ${needSettings} need Settings (internal domains, VIPs…)` : ''} — see the Rules view`,
+      9000,
+    )
   }
 }
 
@@ -139,7 +151,11 @@ export async function runRulesFor(kase: Case, rules: Rule[], onProgress?: (done:
     log('info', `running ${rules.length} rule(s) on the server store…`)
     const r = await getSource(kase).runRules(rules, onProgress)
     const completed = rules.map((x) => x.id).filter((id) => !r.errors.some((e) => e.startsWith(`${id}:`)))
-    const n = await persistFindings(kase.id!, completed, r.findings.filter((f) => completed.includes(String(f.ruleId))))
+    const n = await persistFindings(
+      kase.id!,
+      completed,
+      r.findings.filter((f) => completed.includes(String(f.ruleId))),
+    )
     for (const e of r.errors) log('err', e)
     log('ok', `rules done: ${n} finding(s)`)
     toast('ok', `${n} finding(s) from ${rules.length} rule(s)`)

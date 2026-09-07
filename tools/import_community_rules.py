@@ -21,11 +21,11 @@ Re-running the script rewrites the packs in place (stable ordering, no aliases) 
 one commit. --download resolves the branch head through the GitHub API and fetches that exact
 commit, so pack.json always names the commit the rules came from.
 """
+
 from __future__ import annotations
 
 import argparse
 import datetime as dt
-import io
 import json
 import os
 import re
@@ -48,8 +48,8 @@ django.setup()
 import yaml  # noqa: E402
 
 from services.rules import mql, sigma  # noqa: E402
-from services.store.sqlfilter import Ctx, compile_cond  # noqa: E402
 from services.store.casestore import StoreRegistry  # noqa: E402
+from services.store.sqlfilter import Ctx, compile_cond  # noqa: E402
 
 COMMUNITY = ROOT / "rules" / "community"
 
@@ -62,12 +62,27 @@ SOURCES: dict[str, dict[str, Any]] = {
         "source": "events",
         "windows_only": True,
         "packs": [
-            {"id": "sigma-windows", "roots": ["rules"], "name": "Sigma - Windows (stable + test)", "default": True,
-             "description": "The main SigmaHQ Windows rule set (process creation, registry, image load, PowerShell, network, file, DNS, built-in Security/System channels). Converted to the REMN DSL one to one; rules that would need to be weakened are listed in skipped.json."},
-            {"id": "sigma-emerging-threats", "roots": ["rules-emerging-threats"], "name": "Sigma - Emerging threats (Windows)", "default": True,
-             "description": "SigmaHQ emerging-threats rules for Windows: specific malware families, threat actors, exploited CVEs. Narrow by design, so they are on by default."},
-            {"id": "sigma-threat-hunting", "roots": ["rules-threat-hunting"], "name": "Sigma - Threat hunting (Windows)", "default": False,
-             "description": "SigmaHQ threat-hunting rules for Windows. Written to surface activity worth a look rather than confirmed malice, so they are noisy on purpose and off by default."},
+            {
+                "id": "sigma-windows",
+                "roots": ["rules"],
+                "name": "Sigma - Windows (stable + test)",
+                "default": True,
+                "description": "The main SigmaHQ Windows rule set (process creation, registry, image load, PowerShell, network, file, DNS, built-in Security/System channels). Converted to the REMN DSL one to one; rules that would need to be weakened are listed in skipped.json.",
+            },
+            {
+                "id": "sigma-emerging-threats",
+                "roots": ["rules-emerging-threats"],
+                "name": "Sigma - Emerging threats (Windows)",
+                "default": True,
+                "description": "SigmaHQ emerging-threats rules for Windows: specific malware families, threat actors, exploited CVEs. Narrow by design, so they are on by default.",
+            },
+            {
+                "id": "sigma-threat-hunting",
+                "roots": ["rules-threat-hunting"],
+                "name": "Sigma - Threat hunting (Windows)",
+                "default": False,
+                "description": "SigmaHQ threat-hunting rules for Windows. Written to surface activity worth a look rather than confirmed malice, so they are noisy on purpose and off by default.",
+            },
         ],
     },
     "sublime": {
@@ -78,8 +93,13 @@ SOURCES: dict[str, dict[str, Any]] = {
         "source": "mails",
         "windows_only": False,
         "packs": [
-            {"id": "sublime", "roots": ["detection-rules"], "name": "Sublime Security - detection rules", "default": True,
-             "description": "The structural subset of the Sublime Security MQL detection rules: sender, subject, header, link and attachment logic that translates exactly to the REMN DSL. Rules that depend on Sublime-only features (ML classifiers, link analysis, sender profiles, file explosion) are listed in skipped.json."},
+            {
+                "id": "sublime",
+                "roots": ["detection-rules"],
+                "name": "Sublime Security - detection rules",
+                "default": True,
+                "description": "The structural subset of the Sublime Security MQL detection rules: sender, subject, header, link and attachment logic that translates exactly to the REMN DSL. Rules that depend on Sublime-only features (ML classifiers, link analysis, sender profiles, file explosion) are listed in skipped.json.",
+            },
         ],
     },
 }
@@ -100,7 +120,9 @@ def _dump(rule: dict[str, Any]) -> str:
 
 
 def _github_sha(repo: str, ref: str) -> str:
-    req = urllib.request.Request(f"https://api.github.com/repos/{repo}/commits/{ref}", headers={"Accept": "application/vnd.github.sha", "User-Agent": "remn-rule-import"})
+    req = urllib.request.Request(
+        f"https://api.github.com/repos/{repo}/commits/{ref}", headers={"Accept": "application/vnd.github.sha", "User-Agent": "remn-rule-import"}
+    )
     with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 - fixed https host
         sha = resp.read().decode("ascii").strip()
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
@@ -216,8 +238,10 @@ def build_pack(src: dict[str, Any], pack: dict[str, Any], zf: zipfile.ZipFile, p
     for old in out_dir.glob("*.yaml"):
         old.unlink()
     files: dict[str, int] = {}
-    header = (f"# {pack['name']} - generated by tools/import_community_rules.py from {src['repo']}@{provenance['sha'][:12]} "
-              f"({provenance['fetched']}). Upstream licence: {src['license']['name']} (see LICENSE). Do not edit by hand: re-run the import.\n")
+    header = (
+        f"# {pack['name']} - generated by tools/import_community_rules.py from {src['repo']}@{provenance['sha'][:12]} "
+        f"({provenance['fetched']}). Upstream licence: {src['license']['name']} (see LICENSE). Do not edit by hand: re-run the import.\n"
+    )
     for group in sorted(groups):
         rules = sorted(groups[group], key=lambda r: str(r["id"]))
         text = header + "---\n".join(_dump(r) for r in rules)
@@ -231,14 +255,23 @@ def build_pack(src: dict[str, Any], pack: dict[str, Any], zf: zipfile.ZipFile, p
         "source": src["source"],
         "defaultEnabled": bool(pack["default"]),
         "license": {**src["license"], "file": "LICENSE"},
-        "upstream": {"repo": src["repo"], "ref": src["ref"], "sha": provenance["sha"], "url": f"https://github.com/{src['repo']}/tree/{provenance['sha']}", "paths": pack["roots"], "fetched": provenance["fetched"]},
+        "upstream": {
+            "repo": src["repo"],
+            "ref": src["ref"],
+            "sha": provenance["sha"],
+            "url": f"https://github.com/{src['repo']}/tree/{provenance['sha']}",
+            "paths": pack["roots"],
+            "fetched": provenance["fetched"],
+        },
         "counts": {"upstream": considered, "converted": converted, "skipped": len(skipped), "warnings": warnings},
         "skipReasons": [[k, v] for k, v in reasons.most_common(25)],
         "files": files,
         "generator": "tools/import_community_rules.py",
     }
     (out_dir / "pack.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
-    (out_dir / "skipped.json").write_text(json.dumps(sorted(skipped, key=lambda s: s["file"]), indent=1, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
+    (out_dir / "skipped.json").write_text(
+        json.dumps(sorted(skipped, key=lambda s: s["file"]), indent=1, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n"
+    )
     lic = [n for n in zf.namelist() if n.count("/") == 1 and n.split("/")[1].upper().startswith("LICENSE")]
     if lic:
         (out_dir / "LICENSE").write_bytes(zf.read(lic[0]))
@@ -283,18 +316,28 @@ def run_tranco(zip_path: Path | None, download: bool, cache_dir: Path, list_id: 
     fetched = dt.date.today().isoformat()
     lid = list_id or "unknown"
     ref = ROOT / "backend" / "services" / "reference"
-    header = (f"# Tranco list {lid} (https://tranco-list.eu), top {len(domains):,} domains, fetched {fetched}. "
-              "Regenerate: tools/import_community_rules.py tranco --download\n")
+    header = (
+        f"# Tranco list {lid} (https://tranco-list.eu), top {len(domains):,} domains, fetched {fetched}. "
+        "Regenerate: tools/import_community_rules.py tranco --download\n"
+    )
     (ref / "tranco_top10k.txt").write_text(header + "\n".join(domains) + "\n", encoding="utf-8", newline="\n")
-    manifest = {"id": lid, "url": "https://tranco-list.eu", "fetched": fetched, "count": len(domains),
-                "citation": "Le Pochat et al., Tranco: A Research-Oriented Top Sites Ranking Hardened Against Manipulation, NDSS 2019"}
+    manifest = {
+        "id": lid,
+        "url": "https://tranco-list.eu",
+        "fetched": fetched,
+        "count": len(domains),
+        "citation": "Le Pochat et al., Tranco: A Research-Oriented Top Sites Ranking Hardened Against Manipulation, NDSS 2019",
+    }
     (ref / "tranco.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8", newline="\n")
     ts = ROOT / "frontend" / "src" / "reference" / "tranco10k.ts"
     ts.parent.mkdir(parents=True, exist_ok=True)
-    ts.write_text("// Generated by tools/import_community_rules.py tranco - do not edit.\n"
-                  f"// Tranco list {lid} (https://tranco-list.eu), top {len(domains):,} domains, fetched {fetched}.\n"
-                  "export const TRANCO_10K: string[] = `" + "\n".join(domains) + "`.split('\\n')\n",
-                  encoding="utf-8", newline="\n")
+    ts.write_text(
+        "// Generated by tools/import_community_rules.py tranco - do not edit.\n"
+        f"// Tranco list {lid} (https://tranco-list.eu), top {len(domains):,} domains, fetched {fetched}.\n"
+        "export const TRANCO_10K: string[] = `" + "\n".join(domains) + "`.split('\\n')\n",
+        encoding="utf-8",
+        newline="\n",
+    )
     print(f"  tranco: {len(domains)} domains from list {lid} -> backend/services/reference/tranco_top10k.txt + frontend/src/reference/tranco10k.ts")
 
 
@@ -331,7 +374,7 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit("--zip applies to one source; use --download for all")
     if a.source in ("tranco", "all"):
         run_tranco(a.zip, a.download, a.cache_dir, a.sha)
-    for s in (["sigma", "sublime"] if a.source == "all" else [a.source] if a.source != "tranco" else []):
+    for s in ["sigma", "sublime"] if a.source == "all" else [a.source] if a.source != "tranco" else []:
         run(s, a.zip, a.sha, a.download, a.cache_dir)
 
 

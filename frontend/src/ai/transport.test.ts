@@ -42,10 +42,10 @@ describe('pyJson', () => {
 
 // ---------------------------------------------------------------------------
 function metaResponse(version: string): Response {
-  return new Response(
-    JSON.stringify({ prompts: META.prompts, tools: [], querySchema: META.querySchema, schemaDoc: META.schemaDoc, numCtx: 4096, defaultModel: 'd', limits: META.limits, version }),
-    { status: 200, headers: { 'Content-Type': 'application/json' } },
-  )
+  return new Response(JSON.stringify({ prompts: META.prompts, tools: [], querySchema: META.querySchema, schemaDoc: META.schemaDoc, numCtx: 4096, defaultModel: 'd', limits: META.limits, version }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  })
 }
 
 function ndjsonResponse(lines: unknown[], status = 200): Response {

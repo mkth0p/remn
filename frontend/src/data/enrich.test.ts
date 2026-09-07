@@ -14,12 +14,25 @@ vi.mock('./rules', () => ({ settingsForRules: (k: Case) => ({ internal_domains: 
 const fixture = JSON.parse(readFileSync(join(__dirname, '../../../samples/synthetic/mail-calibration.json'), 'utf8'))
 const kase: Case = { id: 1, name: 'Calibration', storage: 'browser', createdAt: 1, updatedAt: 1, settings: defaultSettings() }
 const row = (id = 1, caseId = 1): MailRow => ({ ...fixture.examples[2].row, id, caseId, evidenceId: 42, risk: 90, flags: ['att_html_smuggling'] })
-const update = (id = 1) => ({ id, risk: 31, flags: ['att_html_file_download'], attachments: fixture.examples[2].row.attachments, maxAttachmentRisk: 35, assessment: fixture.examples[2].row.assessment })
+const update = (id = 1) => ({
+  id,
+  risk: 31,
+  flags: ['att_html_file_download'],
+  attachments: fixture.examples[2].row.attachments,
+  maxAttachmentRisk: 35,
+  assessment: fixture.examples[2].row.assessment,
+})
 const summary = { version: 'mail-2', mails: 1, changed: 1, limited: 0, highBefore: 1, highAfter: 0 }
 let db: RemnDB
 
-beforeEach(() => { vi.clearAllMocks(); db = new RemnDB(`rescore-${Math.random()}`); setDb(db) })
-afterEach(async () => { await db.delete() })
+beforeEach(() => {
+  vi.clearAllMocks()
+  db = new RemnDB(`rescore-${Math.random()}`)
+  setDb(db)
+})
+afterEach(async () => {
+  await db.delete()
+})
 
 describe('mail score refresh', () => {
   it('updates mail and attachment rows together while preserving evidence and body IDs', async () => {
@@ -54,7 +67,9 @@ describe('mail score refresh', () => {
     expect(await rescoreMails(kase)).toEqual(summary)
     expect((await db.mails.get(2))?.risk).toBe(90)
     const facets = await db.facets.toArray()
-    expect(facets).toEqual(expect.arrayContaining([expect.objectContaining({ field: 'riskBand', value: 'low', count: 1 }), expect.objectContaining({ field: 'flags', value: 'att_html_file_download', count: 1 })]))
+    expect(facets).toEqual(
+      expect.arrayContaining([expect.objectContaining({ field: 'riskBand', value: 'low', count: 1 }), expect.objectContaining({ field: 'flags', value: 'att_html_file_download', count: 1 })]),
+    )
     expect(facets.some((f) => f.value === 'critical')).toBe(false)
     expect((await db.kv.get('mail-calibration-1'))?.value).toMatchObject({ state: 'scores_done', summary })
   })
@@ -65,7 +80,9 @@ describe('mail score refresh', () => {
     await expect(rescoreMails(kase)).rejects.toThrow('connection lost')
     expect((await db.kv.get('mail-calibration-1'))?.value).toMatchObject({ state: 'incomplete' })
     expect((await db.mails.get(1))?.risk).toBe(90)
-    vi.mocked(apiPost).mockResolvedValueOnce({ rows: [], summary: {} }).mockResolvedValueOnce({ rows: [update()], summary })
+    vi.mocked(apiPost)
+      .mockResolvedValueOnce({ rows: [], summary: {} })
+      .mockResolvedValueOnce({ rows: [update()], summary })
     expect((await rescoreMails(kase)).highAfter).toBe(0)
   })
 
@@ -94,7 +111,7 @@ describe('findings refresh', () => {
     await replaceFindings(1, ['html-review'], [])
     expect(await db.findings.where('caseId').equals(1).count()).toBe(0)
     await replaceFindings(1, ['html-review'], [{ ...f, severity: 'low' }])
-    expect((await db.findings.where('caseId').equals(1).first())).toMatchObject({ severity: 'low', status: 'false_positive', notes: 'Reviewed: ordinary CSV export', createdAt: first.createdAt })
+    expect(await db.findings.where('caseId').equals(1).first()).toMatchObject({ severity: 'low', status: 'false_positive', notes: 'Reviewed: ordinary CSV export', createdAt: first.createdAt })
     expect((await db.findings.where('caseId').equals(2).first())?.status).toBe('new')
   })
 })

@@ -1,4 +1,5 @@
 """Tiny in-process job manager (threads) for long ingestion / rule runs. Jobs are per-process and not persisted."""
+
 from __future__ import annotations
 
 import logging
@@ -6,7 +7,8 @@ import threading
 import time
 import traceback
 import uuid
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -55,9 +57,19 @@ class Job:
 
     def to_dict(self, with_result: bool = False) -> dict[str, Any]:
         with self._lock:
-            d = {"id": self.id, "kind": self.kind, "caseKey": self.case_key, "label": self.label, "status": self.status, "progress": dict(self.progress),
-                 "error": self.error, "created": int(self.created * 1000), "started": int(self.started * 1000) if self.started else None,
-                 "finished": int(self.finished * 1000) if self.finished else None, "log": list(self.log[-30:])}
+            d = {
+                "id": self.id,
+                "kind": self.kind,
+                "caseKey": self.case_key,
+                "label": self.label,
+                "status": self.status,
+                "progress": dict(self.progress),
+                "error": self.error,
+                "created": int(self.created * 1000),
+                "started": int(self.started * 1000) if self.started else None,
+                "finished": int(self.finished * 1000) if self.finished else None,
+                "log": list(self.log[-30:]),
+            }
             if with_result:
                 d["result"] = self.result
             return d

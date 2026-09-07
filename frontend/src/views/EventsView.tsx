@@ -28,7 +28,50 @@ const FACETS: FacetDef[] = [
   { field: 'processName', label: 'Process' },
   { field: 'serviceName', label: 'Service' },
 ]
-const FIELDS = ['eventId', 'provider', 'channel', 'computer', 'sourceFile', 'summary', 'targetUser', 'targetDomain', 'subjectUser', 'logonType', 'ipAddress', 'ipPort', 'workstation', 'status', 'subStatus', 'statusText', 'authPackage', 'processName', 'commandLine', 'parentProcessName', 'serviceName', 'serviceFile', 'taskName', 'memberName', 'groupName', 'shareName', 'relativeTargetName', 'objectName', 'scriptBlockText', 'image', 'parentImage', 'destinationIp', 'destinationPort', 'query', 'targetFilename', 'targetObject', 'threatName', 'path', 'message', 'category', 'levelName', 'recordId']
+const FIELDS = [
+  'eventId',
+  'provider',
+  'channel',
+  'computer',
+  'sourceFile',
+  'summary',
+  'targetUser',
+  'targetDomain',
+  'subjectUser',
+  'logonType',
+  'ipAddress',
+  'ipPort',
+  'workstation',
+  'status',
+  'subStatus',
+  'statusText',
+  'authPackage',
+  'processName',
+  'commandLine',
+  'parentProcessName',
+  'serviceName',
+  'serviceFile',
+  'taskName',
+  'memberName',
+  'groupName',
+  'shareName',
+  'relativeTargetName',
+  'objectName',
+  'scriptBlockText',
+  'image',
+  'parentImage',
+  'destinationIp',
+  'destinationPort',
+  'query',
+  'targetFilename',
+  'targetObject',
+  'threatName',
+  'path',
+  'message',
+  'category',
+  'levelName',
+  'recordId',
+]
 const LIMIT = 3000
 
 export function EventsView() {
@@ -67,7 +110,9 @@ export function EventsView() {
       .catch((e) => alive && setError((e as Error).message))
       .finally(() => alive && setLoading(false))
     setTotal(null)
-    ds.countEvents(filter).then((n) => alive && setTotal(n)).catch(() => undefined)
+    ds.countEvents(filter)
+      .then((n) => alive && setTotal(n))
+      .catch(() => undefined)
     return () => {
       alive = false
     }
@@ -103,7 +148,13 @@ export function EventsView() {
   const columns: Column<EventRow>[] = useMemo(
     () => [
       { key: 'ts', label: 'time (UTC)', width: 160, render: (r) => fmtTs(r.ts) },
-      { key: 'eventId', label: 'id', width: 60, click: (r) => toggleFacet('eventId', String(r.eventId)), render: (r) => <Badge sev="accent">{r.eventId ?? (r.operation ? String(r.operation).replace(/\.$/, '').slice(0, 22) : '')}</Badge> },
+      {
+        key: 'eventId',
+        label: 'id',
+        width: 60,
+        click: (r) => toggleFacet('eventId', String(r.eventId)),
+        render: (r) => <Badge sev="accent">{r.eventId ?? (r.operation ? String(r.operation).replace(/\.$/, '').slice(0, 22) : '')}</Badge>,
+      },
       { key: 'computer', label: 'computer', width: 130, click: (r) => toggleFacet('computer', String(r.computer)) },
       { key: 'targetUser', label: 'user', width: 130, click: (r) => toggleFacet('targetUser', String(r.targetUser)), render: (r) => String(r.targetUser ?? r.subjectUser ?? '') },
       { key: 'ipAddress', label: 'ip', width: 120, click: (r) => toggleFacet('ipAddress', String(r.ipAddress)) },
@@ -118,7 +169,9 @@ export function EventsView() {
     <div className="view">
       <div className="split">
         <div className="left">
-          <div className="panel-h">Filters <span className="muted">({ds.kind === 'server' ? 'server store' : 'browser store'})</span></div>
+          <div className="panel-h">
+            Filters <span className="muted">({ds.kind === 'server' ? 'server store' : 'browser store'})</span>
+          </div>
           <Facets ds={ds} source="events" fields={FACETS} conditions={filter.conditions ?? []} onToggle={toggleFacet} version={version} />
         </div>
         <div className="right relative">
@@ -131,17 +184,70 @@ export function EventsView() {
             loading={loading}
             extra={
               <span className="row relative" style={{ gap: 4 }}>
-                <button className="btn icon ghost sm" title="export" onClick={() => setMenu(!menu)}><IconMore /></button>
+                <button className="btn icon ghost sm" title="export" onClick={() => setMenu(!menu)}>
+                  <IconMore />
+                </button>
                 {menu && (
                   <div className="menu" style={{ position: 'absolute', right: 0, top: '100%', zIndex: 25 }} onMouseLeave={() => setMenu(false)}>
-                    <button className="btn ghost sm" onClick={() => { exportCsv('events.csv', rows.map(({ raw, data, ...r }) => { void raw; void data; return r }), ['id', 'tsIso', 'eventId', 'provider', 'channel', 'computer', 'sourceFile', 'levelName', 'summary', 'targetUser', 'targetDomain', 'subjectUser', 'logonType', 'ipAddress', 'workstation', 'statusText', 'processName', 'commandLine', 'serviceName', 'serviceFile']); setMenu(false) }}>export CSV ({rows.length})</button>
-                    <button className="btn ghost sm" onClick={() => { exportJson('events.json', rows); setMenu(false) }}>export JSON ({rows.length})</button>
+                    <button
+                      className="btn ghost sm"
+                      onClick={() => {
+                        exportCsv(
+                          'events.csv',
+                          rows.map(({ raw, data, ...r }) => {
+                            void raw
+                            void data
+                            return r
+                          }),
+                          [
+                            'id',
+                            'tsIso',
+                            'eventId',
+                            'provider',
+                            'channel',
+                            'computer',
+                            'sourceFile',
+                            'levelName',
+                            'summary',
+                            'targetUser',
+                            'targetDomain',
+                            'subjectUser',
+                            'logonType',
+                            'ipAddress',
+                            'workstation',
+                            'statusText',
+                            'processName',
+                            'commandLine',
+                            'serviceName',
+                            'serviceFile',
+                          ],
+                        )
+                        setMenu(false)
+                      }}
+                    >
+                      export CSV ({rows.length})
+                    </button>
+                    <button
+                      className="btn ghost sm"
+                      onClick={() => {
+                        exportJson('events.json', rows)
+                        setMenu(false)
+                      }}
+                    >
+                      export JSON ({rows.length})
+                    </button>
                   </div>
                 )}
               </span>
             }
           />
-          <TimeHistogram ds={ds} source="events" filter={filter} version={version} onRange={(from, to) => setFilter({ ...filter, timeRange: { from: new Date(from).toISOString(), to: new Date(to).toISOString() } })} />
+          <TimeHistogram
+            ds={ds}
+            source="events"
+            filter={filter}
+            version={version}
+            onRange={(from, to) => setFilter({ ...filter, timeRange: { from: new Date(from).toISOString(), to: new Date(to).toISOString() } })}
+          />
           {(truncated || error) && (
             <div className="row small dim" style={{ padding: '3px 16px', gap: 12, borderBottom: '1px solid var(--line)' }}>
               {truncated && <span className="mono">showing the first {LIMIT.toLocaleString('en-US')} rows - narrow the filter or change the sort</span>}

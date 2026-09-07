@@ -398,10 +398,8 @@ export class RemnDB extends Dexie {
     this.version(1).stores({
       cases: '++id, name, createdAt',
       evidence: '++id, caseId, kind, status, sha256Client',
-      events:
-        '++id, caseId, evidenceId, ts, eventId, [caseId+ts], [caseId+eventId], [caseId+evidenceId], computer, targetUser, subjectUser, ipAddress, logonType, channel, provider, category',
-      mails:
-        '++id, caseId, evidenceId, date, [caseId+date], [caseId+evidenceId], fromAddr, fromDomain, fromRegistrable, fromNameNorm, originIp, folder, risk, messageId, *flags',
+      events: '++id, caseId, evidenceId, ts, eventId, [caseId+ts], [caseId+eventId], [caseId+evidenceId], computer, targetUser, subjectUser, ipAddress, logonType, channel, provider, category',
+      mails: '++id, caseId, evidenceId, date, [caseId+date], [caseId+evidenceId], fromAddr, fromDomain, fromRegistrable, fromNameNorm, originIp, folder, risk, messageId, *flags',
       mailBodies: 'mailId, caseId',
       attachments: '++id, caseId, mailId, evidenceId, sha256, ext, realExt, risk, *flags',
       urls: '++id, caseId, mailId, evidenceId, host, domain, *flags',
@@ -428,15 +426,22 @@ export function setDb(db: RemnDB | null): void {
 }
 
 /** kv keys that belong to one case (mirrors CASE_KV_PREFIXES in data/caseState.ts, kept here to avoid a schema -> data import). */
-export const CASE_KV_KEYS = (caseId: number) => ['chains', 'ruleDiags', 'baseline', 'mail-calibration', 'report-summary', 'finding-reviews', 'chain-reviews', 'report-settings', 'findingCounts', 'ai-suggestions', 'ai-triage'].map((p) => `${p}-${caseId}`)
+export const CASE_KV_KEYS = (caseId: number) =>
+  ['chains', 'ruleDiags', 'baseline', 'mail-calibration', 'report-summary', 'finding-reviews', 'chain-reviews', 'report-settings', 'findingCounts', 'ai-suggestions', 'ai-triage'].map(
+    (p) => `${p}-${caseId}`,
+  )
 
 export async function deleteCaseData(db: RemnDB, caseId: number): Promise<void> {
-  await db.transaction('rw', [db.events, db.mails, db.mailBodies, db.attachments, db.urls, db.findings, db.iocs, db.facets, db.aiSessions, db.savedSearches, db.evidence, db.caseNotes, db.kv], async () => {
-    for (const t of [db.events, db.mails, db.mailBodies, db.attachments, db.urls, db.findings, db.iocs, db.facets, db.aiSessions, db.savedSearches, db.evidence, db.caseNotes]) {
-      await (t as Table<{ caseId: number }, number>).where('caseId').equals(caseId).delete()
-    }
-    await db.kv.bulkDelete(CASE_KV_KEYS(caseId))  // chain snapshot, diagnostics, calibration state, archived reviews
-  })
+  await db.transaction(
+    'rw',
+    [db.events, db.mails, db.mailBodies, db.attachments, db.urls, db.findings, db.iocs, db.facets, db.aiSessions, db.savedSearches, db.evidence, db.caseNotes, db.kv],
+    async () => {
+      for (const t of [db.events, db.mails, db.mailBodies, db.attachments, db.urls, db.findings, db.iocs, db.facets, db.aiSessions, db.savedSearches, db.evidence, db.caseNotes]) {
+        await (t as Table<{ caseId: number }, number>).where('caseId').equals(caseId).delete()
+      }
+      await db.kv.bulkDelete(CASE_KV_KEYS(caseId)) // chain snapshot, diagnostics, calibration state, archived reviews
+    },
+  )
 }
 
 export async function deleteEvidenceData(db: RemnDB, caseId: number, evidenceId: number): Promise<void> {

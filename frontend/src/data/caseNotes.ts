@@ -23,7 +23,11 @@ export async function deleteNote(id: number): Promise<void> {
 /** Add a row, finding or chain to the curated timeline once; a second call for the same link is a no-op. */
 export async function addTimelineEntry(caseId: number, entry: { ts: number; text: string; link?: CaseNote['link']; severity?: string }): Promise<'added' | 'exists'> {
   if (entry.link) {
-    const dup = await getDb().caseNotes.where('[caseId+kind]').equals([caseId, 'timeline']).filter((n) => n.link?.source === entry.link!.source && String(n.link?.id) === String(entry.link!.id)).first()
+    const dup = await getDb()
+      .caseNotes.where('[caseId+kind]')
+      .equals([caseId, 'timeline'])
+      .filter((n) => n.link?.source === entry.link!.source && String(n.link?.id) === String(entry.link!.id))
+      .first()
     if (dup) return 'exists'
   }
   await addNote(caseId, 'timeline', entry.text, { ts: entry.ts, link: entry.link, severity: entry.severity })

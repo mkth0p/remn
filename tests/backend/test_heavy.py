@@ -9,6 +9,7 @@ Sizes are tunable through environment variables so a quick pass is possible:
     REMN_HEAVY_MAILS     (default 300000) mbox ingest size
     REMN_HEAVY_EVENTS    (default 200000) NDJSON import size
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -26,7 +27,8 @@ from services.ingest.pipeline import MailSource
 from services.parsers.mail.common import ParseContext
 from services.store import queries as Q
 from services.store import rules as R
-from services.store.casestore import StoreRegistry, registry as global_registry
+from services.store.casestore import StoreRegistry
+from services.store.casestore import registry as global_registry
 from services.store.writers import MailWriter
 
 pytestmark = pytest.mark.heavy
@@ -107,8 +109,7 @@ def test_big_mbox_server_store_ingest(tmp_path):
     reg.configure(tmp_path / "cases")
     try:
         st = reg.get(str(uuid.uuid4()))
-        ctx = ParseContext(internal_domains=["interne.fr"], vip_names=["Marie Lefevre"],
-                           analyze_attachments=False)  # deepAttachments off: the fast first pass
+        ctx = ParseContext(internal_domains=["interne.fr"], vip_names=["Marie Lefevre"], analyze_attachments=False)  # deepAttachments off: the fast first pass
         t0 = time.time()
         w = MailWriter(st, 1)
         n = 0
@@ -141,7 +142,7 @@ def test_big_mbox_server_store_ingest(tmp_path):
         ctx_deep = ParseContext(internal_domains=["interne.fr"], analyze_attachments=True)
         deep_n = 0
         t = time.time()
-        for row in MailSource(mbox.name, str(mbox), None, ctx_deep, str(tmp_path)):
+        for _row in MailSource(mbox.name, str(mbox), None, ctx_deep, str(tmp_path)):
             deep_n += 1
             if deep_n >= 5000:
                 break
@@ -158,11 +159,19 @@ def test_job_cancel_mid_ingest_leaves_consistent_store(tmp_path, tmp_registry):
     uid, _ = _upload_blob(c, mbox)
     assert c.post(f"/api/upload/{uid}/complete", "{}", content_type="application/json", **HDR).status_code == 200
     key = str(uuid.uuid4())
-    r = c.post(f"/api/store/{key}/ingest", json.dumps({
-        "uploadId": uid, "kind": "mail",
-        "evidence": {"id": 1, "name": "cancel.mbox", "size": mbox.stat().st_size},
-        "options": {"settings": {"internalDomains": ["interne.fr"]}},
-    }), content_type="application/json", **HDR)
+    r = c.post(
+        f"/api/store/{key}/ingest",
+        json.dumps(
+            {
+                "uploadId": uid,
+                "kind": "mail",
+                "evidence": {"id": 1, "name": "cancel.mbox", "size": mbox.stat().st_size},
+                "options": {"settings": {"internalDomains": ["interne.fr"]}},
+            }
+        ),
+        content_type="application/json",
+        **HDR,
+    )
     assert r.status_code == 200, r.content
     job_id = r.json()["jobId"]
     # let it get going, then cancel

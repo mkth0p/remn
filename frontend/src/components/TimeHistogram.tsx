@@ -65,7 +65,13 @@ export function TimeHistogram({ ds, source, filter, version, onRange }: { ds: Da
     <div style={{ opacity: busy ? 0.6 : 1 }}>
       <div className="hist" title="distribution of the current results over time - click a bar to narrow the time range">
         {bars.map((b) => (
-          <div key={b.t} className="b" style={{ height: `${Math.max(2, (b.count / max) * 100)}%`, opacity: b.count ? 1 : 0.15 }} title={`${fmtTs(b.t)} · ${fmtNum(b.count)}`} onClick={() => b.count && onRange?.(b.t, b.t + b.size)} />
+          <div
+            key={b.t}
+            className="b"
+            style={{ height: `${Math.max(2, (b.count / max) * 100)}%`, opacity: b.count ? 1 : 0.15 }}
+            title={`${fmtTs(b.t)} · ${fmtNum(b.count)}`}
+            onClick={() => b.count && onRange?.(b.t, b.t + b.size)}
+          />
         ))}
       </div>
       <div className="hist-labels">

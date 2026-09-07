@@ -11,14 +11,24 @@ export function Jobs() {
       {jobs.map((j) => (
         <div key={j.id} className="card" style={{ padding: '8px 12px' }}>
           <div className="row small">
-            <span className="mono ellipsis" style={{ maxWidth: 260 }}>{j.name}</span>
+            <span className="mono ellipsis" style={{ maxWidth: 260 }}>
+              {j.name}
+            </span>
             <span className="badge">{j.kind}</span>
             <span className="dim">{j.phase}</span>
             <span className="spacer" />
             <span className="mono dim">{j.phase === 'hashing' ? `${Math.round(j.progress * 100)}%` : `${fmtNum(j.rows)} rows${j.bytes ? ` · ${fmtBytes(j.bytes)}` : ''}`}</span>
           </div>
-          {j.phase !== 'done' && j.phase !== 'error' && <div style={{ marginTop: 6 }}><Progress value={j.phase === 'hashing' ? j.progress : undefined} indeterminate={j.phase !== 'hashing'} /></div>}
-          {j.error && <div className="small" style={{ color: 'var(--danger)', marginTop: 4 }}>{j.error}</div>}
+          {j.phase !== 'done' && j.phase !== 'error' && (
+            <div style={{ marginTop: 6 }}>
+              <Progress value={j.phase === 'hashing' ? j.progress : undefined} indeterminate={j.phase !== 'hashing'} />
+            </div>
+          )}
+          {j.error && (
+            <div className="small" style={{ color: 'var(--danger)', marginTop: 4 }}>
+              {j.error}
+            </div>
+          )}
         </div>
       ))}
     </div>
@@ -37,7 +47,9 @@ export function ConsolePanel() {
       <div className="panel-h">
         console
         <span className="spacer" />
-        <button className="btn xs ghost" onClick={clear}>clear</button>
+        <button className="btn xs ghost" onClick={clear}>
+          clear
+        </button>
       </div>
       <div className="console" ref={ref}>
         {!lines.length && <div className="l muted">ready.</div>}

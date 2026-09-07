@@ -26,8 +26,20 @@ T0 = 1788300000000
 
 
 def _event(i: int, **kw):
-    row = {"recordId": i, "ts": T0 + i * 1000, "tsIso": "2026-09-01T22:00:00Z", "eventId": 4624, "provider": "Microsoft-Windows-Security-Auditing",
-           "channel": "Security", "computer": "WS01", "level": 0, "levelName": "LogAlways", "summary": f"event {i}", "data": {"X": i}, "raw": json.dumps({"i": i})}
+    row = {
+        "recordId": i,
+        "ts": T0 + i * 1000,
+        "tsIso": "2026-09-01T22:00:00Z",
+        "eventId": 4624,
+        "provider": "Microsoft-Windows-Security-Auditing",
+        "channel": "Security",
+        "computer": "WS01",
+        "level": 0,
+        "levelName": "LogAlways",
+        "summary": f"event {i}",
+        "data": {"X": i},
+        "raw": json.dumps({"i": i}),
+    }
     row.update(kw)
     return row
 
@@ -53,7 +65,15 @@ def test_write_and_search_events(store):
     assert Q.count(store, "events", {"conditions": [{"field": "eventId", "op": "eq", "value": 4625}]}) == 250
     assert Q.count(store, "events", {"conditions": [{"field": "targetUser", "op": "eq", "value": "ADMIN"}]}) == 125
     assert Q.count(store, "events", {"conditions": [{"field": "ipAddress", "op": "in_setting", "value": "internal_ips"}]}, s) == 250
-    assert Q.count(store, "events", {"conditions": [{"field": "ipAddress", "op": "nin_setting", "value": "internal_ips"}, {"field": "eventId", "op": "eq", "value": 4625}]}, s) == 0
+    assert (
+        Q.count(
+            store,
+            "events",
+            {"conditions": [{"field": "ipAddress", "op": "nin_setting", "value": "internal_ips"}, {"field": "eventId", "op": "eq", "value": 4625}]},
+            s,
+        )
+        == 0
+    )
     assert Q.count(store, "events", {"text": "event 99"}) == 11  # 99, 990..999
     assert Q.count(store, "events", {"regex": {"field": "summary", "pattern": "^event 1\\d$"}}) == 10
     assert Q.count(store, "events", {"conditions": [{"field": "data.X", "op": "gte", "value": 990}]}) == 10
@@ -86,7 +106,17 @@ def test_mail_write_nested_filters_and_iocs(store):
     s = {"internal_domains": ["interne.fr"], "vip_names": ["Marie Lefevre"]}
     macro = Q.search(store, "mails", {"conditions": [{"field": "attachments.flags", "op": "contains", "value": "office_macro"}]}, settings=s)["rows"]
     assert [m["subject"] for m in macro] == ["URGENT: facture a regler avant 18h"]
-    vip = Q.search(store, "mails", {"conditions": [{"field": "fromNameNorm", "op": "in_setting", "value": "vip_names"}, {"field": "fromRegistrable", "op": "nin_setting", "value": "internal_domains"}]}, settings=s)["rows"]
+    vip = Q.search(
+        store,
+        "mails",
+        {
+            "conditions": [
+                {"field": "fromNameNorm", "op": "in_setting", "value": "vip_names"},
+                {"field": "fromRegistrable", "op": "nin_setting", "value": "internal_domains"},
+            ]
+        },
+        settings=s,
+    )["rows"]
     assert {m["fromAddr"] for m in vip} == {"marie.lefevre@interne-fr.co", "ceo.office.2026@gmail.com"}
     assert Q.count(store, "mails", {"conditions": [{"field": "flags", "op": "contains_any", "value": "lexicon_gift_card,att_html_smuggling"}]}) == 2
     assert Q.count(store, "mails", {"conditions": [{"field": "urls.host", "op": "eq", "value": "185.220.101.4"}]}) == 1
@@ -121,17 +151,57 @@ def test_server_rules_engine(store):
     w.add(_event(901, eventId=1102, subjectUser="eve"))
     w.flush()
     settings = {"businessHours": {"start": 8, "end": 19, "tz": "UTC"}, "weekendDays": [0, 6], "internal_ips": ["10.0.0.0/8"], "service_accounts": []}
-    brute = {"id": "bf", "title": "brute", "severity": "high", "source": "events", "where": {"eventId": 4625, "ipAddress|exists": True}, "group_by": ["ipAddress"],
-             "window": "5m", "threshold": ">= 5", "then": {"where": {"eventId": 4624}, "join": ["ipAddress"], "within": "15m", "severity": "critical", "title": "success after burst"}}
+    brute = {
+        "id": "bf",
+        "title": "brute",
+        "severity": "high",
+        "source": "events",
+        "where": {"eventId": 4625, "ipAddress|exists": True},
+        "group_by": ["ipAddress"],
+        "window": "5m",
+        "threshold": ">= 5",
+        "then": {"where": {"eventId": 4624}, "join": ["ipAddress"], "within": "15m", "severity": "critical", "title": "success after burst"},
+    }
     f = R.run_rule(store, brute, settings)
-    assert len(f) == 1 and f[0]["entities"]["ipAddress"] == "10.9.9.9" and f[0]["count"] == 6 and f[0]["severity"] == "critical" and "success after burst" in f[0]["title"]
-    spray = {"id": "spray", "title": "s", "severity": "high", "source": "events", "where": {"eventId": 4625}, "group_by": ["ipAddress"], "window": "30m", "distinct": "targetUser", "threshold": ">= 3"}
+    assert (
+        len(f) == 1
+        and f[0]["entities"]["ipAddress"] == "10.9.9.9"
+        and f[0]["count"] == 6
+        and f[0]["severity"] == "critical"
+        and "success after burst" in f[0]["title"]
+    )
+    spray = {
+        "id": "spray",
+        "title": "s",
+        "severity": "high",
+        "source": "events",
+        "where": {"eventId": 4625},
+        "group_by": ["ipAddress"],
+        "window": "30m",
+        "distinct": "targetUser",
+        "threshold": ">= 3",
+    }
     f = R.run_rule(store, spray, settings)
     assert len(f) == 1 and f[0]["entities"]["ipAddress"] == "1.1.1.1" and "a, b, c" in f[0]["entities"]["targetUser"]
-    night = {"id": "night", "title": "n", "severity": "medium", "source": "events", "where": {"eventId": 4624, "logonType|in": [2, 10]}, "time": {"outside_business_hours": True}, "exclude": {"targetUser|in_setting": "service_accounts"}}
+    night = {
+        "id": "night",
+        "title": "n",
+        "severity": "medium",
+        "source": "events",
+        "where": {"eventId": 4624, "logonType|in": [2, 10]},
+        "time": {"outside_business_hours": True},
+        "exclude": {"targetUser|in_setting": "service_accounts"},
+    }
     f = R.run_rule(store, night, settings)
     assert len(f) == 1 and f[0]["entities"]["targetUser"] == "alice"
-    rdp = {"id": "rdp", "title": "r", "severity": "high", "source": "events", "where": {"eventId": 4624, "logonType": 10}, "exclude": {"ipAddress|in_setting": "internal_ips"}}
+    rdp = {
+        "id": "rdp",
+        "title": "r",
+        "severity": "high",
+        "source": "events",
+        "where": {"eventId": 4624, "logonType": 10},
+        "exclude": {"ipAddress|in_setting": "internal_ips"},
+    }
     assert len(R.run_rule(store, rdp, settings)) == 1
     grouped = {"id": "lock", "title": "l", "severity": "low", "source": "events", "where": {"eventId": 4625}, "group_by": ["targetUser"], "threshold": ">= 3"}
     f = R.run_rule(store, grouped, settings)
@@ -154,8 +224,24 @@ def test_rule_diagnostics_explain_silent_rules(store):
         {"id": "absent", "title": "a", "severity": "low", "source": "events", "where": {"eventId": 1102}},
         {"id": "vip", "title": "v", "severity": "low", "source": "events", "where": {"targetUser|in_setting": "vip_names"}},
         {"id": "req", "title": "r", "severity": "low", "source": "events", "where": {"eventId": 4624}, "require_setting": "internal_ips"},
-        {"id": "excl", "title": "e", "severity": "low", "source": "events", "where": {"eventId": 4624}, "exclude": {"targetUser|in_setting": "service_accounts"}},
-        {"id": "thr", "title": "t", "severity": "low", "source": "events", "where": {"eventId": 4625}, "group_by": ["ipAddress"], "window": "5m", "threshold": ">= 10"},
+        {
+            "id": "excl",
+            "title": "e",
+            "severity": "low",
+            "source": "events",
+            "where": {"eventId": 4624},
+            "exclude": {"targetUser|in_setting": "service_accounts"},
+        },
+        {
+            "id": "thr",
+            "title": "t",
+            "severity": "low",
+            "source": "events",
+            "where": {"eventId": 4625},
+            "group_by": ["ipAddress"],
+            "window": "5m",
+            "threshold": ">= 10",
+        },
         {"id": "time", "title": "ti", "severity": "low", "source": "events", "where": {"eventId": 4625}, "time": {"hours": [5, 5]}},
         {"id": "ok", "title": "o", "severity": "low", "source": "events", "where": {"eventId": 4625}},
     ]
@@ -242,12 +328,19 @@ def test_chunked_upload_store_ingest_and_query(settings, tmp_path):
     upload_id = r.json()["uploadId"]
     chunk = 700_000
     for off in range(0, len(data), chunk):
-        r = c.generic("PUT", f"/api/upload/{upload_id}/chunk?offset={off}", data[off:off + chunk], content_type="application/octet-stream", **HDR)
+        r = c.generic("PUT", f"/api/upload/{upload_id}/chunk?offset={off}", data[off : off + chunk], content_type="application/octet-stream", **HDR)
         assert r.status_code == 200, r.content
     r = c.post(f"/api/upload/{upload_id}/complete", **HDR)
     assert r.status_code == 200
     sha = r.json()["sha256"]
-    r = c.post(f"/api/store/{key}/ingest", data=json.dumps({"uploadId": upload_id, "kind": "evtx", "evidence": {"id": 7, "name": "System.evtx", "sha256Client": sha}, "options": {"includeRaw": False}}), content_type="application/json", **HDR)
+    r = c.post(
+        f"/api/store/{key}/ingest",
+        data=json.dumps(
+            {"uploadId": upload_id, "kind": "evtx", "evidence": {"id": 7, "name": "System.evtx", "sha256Client": sha}, "options": {"includeRaw": False}}
+        ),
+        content_type="application/json",
+        **HDR,
+    )
     assert r.status_code == 200
     job_id = r.json()["jobId"]
     for _ in range(600):
@@ -257,13 +350,20 @@ def test_chunked_upload_store_ingest_and_query(settings, tmp_path):
         time.sleep(0.1)
     assert j["status"] == "done", j
     assert j["result"]["count"] > 1000 and j["result"]["integrity"] == "verified"
-    r = c.post(f"/api/store/{key}/search", data=json.dumps({"source": "events", "filter": {"text": "service"}, "limit": 5}), content_type="application/json", **HDR)
+    r = c.post(
+        f"/api/store/{key}/search", data=json.dumps({"source": "events", "filter": {"text": "service"}, "limit": 5}), content_type="application/json", **HDR
+    )
     assert r.status_code == 200 and len(r.json()["rows"]) == 5
     r = c.get(f"/api/store/{key}/facets?source=events&field=eventId&limit=3", **HDR)
     assert r.status_code == 200 and len(r.json()) == 3
     r = c.get(f"/api/store/{key}", **HDR)
     assert r.json()["counts"]["events"] == j["result"]["count"] and r.json()["evidence"][0]["id"] == 7
-    r = c.post(f"/api/store/{key}/rules/run", data=json.dumps({"rules": [{"id": "svc", "title": "s", "severity": "info", "source": "events", "where": {"eventId": 7045}}], "settings": {}}), content_type="application/json", **HDR)
+    r = c.post(
+        f"/api/store/{key}/rules/run",
+        data=json.dumps({"rules": [{"id": "svc", "title": "s", "severity": "info", "source": "events", "where": {"eventId": 7045}}], "settings": {}}),
+        content_type="application/json",
+        **HDR,
+    )
     job_id = r.json()["jobId"]
     for _ in range(300):
         j = c.get(f"/api/jobs/{job_id}", **HDR).json()
@@ -280,7 +380,9 @@ def test_chunked_upload_store_ingest_and_query(settings, tmp_path):
     r = c.delete(f"/api/store/{key}/evidence/8", **HDR)
     deleted = r.json()["deleted"]
     assert deleted["events"] == 10 and "mail_bodies" in deleted and deleted["bytes"] > 0  # the import path creates no evidence row
-    r = c.post(f"/api/store/{key}/sql", data=json.dumps({"sql": 'SELECT count(*) AS n FROM events WHERE "evidenceId" = 8'}), content_type="application/json", **HDR)
+    r = c.post(
+        f"/api/store/{key}/sql", data=json.dumps({"sql": 'SELECT count(*) AS n FROM events WHERE "evidenceId" = 8'}), content_type="application/json", **HDR
+    )
     assert r.json()["rows"][0]["n"] == 0
     assert not Path(settings.FILE_UPLOAD_TEMP_DIR, "uploads", f"{upload_id}.part").exists()
     r = c.delete(f"/api/store/{key}", **HDR)
@@ -298,18 +400,25 @@ def test_trusted_sender_rule_exclusion(store):
     vip_rule = next(d for d in docs if d["id"] == "mail-vip-impersonation")
     ctx = ParseContext(internal_domains=["interne.fr"], vip_names=["Marie Lefevre"])
     teams = make_samples.mail(
-        '"Marie Lefevre" <noreply@email.teams.microsoft.com>', "j.dupont@interne.fr",
-        "Marie Lefevre mentioned you", "Open Teams to reply.",
-        extra_headers=[("Authentication-Results", "mx.interne.fr; spf=pass smtp.mailfrom=email.teams.microsoft.com; dkim=pass header.d=microsoft.com; dmarc=pass")],
-        date="Tue, 01 Sep 2026 10:00:00 +0000")
+        '"Marie Lefevre" <noreply@email.teams.microsoft.com>',
+        "j.dupont@interne.fr",
+        "Marie Lefevre mentioned you",
+        "Open Teams to reply.",
+        extra_headers=[
+            ("Authentication-Results", "mx.interne.fr; spf=pass smtp.mailfrom=email.teams.microsoft.com; dkim=pass header.d=microsoft.com; dmarc=pass")
+        ],
+        date="Tue, 01 Sep 2026 10:00:00 +0000",
+    )
     legacy_saas = make_samples.mail(  # no auth headers: unflagged at ingest, like a pre-feature ingest
-        '"Marie Lefevre" <mentions@old-tool.example-saas.com>', "j.dupont@interne.fr",
-        "Marie commented", "See the comment.",
-        date="Tue, 01 Sep 2026 10:01:00 +0000")
+        '"Marie Lefevre" <mentions@old-tool.example-saas.com>',
+        "j.dupont@interne.fr",
+        "Marie commented",
+        "See the comment.",
+        date="Tue, 01 Sep 2026 10:01:00 +0000",
+    )
     spoof = make_samples.mail(
-        '"Marie Lefevre" <marie.lefevre@interne-fr.co>', "j.dupont@interne.fr",
-        "Urgent request", "Please call me.",
-        date="Tue, 01 Sep 2026 10:02:00 +0000")
+        '"Marie Lefevre" <marie.lefevre@interne-fr.co>', "j.dupont@interne.fr", "Urgent request", "Please call me.", date="Tue, 01 Sep 2026 10:02:00 +0000"
+    )
     from services.parsers.mail.common import parse_message_bytes
 
     w = MailWriter(store, 7)
@@ -406,19 +515,25 @@ def test_grouped_rule_with_any_in_group_and_exclude(store):
     from pathlib import Path
 
     import yaml
+
     from services.parsers.mail.common import parse_message_bytes
 
     docs = list(yaml.safe_load_all((Path(__file__).resolve().parents[2] / "rules" / "mail" / "spoofing.yaml").read_text(encoding="utf-8")))
     rule = next(d for d in docs if d["id"] == "mail-internal-name-external-domain")
     ctx = ParseContext(internal_domains=["interne.fr"])
     mails = [
-        make_samples.mail('"Jean Dupont" <jean.dupont@interne.fr>', "j.martin@interne.fr", "Budget", "See attached.",
-                          date="Tue, 01 Sep 2026 10:00:00 +0000"),
-        make_samples.mail('"Jean Dupont" <jean.dupont@gmail.com>', "j.martin@interne.fr", "Urgent", "Call me.",
-                          date="Tue, 01 Sep 2026 10:05:00 +0000"),
-        make_samples.mail('"Jean Dupont" <noreply@email.teams.microsoft.com>', "j.martin@interne.fr", "Jean mentioned you", "Open Teams.",
-                          extra_headers=[("Authentication-Results", "mx.interne.fr; spf=pass smtp.mailfrom=email.teams.microsoft.com; dkim=pass header.d=microsoft.com; dmarc=pass")],
-                          date="Tue, 01 Sep 2026 10:10:00 +0000"),
+        make_samples.mail('"Jean Dupont" <jean.dupont@interne.fr>', "j.martin@interne.fr", "Budget", "See attached.", date="Tue, 01 Sep 2026 10:00:00 +0000"),
+        make_samples.mail('"Jean Dupont" <jean.dupont@gmail.com>', "j.martin@interne.fr", "Urgent", "Call me.", date="Tue, 01 Sep 2026 10:05:00 +0000"),
+        make_samples.mail(
+            '"Jean Dupont" <noreply@email.teams.microsoft.com>',
+            "j.martin@interne.fr",
+            "Jean mentioned you",
+            "Open Teams.",
+            extra_headers=[
+                ("Authentication-Results", "mx.interne.fr; spf=pass smtp.mailfrom=email.teams.microsoft.com; dkim=pass header.d=microsoft.com; dmarc=pass")
+            ],
+            date="Tue, 01 Sep 2026 10:10:00 +0000",
+        ),
     ]
     w = MailWriter(store, 3)
     for raw in mails:

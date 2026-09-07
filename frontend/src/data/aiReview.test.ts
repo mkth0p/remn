@@ -6,11 +6,48 @@ import { reviewQueue } from './review'
 import { describeItem, normaliseDecision, parseDecisions, suggestionsFor } from './aiReview'
 
 let seq = 1
-const f = (p: Partial<Finding> & { ruleId: string; severity: Finding['severity'] }): Finding => ({ id: seq++, caseId: 1, key: `${p.ruleId}|${seq}`, title: p.ruleId, source: 'mails', ts: 10, entities: {}, count: 1, refs: [seq], attack: [], status: 'new', createdAt: 0, ...p })
+const f = (p: Partial<Finding> & { ruleId: string; severity: Finding['severity'] }): Finding => ({
+  id: seq++,
+  caseId: 1,
+  key: `${p.ruleId}|${seq}`,
+  title: p.ruleId,
+  source: 'mails',
+  ts: 10,
+  entities: {},
+  count: 1,
+  refs: [seq],
+  attack: [],
+  status: 'new',
+  createdAt: 0,
+  ...p,
+})
 const chain: Chain = {
-  id: 'alice', identity: 'alice', identityLabel: 'alice@corp.test', start: 0, end: 3_600_000, score: 80, severity: 'high', artifactLinks: 1, summary: 'summary',
+  id: 'alice',
+  identity: 'alice',
+  identityLabel: 'alice@corp.test',
+  start: 0,
+  end: 3_600_000,
+  score: 80,
+  severity: 'high',
+  artifactLinks: 1,
+  summary: 'summary',
   seed: { id: 7, ts: 0, subject: 'Urgent invoice', fromAddr: 'x@evil.test', risk: 90, flags: ['spf_fail'], findings: [], urlDomains: [], attachments: [] },
-  steps: [{ kind: 'event', source: 'events', id: 11, ts: 60_000, tsEnd: 60_000, count: 1, title: 'logon from 203.0.113.9', weight: 3, artifacts: ['mail URL domain'], findings: [], offsetMin: 1, origin: 'm365' }],
+  steps: [
+    {
+      kind: 'event',
+      source: 'events',
+      id: 11,
+      ts: 60_000,
+      tsEnd: 60_000,
+      count: 1,
+      title: 'logon from 203.0.113.9',
+      weight: 3,
+      artifacts: ['mail URL domain'],
+      findings: [],
+      offsetMin: 1,
+      origin: 'm365',
+    },
+  ],
   entities: { user: 'alice', ips: ['203.0.113.9'], hosts: [], attackerAddresses: ['x@evil.test'], domains: [] },
 }
 
@@ -51,9 +88,15 @@ describe('AI review', () => {
     expect(rejected[0]).toContain('ghost')
   })
 
-  it('reads the words models use for a decision and says them in the item kind\'s words', () => {
+  it("reads the words models use for a decision and says them in the item kind's words", () => {
     const items = queue()
-    const { decisions, rejected } = parseDecisions(JSON.stringify([{ id: 'chain:alice', decision: 'escalate', reason: 'r' }, { id: items[1].id, decision: 'dismiss', reason: 'r' }]), items)
+    const { decisions, rejected } = parseDecisions(
+      JSON.stringify([
+        { id: 'chain:alice', decision: 'escalate', reason: 'r' },
+        { id: items[1].id, decision: 'dismiss', reason: 'r' },
+      ]),
+      items,
+    )
     expect(decisions.map((d) => d.decision)).toEqual(['confirmed', 'reviewed'])
     expect(rejected).toHaveLength(0)
     expect(normaliseDecision('False Positive', 'chain')).toBe('benign')

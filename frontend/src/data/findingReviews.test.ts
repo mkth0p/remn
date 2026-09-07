@@ -3,10 +3,34 @@ import { RemnDB, setDb, type Finding } from '../db/schema'
 import { rememberReviews, replaceFindings, resetFindingSeverityOverrides } from './findingReviews'
 
 let db: RemnDB
-const row = (patch: Partial<Finding> = {}): Finding => ({ caseId: 1, key: 'replyto|3307', ruleId: 'replyto', title: 'Reply-To diverted', source: 'mails', severity: 'medium', severityOverride: 'high', refs: [3307], entities: {}, count: 1, attack: [], ts: 1, status: 'reviewed', notes: 'Supplier confirmed', decidedBy: 'analyst', reportExclude: true, createdAt: 5, ...patch })
+const row = (patch: Partial<Finding> = {}): Finding => ({
+  caseId: 1,
+  key: 'replyto|3307',
+  ruleId: 'replyto',
+  title: 'Reply-To diverted',
+  source: 'mails',
+  severity: 'medium',
+  severityOverride: 'high',
+  refs: [3307],
+  entities: {},
+  count: 1,
+  attack: [],
+  ts: 1,
+  status: 'reviewed',
+  notes: 'Supplier confirmed',
+  decidedBy: 'analyst',
+  reportExclude: true,
+  createdAt: 5,
+  ...patch,
+})
 
-beforeEach(() => { db = new RemnDB(`severity-reset-${Math.random()}`); setDb(db) })
-afterEach(async () => { await db.delete() })
+beforeEach(() => {
+  db = new RemnDB(`severity-reset-${Math.random()}`)
+  setDb(db)
+})
+afterEach(async () => {
+  await db.delete()
+})
 
 describe('explicit finding severity reset', () => {
   it('keeps every other decision and clears the archived override through disappearance and reappearance', async () => {

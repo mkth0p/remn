@@ -1,4 +1,5 @@
 """Cross-source attack chains: build from a server case store, or from rows posted by a browser-stored case."""
+
 from __future__ import annotations
 
 import json

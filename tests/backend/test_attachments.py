@@ -71,7 +71,9 @@ def test_pdf_javascript_and_uris():
 
 def test_html_smuggling_and_credential_form():
     r = analyze_attachment("Document.html", make_samples.html_smuggle())
-    assert {"html_smuggling", "html_embedded_payload", "html_password_form", "html_credential_harvest", "html_brand_lure", "html_prefilled_email"} <= set(r["flags"])
+    assert {"html_smuggling", "html_embedded_payload", "html_password_form", "html_credential_harvest", "html_brand_lure", "html_prefilled_email"} <= set(
+        r["flags"]
+    )
     assert "zip" in r["details"]["html"]["decodedBlobTypes"]
     assert r["risk"] >= 90
 

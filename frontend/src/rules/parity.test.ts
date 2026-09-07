@@ -49,7 +49,9 @@ describe('engine parity with the SQL engine', () => {
     const diffs: string[] = []
     for (const rule of rules) {
       const rows = rule.source === 'mails' ? mails : events
-      const got = runRule(rule, { rows, settings: expected.settings, thenRows: () => rows }).map((f) => f.key).sort()
+      const got = runRule(rule, { rows, settings: expected.settings, thenRows: () => rows })
+        .map((f) => f.key)
+        .sort()
       const want = expected.findings[rule.id] ?? []
       if (JSON.stringify(got) !== JSON.stringify(want)) diffs.push(`${rule.id}: browser ${JSON.stringify(got)} vs sql ${JSON.stringify(want)}`)
     }

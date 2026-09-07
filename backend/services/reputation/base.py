@@ -3,14 +3,16 @@ Reputation providers: common model, in-memory TTL cache, per-provider rate
 limiting and a registry that fans a batch of IOCs out to every configured
 provider. Nothing here is Django-specific; ``configure()`` receives the keys.
 """
+
 from __future__ import annotations
 
 import logging
 import threading
 import time
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -33,9 +35,16 @@ class Verdict:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "provider": self.provider, "kind": self.kind, "value": self.value, "verdict": self.verdict,
-            "score": self.score, "tags": self.tags[:20], "details": self.details, "link": self.link,
-            "cached": self.cached, "fetchedAt": int(self.fetched_at * 1000) if self.fetched_at else None,
+            "provider": self.provider,
+            "kind": self.kind,
+            "value": self.value,
+            "verdict": self.verdict,
+            "score": self.score,
+            "tags": self.tags[:20],
+            "details": self.details,
+            "link": self.link,
+            "cached": self.cached,
+            "fetchedAt": int(self.fetched_at * 1000) if self.fetched_at else None,
         }
 
 
@@ -73,8 +82,14 @@ class Provider:
         raise NotImplementedError
 
     def info(self) -> dict[str, Any]:
-        return {"name": self.name, "kinds": list(self.kinds), "configured": self.configured(),
-                "needsKey": self.needs_key, "description": self.description, "homepage": self.homepage}
+        return {
+            "name": self.name,
+            "kinds": list(self.kinds),
+            "configured": self.configured(),
+            "needsKey": self.needs_key,
+            "description": self.description,
+            "homepage": self.homepage,
+        }
 
 
 class TTLCache:
@@ -120,8 +135,15 @@ class Registry:
         self.cache = TTLCache(6 * 3600)
         self.config: dict[str, Any] = {}
 
-    def configure(self, keys: dict[str, str], timeout: float = 15, cache_ttl: float = 6 * 3600,
-                  offline_dir: str | None = None, geoip_dir: str | None = None, spamhaus_dqs: str | None = None) -> None:
+    def configure(
+        self,
+        keys: dict[str, str],
+        timeout: float = 15,
+        cache_ttl: float = 6 * 3600,
+        offline_dir: str | None = None,
+        geoip_dir: str | None = None,
+        spamhaus_dqs: str | None = None,
+    ) -> None:
         from services.reputation import offline, providers, spamhaus
 
         self.config = {"keys": dict(keys or {}), "timeout": timeout, "offline_dir": offline_dir, "geoip_dir": geoip_dir}
@@ -155,8 +177,9 @@ class Registry:
         self.cache.put(v)
         return v
 
-    def lookup(self, items: Iterable[tuple[str, str]], providers: Iterable[str] | None = None,
-               max_workers: int = 8, deadline: float = 60.0) -> list[dict[str, Any]]:
+    def lookup(
+        self, items: Iterable[tuple[str, str]], providers: Iterable[str] | None = None, max_workers: int = 8, deadline: float = 60.0
+    ) -> list[dict[str, Any]]:
         """items: iterable of (kind, value). Returns one dict per (item, provider)."""
         wanted = [p for p in self.providers.values() if (providers is None or p.name in providers)]
         jobs: list[tuple[Provider, str, str]] = []
@@ -195,8 +218,21 @@ def summarize(verdicts: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     for v in verdicts:
         key = f"{v['kind']}:{v['value']}"
-        agg = out.setdefault(key, {"kind": v["kind"], "value": v["value"], "verdict": "unknown", "providers": [],
-                                   "malicious": 0, "suspicious": 0, "clean": 0, "tags": set(), "geo": None, "asn": None})
+        agg = out.setdefault(
+            key,
+            {
+                "kind": v["kind"],
+                "value": v["value"],
+                "verdict": "unknown",
+                "providers": [],
+                "malicious": 0,
+                "suspicious": 0,
+                "clean": 0,
+                "tags": set(),
+                "geo": None,
+                "asn": None,
+            },
+        )
         agg["providers"].append(v["provider"])
         if v["verdict"] in ("malicious", "suspicious", "clean"):
             agg[v["verdict"]] += 1

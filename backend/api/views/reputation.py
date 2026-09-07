@@ -37,6 +37,5 @@ def lookup(request: HttpRequest):
     wanted = body.get("providers")
     if wanted is not None and not isinstance(wanted, list):
         return JsonResponse({"error": "providers must be a list"}, status=400)
-    results = registry.lookup(items, providers=[str(p) for p in wanted] if wanted else None,
-                              deadline=float(body.get("deadline") or 60))
+    results = registry.lookup(items, providers=[str(p) for p in wanted] if wanted else None, deadline=float(body.get("deadline") or 60))
     return JsonResponse({"results": results, "summary": summarize(results)})

@@ -8,8 +8,22 @@ vi.mock('../api/client', () => ({ apiPost: vi.fn() }))
 vi.mock('./rules', () => ({ settingsForRules: (k: Case) => ({ internal_domains: k.settings.internalDomains }) }))
 
 const kase: Case = { id: 1, name: 'Stale', storage: 'browser', createdAt: 1, updatedAt: 1, settings: defaultSettings() }
-const finding = (key: string, ruleId = 'mail-x'): Record<string, unknown> =>
-  ({ caseId: 1, ruleId, key, title: key, severity: 'high', source: 'mails', ts: 1, entities: {}, count: 1, refs: [1], attack: [], tags: [], status: 'new', createdAt: 1 })
+const finding = (key: string, ruleId = 'mail-x'): Record<string, unknown> => ({
+  caseId: 1,
+  ruleId,
+  key,
+  title: key,
+  severity: 'high',
+  source: 'mails',
+  ts: 1,
+  entities: {},
+  count: 1,
+  refs: [1],
+  attack: [],
+  tags: [],
+  status: 'new',
+  createdAt: 1,
+})
 let db: RemnDB
 
 beforeEach(() => {
@@ -75,4 +89,3 @@ describe('derived state follows the evidence', () => {
     expect(((await db.kv.get('finding-reviews-1'))?.value as Record<string, unknown>)['sigma-gone|1']).toMatchObject({ status: 'reviewed', notes: 'seen' })
   })
 })
-

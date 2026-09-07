@@ -64,7 +64,12 @@ export function VirtualTable<T extends object>({ rows, columns, rowHeight = 30, 
                 onClick={() => onRowClick?.(row)}
               >
                 {selectable && (
-                  <div onClick={(e) => { e.stopPropagation(); onToggleSelect!(key, row) }}>
+                  <div
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onToggleSelect!(key, row)
+                    }}
+                  >
                     <input type="checkbox" checked={!!selectedKeys?.has(key)} readOnly style={{ accentColor: 'var(--accent)' }} />
                   </div>
                 )}
