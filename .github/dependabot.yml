@@ -29,3 +29,10 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # the project targets Python 3.13 (the venv, CI, the optional PST and YARA wheels) and Node 22 LTS;
+      # digest refreshes of those tags still come through, a change of version is a decision, not a bump
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]

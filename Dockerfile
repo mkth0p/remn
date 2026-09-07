@@ -24,7 +24,7 @@ COPY backend/requirements.txt backend/requirements.txt
 # extra packages go in at build time, e.g. --build-arg EXTRA_PIP="yara-python": the runtime image keeps no pip
 ARG EXTRA_PIP=""
 RUN pip install -r backend/requirements.txt && if [ -n "$EXTRA_PIP" ]; then pip install $EXTRA_PIP; fi \
-    && python -m pip uninstall -y pip && rm -rf /usr/local/lib/python3.13/ensurepip/_bundled /root/.cache
+    && python -m pip uninstall -y pip && rm -rf /usr/local/lib/python3.*/ensurepip/_bundled /root/.cache
 COPY backend/ backend/
 COPY rules/ rules/
 COPY tools/ tools/
