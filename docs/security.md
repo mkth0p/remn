@@ -1,0 +1,36 @@
+# Security model
+
+_What leaves the machine, what is stored where, hardening in place._
+
+## Security model
+
+* Server binds to `127.0.0.1`, keeps no database and deletes upload temp files at
+  the end of each request. Every `/api` call needs the `X-Forensic-Client`
+  header (cookie-less CSRF protection); cross-origin preflights are refused.
+  With `FORENSIC_AUTH_TOKEN` set, the header value must equal the token
+  (see "Remote access").
+* Parsed content is treated as hostile: React escaping, HTML previews in a
+  sandboxed iframe with DOMPurify, images blocked, links disabled and defanged.
+  Attachments are analysed statically, never opened or executed.
+* The built app carries a Content Security Policy (no inline script, scripts and
+  workers from the app origin only, WebAssembly allowed for hashing, frames only for
+  the sandboxed mail and report documents, no object or base tags) as a `<meta>` tag
+  in `index.html` and as a header from the server, which adds `frame-ancestors 'none'`.
+  Every response also carries `X-Frame-Options: DENY`, `nosniff`, a `no-referrer`
+  policy, same-origin opener and resource policies, and API bodies get a CSP that
+  forbids rendering them. The theme bootstrap is an external file for that reason.
+* Markdown from the model and from notes is escaped before the light markup pass
+  (no links or raw HTML are produced); JSON views are escaped; the report is built
+  from escaped cells and printed from a sandboxed frame. Links whose target comes
+  from data (reputation providers, pack manifests, ATT&CK ids) pass through a
+  scheme check and get `rel="noopener noreferrer"`; anything but http(s) is dropped.
+* The raw SQL endpoint and the analyst's `sql` tool accept one read statement
+  (SELECT, WITH, DESCRIBE, SHOW) with write keywords rejected, and every DuckDB
+  connection runs with external access disabled and the configuration locked, so a
+  prompt-injected query cannot read or write files on the server or load extensions.
+* Identifiers that reach the filesystem are validated (case keys and upload ids by
+  pattern, pack ids without separators, static files resolved inside the build
+  directory); rule archives are capped per member and in total; CSV exports
+  neutralise spreadsheet formula injection.
+* No outbound request unless "allow external lookups" is enabled for the case;
+  the AI model only sees what the tools return from the local database.
