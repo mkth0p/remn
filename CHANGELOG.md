@@ -5,6 +5,19 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- Mail-led chains keep full recipient identities through deduplication; foreign bare aliases
+  cannot bypass realm checks and duplicate account fields no longer duplicate event steps.
+- Authentication campaigns can start from Windows or Entra events alone: ten failures in
+  thirty minutes, medium without a later success and high with one. Event navigation and
+  reports retain the seed's source. Analysis-limit warnings persist in results and reports.
+- Case backups stream to disk as checksummed `.remn.ndjson`, include case-owned review,
+  chain, report and AI state, verify before import, remap row references and roll back failed
+  restores. Legacy browser JSON bundles remain readable. Legacy server bundles without row
+  IDs are rejected explicitly because their investigation links cannot be recovered safely.
+- Browser-to-server migration stages rows with original IDs, keeps findings and reviews,
+  and switches storage only after transfer completes. Failed transfers retain the browser case.
+- Added modern synthetic mail holdout checks for scores and rule packs, and a production
+  browser upload/review/export/restore regression. Releases now require the full CI workflow.
 - Settings has a "delete this case" button next to "delete all case data". The first removes
   the case itself (server store, browser records, custom rules, settings) and switches to the
   most recently updated remaining case, or a fresh one; the second empties the case and keeps it.
