@@ -133,7 +133,11 @@ notifications from authenticated known relays, expected service accounts, single
 the report should carry the item: false for false positives, benign chains and noise. "unlink" (chains only) lists
 linked finding ids that describe something unrelated to the chain and should be handled on their own; leave it empty
 unless a finding clearly does not belong. Be conservative with false_positive and benign: only when the facts show it.
-Give one or two factual sentences of reason per item, naming the facts you relied on. Reply with ONLY the JSON array."""
+Give one or two factual sentences of reason per item, naming the facts you relied on.
+Also write the text the report prints. For a chain, "narrative": 4 to 7 sentences in the past tense, factual, no
+speculation beyond the steps given: the recipient, the seed mail, what tied the later activity to it, the impact, and
+one closing sentence on what to verify or contain. For an incident, "note": 1 to 3 sentences printed with it: what it
+is, what the facts show, and the decision. Reply with ONLY the JSON array."""
 
 SYSTEM_BY_MODE = {"analyst": SYSTEM_ANALYST, "explain": SYSTEM_EXPLAIN, "rule": SYSTEM_RULE, "report": SYSTEM_REPORT, "triage": SYSTEM_TRIAGE, "free": ""}
 

@@ -6,6 +6,7 @@ import { IconAi, IconArrowLeft, IconCheck, IconReport, IconStop } from '../compo
 import { Badge, Dot, Modal, Progress, Sev, Spinner, Toggle } from '../components/ui'
 import { applySuggestion, loadSuggestions, loadTriageRun, removeSuggestion, runTriage, suggestionsFor, undoEntry, type Suggestion, type TriageEntry, type TriageProgress, type TriageRun } from '../data/aiReview'
 import { loadChains, type Chain } from '../data/chains'
+import { draftExecutiveSummary } from '../data/reportSummary'
 import { applyChainVerdict, chainIncluded, chainSeverity, effectiveSeverity, loadChainReviews, loadReportSettings, overridesForIncident, reviewQueue, saveChainReview, saveReportSettings, setChainUnlinked, SEVERITIES, stepVisible, type ChainReview, type ReportSettings, type ReviewItem, type Verdict } from '../data/review'
 import { getDb, type Finding, type Severity } from '../db/schema'
 import { buildIncidents, type Incident } from '../rules/incidents'
@@ -49,6 +50,7 @@ export function ReviewView() {
   const [showRun, setShowRun] = useState(false)
   const [askTriage, setAskTriage] = useState(false)
   const [triageDecided, setTriageDecided] = useState(false)
+  const [triageSummary, setTriageSummary] = useState(true)
   const [triage, setTriage] = useState<TriageProgress | null>(null)
   const triageAbort = useRef<AbortController | null>(null)
   const [suggesting, setSuggesting] = useState(false)
@@ -106,7 +108,8 @@ export function ReviewView() {
     reload()
   }, [reload])
   const saveNote = async (inc: Incident) => {
-    await getDb().findings.update(inc.lead.id!, { notes: note })
+    if (note === (inc.lead.notes ?? '')) return
+    await getDb().findings.update(inc.lead.id!, { notes: note, notesBy: note ? 'analyst' : undefined })
     reload()
   }
   /** A verdict writes the status of the chain's linked findings; the other fields only touch the chain review. */
@@ -153,7 +156,7 @@ export function ReviewView() {
       const text = msgs.filter((m) => m.role === 'assistant').map((m) => m.content).join('\n').trim()
       if (!text) throw new Error('the model returned nothing')
       setNarrative(text)
-      await chainPatch(c, { narrative: text })
+      await chainPatch(c, { narrative: text, narrativeBy: 'ai' })
     } catch (e) {
       toast('err', `narrative: ${(e as Error).message}`)
     } finally {
@@ -193,7 +196,7 @@ export function ReviewView() {
     triageAbort.current = controller
     setTriage({ done: 0, total: items.length, batch: 0, batches: 0 })
     try {
-      const run = await runTriage(kase, items, reviews, { apply: true, signal: controller.signal, onProgress: setTriage })
+      const run = await runTriage(kase, items, reviews, { apply: true, signal: controller.signal, onProgress: setTriage, draftSummary: triageSummary ? () => draftExecutiveSummary(kase, { signal: controller.signal }) : undefined })
       setLastRun(run)
       setShowRun(true)
       setReviews(await loadChainReviews(kase.id!))
@@ -273,6 +276,7 @@ export function ReviewView() {
         {s.unlink?.length ? <span className="small">unlink {s.unlink.length} finding{s.unlink.length === 1 ? '' : 's'}: {s.unlink.map((id) => members.find((f) => f.id === id)?.title ?? `#${id}`).join('; ')}</span> : null}
       </div>
       <div className="small">{s.reason}</div>
+      {(s.narrative || s.note) && <div className="small muted" style={{ whiteSpace: 'pre-wrap' }}><b>{s.narrative ? 'narrative' : 'note'}:</b> {(s.narrative ?? s.note ?? '').slice(0, 600)}{(s.narrative ?? s.note ?? '').length > 600 ? '…' : ''}</div>}
       <div className="row" style={{ gap: 6 }}>
         <button className="btn sm primary" onClick={() => accept(it, s)}>apply</button>
         <button className="btn sm ghost" onClick={() => dismiss(s.target)}>dismiss</button>
@@ -389,6 +393,7 @@ export function ReviewView() {
               <div className="section">
                 <h3>Analyst note <span className="muted">(printed with the incident)</span></h3>
                 <textarea className="textarea" style={{ minHeight: 90 }} value={note} onChange={(e) => setNote(e.target.value)} onBlur={() => saveNote(inc)} placeholder="what this is, what was checked, what was decided…" />
+                {inc.lead.notesBy === 'ai' && inc.lead.notes && <div className="small muted">written by the model during triage; edit it to make it yours (the next triage then leaves it alone)</div>}
               </div>
               <div className="row wrap" style={{ gap: 6 }}>
                 <button className="btn sm ghost" onClick={() => go(-1)}><IconArrowLeft /> previous</button>
@@ -448,7 +453,8 @@ export function ReviewView() {
               </div>
               <div className="section">
                 <h3>Narrative <span className="muted">(replaces the automatic summary in the report)</span></h3>
-                <textarea className="textarea" style={{ minHeight: 140 }} value={narrative} onChange={(e) => setNarrative(e.target.value)} onBlur={() => chainPatch(ch, { narrative })} placeholder="what happened, in order, and what tied it to the mail…" />
+                <textarea className="textarea" style={{ minHeight: 140 }} value={narrative} onChange={(e) => setNarrative(e.target.value)} onBlur={() => { if (narrative !== (chRev?.narrative ?? '')) void chainPatch(ch, { narrative, narrativeBy: narrative ? 'analyst' : undefined }) }} placeholder="what happened, in order, and what tied it to the mail…" />
+                {chRev?.narrativeBy === 'ai' && chRev.narrative && <div className="small muted">written by the model during triage; edit it to make it yours (the next triage then leaves it alone)</div>}
                 <div className="row" style={{ gap: 6 }}>
                   <button className="btn sm" disabled={drafting} onClick={() => draft(ch)}>{drafting ? <Spinner /> : <IconAi />} draft with the analyst</button>
                   <span className="small muted">the model only sees the chain's steps; edit before you keep it</span>
@@ -470,9 +476,10 @@ export function ReviewView() {
       {askTriage && (
         <Modal title="Triage with the model" onClose={() => setAskTriage(false)} footer={<><button className="btn ghost sm" onClick={() => setAskTriage(false)}>cancel</button><button className="btn primary sm" onClick={startTriage}><IconAi /> start</button></>}>
           <div className="col" style={{ gap: 10 }}>
-            <div>The model decides on every item in the queue: chains get a verdict, incidents a decision, both a severity, whether the report carries them, and a reason. Chains may also have findings unlinked when they do not belong. Every decision is written straight away, tagged "AI", listed afterwards with its reason, and can be undone one by one or all at once.</div>
+            <div>The model decides on every item in the queue: chains get a verdict and a report narrative, incidents a decision and a note, both a severity, whether the report carries them, and a reason. Chains may also have findings unlinked when they do not belong. Narratives and notes the analyst wrote are kept. Every decision is written straight away, tagged "AI", listed afterwards with its reason, and can be undone one by one or all at once.</div>
             <div className="small muted">{modelName} · {aiCfg.transport === 'claude' ? 'Claude Code on the server machine: the items (findings, entities, chain steps) leave for Anthropic' : aiCfg.transport === 'browser' ? 'your local Ollama: nothing leaves this machine' : 'the server\'s Ollama'} · {aiCfg.transport === 'claude' ? 8 : 4} items per call</div>
             <Toggle on={triageDecided} onChange={setTriageDecided} label={`re-triage the ${done} item${done === 1 ? '' : 's'} already decided too`} />
+            <Toggle on={triageSummary} onChange={setTriageSummary} label="draft the executive summary when done (one more call)" />
             <div><b>{fmtNum(triageDecided ? queue.length : undecided)}</b> item{(triageDecided ? queue.length : undecided) === 1 ? '' : 's'} will be sent.</div>
           </div>
         </Modal>
@@ -485,6 +492,8 @@ export function ReviewView() {
               {(['confirmed', 'escalated', 'unsure', 'reviewed', 'benign', 'false_positive'] as const).map((d) => { const n = lastRun.entries.filter((e) => e.decision === d && !e.undone).length; return n ? <span key={d} style={{ marginRight: 12 }}><Badge sev={DECISION_SEV[d]}>{SUMMARY_LABEL[d]}</Badge> {n}</span> : null })}
               {lastRun.entries.some((e) => e.severityBefore !== e.severityAfter && !e.undone) && <span style={{ marginRight: 12 }}>rescored {lastRun.entries.filter((e) => e.severityBefore !== e.severityAfter && !e.undone).length}</span>}
               {lastRun.entries.some((e) => e.unlinked.length && !e.undone) && <span>unlinked {lastRun.entries.reduce((n, e) => n + (e.undone ? 0 : e.unlinked.length), 0)} finding(s), now in the queue on their own</span>}
+              {lastRun.entries.some((e) => e.wrote && !e.undone) && <span style={{ marginRight: 12 }}>wrote {lastRun.entries.filter((e) => e.wrote === 'narrative' && !e.undone).length} narrative(s), {lastRun.entries.filter((e) => e.wrote === 'note' && !e.undone).length} note(s)</span>}
+              {lastRun.summaryDrafted && <span style={{ marginRight: 12 }}>executive summary drafted</span>}
               {lastRun.asked > lastRun.entries.length && <span className="muted"> · {lastRun.asked - lastRun.entries.length} of {lastRun.asked} item(s) got no decision</span>}
             </div>
             {lastRun.errors.length > 0 && <div className="small" style={{ color: 'var(--sev-high)' }}>{lastRun.errors.join(' · ')}</div>}
@@ -498,7 +507,7 @@ export function ReviewView() {
                     <td><Badge sev={DECISION_SEV[e.decision]}>{DECISION_LABEL[e.decision] ?? e.decision}</Badge></td>
                     <td className="nowrap">{e.severityBefore !== e.severityAfter ? <span><Sev sev={e.severityBefore} /> → <Sev sev={e.severityAfter} /></span> : <Sev sev={e.severityAfter} />}</td>
                     <td className="nowrap">{e.includeAfter ? 'in' : 'out'}{e.includeBefore !== e.includeAfter ? <span className="muted"> (was {e.includeBefore ? 'in' : 'out'})</span> : null}</td>
-                    <td className="sans small">{e.reason}</td>
+                    <td className="sans small">{e.reason}{e.wrote && !e.undone ? <span className="muted"> · {e.wrote} written</span> : null}</td>
                     <td className="nowrap">{e.undone ? <span className="small muted">undone</span> : <button className="btn link small" onClick={() => undo(e)}>undo</button>}</td>
                   </tr>
                 ))}

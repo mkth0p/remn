@@ -300,6 +300,8 @@ export interface Finding {
   decidedBy?: 'analyst' | 'ai'
   /** the model's reason when it decided (kept apart from the analyst's note) */
   aiReason?: string
+  /** who wrote the note last (a note the model drafted is replaced by the next triage; the analyst's is kept) */
+  notesBy?: 'analyst' | 'ai'
 }
 
 export interface Ioc {

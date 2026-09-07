@@ -47,6 +47,10 @@ export interface Suggestion {
   include?: boolean
   /** chains: linked finding ids to take out of the chain */
   unlink?: number[]
+  /** chains: the report narrative the model drafted */
+  narrative?: string
+  /** incidents: the note printed with the incident */
+  note?: string
   reason: string
   at: number
   by: 'chat' | 'triage'
@@ -136,6 +140,8 @@ export interface ParsedDecision {
   include?: boolean
   unlink: number[]
   reason: string
+  narrative?: string
+  note?: string
 }
 
 /** The model's reply (a JSON array, possibly fenced or wrapped in prose) as validated decisions for the ids asked about. */
@@ -188,8 +194,10 @@ export function parseDecisions(text: string, items: ReviewItem[]): { decisions: 
     const memberIds = new Set((it.incident?.findings ?? []).filter((f) => f.ruleId !== 'chain').map((f) => f.id))
     const unlink = it.kind === 'chain' && Array.isArray(o.unlink) ? (o.unlink as unknown[]).map(Number).filter((n) => memberIds.has(n)) : []
     const reason = short(String(o.reason ?? o.why ?? '').trim(), 700) || '(no reason given)'
+    const narrative = it.kind === 'chain' ? short(String(o.narrative ?? o.note ?? '').trim(), 2500) || undefined : undefined
+    const note = it.kind !== 'chain' ? short(String(o.note ?? o.narrative ?? '').trim(), 900) || undefined : undefined
     seen.add(id)
-    decisions.push({ id, decision, severity, include, unlink, reason })
+    decisions.push({ id, decision, severity, include, unlink, reason, narrative, note })
   }
   return { decisions, rejected }
 }
@@ -202,6 +210,8 @@ interface FindingSnapshot {
   chainUnlinked?: boolean
   decidedBy?: Finding['decidedBy']
   aiReason?: string
+  notes?: string
+  notesBy?: Finding['notesBy']
 }
 
 export interface TriageEntry {
@@ -215,6 +225,8 @@ export interface TriageEntry {
   includeAfter: boolean
   unlinked: { id: number; title: string }[]
   reason: string
+  /** the model also wrote the chain narrative / the incident note */
+  wrote?: 'narrative' | 'note'
   before: { findings: FindingSnapshot[]; chainReview?: ChainReview | null }
   undone?: boolean
 }
@@ -227,6 +239,8 @@ export interface TriageRun {
   entries: TriageEntry[]
   errors: string[]
   rejected: string[]
+  /** the executive summary was drafted at the end of the pass */
+  summaryDrafted?: boolean
 }
 
 export async function loadTriageRun(caseId: number): Promise<TriageRun | null> {
@@ -236,7 +250,7 @@ export async function saveTriageRun(caseId: number, run: TriageRun): Promise<voi
   await getDb().kv.put({ key: `ai-triage-${caseId}`, value: run })
 }
 
-const snapshot = (f: Finding): FindingSnapshot => ({ id: f.id!, status: f.status, severityOverride: f.severityOverride, reportExclude: f.reportExclude, chainUnlinked: f.chainUnlinked, decidedBy: f.decidedBy, aiReason: f.aiReason })
+const snapshot = (f: Finding): FindingSnapshot => ({ id: f.id!, status: f.status, severityOverride: f.severityOverride, reportExclude: f.reportExclude, chainUnlinked: f.chainUnlinked, decidedBy: f.decidedBy, aiReason: f.aiReason, notes: f.notes, notesBy: f.notesBy })
 
 /** Write one decision (incident status/severity/inclusion, or chain verdict/severity/inclusion/unlinks) and return the log entry with what it replaced. */
 export async function applyDecision(caseId: number, it: ReviewItem, d: ParsedDecision, reviews: Record<string, ChainReview>): Promise<TriageEntry> {
@@ -254,6 +268,12 @@ export async function applyDecision(caseId: number, it: ReviewItem, d: ParsedDec
     const patch: Partial<ChainReview> = {}
     if (d.severity && d.severity !== chainSeverity(c, rev)) patch.severityOverride = d.severity === c.severity ? undefined : d.severity
     if (d.include !== undefined) patch.include = d.include
+    // the analyst's narrative is kept; one the model drafted earlier is replaced
+    if (d.narrative && (!rev?.narrative || rev.narrativeBy === 'ai')) {
+      patch.narrative = d.narrative
+      patch.narrativeBy = 'ai'
+      entry.wrote = 'narrative'
+    }
     if (Object.keys(patch).length) await saveChainReview(caseId, c.id, patch)
     entry.severityAfter = d.severity ?? chainSeverity(c, rev)
     entry.includeAfter = d.include ?? (d.decision !== 'benign')
@@ -267,6 +287,10 @@ export async function applyDecision(caseId: number, it: ReviewItem, d: ParsedDec
   entry.includeBefore = !(findings.length > 0 && findings.every((f) => f.reportExclude))
   const status = d.decision as Finding['status']
   await Promise.all(findings.map((f) => db.findings.update(f.id!, { status, decidedBy: 'ai', aiReason: f.id === inc.lead.id ? d.reason : f.aiReason })))
+  if (d.note && (!inc.lead.notes || inc.lead.notesBy === 'ai')) {
+    await db.findings.update(inc.lead.id!, { notes: d.note, notesBy: 'ai' })
+    entry.wrote = 'note'
+  }
   if (d.severity && d.severity !== inc.severity) {
     await Promise.all(overridesForIncident(inc, d.severity).map((o) => db.findings.update(o.id, { severityOverride: o.severityOverride })))
     entry.severityAfter = d.severity
@@ -281,7 +305,7 @@ export async function applyDecision(caseId: number, it: ReviewItem, d: ParsedDec
 /** Put back what a decision replaced. */
 export async function undoEntry(caseId: number, entry: TriageEntry): Promise<void> {
   const db = getDb()
-  await Promise.all(entry.before.findings.map((s) => db.findings.update(s.id, { status: s.status, severityOverride: s.severityOverride, reportExclude: s.reportExclude, chainUnlinked: s.chainUnlinked, decidedBy: s.decidedBy, aiReason: s.aiReason })))
+  await Promise.all(entry.before.findings.map((s) => db.findings.update(s.id, { status: s.status, severityOverride: s.severityOverride, reportExclude: s.reportExclude, chainUnlinked: s.chainUnlinked, decidedBy: s.decidedBy, aiReason: s.aiReason, ...(entry.wrote === 'note' ? { notes: s.notes, notesBy: s.notesBy } : {}) })))
   if (entry.kind === 'chain' && entry.before.chainReview !== undefined) {
     const all = await loadChainReviews(caseId)
     const chainId = entry.id.replace(/^chain:/, '')
@@ -302,7 +326,7 @@ export interface TriageProgress {
   batches: number
 }
 
-const INSTRUCTION = 'Decide on every item below and reply with ONLY a JSON array, one object per item, in the same order: {"id": "<id as given>", "decision": "<exactly one of the item\'s "decisions" values: chains confirmed|benign|unsure, incidents escalated|reviewed|false_positive>", "severity": "<critical|high|medium|low|info>", "include": <true|false>, "reason": "<one or two factual sentences>", "unlink": [<finding ids that do not belong to the chain, chains only, usually empty>]}.'
+const INSTRUCTION = 'Decide on every item below and reply with ONLY a JSON array, one object per item, in the same order: {"id": "<id as given>", "decision": "<exactly one of the item\'s "decisions" values: chains confirmed|benign|unsure, incidents escalated|reviewed|false_positive>", "severity": "<critical|high|medium|low|info>", "include": <true|false>, "reason": "<one or two factual sentences>", "unlink": [<finding ids that do not belong to the chain, chains only, usually empty>], "narrative": "<chains only: 4 to 7 sentences for the report>", "note": "<incidents only: 1 to 3 sentences printed with the incident>"}.'
 
 export function batchSize(): number {
   return useStore.getState().aiConfig.transport === 'claude' ? 8 : 4
@@ -312,7 +336,7 @@ export function batchSize(): number {
  * Ask the model for a decision on each item, in batches, and either record them as suggestions
  * (apply: false) or write them (apply: true). Returns the log; the caller shows it.
  */
-export async function runTriage(kase: Case, items: ReviewItem[], reviews: Record<string, ChainReview>, opts: { apply: boolean; batch?: number; model?: string; signal?: AbortSignal; onProgress?: (p: TriageProgress) => void }): Promise<TriageRun> {
+export async function runTriage(kase: Case, items: ReviewItem[], reviews: Record<string, ChainReview>, opts: { apply: boolean; batch?: number; model?: string; signal?: AbortSignal; onProgress?: (p: TriageProgress) => void; /** run after the decisions (apply mode): drafts the executive summary */ draftSummary?: () => Promise<unknown> }): Promise<TriageRun> {
   const caseId = kase.id!
   const size = Math.max(1, opts.batch ?? batchSize())
   const batches: ReviewItem[][] = []
@@ -355,12 +379,20 @@ export async function runTriage(kase: Case, items: ReviewItem[], reviews: Record
         if (it.kind === 'chain') currentReviews = await loadChainReviews(caseId)
       } else {
         const target = it.kind === 'chain' ? `chain:${it.chain!.id}` : `incident:${it.incident!.id}`
-        await saveSuggestion(caseId, { target, severity: d.severity, decision: d.decision, include: d.include, unlink: d.unlink.length ? d.unlink : undefined, reason: d.reason, at: Date.now(), by: 'triage', model: run.model || undefined })
+        await saveSuggestion(caseId, { target, severity: d.severity, decision: d.decision, include: d.include, unlink: d.unlink.length ? d.unlink : undefined, narrative: d.narrative, note: d.note, reason: d.reason, at: Date.now(), by: 'triage', model: run.model || undefined })
         run.entries.push({ id: it.id, kind: it.kind, title: it.title, decision: d.decision, severityBefore: it.severity, severityAfter: d.severity ?? it.severity, includeBefore: true, includeAfter: d.include ?? true, unlinked: d.unlink.map((id) => ({ id, title: String(id) })), reason: d.reason, before: { findings: [] } })
       }
     }
   }
   opts.onProgress?.({ done: items.length, total: items.length, batch: batches.length, batches: batches.length })
+  if (opts.apply && opts.draftSummary && !opts.signal?.aborted && run.entries.length) {
+    try {
+      await opts.draftSummary()
+      run.summaryDrafted = true
+    } catch (e) {
+      run.errors.push(`executive summary: ${(e as Error).message}`)
+    }
+  }
   if (opts.apply) await saveTriageRun(caseId, run)
   return run
 }
@@ -370,7 +402,7 @@ export async function applySuggestion(caseId: number, it: ReviewItem, s: Suggest
   const allowed = it.kind === 'chain' ? CHAIN_DECISIONS : INCIDENT_DECISIONS
   const decision: Decision = s.decision && allowed.includes(s.decision) ? s.decision : it.kind === 'chain' ? 'unsure' : 'reviewed'
   const memberIds = new Set((it.incident?.findings ?? []).map((f) => f.id))
-  const entry = await applyDecision(caseId, it, { id: it.id, decision, severity: s.severity, include: s.include, unlink: (s.unlink ?? []).filter((id) => memberIds.has(id)), reason: s.reason }, reviews)
+  const entry = await applyDecision(caseId, it, { id: it.id, decision, severity: s.severity, include: s.include, unlink: (s.unlink ?? []).filter((id) => memberIds.has(id)), reason: s.reason, narrative: s.narrative, note: s.note }, reviews)
   await removeSuggestion(caseId, s.target)
   return entry
 }

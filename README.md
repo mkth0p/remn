@@ -610,6 +610,19 @@ incidents with their notes and member findings at the effective severity, then
 indicators, timeline, tasks, notes and the findings timeline. The Report page says
 how many items still have no decision.
 
+The printed report (`frontend/src/data/reportHtml.ts`) is one self-contained
+HTML file in REMN's own look, laid out for A4 and the browser's print-to-PDF: the
+wordmark (the Gulax face embedded as base64 from the app's own files, OFL) and
+an accent rule on the cover, the case name, five key numbers, a severity bar,
+the decision counts, a numbered table of contents, then numbered sections.
+Chains are cards with a severity pill, the verdict, a score meter split into
+its parts (seed, ties, steps, findings, sources), the narrative in an accent
+block, the swimlane picture, the step table with a lane mark per source and the
+linked findings; incidents are cards with the note, the findings and their
+ATT&CK chips; the case timeline is a vertical line with severity dots. Every
+string from the case is escaped, markdown fields go through the app's renderer,
+and only PNG data URLs the app drew itself are embedded.
+
 The model can take part in the review in three ways. "Ask the model to decide"
 on a card asks for a proposal on that item (decision, severity, in or out of the
 report, findings to unlink, reason) and shows it as a box the analyst applies or
@@ -619,7 +632,11 @@ chain with `get_chain`; proposals show on the Review page next to their item.
 "Triage with the model" sends the whole queue (undecided items by default, or
 everything) in batches of four (Ollama) or eight (Claude Code) and writes each
 decision straight away, tagged "AI" in the rail and on the card with the
-model's reason; a popup then lists every decision (item, decision, severity
+model's reason. The same pass writes the text the report prints: a narrative
+for each chain and a note for each incident (a text the analyst wrote is kept;
+one the model drafted earlier is replaced, and editing it makes it the
+analyst's), and, when the switch in the triage dialog is on, drafts the
+executive summary at the end from the reviewed chains and incidents; a popup then lists every decision (item, decision, severity
 before and after, in or out of the report, unlinked findings, reason) with undo
 per line or for the whole run, and "last AI triage" reopens it. The triage
 prompt is `SYSTEM_TRIAGE` in `backend/services/ai/prompts.py`; the reply is a

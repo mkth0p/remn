@@ -1,6 +1,6 @@
 import { getDb, type Finding } from '../db/schema'
 
-type Review = Pick<Finding, 'status' | 'notes' | 'createdAt' | 'severityOverride' | 'reportExclude' | 'chainUnlinked' | 'decidedBy' | 'aiReason'>
+type Review = Pick<Finding, 'status' | 'notes' | 'createdAt' | 'severityOverride' | 'reportExclude' | 'chainUnlinked' | 'decidedBy' | 'aiReason' | 'notesBy'>
 
 const decided = (f: Finding) => f.status !== 'new' || !!f.notes || !!f.severityOverride || !!f.reportExclude || !!f.chainUnlinked || !!f.aiReason
 
@@ -10,7 +10,7 @@ export async function rememberReviews(caseId: number, findings: Finding[]): Prom
   const key = `finding-reviews-${caseId}`
   const saved = ((await db.kv.get(key))?.value as Record<string, Review>) ?? {}
   for (const f of findings) {
-    if (decided(f)) saved[f.key] = { status: f.status, notes: f.notes, createdAt: f.createdAt, severityOverride: f.severityOverride, reportExclude: f.reportExclude, chainUnlinked: f.chainUnlinked, decidedBy: f.decidedBy, aiReason: f.aiReason }
+    if (decided(f)) saved[f.key] = { status: f.status, notes: f.notes, createdAt: f.createdAt, severityOverride: f.severityOverride, reportExclude: f.reportExclude, chainUnlinked: f.chainUnlinked, decidedBy: f.decidedBy, aiReason: f.aiReason, notesBy: f.notesBy }
   }
   await db.kv.put({ key, value: saved })
   return new Map([...Object.entries(saved), ...findings.map((f) => [f.key, f] as [string, Review])])
@@ -28,7 +28,7 @@ export async function replaceFindings(caseId: number, ruleIds: string[], finding
     const now = Date.now()
     const rows = findings.map((f) => {
       const prev = reviews.get(String(f.key))
-      return { ...f, id: undefined, caseId, createdAt: prev?.createdAt ?? now, status: prev?.status ?? 'new', notes: prev?.notes, severityOverride: prev?.severityOverride, reportExclude: prev?.reportExclude, chainUnlinked: prev?.chainUnlinked, decidedBy: prev?.decidedBy, aiReason: prev?.aiReason } as Finding
+      return { ...f, id: undefined, caseId, createdAt: prev?.createdAt ?? now, status: prev?.status ?? 'new', notes: prev?.notes, severityOverride: prev?.severityOverride, reportExclude: prev?.reportExclude, chainUnlinked: prev?.chainUnlinked, decidedBy: prev?.decidedBy, aiReason: prev?.aiReason, notesBy: prev?.notesBy } as Finding
     })
     for (let i = 0; i < rows.length; i += 2000) await db.findings.bulkAdd(rows.slice(i, i + 2000))
     return rows.length

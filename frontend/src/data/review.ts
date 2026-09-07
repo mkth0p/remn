@@ -48,6 +48,8 @@ export interface ChainReview {
   by?: 'analyst' | 'ai'
   /** the model's reason when it decided */
   aiReason?: string
+  /** who wrote the narrative last */
+  narrativeBy?: 'analyst' | 'ai'
 }
 
 export type Status = Finding['status']
