@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Badge, Dot, Sev, Spinner, Tabs } from '../components/ui'
 import { IconAi, IconCloud, IconHost, IconMail, IconPlay } from '../components/Icons'
-import { buildChains, loadChains, type Chain, type ChainResult, type ChainStep } from '../data/chains'
+import { buildChains, EVENT_CAP, loadChains, type Chain, type ChainResult, type ChainStep } from '../data/chains'
 import { toast, useStore } from '../state/store'
 import { AddToTimeline } from '../components/AddToTimeline'
 import { ChainGraph } from '../components/ChainGraph'
@@ -84,7 +84,7 @@ export function ChainsView() {
       bump()
       toast(
         r.chains.length ? 'ok' : 'warn',
-        `${r.chains.length} chain(s) from ${r.stats.seeds} seed mail(s), ${r.stats.events} event(s) of ${r.stats.identities} identit${r.stats.identities === 1 ? 'y' : 'ies'}`,
+        `${r.chains.length} chain(s) from ${r.stats.seeds} seed mail(s), ${r.stats.events} event(s) of ${r.stats.identities} identit${r.stats.identities === 1 ? 'y' : 'ies'}${r.stats.eventsTruncated ? ` · only the first ${EVENT_CAP.toLocaleString()} events of the window were considered: narrow the window or the seed threshold` : ''}`,
       )
     } catch (e) {
       toast('err', `chains: ${(e as Error).message}`, 0)

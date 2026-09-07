@@ -11,8 +11,16 @@ relates to findings, and where it is stored.
 
 A *seed* is a mail above the risk threshold (45 by default) or carrying a medium or
 higher finding. Its recipients are normalised to an identity: `alice@contoso.com`,
-`CONTOSO\alice` and a Unified Audit Log `UserId` all become `alice`. Every step of that
-identity inside the window (72 hours by default) is collected: replies to the sender
+`CONTOSO\alice` and a Unified Audit Log `UserId` all name the account `alice`, scoped
+by the organisation the name was seen in. A UPN or address matches the recipient when
+its domain is the same organisation (`corp.contoso.com` and `contoso.com` are one,
+`contoso.com` and `other-tenant.example` are not); a Windows domain name (`CONTOSO`)
+matches when it is the first label of the recipient's domain or of an internal domain
+from the case settings, and is rejected when it is the first label of another
+organisation seen in the case; a bare account name cannot be told apart and is
+accepted. So `alice@other-tenant.example` never joins `alice@contoso.com`'s chain, and
+the chain is always labelled with the recipient's address. Every step of that identity
+inside the window (72 hours by default) is collected: replies to the sender
 (same thread), Entra sign-ins (country, legacy client, identity-protection risk),
 MailItemsAccessed bursts, inbox rules and mailbox forwarding, consent grants, role and
 MFA changes, Windows logons, processes spawned by Outlook or a browser, DNS queries,
@@ -26,7 +34,10 @@ attach to the steps they reference, and one chain is kept per identity per day w
 other seeds listed as related.
 
 Server-store cases are correlated inside DuckDB; browser-store cases post the relevant
-rows to the local API (`POST /api/chains/build`). `services/analysis/chains.py` is pure
+rows to the local API (`POST /api/chains/build`). A build considers at most 50,000
+events inside the window on either path; when that cap is reached the Chains page says
+so next to the build statistics, and a narrower window or a higher seed threshold brings
+the count back under it. `services/analysis/chains.py` is pure
 functions over plain rows, tested on the synthetic scenarios.
 
 ## The score

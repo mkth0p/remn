@@ -148,6 +148,8 @@ def validate(pack, retain_all=False):
             assert row["risk"] < 60 and row["id"] not in high_refs, (row["subject"], row["risk"])
         neg_ids = {r["id"] for r in rows_event if r.get("data", {}).get("ScenarioId") == "NEG-TENANT"}
         neg_links = [c["identity"] for c in chains["chains"] if any(s.get("id") in neg_ids for s in c["steps"] if s["source"] == "events")]
+        assert not neg_links, ("an event of alice.martin@other-tenant.example joined a chain", neg_links)
+        assert all("@other-tenant" not in c["identityLabel"] for c in chains["chains"]), [c["identityLabel"] for c in chains["chains"]]
         report = {
             "pack": pack.name,
             "totalRecords": manifest["totalRecords"],
@@ -159,10 +161,7 @@ def validate(pack, retain_all=False):
             "byRule": result["byRule"],
             "chains": checks,
             "benignControls": [{"messageId": r["messageId"], "risk": r["risk"]} for r in benign],
-            "knownNegativeControlLimitation": {
-                "sameLocalPartOtherTenantLinkedTo": neg_links,
-                "expected": "No cross-tenant join. Current identity normalizer strips domain scope; this is a deliberate false-correlation control.",
-            },
+            "negativeControls": {"crossTenantJoins": neg_links},
             "ruleAndChainScope": "all parsed rows"
             if retain_all
             else "all planted records plus first 500 background records per source; full parser/count/hash validation covers every record",

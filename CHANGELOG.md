@@ -5,6 +5,14 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- Fixed: an account with the same name in another organisation
+  (`alice@other-tenant.example`, `OTHER\alice`) joined `alice@northstar.example`'s
+  attack chain and could even become its label. Identities now carry the domain or
+  Windows domain they were seen in, and only accounts of the recipient's organisation
+  join; the synthetic lab's cross-tenant decoy is now an assertion of the validator.
+- The chain builder considers at most 50,000 events inside the window; it now says so
+  on the Chains page when the cap is hit instead of silently cutting the window.
+
 - Fixed: with the built frontend served by the Python API (run.py, Docker), every upload
   failed and a failed row could not be removed. The middleware put the API's closed policy
   (`default-src 'none'; sandbox`) on script assets too, and a web worker takes its policy

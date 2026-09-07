@@ -59,6 +59,9 @@ export interface ChainOptions {
   windowHours?: number
 }
 
+/** events considered per build (the server applies the same cap); the Chains page says when it was hit */
+export const EVENT_CAP = 50_000
+
 const SKIP = new Set(['', '-', 'system', 'anonymous logon', 'local service', 'network service', 'local system'])
 
 /** alice@contoso.com | CONTOSO\alice | alice -> "alice" (mirror of services/analysis/chains.identity_key). */
@@ -143,11 +146,15 @@ export async function buildChains(kase: Case, opts: ChainOptions = {}): Promise<
     const tMin = Math.min(...seeds.map((m) => m.date!)) - 5 * 60_000
     const tMax = Math.max(...seeds.map((m) => m.date!)) + windowHours * 3_600_000
     const events: Record<string, unknown>[] = []
+    let eventsTruncated = false
     await db.events
       .where('[caseId+ts]')
       .between([caseId, tMin], [caseId, tMax], true, true)
       .each((e) => {
-        if (events.length >= 50_000) return
+        if (events.length >= EVENT_CAP) {
+          eventsTruncated = true
+          return
+        }
         const row = e as unknown as Record<string, unknown>
         const data = (row.data ?? {}) as Record<string, unknown>
         const hit = [row.upn, data.UserId, row.targetUser, row.subjectUser, row.user, data.MailboxOwnerUPN].some((v) => {
@@ -178,6 +185,7 @@ export async function buildChains(kase: Case, opts: ChainOptions = {}): Promise<
       inReplyTo: m.inReplyTo,
     }))
     result = await apiPost<ChainResult>('/api/chains/build', { mails, events, findings, settings, seedMinRisk, windowHours })
+    if (eventsTruncated) result.stats.eventsTruncated = 1
   }
   return persistChainResult(caseId, result)
 }

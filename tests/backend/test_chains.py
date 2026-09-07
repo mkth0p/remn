@@ -386,3 +386,69 @@ def test_chain_result_carries_the_breakdown():
     assert set(b) == {"seed", "links", "steps", "findings", "sources", "cap", "linkSteps"}
     assert c["score"] == min(100, b["seed"] + b["links"] + b["steps"] + b["findings"] + b["sources"])
     assert c["artifactLinks"] >= b["linkSteps"] >= 1
+
+
+def test_same_name_in_another_organisation_does_not_join_the_chain():
+    """alice@northstar.example's chain takes NORTHSTAR\alice and a bare alice, never alice@other-tenant.example or OTHER\alice."""
+    seed = _mail(1, 5, "Password expiry", PHISHER, ["alice@northstar.example"], 90, urls=["evil-login.net"], message_id="<p@evil-login.net>")
+    sysmon = "Microsoft-Windows-Sysmon/Operational"
+    events = [
+        {**_ev(4624, 7, targetUser="alice", targetDomain="NORTHSTAR", logonType=10, logonTypeName="RemoteInteractive", ipAddress="203.0.113.5"), "id": 1},
+        {
+            **_ev(22, 8, channel=sysmon, provider="Microsoft-Windows-Sysmon", user="NORTHSTAR\\alice", query="evil-login.net", image="C:\\Windows\\msedge.exe"),
+            "id": 2,
+        },
+        {**_ev(1102, 9, subjectUser="alice@other-tenant.example", subjectDomain="OTHER", computer="OTHER-WS-001.other-tenant.example"), "id": 3},
+        {
+            **_ev(
+                22,
+                10,
+                channel=sysmon,
+                provider="Microsoft-Windows-Sysmon",
+                user="OTHER\\alice",
+                query="evil-login.net",
+                computer="OTHER-WS-001.other-tenant.example",
+            ),
+            "id": 4,
+        },
+        {**_ev(4688, 11, subjectUser="alice", image="C:\\Windows\\System32\\cmd.exe", commandLine="cmd /c whoami"), "id": 5},
+        {
+            **_ev(
+                4624, 25, targetUser="alice", targetDomain="corp.northstar.example", logonType=10, logonTypeName="RemoteInteractive", ipAddress="203.0.113.6"
+            ),
+            "id": 6,
+        },
+    ]
+    res = C.build_chains([seed], events, settings={"internalDomains": ["northstar.example"]})
+    assert len(res["chains"]) == 1
+    chain = res["chains"][0]
+    assert chain["identityLabel"] == "alice@northstar.example"
+    step_ids = {s["id"] for s in chain["steps"] if s["source"] == "events"}
+    assert {1, 2, 6} <= step_ids, step_ids
+    assert 5 in step_ids  # a bare account name cannot be told apart, so it stays in
+    assert not step_ids & {3, 4}, step_ids  # the other organisation's alice, by UPN and by NetBIOS name
+    assert not any("OTHER-WS-001" in str(s.get("computer")) for s in chain["steps"])
+
+
+def test_identity_realms():
+    assert C.identity_realm("alice@northstar.example") == ("northstar.example", "dns")
+    assert C.identity_realm("NORTHSTAR\\alice") == ("northstar", "netbios")
+    assert C.identity_realm("CONTOSO\\alice@contoso.com") == ("contoso.com", "dns")
+    assert C.identity_realm("alice") == (None, "none")
+    assert C.identity_realm("alice", "NORTHSTAR") == ("northstar", "netbios")
+    assert C.identity_realm("alice", "corp.northstar.example") == ("corp.northstar.example", "dns")
+    assert C.identity_realm("SYSTEM", "NT AUTHORITY") == (None, "none")
+    internal = {"northstar.example"}
+    assert C.same_org_domain("corp.northstar.example", "northstar.example")
+    assert not C.same_org_domain("other-tenant.example", "northstar.example")
+    assert C.same_org_domain("northstar.example", "northstar-mail.example", {"northstar.example", "northstar-mail.example"})
+    assert C.realm_matches("northstar.example", None, "none", internal, set())
+    assert C.realm_matches("northstar.example", "northstar", "netbios", internal, {"other"})
+    assert not C.realm_matches("northstar.example", "other", "netbios", internal, {"other"})
+    assert C.realm_matches("northstar.example", "lab", "netbios", internal, {"other"})  # nothing says lab is foreign
+    assert not C.realm_matches("northstar.example", "lab", "netbios", internal, set(), {"lab": {"other-tenant.example"}})
+    assert C.realm_matches("northstar.example", "lab", "netbios", internal, {"lab"}, {"lab": {"corp.northstar.example"}})
+    assert C.netbios_hints({"subjectUser": "alice@other-tenant.example", "subjectDomain": "OTHER"}) == [("other", "other-tenant.example")]
+    assert C.netbios_hints({"user": "OTHER\\alice", "upn": "alice@other-tenant.example"}) == [("other", "other-tenant.example")]
+    assert C.netbios_hints({"targetUser": "alice", "targetDomain": "NORTHSTAR"}) == []
+    assert not C.realm_matches("northstar.example", "other-tenant.example", "dns", internal, set())

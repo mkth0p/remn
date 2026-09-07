@@ -100,14 +100,105 @@ def mail_recipients(mail: dict[str, Any]) -> list[str]:
     return out
 
 
-def event_identities(ev: dict[str, Any]) -> dict[str, str]:
-    """identity key -> the raw label seen (UPN preferred)."""
-    out: dict[str, str] = {}
+def identity_realm(value: Any, domain_field: Any = None) -> tuple[str | None, str]:
+    """
+    The scope of an account name: ('northstar.example', 'dns') for a UPN or address,
+    ('northstar', 'netbios') for CONTOSO\\alice or a separate domain field, (None, 'none') for a bare name.
+    """
+    s = "" if value is None else str(value).strip().strip('"').strip("'").lower()
+    if "\\" in s:
+        dom, user = s.rsplit("\\", 1)
+        if "@" in user:
+            return user.split("@", 1)[1].strip(".") or None, "dns"
+        dom = dom.strip()
+        return (dom, "netbios") if dom and dom not in ("nt authority", "nt service", "window manager", "font driver host") else (None, "none")
+    if "@" in s:
+        return s.split("@", 1)[1].strip(".") or None, "dns"
+    if domain_field:
+        d = str(domain_field).strip().strip('"').strip("'").lower()
+        if d and d not in ("nt authority", "nt service", "window manager", "font driver host", "-"):
+            return (d, "dns") if "." in d else (d, "netbios")
+    return None, "none"
+
+
+def same_org_domain(a: str, b: str, internal: set[str] | None = None) -> bool:
+    """northstar.example and corp.northstar.example are one organisation; other-tenant.example is not."""
+    a, b = a.lower().strip("."), b.lower().strip(".")
+    if a == b or a.endswith("." + b) or b.endswith("." + a):
+        return True
+    return bool(internal) and a in internal and b in internal
+
+
+def realm_matches(
+    seed_domain: str | None,
+    realm: str | None,
+    kind: str,
+    internal: set[str],
+    known_labels: set[str],
+    netbios_map: dict[str, set[str]] | None = None,
+) -> bool:
+    """
+    Does an account seen on an event belong to the recipient's organisation? A DNS realm must be the
+    same organisation as the recipient's domain. A NetBIOS name matches when it is the first label of
+    that domain or of an internal domain, or when the case showed it next to a UPN of that organisation;
+    it does not match when the case tied it to another organisation, by that same co-occurrence or as
+    the first label of another domain seen; an unknown short name is accepted, since nothing says it
+    is foreign.
+    """
+    if not seed_domain or not realm:
+        return True
+    if kind == "dns":
+        return same_org_domain(seed_domain, realm, internal)
+    labels = {seed_domain.split(".")[0]} | {d.split(".")[0] for d in internal}
+    if realm in labels:
+        return True
+    resolved = (netbios_map or {}).get(realm)
+    if resolved:
+        return any(same_org_domain(seed_domain, d, internal) for d in resolved)
+    return realm not in known_labels
+
+
+def netbios_hints(ev: dict[str, Any]) -> list[tuple[str, str]]:
+    """(NetBIOS name, DNS domain) pairs an event shows together: a UPN with a domain field, or DOM\\user with a UPN."""
+    out: list[tuple[str, str]] = []
     data = ev.get("data") if isinstance(ev.get("data"), dict) else {}
-    for raw in (ev.get("upn"), data.get("UserId"), ev.get("targetUser"), ev.get("subjectUser"), ev.get("user"), data.get("MailboxOwnerUPN")):
+    upn_domains = [identity_realm(v)[0] for v in (ev.get("upn"), data.get("UserId")) if identity_realm(v)[1] == "dns"]
+    for user, dom in ((ev.get("targetUser"), ev.get("targetDomain")), (ev.get("subjectUser"), ev.get("subjectDomain"))):
+        u_realm, u_kind = identity_realm(user)
+        d_realm, d_kind = identity_realm(None, dom)
+        if d_kind != "netbios" or not d_realm:
+            continue
+        if u_kind == "dns" and u_realm:
+            out.append((d_realm, u_realm))
+        elif u_kind == "none":
+            out.extend((d_realm, d) for d in upn_domains if d)
+    u_realm, u_kind = identity_realm(ev.get("user"))
+    if u_kind == "netbios" and u_realm:
+        out.extend((u_realm, d) for d in upn_domains if d)
+    return out
+
+
+def event_identities(ev: dict[str, Any]) -> list[tuple[str, str, str | None, str]]:
+    """Every account an event names: (identity key, raw label, realm, realm kind)."""
+    out: list[tuple[str, str, str | None, str]] = []
+    seen: set[tuple[str, str | None]] = set()
+    data = ev.get("data") if isinstance(ev.get("data"), dict) else {}
+    for raw, dom in (
+        (ev.get("upn"), None),
+        (data.get("UserId"), None),
+        (ev.get("targetUser"), ev.get("targetDomain")),
+        (ev.get("subjectUser"), ev.get("subjectDomain")),
+        (ev.get("user"), None),
+        (data.get("MailboxOwnerUPN"), None),
+    ):
         k = identity_key(raw)
-        if k and (k not in out or "@" in str(raw)):
-            out[k] = str(raw)
+        if not k:
+            continue
+        realm, kind = identity_realm(raw, dom)
+        if (k, realm) in seen:
+            continue
+        seen.add((k, realm))
+        out.append((k, str(raw), realm, kind))
     return out
 
 
@@ -491,21 +582,28 @@ def build_chains(
     seeds.sort(key=lambda m: -(int(m.get("risk") or 0)))
     seeds = seeds[:300]
 
-    # index events and mails by identity
-    ev_by_id: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    labels: dict[str, str] = {}
+    # index events and mails by identity; each entry keeps the realm the account was seen in
+    internal = {d for d in _own_domains(settings) if "." in d}
+    ev_by_id: dict[str, list[tuple[dict[str, Any], str | None, str]]] = defaultdict(list)
+    known_labels: set[str] = set()
+    netbios_map: dict[str, set[str]] = defaultdict(set)
     for ev in events:
-        for k, label in event_identities(ev).items():
-            ev_by_id[k].append(ev)
-            if "@" in label or k not in labels:
-                labels[k] = label
+        for k, _label, realm, kind in event_identities(ev):
+            ev_by_id[k].append((ev, realm, kind))
+            if kind == "dns" and realm:
+                known_labels.add(realm.split(".")[0])
+        for nb, dns in netbios_hints(ev):
+            netbios_map[nb].add(dns)
     for lst in ev_by_id.values():
-        lst.sort(key=lambda e: e["ts"])
-    mails_by_sender: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        lst.sort(key=lambda e: e[0]["ts"])
+    mails_by_sender: dict[str, list[tuple[dict[str, Any], str | None, str]]] = defaultdict(list)
     for m in mails:
         k = identity_key(m.get("fromAddr"))
         if k and m.get("date") is not None:
-            mails_by_sender[k].append(m)
+            realm, kind = identity_realm(m.get("fromAddr"))
+            mails_by_sender[k].append((m, realm, kind))
+            if kind == "dns" and realm:
+                known_labels.add(realm.split(".")[0])
 
     chains: list[dict[str, Any]] = []
     for seed in seeds:
@@ -516,11 +614,14 @@ def build_chains(
             ident = identity_key(rcpt)
             if not ident:
                 continue
+            rcpt_domain, _ = identity_realm(rcpt)
             steps: list[dict[str, Any]] = []
             last_by_key: dict[str, dict[str, Any]] = {}
             # victim replies / forwards to the phisher
-            for m in mails_by_sender.get(ident, []):
+            for m, m_realm, m_kind in mails_by_sender.get(ident, []):
                 if m is seed or not (t0 - before_ms <= int(m["date"]) <= t0 + window_ms):
+                    continue
+                if not realm_matches(rcpt_domain, m_realm, m_kind, internal, known_labels, netbios_map):
                     continue
                 to_phisher = bool(set(mail_recipients(m)) & art["senders"])
                 same_thread = bool(m.get("inReplyTo") and seed.get("messageId") and str(m["inReplyTo"]).strip() == str(seed["messageId"]).strip())
@@ -539,13 +640,15 @@ def build_chains(
                             "findings": _fsum(f_by_ref.get(("mails", int(m["id"])) if m.get("id") is not None else ("mails", -1)) or []),
                         }
                     )
-            # events of that identity in the window
-            for ev in ev_by_id.get(ident, []):
+            # events of that identity in the window, in the recipient's organisation
+            for ev, ev_realm, ev_kind in ev_by_id.get(ident, []):
                 ts = int(ev["ts"])
                 if ts < t0 - before_ms:
                     continue
                 if ts > t0 + window_ms:
                     break
+                if not realm_matches(rcpt_domain, ev_realm, ev_kind, internal, known_labels, netbios_map):
+                    continue
                 cls = _m365_step(ev, art, settings) if _is_m365(ev) else _host_step(ev, art)
                 if cls is None:
                     continue
@@ -622,7 +725,7 @@ def build_chains(
             chains.append(
                 {
                     "identity": ident,
-                    "identityLabel": labels.get(ident) or rcpt,
+                    "identityLabel": rcpt,
                     "seed": {
                         "id": seed.get("id"),
                         "ts": t0,
@@ -642,7 +745,7 @@ def build_chains(
                     "artifactLinks": artifact_links,
                     "scoreBreakdown": breakdown,
                     "entities": {
-                        "user": labels.get(ident) or rcpt,
+                        "user": rcpt,
                         "ips": ips[:20],
                         "hosts": hosts[:20],
                         "attackerAddresses": sorted(set(attacker))[:10],
@@ -685,6 +788,8 @@ def _summary(c: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 # DuckDB store adapter
 # ---------------------------------------------------------------------------
+# events considered per build; beyond it the window is cut and the stats say so
+EVENT_CAP = 50_000
 _IDENT_SQL = "lower(regexp_extract(coalesce({col}, ''), '^(?:[^\\\\]*\\\\)?([^@]+)', 1))"
 
 
@@ -714,8 +819,10 @@ def chains_for_store(store: Any, settings: dict[str, Any] | None, findings: list
     ph = ", ".join("?" for _ in idents)
     ident_cond = " OR ".join(_IDENT_SQL.format(col=f'"{c}"') + f" IN ({ph})" for c in ("targetUser", "subjectUser", "user", "upn"))
     params: list[Any] = [t_min, t_max] + idents * 4
-    cur.execute(f"SELECT * FROM events WHERE ts BETWEEN ? AND ? AND ({ident_cond}) ORDER BY ts LIMIT 50000", params)
+    cur.execute(f"SELECT * FROM events WHERE ts BETWEEN ? AND ? AND ({ident_cond}) ORDER BY ts LIMIT {EVENT_CAP + 1}", params)
     events = rows_to_dicts(cur)
+    events_truncated = len(events) > EVENT_CAP
+    events = events[:EVENT_CAP]
     for r in events:
         if isinstance(r.get("data"), str):
             try:
@@ -728,7 +835,7 @@ def chains_for_store(store: Any, settings: dict[str, Any] | None, findings: list
     replies = Q._parse_json_cols(rows_to_dicts(cur), "mails") if hasattr(Q, "_parse_json_cols") else rows_to_dicts(cur)
     have = {m["id"] for m in seeds}
     mails = seeds + [m for m in replies if m["id"] not in have]
-    return build_chains(
+    result = build_chains(
         mails,
         events,
         findings,
@@ -737,3 +844,5 @@ def chains_for_store(store: Any, settings: dict[str, Any] | None, findings: list
         window_hours=window_hours,
         **{k: v for k, v in opts.items() if k in ("before_minutes", "collapse_minutes", "min_score", "max_chains")},
     )
+    result["stats"]["eventsTruncated"] = events_truncated
+    return result
