@@ -115,6 +115,13 @@ export default function App() {
         .then((h) => {
           setHealth(h)
           if (h.store?.thresholdMb) db.kv.get('storeThresholdMb').then((k) => { if (typeof k?.value !== 'number') setThreshold(h.store!.thresholdMb) })
+          // the model went unreachable (the server was down, Ollama restarted): check again with every poll until it is back
+          if (useStore.getState().aiStatus.reachable !== true) {
+            getTransport()
+              .ping()
+              .then((r) => useStore.getState().setAiStatus({ reachable: r.reachable, error: r.error, models: r.models, checkedAt: Date.now() }))
+              .catch(() => undefined)
+          }
         })
         .catch((e) => {
           setHealth(null)
@@ -230,7 +237,7 @@ export default function App() {
         </nav>
         <div className="sidebar-footer">
           <div><span className={`status-dot ${health ? 'ok' : 'bad'}`} />server {health ? `v${health.version}` : 'offline'}</div>
-          <div title={aiCfg.transport === 'browser' ? `browser-direct: ${aiCfg.ollamaUrl}` : 'via REMN server'}><span className={`status-dot ${aiStatus.reachable ? 'ok' : aiStatus.reachable === null ? '' : 'bad'}`} />ollama {aiStatus.reachable ? 'online' : aiStatus.reachable === null ? '…' : 'offline'} <span className="dim">[{aiCfg.transport}]</span></div>
+          <div title={aiCfg.transport === 'browser' ? `browser-direct: ${aiCfg.ollamaUrl}` : aiCfg.transport === 'claude' ? 'Claude Code on the server machine' : 'via REMN server'}><span className={`status-dot ${aiStatus.reachable ? 'ok' : aiStatus.reachable === null ? '' : 'bad'}`} />{aiCfg.transport === 'claude' ? 'claude' : 'ollama'} {aiStatus.reachable ? (aiCfg.transport === 'claude' ? 'ready' : 'online') : aiStatus.reachable === null ? '…' : aiCfg.transport === 'claude' ? 'unavailable' : 'offline'} <span className="dim">[{aiCfg.transport}]</span></div>
           <div><span className={`status-dot ${kase.settings.networkAllowed ? 'bad' : 'ok'}`} />egress {kase.settings.networkAllowed ? 'allowed' : 'blocked'}</div>
           <div><span className={`status-dot ${isServer ? 'ok' : ''}`} />store {isServer ? 'server' : 'browser'}</div>
           <button className="btn ghost xs" style={{ justifyContent: 'flex-start' }} onClick={() => setShowConsole(!showConsole)} title="console"><IconTerminal /><span className="label"> console {busy ? '●' : ''}</span></button>
