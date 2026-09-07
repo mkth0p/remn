@@ -3,7 +3,8 @@ import type { Case, Finding } from '../db/schema'
 import type { Chain } from './chains'
 import { buildIncidents } from '../rules/incidents'
 import { DEFAULT_REPORT } from './review'
-import { buildReportHtml, type ReportData } from './reportHtml'
+import { buildReportHtml, foldSteps, MAX_STEP_ROWS, type ReportData } from './reportHtml'
+import type { ChainStep } from './chains'
 
 let seq = 1
 const f = (p: Partial<Finding> & { ruleId: string; severity: Finding['severity'] }): Finding => ({ id: seq++, caseId: 1, key: `${p.ruleId}|${seq}`, title: p.ruleId, source: 'mails', ts: 10, entities: {}, count: 1, refs: [seq], attack: [], status: 'new', createdAt: 0, ...p })
@@ -51,6 +52,21 @@ describe('report html', () => {
     expect(html).toContain("@font-face{font-family:'Gulax'")
     expect(html).toContain('every item decided')
     expect(html).not.toContain('undefined')
+  })
+
+  it('folds runs of the same step into one row with a count and a span, and caps the rows it prints', () => {
+    const s = (i: number, title: string, ties: string[] = []): ChainStep => ({ kind: 'event', source: 'events', id: i, ts: i * 60_000, tsEnd: i * 60_000, count: 1, title, weight: 2, artifacts: ties, findings: [], offsetMin: i, origin: 'm365', ipAddress: '203.0.113.9' })
+    const steps = [s(1, 'mailbox items accessed'), s(2, 'mailbox items accessed'), s(3, 'mailbox items accessed'), s(4, 'file downloaded', ['tie']), s(5, 'mailbox items accessed'), s(6, 'mailbox items accessed', ['tie'])]
+    const folded = foldSteps(steps)
+    expect(folded.map((f) => [f.step.title, f.n])).toEqual([['mailbox items accessed', 3], ['file downloaded', 1], ['mailbox items accessed', 1], ['mailbox items accessed', 1]])
+    expect(folded[0].offsetMin).toBe(1)
+    expect(folded[0].offsetEnd).toBe(3)
+    const runs = buildReportHtml(data({ chains: [{ ...chain, steps }] }))
+    expect(runs).toContain('<span class="chip">×3</span>')
+    expect(runs).toContain('<thead>')
+    expect(runs).not.toContain('position:fixed')
+    const long = { ...chain, steps: Array.from({ length: MAX_STEP_ROWS + 25 }, (_, i) => s(i + 1, `step ${i + 1}`)) }
+    expect(buildReportHtml(data({ chains: [long] }))).toContain('25 more step row(s) not printed')
   })
 
   it('drops pictures and fonts that are not what the app produced, and follows the section switches', () => {

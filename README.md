@@ -621,7 +621,12 @@ block, the swimlane picture, the step table with a lane mark per source and the
 linked findings; incidents are cards with the note, the findings and their
 ATT&CK chips; the case timeline is a vertical line with severity dots. Every
 string from the case is escaped, markdown fields go through the app's renderer,
-and only PNG data URLs the app drew itself are embedded.
+and only PNG data URLs the app drew itself are embedded. Runs of the same step (the
+same title, source, machine and ties in a row) print as one row with a count and
+a time span, at most 60 rows per chain, and table headers repeat on every page.
+"Print / PDF" prints from a frame that runs no script but keeps the app's origin
+(a sandboxed frame without it makes the browser refuse the print call); "open in
+a tab" shows the report as its own page for the browser's print-to-PDF.
 
 The model can take part in the review in three ways. "Ask the model to decide"
 on a card asks for a proposal on that item (decision, severity, in or out of the

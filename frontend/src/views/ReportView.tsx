@@ -106,19 +106,22 @@ export function ReportView() {
   const printReport = () => {
     const frame = document.createElement('iframe')
     frame.setAttribute('sandbox', 'allow-same-origin allow-modals')
-    frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0'
+    // laid out at full size (a zero-size frame prints blank in some browsers) but invisible and inert
+    frame.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;border:0;opacity:0;pointer-events:none;z-index:-1'
     frame.srcdoc = html()
     frame.onload = () => {
+      const win = frame.contentWindow
       try {
-        frame.contentWindow?.focus()
-        frame.contentWindow?.print()
+        win?.addEventListener('afterprint', () => frame.remove())
+        win?.focus()
+        win?.print()
       } catch (e) {
         frame.remove()
         toast('err', `the browser refused to print from the page (${(e as Error).message}); the report opens in a new tab, print it from there`, 0)
         openReport()
         return
       }
-      setTimeout(() => frame.remove(), 60_000)
+      setTimeout(() => frame.remove(), 120_000)
     }
     document.body.appendChild(frame)
   }

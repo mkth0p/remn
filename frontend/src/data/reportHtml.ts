@@ -1,5 +1,5 @@
 import type { Case, CaseNote, Evidence, Finding, Ioc } from '../db/schema'
-import type { Chain } from './chains'
+import type { Chain, ChainStep } from './chains'
 import type { ChainReview, ReportSettings } from './review'
 import { chainSeverity, effectiveSeverity, stepVisible } from './review'
 import type { Incident } from '../rules/incidents'
@@ -51,7 +51,7 @@ const CSS = `
 html{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 body{font:12.5px/1.55 var(--sans);color:var(--ink);background:var(--surface);margin:0;padding:34px 40px 60px}
 @page{size:A4;margin:16mm 14mm 18mm}
-@media print{body{padding:0}.foot{position:fixed;bottom:-8mm;left:0;right:0}.no-print{display:none}}
+@media print{body{padding:0}.no-print{display:none}.cover-page{break-after:page}}
 a{color:var(--accent);text-decoration:none}
 code,.mono{font-family:var(--mono);font-size:11px}
 .muted{color:var(--ink-2)}.dim{color:var(--ink-3)}
@@ -77,8 +77,8 @@ code,.mono{font-family:var(--mono);font-size:11px}
 .toc li{margin:0 0 4px;break-inside:avoid}
 .toc .n{font-family:var(--mono);color:var(--accent);margin-right:8px}
 /* sections */
-.s{margin-top:30px;page-break-inside:auto}
-.s-head{display:flex;align-items:baseline;gap:12px;margin-bottom:12px;page-break-after:avoid}
+.s{margin-top:30px;break-inside:auto}
+.s-head{display:flex;align-items:baseline;gap:12px;margin-bottom:12px;break-after:avoid;break-inside:avoid}
 .s-head .num{font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:.08em}
 .s-head h2{font-size:17px;font-weight:600;margin:0;letter-spacing:-.01em}
 .s-head .rule{flex:1;height:1px;background:var(--line);transform:translateY(-4px)}
@@ -91,9 +91,11 @@ code,.mono{font-family:var(--mono);font-size:11px}
 .pill.verdict-confirmed{color:#fff;background:var(--critical)}.pill.verdict-unsure{color:#fff;background:var(--medium)}.pill.verdict-benign{color:#fff;background:var(--accent)}
 .chip{display:inline-block;border:1px solid var(--line-2);border-radius:4px;padding:0 5px;font-family:var(--mono);font-size:10px;color:var(--ink-2);margin:0 3px 2px 0}
 /* cards */
-.card{border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:0 0 14px;page-break-inside:avoid;background:var(--surface)}
+.card{border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:0 0 14px;break-inside:auto;background:var(--surface)}
 .card.chain{border-left:4px solid var(--accent)}
-.card.inc{border-left:4px solid var(--line-2)}
+.card.inc{border-left:4px solid var(--line-2);break-inside:avoid}
+.card-head,.card-meta,.narr{break-inside:avoid}
+.card-head{break-after:avoid}
 .card.inc.critical{border-left-color:var(--critical)}.card.inc.high{border-left-color:var(--high)}.card.inc.medium{border-left-color:var(--medium)}.card.inc.low{border-left-color:var(--low)}
 .card-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .card-head h3{font-size:14.5px;font-weight:600;margin:0;flex:1;min-width:200px}
@@ -106,14 +108,15 @@ code,.mono{font-family:var(--mono);font-size:11px}
 .cap{font-size:10.5px;color:var(--ink-3);margin-top:4px}
 .note{background:var(--surface-2);padding:8px 12px;border-radius:6px;margin:6px 0 8px;font-size:12.5px}
 .note p{margin:0 0 6px}.note p:last-child{margin:0}
-figure{margin:8px 0 10px;page-break-inside:avoid}
-figure img{width:100%;border:1px solid var(--line);border-radius:6px}
+figure{margin:8px 0 10px;break-inside:avoid}
+figure img{width:100%;max-height:120mm;object-fit:contain;border:1px solid var(--line);border-radius:6px}
 figure figcaption{font-size:10.5px;color:var(--ink-3);margin-top:3px}
 /* tables */
 table{border-collapse:collapse;width:100%;font-size:11.5px;margin:4px 0 8px}
 th{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);text-align:left;font-weight:600;padding:5px 8px;border-bottom:1px solid var(--line-2);background:var(--surface-2)}
 td{padding:5px 8px;border-bottom:1px solid var(--line);vertical-align:top}
-tr{page-break-inside:avoid}
+tr{break-inside:avoid}
+thead{display:table-header-group}
 td .sub{display:block;font-size:10.5px;color:var(--ink-3)}
 .lane{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;vertical-align:middle}
 .lane.mail{background:var(--accent)}.lane.m365{background:var(--low)}.lane.host{background:var(--ink-3)}
@@ -130,7 +133,7 @@ td .sub{display:block;font-size:10.5px;color:var(--ink-3)}
 .notes .n{border-bottom:1px solid var(--line);padding:6px 0 8px;margin:0 0 6px}
 .notes .n:last-child{border:0}
 .settings{font-family:var(--mono);font-size:11px;color:var(--ink-2);background:var(--surface-2);padding:8px 12px;border-radius:6px}
-.foot{margin-top:40px;border-top:1px solid var(--line);padding-top:6px;font-size:10px;color:var(--ink-3);display:flex;justify-content:space-between;background:#fff}
+.foot{margin-top:40px;border-top:1px solid var(--line);padding-top:6px;font-size:10px;color:var(--ink-3);display:flex;justify-content:space-between}
 .foot .wm{font-family:var(--display);letter-spacing:.2em;color:var(--ink-2)}
 .empty{color:var(--ink-3);font-size:12px}
 `
@@ -139,6 +142,36 @@ const pill = (sev: string) => `<span class="pill ${ORDER.includes(sev as never) 
 const statusPill = (s: string) => `<span class="pill st-${h(s)}">${h(STATUS_WORD[s] ?? s)}</span>`
 const verdictPill = (v?: string) => (v ? `<span class="pill verdict-${h(v)}">${h(v)}</span>` : '')
 const rows = (xs: string[][]) => xs.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join('')}</tr>`).join('')
+/** a table whose header row repeats on every printed page */
+const table = (head: string[], body: string[][]) => `<table><thead><tr>${head.map((x) => `<th>${x}</th>`).join('')}</tr></thead><tbody>${rows(body)}</tbody></table>`
+
+/** The most step rows a chain prints; the rest is summarised in one line. */
+export const MAX_STEP_ROWS = 60
+
+export interface FoldedStep {
+  step: ChainStep
+  /** rows folded into this one (the same step repeating in a run) */
+  n: number
+  ts: number
+  tsEnd: number
+  offsetMin: number
+  offsetEnd: number
+}
+
+/** Consecutive steps that say the same thing (title, source, machine, ties) print as one row with a count and a time span. */
+export function foldSteps(steps: ChainStep[]): FoldedStep[] {
+  const key = (s: ChainStep) => [s.title, s.kind, s.origin ?? '', s.computer ?? '', s.ipAddress ?? '', [...s.artifacts, ...s.findings.map((f) => f.title)].join(';')].join('')
+  const out: FoldedStep[] = []
+  for (const s of steps) {
+    const last = out[out.length - 1]
+    if (last && key(last.step) === key(s)) {
+      last.n += 1
+      last.tsEnd = Math.max(last.tsEnd, s.tsEnd || s.ts)
+      last.offsetEnd = Math.max(last.offsetEnd, s.offsetMin)
+    } else out.push({ step: s, n: 1, ts: s.ts, tsEnd: s.tsEnd || s.ts, offsetMin: s.offsetMin, offsetEnd: s.offsetMin })
+  }
+  return out
+}
 /** only a PNG data URL this app produced itself is embedded */
 const img = (src: string | undefined, alt: string, caption?: string) => (src && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(src) ? `<figure><img src="${src}" alt="${h(alt)}">${caption ? `<figcaption>${h(caption)}</figcaption>` : ''}</figure>` : '')
 const md = (text: string) => renderMarkdown(text)
@@ -155,18 +188,23 @@ function meter(c: Chain): string {
 
 function chainCard(c: Chain, d: ReportData): string {
   const r = d.reviews[c.id]
-  const steps = c.steps.filter((s) => stepVisible(s, d.settings.chainDetail))
-  const hidden = c.steps.length - steps.length
+  const visible = c.steps.filter((s) => stepVisible(s, d.settings.chainDetail))
+  const hidden = c.steps.length - visible.length
+  const folded = foldSteps(visible)
+  const printed = folded.slice(0, MAX_STEP_ROWS)
+  const left = folded.length - printed.length
   const members = d.membersOf.get(c.id) ?? []
+  const offset = (f: FoldedStep) => (f.n > 1 && f.offsetEnd !== f.offsetMin ? `${f.offsetMin >= 0 ? '+' : ''}${Math.round(f.offsetMin)} → ${f.offsetEnd >= 0 ? '+' : ''}${Math.round(f.offsetEnd)} min` : `${f.offsetMin >= 0 ? '+' : ''}${Math.round(f.offsetMin)} min`)
+  const when = (f: FoldedStep) => (f.n > 1 && f.tsEnd !== f.ts ? `${fmtTs(f.ts)}<span class="sub">to ${fmtTs(f.tsEnd)}</span>` : fmtTs(f.ts))
   const narrative = r?.narrative ? `<div class="narr">${md(r.narrative)}</div>${r.narrativeBy === 'ai' ? '<div class="cap">narrative drafted by the model during triage</div>' : ''}` : `<div class="narr"><p>${h(c.summary)}</p></div>`
   return `<div class="card chain">
 <div class="card-head">${pill(chainSeverity(c, r))}<h3>${h(c.identityLabel)}</h3>${verdictPill(r?.verdict)}${meter(c)}</div>
 <div class="card-meta">Seed mail “${h(c.seed.subject)}” from <code>${h(c.seed.fromAddr ?? '')}</code> at ${fmtTs(c.seed.ts)} (risk ${c.seed.risk}) · ${c.steps.length} steps from ${fmtTs(c.start)} to ${fmtTs(c.end)} · ${c.artifactLinks} tie(s) to the mail${c.entities.attackerAddresses.length ? ` · attacker <code>${h(c.entities.attackerAddresses.join(', '))}</code>` : ''}${c.entities.ips.length ? ` · IPs <code>${h(c.entities.ips.join(', '))}</code>` : ''}${c.entities.hosts.length ? ` · hosts <code>${h(c.entities.hosts.join(', '))}</code>` : ''}</div>
 ${narrative}
 ${d.settings.includeGraphs ? img(d.graphs[c.id], `graph of the chain for ${c.identityLabel}`, 'Steps by lane and time: diamond = seed mail, box = step (size = weight, colour = worst finding), grey dot = folded routine steps, green edges = ties to the mail.') : ''}
-<table><tr><th>time (UTC)</th><th>offset</th><th>source</th><th>step</th><th>ties to the mail / findings</th></tr>${rows(steps.map((s) => [`<span class="nowrap">${fmtTs(s.ts)}</span>`, `${s.offsetMin >= 0 ? '+' : ''}${Math.round(s.offsetMin)} min`, `<span class="lane ${s.kind === 'mail' ? 'mail' : s.origin === 'm365' ? 'm365' : 'host'}"></span>${h(s.kind === 'mail' ? 'mailbox' : s.origin === 'm365' ? 'Microsoft 365' : 'host')}`, h(s.title) + (s.computer || s.ipAddress ? `<span class="sub">${h([s.computer, s.ipAddress].filter(Boolean).join(' · '))}</span>` : ''), h([...s.artifacts, ...s.findings.map((f) => f.title)].join('; '))]))}</table>
-${hidden ? `<div class="cap">${hidden} routine step(s) not printed at the “${h(d.settings.chainDetail)}” detail level.</div>` : ''}
-${members.length ? `<div class="cap" style="margin-top:8px">${members.length} finding(s) linked to this chain, decided with it</div><table><tr><th>severity</th><th>finding</th><th>rule</th><th>rows</th><th>status</th></tr>${rows(members.map((f) => [pill(effectiveSeverity(f)), h(f.title), `<code>${h(f.ruleId)}</code>`, String(f.count), statusPill(f.status)]))}</table>` : ''}
+${table(['time (UTC)', 'offset', 'source', 'step', 'ties to the mail / findings'], printed.map((f) => { const s = f.step; return [`<span class="nowrap">${when(f)}</span>`, `<span class="nowrap">${offset(f)}</span>`, `<span class="lane ${s.kind === 'mail' ? 'mail' : s.origin === 'm365' ? 'm365' : 'host'}"></span>${h(s.kind === 'mail' ? 'mailbox' : s.origin === 'm365' ? 'Microsoft 365' : 'host')}`, h(s.title) + (f.n > 1 ? ` <span class="chip">×${f.n}</span>` : s.count > 1 ? ` <span class="chip">×${s.count}</span>` : '') + (s.computer || s.ipAddress ? `<span class="sub">${h([s.computer, s.ipAddress].filter(Boolean).join(' · '))}</span>` : ''), h([...s.artifacts, ...s.findings.map((x) => x.title)].join('; '))] }))}
+${left || hidden ? `<div class="cap">${left ? `${left} more step row(s) not printed (open the chain in REMN for the full list)` : ''}${left && hidden ? ' · ' : ''}${hidden ? `${hidden} routine step(s) not printed at the “${h(d.settings.chainDetail)}” detail level` : ''}.</div>` : ''}
+${members.length ? `<div class="cap" style="margin-top:8px">${members.length} finding(s) linked to this chain, decided with it</div>${table(['severity', 'finding', 'rule', 'rows', 'status'], members.map((f) => [pill(effectiveSeverity(f)), h(f.title), `<code>${h(f.ruleId)}</code>`, String(f.count), statusPill(f.status)]))}` : ''}
 ${r?.by === 'ai' && r.aiReason ? `<div class="cap">Triage note (model): ${h(r.aiReason)}</div>` : ''}
 </div>`
 }
@@ -177,7 +215,7 @@ function incidentCard(i: Incident): string {
 <div class="card-meta">${h(i.subtitle)} · ${fmtTs(i.ts)}${i.tsEnd && i.tsEnd !== i.ts ? ` → ${fmtTs(i.tsEnd)}` : ''} · ${n(i.refs.length)} row(s)${Object.keys(i.entities).length ? ' · ' + Object.entries(i.entities).slice(0, 6).map(([k, v]) => `<span class="chip">${h(k)}=${h(String(v))}</span>`).join('') : ''}</div>
 ${i.lead.notes ? `<div class="note">${md(i.lead.notes)}</div>${i.lead.notesBy === 'ai' ? '<div class="cap">note drafted by the model during triage</div>' : ''}` : ''}
 ${i.lead.decidedBy === 'ai' && i.lead.aiReason ? `<div class="cap">Triage note (model): ${h(i.lead.aiReason)}</div>` : ''}
-<table><tr><th>severity</th><th>finding</th><th>rule</th><th>rows</th><th>first (UTC)</th><th>ATT&amp;CK</th></tr>${rows(i.findings.map((f) => [pill(effectiveSeverity(f)) + (f.severityOverride ? `<span class="sub">rule: ${h(f.severity)}</span>` : ''), h(f.title) + (f.escalation ? `<span class="sub">${h(f.escalation)}</span>` : ''), `<code>${h(f.ruleId)}</code>`, String(f.count), `<span class="nowrap">${fmtTs(f.ts)}</span>`, f.attack.map((t) => `<span class="chip">${h(t)}</span>`).join('')]))}</table>
+${table(['severity', 'finding', 'rule', 'rows', 'first (UTC)', 'ATT&amp;CK'], i.findings.map((f) => [pill(effectiveSeverity(f)) + (f.severityOverride ? `<span class="sub">rule: ${h(f.severity)}</span>` : ''), h(f.title) + (f.escalation ? `<span class="sub">${h(f.escalation)}</span>` : ''), `<code>${h(f.ruleId)}</code>`, String(f.count), `<span class="nowrap">${fmtTs(f.ts)}</span>`, f.attack.map((t) => `<span class="chip">${h(t)}</span>`).join('')]))}
 </div>`
 }
 
@@ -193,24 +231,25 @@ export function buildReportHtml(d: ReportData): string {
   }
   const sections: { id: string; title: string; count?: number; body: string }[] = []
   if (d.summary) sections.push({ id: 'summary', title: 'Executive summary', body: `<div class="narr">${md(d.summary)}</div>` })
-  if (settings.includeEvidence) sections.push({ id: 'evidence', title: 'Evidence and chain of custody', count: d.evidence.length, body: d.evidence.length ? `<table><tr><th>file</th><th>kind</th><th>size</th><th>rows</th><th>SHA-256</th><th>integrity</th><th>added (UTC)</th></tr>${rows(d.evidence.map((e) => [h(e.name), h(e.format || e.kind), fmtBytes(e.size), n(e.count), `<code>${h(e.sha256Client ?? '')}</code>`, h(e.integrity), `<span class="nowrap">${fmtTs(e.addedAt)}</span>`]))}</table>` : '<div class="empty">No evidence file.</div>' })
+  if (settings.includeEvidence) sections.push({ id: 'evidence', title: 'Evidence and chain of custody', count: d.evidence.length, body: d.evidence.length ? table(['file', 'kind', 'size', 'rows', 'SHA-256', 'integrity', 'added (UTC)'], d.evidence.map((e) => [h(e.name), h(e.format || e.kind), fmtBytes(e.size), n(e.count), `<code>${h(e.sha256Client ?? '')}</code>`, h(e.integrity), `<span class="nowrap">${fmtTs(e.addedAt)}</span>`])) : '<div class="empty">No evidence file.</div>' })
   if (d.chains.length) {
     const campaign = settings.includeGraphs && d.chains.length > 1 && d.graphs.campaign ? `<div class="card"><div class="card-head"><h3>Shared between chains</h3></div>${img(d.graphs.campaign, 'campaign graph', 'Chains and the senders, domains, IPs and hosts they share.')}<div class="cap">${d.campaignInsights.length ? d.campaignInsights.map((x) => h(x)).join(' · ') : 'no sender, domain, IP or host is shared between the chains'}</div></div>` : ''
     sections.push({ id: 'chains', title: 'Attack chains', count: d.chains.length, body: `<p class="intro">A chain is a suspicious mail and what the recipient's accounts and machines did after it, scored on the seed, the ties to the mail, the steps, the findings and the sources involved. Findings whose rows are steps of a chain are decided with it.</p>${campaign}${d.chains.map((c) => chainCard(c, d)).join('\n')}` })
   }
   sections.push({ id: 'incidents', title: 'Incidents', count: d.incidents.length, body: `<p class="intro">Findings on the same mail, or about the same user, host or IP within six hours, are one incident.</p>${d.incidents.length ? d.incidents.map(incidentCard).join('\n') : '<div class="empty">No incident outside the attack chains passes the severity floor.</div>'}` })
-  if (settings.includeIocs) sections.push({ id: 'iocs', title: 'Indicators of compromise', count: d.iocs.length, body: d.iocs.length ? `<p class="intro">Indicators flagged by the reputation providers; values are defanged.</p><table><tr><th>kind</th><th>indicator</th><th>verdict</th><th>tags</th><th>seen</th></tr>${rows(d.iocs.map((i) => [h(i.kind), `<code>${h(defang(i.value))}</code>`, h(i.verdict ?? ''), (i.tags ?? []).map((t) => `<span class="chip">${h(t)}</span>`).join(''), h(`${i.count} (${i.sources.join(', ')})`)]))}</table>` : '<div class="empty">No indicator flagged: reputation checks were not run, or nothing was found malicious.</div>' })
+  if (settings.includeIocs) sections.push({ id: 'iocs', title: 'Indicators of compromise', count: d.iocs.length, body: d.iocs.length ? `<p class="intro">Indicators flagged by the reputation providers; values are defanged.</p>${table(['kind', 'indicator', 'verdict', 'tags', 'seen'], d.iocs.map((i) => [h(i.kind), `<code>${h(defang(i.value))}</code>`, h(i.verdict ?? ''), (i.tags ?? []).map((t) => `<span class="chip">${h(t)}</span>`).join(''), h(`${i.count} (${i.sources.join(', ')})`)]))}` : '<div class="empty">No indicator flagged: reputation checks were not run, or nothing was found malicious.</div>' })
   if (settings.includeTimeline && d.timeline.length) sections.push({ id: 'timeline', title: 'Case timeline', count: d.timeline.length, body: `<ul class="tl">${d.timeline.map((t) => `<li class="${h(t.severity ?? 'info')}"><div class="t">${fmtTs(t.ts)}${t.link ? ` · ${h(`${t.link.source} ${t.link.label ?? t.link.id}`)}` : ''}</div><div>${h(t.text)}</div></li>`).join('')}</ul>` })
   if (settings.includeTasks && d.tasks.length) sections.push({ id: 'tasks', title: 'Tasks', count: d.tasks.length, body: `<ul class="tasks">${d.tasks.map((t) => `<li class="${t.done ? 'done' : ''}"><span class="box">${t.done ? '✓' : ''}</span>${h(t.text)} <span class="dim">· ${fmtTs(t.updatedAt)}</span></li>`).join('')}</ul>` })
   if (settings.includeNotes && d.notes.length) sections.push({ id: 'notes', title: 'Analyst notes', count: d.notes.length, body: `<div class="notes">${d.notes.map((x) => `<div class="n"><div class="cap">${fmtTs(x.createdAt)}</div>${md(x.text)}</div>`).join('')}</div>` })
   const timed = [...d.findings].filter((f) => f.ts).sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0))
-  sections.push({ id: 'findings', title: 'Findings in time order', count: timed.length, body: timed.length ? `<table><tr><th>time (UTC)</th><th>severity</th><th>finding</th><th>entities</th></tr>${rows(timed.map((f) => [`<span class="nowrap">${fmtTs(f.ts)}</span>`, pill(effectiveSeverity(f)), h(f.title), `<code>${h(Object.values(f.entities).slice(0, 3).join(' · '))}</code>`]))}</table>` : '<div class="empty">No dated finding.</div>' })
+  sections.push({ id: 'findings', title: 'Findings in time order', count: timed.length, body: timed.length ? table(['time (UTC)', 'severity', 'finding', 'entities'], timed.map((f) => [`<span class="nowrap">${fmtTs(f.ts)}</span>`, pill(effectiveSeverity(f)), h(f.title), `<code>${h(Object.values(f.entities).slice(0, 3).join(' · '))}</code>`])) : '<div class="empty">No dated finding.</div>' })
   sections.push({ id: 'settings', title: 'Case settings', body: `<div class="settings">internal domains: ${h(kase.settings.internalDomains.join(', ') || '—')} · VIPs: ${h(kase.settings.vipNames.join(', ') || '—')} · business hours ${kase.settings.businessHours.start}h–${kase.settings.businessHours.end}h (${h(kase.settings.businessHours.tz)}) · external lookups ${kase.settings.networkAllowed ? 'enabled' : 'disabled'} · report floor ${h(settings.minSeverity)}${settings.onlyReviewed ? ' · reviewed items only' : ''}${settings.includeFp ? ' · false positives included' : ''} · chain steps: ${h(settings.chainDetail)}</div>` })
 
   const num = (i: number) => String(i + 1).padStart(2, '0')
   const font = d.fontData && /^[A-Za-z0-9+/=]+$/.test(d.fontData) ? `@font-face{font-family:'Gulax';src:url(data:font/woff2;base64,${d.fontData}) format('woff2');font-weight:400;font-style:normal}` : ''
   const generated = new Date(d.generatedAt).toISOString().replace('T', ' ').slice(0, 19) + 'Z'
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>REMN report · ${h(kase.name)}</title><style>${font}${CSS}</style></head><body>
+<div class="cover-page">
 <div class="cover">
 <div class="brand"><span class="wordmark">REMN</span><span class="tag">forensic analysis report</span></div>
 <h1>${h(kase.name)}</h1>
@@ -221,6 +260,7 @@ export function buildReportHtml(d: ReportData): string {
 <div class="decisions">Decisions: <b>${decisions.confirmed}</b> confirmed · <b>${decisions.reviewed}</b> reviewed or unsure · <b>${decisions.fp}</b> false positive${decisions.fp === 1 ? '' : 's'}${d.undecided ? ` · <b>${d.undecided}</b> item${d.undecided === 1 ? '' : 's'} without a decision` : ' · every item decided'}</div>
 </div>
 <ul class="toc">${sections.map((s, i) => `<li><span class="n">${num(i)}</span>${h(s.title)}${s.count != null ? ` <span class="dim">(${n(s.count)})</span>` : ''}</li>`).join('')}</ul>
+</div>
 ${sections.map((s, i) => `<section class="s" id="${h(s.id)}"><div class="s-head"><span class="num">${num(i)}</span><h2>${h(s.title)}</h2><span class="rule"></span>${s.count != null ? `<span class="count">${n(s.count)}</span>` : ''}</div>${s.body}</section>`).join('\n')}
 <div class="foot"><span class="wm">REMN</span><span>${h(kase.name)} · generated ${generated}</span></div>
 </body></html>`
