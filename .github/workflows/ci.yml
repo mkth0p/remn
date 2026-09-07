@@ -81,7 +81,7 @@ jobs:
       # from the base layer without a file path, so their removal in a later layer is invisible to it;
       # the pip directory is skipped for that reason and no other
       - name: Scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: remn:ci
           format: table
