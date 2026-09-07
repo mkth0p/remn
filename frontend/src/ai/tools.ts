@@ -2,11 +2,15 @@
  * Executes the AI tool calls locally against the case data source (IndexedDB
  * or the server store). Only what these functions return is sent to the model.
  */
-import { getDb, type Case } from '../db/schema'
+import { getDb, type Case, type Finding } from '../db/schema'
 import { lookupReputation } from '../api/client'
 import { getSource } from '../data/source'
 import { compileRegex, type Filter } from '../rules/filter'
 import type { Bucket } from '../data/queries'
+import { loadChains } from '../data/chains'
+import { chainMembership } from '../rules/incidents'
+import { saveSuggestion, type Decision } from '../data/aiReview'
+import { stepVisible } from '../data/review'
 
 const EVENT_COLS = ['id', 'tsIso', 'eventId', 'provider', 'channel', 'computer', 'sourceFile', 'summary', 'targetUser', 'targetDomain', 'subjectUser', 'logonType', 'ipAddress', 'workstation', 'statusText', 'processName', 'commandLine', 'parentProcessName', 'serviceName', 'serviceFile', 'taskName', 'memberName', 'groupName', 'shareName', 'relativeTargetName', 'image', 'destinationIp', 'destinationPort', 'query', 'targetFilename', 'targetObject', 'threatName', 'path']
 const MAIL_COLS = ['id', 'dateIso', 'subject', 'folder', 'fromName', 'fromAddr', 'fromDomain', 'replyTo', 'returnPath', 'originIp', 'risk', 'flags', 'urlCount', 'attachmentCount', 'maxAttachmentRisk', 'textPreview']
@@ -115,6 +119,50 @@ export async function executeTool(name: string, args: Record<string, unknown>, k
         rows.sort((a, b) => order.indexOf(a.severity) - order.indexOf(b.severity))
         const limit = Math.min(Number(args.limit) || 50, 200)
         return cap({ count: rows.length, findings: rows.slice(0, limit).map((f) => ({ id: f.id, ruleId: f.ruleId, title: f.title, severity: f.severity, source: f.source, tsIso: iso(f.ts), count: f.count, entities: f.entities, attack: f.attack, status: f.status, refs: f.refs.slice(0, 10) })) })
+      }
+      case 'get_chain': {
+        const res = await loadChains(caseId)
+        const chains = res?.chains ?? []
+        const wantId = args.chain_id ? String(args.chain_id) : ''
+        const wantUser = args.user ? String(args.user).toLowerCase() : ''
+        const c = chains.find((x) => x.id === wantId) ?? (wantUser ? chains.find((x) => x.identity.toLowerCase() === wantUser || x.identityLabel.toLowerCase().includes(wantUser)) : undefined)
+        if (!c) return cap({ error: 'no such chain', chains: chains.slice(0, 30).map((x) => ({ id: x.id, recipient: x.identityLabel, score: x.score, severity: x.severity, steps: x.steps.length })) })
+        const findings = await db.findings.where('caseId').equals(caseId).toArray()
+        const membership = chainMembership(findings, chains)
+        const linked = findings.filter((f) => f.id != null && membership.get(f.id) === c.id && f.ruleId !== 'chain')
+        const unlinked = findings.filter((f) => f.chainUnlinked)
+        return cap({
+          id: c.id, recipient: c.identityLabel, score: c.score, severity: c.severity, scoreBreakdown: c.scoreBreakdown ?? null, artifactLinks: c.artifactLinks, from: iso(c.start), to: iso(c.end), summary: c.summary,
+          seed: { mailId: c.seed.id, subject: c.seed.subject, from: c.seed.fromAddr, at: iso(c.seed.ts), risk: c.seed.risk, flags: c.seed.flags, findings: c.seed.findings.map((f) => f.title) },
+          entities: c.entities,
+          steps: c.steps.filter((st) => stepVisible(st, 'weighted')).slice(0, 40).map((st) => ({ at: iso(st.ts), offsetMin: Math.round(st.offsetMin), kind: st.kind === 'mail' ? 'mail' : st.origin ?? 'host', rowId: st.id, title: st.title, weight: st.weight, ties: st.artifacts, findings: st.findings.map((f) => f.title) })),
+          stepsTotal: c.steps.length,
+          linkedFindings: linked.slice(0, 40).map((f) => ({ id: f.id, ruleId: f.ruleId, severity: f.severityOverride ?? f.severity, title: f.title, source: f.source, rows: f.count, status: f.status })),
+          unlinkedFindings: unlinked.slice(0, 20).map((f) => ({ id: f.id, ruleId: f.ruleId, title: f.title })),
+        })
+      }
+      case 'suggest_review': {
+        const reason = String(args.reason ?? '').trim()
+        if (!reason) return cap({ error: 'reason is required' })
+        const sevRaw = args.severity ? String(args.severity).toLowerCase() : ''
+        const severity = ['critical', 'high', 'medium', 'low', 'info'].includes(sevRaw) ? (sevRaw as Finding['severity']) : undefined
+        const decRaw = args.decision ? String(args.decision).toLowerCase().replace(/[\s-]+/g, '_') : ''
+        const decision = ['reviewed', 'escalated', 'false_positive', 'confirmed', 'benign', 'unsure'].includes(decRaw) ? (decRaw as Decision) : undefined
+        const include = typeof args.include === 'boolean' ? args.include : undefined
+        let target = ''
+        if (args.chain_id) {
+          const res = await loadChains(caseId)
+          const c = res?.chains.find((x) => x.id === String(args.chain_id))
+          if (!c) return cap({ error: `no chain with id ${String(args.chain_id)}; use get_chain or list_findings (rule "chain")` })
+          target = `chain:${c.id}`
+        } else if (args.finding_id != null) {
+          const f = await db.findings.get(Number(args.finding_id))
+          if (!f || f.caseId !== caseId) return cap({ error: `no finding with id ${String(args.finding_id)}` })
+          target = `finding:${f.id}`
+        } else return cap({ error: 'give finding_id or chain_id' })
+        const unlink = Array.isArray(args.unlink_finding_ids) ? (args.unlink_finding_ids as unknown[]).map(Number).filter((n) => Number.isFinite(n)) : []
+        await saveSuggestion(caseId, { target, severity, decision, include, unlink: unlink.length ? unlink : undefined, reason: reason.slice(0, 700), at: Date.now(), by: 'chat' })
+        return cap({ recorded: true, target, severity, decision, include, unlink, note: 'shown on the Review page next to the item; the analyst applies or dismisses it' })
       }
       case 'regex_test': {
         const re = compileRegex(String(args.pattern || ''), String(args.flags || 'i'))

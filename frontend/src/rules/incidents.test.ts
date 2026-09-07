@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Finding } from '../db/schema'
-import { buildIncidents, deriveStatus, primaryEntity } from './incidents'
+import type { Chain } from '../data/chains'
+import { buildIncidents, chainMembership, deriveStatus, primaryEntity } from './incidents'
 
 let seq = 1
 function f(p: Partial<Finding> & { ruleId: string; severity: Finding['severity']; source: Finding['source'] }): Finding {
@@ -85,5 +86,61 @@ describe('false positives', () => {
     expect(inc.lead.ruleId).toBe('mail-high-risk-score')
     expect(inc.findings).toHaveLength(2)
     expect(inc.status).toBe('new')
+  })
+})
+
+const chainOf = (id: string, seedId: number, stepIds: number[], score = 80): Chain => ({
+  id, identity: id, identityLabel: `${id}@corp.test`, start: 0, end: 10 * H, score, severity: 'high', artifactLinks: 1, summary: '',
+  seed: { id: seedId, ts: 0, subject: 'Urgent invoice', fromAddr: 'x@evil.test', risk: 90, flags: [], findings: [], urlDomains: [], attachments: [] },
+  steps: stepIds.map((sid, i) => ({ kind: 'event' as const, source: 'events' as const, id: sid, refs: i === 0 ? [sid, sid + 100] : undefined, ts: (i + 1) * H, tsEnd: (i + 1) * H, count: 1, title: `step ${sid}`, weight: 2, artifacts: [], findings: [], offsetMin: 60 })),
+  entities: { user: id, ips: [], hosts: [], attackerAddresses: [], domains: [] },
+})
+
+describe('chain membership', () => {
+  it('folds the chain row, the seed mail findings and the step findings into one chain incident', () => {
+    const c = chainOf('alice', 7, [11, 12])
+    const rows = [
+      f({ ruleId: 'chain', key: 'chain|alice|7', severity: 'high', source: 'mails', refs: [7], ts: 0, title: 'Attack chain: alice' }),
+      f({ ruleId: 'mail-credential-phishing', severity: 'critical', source: 'mails', refs: [7], ts: 0, entities: { subject: 'Urgent invoice' } }),
+      f({ ruleId: 'win-logon-external', severity: 'medium', source: 'events', refs: [11], ts: H, entities: { targetUser: 'alice' } }),
+      f({ ruleId: 'win-folded', severity: 'low', source: 'events', refs: [111], ts: H, entities: { targetUser: 'alice' } }),
+      f({ ruleId: 'win-elsewhere', severity: 'high', source: 'events', refs: [99], ts: 2 * H, entities: { targetUser: 'alice' } }),
+      f({ ruleId: 'win-burst', severity: 'high', source: 'events', refs: [11, 12, 500], ts: 2 * H, entities: { targetUser: 'alice' } }),
+    ]
+    const m = chainMembership(rows, [c])
+    expect([...m.keys()].map((id) => rows.find((r) => r.id === id)!.ruleId).sort()).toEqual(['chain', 'mail-credential-phishing', 'win-folded', 'win-logon-external'])
+    const inc = buildIncidents(rows, { chains: [c] })
+    const ci = inc.find((i) => i.kind === 'chain')!
+    expect(ci.id).toBe('chain:alice')
+    expect(ci.chain).toBe(c)
+    expect(ci.lead.ruleId).toBe('chain')
+    expect(ci.severity).toBe('high')
+    expect(ci.findings).toHaveLength(4)
+    expect(ci.subtitle).toContain('3 linked findings')
+    // the event outside the chain and the burst that reaches past it stay their own incident
+    const others = inc.filter((i) => i.kind !== 'chain')
+    expect(others).toHaveLength(1)
+    expect(others[0].findings.map((x) => x.ruleId).sort()).toEqual(['win-burst', 'win-elsewhere'])
+  })
+
+  it('an unlinked finding leaves the chain and is decided on its own; the higher-scoring chain wins an overlap', () => {
+    const a = chainOf('alice', 7, [11], 60)
+    const b = chainOf('bob', 7, [11], 90)
+    const rows = [
+      f({ ruleId: 'mail-credential-phishing', severity: 'critical', source: 'mails', refs: [7], ts: 0, entities: { subject: 'Urgent invoice' } }),
+      f({ ruleId: 'win-logon-external', severity: 'medium', source: 'events', refs: [11], ts: H, entities: { targetUser: 'alice' }, chainUnlinked: true }),
+    ]
+    const m = chainMembership(rows, [a, b])
+    expect(m.get(rows[0].id!)).toBe('bob')
+    expect(m.has(rows[1].id!)).toBe(false)
+    const inc = buildIncidents(rows, { chains: [a, b], severityOf: (c) => (c.id === 'bob' ? 'critical' : c.severity) })
+    expect(inc.map((i) => i.kind).sort()).toEqual(['chain', 'entity'])
+    expect(inc.find((i) => i.kind === 'chain')!.severity).toBe('critical')
+  })
+
+  it('without chains nothing changes', () => {
+    const rows = [f({ ruleId: 'chain', key: 'chain|alice|7', severity: 'high', source: 'mails', refs: [7] })]
+    expect(buildIncidents(rows)[0].kind).toBe('mail')
+    expect(chainMembership(rows, []).size).toBe(0)
   })
 })

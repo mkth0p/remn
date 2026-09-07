@@ -13,7 +13,7 @@ export interface ChatMessage {
 }
 
 export interface AgentOptions {
-  mode: 'analyst' | 'explain' | 'rule' | 'report' | 'free'
+  mode: 'analyst' | 'explain' | 'rule' | 'report' | 'triage' | 'free'
   model?: string
   think?: boolean
   tools?: boolean

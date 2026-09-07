@@ -578,6 +578,19 @@ and every artifact that ties a step to the mail is a labelled edge back to the s
 domain, attachment or sender. Its "all chains" mode draws every chain of the case against
 the sender addresses, link domains, IPs and hosts they share, and lists the shared ones.
 
+An attack chain and the findings whose rows are its steps are one item. When
+the chains are built, every finding whose rows all sit among a chain's steps
+(or on its seed mail) joins that chain's incident, so a phishing mail's rule
+hits and the findings on the recipient's later logons are never listed twice:
+once inside the chain and once on their own. The chain's verdict writes the
+status of its linked findings (confirmed → confirmed, benign → false positive,
+unsure → reviewed). A finding that does not belong can be unlinked on the
+Review page (one, or all of a chain): it leaves the chain, goes back into the
+queue on its own and keeps its own decisions; "link back" undoes that. Findings
+with more than 500 rows describe a pattern rather than steps and stay separate.
+Unlinks, rescoring and report exclusions survive a rule rerun like statuses and
+notes do.
+
 The Review page is where a case gets cleared. It walks the analyst through every
 attack chain (by score) and then every incident (by severity), one card at a time,
 with `j` / `k` to move and `r` / `e` / `f` / `x` for reviewed, confirmed, false positive
@@ -592,9 +605,29 @@ same bar sets what the report contains: the severity floor, the chain detail lev
 the sections (chains, case timeline, tasks, notes, indicators, evidence, false
 positives, reviewed items only). Decisions live on the findings and in the case's
 key-value store, travel with the bundle, and the Report page prints from them: attack
-chains with narrative and step table, incidents with their notes and member findings
-at the effective severity, then indicators, timeline, tasks, notes and the findings
-timeline. The Report page says how many items still have no decision. With
+chains with narrative, step table and the findings linked to them, the other
+incidents with their notes and member findings at the effective severity, then
+indicators, timeline, tasks, notes and the findings timeline. The Report page says
+how many items still have no decision.
+
+The model can take part in the review in three ways. "Ask the model to decide"
+on a card asks for a proposal on that item (decision, severity, in or out of the
+report, findings to unlink, reason) and shows it as a box the analyst applies or
+dismisses. In the AI analyst chat the model records the same kind of proposal
+with the `suggest_review` tool (on a finding or a chain), after looking at a
+chain with `get_chain`; proposals show on the Review page next to their item.
+"Triage with the model" sends the whole queue (undecided items by default, or
+everything) in batches of four (Ollama) or eight (Claude Code) and writes each
+decision straight away, tagged "AI" in the rail and on the card with the
+model's reason; a popup then lists every decision (item, decision, severity
+before and after, in or out of the report, unlinked findings, reason) with undo
+per line or for the whole run, and "last AI triage" reopens it. The triage
+prompt is `SYSTEM_TRIAGE` in `backend/services/ai/prompts.py`; the reply is a
+JSON array checked item by item (unknown ids, wrong words and unlink ids that
+are not linked findings are dropped and listed as "not applied"), and the words
+models use instead of the exact decisions (escalate, dismiss, false positive on
+a chain…) are mapped to the item's vocabulary. A decision made by the model is
+a decision like any other: changing it on the card makes it the analyst's. With
 "chain graphs" on (the default), each printed chain carries its swimlane graph
 as a picture, drawn off-screen from the same model as the Chains page in the
 report's light palette, and a report with several chains opens with the

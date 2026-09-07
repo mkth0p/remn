@@ -111,6 +111,16 @@ TOOLS: list[dict[str, Any]] = [
         "parameters": {"type": "object", "properties": {"sql": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["sql"]},
     }},
     {"type": "function", "function": {
+        "name": "get_chain",
+        "description": "One attack chain in full: recipient, score and its parts, seed mail, steps tied to the mail, and the findings linked to the chain (with their ids). Find it by chain id, or by the recipient's user name.",
+        "parameters": {"type": "object", "properties": {"chain_id": {"type": "string"}, "user": {"type": "string"}}},
+    }},
+    {"type": "function", "function": {
+        "name": "suggest_review",
+        "description": "Record a review proposal for the analyst (shown on the Review page, applied by the analyst): a new severity, a decision (incident: reviewed|escalated|false_positive; chain: confirmed|benign|unsure), whether the report should carry it, findings to unlink from a chain, and the reason. Target one finding (finding_id) or one chain (chain_id).",
+        "parameters": {"type": "object", "properties": {"finding_id": {"type": "integer"}, "chain_id": {"type": "string"}, "severity": {"type": "string", "enum": ["critical", "high", "medium", "low", "info"]}, "decision": {"type": "string", "enum": ["reviewed", "escalated", "false_positive", "confirmed", "benign", "unsure"]}, "include": {"type": "boolean"}, "unlink_finding_ids": {"type": "array", "items": {"type": "integer"}}, "reason": {"type": "string"}}, "required": ["reason"]},
+    }},
+    {"type": "function", "function": {
         "name": "pivot",
         "description": "Cross-source pivot on a value (IP, user, domain, hash, subject fragment): counts of events and mails mentioning it, with first/last seen.",
         "parameters": {"type": "object", "properties": {"value": {"type": "string"}}, "required": ["value"]},

@@ -1,6 +1,6 @@
 import { getDb, type Finding, type Severity } from '../db/schema'
 import type { Chain, ChainStep } from './chains'
-import { effectiveSeverity, ORDER, type Incident } from '../rules/incidents'
+import { chainMembership, effectiveSeverity, ORDER, type Incident } from '../rules/incidents'
 
 /**
  * Review decisions and report selection.
@@ -44,7 +44,16 @@ export interface ChainReview {
   include?: boolean
   severityOverride?: Severity
   reviewedAt?: number
+  /** who set the verdict */
+  by?: 'analyst' | 'ai'
+  /** the model's reason when it decided */
+  aiReason?: string
 }
+
+export type Status = Finding['status']
+
+/** The status a chain verdict writes to the chain's linked findings. */
+export const verdictStatus = (v: Verdict): Status => (v === 'confirmed' ? 'escalated' : v === 'benign' ? 'false_positive' : 'reviewed')
 
 export async function loadReportSettings(caseId: number): Promise<ReportSettings> {
   const v = (await getDb().kv.get(`report-settings-${caseId}`))?.value as Partial<ReportSettings> | undefined
@@ -81,10 +90,21 @@ export function findingInReport(f: Finding, s: ReportSettings): boolean {
   return rank(effectiveSeverity(f)) <= rank(s.minSeverity)
 }
 
+/**
+ * What the report contains. A finding linked to a chain follows its chain: printed with it when the
+ * chain is, left out when the chain is; every other finding passes the floor and the flags on its own.
+ */
 export function selectForReport(findings: Finding[], chains: Chain[], reviews: Record<string, ChainReview>, s: ReportSettings): { findings: Finding[]; chains: Chain[] } {
+  const selected = s.includeChains ? chains.filter((c) => chainIncluded(c, reviews[c.id]) && rank(chainSeverity(c, reviews[c.id])) <= rank(s.minSeverity)) : []
+  const printed = new Set(selected.map((c) => c.id))
+  const membership = chainMembership(findings, chains)
   return {
-    findings: findings.filter((f) => findingInReport(f, s)),
-    chains: s.includeChains ? chains.filter((c) => chainIncluded(c, reviews[c.id]) && rank(chainSeverity(c, reviews[c.id])) <= rank(s.minSeverity)) : [],
+    findings: findings.filter((f) => {
+      const chainId = f.id != null ? membership.get(f.id) : undefined
+      if (chainId) return printed.has(chainId) && !f.reportExclude
+      return findingInReport(f, s)
+    }),
+    chains: selected,
   }
 }
 
@@ -99,11 +119,32 @@ export interface ReviewItem {
   incident?: Incident
 }
 
-/** The order an analyst clears the case in: chains by score, then incidents by severity. */
+/**
+ * The order an analyst clears the case in: chains by score (each with the incident that holds its
+ * linked findings, when the incidents were built with the chains), then the other incidents by severity.
+ */
 export function reviewQueue(incidents: Incident[], chains: Chain[], reviews: Record<string, ChainReview>): ReviewItem[] {
-  const cs: ReviewItem[] = [...chains].sort((a, b) => b.score - a.score).map((c) => ({ id: `chain:${c.id}`, kind: 'chain', title: c.identityLabel, sub: `chain · score ${c.score} · ${c.steps.length} steps`, severity: chainSeverity(c, reviews[c.id]), done: !!reviews[c.id]?.verdict, chain: c }))
-  const is: ReviewItem[] = incidents.map((i) => ({ id: `incident:${i.id}`, kind: 'incident', title: i.title, sub: i.subtitle, severity: i.severity, done: i.status !== 'new', incident: i }))
+  const byChain = new Map(incidents.filter((i) => i.kind === 'chain' && i.chain).map((i) => [i.chain!.id, i]))
+  const cs: ReviewItem[] = [...chains].sort((a, b) => b.score - a.score).map((c) => ({ id: `chain:${c.id}`, kind: 'chain', title: c.identityLabel, sub: `chain · score ${c.score} · ${c.steps.length} steps${byChain.get(c.id) ? ` · ${byChain.get(c.id)!.findings.length} findings` : ''}`, severity: chainSeverity(c, reviews[c.id]), done: !!reviews[c.id]?.verdict, chain: c, incident: byChain.get(c.id) }))
+  const is: ReviewItem[] = incidents.filter((i) => i.kind !== 'chain').map((i) => ({ id: `incident:${i.id}`, kind: 'incident', title: i.title, sub: i.subtitle, severity: i.severity, done: i.status !== 'new', incident: i }))
   return [...cs, ...is]
+}
+
+/** The findings a chain verdict decides on: the chain's linked findings, its own row included. */
+export const chainMembers = (inc: Incident | undefined): Finding[] => (inc?.kind === 'chain' ? inc.findings : [])
+
+/** Set a chain's verdict and write the matching status to its linked findings. */
+export async function applyChainVerdict(caseId: number, chain: Chain, members: Finding[], verdict: Verdict, by: 'analyst' | 'ai' = 'analyst', aiReason?: string): Promise<Record<string, ChainReview>> {
+  const db = getDb()
+  const status = verdictStatus(verdict)
+  await Promise.all(members.filter((f) => f.id != null).map((f) => db.findings.update(f.id!, { status, decidedBy: by, ...(by === 'ai' && aiReason ? { aiReason } : {}) })))
+  return saveChainReview(caseId, chain.id, { verdict, by, ...(by === 'ai' ? { aiReason } : { aiReason: undefined }) })
+}
+
+/** Take findings out of their chain (or put them back): unlinked findings are decided on their own. */
+export async function setChainUnlinked(ids: number[], on: boolean): Promise<void> {
+  const db = getDb()
+  await Promise.all(ids.map((id) => db.findings.update(id, { chainUnlinked: on || undefined })))
 }
 
 /**

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Chain, ChainStep } from './chains'
 import type { Finding } from '../db/schema'
 import { buildIncidents } from '../rules/incidents'
-import { DEFAULT_REPORT, overridesForIncident, reviewQueue, selectForReport, stepVisible } from './review'
+import { DEFAULT_REPORT, overridesForIncident, reviewQueue, selectForReport, stepVisible, verdictStatus } from './review'
 
 let seq = 1
 const f = (p: Partial<Finding> & { ruleId: string; severity: Finding['severity'] }): Finding => ({ id: seq++, caseId: 1, key: `${p.ruleId}|${seq}`, title: p.ruleId, source: 'mails', ts: 10, entities: {}, count: 1, refs: [seq], attack: [], status: 'new', createdAt: 0, ...p })
@@ -55,5 +55,39 @@ describe('report selection', () => {
     const up = overridesForIncident(buildIncidents([f({ ruleId: 'd', severity: 'low', refs: [8] })])[0], 'high')
     expect(up[0].severityOverride).toBe('high')
     expect(overridesForIncident(inc, null).every((o) => o.severityOverride === undefined)).toBe(true)
+  })
+})
+
+describe('chains in the queue and the report', () => {
+  const c = chain('alice', 90, 'critical')
+  c.seed.id = 7
+  c.steps = [step({ id: 11 })]
+  const rows = () => [
+    f({ ruleId: 'chain', key: 'chain|alice|7', severity: 'critical', refs: [7] }),
+    f({ ruleId: 'mail-credential-phishing', severity: 'low', refs: [7] }),
+    f({ ruleId: 'win-logon-external', severity: 'low', source: 'events', refs: [11], entities: { targetUser: 'alice' } }),
+    f({ ruleId: 'other', severity: 'high', refs: [8] }),
+  ]
+
+  it('lists the chain once, with its incident, and never its members as separate items', () => {
+    const inc = buildIncidents(rows(), { chains: [c] })
+    const q = reviewQueue(inc, [c], {})
+    expect(q.map((i) => i.id)).toEqual(['chain:alice', 'incident:mail:8'])
+    expect(q[0].incident?.findings).toHaveLength(3)
+    expect(q[0].sub).toContain('3 findings')
+  })
+
+  it('members follow their chain into or out of the report, whatever their severity', () => {
+    const inReport = selectForReport(rows(), [c], { alice: { verdict: 'confirmed' } }, { ...DEFAULT_REPORT, minSeverity: 'high' })
+    expect(inReport.findings.map((x) => x.ruleId).sort()).toEqual(['chain', 'mail-credential-phishing', 'other', 'win-logon-external'])
+    const out = selectForReport(rows(), [c], { alice: { verdict: 'benign' } }, { ...DEFAULT_REPORT, minSeverity: 'high' })
+    expect(out.findings.map((x) => x.ruleId)).toEqual(['other'])
+    expect(out.chains).toEqual([])
+  })
+
+  it('a verdict maps to the status its linked findings get', () => {
+    expect(verdictStatus('confirmed')).toBe('escalated')
+    expect(verdictStatus('benign')).toBe('false_positive')
+    expect(verdictStatus('unsure')).toBe('reviewed')
   })
 })

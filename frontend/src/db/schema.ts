@@ -294,6 +294,12 @@ export interface Finding {
   severityOverride?: Severity
   /** kept out of the report whatever its severity */
   reportExclude?: boolean
+  /** taken out of its attack chain by the analyst (or the model): decided on its own again */
+  chainUnlinked?: boolean
+  /** who made the last decision on this finding */
+  decidedBy?: 'analyst' | 'ai'
+  /** the model's reason when it decided (kept apart from the analyst's note) */
+  aiReason?: string
 }
 
 export interface Ioc {
@@ -420,7 +426,7 @@ export function setDb(db: RemnDB | null): void {
 }
 
 /** kv keys that belong to one case (mirrors CASE_KV_PREFIXES in data/caseState.ts, kept here to avoid a schema -> data import). */
-export const CASE_KV_KEYS = (caseId: number) => ['chains', 'ruleDiags', 'baseline', 'mail-calibration', 'report-summary', 'finding-reviews', 'chain-reviews', 'report-settings', 'findingCounts'].map((p) => `${p}-${caseId}`)
+export const CASE_KV_KEYS = (caseId: number) => ['chains', 'ruleDiags', 'baseline', 'mail-calibration', 'report-summary', 'finding-reviews', 'chain-reviews', 'report-settings', 'findingCounts', 'ai-suggestions', 'ai-triage'].map((p) => `${p}-${caseId}`)
 
 export async function deleteCaseData(db: RemnDB, caseId: number): Promise<void> {
   await db.transaction('rw', [db.events, db.mails, db.mailBodies, db.attachments, db.urls, db.findings, db.iocs, db.facets, db.aiSessions, db.savedSearches, db.evidence, db.caseNotes, db.kv], async () => {

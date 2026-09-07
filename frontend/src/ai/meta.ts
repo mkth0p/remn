@@ -6,7 +6,7 @@
 import { apiGet } from '../api/client'
 
 export interface AiMeta {
-  prompts: Record<'analyst' | 'query' | 'explain' | 'rule' | 'report' | 'free', string>
+  prompts: Record<'analyst' | 'query' | 'explain' | 'rule' | 'report' | 'triage' | 'free', string>
   tools: Record<string, unknown>[]
   querySchema: Record<string, unknown>
   schemaDoc: string

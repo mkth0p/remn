@@ -60,13 +60,16 @@ export function ReportView() {
   }, [selection.chains, settings?.includeGraphs])
   if (!kase || !settings) return null
   const shown = selection.findings
-  const incidents = buildIncidents(shown)
+  // findings linked to a printed chain are printed with it, not as incidents
+  const grouped = buildIncidents(shown, { chains: selection.chains, severityOf: (c) => chainSeverity(c, reviews[c.id]) })
+  const incidents = grouped.filter((i) => i.kind !== 'chain')
+  const membersOf = new Map(grouped.filter((i) => i.kind === 'chain' && i.chain).map((i) => [i.chain!.id, i.findings.filter((f) => f.ruleId !== 'chain')]))
   const bySev = shown.reduce((acc, f) => ((acc[effectiveSeverity(f)] = (acc[effectiveSeverity(f)] ?? 0) + 1), acc), {} as Record<string, number>)
   const curated = notes.filter((n) => n.kind === 'timeline').sort((a, b) => a.ts - b.ts)
   const tasks = notes.filter((n) => n.kind === 'task').sort((a, b) => Number(a.done ?? false) - Number(b.done ?? false) || a.createdAt - b.createdAt)
   const analystNotes = notes.filter((n) => n.kind === 'note').sort((a, b) => a.createdAt - b.createdAt)
   // same unit as the Review page: incidents without a decision plus chains without a verdict
-  const undecided = buildIncidents(findings).filter((i) => i.status === 'new').length + chains.filter((c) => !reviews[c.id]?.verdict).length
+  const undecided = buildIncidents(findings, { chains }).filter((i) => (i.kind === 'chain' && i.chain ? !reviews[i.chain.id]?.verdict : i.status === 'new')).length
 
   const generateSummary = async () => {
     if (useStore.getState().aiStatus.reachable !== true) return toast('err', 'the analyst model is not reachable (see the AI section in Settings)')
@@ -106,7 +109,7 @@ export function ReportView() {
 <p class="muted">Seed mail "${h(c.seed.subject)}" from ${h(c.seed.fromAddr ?? '')} at ${fmtTs(c.seed.ts)} (risk ${c.seed.risk}) · ${c.steps.length} steps from ${fmtTs(c.start)} to ${fmtTs(c.end)} · ${c.artifactLinks} artifact link(s)${c.entities.attackerAddresses.length ? ` · attacker ${h(c.entities.attackerAddresses.join(', '))}` : ''}${c.entities.ips.length ? ` · IPs ${h(c.entities.ips.join(', '))}` : ''}</p>
 <p>${r?.narrative ? renderMarkdown(r.narrative) : h(c.summary)}</p>
 ${settings.includeGraphs ? img(graphs[c.id], `graph of the chain for ${c.identityLabel}: seed mail, steps by lane and time, ties to the mail`) : ''}
-<table><tr><th>time (UTC)</th><th>offset</th><th>source</th><th>step</th><th>ties to the mail / findings</th></tr>${rows(steps.map((s) => [fmtTs(s.ts), `${s.offsetMin >= 0 ? '+' : ''}${Math.round(s.offsetMin)} min`, h(s.kind === 'mail' ? 'mailbox' : s.origin === 'm365' ? 'Microsoft 365' : 'host'), h(s.title) + (s.computer || s.ipAddress ? `<br><span class="muted">${h([s.computer, s.ipAddress].filter(Boolean).join(' · '))}</span>` : ''), h([...s.artifacts, ...s.findings.map((f) => f.title)].join('; '))]))}</table>${hidden ? `<p class="muted">${hidden} routine step(s) not printed at the "${h(settings.chainDetail)}" detail level.</p>` : ''}`
+<table><tr><th>time (UTC)</th><th>offset</th><th>source</th><th>step</th><th>ties to the mail / findings</th></tr>${rows(steps.map((s) => [fmtTs(s.ts), `${s.offsetMin >= 0 ? '+' : ''}${Math.round(s.offsetMin)} min`, h(s.kind === 'mail' ? 'mailbox' : s.origin === 'm365' ? 'Microsoft 365' : 'host'), h(s.title) + (s.computer || s.ipAddress ? `<br><span class="muted">${h([s.computer, s.ipAddress].filter(Boolean).join(' · '))}</span>` : ''), h([...s.artifacts, ...s.findings.map((f) => f.title)].join('; '))]))}</table>${hidden ? `<p class="muted">${hidden} routine step(s) not printed at the "${h(settings.chainDetail)}" detail level.</p>` : ''}${(membersOf.get(c.id) ?? []).length ? `<p class="muted">${(membersOf.get(c.id) ?? []).length} finding(s) linked to this chain (decided with it):</p><table><tr><th>severity</th><th>finding</th><th>rule</th><th>rows</th><th>status</th></tr>${rows((membersOf.get(c.id) ?? []).map((f) => [sev(effectiveSeverity(f)), h(f.title), `<code>${h(f.ruleId)}</code>`, String(f.count), h(f.status === 'escalated' ? 'confirmed' : f.status === 'false_positive' ? 'false positive' : f.status)]))}</table>` : ''}${r?.by === 'ai' && r.aiReason ? `<p class="muted">Triage note (model): ${h(r.aiReason)}</p>` : ''}`
     }).join('\n')
     return `<!doctype html><html><head><meta charset="utf-8"><title>REMN report - ${h(kase.name)}</title>
 <style>body{font:13px/1.5 Segoe UI,Arial,sans-serif;color:#111;margin:40px;max-width:1100px}h1{font-size:22px;border-bottom:2px solid #222;padding-bottom:6px}h2{font-size:16px;margin-top:28px;border-bottom:1px solid #ccc}h3{font-size:14px;margin-top:20px}table{border-collapse:collapse;width:100%;font-size:12px;margin:6px 0 12px}td,th{border:1px solid #ccc;padding:4px 6px;text-align:left;vertical-align:top}th{background:#eee}code,.mono{font-family:Consolas,monospace;font-size:11px}.sev-critical{color:#b00035;font-weight:bold}.sev-high{color:#c4471b;font-weight:bold}.sev-medium{color:#9a6b00}.sev-low{color:#1f5fb0}.sev-info{color:#666}.muted{color:#666}figure{margin:8px 0 12px;page-break-inside:avoid}figure img{width:100%;border:1px solid #ddd}</style></head><body>
@@ -120,7 +123,7 @@ ${selection.chains.length ? `<h2>Attack chains (${selection.chains.length})</h2>
 <p>${ORDER.map((s) => `<span class="sev-${s}">${s}: ${bySev[s] ?? 0}</span>`).join(' · ')} finding(s). Findings on the same mail, or about the same user, host or IP within six hours, are one incident.</p>
 ${incidents.map((i) => `<h3>${sev(i.severity)} · ${h(i.title)}${i.status !== 'new' ? ` · ${h(i.status === 'escalated' ? 'confirmed' : i.status === 'false_positive' ? 'false positive' : i.status)}` : ''}</h3>
 <p class="muted">${h(i.subtitle)} · ${fmtTs(i.ts)}${i.tsEnd && i.tsEnd !== i.ts ? ` → ${fmtTs(i.tsEnd)}` : ''} · entities: <code>${h(Object.entries(i.entities).slice(0, 8).map(([k, v]) => `${k}=${v}`).join('; '))}</code></p>
-${i.lead.notes ? `<p>${renderMarkdown(i.lead.notes)}</p>` : ''}
+${i.lead.notes ? `<p>${renderMarkdown(i.lead.notes)}</p>` : ''}${i.lead.decidedBy === 'ai' && i.lead.aiReason ? `<p class="muted">Triage note (model): ${h(i.lead.aiReason)}</p>` : ''}
 <table><tr><th>severity</th><th>finding</th><th>rule</th><th>rows</th><th>first</th><th>ATT&amp;CK</th></tr>${rows(i.findings.map((f) => [sev(effectiveSeverity(f)) + (f.severityOverride ? `<br><span class="muted">rule: ${h(f.severity)}</span>` : ''), h(f.title) + (f.escalation ? `<br><span class="muted">${h(f.escalation)}</span>` : ''), `<code>${h(f.ruleId)}</code>`, String(f.count), fmtTs(f.ts), h(f.attack.join(' '))]))}</table>`).join('\n')}
 ${settings.includeIocs ? `<h2>Indicators of compromise (flagged by reputation)</h2>
 ${iocs.length ? `<table><tr><th>kind</th><th>indicator (defanged)</th><th>verdict</th><th>tags</th><th>seen</th></tr>${rows(iocs.map((i) => [h(i.kind), `<code>${h(defang(i.value))}</code>`, h(i.verdict ?? ''), h((i.tags ?? []).join(' ')), h(`${i.count} (${i.sources.join(', ')})`)]))}</table>` : '<p class="muted">No indicator flagged (reputation checks not run, or nothing malicious).</p>'}` : ''}

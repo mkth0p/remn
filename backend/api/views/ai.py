@@ -55,7 +55,7 @@ def ai_meta(request: HttpRequest):
 
     resp = JsonResponse({
         "prompts": {"analyst": prompts.SYSTEM_ANALYST, "query": prompts.SYSTEM_QUERY, "explain": prompts.SYSTEM_EXPLAIN,
-                    "rule": prompts.SYSTEM_RULE, "report": prompts.SYSTEM_REPORT, "free": ""},
+                    "rule": prompts.SYSTEM_RULE, "report": prompts.SYSTEM_REPORT, "triage": prompts.SYSTEM_TRIAGE, "free": ""},
         "tools": TOOLS,
         "querySchema": QUERY_SCHEMA,
         "schemaDoc": SCHEMA_DOC,

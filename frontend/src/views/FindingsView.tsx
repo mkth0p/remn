@@ -10,7 +10,9 @@ import { loadRules, type LoadedRule } from '../data/rules'
 import { findingsStaleness, runEnabledRules, type Staleness } from '../data/findingsState'
 import { getSource } from '../data/source'
 import { getDb, type Finding, type Severity } from '../db/schema'
-import { buildIncidents, effectiveSeverity, sevCounts, type Incident } from '../rules/incidents'
+import { buildIncidents, chainMembership, effectiveSeverity, sevCounts, type Incident } from '../rules/incidents'
+import { loadChains, type Chain } from '../data/chains'
+import { chainSeverity, loadChainReviews, type ChainReview } from '../data/review'
 import { useStore } from '../state/store'
 import { classNames, fmtNum, fmtTs } from '../util/format'
 import { exportCsv, exportJson } from '../util/export'
@@ -24,7 +26,7 @@ const REFS_OPEN = 2000
 
 const STATUS_LABEL: Record<Status, string> = { new: 'new', reviewed: 'reviewed', escalated: 'escalated', false_positive: 'false positive' }
 const STATUS_SEV: Record<Status, string> = { new: 'accent', reviewed: 'ok', escalated: 'critical', false_positive: 'info' }
-const KIND_LABEL: Record<Incident['kind'], string> = { mail: 'mail', entity: 'entity', group: 'grouped' }
+const KIND_LABEL: Record<Incident['kind'], string> = { chain: 'chain', mail: 'mail', entity: 'entity', group: 'grouped' }
 
 interface LastRun {
   ts: number
@@ -59,6 +61,8 @@ export function FindingsView() {
   const setEntity = useStore((s) => s.setEntity)
   const openEntity = (k: string, v: string, source: 'events' | 'mails') => { const kind = entityKind(k); if (kind && v && !v.includes(',')) setEntity({ kind, value: v }); else pivot(v, k, source) }
   const [all, setAll] = useState<Finding[]>([])
+  const [chains, setChains] = useState<Chain[]>([])
+  const [chainReviews, setChainReviews] = useState<Record<string, ChainReview>>({})
   const [sev, setSev] = useState('')
   const [status, setStatus] = useState('')
   const [source, setSource] = useState('')
@@ -83,6 +87,8 @@ export function FindingsView() {
     const db = getDb()
     db.findings.where('caseId').equals(kase.id).toArray().then((f) => setAll(f.sort((a, b) => ORDER.indexOf(a.severity) - ORDER.indexOf(b.severity) || (b.ts ?? 0) - (a.ts ?? 0))))
     db.kv.get(`ruleDiags-${kase.id}`).then((k) => setLastRun((k?.value as LastRun) ?? null))
+    loadChains(kase.id).then((r) => setChains(r?.chains ?? []))
+    loadChainReviews(kase.id).then(setChainReviews)
     db.kv.get(`findingCounts-${kase.id}`).then((k) => setPrevious(((k?.value as { previous?: Record<string, number> }) ?? {}).previous ?? null))
     findingsStaleness(kase.id).then(setStale).catch(() => setStale(null))
   }, [kase?.id])
@@ -111,8 +117,10 @@ export function FindingsView() {
     const base = status === 'false_positive' || showFp ? all : active
     return base.filter((f) => (!sev || f.severity === sev) && (!status || f.status === status) && (!source || f.source === source) && (!needle || `${f.title} ${f.ruleId} ${JSON.stringify(f.entities)} ${f.attack.join(' ')}`.toLowerCase().includes(needle)))
   }, [all, active, sev, status, source, q, showFp])
-  const incidents = useMemo(() => (group === 'incident' ? buildIncidents(rows) : []), [rows, group])
-  const allIncidents = useMemo(() => buildIncidents(active), [active])
+  const incidentOpts = useMemo(() => ({ chains, severityOf: (c: Chain) => chainSeverity(c, chainReviews[c.id]) }), [chains, chainReviews])
+  const incidents = useMemo(() => (group === 'incident' ? buildIncidents(rows, incidentOpts) : []), [rows, group, incidentOpts])
+  const allIncidents = useMemo(() => buildIncidents(active, incidentOpts), [active, incidentOpts])
+  const membership = useMemo(() => chainMembership(all, chains), [all, chains])
   const counts = useMemo(() => (group === 'incident' ? sevCounts(allIncidents) : sevCounts(active)), [active, allIncidents, group])
   const groups = useMemo(() => {
     if (!group || group === 'incident') return []
@@ -239,7 +247,7 @@ export function FindingsView() {
 
   const columns: Column<Finding>[] = [
     { key: 'severity', label: 'severity', width: 104, render: (r) => <Sev sev={effectiveSeverity(r)}>{effectiveSeverity(r)}{r.severityOverride ? <span className="muted" title={`rule severity ${r.severity}, rescored on the Review page`}>*</span> : null}</Sev> },
-    { key: 'title', label: 'finding', width: 'minmax(280px, 1.6fr)', render: (r) => <span className="sans ellipsis" title={r.description}>{r.title}{r.escalation ? <span className="muted"> · {r.escalation}</span> : null}</span> },
+    { key: 'title', label: 'finding', width: 'minmax(280px, 1.6fr)', render: (r) => <span className="sans ellipsis" title={r.description}>{r.title}{r.escalation ? <span className="muted"> · {r.escalation}</span> : null}{r.id != null && membership.has(r.id) && r.ruleId !== 'chain' ? <> <Badge sev="outline" title="its rows are steps of an attack chain: decided with the chain on the Review page">chain</Badge></> : null}{r.chainUnlinked ? <> <Badge sev="outline" title="taken out of its attack chain: decided on its own">unlinked</Badge></> : null}</span> },
     { key: 'entities', label: 'entities', width: 'minmax(220px, 1fr)', render: (r) => Object.entries(r.entities).map(([k, v]) => `${k}=${v}`).join(' · ') },
     { key: 'attack', label: 'att&ck', width: 130, render: (r) => <span className="row" style={{ gap: 4 }}>{r.attack.slice(0, 2).map((t) => <Badge key={t} sev="outline">{t}</Badge>)}{r.attack.length > 2 ? <span className="muted">+{r.attack.length - 2}</span> : null}</span> },
     { key: 'source', label: 'source', width: 70 },
@@ -423,7 +431,7 @@ export function FindingsView() {
               >
                 <div className="section">
                   <h3>Findings</h3>
-                  <div className="small muted">{incident.subtitle}. The status of the incident is set on every finding below; open one for its own detail.</div>
+                  <div className="small muted">{incident.subtitle}. {incident.kind === 'chain' ? 'These findings have their rows among the steps of the attack chain: the verdict on the Review page decides them together, and a finding can be unlinked there to be decided on its own.' : 'The status of the incident is set on every finding below; open one for its own detail.'}</div>
                   <table className="table compact">
                     <tbody>{incident.findings.map((f) => memberRow(f, incident))}</tbody>
                   </table>

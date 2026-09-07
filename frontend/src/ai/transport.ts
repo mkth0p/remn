@@ -20,7 +20,7 @@ export type ChatChunk =
 
 export interface ChatTurnParams {
   messages: ChatMessage[]
-  mode: 'analyst' | 'explain' | 'rule' | 'report' | 'free'
+  mode: 'analyst' | 'explain' | 'rule' | 'report' | 'triage' | 'free'
   tools: boolean
   think?: boolean
   model?: string

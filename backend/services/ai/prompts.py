@@ -50,6 +50,11 @@ Prefer aggregate_events / timeline_events to get the shape of the data before li
 (limit 50 or fewer). Chain at most ~8 tool calls per question. When done, answer in concise English with:
   1. Direct answer / verdict. 2. Evidence (bullet list with ids, times, users, IPs). 3. Suggested next pivots.
 Use MITRE ATT&CK technique ids when relevant. Never execute, decode or "detonate" anything; you only read metadata.
+Review decisions: when the analyst asks you to assess, rescore, confirm, dismiss or triage a finding, an incident or an
+attack chain, record your proposal with suggest_review (severity, decision, in or out of the report, findings to unlink
+from a chain, and the reason); the analyst applies it on the Review page. get_chain shows a chain's steps and the
+findings linked to it (those are decided with the chain unless unlinked). Findings whose rows are steps of a chain are
+part of that chain's incident, not separate incidents.
 Times in the data are epoch milliseconds UTC; tsIso/dateIso are ISO strings. Business hours and internal domains are
 provided in the case settings when relevant.
 
@@ -112,7 +117,25 @@ list and statistics provided as JSON. Write in English, factual, no speculation,
 Key findings (bullets with severity, entities, timestamps UTC and record ids), Timeline (chronological bullets),
 Indicators of compromise (table-like bullets), Recommendations (prioritised). Keep it under 600 words."""
 
-SYSTEM_BY_MODE = {"analyst": SYSTEM_ANALYST, "explain": SYSTEM_EXPLAIN, "rule": SYSTEM_RULE, "report": SYSTEM_REPORT, "free": ""}
+SYSTEM_TRIAGE = """You triage the review queue of a digital forensics case: incidents (findings grouped on one mail, or on one
+user, host or IP) and attack chains (a suspicious mail and what the recipient's accounts and machines did after it).
+For each item you are given its facts as JSON: severity from the rules, findings, entities, time span, and for chains
+the seed mail, the score and its parts, the steps tied to the mail and the findings linked to the chain. Decide from
+those facts only; never assume records you were not given.
+
+Decisions. Incidents: "escalated" = real, needs action; "reviewed" = looked at, nothing to do or benign context
+(expected admin activity, a known notification sender, a lab or test signal); "false_positive" = the rules misfired on
+this data. Chains: "confirmed" = the activity after the mail is tied to it and looks like account or host compromise;
+"benign" = the mail is harmless or nothing that followed relates to it; "unsure" = suspicious but the facts given do
+not settle it. Severity: keep the rule severity unless the facts justify a change (raise for credential harvesting,
+mailbox forwarding rules, external logons after a phishing mail, macros, ransomware notes, log clearing; lower for
+notifications from authenticated known relays, expected service accounts, single weak signals). "include" is whether
+the report should carry the item: false for false positives, benign chains and noise. "unlink" (chains only) lists
+linked finding ids that describe something unrelated to the chain and should be handled on their own; leave it empty
+unless a finding clearly does not belong. Be conservative with false_positive and benign: only when the facts show it.
+Give one or two factual sentences of reason per item, naming the facts you relied on. Reply with ONLY the JSON array."""
+
+SYSTEM_BY_MODE = {"analyst": SYSTEM_ANALYST, "explain": SYSTEM_EXPLAIN, "rule": SYSTEM_RULE, "report": SYSTEM_REPORT, "triage": SYSTEM_TRIAGE, "free": ""}
 
 
 def compose_system(mode: str, context: dict) -> str:

@@ -473,3 +473,12 @@ label.field > span { font-weight: 500; }
 .review-card .controls .lbl { font-size: 11px; color: var(--fg-3); text-transform: uppercase; letter-spacing: 0.05em; margin-right: 6px; }
 .review-progress { height: 4px; background: var(--surface-3); border-radius: 2px; overflow: hidden; }
 .review-progress > div { height: 100%; background: var(--accent); }
+
+/* the model's part in the review */
+.ai-tag { font-size: 9.5px; font-weight: 600; letter-spacing: 0.06em; padding: 0 5px; border-radius: 3px; color: var(--accent); background: var(--accent-dim); text-transform: uppercase; }
+.ai-tag.proposal { color: var(--sev-medium); background: var(--sev-medium-bg); }
+.ai-note { font-size: 12px; padding: 8px 12px; border-left: 3px solid var(--accent); background: var(--surface-2); border-radius: 0 var(--radius) var(--radius) 0; color: var(--fg-1); }
+.suggestion { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px dashed var(--accent); border-radius: var(--radius-lg); background: var(--accent-dim); font-size: 12.5px; }
+.triage-table td { vertical-align: top; }
+.triage-table tr.undone td { opacity: 0.45; text-decoration: line-through; }
+.triage-table tr.undone td:last-child { text-decoration: none; }

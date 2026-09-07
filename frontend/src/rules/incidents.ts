@@ -1,9 +1,13 @@
 import type { Finding, Severity } from '../db/schema'
+import type { Chain } from '../data/chains'
 
 /**
  * Incidents: findings grouped around what an analyst actually reviews.
  *
- * - every finding on one mail (rules, score bands, the attack chain seeded by it) is one incident;
+ * - an attack chain and every finding whose rows are steps of it (the seed mail's findings, the
+ *   findings on its events) are one incident, so a step never shows up twice; a finding the analyst
+ *   unlinks leaves the chain and is decided on its own again;
+ * - every finding on one mail (rules, score bands) is one incident;
  * - event findings about the same user / host / IP within a time gap (6 h by default) are one
  *   incident, the way Sentinel and Elastic group alerts on shared entities;
  * - grouped findings without a usable entity (bursts keyed by something else) stay on their own.
@@ -12,7 +16,7 @@ import type { Finding, Severity } from '../db/schema'
  * derived from its members (setting it writes to every member).
  */
 
-export type IncidentKind = 'mail' | 'entity' | 'group'
+export type IncidentKind = 'chain' | 'mail' | 'entity' | 'group'
 export type Status = Finding['status']
 
 export interface Incident {
@@ -32,6 +36,16 @@ export interface Incident {
   status: Status
   /** the member that gives the incident its severity and its headline */
   lead: Finding
+  /** chain incidents: the chain itself */
+  chain?: Chain
+}
+
+export interface IncidentOptions {
+  gapMs?: number
+  /** attack chains: their member findings become one incident per chain */
+  chains?: Chain[]
+  /** severity of a chain incident (the Review page passes the analyst's override); default the chain's */
+  severityOf?: (c: Chain) => Severity
 }
 
 export const ORDER: Severity[] = ['critical', 'high', 'medium', 'low', 'info']
@@ -40,6 +54,8 @@ const USER_FIELDS = ['targetUser', 'subjectUser', 'user', 'upn', 'memberName', '
 const HOST_FIELDS = ['computer', 'host', 'workstation']
 const IP_FIELDS = ['ipAddress', 'sourceIp', 'clientIp', 'ip']
 const MAX_REFS = 5000
+/** a finding with more rows than this describes a pattern, not steps of a chain */
+const MAX_MEMBER_REFS = 500
 
 const rank = (s: Severity) => ORDER.indexOf(s)
 /** the analyst's rescoring wins over the rule's severity */
@@ -54,6 +70,49 @@ export function primaryEntity(f: Finding): { field: string; value: string } | nu
     }
   }
   return null
+}
+
+/** The finding row that mirrors a chain (see data/chains.ts persistChainFindings). */
+export const chainFindingKey = (c: Chain) => `chain|${c.identity}|${c.seed.id}`
+
+/** Row ids a chain is made of: its seed mail(s) and every step (folded runs carry their rows in refs). */
+export function chainCoverage(c: Chain): { mails: Set<number>; events: Set<number> } {
+  const mails = new Set<number>([c.seed.id, ...(c.relatedSeeds ?? []).map((x) => x.id)])
+  const events = new Set<number>()
+  for (const s of c.steps) {
+    const set = s.source === 'mails' ? mails : events
+    if (s.id != null) set.add(s.id)
+    for (const r of s.refs ?? []) set.add(r)
+  }
+  return { mails, events }
+}
+
+/**
+ * Which chain each finding belongs to: the chain's own row, and every finding whose rows are all
+ * steps (or the seed mail) of the chain. Unlinked findings stay out; when chains overlap the one
+ * with the higher score takes the finding.
+ */
+export function chainMembership(findings: Finding[], chains: Chain[]): Map<number, string> {
+  const out = new Map<number, string>()
+  if (!chains.length) return out
+  const cov = [...chains].sort((a, b) => b.score - a.score).map((c) => ({ c, key: chainFindingKey(c), ...chainCoverage(c) }))
+  for (const f of findings) {
+    if (f.id == null) continue
+    if (f.ruleId === 'chain') {
+      const hit = cov.find((x) => x.key === f.key)
+      if (hit) out.set(f.id, hit.c.id)
+      continue
+    }
+    if (f.chainUnlinked || !f.refs.length || f.refs.length > MAX_MEMBER_REFS) continue
+    for (const x of cov) {
+      const set = f.source === 'mails' ? x.mails : x.events
+      if (f.refs.every((r) => set.has(r))) {
+        out.set(f.id, x.c.id)
+        break
+      }
+    }
+  }
+  return out
 }
 
 /** Derived status: all false positive → false positive; any escalated → escalated; all handled → reviewed; else new. */
@@ -103,12 +162,22 @@ function finish(id: string, kind: IncidentKind, members: Finding[], title?: stri
 }
 
 /** Group findings into incidents. Pure; the order is severity, then breadth (rules), then recency. */
-export function buildIncidents(findings: Finding[], opts: { gapMs?: number } = {}): Incident[] {
+export function buildIncidents(findings: Finding[], opts: IncidentOptions = {}): Incident[] {
   const gap = opts.gapMs ?? DEFAULT_GAP_MS
   const mail = new Map<number, Finding[]>()
   const byEntity = new Map<string, { field: string; value: string; items: Finding[] }>()
   const groups: Finding[][] = []
+  const chains = opts.chains ?? []
+  const membership = chainMembership(findings, chains)
+  const byChain = new Map<string, Finding[]>()
   for (const f of findings) {
+    const chainId = f.id != null ? membership.get(f.id) : undefined
+    if (chainId) {
+      const arr = byChain.get(chainId) ?? []
+      arr.push(f)
+      byChain.set(chainId, arr)
+      continue
+    }
     if (f.source === 'mails' && f.refs.length === 1) {
       const id = f.refs[0]
       const arr = mail.get(id) ?? []
@@ -129,6 +198,17 @@ export function buildIncidents(findings: Finding[], opts: { gapMs?: number } = {
     groups.push([f])
   }
   const out: Incident[] = []
+  for (const c of chains) {
+    const members = byChain.get(c.id)
+    if (!members) continue
+    const own = members.find((f) => f.ruleId === 'chain')
+    const n = members.length - (own ? 1 : 0)
+    const inc = finish(`chain:${c.id}`, 'chain', members, `Attack chain · ${c.identityLabel}`, `score ${c.score} · ${c.steps.length} step${c.steps.length === 1 ? '' : 's'} · ${n} linked finding${n === 1 ? '' : 's'}`)
+    inc.chain = c
+    inc.severity = opts.severityOf ? opts.severityOf(c) : c.severity
+    if (own) inc.lead = own
+    out.push(inc)
+  }
   for (const [id, members] of mail) {
     const withSubject = members.find((f) => f.entities.subject)
     const from = members.find((f) => f.entities.fromAddr)?.entities.fromAddr
