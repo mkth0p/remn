@@ -17,7 +17,7 @@ die() { printf '\n\033[31merror: %s\033[0m\n' "$*" >&2; exit 1; }
 : "${REMN_DOMAIN:?set REMN_DOMAIN to the name browsers will use, e.g. REMN_DOMAIN=remn.example.tech}"
 [ -f docker-compose.public.yml ] || die "run this from the repository clone (docker-compose.public.yml is not here)"
 
-# The user who invoked sudo owns the keys that matter; root's own keys count on a fresh Droplet.
+# The user who invoked sudo owns the keys that matter; root's own keys count on a freshly created machine.
 ADMIN="${SUDO_USER:-root}"
 ADMIN_HOME=$(getent passwd "$ADMIN" | cut -d: -f6)
 
