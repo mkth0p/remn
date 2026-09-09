@@ -147,7 +147,12 @@ EOF
 fi
 
 log "Building and starting REMN in browser-only mode"
-REMN_DOMAIN="$REMN_DOMAIN" docker compose -f docker-compose.public.yml up -d --build
+# Compose reads .env from the project directory, so every later `docker compose ... ps|logs|down`
+# works without repeating the variable. It is gitignored, and holds no secret.
+printf 'REMN_DOMAIN=%s
+' "$REMN_DOMAIN" >.env
+chown "$ADMIN" .env 2>/dev/null || true
+docker compose -f docker-compose.public.yml up -d --build
 
 log "Waiting for the certificate and the first answer"
 for _ in $(seq 1 30); do

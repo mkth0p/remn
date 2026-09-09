@@ -177,7 +177,9 @@ and 443 open:
 REMN_DOMAIN=remn.example.tech docker compose -f docker-compose.public.yml up -d --build
 ```
 
-Caddy obtains and renews the certificate itself. The variables `REMN_RATE_LIMIT`
+The setup script writes `REMN_DOMAIN` into a `.env` file beside the compose file, so later
+commands such as `docker compose -f docker-compose.public.yml logs -f caddy` work without
+repeating it. Caddy obtains and renews the certificate itself. The variables `REMN_RATE_LIMIT`
 (heavy requests a minute per address, 60), `REMN_MAX_UPLOAD_MB` (512) and `REMN_EXTRA_PIP`
 (the full build by default) adjust it. Visitors who want the AI analyst run Ollama on
 their own machine and allow the site's origin in it, as described on the [AI page](ai.md);
