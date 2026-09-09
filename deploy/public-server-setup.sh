@@ -62,32 +62,40 @@ docker compose version | sed 's/^/  /'
 log "Firewall: 22, 80 and 443 only"
 
 # Some cloud images (Oracle's Ubuntu among them) ship a saved iptables ruleset that rejects
-# everything except SSH. It sits in front of ufw, so opening 80 and 443 in ufw and in the cloud
-# firewall is not enough, and the certificate request then fails with no obvious cause. Clear it
-# BEFORE enabling ufw so ufw builds its chains on a clean table; enabling first and flushing after
-# leaves ufw believing it is active while none of its rules are live. A copy is kept either way.
-if [ -f /etc/iptables/rules.v4 ] && grep -qE 'REJECT|DROP' /etc/iptables/rules.v4 && ! grep -q 'ufw' /etc/iptables/rules.v4; then
-  printf '  a pre-installed iptables ruleset would block 80 and 443 in front of ufw; replacing it with ufw\n'
-  cp -a /etc/iptables/rules.v4 "/etc/iptables/rules.v4.before-remn.$(date +%Y%m%d-%H%M%S)"
-  # policy first: an empty chain with a DROP policy would cut this SSH session
-  iptables -P INPUT ACCEPT
-  iptables -F INPUT
-  [ -f /etc/iptables/rules.v6 ] && { ip6tables -P INPUT ACCEPT; ip6tables -F INPUT; } 2>/dev/null || true
-fi
+# everything except SSH, restored at every boot by netfilter-persistent. Two things follow. It sits
+# in front of ufw, so opening 80 and 443 in ufw and in the cloud firewall is not enough and the
+# certificate request fails with no obvious cause. And ufw persists its own rules through its own
+# unit, so leaving netfilter-persistent enabled means the two fight over the table and the saved
+# snapshot wins at the next boot. The ruleset is moved aside, keeping a copy, and its service stopped.
+for f in /etc/iptables/rules.v4 /etc/iptables/rules.v6; do
+  if [ -f "$f" ] && grep -qE 'REJECT|DROP' "$f" && ! grep -q 'ufw' "$f"; then
+    printf '  %s would block 80 and 443 in front of ufw and return at boot; moving it aside\n' "$f"
+    mv "$f" "$f.before-remn.$(date +%Y%m%d-%H%M%S)"
+  fi
+done
+systemctl disable --now netfilter-persistent >/dev/null 2>&1 || true
+
+# Clear the live table before ufw builds its chains, on whichever backend holds rules. The policy
+# is opened first: an empty chain with a DROP policy would cut the SSH session running this script.
+for cmd in iptables ip6tables iptables-legacy ip6tables-legacy; do
+  command -v "$cmd" >/dev/null 2>&1 || continue
+  "$cmd" -P INPUT ACCEPT 2>/dev/null || true
+  "$cmd" -F INPUT 2>/dev/null || true
+done
 
 ufw --force disable >/dev/null 2>&1 || true
 ufw default deny incoming >/dev/null
 ufw default allow outgoing >/dev/null
 for port in 22/tcp 80/tcp 443/tcp; do ufw allow "$port" >/dev/null; done
 ufw --force enable >/dev/null
-command -v netfilter-persistent >/dev/null && netfilter-persistent save >/dev/null 2>&1 || true
+systemctl enable ufw >/dev/null 2>&1 || true
 ufw status verbose | sed 's/^/  /'
 
-# ufw must actually be in the live table; if it is not, the machine is wide open or shut and
-# either way the operator has to know now rather than after the certificate fails.
-if ! iptables -S | grep -q 'ufw'; then
+# ufw must be in the live table, not merely in its own bookkeeping. Match a chain ufw always
+# creates when it is genuinely applied, and check the backend the iptables command actually uses.
+if ! iptables -S 2>/dev/null | grep -q 'ufw-before-input'; then
   die "ufw reports its rules but they are not in the live iptables table. Fix it by hand before continuing:
-    sudo ufw --force disable && sudo ufw --force enable && sudo iptables -S | head
+    sudo ufw --force disable && sudo ufw --force enable && sudo iptables -S | grep ufw-before-input
   SSH stays reachable meanwhile: the INPUT policy was set to ACCEPT."
 fi
 
