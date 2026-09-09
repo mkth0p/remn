@@ -38,8 +38,26 @@ log "Installing packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get -y -qq upgrade
-apt-get -y -qq install docker.io docker-compose-v2 ufw unattended-upgrades fail2ban curl git
+apt-get -y -qq install ufw unattended-upgrades fail2ban curl git ca-certificates
+
+# Docker comes from Docker's own repository rather than the distribution's: Ubuntu 20.04 has no
+# docker-compose-v2 package at all, and where docker.io exists it lags. One source covers
+# Ubuntu 20.04 to 24.04 and Debian, on both amd64 and arm64.
+if ! docker compose version >/dev/null 2>&1; then
+  . /etc/os-release
+  distro="ubuntu"
+  [ "${ID:-ubuntu}" = "debian" ] && distro="debian"
+  codename="${VERSION_CODENAME:-}"
+  [ -n "$codename" ] || die "cannot determine the distribution codename from /etc/os-release"
+  install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL "https://download.docker.com/linux/$distro/gpg" -o /etc/apt/keyrings/docker.asc
+  chmod a+r /etc/apt/keyrings/docker.asc
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$distro $codename stable" >/etc/apt/sources.list.d/docker.list
+  apt-get update -qq
+  apt-get -y -qq install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+fi
 systemctl enable --now docker >/dev/null
+docker compose version | sed 's/^/  /'
 
 log "Firewall: 22, 80 and 443 only"
 ufw default deny incoming >/dev/null
