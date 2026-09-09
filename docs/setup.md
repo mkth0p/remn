@@ -203,7 +203,17 @@ It refuses to go on until the name resolves to that machine, installs Docker and
 firewall, opens 22, 80 and 443 and nothing else, turns on unattended security updates,
 closes SSH password logins only once it has found a key to log in with (never before, so
 it cannot lock you out), starts the stack and waits for the certificate. Running it again
-is safe. The same steps by hand, if you would rather see each one:
+is safe.
+
+Two things the script cannot do for you, because they live in the provider's console. The
+cloud firewall in front of the machine has to allow 80 and 443, whatever the machine's own
+firewall says; on most providers that is a security list or a network security group. And
+some images, Oracle's Ubuntu among them, ship a saved iptables ruleset that rejects those
+ports in front of ufw, which is the usual reason a certificate request fails on a machine
+that looks correctly configured; the script detects that ruleset, keeps a copy and hands
+the firewall to ufw.
+
+The same steps by hand, if you would rather see each one:
 
 ```bash
 sudo apt update && sudo apt -y upgrade && sudo apt -y install docker.io docker-compose-v2 ufw unattended-upgrades fail2ban git
