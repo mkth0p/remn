@@ -71,6 +71,34 @@ pack importer download from their sources on request, never during an investigat
   updates at build time, runs as a non-root user without a package manager, and is
   scanned by Trivy in continuous integration.
 
+## Browser-only mode and request budgets
+
+An instance open to people you do not know runs with `FORENSIC_BROWSER_ONLY=1`. The
+server then does what it does for a browser-store case and nothing else: parse evidence
+and return the rows, run rules and correlation over posted rows, convert rules, serve the
+rule packs and the prompt bundle for the analyst's own model. Everything that keeps state
+on the server, reaches a third party or runs a model on the server's account answers 403
+with the code `browserOnly`: the server store and its jobs, chunked uploads, reputation
+lookups, the server-proxy and Claude Code transports. The health endpoint says
+`"mode": "browser-only"` and stops reporting paths and platform details, and the
+interface hides the server store, the conversion, the two server-side transports and the
+lookups toggle. Every case, its evidence rows included, lives in the visitor's browser.
+
+Two settings go with it. `FORENSIC_RATE_LIMIT_PER_MIN` gives each client address a
+budget on the heavy paths (parsing, correlation, enrichment, conversion, lookups, models,
+store writes and store queries that run rules or SQL); over budget is a 429 with a
+Retry-After, and health, meta, rule packs and plain reads are never counted. Behind a
+reverse proxy every request arrives from the proxy's address, so `FORENSIC_TRUST_PROXY=1`
+takes the client address from the first X-Forwarded-For entry; set it only when a proxy
+you control is the only way to reach the server, since the header is otherwise free to
+forge. `docker-compose.public.yml` is this configuration with Caddy in front, and
+`FORENSIC_MAX_UPLOAD_MB` lowered.
+
+For the full mode, one change came with this: listing every server store (`GET
+/api/store`) is an operator action and is only answered when an access token is
+configured. A case reaches its store by the key it holds, and the keys are random, so
+without the listing a store cannot be found by a client that was never given it.
+
 ## Text in the evidence that addresses the model
 
 The analyst chat reads tool results, the triage pass reads item summaries, and the

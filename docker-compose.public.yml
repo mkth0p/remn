@@ -1,0 +1,51 @@
+# An instance open to people you do not know: browser-only mode, with Caddy in front for HTTPS.
+#
+#   REMN_DOMAIN=remn.example.tech docker compose -f docker-compose.public.yml up -d --build
+#
+# The name must already point at this machine (an A or AAAA record) and ports 80 and 443 must be
+# reachable, so that Caddy can obtain and renew its certificate. The application container is not
+# published at all; Caddy reaches it on the compose network.
+#
+# What the server does here: parse evidence and return rows, run rules and correlation, serve the
+# rule packs and the prompt bundle for the analyst's own model. What it refuses: server stores,
+# chunked uploads, jobs, reputation lookups, server-side models. Every case stays in the visitor's
+# browser, the server keeps nothing. Each address gets REMN_RATE_LIMIT heavy requests a minute and
+# uploads are capped at REMN_MAX_UPLOAD_MB. See docs/security.md.
+services:
+  remn:
+    build:
+      context: .
+      args:
+        EXTRA_PIP: ${REMN_EXTRA_PIP:-yara-python libpff-python}
+    image: remn
+    environment:
+      FORENSIC_BROWSER_ONLY: "1"
+      FORENSIC_TRUST_PROXY: "1"
+      FORENSIC_RATE_LIMIT_PER_MIN: ${REMN_RATE_LIMIT:-60}
+      FORENSIC_MAX_UPLOAD_MB: ${REMN_MAX_UPLOAD_MB:-512}
+      FORENSIC_ALLOWED_HOSTS: ${REMN_DOMAIN:?set REMN_DOMAIN to the name browsers will use}
+      FORENSIC_AUTH_TOKEN: ""
+      CLAUDE_CODE_ENABLED: "0"
+    volumes:
+      - remn-tmp:/app/backend/tmp
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "${REMN_HTTP_PORT:-80}:80"
+      - "${REMN_HTTPS_PORT:-443}:443"
+    environment:
+      REMN_DOMAIN: ${REMN_DOMAIN:?set REMN_DOMAIN to the name browsers will use}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - remn
+    restart: unless-stopped
+
+volumes:
+  remn-tmp:
+  caddy-data:
+  caddy-config:

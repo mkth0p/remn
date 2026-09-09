@@ -14,11 +14,23 @@ so the frontend can prompt for the token.
 from __future__ import annotations
 
 import hmac
+import re
+import threading
+import time
 
 from django.conf import settings
 from django.http import JsonResponse
 
 HEADER_NAME = "HTTP_X_FORENSIC_CLIENT"
+
+
+def client_address(request) -> str:
+    """The client's address: the first X-Forwarded-For entry when the proxy in front is trusted, else the peer."""
+    if settings.FORENSIC_TRUST_PROXY:
+        first = request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0].strip()
+        if first:
+            return first
+    return request.META.get("REMOTE_ADDR", "") or "?"
 
 
 class ApiClientHeaderMiddleware:
@@ -69,3 +81,63 @@ class SecurityHeadersMiddleware:
             # so the hashing and ingest workers must get the page's policy (wasm, connect-src), not the API one
             resp.setdefault("Content-Security-Policy", CSP)
         return resp
+
+
+# Paths that keep state on the server, reach out to third parties or run a model on the server's
+# account: closed in browser-only mode. Parsing, correlation, rule conversion, rule packs and the
+# prompt bundle for the browser-direct model stay open.
+BROWSER_ONLY_CLOSED = ("/api/store", "/api/jobs", "/api/upload", "/api/reputation", "/api/ai/chat", "/api/ai/query", "/api/ai/models", "/api/ai/claude")
+
+
+class ModeGuardMiddleware:
+    """Browser-only mode: the server answers 403 with code "browserOnly" on every stateful or costly path."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        if settings.FORENSIC_BROWSER_ONLY and request.path.startswith(BROWSER_ONLY_CLOSED):
+            return JsonResponse({"error": "not available on this server: browser-only mode", "code": "browserOnly"}, status=403)
+        return self.get_response(request)
+
+
+# The heavy paths: parsing, correlation, enrichment, conversion, lookups, models, store writes and
+# queries that run rules or SQL. Health, meta, rule packs, chunk PUTs and plain store reads are not budgeted.
+BUDGETED = re.compile(
+    r"^/api/(ingest/|analyze/|chains/|enrich/|rules/convert/|reputation/|ai/|upload/init$|store/[^/]+/(ingest|import|export|rules/run|sql|reputation)$)"
+)
+
+
+class RateLimitMiddleware:
+    """A token bucket per client address over the heavy paths: FORENSIC_RATE_LIMIT_PER_MIN requests a
+    minute, refilled continuously. Over budget gets 429 with a Retry-After. 0 turns it off."""
+
+    _lock = threading.Lock()
+    _buckets: dict[str, tuple[float, float]] = {}
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    @classmethod
+    def reset(cls) -> None:
+        with cls._lock:
+            cls._buckets.clear()
+
+    def __call__(self, request):
+        limit = int(settings.FORENSIC_RATE_LIMIT_PER_MIN or 0)
+        if limit > 0 and BUDGETED.match(request.path):
+            addr = client_address(request)
+            now = time.monotonic()
+            with self._lock:
+                tokens, last = self._buckets.get(addr, (float(limit), now))
+                tokens = min(float(limit), tokens + (now - last) * limit / 60.0)
+                if tokens < 1.0:
+                    self._buckets[addr] = (tokens, now)
+                    resp = JsonResponse({"error": "too many requests from this address, try again shortly", "code": "rate"}, status=429)
+                    resp["Retry-After"] = str(int((1.0 - tokens) * 60.0 / limit) + 1)
+                    return resp
+                self._buckets[addr] = (tokens - 1.0, now)
+                if len(self._buckets) > 10_000:
+                    for k in [k for k, (_, t) in self._buckets.items() if now - t > 600]:
+                        del self._buckets[k]
+        return self.get_response(request)

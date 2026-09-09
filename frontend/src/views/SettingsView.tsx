@@ -69,6 +69,7 @@ export function SettingsView() {
   if (!kase || !ds) return null
   const s = kase.settings
   const isServer = kase.storage === 'server'
+  const browserOnly = health?.mode === 'browser-only'
   const patch = async (p: Partial<CaseSettings>) => {
     updateSettings(p)
     await getDb().cases.update(kase.id!, { settings: { ...s, ...p }, updatedAt: Date.now() })
@@ -218,7 +219,7 @@ export function SettingsView() {
                   ? 'Rows live in a DuckDB file under the server data folder on this machine; the browser keeps cases, findings, notes and AI sessions. Suited to gigabytes of logs and mailboxes.'
                   : 'Rows live in this browser only (portable, zero server state). Suited to cases under a few hundred MB.'}
               </div>
-              {!isServer && (
+              {!isServer && !browserOnly && (
                 <div className="col">
                   <button className="btn primary sm" onClick={migrate} disabled={!!migrating}>
                     convert this case to the server store
@@ -268,23 +269,29 @@ export function SettingsView() {
                     <span className="muted small">— this page calls YOUR local Ollama. Prompts and evidence excerpts never reach the REMN server. Each analyst uses their own machine's models.</span>
                   </span>
                 </label>
-                <label className="checkbox">
-                  <input type="radio" name="aitransport" checked={aiCfg.transport === 'server'} onChange={() => saveAi({ transport: 'server' })} />{' '}
-                  <span>
-                    <b>Server proxy</b>{' '}
-                    <span className="muted small">— the REMN server relays to the Ollama configured in its .env (nothing persisted). Use when no local Ollama, or on Safari over HTTPS.</span>
-                  </span>
-                </label>
-                <label className="checkbox">
-                  <input type="radio" name="aitransport" checked={aiCfg.transport === 'claude'} onChange={() => saveAi({ transport: 'claude' })} />{' '}
-                  <span>
-                    <b>Claude Code</b>{' '}
-                    <span className="muted small">
-                      — the REMN server runs the <code>claude</code> command line installed on its machine, signed in with that machine's Claude account. Prompts, tool results (evidence excerpts) and
-                      answers go to Anthropic; the server keeps nothing. Not for evidence that may not leave your organisation.
-                    </span>
-                  </span>
-                </label>
+                {browserOnly ? (
+                  <div className="hint">This server runs in browser-only mode: it has no model of its own. The page talks to the Ollama on your machine.</div>
+                ) : (
+                  <>
+                    <label className="checkbox">
+                      <input type="radio" name="aitransport" checked={aiCfg.transport === 'server'} onChange={() => saveAi({ transport: 'server' })} />{' '}
+                      <span>
+                        <b>Server proxy</b>{' '}
+                        <span className="muted small">— the REMN server relays to the Ollama configured in its .env (nothing persisted). Use when no local Ollama, or on Safari over HTTPS.</span>
+                      </span>
+                    </label>
+                    <label className="checkbox">
+                      <input type="radio" name="aitransport" checked={aiCfg.transport === 'claude'} onChange={() => saveAi({ transport: 'claude' })} />{' '}
+                      <span>
+                        <b>Claude Code</b>{' '}
+                        <span className="muted small">
+                          — the REMN server runs the <code>claude</code> command line installed on its machine, signed in with that machine's Claude account. Prompts, tool results (evidence excerpts)
+                          and answers go to Anthropic; the server keeps nothing. Not for evidence that may not leave your organisation.
+                        </span>
+                      </span>
+                    </label>
+                  </>
+                )}
               </div>
               {aiCfg.transport === 'claude' && (
                 <div className="row" style={{ alignItems: 'flex-start' }}>
@@ -498,7 +505,11 @@ export function SettingsView() {
           <div className="panel">
             <div className="panel-h">external lookups (opt-in)</div>
             <div className="panel-b col">
-              <Toggle on={s.networkAllowed} onChange={(v) => patch({ networkAllowed: v })} label="allow reputation lookups - every checked indicator is disclosed to the provider" />
+              {browserOnly ? (
+                <div className="hint">Reputation lookups are switched off on this server (browser-only mode): it contacts no third party on your behalf.</div>
+              ) : (
+                <Toggle on={s.networkAllowed} onChange={(v) => patch({ networkAllowed: v })} label="allow reputation lookups - every checked indicator is disclosed to the provider" />
+              )}
               <div className="col" style={{ gap: 4 }}>
                 {providers.map((p) => (
                   <label key={p.name} className="checkbox small" title={p.description}>

@@ -147,6 +147,11 @@ export default function App() {
       getHealth()
         .then((h) => {
           setHealth(h)
+          if (h.mode === 'browser-only' && useStore.getState().aiConfig.transport !== 'browser') {
+            // the server-side transports do not exist here; the page talks to the analyst's own model
+            useStore.getState().setAiConfig({ ...useStore.getState().aiConfig, transport: 'browser' })
+            db.kv.put({ key: 'aiTransport', value: 'browser' }).catch(() => undefined)
+          }
           if (h.store?.thresholdMb)
             db.kv.get('storeThresholdMb').then((k) => {
               if (typeof k?.value !== 'number') setThreshold(h.store!.thresholdMb)
@@ -265,6 +270,8 @@ export default function App() {
     )
   const busy = jobs.some((j) => j.phase !== 'done' && j.phase !== 'error')
   const isServer = kase.storage === 'server'
+  const browserOnly = health?.mode === 'browser-only'
+  const canConvert = !isServer && !browserOnly
   const bigTotal = pending ? pending.files.reduce((s, f) => s + f.size, 0) : 0
   return (
     <div className={collapsed ? 'app sidebar-collapsed' : 'app'}>
@@ -405,17 +412,23 @@ export default function App() {
                 <b>Browser store</b> <span className="muted small">— everything stays in this browser (IndexedDB). Portable, zero server state, best under ~{threshold} MB per file.</span>
               </span>
             </label>
-            <label className="checkbox">
-              <input type="radio" name="storage" checked={newCase.storage === 'server'} onChange={() => setNewCase({ ...newCase, storage: 'server' })} />{' '}
-              <span>
-                <b>Server store</b>{' '}
-                <span className="muted small">
-                  — rows go to a DuckDB file on this machine ({health?.store?.casesDir ?? 'backend/data/cases'}); the browser keeps findings and notes. For gigabytes of EVTX / mailboxes.
+            {!browserOnly && (
+              <label className="checkbox">
+                <input type="radio" name="storage" checked={newCase.storage === 'server'} onChange={() => setNewCase({ ...newCase, storage: 'server' })} />{' '}
+                <span>
+                  <b>Server store</b>{' '}
+                  <span className="muted small">
+                    — rows go to a DuckDB file on this machine ({health?.store?.casesDir ?? 'backend/data/cases'}); the browser keeps findings and notes. For gigabytes of EVTX / mailboxes.
+                  </span>
                 </span>
-              </span>
-            </label>
+              </label>
+            )}
           </div>
-          <div className="hint">A browser case can be converted to the server store later from Settings, or when a large file is dropped.</div>
+          <div className="hint">
+            {browserOnly
+              ? 'This server runs in browser-only mode: it parses evidence and returns the rows, and keeps nothing. Every case stays in this browser.'
+              : 'A browser case can be converted to the server store later from Settings, or when a large file is dropped.'}
+          </div>
         </Modal>
       )}
       {pending && (
@@ -427,13 +440,13 @@ export default function App() {
               <button className="btn" disabled={!!migrating} onClick={() => setPending(null)}>
                 cancel
               </button>
-              {pending.reason === 'big' && !isServer && (
+              {pending.reason === 'big' && canConvert && (
                 <button className="btn" disabled={!!migrating} onClick={() => proceedPending(false)}>
                   ingest in the browser anyway
                 </button>
               )}
-              <button className="btn primary" disabled={!!migrating} onClick={() => proceedPending(pending.reason === 'big' && !isServer)}>
-                {pending.reason === 'big' && !isServer ? 'convert case to server store and ingest' : 'ingest'}
+              <button className="btn primary" disabled={!!migrating} onClick={() => proceedPending(pending.reason === 'big' && canConvert)}>
+                {pending.reason === 'big' && canConvert ? 'convert case to server store and ingest' : 'ingest'}
               </button>
             </>
           }
@@ -449,10 +462,15 @@ export default function App() {
             ))}
             {pending.files.length > 8 && <div className="small muted">…and {pending.files.length - 8} more</div>}
           </div>
-          {pending.reason === 'big' && !isServer && (
+          {pending.reason === 'big' && canConvert && (
             <div className="hint">
               {fmtBytes(bigTotal)} is above the {threshold} MB browser threshold. The browser store gets slow past a few hundred MB; the server store (DuckDB on this machine) handles gigabytes.
               Converting moves the existing {fmtNum(counts.events + counts.mails)} rows of this case too.
+            </div>
+          )}
+          {pending.reason === 'big' && browserOnly && (
+            <div className="hint">
+              {fmtBytes(bigTotal)} is above the {threshold} MB browser threshold. This server keeps nothing, so the rows go into this browser, which gets slow past a few hundred MB.
             </div>
           )}
           {pending.files.some((f) => /(\.zip|\.tar|\.tgz|\.gz|\.bz2|\.xz)$/i.test(f.name)) && !pending.kindOverride && (

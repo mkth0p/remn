@@ -65,6 +65,10 @@ def _ctx_from(settings_obj: dict[str, Any] | None) -> ParseContext:
 # ---------------------------------------------------------------------------
 @require_GET
 def list_stores(request: HttpRequest):
+    """Store keys are capabilities: a case reaches its store by the key it holds. Listing every key
+    is an operator action, so it is only answered on a server with an access token configured."""
+    if not settings.FORENSIC_AUTH_TOKEN:
+        return JsonResponse({"error": "the store listing needs an access token on this server (FORENSIC_AUTH_TOKEN)", "code": "listing"}, status=403)
     return JsonResponse({"stores": registry.list(), "root": str(settings.CASES_DIR), "thresholdMb": settings.FORENSIC_STORE_THRESHOLD_MB})
 
 

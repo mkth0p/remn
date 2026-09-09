@@ -5,6 +5,14 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- Browser-only mode (`FORENSIC_BROWSER_ONLY=1`) for an instance open to strangers: the
+  server parses and returns rows and keeps nothing; server stores, jobs, chunked uploads,
+  reputation lookups and the server-side model transports answer 403, health reports the
+  mode without paths or platform details, and the interface hides what is not there. A
+  per-address budget on the heavy paths (`FORENSIC_RATE_LIMIT_PER_MIN`, off by default) and
+  `FORENSIC_TRUST_PROXY` for the client address behind a proxy. `docker-compose.public.yml`
+  runs it behind Caddy with automatic HTTPS. Listing every server store now needs a
+  configured access token; a case reaches its store by its key.
 - Mail-led chains keep full recipient identities through deduplication; foreign bare aliases
   cannot bypass realm checks and duplicate account fields no longer duplicate event steps.
 - Authentication campaigns can start from Windows or Entra events alone: ten failures in

@@ -163,6 +163,101 @@ integration scans every build with Trivy, failing on critical or high findings t
 a fix. Findings without a fix from Debian yet (zlib and tar at the time of writing) stay
 visible in a scan but do not fail the build.
 
+## A public instance
+
+To put REMN on the open internet, run it in browser-only mode: the server parses and
+returns rows and keeps nothing, every case stays in the visitor's browser, and the paths
+that would keep state, spend money or run a model on the server are closed. The
+[security page](security.md) lists exactly what is open and what is not.
+`docker-compose.public.yml` is that configuration with Caddy in front for HTTPS. On a
+small Linux virtual machine with Docker, a name that already points at it, and ports 80
+and 443 open:
+
+```
+REMN_DOMAIN=remn.example.tech docker compose -f docker-compose.public.yml up -d --build
+```
+
+Caddy obtains and renews the certificate itself. The variables `REMN_RATE_LIMIT`
+(heavy requests a minute per address, 60), `REMN_MAX_UPLOAD_MB` (512) and `REMN_EXTRA_PIP`
+(the full build by default) adjust it. Visitors who want the AI analyst run Ollama on
+their own machine and allow the site's origin in it, as described on the [AI page](ai.md);
+the server has no model.
+
+### From an empty virtual machine
+
+The machine: two virtual processors, 2 GB of memory and 40 GB of disk are enough, since
+nothing is stored between visits; parsing is what uses the processor. Any current Ubuntu
+LTS or Debian works. The name needs one DNS record, `A` for the address of the machine
+(and `AAAA` if it has an IPv6 one). Let it resolve before starting the stack, or the
+certificate request fails and Caddy backs off for a while.
+
+Everything below runs as a normal user with `sudo`; do not work as root.
+
+```bash
+sudo apt update && sudo apt -y upgrade && sudo apt -y install docker.io docker-compose-v2 ufw unattended-upgrades fail2ban git
+```
+
+```bash
+sudo ufw default deny incoming && sudo ufw allow OpenSSH && sudo ufw allow 80/tcp && sudo ufw allow 443/tcp && sudo ufw --force enable
+```
+
+Only three ports are open, and the application container publishes none of its own: Caddy
+reaches it over the compose network, so the only way in is through TLS. Then disable
+password logins over SSH, which is what removes the class of attack that actually happens
+to a machine with a public address (edit `/etc/ssh/sshd_config`, or a file under
+`/etc/ssh/sshd_config.d/`):
+
+```
+PasswordAuthentication no
+PermitRootLogin no
+```
+
+```bash
+sudo systemctl restart ssh
+```
+
+Keep a working key-based session open while you test a second one. Then enable the
+automatic security updates that the package above only installs:
+
+```bash
+sudo dpkg-reconfigure -plow unattended-upgrades
+```
+
+Finally the stack itself, from a clone of the repository:
+
+```bash
+git clone https://github.com/mkth0p/remn.git && cd remn
+```
+
+```bash
+REMN_DOMAIN=remn.example.tech sudo -E docker compose -f docker-compose.public.yml up -d --build
+```
+
+### Upkeep
+
+There is no case data on the machine to back up: browser-only mode keeps nothing, and the
+only volume holds the temporary upload area. What needs attention is the code and the
+base images, since a public address means the vulnerabilities in them are reachable:
+
+```bash
+git pull && REMN_DOMAIN=remn.example.tech sudo -E docker compose -f docker-compose.public.yml up -d --build --pull always
+```
+
+Run that when a release is tagged. Continuous integration scans every image build with
+Trivy and fails on critical or high findings that have a fix, so a green build is the
+signal that the image is worth deploying. `docker logs` on the two containers shows what
+happened; `sudo docker system prune -f` reclaims the space of the images replaced.
+
+### What is still true of a public instance
+
+Anyone who reaches it can use it, and the request budget only bounds how fast. The server
+parses whatever it is given, so treat it as a machine that runs untrusted input through
+the parsers all day: that is why it holds no case data, no keys and no model account, and
+why it lives on a machine of its own rather than next to anything that matters. Visitors
+upload evidence to it; the rows come back to their browser and the temporary copy is
+discarded, but during the parse the file is on that disk, so the instance is a place to
+try REMN and not a place for anyone's real evidence. Say so on the page that links to it.
+
 ## Remote access
 
 By default everything binds to loopback. To host REMN on a home server or a lab machine

@@ -155,6 +155,8 @@ export interface Health {
   name: string
   version: string
   stateless: boolean
+  /** browser-only: the server parses and returns rows and keeps nothing; no server store, lookups or server-side models */
+  mode?: 'full' | 'browser-only'
   python?: string
   platform?: string
   limits: { maxUploadMb: number; inMemoryMb: number; maxChunkedGb?: number; chunkMb?: number }

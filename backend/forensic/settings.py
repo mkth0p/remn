@@ -45,11 +45,24 @@ ALLOWED_HOSTS = ["127.0.0.1", "localhost"] + [h.strip() for h in os.environ.get(
 # header only needs to be present (cookie-less CSRF protection).
 FORENSIC_AUTH_TOKEN = os.environ.get("FORENSIC_AUTH_TOKEN", "").strip()
 
+# Browser-only ingestion mode, for an instance open to people you do not know: the server parses
+# evidence and returns rows, and keeps nothing. The server store, chunked uploads, jobs, reputation
+# lookups and the server-side model transports answer 403. See docs/security.md.
+FORENSIC_BROWSER_ONLY = _env_bool("FORENSIC_BROWSER_ONLY", False)
+# Behind a reverse proxy the peer address is the proxy's; with this on, the client address is the
+# first X-Forwarded-For entry. Only set it when a proxy you control is the only way in.
+FORENSIC_TRUST_PROXY = _env_bool("FORENSIC_TRUST_PROXY", False)
+# Requests a minute per client address on the heavy paths (parsing, correlation, conversion,
+# lookups, models, store writes). 0 turns the budget off.
+FORENSIC_RATE_LIMIT_PER_MIN = _env_int("FORENSIC_RATE_LIMIT_PER_MIN", 0)
+
 INSTALLED_APPS = ["api"]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "forensic.middleware.ApiClientHeaderMiddleware",
+    "forensic.middleware.ModeGuardMiddleware",
+    "forensic.middleware.RateLimitMiddleware",
     "forensic.middleware.SecurityHeadersMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "django.middleware.common.CommonMiddleware",

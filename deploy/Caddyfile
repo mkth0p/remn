@@ -1,0 +1,17 @@
+# Caddy in front of the browser-only container (docker-compose.public.yml). Automatic HTTPS for
+# REMN_DOMAIN; "localhost" gets a locally trusted certificate, which is how the profile is tested.
+{$REMN_DOMAIN} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+	reverse_proxy remn:8000 {
+		# streamed responses (ingestion rows, job events) go through as they come
+		flush_interval -1
+		transport http {
+			read_timeout 3600s
+			write_timeout 3600s
+		}
+	}
+}
