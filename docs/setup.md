@@ -193,6 +193,18 @@ certificate request fails and Caddy backs off for a while.
 
 Everything below runs as a normal user with `sudo`; do not work as root.
 
+One script does all of it, from a clone of the repository:
+
+```bash
+sudo REMN_DOMAIN=remn.example.tech bash deploy/public-server-setup.sh
+```
+
+It refuses to go on until the name resolves to that machine, installs Docker and the
+firewall, opens 22, 80 and 443 and nothing else, turns on unattended security updates,
+closes SSH password logins only once it has found a key to log in with (never before, so
+it cannot lock you out), starts the stack and waits for the certificate. Running it again
+is safe. The same steps by hand, if you would rather see each one:
+
 ```bash
 sudo apt update && sudo apt -y upgrade && sudo apt -y install docker.io docker-compose-v2 ufw unattended-upgrades fail2ban git
 ```
