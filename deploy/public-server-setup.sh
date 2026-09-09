@@ -60,26 +60,35 @@ systemctl enable --now docker >/dev/null
 docker compose version | sed 's/^/  /'
 
 log "Firewall: 22, 80 and 443 only"
+
+# Some cloud images (Oracle's Ubuntu among them) ship a saved iptables ruleset that rejects
+# everything except SSH. It sits in front of ufw, so opening 80 and 443 in ufw and in the cloud
+# firewall is not enough, and the certificate request then fails with no obvious cause. Clear it
+# BEFORE enabling ufw so ufw builds its chains on a clean table; enabling first and flushing after
+# leaves ufw believing it is active while none of its rules are live. A copy is kept either way.
+if [ -f /etc/iptables/rules.v4 ] && grep -qE 'REJECT|DROP' /etc/iptables/rules.v4 && ! grep -q 'ufw' /etc/iptables/rules.v4; then
+  printf '  a pre-installed iptables ruleset would block 80 and 443 in front of ufw; replacing it with ufw\n'
+  cp -a /etc/iptables/rules.v4 "/etc/iptables/rules.v4.before-remn.$(date +%Y%m%d-%H%M%S)"
+  # policy first: an empty chain with a DROP policy would cut this SSH session
+  iptables -P INPUT ACCEPT
+  iptables -F INPUT
+  [ -f /etc/iptables/rules.v6 ] && { ip6tables -P INPUT ACCEPT; ip6tables -F INPUT; } 2>/dev/null || true
+fi
+
+ufw --force disable >/dev/null 2>&1 || true
 ufw default deny incoming >/dev/null
 ufw default allow outgoing >/dev/null
 for port in 22/tcp 80/tcp 443/tcp; do ufw allow "$port" >/dev/null; done
 ufw --force enable >/dev/null
-
-# Some cloud images (Oracle's Ubuntu among them) ship a saved iptables ruleset that rejects
-# everything except SSH. It sits in front of ufw, so opening 80 and 443 in ufw and in the cloud
-# firewall is not enough and the certificate request fails with no obvious cause. Hand the
-# firewall to ufw, which already allows SSH, and keep a copy of what was replaced.
-if [ -f /etc/iptables/rules.v4 ] && grep -qE 'REJECT|DROP' /etc/iptables/rules.v4 && ! grep -q 'ufw' /etc/iptables/rules.v4; then
-  printf '  a pre-installed iptables ruleset would block 80 and 443 in front of ufw; replacing it with ufw\n'
-  cp -a /etc/iptables/rules.v4 "/etc/iptables/rules.v4.before-remn.$(date +%Y%m%d-%H%M%S)"
-  iptables -P INPUT ACCEPT
-  iptables -F INPUT
-  ufw --force reload >/dev/null
-  command -v netfilter-persistent >/dev/null && netfilter-persistent save >/dev/null 2>&1 || true
-fi
+command -v netfilter-persistent >/dev/null && netfilter-persistent save >/dev/null 2>&1 || true
 ufw status verbose | sed 's/^/  /'
+
+# ufw must actually be in the live table; if it is not, the machine is wide open or shut and
+# either way the operator has to know now rather than after the certificate fails.
 if ! iptables -S | grep -q 'ufw'; then
-  printf '  warning: ufw does not appear in the live iptables rules; check the firewall by hand before relying on it\n'
+  die "ufw reports its rules but they are not in the live iptables table. Fix it by hand before continuing:
+    sudo ufw --force disable && sudo ufw --force enable && sudo iptables -S | head
+  SSH stays reachable meanwhile: the INPUT policy was set to ACCEPT."
 fi
 
 log "Automatic security updates"
