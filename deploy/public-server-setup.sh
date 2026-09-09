@@ -75,28 +75,42 @@ for f in /etc/iptables/rules.v4 /etc/iptables/rules.v6; do
 done
 systemctl disable --now netfilter-persistent >/dev/null 2>&1 || true
 
-# Clear the live table before ufw builds its chains, on whichever backend holds rules. The policy
-# is opened first: an empty chain with a DROP policy would cut the SSH session running this script.
-for cmd in iptables ip6tables iptables-legacy ip6tables-legacy; do
-  command -v "$cmd" >/dev/null 2>&1 || continue
-  "$cmd" -P INPUT ACCEPT 2>/dev/null || true
-  "$cmd" -F INPUT 2>/dev/null || true
-done
+# Opens the INPUT policy and empties the chain on every backend present. Called before ufw builds
+# its chains, and again if ufw fails to apply, so a half-configured firewall never seals the machine.
+open_the_policy() {
+  for cmd in iptables ip6tables iptables-legacy ip6tables-legacy; do
+    command -v "$cmd" >/dev/null 2>&1 || continue
+    "$cmd" -P INPUT ACCEPT 2>/dev/null || true
+    "$cmd" -F INPUT 2>/dev/null || true
+  done
+}
+# Clear the live table before ufw builds its chains: an empty chain with a DROP policy would cut
+# the SSH session running this script, so the policy is opened first.
+open_the_policy
 
 ufw --force disable >/dev/null 2>&1 || true
 ufw default deny incoming >/dev/null
 ufw default allow outgoing >/dev/null
 for port in 22/tcp 80/tcp 443/tcp; do ufw allow "$port" >/dev/null; done
-ufw --force enable >/dev/null
-systemctl enable ufw >/dev/null 2>&1 || true
-ufw status verbose | sed 's/^/  /'
+ufw_said=$(ufw --force enable 2>&1 || true)
 
-# ufw must be in the live table, not merely in its own bookkeeping. Match a chain ufw always
-# creates when it is genuinely applied, and check the backend the iptables command actually uses.
-if ! iptables -S 2>/dev/null | grep -q 'ufw-before-input'; then
-  die "ufw reports its rules but they are not in the live iptables table. Fix it by hand before continuing:
-    sudo ufw --force disable && sudo ufw --force enable && sudo iptables -S | grep ufw-before-input
-  SSH stays reachable meanwhile: the INPUT policy was set to ACCEPT."
+# ufw records itself as enabled in its own configuration before, and independently of, applying
+# any rules, so `ufw status` reports the full rule list even when the apply failed. Match a chain
+# that exists only once the rules are genuinely live, on the backend the iptables command uses.
+if iptables -S 2>/dev/null | grep -q 'ufw-before-input'; then
+  systemctl enable ufw >/dev/null 2>&1 || true
+  ufw status verbose | sed 's/^/  /'
+else
+  # A failed apply leaves DROP policies with no accept rules, which cuts every connection to the
+  # machine including this session. Roll it back rather than leave the operator locked out.
+  ufw --force disable >/dev/null 2>&1 || true
+  open_the_policy
+  printf '  WARNING: ufw could not apply its rules on this kernel, so the host firewall is OFF.\n'
+  printf '  The machine stays reachable; it is not sealed. ufw said:\n'
+  printf '%s\n' "$ufw_said" | sed 's/^/    /'
+  printf '  Your provider firewall is now the only layer. Check it allows 22, 80 and 443 and\n'
+  printf '  nothing else (Oracle: the VCN security list; AWS: the security group) before treating\n'
+  printf '  this machine as hardened. The container publishes no port of its own either way.\n'
 fi
 
 log "Automatic security updates"
