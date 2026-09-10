@@ -251,8 +251,9 @@ class PackageSource:
                 elif collection.supported(member.name) or (
                     self.context.get("artifactDefault") == "defender" and low.endswith((".txt", ".log", ".csv", ".json"))
                 ):
-                    if size > MAX_STRUCTURED:
-                        raise ValueError("structured export exceeds 64 MiB limit; split the export")
+                    # No size pre-check: collection.records() enforces the parse budget while
+                    # reading, so an oversized export yields the records before the ceiling and is
+                    # reported as partial rather than contributing nothing but a hash.
                     entry["format"] = collection.VERSION
                     source = None
                     parse_name = member.name if collection.category(member.name) else f"WdSupportLogs/{member.name}"

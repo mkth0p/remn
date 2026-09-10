@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import hashlib
 import io
 import json
@@ -522,3 +523,47 @@ def test_a_loaded_module_is_its_own_node():
     graph = build([loaded], [])
     assert any(e["relation"] == "loads image" for e in graph["edges"])
     assert any("evil.dll" in n["label"] for n in graph["nodes"] if n["kind"] == "file")
+
+
+def test_an_oversized_export_keeps_the_records_it_parsed(tmp_path, monkeypatch):
+    """The byte ceiling used to reject before parsing, so a 200 MB file listing contributed nothing
+    but a hash. Every other limit here raises during iteration and keeps what it read."""
+    from services.parsers import collection
+
+    monkeypatch.setattr(collection, "MAX_PARSE_BYTES", 64 * 1024)
+    export = tmp_path / "processes.csv"
+    with export.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["Name", "Id", "Path"])
+        rows = 0
+        while fh.tell() < 200 * 1024:
+            writer.writerow([f"proc{rows}.exe", rows, "C:\\Windows\\System32\\proc.exe"])
+            rows += 1
+
+    parsed = 0
+    reason = None
+    try:
+        for _ in collection.records(str(export), "Processes/processes.csv"):
+            parsed += 1
+    except ValueError as exc:
+        reason = str(exc)
+    assert parsed > 100, f"only {parsed} records survived the ceiling"
+    assert reason and "parse limit" in reason and "not read" in reason
+
+
+def test_an_oversized_member_is_partial_in_the_package_inventory(tmp_path, monkeypatch):
+    from services.parsers import collection
+
+    monkeypatch.setattr(collection, "MAX_PARSE_BYTES", 32 * 1024)
+    body = io.StringIO()
+    writer = csv.writer(body)
+    writer.writerow(["Name", "Id", "Path"])
+    for i in range(4000):
+        writer.writerow([f"proc{i}.exe", i, "C:\\Windows\\System32\\proc.exe"])
+    blob = archive([("Processes/processes.csv", body.getvalue())])
+    src = PackageSource("pkg.zip", None, blob, str(tmp_path), ParseContext(analyze_attachments=False))
+    produced = list(src)
+    member = next(f for f in src.files if f["name"].endswith("processes.csv"))
+    assert produced, "records parsed before the ceiling must reach the case"
+    assert member["status"] == "error" and "parse limit" in member["reason"]
+    assert member["count"] == len(produced) > 0

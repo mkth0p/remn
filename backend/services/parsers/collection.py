@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import os
 import re
 from collections.abc import Iterator
 from datetime import datetime
@@ -113,6 +114,46 @@ def _xml_records(path: str, name: str) -> Iterator[dict[str, Any]]:
             }
 
 
+# Bytes a single structured export may be parsed from. Enforced while reading, not on the file
+# size, so the records parsed before the ceiling survive and the member is reported as partial.
+MAX_PARSE_BYTES = 64 * 1024**2
+
+
+class _ByteBudget(io.RawIOBase):
+    """Passes bytes through and stops the parse once the budget is spent.
+
+    Rejecting an oversized export up front made a 200 MB file listing contribute nothing but a
+    hash, while every other limit here raises during iteration and keeps what it read. This makes
+    the byte ceiling behave the same way.
+    """
+
+    def __init__(self, raw: Any, limit: int) -> None:
+        self._raw = raw
+        self._limit = limit
+        self._read = 0
+
+    def readable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return self._raw.seekable()
+
+    def seek(self, offset: int, whence: int = os.SEEK_SET) -> int:
+        # Sniffing a CSV dialect rewinds; the budget counts bytes actually read, so a rewind of a
+        # few kilobytes is simply counted twice and does not distort a 64 MiB ceiling.
+        return self._raw.seek(offset, whence)
+
+    def tell(self) -> int:
+        return self._raw.tell()
+
+    def readinto(self, buffer: Any) -> int:
+        n = self._raw.readinto(buffer) or 0
+        self._read += n
+        if self._read > self._limit:
+            raise ValueError(f"structured export exceeded the {self._limit // 1024**2} MiB parse limit; records beyond it were not read")
+        return n
+
+
 def records(path: str, name: str) -> Iterator[dict[str, Any]]:
     if name.lower().endswith(".xml"):
         yield from _xml_records(path, name)
@@ -121,7 +162,7 @@ def records(path: str, name: str) -> Iterator[dict[str, Any]]:
         head = raw.read(4)
         raw.seek(0)
         encoding = "utf-16" if head.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8-sig"
-        with io.TextIOWrapper(raw, encoding=encoding, errors="strict", newline="") as fh:
+        with io.TextIOWrapper(io.BufferedReader(_ByteBudget(raw, MAX_PARSE_BYTES)), encoding=encoding, errors="strict", newline="") as fh:
             if name.lower().endswith((".txt", ".log")):
                 record = {}
                 for index, line in enumerate(fh):
