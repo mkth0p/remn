@@ -127,6 +127,32 @@ finishes.
 None of this makes a public instance a place for real evidence. It bounds the exposure of the
 files people do send.
 
+### The parser's isolation
+
+The server exists to run hostile binary formats through libpff, the EVTX reader, oletools and
+pypdf, which are among the most CVE-prone libraries in any stack. That cannot be made
+unexploitable, so `docker-compose.public.yml` makes an exploit worth as little as possible. The
+application container has what the deception archive already had:
+
+- **No route off the host.** It sits on a Docker network marked `internal`, reachable by Caddy and
+  nothing else. In browser-only mode the application makes no outbound calls at all: reputation,
+  Ollama and Claude are closed, and the domain parser uses a bundled public-suffix snapshot rather
+  than fetching one. An exploited parser has nowhere to send anything and nothing to fetch a second
+  stage from.
+- **A read-only root**, with the staging area and `/tmp` as tmpfs mounted `noexec,nosuid,nodev`.
+  Evidence in transit therefore never reaches physical disk and cannot survive a restart.
+- **No capabilities and no privilege escalation**, running as an unprivileged user, with process
+  and memory ceilings so a decompression bomb cannot take the host with it.
+
+Verified rather than asserted: from inside the running container the effective capability set is
+empty, the root filesystem refuses writes, the staging area reports as tmpfs, and connections to a
+hostname, to a raw address on 443 and to a resolver on 53 all fail, while a 14 MiB EVTX still
+parses to 6000 events with a matching digest.
+
+What remains is that an exploit still gets execution inside that container for the life of one
+request, and can read whatever else is staged at that moment. Isolating each parse into its own
+throwaway sandbox is the next step and is not configuration.
+
 The per-address budget reads the **rightmost** X-Forwarded-For entry, the one the trusted proxy
 observed and appended, not the leftmost, which is whatever the client sent. Caddy's default
 replaces the header rather than appending, which hides the difference, but that is a property of

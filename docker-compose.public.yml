@@ -26,12 +26,36 @@ services:
       FORENSIC_ALLOWED_HOSTS: ${REMN_DOMAIN:?set REMN_DOMAIN to the name browsers will use}
       FORENSIC_AUTH_TOKEN: ""
       CLAUDE_CODE_ENABLED: "0"
-    volumes:
-      - remn-tmp:/app/backend/tmp
+      # staging lives in RAM here, so keep the budget inside the tmpfs below
+      FORENSIC_TMP_MAX_GB: ${REMN_TMP_MAX_GB:-1}
+    # This is the process that runs attacker-controlled EVTX, PST, OLE and registry hives through
+    # libpff, the EVTX reader and oletools: the most CVE-prone libraries in the stack. It cannot be
+    # made unexploitable, so it is made to be worth little. Nothing here changes what it can parse.
+    networks:
+      # No route off the host. In browser-only mode the application makes no outbound calls at all:
+      # reputation lookups, Ollama and Claude are closed, and the domain parser uses a bundled
+      # suffix list rather than fetching one. So an exploited parser has nowhere to send anything
+      # and nothing to fetch a second stage from.
+      - parse
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 256
+    mem_limit: ${REMN_MEM_LIMIT:-2g}
+    tmpfs:
+      # Evidence in transit never reaches physical disk, and cannot survive a restart even in
+      # principle. Sized to hold one upload at the 512 MiB ceiling with room to parse it.
+      - /app/backend/tmp:rw,noexec,nosuid,nodev,size=${REMN_TMP_SIZE:-1g},uid=1000,gid=1000,mode=0700
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700
     restart: unless-stopped
 
   caddy:
     image: caddy:2-alpine
+    # Caddy sits on both: the internet for certificates and visitors, the internal network to
+    # reach the parser. It is the only thing here that can talk to either.
+    networks:
+      - edge
+      - parse
     ports:
       - "${REMN_HTTP_PORT:-80}:80"
       - "${REMN_HTTPS_PORT:-443}:443"
@@ -45,7 +69,12 @@ services:
       - remn
     restart: unless-stopped
 
+networks:
+  edge: {}
+  # No gateway: containers on this network can reach each other and nothing else.
+  parse:
+    internal: true
+
 volumes:
-  remn-tmp:
   caddy-data:
   caddy-config:
