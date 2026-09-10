@@ -16,6 +16,9 @@ CLOSED = [
     ("delete", "/api/store/abc"),
     ("post", "/api/upload/init"),
     ("get", "/api/jobs"),
+    # collection packages are an operator workflow: reconciliation is quadratic in
+    # attacker-controlled input and each native member spawns a decoder subprocess
+    ("post", "/api/ingest/package"),
     ("get", "/api/reputation/providers"),
     ("post", "/api/reputation/lookup"),
     ("post", "/api/ai/chat"),
@@ -89,3 +92,11 @@ def test_budget_off_by_default():
     RateLimitMiddleware.reset()
     c = Client()
     assert all(_build(c).status_code == 200 for _ in range(5))
+
+
+@override_settings(FORENSIC_BROWSER_ONLY=True)
+def test_browser_only_keeps_the_ordinary_ingestion_paths_open():
+    """Closing the package endpoint must not close the paths the browser store depends on."""
+    c = Client()
+    for path in ("/api/ingest/evtx", "/api/ingest/mail"):
+        assert c.post(path, **HDR).status_code != 403, path

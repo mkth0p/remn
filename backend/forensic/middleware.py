@@ -86,7 +86,20 @@ class SecurityHeadersMiddleware:
 # Paths that keep state on the server, reach out to third parties or run a model on the server's
 # account: closed in browser-only mode. Parsing, correlation, rule conversion, rule packs and the
 # prompt bundle for the browser-direct model stay open.
-BROWSER_ONLY_CLOSED = ("/api/store", "/api/jobs", "/api/upload", "/api/reputation", "/api/ai/chat", "/api/ai/query", "/api/ai/models", "/api/ai/claude")
+# /api/ingest/package is closed here even though it keeps no state: reconciling a collection is
+# quadratic in attacker-controlled inputs and each native member spawns a decoder subprocess, so
+# it is a costly path served to strangers. Collection packages are an operator workflow.
+BROWSER_ONLY_CLOSED = (
+    "/api/store",
+    "/api/jobs",
+    "/api/upload",
+    "/api/reputation",
+    "/api/ingest/package",
+    "/api/ai/chat",
+    "/api/ai/query",
+    "/api/ai/models",
+    "/api/ai/claude",
+)
 
 
 class ModeGuardMiddleware:
@@ -104,7 +117,7 @@ class ModeGuardMiddleware:
 # The heavy paths: parsing, correlation, enrichment, conversion, lookups, models, store writes and
 # queries that run rules or SQL. Health, meta, rule packs, chunk PUTs and plain store reads are not budgeted.
 BUDGETED = re.compile(
-    r"^/api/(ingest/|analyze/|chains/|enrich/|rules/convert/|reputation/|ai/|upload/init$|store/[^/]+/(ingest|import|export|rules/run|sql|reputation)$)"
+    r"^/api/(ingest/|analyze/|chains/|relationships/|enrich/|rules/convert/|reputation/|ai/|upload/init$|store/[^/]+/(ingest|import|export|rules/run|sql|reputation)$)"
 )
 
 
