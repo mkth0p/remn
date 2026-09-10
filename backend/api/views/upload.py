@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -19,6 +21,7 @@ from django.conf import settings
 from django.http import HttpRequest, JsonResponse
 from django.views.decorators.http import require_http_methods, require_POST
 
+log = logging.getLogger(__name__)
 _ID = re.compile(r"^[a-f0-9]{32}$")
 MAX_CHUNK = 64 * 1024 * 1024
 
@@ -26,7 +29,26 @@ MAX_CHUNK = 64 * 1024 * 1024
 def upload_dir() -> Path:
     d = Path(settings.FILE_UPLOAD_TEMP_DIR) / "uploads"
     d.mkdir(parents=True, exist_ok=True)
+    # Evidence in transit is readable only by the account running the server. On a shared host this
+    # is the difference between "briefly on disk" and "briefly readable by anyone on the box".
+    try:
+        d.chmod(0o700)
+    except OSError:
+        pass
     return d
+
+
+def staged_bytes() -> int:
+    """Everything the staging area currently holds, including Django's own multipart spool."""
+    total = 0
+    for directory in (upload_dir(), Path(settings.FILE_UPLOAD_TEMP_DIR)):
+        try:
+            for p in directory.iterdir():
+                if p.is_file():
+                    total += p.stat().st_size
+        except OSError:
+            continue
+    return total
 
 
 def _paths(upload_id: str) -> tuple[Path, Path]:
@@ -69,17 +91,57 @@ def discard_upload(upload_id: str) -> None:
             pass
 
 
-def cleanup_stale(max_age_s: int = 24 * 3600) -> int:
+def cleanup_stale(max_age_s: int | None = None) -> int:
+    """Remove staged evidence nothing is going to consume.
+
+    Covers both the chunked staging area and Django's own multipart spool: a request that dies
+    part-way through a large single-request upload leaves a .upload file behind there, which the
+    original sweep never looked at.
+    """
+    if max_age_s is None:
+        max_age_s = settings.FORENSIC_UPLOAD_MAX_AGE_S
     n = 0
     now = time.time()
-    try:
-        for p in upload_dir().iterdir():
-            if p.suffix in (".part", ".json") and now - p.stat().st_mtime > max_age_s:
-                p.unlink(missing_ok=True)
-                n += 1
-    except OSError:
-        pass
+    for directory, suffixes in ((upload_dir(), (".part", ".json")), (Path(settings.FILE_UPLOAD_TEMP_DIR), (".upload",))):
+        try:
+            for p in directory.iterdir():
+                if not p.is_file() or p.suffix not in suffixes:
+                    continue
+                if now - p.stat().st_mtime > max_age_s:
+                    p.unlink(missing_ok=True)
+                    n += 1
+        except OSError:
+            continue
     return n
+
+
+_sweeper: threading.Thread | None = None
+
+
+def start_sweeper() -> bool:
+    """Run cleanup_stale on a timer, so an abandoned upload clears without waiting for a restart.
+
+    A daemon thread rather than an external timer: the container runs one process, and a sweep that
+    depends on the operator having configured cron is a sweep that does not happen.
+    """
+    global _sweeper
+    interval = int(settings.FORENSIC_UPLOAD_SWEEP_S or 0)
+    if interval <= 0 or (_sweeper is not None and _sweeper.is_alive()):
+        return False
+
+    def loop() -> None:
+        while True:
+            time.sleep(interval)
+            try:
+                removed = cleanup_stale()
+                if removed:
+                    log.info("swept %d stale staged file(s)", removed)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("upload sweep failed: %s", exc)
+
+    _sweeper = threading.Thread(target=loop, name="remn-upload-sweeper", daemon=True)
+    _sweeper.start()
+    return True
 
 
 @require_POST
@@ -97,9 +159,21 @@ def init(request: HttpRequest):
         limit = min(limit, settings.FORENSIC_MAX_UPLOAD_MB * 1024**2)
     if size <= 0 or size > limit:
         return JsonResponse({"error": f"size must be between 1 byte and {settings.FORENSIC_MAX_CHUNKED_GB} GB"}, status=400)
+    # Refuse rather than accept an upload the disk cannot take. Sweep first, so a burst of
+    # abandoned uploads does not lock out a legitimate one for the rest of the retention window.
+    budget = settings.FORENSIC_TMP_MAX_GB * 1024**3
+    if staged_bytes() + size > budget:
+        cleanup_stale()
+        if staged_bytes() + size > budget:
+            return JsonResponse({"error": "the server is staging as much evidence as it can hold; try again shortly", "code": "staging-full"}, status=507)
+
     upload_id = uuid.uuid4().hex
     dp, _ = _paths(upload_id)
     dp.touch()
+    try:
+        dp.chmod(0o600)
+    except OSError:
+        pass
     _save_meta(upload_id, {"id": upload_id, "name": name, "size": size, "received": 0, "complete": False, "created": int(time.time() * 1000)})
     return JsonResponse({"uploadId": upload_id, "chunkSize": settings.FORENSIC_CHUNK_MB * 1024 * 1024})
 

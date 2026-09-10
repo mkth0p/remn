@@ -101,6 +101,15 @@ FORENSIC_MAX_UPLOAD_MB = _env_int("FORENSIC_MAX_UPLOAD_MB", 2048)
 # Chunked uploads (large evidence): per-file cap and chunk size.
 FORENSIC_MAX_CHUNKED_GB = _env_int("FORENSIC_MAX_CHUNKED_GB", 64)
 FORENSIC_CHUNK_MB = _env_int("FORENSIC_CHUNK_MB", 16)
+
+# The staging area holds evidence only while it is being parsed, but an abandoned upload holds
+# disk until something removes it. An instance open to strangers keeps that window short.
+FORENSIC_UPLOAD_MAX_AGE_S = _env_int("FORENSIC_UPLOAD_MAX_AGE_S", 1800 if FORENSIC_BROWSER_ONLY else 6 * 3600)
+# How often the sweeper runs. 0 disables the periodic sweep (it still runs at startup).
+FORENSIC_UPLOAD_SWEEP_S = _env_int("FORENSIC_UPLOAD_SWEEP_S", 300)
+# Total bytes the staging area may hold. A new upload is refused above it, after a sweep, so a
+# stream of abandoned uploads cannot fill the disk however short the lifetime is.
+FORENSIC_TMP_MAX_GB = _env_int("FORENSIC_TMP_MAX_GB", 4)
 # Advisory threshold (MB) above which the UI suggests the server store instead of IndexedDB.
 FORENSIC_STORE_THRESHOLD_MB = _env_int("FORENSIC_STORE_THRESHOLD_MB", 150)
 # Files smaller than this are handled fully in memory by the parsers.

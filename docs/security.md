@@ -103,6 +103,30 @@ at any address on their network, so it stays open there; a public page served ov
 only reach loopback anyway, so the narrower policy costs that deployment nothing and removes the
 channel a script injection would otherwise use to send evidence somewhere.
 
+### Evidence in transit
+
+Browser-only mode means the server keeps no case, not that files never reach it. A browser-store
+ingest uploads the file, the server writes it to the staging area under `FORENSIC_TMP_DIR`, parses
+it, streams the rows back, and deletes it. So evidence is on the server's disk for the length of a
+parse, and the question that matters on a public instance is what happens when a parse never
+finishes.
+
+- **A short window.** `FORENSIC_UPLOAD_MAX_AGE_S` defaults to 30 minutes in browser-only mode and
+  6 hours otherwise. An operator can lengthen it; a stranger-facing instance should not hold
+  someone's evidence for a day because nobody set a variable.
+- **Swept on a timer**, every `FORENSIC_UPLOAD_SWEEP_S` seconds (300 by default) as well as at
+  startup, so an abandoned upload clears without waiting for a restart. Set it to 0 to disable.
+  The sweep covers Django's own multipart spool as well as the chunked staging area: a request
+  that dies part-way through a single-request upload leaves a file there too.
+- **A total budget.** `FORENSIC_TMP_MAX_GB` (4 by default) caps what the staging area may hold at
+  once. A new upload that would exceed it triggers a sweep and is then refused with 507, so a
+  stream of abandoned uploads cannot fill the disk however short the lifetime is.
+- **Private to the server account.** The staging directory is 0700 and each staged file 0600, so
+  evidence in transit is not readable by other accounts on the host.
+
+None of this makes a public instance a place for real evidence. It bounds the exposure of the
+files people do send.
+
 The per-address budget reads the **rightmost** X-Forwarded-For entry, the one the trusted proxy
 observed and appended, not the leftmost, which is whatever the client sent. Caddy's default
 replaces the header rather than appending, which hides the difference, but that is a property of
