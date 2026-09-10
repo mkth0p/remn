@@ -14,7 +14,6 @@ CLOSED = [
     ("get", "/api/store"),
     ("post", "/api/store/abc/search"),
     ("delete", "/api/store/abc"),
-    ("post", "/api/upload/init"),
     ("get", "/api/jobs"),
     # collection packages are an operator workflow: reconciliation is quadratic in
     # attacker-controlled input and each native member spawns a decoder subprocess
@@ -100,3 +99,22 @@ def test_browser_only_keeps_the_ordinary_ingestion_paths_open():
     c = Client()
     for path in ("/api/ingest/evtx", "/api/ingest/mail"):
         assert c.post(path, **HDR).status_code != 403, path
+
+
+@override_settings(FORENSIC_BROWSER_ONLY=True, FORENSIC_MAX_UPLOAD_MB=64, FORENSIC_MAX_CHUNKED_GB=64)
+def test_browser_only_allows_chunked_upload_but_caps_it_at_the_single_request_ceiling():
+    """A browser-store case has to get its evidence to the parser, and one request carrying the
+    whole file is what proxies refuse. The chunked path stays open, bounded by the same ceiling."""
+    c = Client()
+    ok = c.post("/api/upload/init", json.dumps({"name": "big.evtx", "size": 32 * 1024**2}), content_type="application/json", **HDR)
+    assert ok.status_code == 200 and ok.json()["uploadId"]
+
+    # beyond what this instance accepts in one request, an unfinished upload would just hold disk
+    too_big = c.post("/api/upload/init", json.dumps({"name": "huge.evtx", "size": 128 * 1024**2}), content_type="application/json", **HDR)
+    assert too_big.status_code == 400
+
+
+@override_settings(FORENSIC_BROWSER_ONLY=False, FORENSIC_MAX_UPLOAD_MB=64, FORENSIC_MAX_CHUNKED_GB=64)
+def test_full_mode_keeps_the_operator_scale_chunked_ceiling():
+    r = Client().post("/api/upload/init", json.dumps({"name": "huge.evtx", "size": 128 * 1024**2}), content_type="application/json", **HDR)
+    assert r.status_code == 200

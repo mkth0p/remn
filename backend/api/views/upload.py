@@ -91,6 +91,10 @@ def init(request: HttpRequest):
     name = str(body.get("name") or "upload")[:255]
     size = int(body.get("size") or 0)
     limit = settings.FORENSIC_MAX_CHUNKED_GB * 1024**3
+    if settings.FORENSIC_BROWSER_ONLY:
+        # An instance open to strangers stages the same ceiling it accepts in one request, rather
+        # than the operator-scale chunked ceiling: an unfinished upload holds disk until it is swept.
+        limit = min(limit, settings.FORENSIC_MAX_UPLOAD_MB * 1024**2)
     if size <= 0 or size > limit:
         return JsonResponse({"error": f"size must be between 1 byte and {settings.FORENSIC_MAX_CHUNKED_GB} GB"}, status=400)
     upload_id = uuid.uuid4().hex

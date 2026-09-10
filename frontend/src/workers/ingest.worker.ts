@@ -16,6 +16,10 @@ export interface IngestRequest {
   evidenceId: number
   file: File
   kind: 'evtx' | 'mail' | 'package'
+  /** A completed chunked upload to parse instead of posting the file: set for large evidence. */
+  uploadId?: string
+  /** The digest computed during that upload, so the file is not read a second time. */
+  uploadSha256?: string
   sourceName?: string
   includeRaw: boolean
   settings: { internalDomains: string[]; brands: string[]; vipNames: string[]; trustedSenders?: string[] }
@@ -240,19 +244,24 @@ async function ingest(req: IngestRequest): Promise<void> {
   const db = getDb()
   const { caseId, evidenceId, file, kind } = req
   const abort = { aborted: false }
-  post({ type: 'phase', phase: 'hashing' })
   let lastReport = 0
-  const sha256 = await hashFile(
-    file,
-    (done) => {
-      const now = Date.now()
-      if (now - lastReport > 150 || done === file.size) {
-        lastReport = now
-        post({ type: 'hash-progress', done, total: file.size })
-      }
-    },
-    abort,
-  )
+  // A large file was uploaded in chunks before this worker started and hashed on the way, so it
+  // is neither read nor sent a second time here.
+  let sha256 = req.uploadSha256 ?? ''
+  if (!sha256) {
+    post({ type: 'phase', phase: 'hashing' })
+    sha256 = await hashFile(
+      file,
+      (done) => {
+        const now = Date.now()
+        if (now - lastReport > 150 || done === file.size) {
+          lastReport = now
+          post({ type: 'hash-progress', done, total: file.size })
+        }
+      },
+      abort,
+    )
+  }
   post({ type: 'hash', sha256 })
   const duplicate = await duplicateEvidence(caseId, evidenceId, req.sourceName ?? file.name, kind, sha256)
   if (duplicate) {
@@ -264,7 +273,8 @@ async function ingest(req: IngestRequest): Promise<void> {
 
   post({ type: 'phase', phase: 'uploading' })
   const form = new FormData()
-  form.append('file', file, file.name)
+  if (req.uploadId) form.append('uploadId', req.uploadId)
+  else form.append('file', file, file.name)
   form.append('sourceName', req.sourceName ?? file.name)
   form.append('raw', req.includeRaw ? '1' : '0')
   if (kind !== 'evtx')

@@ -24,6 +24,15 @@ export function isArchive(file: File): boolean {
   return /\.(zip|tar|tgz|tar\.gz|tar\.bz2|tbz2|tar\.xz|txz)$/i.test(file.name)
 }
 
+/**
+ * Size above which a browser-store case uploads in chunks rather than one request.
+ *
+ * Nothing about the server requires it: this is about what sits in front of it. Reverse proxies
+ * and CDNs cap a single request body far below the server's own limit, so a large file posted
+ * whole is refused with a 413 that the analyst cannot act on.
+ */
+export const CHUNK_ABOVE_BYTES = 32 * 1024 * 1024
+
 export function thresholdBytes(): number {
   const mb = useStore.getState().storeThresholdMb
   return Math.max(1, mb) * 1024 * 1024
@@ -155,12 +164,29 @@ export async function ingestToBrowser(file: File, kase: Case, kind: 'evtx' | 'ma
   log('info', `[${file.name}] added as evidence #${evidenceId} (${kind}), hashing…`)
 
   const worker = new Worker(new URL('../workers/ingest.worker.ts', import.meta.url), { type: 'module' })
+  // Beyond this, one request carrying the whole file is refused by proxies long before the
+  // server's own limit, which is the 413 a browser-store case used to hit. The chunked path
+  // sends fixed-size pieces instead and hashes on the way, so the file is read once.
+  let upload: { uploadId: string; sha256Client: string } | undefined
+  if (file.size > CHUNK_ABOVE_BYTES) {
+    try {
+      useStore.getState().upsertJob({ id: jobId, phase: 'uploading', progress: 0 })
+      upload = await chunkedUpload(file, (p) => useStore.getState().upsertJob({ id: jobId, phase: 'uploading', progress: p.uploaded / Math.max(1, p.total) }))
+    } catch (e) {
+      // A server without the chunked endpoints, or an interrupted upload: fall back to the
+      // single request rather than failing the ingest outright.
+      log('warn', `[${file.name}] chunked upload unavailable (${(e as Error).message}); sending in one request`)
+      upload = undefined
+    }
+  }
   const req: IngestRequest = {
     cmd: 'ingest',
     jobId,
     caseId: kase.id!,
     evidenceId,
     file,
+    uploadId: upload?.uploadId,
+    uploadSha256: upload?.sha256Client,
     kind,
     sourceName: file.webkitRelativePath || file.name,
     includeRaw: kase.settings.includeRaw !== false,

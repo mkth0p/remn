@@ -89,10 +89,15 @@ class SecurityHeadersMiddleware:
 # /api/ingest/package is closed here even though it keeps no state: reconciling a collection is
 # quadratic in attacker-controlled inputs and each native member spawns a decoder subprocess, so
 # it is a costly path served to strangers. Collection packages are an operator workflow.
+#
+# /api/upload is NOT closed. A browser-store case has to get its evidence to the parser somehow,
+# and the alternative is one request carrying the whole file, which proxies refuse well before the
+# server's own limit. The chunked path writes the same transient bytes the multipart path already
+# writes to the temp directory, bounded by FORENSIC_MAX_UPLOAD_MB in this mode, rate limited on
+# init, and swept after 24 hours.
 BROWSER_ONLY_CLOSED = (
     "/api/store",
     "/api/jobs",
-    "/api/upload",
     "/api/reputation",
     "/api/ingest/package",
     "/api/ai/chat",
