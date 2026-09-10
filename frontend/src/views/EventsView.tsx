@@ -4,9 +4,11 @@ import { FilterBar } from '../components/FilterBar'
 import { TimeHistogram } from '../components/TimeHistogram'
 import { IconMore } from '../components/Icons'
 import { VirtualTable, type Column } from '../components/VirtualTable'
+import { RowMarkBar } from '../components/RowMarkBar'
+import { loadRowMarks, markedRowIds } from '../data/rowMarks'
 import { EventDetail } from '../components/Detail'
 import { getSource } from '../data/source'
-import type { EventRow } from '../db/schema'
+import type { EventRow, RowMark } from '../db/schema'
 import type { Condition, Filter } from '../rules/filter'
 import { useStore } from '../state/store'
 import { fmtTs } from '../util/format'
@@ -92,6 +94,10 @@ export function EventsView() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<EventRow | null>(null)
+  const [picked, setPicked] = useState<Set<string | number>>(new Set())
+  const [marks, setMarks] = useState<Map<number, RowMark>>(new Map())
+  const [markedOnly, setMarkedOnly] = useState(false)
+  const [marksVersion, setMarksVersion] = useState(0)
   const [version, setVersion] = useState(0)
   const [menu, setMenu] = useState(false)
   const ds = useMemo(() => (kase ? getSource(kase) : null), [kase])
@@ -122,6 +128,39 @@ export function EventsView() {
       alive = false
     }
   }, [ds, filter, version])
+
+  useEffect(() => {
+    if (!kase?.id || !rows.length) {
+      setMarks(new Map())
+      return
+    }
+    let alive = true
+    loadRowMarks(
+      kase.id,
+      'events',
+      rows.map((r) => r.id!),
+    )
+      .then((m) => alive && setMarks(m))
+      .catch(() => alive && setMarks(new Map()))
+    return () => {
+      alive = false
+    }
+  }, [kase?.id, rows, marksVersion])
+
+  // "marked only" is a row-id filter, the same mechanism a finding uses to open its rows
+  useEffect(() => {
+    if (!kase?.id) return
+    if (!markedOnly) {
+      setFilter((prev: Filter) => ({ ...prev, conditions: (prev.conditions ?? []).filter((c) => c.field !== 'id') }))
+      return
+    }
+    markedRowIds(kase.id, 'events').then(({ ids }) => {
+      setFilter((prev: Filter) => ({
+        ...prev,
+        conditions: [...(prev.conditions ?? []).filter((c) => c.field !== 'id'), { field: 'id', op: 'in', value: ids.length ? ids : [-1] } as Condition],
+      }))
+    })
+  }, [markedOnly, kase?.id, setFilter, marksVersion])
 
   useEffect(() => {
     if (focus?.source === 'events' && ds) {
@@ -189,6 +228,9 @@ export function EventsView() {
             loading={loading}
             extra={
               <span className="row relative" style={{ gap: 4 }}>
+                <button className={markedOnly ? 'btn xs primary' : 'btn xs ghost'} title="Show only the rows you marked" onClick={() => setMarkedOnly((on) => !on)}>
+                  marked
+                </button>
                 <button className="btn icon ghost sm" title="export" onClick={() => setMenu(!menu)}>
                   <IconMore />
                 </button>
@@ -259,15 +301,45 @@ export function EventsView() {
               {error && <span style={{ color: 'var(--danger)' }}>{error}</span>}
             </div>
           )}
+          {kase?.id != null && (
+            <RowMarkBar
+              caseId={kase.id}
+              source="events"
+              rows={rows as unknown as Record<string, unknown>[]}
+              picked={picked}
+              onClear={() => setPicked(new Set())}
+              onChanged={() => setMarksVersion((v) => v + 1)}
+            />
+          )}
           <VirtualTable
             rows={rows}
             columns={columns}
             rowKey={(r) => r.id!}
             onRowClick={setSelected}
             selectedKey={selected?.id ?? null}
+            selectedKeys={picked}
+            onToggleSelect={(k) =>
+              setPicked((prev) => {
+                const next = new Set(prev)
+                if (next.has(k)) next.delete(k)
+                else next.add(k)
+                return next
+              })
+            }
+            onToggleAll={(on) => setPicked(on ? new Set(rows.map((r) => r.id!)) : new Set())}
             sort={sort}
             onSort={(field) => setFilter({ ...filter, sort: { field, dir: sort.field === field && sort.dir === 'desc' ? 'asc' : 'desc' } })}
-            rowClass={(r) => (r.category === 'log-tampering' || r.category === 'defender-tampering' ? 'sev-critical' : r.eventId === 4625 || r.category === 'defender' ? 'sev-medium' : undefined)}
+            rowClass={(r) =>
+              marks.get(r.id!)?.verdict === 'noise'
+                ? 'row-noise'
+                : marks.get(r.id!)
+                  ? 'row-marked'
+                  : r.category === 'log-tampering' || r.category === 'defender-tampering'
+                    ? 'sev-critical'
+                    : r.eventId === 4625 || r.category === 'defender'
+                      ? 'sev-medium'
+                      : undefined
+            }
             empty={loading ? 'loading…' : 'no events match - load an EVTX file in Evidence or relax the filter'}
           />
           {selected && <EventDetail row={selected} onClose={() => setSelected(null)} />}

@@ -2225,3 +2225,15 @@ label.field > span {
 .triage-table tr.undone td:last-child {
   text-decoration: none;
 }
+
+/* Analyst marks on evidence rows. Noise recedes; anything else the analyst kept is lifted. A mark
+   is an opinion, so it reads as a tint rather than a severity colour, which belongs to the rules. */
+.vrow.row-marked {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.vrow.row-noise {
+  opacity: 0.45;
+}
+.vrow.row-noise:hover {
+  opacity: 1;
+}
