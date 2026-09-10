@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { buildRelationships, relationshipRow, mergeRelationships, type RelationshipResult } from './relationships'
+import { buildRelationships, relationshipRow, mergeRelationships, scanRelationships, type RelationshipResult } from './relationships'
 import { relationshipKey, reportRelationships, saveRelationshipReview, strandedRelationships, type RelationshipReview } from './relationshipReviews'
 import { duplicateEvidence } from './duplicateEvidence'
 import { defaultSettings, getDb } from '../db/schema'
@@ -7,6 +7,44 @@ import { caseSummary } from './queries'
 
 const post = vi.hoisted(() => vi.fn(async (_url: string, _body: Record<string, unknown>) => ({ nodes: [], edges: [], stats: {} })))
 vi.mock('../api/client', () => ({ apiPost: post }))
+
+it('scans through later sources and keeps progress when stopped', async () => {
+  const first: RelationshipResult = {
+    nodes: [],
+    edges: [],
+    stats: { events: 1000, mails: 0, truncated: false, rowCap: 20000, referenceCap: 30 },
+    cursor: { events: 1000, mails: 0 },
+    processContext: [{ id: 5000 }],
+    processContextTruncated: true,
+  }
+  const second: RelationshipResult = { ...first, stats: { ...first.stats, events: 12 }, cursor: null }
+  const load = vi.fn(async (previous: RelationshipResult | null) => (previous ? second : first))
+  const all = await scanRelationships(
+    null,
+    load,
+    () => false,
+    () => {},
+  )
+  expect(all?.stats.events).toBe(1012)
+  expect(all?.cursor).toBeNull()
+  expect(load.mock.calls[1][0]?.processContextTruncated).toBe(true)
+  let stop = false
+  const partial = await scanRelationships(
+    null,
+    load,
+    () => stop,
+    () => {
+      stop = true
+    },
+  )
+  expect(partial?.cursor?.events).toBe(1000)
+  expect(partial?.stats.events).toBe(1000)
+})
+
+it('keeps an incomplete process context explicitly incomplete on subsequent requests', async () => {
+  await buildRelationships({ id: 1, name: 'case', createdAt: 1, updatedAt: 1, settings: defaultSettings() }, undefined, { events: 1000, mails: 0 }, {}, [{ id: 1 }], true)
+  expect(post.mock.calls.at(-1)?.[1]).toMatchObject({ truncated: true })
+})
 afterEach(async () => {
   for (const table of getDb().tables) await table.clear()
   post.mockClear()
@@ -207,10 +245,65 @@ it('keeps a reviewed relationship whose supporting references only partly surviv
   const reported = await reportRelationships(1)
   expect(reported).toHaveLength(1)
   expect(reported[0].references).toEqual([live])
-  expect(await strandedRelationships(1)).toBe(0)
+  expect((await strandedRelationships(1)).evidenceGone).toBe(0)
 
   // when nothing survives it is dropped, and counted so the report can say so
   await saveRelationshipReview(1, { ...review, key: 'gone', references: [dead] })
   expect(await reportRelationships(1)).toHaveLength(1)
-  expect(await strandedRelationships(1)).toBe(1)
+  expect((await strandedRelationships(1)).evidenceGone).toBe(1)
+})
+
+it('an unrelated alias edit keeps existing review keys', async () => {
+  // The key used to embed the whole alias map, so adding one account alias re-keyed every review
+  // in the case at once: the saved decisions orphaned while the rebuilt edges came back unreviewed,
+  // and the report printed both.
+  const ref = {
+    id: 1,
+    evidenceId: 9,
+    source: 'events' as const,
+    sourceFile: 'Security.evtx',
+    sourceSha256: null,
+    sourceIndex: 0,
+    recordKind: 'event',
+    ts: 1700000000000,
+    observedAt: null,
+    title: 'logon',
+  }
+  const edge = { source: 'acct', target: 'host', relation: 'observed on', reason: 'collected', confidence: 'high', refs: [ref], count: 1 }
+  const nodes = new Map([
+    ['acct', { id: 'acct', kind: 'account', scope: 'ws01', value: 'alice', label: 'alice' }],
+    ['host', { id: 'host', kind: 'host', scope: '', value: 'ws01', label: 'ws01' }],
+  ])
+  expect(relationshipKey(edge, nodes)).toBe(relationshipKey(edge, nodes))
+
+  // an alias that DOES matter still changes the key, because it changes the node value itself
+  const aliased = new Map(nodes)
+  aliased.set('host', { id: 'host', kind: 'host', scope: '', value: 'ws01.example', label: 'ws01.example' })
+  expect(relationshipKey(edge, aliased)).not.toBe(relationshipKey(edge, nodes))
+})
+
+it('the report excludes accepted relationships the graph no longer produces', async () => {
+  const ref = { id: 1, evidenceId: 9, source: 'events' as const, sourceFile: 'a.csv', sourceSha256: 'abc', sourceIndex: 0, recordKind: 'observation', ts: null, observedAt: 1, title: 'x' }
+  const review: RelationshipReview = {
+    key: 'still-here',
+    status: 'accepted',
+    includeInReport: true,
+    notes: '',
+    sourceLabel: 'a',
+    targetLabel: 'b',
+    relation: 'observed on',
+    reason: 'collected',
+    confidence: 'high',
+    references: [ref],
+    aliases: {},
+    updatedAt: 1,
+  }
+  await getDb().evidence.add({ id: 9, caseId: 1, name: 'p.zip', kind: 'package', status: 'done', integrity: 'verified', size: 1, count: 1, addedAt: 1 })
+  await saveRelationshipReview(1, review)
+  await saveRelationshipReview(1, { ...review, key: 'vanished' })
+
+  expect(await reportRelationships(1)).toHaveLength(2)
+  const live = new Set(['still-here'])
+  expect((await reportRelationships(1, live)).map((r) => r.key)).toEqual(['still-here'])
+  expect(await strandedRelationships(1, live)).toEqual({ evidenceGone: 0, notProduced: 1 })
 })

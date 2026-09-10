@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { EventDetail, MailDetail } from '../components/Detail'
 import { Badge } from '../components/ui'
-import { buildRelationships, mergeRelationships, type RelationshipAliases, type RelationshipEdge, type RelationshipNode, type RelationshipRef, type RelationshipResult } from '../data/relationships'
+import { buildRelationships, scanRelationships, type RelationshipAliases, type RelationshipEdge, type RelationshipNode, type RelationshipRef, type RelationshipResult } from '../data/relationships'
 import { loadRelationshipReviews, relationshipKey, saveRelationshipReview, type RelationshipReview } from '../data/relationshipReviews'
+import { relationshipLeads } from '../data/relationshipLeads'
 import { getSource } from '../data/source'
 import { getDb, type EventRow, type Evidence, type MailRow } from '../db/schema'
 import { useStore } from '../state/store'
@@ -45,7 +46,7 @@ function RelationshipEditor({
   onSave: (r: RelationshipReview) => Promise<void>
 }) {
   const [draft, setDraft] = useState<RelationshipReview>(() => ({
-    key: relationshipKey(edge, nodes, aliases),
+    key: relationshipKey(edge, nodes),
     status: 'unreviewed',
     notes: '',
     includeInReport: false,
@@ -138,8 +139,16 @@ export function RelationshipsView() {
   const [reviews, setReviews] = useState<Record<string, RelationshipReview>>({})
   const [detail, setDetail] = useState<{ source: 'events'; row: EventRow } | { source: 'mails'; row: MailRow } | null>(null)
   const alive = useRef(true)
+  const stopped = useRef(false)
+  const generation = useRef(0)
+  const [progress, setProgress] = useState('')
   useEffect(() => {
     alive.current = true
+    const current = ++generation.current
+    setBusy(false)
+    setResult(null)
+    setSelected('')
+    setError('')
     if (kase?.id)
       getDb()
         .evidence.where('caseId')
@@ -147,16 +156,18 @@ export function RelationshipsView() {
         .toArray()
         .then(async (rows) => {
           const [saved, aliases, cache] = await Promise.all([loadRelationshipReviews(kase.id!), getDb().kv.get(`relationship-aliases-${kase.id}`), getDb().kv.get(`relationship-cache-${kase.id}`)])
-          if (!alive.current) return
+          if (!alive.current || current !== generation.current) return
           setEvidence(rows)
           setReviews(saved)
           setAliasesText(JSON.stringify(aliases?.value ?? {}, null, 2))
-          const cached = cache?.value as { fingerprint: string; result: RelationshipResult; aliases: RelationshipAliases; scope: string } | undefined
-          if (cached?.fingerprint === fingerprint(rows)) {
+          const cached = cache?.value as { fingerprint: string; result?: RelationshipResult; aliases: RelationshipAliases; scope: string; tooLarge?: number } | undefined
+          if (cached?.fingerprint === fingerprint(rows) && cached.result) {
             setResult(cached.result)
             setActiveAliases(cached.aliases)
             setEvidenceId(cached.scope)
-            setSelected(cached.result.nodes[0]?.id ?? '')
+            setSelected(relationshipLeads(cached.result)[0]?.node.id ?? cached.result.nodes.find((n) => n.kind !== 'record')?.id ?? '')
+          } else if (cached?.tooLarge) {
+            setError('The previous graph was too large to cache. Rebuild to scan the evidence again; your saved reviews are retained.')
           }
         })
     return () => {
@@ -164,6 +175,7 @@ export function RelationshipsView() {
     }
   }, [kase?.id])
   const byId = useMemo(() => new Map(result?.nodes.map((n) => [n.id, n]) ?? []), [result])
+  const leads = useMemo(() => relationshipLeads(result), [result])
   const degrees = useMemo(() => {
     const counts = new Map<string, number>()
     for (const edge of result?.edges ?? []) for (const id of [edge.source, edge.target]) counts.set(id, (counts.get(id) ?? 0) + 1)
@@ -184,11 +196,21 @@ export function RelationshipsView() {
     setBusy(true)
     setError('')
     setDetail(null)
+    stopped.current = false
+    const current = generation.current
+    setProgress('Scanning evidence…')
     try {
       const aliases = append ? activeAliases : (JSON.parse(aliasesText) as RelationshipAliases)
       if (!aliases || Array.isArray(aliases) || typeof aliases !== 'object') throw new Error('Aliases must be a JSON object containing hosts and/or accounts maps')
-      const page = await buildRelationships(kase, evidenceId ? Number(evidenceId) : undefined, append ? (result?.cursor ?? undefined) : undefined, aliases, append ? result?.processContext : undefined)
-      const next = mergeRelationships(append ? result : null, page)
+      const next = await scanRelationships(
+        append ? result : null,
+        (previous) => buildRelationships(kase, evidenceId ? Number(evidenceId) : undefined, previous?.cursor ?? undefined, aliases, previous?.processContext, previous?.processContextTruncated),
+        () => stopped.current || !alive.current || generation.current !== current,
+        (partial) => {
+          if (alive.current && generation.current === current) setProgress(`Scanned ${fmtNum(partial.stats.events + partial.stats.mails)} records…`)
+        },
+      )
+      if (!next || !alive.current || generation.current !== current) return
       // The graph grows with every page and the merge caps only stop it at 100,000 nodes, so
       // persisting the whole thing rewrites an ever larger row on each click and can exceed what a
       // single structured clone will carry. Cache only what a reload needs to resume.
@@ -202,14 +224,17 @@ export function RelationshipsView() {
             : { fingerprint: fingerprint(evidence), aliases, scope: evidenceId, cursor: next.cursor, tooLarge: next.nodes.length + next.edges.length },
         },
       ])
-      if (!alive.current) return
+      if (!alive.current || generation.current !== current) return
       setResult(next)
       setActiveAliases(aliases)
-      if (!append) setSelected(next.nodes.find((n) => n.kind === 'host')?.id ?? next.nodes[0]?.id ?? '')
+      if (!append) setSelected(relationshipLeads(next)[0]?.node.id ?? next.nodes.find((n) => n.kind !== 'record')?.id ?? '')
     } catch (e) {
-      if (alive.current) setError((e as Error).message)
+      if (alive.current && generation.current === current) setError((e as Error).message)
     } finally {
-      if (alive.current) setBusy(false)
+      if (alive.current && generation.current === current) {
+        setBusy(false)
+        setProgress('')
+      }
     }
   }
   const open = async (ref: RelationshipRef) => {
@@ -253,9 +278,19 @@ export function RelationshipsView() {
         <button className="btn primary" disabled={busy} onClick={() => build()}>
           {busy ? 'Building…' : result ? 'Rebuild relationships' : 'Build relationships'}
         </button>
+        {busy && (
+          <button
+            className="btn"
+            onClick={() => {
+              stopped.current = true
+            }}
+          >
+            Stop after this page
+          </button>
+        )}
         {result?.cursor && (
           <button className="btn" disabled={busy} onClick={() => build(true)}>
-            Load more records
+            Continue scanning
           </button>
         )}
       </div>
@@ -282,6 +317,11 @@ export function RelationshipsView() {
             {error}
           </div>
         )}
+        {busy && (
+          <div className="hint" role="status">
+            {progress} The scan continues across pages; larger cases take longer.
+          </div>
+        )}
         {result && (
           <>
             <div className="row">
@@ -292,7 +332,7 @@ export function RelationshipsView() {
             </div>
             {result.cursor && (
               <div className="hint" role="status">
-                More evidence remains. Use Load more records to extend this graph; the saved snapshot resumes here next time.
+                This scan is incomplete. Continue scanning to include later sources, or narrow the evidence scope if a graph limit was reached.
               </div>
             )}
             {result.stats.truncated && (
@@ -300,6 +340,49 @@ export function RelationshipsView() {
                 Partial graph: an input or graph limit was reached. Select an evidence item to narrow the build. Absence of a link here is not evidence of absence.
               </div>
             )}
+            <section className="card col" style={{ gap: 10 }}>
+              <h2 style={{ margin: 0 }}>Cross-source links</h2>
+              <p className="small muted" style={{ margin: 0 }}>
+                Files, hashes, process instances and other entities reported in multiple source files. These are investigation starting points, not malicious verdicts. Counts use retained source
+                references.
+              </p>
+              {leads.length === 0 && (
+                <p>
+                  No cross-source overlap found in the scanned records.{' '}
+                  {result.cursor ? 'Later sources have not been scanned yet.' : 'Check package coverage and whether records identify their host, full paths or hashes.'}
+                </p>
+              )}
+              {leads.slice(0, 30).map((lead) => (
+                <div key={lead.node.id} style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+                  <button
+                    className={`btn ${selected === lead.node.id ? 'primary' : 'ghost'}`}
+                    style={{ whiteSpace: 'normal', textAlign: 'left', overflowWrap: 'anywhere' }}
+                    onClick={() => {
+                      setSelected(lead.node.id)
+                      setQuery('')
+                      setKind('')
+                    }}
+                  >
+                    {lead.node.kind} · {lead.node.label}
+                  </button>
+                  <div className="small">
+                    {lead.sources.length} source files · {lead.records} cited records · {lead.relations.join(' · ')}
+                  </div>
+                  <div className="small muted" style={{ overflowWrap: 'anywhere' }}>
+                    {lead.sources.slice(0, 4).join(' ↔ ')}
+                    {lead.sources.length > 4 ? ' …' : ''}
+                  </div>
+                  <div className="row" style={{ marginTop: 6 }}>
+                    {lead.references.slice(0, 3).map((ref, i) => (
+                      <button key={i} className="btn xs" onClick={() => open(ref)}>
+                        Open {ref.source} #{ref.id}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {leads.length > 30 && <span className="small muted">Showing 30 of {fmtNum(leads.length)} shared entities. Use the explorer below for the rest.</span>}
+            </section>
             <div style={{ display: 'grid', gridTemplateColumns: 'minmax(220px, 28%) minmax(0, 1fr)', gap: 16 }}>
               <div className="card col" style={{ gap: 8 }}>
                 <input className="input" placeholder="Search entities and records" aria-label="Search entities" value={query} onChange={(e) => setQuery(e.target.value)} />
@@ -401,11 +484,11 @@ export function RelationshipsView() {
                     </summary>
                     <p>{edge.reason}</p>
                     <RelationshipEditor
-                      key={relationshipKey(edge, byId, activeAliases)}
+                      key={relationshipKey(edge, byId)}
                       edge={edge}
                       nodes={byId}
                       aliases={activeAliases}
-                      review={reviews[relationshipKey(edge, byId, activeAliases)]}
+                      review={reviews[relationshipKey(edge, byId)]}
                       onSave={async (review) => {
                         try {
                           await saveRelationshipReview(kase.id!, review)

@@ -146,7 +146,7 @@ def test_task_xml_clixml_and_netstat_exports(tmp_path):
 
 
 def test_explicit_aliases_and_unique_snapshot_pid_resolution():
-    base = {"computer": "WS01", "packageId": "pkg", "observedAt": 1788948000000, "processId": 42}
+    base = {"computer": "WS01", "packageId": "pkg", "observedAt": 1788948000000, "processId": 42, "recordKind": "observation"}
     rows = [
         {**base, "id": 1, "artifactType": "process", "processStart": COLLECTED},
         {**base, "id": 2, "artifactType": "connection", "destinationIp": "203.0.113.10"},
@@ -295,11 +295,11 @@ def test_store_roundtrip_relationship_parity_and_deletion(tmp_path, registry, mo
 
 def test_relationship_scope_pid_reuse_and_digest_bridge():
     rows = [
-        {"id": 1, "computer": "A", "processId": 123, "image": r"C:\agent.exe", "hashes": "SHA256=" + HASH},
-        {"id": 2, "computer": "A", "processId": 123, "image": r"C:\agent.exe"},
-        {"id": 3, "computer": "B", "processId": 123, "image": r"C:\agent.exe"},
-        {"id": 4, "computer": "A", "processId": 123, "processStart": COLLECTED, "image": r"C:\agent.exe"},
-        {"id": 5, "computer": "A", "processId": 123, "processStart": "2026-09-10T10:00:00Z", "image": r"C:\agent.exe"},
+        {"id": 1, "computer": "A", "processId": 123, "image": r"C:\agent.exe", "hashes": "SHA256=" + HASH, "recordKind": "observation"},
+        {"id": 2, "computer": "A", "processId": 123, "image": r"C:\agent.exe", "recordKind": "observation"},
+        {"id": 3, "computer": "B", "processId": 123, "image": r"C:\agent.exe", "recordKind": "observation"},
+        {"id": 4, "computer": "A", "processId": 123, "processStart": COLLECTED, "image": r"C:\agent.exe", "recordKind": "observation"},
+        {"id": 5, "computer": "A", "processId": 123, "processStart": "2026-09-10T10:00:00Z", "image": r"C:\agent.exe", "recordKind": "observation"},
     ]
     graph = build(rows, [{"id": 1, "attachments": [{"sha256": HASH}], "fromAddr": "sender@example.test"}])
     nodes = graph["nodes"]
@@ -461,3 +461,64 @@ def test_the_worker_reports_a_total_failure_as_before(tmp_path, monkeypatch):
     output.write_text(json.dumps({"Key": "Run", "Value": "a.exe"}) + "\n", encoding="utf-8")
     monkeypatch.setattr(native, "decode", lambda kind, path, tmp_dir: str(output))
     assert [r["Value"] for r in native.records("registry", "ignored", str(tmp_path))] == ["a.exe"]
+
+
+def test_the_graph_uses_the_subject_pid_of_an_event_not_the_writers():
+    """evtx_parser puts the Execution ProcessID in processId: the PID of the service that wrote
+    the record. The subject is newProcessId (created) or callerProcessId (acting)."""
+    from services.analysis import relationships as R
+
+    # a 4688: the event log service wrote it (PID 4), svchost spawned cmd.exe as PID 2244
+    created = {"id": 1, "computer": "WS01", "processId": 4, "callerProcessId": 880, "newProcessId": 2244, "image": r"C:\Windows\System32\cmd.exe"}
+    assert R.subject_process_id(created) == ("2244", "new process")
+    # an event that only names the acting process
+    acting = {"id": 2, "computer": "WS01", "processId": 4, "callerProcessId": "0x1f4"}
+    assert R.subject_process_id(acting) == ("500", "caller")
+    # a collector snapshot: processId is the real one
+    assert R.subject_process_id({"id": 3, "recordKind": "observation", "processId": "0x1f4"}) == ("500", "process")
+    # the writer's PID never becomes a node
+    graph = build([created], [])
+    observations = [n for n in graph["nodes"] if n["kind"] == "process-observation"]
+    assert observations and all("2244" in n["label"] for n in observations), [n["label"] for n in observations]
+    assert not any("4" == n["value"] for n in observations)
+
+
+def test_hex_and_decimal_pids_are_the_same_process():
+    from services.analysis import relationships as R
+
+    assert R.process_id("0x1f4") == R.process_id("500") == "500"
+    assert R.process_id(None) == "" and R.process_id("not-a-pid") == "not-a-pid"
+
+
+def test_a_reported_digest_belongs_to_the_file_the_record_is_about():
+    """A Sysmon FileCreateStreamHash or ImageLoad reports the digest of the target or the loaded
+    module, not of the executable of the process doing it."""
+    written = {
+        "id": 1,
+        "computer": "WS01",
+        "recordKind": "observation",
+        "processId": 900,
+        "image": r"C:\Windows\System32\powershell.exe",
+        "targetFilename": r"C:\Users\a\payload.dll",
+        "hashes": "SHA256=" + HASH,
+    }
+    graph = build([written], [])
+    digest = next(n["id"] for n in graph["nodes"] if n["kind"] == "hash")
+    subject = next(e["source"] for e in graph["edges"] if e["target"] == digest and e["relation"] == "reported digest")
+    label = next(n["label"] for n in graph["nodes"] if n["id"] == subject)
+    assert "payload.dll" in label, f"digest attributed to {label}"
+    assert "powershell" not in label
+
+
+def test_a_loaded_module_is_its_own_node():
+    loaded = {
+        "id": 1,
+        "computer": "WS01",
+        "recordKind": "observation",
+        "processId": 900,
+        "image": r"C:\Windows\System32\svchost.exe",
+        "imageLoaded": r"C:\Users\a\evil.dll",
+    }
+    graph = build([loaded], [])
+    assert any(e["relation"] == "loads image" for e in graph["edges"])
+    assert any("evil.dll" in n["label"] for n in graph["nodes"] if n["kind"] == "file")

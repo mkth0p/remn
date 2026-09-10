@@ -36,11 +36,12 @@ export interface RelationshipResult {
   cursor?: { events: number; mails: number } | null
   /** The process snapshot used for this build, so later pages reuse it instead of re-reading it. */
   processContext?: Record<string, unknown>[]
+  processContextTruncated?: boolean
 }
 export type RelationshipAliases = { hosts?: Record<string, string>; accounts?: Record<string, string> }
 export const RELATIONSHIP_CAP = 20_000
 const FIELDS =
-  'id evidenceId sourceFile sourceName sourceIndex sourceSha256 packageId memberIndex recordKind artifactType observedAt ts date computer targetUser targetDomain targetSid subjectUser subjectDomain user upn image processName processGuid processId newProcessId processStart parentProcessGuid parentImage parentProcessName serviceName serviceFile taskName path targetFilename hashes destinationIp sourceIp ipAddress destinationHostname query fromAddr toList to summary subject name groupName memberName serviceAccount company deceptionEpisodeId deceptionExhibitId deceptionParentExhibitId deceptionScope deceptionAction deceptionResult deceptionStage'.split(
+  'id evidenceId sourceFile sourceName sourceIndex sourceSha256 packageId memberIndex recordKind artifactType observedAt ts date computer targetUser targetDomain targetSid subjectUser subjectDomain user upn image processName processGuid processId newProcessId callerProcessId imageLoaded processStart parentProcessGuid parentImage parentProcessName serviceName serviceFile taskName path targetFilename hashes destinationIp sourceIp ipAddress destinationHostname query fromAddr toList to summary subject name groupName memberName serviceAccount company deceptionEpisodeId deceptionExhibitId deceptionParentExhibitId deceptionScope deceptionAction deceptionResult deceptionStage'.split(
     ' ',
   )
 
@@ -62,6 +63,7 @@ export async function buildRelationships(
   cursor = { events: 0, mails: 0 },
   aliases: RelationshipAliases = {},
   processContext?: Record<string, unknown>[],
+  inheritedContextTruncated = false,
 ): Promise<RelationshipResult> {
   const pageSize = 1000
   if (kase.storage === 'server' && kase.serverKey) return apiPost('/api/relationships/build', { storeKey: kase.serverKey, evidenceId, cursor, pageSize, options: { aliases } })
@@ -78,7 +80,7 @@ export async function buildRelationships(
   // The process snapshot is the same for every page of a build, so it is read and mapped once and
   // handed back to the caller rather than re-read from the database and re-uploaded per page.
   let context = processContext
-  let contextTruncated = false
+  let contextTruncated = inheritedContextTruncated
   if (!context) {
     const processes = await db.events
       .where('[caseId+artifactType]')
@@ -97,6 +99,7 @@ export async function buildRelationships(
     options: { aliases },
   })
   result.processContext = context
+  result.processContextTruncated = contextTruncated
   result.cursor =
     events.length > pageSize || mails.length > pageSize
       ? { events: events[Math.min(pageSize, events.length) - 1]?.id ?? cursor.events, mails: mails[Math.min(pageSize, mails.length) - 1]?.id ?? cursor.mails }
@@ -133,6 +136,26 @@ export function mergeRelationships(previous: RelationshipResult | null, next: Re
     edges: [...edges.values()],
     cursor: next.cursor,
     processContext: next.processContext ?? previous.processContext,
+    processContextTruncated: next.processContextTruncated ?? previous.processContextTruncated,
     stats: { ...next.stats, events: previous.stats.events + next.stats.events, mails: previous.stats.mails + next.stats.mails, truncated: previous.stats.truncated || next.stats.truncated || capped },
   }
+}
+
+/** Scan successive pages once, retaining the current page when the analyst stops. */
+export async function scanRelationships(
+  initial: RelationshipResult | null,
+  load: (previous: RelationshipResult | null) => Promise<RelationshipResult>,
+  stopped: () => boolean,
+  progress: (result: RelationshipResult) => void,
+): Promise<RelationshipResult | null> {
+  let next = initial
+  do {
+    if (stopped()) break
+    const page = await load(next)
+    if (page.cursor && next?.cursor && page.cursor.events === next.cursor.events && page.cursor.mails === next.cursor.mails) throw new Error('The scan cursor did not advance. Please rebuild.')
+    next = mergeRelationships(next, page)
+    progress(next)
+    if (next.nodes.length >= 100_000 || next.edges.length >= 200_000) return { ...next, stats: { ...next.stats, truncated: true } }
+  } while (next.cursor && !stopped())
+  return next
 }

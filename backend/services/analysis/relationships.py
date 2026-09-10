@@ -48,6 +48,8 @@ FIELDS = (
     "processGuid",
     "processId",
     "newProcessId",
+    "callerProcessId",
+    "imageLoaded",
     "processStart",
     "parentProcessGuid",
     "parentImage",
@@ -91,6 +93,39 @@ def clean(value: Any) -> str:
 
 def ident(kind: str, value: str, scope: str = "") -> str:
     return kind + ":" + hashlib.sha256(json.dumps([kind, scope, value], ensure_ascii=False).encode()).hexdigest()[:24]
+
+
+def process_id(value: Any) -> str:
+    """A PID as a decimal string.
+
+    Windows reports process identifiers in both decimal and 0x-hex depending on the channel, and
+    comparing the raw text makes "0x1f4" and "500" two different processes.
+    """
+    text = clean(value)
+    if not text:
+        return ""
+    try:
+        return str(int(text, 16) if text[:2].lower() == "0x" else int(text, 10))
+    except ValueError:
+        return text
+
+
+def subject_process_id(row: dict[str, Any]) -> tuple[str, str]:
+    """(pid, which field it came from) for the process a record is ABOUT.
+
+    On an event log record ``processId`` is the Execution ProcessID, the PID of the service that
+    *wrote* the record, not its subject: evtx_parser maps EventData ProcessId to callerProcessId
+    and the created process to newProcessId. Taking processId therefore labelled a 4688 with the
+    PID of the event log service. A collection observation has no writer, so there processId is
+    the real one (collection.py maps ProcessId/PID/OwningProcess onto it).
+    """
+    if row.get("recordKind") == "observation":
+        return process_id(row.get("processId")), "process"
+    for field, label in (("newProcessId", "new process"), ("callerProcessId", "caller")):
+        pid = process_id(row.get(field))
+        if pid:
+            return pid, label
+    return "", ""
 
 
 def file_path(value: Any) -> str:
@@ -233,11 +268,11 @@ def build(events: list[dict[str, Any]], mails: list[dict[str, Any]], options: di
             link(record, fn, "names executable", "Full Windows path in the executable field, scoped to its host", "high" if host else "contextual", ref)
             guid = clean(row.get("processGuid")).casefold()
             start = timestamp(row.get("processStart"))
-            pid = clean(row.get("processId") or row.get("newProcessId"))
+            pid, pid_field = subject_process_id(row)
             process_key = guid if guid else f"{pid}@{start}" if pid and start is not None else ""
             pn = node("process", process_key, host, f"{image_value or 'process'} · {process_key}") if host and process_key else None
             if not pn and pid:
-                pn = node("process-observation", pid, scope, f"PID {pid} · {host or 'unknown host'} · instance unresolved")
+                pn = node("process-observation", pid, scope, f"{pid_field} {pid} · {host or 'unknown host'} · instance unresolved")
             link(
                 record,
                 pn,
@@ -295,16 +330,42 @@ def build(events: list[dict[str, Any]], mails: list[dict[str, Any]], options: di
                 "high",
                 ref,
             )
-            for field in ("path", "targetFilename"):
+            named: dict[str, Any] = {}
+            for field in ("path", "targetFilename", "imageLoaded"):
                 other = node("file", file_path(row.get(field)), file_scope)
                 link(record, other, "names file", f"Full path in {field}, scoped to its host", "high" if host else "contextual", ref)
-                fn = fn or other
+                if other is not None:
+                    named[field] = other
+            if "imageLoaded" in named:
+                link(pn, named["imageLoaded"], "loads image", "Module loaded into this process", "high" if host else "contextual", ref)
+            # The digest in a record describes the file the record is about. For a file write, a
+            # delete or an image load that is the target, not the executable of the process doing
+            # it; attributing it to the image asserts that the running binary has that digest.
+            digest_subject = named.get("targetFilename") or named.get("imageLoaded") or named.get("path") or fn
+            attributed = len([f for f in ("targetFilename", "imageLoaded", "path") if f in named]) <= 1
             for algorithm, value in re.findall(r"(SHA256|SHA1|MD5)=([a-fA-F0-9]+)", clean(row.get("hashes")), re.I):
                 if len(value) != {"SHA256": 64, "SHA1": 40, "MD5": 32}[algorithm.upper()]:
                     continue
                 hash_node = node("hash", algorithm.lower() + ":" + value.lower())
                 link(record, hash_node, "reports hash", "Explicit digest in the source record", "high", ref)
-                link(fn, hash_node, "reported digest", "Path and digest are reported together; historical versions remain separate observations", "high", ref)
+                if attributed:
+                    link(
+                        digest_subject,
+                        hash_node,
+                        "reported digest",
+                        "Path and digest are reported together; historical versions remain separate observations",
+                        "high",
+                        ref,
+                    )
+                else:
+                    link(
+                        digest_subject,
+                        hash_node,
+                        "reported digest",
+                        "The record names several files and one digest; the subject is inferred, not stated",
+                        "contextual",
+                        ref,
+                    )
             for field in ("destinationIp", "sourceIp", "ipAddress"):
                 endpoint = ip(row.get(field))
                 link(record, endpoint, "names address", f"Address in {field}", "high", ref)
