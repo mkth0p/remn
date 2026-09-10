@@ -15,9 +15,6 @@ CLOSED = [
     ("post", "/api/store/abc/search"),
     ("delete", "/api/store/abc"),
     ("get", "/api/jobs"),
-    # collection packages are an operator workflow: reconciliation is quadratic in
-    # attacker-controlled input and each native member spawns a decoder subprocess
-    ("post", "/api/ingest/package"),
     ("get", "/api/reputation/providers"),
     ("post", "/api/reputation/lookup"),
     ("post", "/api/ai/chat"),
@@ -171,3 +168,11 @@ def test_the_static_fallback_refuses_methods_it_cannot_serve(tmp_path):
         for method in ("put", "delete", "patch"):
             r = getattr(c, method)("/some/spa/route")
             assert r.status_code == 405, (method, r.status_code)
+
+
+@override_settings(FORENSIC_BROWSER_ONLY=True)
+def test_browser_only_accepts_a_collection_package():
+    """It was closed while reconciliation was quadratic and nothing bounded the decoder
+    subprocesses. Both are bounded now, so a package is a parse like any other ingest path."""
+    r = Client().post("/api/ingest/package", **HDR)
+    assert r.status_code != 403, r.content[:200]

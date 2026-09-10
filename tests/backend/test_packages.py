@@ -567,3 +567,24 @@ def test_an_oversized_member_is_partial_in_the_package_inventory(tmp_path, monke
     assert produced, "records parsed before the ceiling must reach the case"
     assert member["status"] == "error" and "parse limit" in member["reason"]
     assert member["count"] == len(produced) > 0
+
+
+def test_one_package_cannot_spawn_unbounded_decoder_subprocesses(tmp_path):
+    """Each decode is capped at 512 MiB and 30 seconds; without a count, a package of twenty
+    thousand hives was twenty thousand subprocesses on a single request."""
+    from services.ingest import package as P
+
+    hive = b"regf" + bytes(4096)
+    blob = archive([(f"Registry/hive{i}.dat", hive) for i in range(6)])
+    src = PackageSource("pkg.zip", None, blob, str(tmp_path), ParseContext(analyze_attachments=False))
+    original = P.MAX_NATIVE_DECODES
+    P.MAX_NATIVE_DECODES = 2
+    try:
+        list(src)
+    finally:
+        P.MAX_NATIVE_DECODES = original
+
+    skipped = [f for f in src.files if "native decoding budget" in str(f.get("reason", ""))]
+    assert len(skipped) == 4, [(f.get("status"), f.get("reason")) for f in src.files]
+    # the members past the budget are still inventoried and hashed: nothing is silently dropped
+    assert all(f.get("sha256") for f in skipped)

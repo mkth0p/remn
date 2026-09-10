@@ -8,6 +8,7 @@ import json
 import os
 import tarfile
 import tempfile
+import time
 import zipfile
 from collections.abc import Iterator
 from pathlib import PurePosixPath
@@ -23,6 +24,12 @@ MAX_FILES = 20_000
 # where they are read: an uncapped list is both unbounded memory and the driver of the
 # reconciliation cost, and a summary CSV naming them is attacker-controlled.
 MAX_EXPECTATIONS = 10_000
+# Registry hives and prefetch files are decoded by a subprocess each, individually bounded to
+# 512 MiB, 64 MiB of output and 30 seconds. Nothing bounded HOW MANY, so a package of twenty
+# thousand hives was twenty thousand subprocesses on one request. A real collection carries a few
+# dozen; past these the member is still inventoried and hashed, and says why it was not decoded.
+MAX_NATIVE_DECODES = 200
+MAX_NATIVE_SECONDS = 120.0
 MAX_MEMBER = 4 * 1024**3
 MAX_TOTAL = 16 * 1024**3
 MAX_STRUCTURED = 64 * 1024**2
@@ -54,7 +61,9 @@ class PackageSource:
         self.bytes_read = 0
         self.inventory_complete = True
         self.manifest_count = 0
-        self.budget = budget if budget is not None else {"bytes": 0, "files": 0}
+        self.budget = budget if budget is not None else {"bytes": 0, "files": 0, "decodes": 0, "decodeSeconds": 0.0}
+        self.budget.setdefault("decodes", 0)
+        self.budget.setdefault("decodeSeconds", 0.0)
         self.depth = depth
         self.inherited_context = inherited_context or {}
         self.expectations = []
@@ -155,6 +164,7 @@ class PackageSource:
                 continue
             tmp_path = None
             rows = source = None
+            decode_started = None
             try:
                 digest = hashlib.sha256()
                 with tempfile.NamedTemporaryFile(dir=self.tmp_dir, suffix=".member", delete=False) as out:
@@ -240,9 +250,17 @@ class PackageSource:
                     entry.update(status="metadata", format="collection-manifest")
                     continue
                 if head.startswith(b"regf") or low.endswith(".pf"):
+                    if self.budget["decodes"] >= MAX_NATIVE_DECODES or self.budget["decodeSeconds"] >= MAX_NATIVE_SECONDS:
+                        entry.update(
+                            status="unsupported",
+                            reason=f"native decoding budget for this package is spent ({MAX_NATIVE_DECODES} artifacts or {MAX_NATIVE_SECONDS:g}s); inventoried and hashed only",
+                        )
+                        continue
                     source = None
                     kind = "registry" if head.startswith(b"regf") else "prefetch"
                     entry["format"] = f"dissect-{kind}/1"
+                    self.budget["decodes"] += 1
+                    decode_started = time.monotonic()
                     rows = (("event", r) for r in collection.native_records(kind, tmp_path, member.name, self.context, self.tmp_dir))
                 elif head.startswith(b"ElfFile\x00") or low.endswith(".evtx") or m365.detect_format(member.name, head):
                     source = EvtxSource(member.name, tmp_path, None, self.tmp_dir, self.include_raw)
@@ -285,6 +303,9 @@ class PackageSource:
                         time_range["firstTs"] = ts if time_range["firstTs"] is None else min(ts, time_range["firstTs"])
                         time_range["lastTs"] = ts if time_range["lastTs"] is None else max(ts, time_range["lastTs"])
                     yield row
+                if decode_started is not None:
+                    self.budget["decodeSeconds"] += time.monotonic() - decode_started
+                    decode_started = None
                 if source is not None and source.stats.errors:
                     raise ValueError(f"parser reported {source.stats.errors} error(s); any emitted rows are partial")
                 entry["status"] = "parsed"

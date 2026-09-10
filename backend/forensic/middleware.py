@@ -108,9 +108,10 @@ class SecurityHeadersMiddleware:
 # Paths that keep state on the server, reach out to third parties or run a model on the server's
 # account: closed in browser-only mode. Parsing, correlation, rule conversion, rule packs and the
 # prompt bundle for the browser-direct model stay open.
-# /api/ingest/package is closed here even though it keeps no state: reconciling a collection is
-# quadratic in attacker-controlled inputs and each native member spawns a decoder subprocess, so
-# it is a costly path served to strangers. Collection packages are an operator workflow.
+# /api/ingest/package is open. It was closed when reconciling a collection was quadratic in
+# attacker-controlled input, which it no longer is, and when nothing bounded how many decoder
+# subprocesses one package could spawn, which MAX_NATIVE_DECODES now does. What remains is a
+# parse, like the other ingest paths, under the same per-address budget.
 #
 # /api/upload is NOT closed. A browser-store case has to get its evidence to the parser somehow,
 # and the alternative is one request carrying the whole file, which proxies refuse well before the
@@ -121,7 +122,6 @@ BROWSER_ONLY_CLOSED = (
     "/api/store",
     "/api/jobs",
     "/api/reputation",
-    "/api/ingest/package",
     "/api/ai/chat",
     "/api/ai/query",
     "/api/ai/models",
