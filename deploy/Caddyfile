@@ -3,10 +3,13 @@
 {$REMN_DOMAIN} {
 	encode zstd gzip
 	header {
-		Strict-Transport-Security "max-age=31536000"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		-Server
 	}
 	reverse_proxy remn:8000 {
+		# Set the header rather than appending to whatever the client sent, so the address the
+		# request budget reads is this proxy's observation and not a client-supplied value.
+		header_up X-Forwarded-For {remote_host}
 		# streamed responses (ingestion rows, job events) go through as they come
 		flush_interval -1
 		transport http {

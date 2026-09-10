@@ -94,6 +94,22 @@ you control is the only way to reach the server, since the header is otherwise f
 forge. `docker-compose.public.yml` is this configuration with Caddy in front, and
 `FORENSIC_MAX_UPLOAD_MB` lowered.
 
+Browser-only mode withholds more than paths: the health endpoint also omits the version and
+which optional parsers are compiled in, since version plus "libpff and yara-python are present"
+is what selects a CVE off a shelf, and the browser only needs to know a capability exists at the
+moment a file needs it. The content security policy narrows `connect-src` to the origin and
+loopback in that mode. An operator's own instance may point the browser-direct model transport
+at any address on their network, so it stays open there; a public page served over HTTPS can
+only reach loopback anyway, so the narrower policy costs that deployment nothing and removes the
+channel a script injection would otherwise use to send evidence somewhere.
+
+The per-address budget reads the **rightmost** X-Forwarded-For entry, the one the trusted proxy
+observed and appended, not the leftmost, which is whatever the client sent. Caddy's default
+replaces the header rather than appending, which hides the difference, but that is a property of
+one proxy's configuration: put a CDN in front, or set `trusted_proxies`, and a leftmost read
+becomes forgeable. The shipped Caddyfiles also set the header explicitly rather than relying on
+that default.
+
 For the full mode, one change came with this: listing every server store (`GET
 /api/store`) is an operator action and is only answered when an access token is
 configured. A case reaches its store by the key it holds, and the keys are random, so

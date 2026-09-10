@@ -25,11 +25,21 @@ HEADER_NAME = "HTTP_X_FORENSIC_CLIENT"
 
 
 def client_address(request) -> str:
-    """The client's address: the first X-Forwarded-For entry when the proxy in front is trusted, else the peer."""
+    """The client's address, for the per-address request budget.
+
+    With a trusted proxy in front, the address is the RIGHTMOST X-Forwarded-For entry: the one the
+    immediately-upstream proxy observed and appended itself. The leftmost entry is whatever the
+    client sent, so reading it makes the budget bypassable by anyone who adds a header. Caddy's
+    default happens to replace the header rather than append, which hid this, but that is a
+    property of one proxy's configuration and not something to depend on: put a CDN in front, or
+    set trusted_proxies, and the leftmost entry becomes attacker-controlled.
+
+    With FORENSIC_TRUST_PROXY unset the header is ignored entirely and the peer address is used.
+    """
     if settings.FORENSIC_TRUST_PROXY:
-        first = request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0].strip()
-        if first:
-            return first
+        forwarded = [part.strip() for part in request.META.get("HTTP_X_FORWARDED_FOR", "").split(",") if part.strip()]
+        if forwarded:
+            return forwarded[-1]
     return request.META.get("REMOTE_ADDR", "") or "?"
 
 
@@ -51,11 +61,23 @@ class ApiClientHeaderMiddleware:
 
 
 # What the built index.html declares in its <meta> tag, plus frame-ancestors (header only).
-CSP = (
-    "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; "
-    "img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' http: https:; worker-src 'self' blob:; "
-    "frame-src 'self' blob: data: about:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
-)
+def _csp(connect: str) -> str:
+    return (
+        "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; "
+        f"img-src 'self' data: blob:; font-src 'self' data:; connect-src {connect}; worker-src 'self' blob:; "
+        "frame-src 'self' blob: data: about:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+    )
+
+
+# An operator's own instance may point the browser-direct model transport at any address on their
+# network, so connect-src stays open there.
+CSP = _csp("'self' http: https:")
+
+# An instance open to strangers holds evidence in the visitor's browser, and an open connect-src
+# would give any script injection an unrestricted channel to send it somewhere. A page served over
+# HTTPS can only reach loopback anyway (anything else is mixed content), so narrowing to loopback
+# costs that deployment nothing and removes the channel.
+CSP_BROWSER_ONLY = _csp("'self' http://localhost:* http://127.0.0.1:* https://localhost:* https://127.0.0.1:*")
 
 
 class SecurityHeadersMiddleware:
@@ -79,7 +101,7 @@ class SecurityHeadersMiddleware:
         elif ct.startswith("text/html") or ct.startswith("text/javascript") or ct.startswith("application/javascript"):
             # the app pages, and the scripts: a web worker takes its policy from its own script's response,
             # so the hashing and ingest workers must get the page's policy (wasm, connect-src), not the API one
-            resp.setdefault("Content-Security-Policy", CSP)
+            resp.setdefault("Content-Security-Policy", CSP_BROWSER_ONLY if settings.FORENSIC_BROWSER_ONLY else CSP)
         return resp
 
 

@@ -6,7 +6,7 @@ import mimetypes
 from pathlib import Path
 
 from django.conf import settings
-from django.http import FileResponse, Http404, HttpResponse
+from django.http import FileResponse, Http404, HttpResponse, HttpResponseNotAllowed
 
 
 def _safe_join(root: Path, rel: str) -> Path:
@@ -28,6 +28,11 @@ def asset(request, path: str):
 
 
 def index(request, path: str = ""):
+    # The fallback serves a page for any unmatched path, which answered PUT, DELETE, TRACE and
+    # friends with 200 and the application HTML. Nothing acted on them, but a method that cannot
+    # do anything should say so rather than look accepted.
+    if request.method not in ("GET", "HEAD"):
+        return HttpResponseNotAllowed(["GET", "HEAD"])
     dist = settings.FRONTEND_DIST
     # Direct file in dist root (favicon, manifest...)
     if path:

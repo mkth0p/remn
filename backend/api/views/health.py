@@ -53,6 +53,11 @@ def health(request):
         "dataDir": str(settings.DATA_DIR),
     }
     if browser_only:
-        for k in ("python", "platform", "store", "rulesDir", "dataDir"):
+        # The same reasoning as the paths and platform: an instance open to strangers should not
+        # hand out its exact version and which native parsers are compiled in. libpff and
+        # yara-python are the most CVE-prone parts of the stack, and the browser needs to know
+        # only whether a capability exists, which it learns when a file needs it.
+        for k in ("python", "platform", "store", "rulesDir", "dataDir", "version"):
             payload.pop(k, None)
+        payload["optional"] = {"claudeCode": False}
     return JsonResponse(payload)

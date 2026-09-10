@@ -36,7 +36,7 @@
 {$REMN_DOMAIN} {
 	encode zstd gzip
 	header {
-		Strict-Transport-Security "max-age=31536000"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		-Server
 	}
 	# Exactly two synthetic, passive discovery artifacts. No real files are served.
@@ -52,6 +52,9 @@
 	}
 	handle {
 		reverse_proxy remn:8000 {
+			# Set the header rather than appending to whatever the client sent, so the address the
+			# request budget reads is this proxy's observation and not a client-supplied value.
+			header_up X-Forwarded-For {remote_host}
 			flush_interval -1
 			transport http {
 				read_timeout 3600s
@@ -63,7 +66,7 @@
 
 {$REMN_ARCHIVE_DOMAIN} {
 	header {
-		Strict-Transport-Security "max-age=31536000"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		-Server
 	}
 	# Discovery is only issued at the main origin; health is private to the container.
