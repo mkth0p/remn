@@ -1,0 +1,80 @@
+{
+	# Error logs must not bypass the simulator's sanitized telemetry policy.
+	log default {
+		format filter {
+			wrap json
+			fields {
+				request delete
+				resp_headers delete
+			}
+		}
+	}
+	servers {
+		max_header_size 16KB
+		timeouts {
+			read_header 5s
+		}
+	}
+}
+
+(archive_proxy) {
+	reverse_proxy unix//run/archive/http.sock {
+		header_up -Authorization
+		header_up -Cookie
+		header_up -Referer
+		header_up -X-Forwarded-For
+		header_up -X-Real-IP
+		transport http {
+			dial_timeout 2s
+			response_header_timeout 6s
+			read_timeout 6s
+			write_timeout 6s
+		}
+	}
+}
+
+{$REMN_DOMAIN} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+	# Exactly two synthetic, passive discovery artifacts. No real files are served.
+	handle /.env.bak {
+		rewrite * /discovery/env
+		import archive_proxy
+		header Content-Security-Policy "default-src 'none'; sandbox"
+	}
+	handle /_retained/release.json {
+		rewrite * /discovery/build
+		import archive_proxy
+		header Content-Security-Policy "default-src 'none'; sandbox"
+	}
+	handle {
+		reverse_proxy remn:8000 {
+			flush_interval -1
+			transport http {
+				read_timeout 3600s
+				write_timeout 3600s
+			}
+		}
+	}
+}
+
+{$REMN_ARCHIVE_DOMAIN} {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+	# Discovery is only issued at the main origin; health is private to the container.
+	@private path /discovery/* /healthz
+	handle @private {
+		respond "Not found." 404
+	}
+	handle {
+		request_body {
+			max_size 8KB
+		}
+		import archive_proxy
+	}
+}

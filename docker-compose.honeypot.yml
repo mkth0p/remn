@@ -1,0 +1,50 @@
+# Optional overlay: docker compose -f docker-compose.public.yml -f docker-compose.honeypot.yml up -d --build
+services:
+  archive:
+    build:
+      context: ./honeypot
+      dockerfile: Dockerfile
+    image: remn-archive
+    environment:
+      ARCHIVE_ORIGIN: https://${REMN_ARCHIVE_DOMAIN:?set a distinct archive domain, e.g. vault.remn.tech}
+    network_mode: none
+    read_only: true
+    user: "10001:10001"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 32
+    mem_limit: 128m
+    cpus: 0.25
+    ulimits:
+      nofile: {soft: 128, hard: 128}
+    volumes:
+      - archive-state:/var/lib/archive
+      - archive-socket:/run/archive
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=1m,mode=0700,uid=10001,gid=10001
+    logging:
+      driver: local
+      options: {max-size: 1m, max-file: "2"}
+    restart: unless-stopped
+  caddy:
+    logging:
+      driver: local
+      options: {max-size: 1m, max-file: "2"}
+    environment:
+      REMN_ARCHIVE_DOMAIN: ${REMN_ARCHIVE_DOMAIN:?set a distinct archive domain}
+    volumes:
+      - ./deploy/Caddyfile.honeypot:/etc/caddy/Caddyfile:ro
+      - type: volume
+        source: archive-socket
+        target: /run/archive
+        read_only: true
+        volume: {nocopy: true}
+    depends_on:
+      archive: {condition: service_healthy}
+volumes:
+  archive-state:
+  archive-socket:
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=1m,uid=10001,gid=10001,mode=0700
