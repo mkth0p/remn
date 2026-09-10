@@ -2,7 +2,7 @@ import Dexie, { type Table } from 'dexie'
 import { uuid4 } from '../util/uuid'
 
 export type Severity = 'info' | 'low' | 'medium' | 'high' | 'critical'
-export type EvidenceKind = 'evtx' | 'mail'
+export type EvidenceKind = 'evtx' | 'mail' | 'package'
 export type EvidenceStatus = 'hashing' | 'uploading' | 'parsing' | 'done' | 'error'
 
 export interface CaseSettings {
@@ -88,6 +88,15 @@ export interface Evidence {
 }
 
 export interface EventRow {
+  recordKind?: 'event' | 'observation'
+  artifactType?: string
+  observedAt?: number | null
+  packageId?: string
+  sourceFile?: string
+  sourceSha256?: string
+  sourceIndex?: number
+  memberIndex?: number
+  parserVersion?: string
   id?: number
   caseId: number
   evidenceId: number
@@ -412,6 +421,11 @@ export class RemnDB extends Dexie {
       kv: 'key',
     })
     this.version(2).stores({ caseNotes: '++id, caseId, kind, ts, [caseId+kind], [caseId+ts]' })
+    this.version(3).stores({
+      events:
+        '++id, caseId, evidenceId, ts, eventId, [caseId+id], [caseId+artifactType], [caseId+ts], [caseId+eventId], [caseId+evidenceId], computer, targetUser, subjectUser, ipAddress, logonType, channel, provider, category',
+      mails: '++id, caseId, evidenceId, date, [caseId+id], [caseId+date], [caseId+evidenceId], fromAddr, fromDomain, fromRegistrable, fromNameNorm, originIp, folder, risk, messageId, *flags',
+    })
   }
 }
 
@@ -427,9 +441,22 @@ export function setDb(db: RemnDB | null): void {
 
 /** kv keys that belong to one case (mirrors CASE_KV_PREFIXES in data/caseState.ts, kept here to avoid a schema -> data import). */
 export const CASE_KV_KEYS = (caseId: number) =>
-  ['chains', 'ruleDiags', 'baseline', 'mail-calibration', 'report-summary', 'finding-reviews', 'chain-reviews', 'report-settings', 'findingCounts', 'ai-suggestions', 'ai-triage'].map(
-    (p) => `${p}-${caseId}`,
-  )
+  [
+    'chains',
+    'ruleDiags',
+    'baseline',
+    'mail-calibration',
+    'report-summary',
+    'finding-reviews',
+    'chain-reviews',
+    'report-settings',
+    'findingCounts',
+    'ai-suggestions',
+    'ai-triage',
+    'relationship-reviews',
+    'relationship-aliases',
+    'relationship-cache',
+  ].map((p) => `${p}-${caseId}`)
 
 export async function deleteCaseData(db: RemnDB, caseId: number): Promise<void> {
   await db.transaction(

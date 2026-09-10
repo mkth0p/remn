@@ -34,6 +34,8 @@ jobs:
         run: ruff format --check .
       - name: Tests
         run: pytest -q
+      - name: Archive simulator tests
+        run: python -m unittest honeypot.test_archive -q
 
   frontend:
     name: frontend (typecheck, lint, vitest, build)
@@ -79,6 +81,11 @@ jobs:
           for i in $(seq 1 20); do curl -fs -H "X-Forensic-Client: 1" http://127.0.0.1:8000/api/health > /dev/null && break; sleep 2; done
           curl -fs -H "X-Forensic-Client: 1" http://127.0.0.1:8000/api/health | head -c 200; echo
           docker rm -f remn
+      - name: Archive isolation and routing
+        run: |
+          docker tag remn:ci remn:latest
+          docker build -t remn-archive honeypot
+          python3 tools/validate_honeypot.py
       # pip is not in the runtime image, but Trivy records the libraries pip vendors (msgpack, setuptools, ...)
       # from the base layer without a file path, so their removal in a later layer is invisible to it;
       # the pip directory is skipped for that reason and no other

@@ -5,6 +5,23 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- Optional Records Continuity honeypot: isolated Unix-socket service, signed ARG
+  reference trail, consented exercise, bounded private telemetry/replay and REMN
+  package import with episode/exhibit relationships. Includes deployment and
+  network/routing verification; see `docs/honeypot.md`.
+
+- Native Prefetch/REGF/CAB adapters, task XML, CLIXML and text exports; nested packages
+  share import limits, collection counts/hashes reconcile, and duplicate sources skip.
+- Collection detection rules, explicit entity aliases, conservative process snapshot
+  resolution, paginated relationship graphs, related evidence timelines and saved
+  link decisions/notes included in reports and case backups.
+
+- Mixed investigation-package ingestion in browser and server storage, with member
+  hashes, explicit partial coverage and CSV/JSON host collection adapters. Folder
+  imports preserve relative paths; snapshots retain their own record type and time.
+- Relationships explores entities across the evidence without requiring a mail seed,
+  with source references and explicit graph limits. See `docs/packages.md` for coverage.
+
 - Browser-only mode (`FORENSIC_BROWSER_ONLY=1`) for an instance open to strangers: the
   server parses and returns rows and keeps nothing; server stores, jobs, chunked uploads,
   reputation lookups and the server-side model transports answer 403, health reports the

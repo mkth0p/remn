@@ -102,6 +102,32 @@ function data(over: Partial<ReportData> = {}): ReportData {
   }
 }
 
+it('prints only accepted selected relationships and escapes source labels and notes', () => {
+  const accepted = {
+    key: 'x',
+    status: 'accepted' as const,
+    includeInReport: true,
+    notes: 'Reviewed <script>unsafe</script>',
+    sourceLabel: '<img onerror=alert(1)>',
+    targetLabel: 'PC',
+    relation: 'observed',
+    reason: 'same record',
+    confidence: 'high',
+    references: [
+      { id: 1, evidenceId: 1, source: 'events' as const, sourceFile: 'processes.csv', sourceSha256: 'abc', sourceIndex: 0, recordKind: 'observation', ts: null, observedAt: 1, title: 'process' },
+    ],
+    aliases: {},
+    updatedAt: 1,
+  }
+  const html = buildReportHtml(data({ relationships: [accepted, { ...accepted, key: 'rejected', status: 'rejected', sourceLabel: 'REJECTED_SENTINEL' }] }))
+  expect(html).toContain('Reviewed evidence relationships')
+  expect(html).toContain('processes.csv')
+  expect(html).toContain('Collected:')
+  expect(html).not.toContain('<img onerror=')
+  expect(html).not.toContain('<script>unsafe')
+  expect(html).not.toContain('REJECTED_SENTINEL')
+})
+
 describe('report html', () => {
   it('carries the REMN cover, numbered sections and the chain and incident cards, with every case string escaped', () => {
     const html = buildReportHtml(data())

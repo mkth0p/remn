@@ -110,6 +110,16 @@ def mails() -> list[dict[str, Any]]:
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     ev_rows = events()
+    ev_rows.extend(
+        [
+            {"artifactType": "service", "serviceName": "PSEXESVC", "serviceFile": r"C:\Users\Public\demo.exe", "recordKind": "observation"},
+            {"artifactType": "process", "commandLine": "powershell.exe -enc AAAA", "recordKind": "observation"},
+            {"artifactType": "connection", "image": r"C:\Windows\powershell.exe", "destinationIp": "203.0.113.10", "recordKind": "observation"},
+            {"artifactType": "defender", "message": "Threat detected: synthetic", "recordKind": "observation"},
+            {"artifactType": "prefetch", "processName": "POWERSHELL.EXE", "ts": 1788948000000, "recordKind": "event"},
+            {"artifactType": "service", "serviceName": "Expected", "serviceFile": r"C:\Program Files\Vendor\demo.exe", "recordKind": "observation"},
+        ]
+    )
     ml_rows = mails()
     bundled = [x["rule"] for x in load_rules(ROOT / "rules") if "rule" in x]
     with tempfile.TemporaryDirectory() as tmp:

@@ -16,6 +16,8 @@ server for gigabyte cases.
 
 - **Search** across events and mails with facets, filter chips, regex on any field,
   time and business-hours filters, saved searches, CSV/JSON export.
+- **Import investigation packages** with mixed mail, EVTX and structured host exports,
+  member hashes and explicit coverage; explore evidence-backed entity relationships.
 - **Detect** with a YAML rule catalogue (Windows, mail, Microsoft 365) plus the SigmaHQ
   and Sublime Security community packs, two rule engines (browser and SQL) kept in
   parity, and a calibrated mail risk score measured on public phishing corpora.
@@ -61,11 +63,13 @@ For development, run the API with `manage.py runserver` and the frontend with
 - [Setup and run](docs/setup.md) — requirements, installation, remote access
 - [Storage modes](docs/storage.md) — browser store, server store, uploads, the checklist before real exports
 - [Data sources](docs/sources.md) — event logs, mailboxes, Microsoft 365 and Entra, deleted mail
+- [Investigation packages](docs/packages.md) — adapters, coverage, observations and relationships
 - [Detection](docs/detection.md) — rule DSL, community packs, mail risk scoring, engine parity
 - [Attack chains](docs/chains.md) — how chains are built and scored
 - [Interface](docs/interface.md) — the pages, the review workflow, the report
 - [AI analyst](docs/ai.md) — transports, tools, triage
 - [Validation and test data](docs/validation.md) — public corpora, measured rates, test suites
+- [Optional archive honeypot](docs/honeypot.md) — isolated decoy, reference trail, private replay and REMN package export
 - [Security model](docs/security.md) — what leaves the machine, what is stored where
 
 ## Where things stand

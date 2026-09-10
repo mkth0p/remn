@@ -23,6 +23,7 @@ export async function writeCaseBundle(kase: Case, sink: Sink, progress?: (messag
     for await (const page of caseRows(table, kase.id!)) for (const row of page) await write({ table, row })
   }
   for (const key of CASE_KV_KEYS(kase.id!)) {
+    if (key.startsWith('relationship-cache-')) continue // Rebuildable graph IDs belong to this database only.
     const row = await getDb().kv.get(key)
     if (row) await write({ table: 'kv', row })
   }

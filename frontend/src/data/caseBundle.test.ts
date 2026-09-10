@@ -38,6 +38,19 @@ beforeEach(async () => {
     { key: 'finding-reviews-1', value: { 'mail-test|70': { status: 'reviewed', notes: 'Archived decision' } } },
     { key: 'ai-triage-1', value: { entries: [{ id: 'incident:mail:70', before: { findings: [{ id: 90, status: 'new' }] } }] } },
     { key: 'chains-2', value: { privateToAnotherCase: true } },
+    {
+      key: 'relationship-reviews-1',
+      value: {
+        stable: {
+          notes: 'Reviewed link',
+          references: [
+            { source: 'events', id: 80, evidenceId: 9 },
+            { source: 'mails', id: 70, evidenceId: 9 },
+          ],
+        },
+      },
+    },
+    { key: 'relationship-cache-1', value: { privateCache: true } },
   ])
 })
 afterEach(async () => {
@@ -72,6 +85,16 @@ it('restores all analyst state with correct evidence, finding and chain referenc
   expect(chain.chains[0].steps[0]).toMatchObject({ id: event.id, refs: [event.id] })
   expect((await db.kv.get(`ai-triage-${id}`))?.value).toMatchObject({ entries: [{ id: 'incident:mail:140', before: { findings: [{ id: finding.id }] } }] })
   expect((await db.findings.get(90))?.refs).toEqual([70])
+  expect((await db.kv.get(`relationship-reviews-${id}`))?.value).toMatchObject({
+    stable: {
+      notes: 'Reviewed link',
+      references: [
+        { source: 'events', id: event.id, evidenceId: event.evidenceId },
+        { source: 'mails', id: mail.id, evidenceId: mail.evidenceId },
+      ],
+    },
+  })
+  expect(await db.kv.get(`relationship-cache-${id}`)).toBeUndefined()
 })
 
 it('rejects corruption or truncation before creating any case', async () => {

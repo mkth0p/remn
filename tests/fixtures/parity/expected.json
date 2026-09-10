@@ -86,6 +86,24 @@
  },
  "errors": [],
  "findings": {
+  "collection-defender-alert-text": [
+   "collection-defender-alert-text|110"
+  ],
+  "collection-encoded-execution": [
+   "collection-encoded-execution|108"
+  ],
+  "collection-persistence-user-path": [
+   "collection-persistence-user-path|107"
+  ],
+  "collection-prefetch-script-execution": [
+   "collection-prefetch-script-execution|111"
+  ],
+  "collection-remote-service": [
+   "collection-remote-service|107"
+  ],
+  "collection-script-host-connection": [
+   "collection-script-host-connection|109"
+  ],
   "m365-app-consent": [
    "m365-app-consent|105"
   ],
@@ -247,6 +265,12 @@
   ]
  },
  "rules": [
+  "collection-defender-alert-text",
+  "collection-encoded-execution",
+  "collection-persistence-user-path",
+  "collection-prefetch-script-execution",
+  "collection-remote-service",
+  "collection-script-host-connection",
   "m365-anonymous-sharing",
   "m365-app-consent",
   "m365-app-registered",

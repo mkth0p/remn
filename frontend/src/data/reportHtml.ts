@@ -3,6 +3,8 @@ import type { Chain, ChainStep } from './chains'
 import type { ChainReview, ReportSettings } from './review'
 import { chainSeverity, effectiveSeverity, stepVisible } from './review'
 import type { Incident } from '../rules/incidents'
+import type { RelationshipReview } from './relationshipReviews'
+import { packageCoverageIssues } from './packageCoverage'
 import { defang, escapeHtml, fmtBytes, fmtNum, fmtTs, renderMarkdown } from '../util/format'
 
 /**
@@ -26,6 +28,7 @@ export interface ReportData {
   graphs: Record<string, string>
   campaignInsights: string[]
   coverageWarnings?: string[]
+  relationships?: RelationshipReview[]
   /** incidents other than chains */
   incidents: Incident[]
   /** every finding the report carries */
@@ -320,6 +323,40 @@ export function buildReportHtml(d: ReportData): string {
       body: `<p class="intro">A chain is a suspicious mail and what the recipient's accounts and machines did after it, scored on the seed, the ties to the mail, the steps, the findings and the sources involved. Findings whose rows are steps of a chain are decided with it.</p>${campaign}${d.chains.map((c) => chainCard(c, d)).join('\n')}`,
     })
   }
+  const relationships = (d.relationships ?? []).filter((r) => r.status === 'accepted' && r.includeInReport)
+  const packages = d.evidence.filter((e) => e.kind === 'package')
+  if (packages.length)
+    sections.push({
+      id: 'package-coverage',
+      title: 'Investigation package coverage',
+      count: packages.length,
+      body: table(
+        ['Package', 'Coverage'],
+        packages.map((e) => [h(e.name), h(packageCoverageIssues(e).join('; ') || 'No reported import issues')]),
+      ),
+    })
+  if (relationships.length)
+    sections.push({
+      id: 'relationships',
+      title: 'Reviewed evidence relationships',
+      count: relationships.length,
+      body:
+        '<p class="intro">Analyst-selected connections. Observation and collection times remain distinct; shared entities do not establish causation.</p>' +
+        relationships
+          .map(
+            (r) =>
+              `<div class="card"><h3>${h(r.sourceLabel)} → ${h(r.relation)} → ${h(r.targetLabel)}</h3><p>${h(r.reason)} (${h(r.confidence)})</p><div class="narr">${md(r.notes)}</div>${Object.keys(r.aliases ?? {}).length ? `<p>Explicit aliases: ${h(JSON.stringify(r.aliases))}</p>` : ''}${table(
+                ['Source', 'Record', 'Time (UTC)', 'SHA-256'],
+                r.references.map((ref) => [
+                  h(ref.sourceFile ?? ''),
+                  h(`${ref.source} #${ref.id} · evidence #${ref.evidenceId} · source row ${(ref.sourceIndex ?? -1) + 1}`),
+                  h(`${ref.recordKind === 'observation' ? 'Collected' : 'Event'}: ${fmtTs(ref.recordKind === 'observation' ? ref.observedAt : ref.ts)}`),
+                  h(ref.sourceSha256 ?? ''),
+                ]),
+              )}</div>`,
+          )
+          .join(''),
+    })
   sections.push({
     id: 'incidents',
     title: 'Incidents',

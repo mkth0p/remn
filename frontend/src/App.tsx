@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { ApiError, getHealth, getMeta, onAuthError, setApiToken } from './api/client'
 import { defaultSettings, getDb, newServerKey, type Case } from './db/schema'
 import { toast, useStore, type View } from './state/store'
-import { detectKind, ingestFile, refreshCounts, requestIngest } from './data/ingest'
+import { detectKind, ingestFiles, refreshCounts, requestIngest } from './data/ingest'
 import { migrateCaseToServer } from './data/migrate'
 import { getSource } from './data/source'
 import { setLocalTime } from './util/format'
@@ -45,6 +45,7 @@ import { ReviewView } from './views/ReviewView'
 import { HomeView } from './views/HomeView'
 import { RulesView } from './views/RulesView'
 import { SettingsView } from './views/SettingsView'
+import { RelationshipsView } from './views/RelationshipsView'
 import type { PivotResult } from './data/queries'
 import { fmtBytes, fmtNum, fmtTs } from './util/format'
 
@@ -56,6 +57,7 @@ const NAV: { id: View; label: string; icon: React.ComponentType; count?: 'events
   { id: 'timeline', label: 'Timeline', icon: IconTimeline },
   { id: 'findings', label: 'Findings', icon: IconFindings, count: 'findings', section: 'detect' },
   { id: 'chains', label: 'Chains', icon: IconLink },
+  { id: 'relationships', label: 'Relationships', icon: IconPivot },
   { id: 'rules', label: 'Rules', icon: IconRules },
   { id: 'iocs', label: 'Indicators', icon: IconIoc, count: 'iocs' },
   { id: 'ai', label: 'AI analyst', icon: IconAi, section: 'assist' },
@@ -103,7 +105,7 @@ export default function App() {
   const [global, setGlobal] = useState('')
   const [pivotRes, setPivotRes] = useState<PivotResult | null>(null)
   const [ready, setReady] = useState(false)
-  const [pendingKind, setPendingKind] = useState<'evtx' | 'mail'>('mail')
+  const [pendingKind, setPendingKind] = useState<'evtx' | 'mail' | 'package'>('mail')
   const [migrating, setMigrating] = useState<string | null>(null)
 
   useEffect(() => {
@@ -211,7 +213,7 @@ export default function App() {
   }, [kase, view, setView])
 
   useEffect(() => {
-    if (pending) setPendingKind(pending.kindOverride ?? (pending.files.every((f) => detectKind(f) === 'evtx') ? 'evtx' : 'mail'))
+    if (pending) setPendingKind(pending.kindOverride ?? 'package')
   }, [pending])
 
   const switchCase = async (id: number) => {
@@ -258,7 +260,7 @@ export default function App() {
     }
     const files = pending.files
     setPending(null)
-    files.forEach((f) => ingestFile(f, target, pending.kindOverride ?? (/(\.zip|\.tar|\.tgz|\.gz|\.bz2|\.xz)$/i.test(f.name) ? pendingKind : detectKind(f))))
+    void ingestFiles(files, target, (f) => pending.kindOverride ?? (/(\.zip|\.tar|\.tgz|\.gz|\.bz2|\.xz)$/i.test(f.name) ? pendingKind : detectKind(f)))
     setView('evidence')
   }
 
@@ -371,6 +373,7 @@ export default function App() {
         {view === 'timeline' && <TimelineView />}
         {view === 'findings' && <FindingsView />}
         {view === 'chains' && <ChainsView />}
+        {view === 'relationships' && <RelationshipsView key={kase?.id} />}
         {view === 'rules' && <RulesView />}
         {view === 'iocs' && <IocsView />}
         {view === 'ai' && <AiView />}
@@ -476,7 +479,8 @@ export default function App() {
           {pending.files.some((f) => /(\.zip|\.tar|\.tgz|\.gz|\.bz2|\.xz)$/i.test(f.name)) && !pending.kindOverride && (
             <label className="field">
               <span>what is inside the archive(s)?</span>
-              <select className="select" value={pendingKind} onChange={(e) => setPendingKind(e.target.value as 'evtx' | 'mail')}>
+              <select className="select" value={pendingKind} onChange={(e) => setPendingKind(e.target.value as 'evtx' | 'mail' | 'package')}>
+                <option value="package">Investigation package (detect every member, including mixed mail and events)</option>
                 <option value="evtx">Windows event logs (.evtx files)</option>
                 <option value="mail">Mailbox / mail corpus (.eml, .msg, .mbox, .pst, extension-less messages)</option>
               </select>

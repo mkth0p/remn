@@ -1,5 +1,8 @@
 # Data sources
 
+Mixed host investigation collections are described in [Investigation packages](packages.md),
+including structured artifact adapters, snapshots and member coverage.
+
 REMN reads three kinds of evidence and turns them into two tables, events and mails, so
 that search, facets, the timeline, the rules, the attack chains and the AI tools work
 the same way whatever the file came from. Every dropped file is hashed with SHA-256 in

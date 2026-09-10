@@ -24,7 +24,7 @@ export async function clearDerivedState(caseId: number): Promise<{ findings: num
     await rememberReviews(caseId, findings)
     await db.findings.where('caseId').equals(caseId).delete()
     const chains = ((await db.kv.get(`chains-${caseId}`))?.value as { chains?: unknown[] } | undefined)?.chains?.length ?? 0
-    await db.kv.bulkDelete([`chains-${caseId}`, `ruleDiags-${caseId}`])
+    await db.kv.bulkDelete([`chains-${caseId}`, `ruleDiags-${caseId}`, `relationship-cache-${caseId}`])
     await db.facets.where('caseId').equals(caseId).delete()
     return { findings: findings.length, chains }
   })

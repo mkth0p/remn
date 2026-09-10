@@ -36,7 +36,7 @@ interface StoredUpload {
   received: number
 }
 
-const uploadKvKey = (file: File) => `upload-${file.name}-${file.size}-${file.lastModified}`
+const uploadKvKey = (file: File) => `upload-${file.webkitRelativePath || file.name}-${file.size}-${file.lastModified}`
 
 /** Drop the resume record of a file and the partial the server may still hold (evidence removal). */
 export async function forgetUpload(file: { name: string; size: number; lastModified?: number | null }): Promise<boolean> {

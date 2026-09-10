@@ -19,6 +19,7 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from api.jobs import Job, manager
 from api.views.upload import discard_upload, get_upload
 from services.common import ndjson_line
+from services.ingest.package import PackageSource
 from services.ingest.pipeline import EvtxSource, MailSource, MailStats
 from services.parsers import evtx_parser
 from services.parsers.mail.common import ParseContext
@@ -107,8 +108,8 @@ def ingest(request: HttpRequest, key: str):
     kind = str(body.get("kind") or "")
     evidence = body.get("evidence") or {}
     options = body.get("options") or {}
-    if kind not in ("evtx", "mail"):
-        return JsonResponse({"error": "kind must be evtx or mail"}, status=400)
+    if kind not in ("evtx", "mail", "package"):
+        return JsonResponse({"error": "kind must be evtx, mail or package"}, status=400)
     try:
         path, meta = get_upload(upload_id)
     except (FileNotFoundError, ValueError):
@@ -145,7 +146,24 @@ def ingest(request: HttpRequest, key: str):
         count = 0
         last = 0.0
         try:
-            if kind == "evtx":
+            if kind == "package":
+                package = PackageSource(name, str(path), None, tmp_dir, ctx, include_raw, str(meta.get("sha256") or ""))
+                ew = EventWriter(st, evidence_id, include_raw=include_raw)
+                pmw = MailWriter(st, evidence_id, keep_bodies=keep_bodies)
+                try:
+                    for row in package:
+                        (pmw if row["type"] == "mail" else ew).add(row)
+                        count += 1
+                        if time.time() - last > 0.5:
+                            job.update(rows=count, format=package.format, files=len(package.files))
+                            job.check()
+                            last = time.time()
+                finally:
+                    ew.flush()
+                    pmw.flush()
+                stats = package.stats()
+                fmt = package.format
+            elif kind == "evtx":
                 src = EvtxSource(name, str(path), None, tmp_dir, include_raw=include_raw)
                 w = EventWriter(st, evidence_id, include_raw=include_raw)
                 for row in src:

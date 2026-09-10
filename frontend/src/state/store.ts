@@ -8,7 +8,7 @@ export interface EntityRef {
   value: string
 }
 
-export type View = 'home' | 'dashboard' | 'evidence' | 'events' | 'mails' | 'findings' | 'chains' | 'timeline' | 'iocs' | 'ai' | 'review' | 'case' | 'report' | 'rules' | 'settings'
+export type View = 'home' | 'dashboard' | 'evidence' | 'events' | 'mails' | 'findings' | 'chains' | 'relationships' | 'timeline' | 'iocs' | 'ai' | 'review' | 'case' | 'report' | 'rules' | 'settings'
 
 export interface ConsoleLine {
   id: number
@@ -25,7 +25,7 @@ export interface IngestJob {
   id: number
   evidenceId: number
   name: string
-  kind: 'evtx' | 'mail'
+  kind: 'evtx' | 'mail' | 'package'
   phase: 'hashing' | 'uploading' | 'parsing' | 'done' | 'error'
   progress: number // 0..1 for hashing, rows for parsing
   rows: number
@@ -80,7 +80,7 @@ interface State {
   bumpRules: () => void
   storeThresholdMb: number
   setStoreThresholdMb: (mb: number) => void
-  pendingIngest: { files: File[]; kindOverride?: 'evtx' | 'mail'; reason: 'big' | 'archive' } | null
+  pendingIngest: { files: File[]; kindOverride?: 'evtx' | 'mail' | 'package'; reason: 'big' | 'archive' } | null
   setPendingIngest: (p: State['pendingIngest']) => void
   aiConfig: { transport: 'browser' | 'server' | 'claude'; ollamaUrl: string; model: string; numCtx: number | null; claudeModel: string }
   setAiConfig: (patch: Partial<State['aiConfig']>) => void

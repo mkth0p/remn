@@ -15,6 +15,7 @@ import { buildReportHtml, loadReportFont } from '../data/reportHtml'
 import { draftExecutiveSummary } from '../data/reportSummary'
 import { buildCampaignGraph } from '../data/chainGraph'
 import { IconAi, IconCheck, IconDownload } from '../components/Icons'
+import { reportRelationships, type RelationshipReview } from '../data/relationshipReviews'
 
 const ORDER = ['critical', 'high', 'medium', 'low', 'info']
 
@@ -32,6 +33,7 @@ export function ReportView() {
   const [chains, setChains] = useState<Chain[]>([])
   const [coverageWarnings, setCoverageWarnings] = useState<string[]>([])
   const [reviews, setReviews] = useState<Record<string, ChainReview>>({})
+  const [relationships, setRelationships] = useState<RelationshipReview[]>([])
   const [settings, setSettings] = useState<ReportSettings | null>(null)
   const [iocs, setIocs] = useState<Ioc[]>([])
   const [notes, setNotes] = useState<CaseNote[]>([])
@@ -62,6 +64,7 @@ export function ReportView() {
       setCoverageWarnings(chainCoverageWarnings(r?.stats))
     })
     loadChainReviews(kase.id).then(setReviews)
+    reportRelationships(kase.id).then(setRelationships)
     loadReportSettings(kase.id).then(setSettings)
   }, [kase, rulesVersion])
   const selection = useMemo(() => (settings ? selectForReport(findings, chains, reviews, settings) : { findings: [], chains: [] }), [findings, chains, reviews, settings])
@@ -118,6 +121,7 @@ export function ReportView() {
       chains: selection.chains,
       reviews,
       coverageWarnings,
+      relationships,
       membersOf,
       graphs,
       campaignInsights:
