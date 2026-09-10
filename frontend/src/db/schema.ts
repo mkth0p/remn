@@ -370,6 +370,43 @@ export interface KV {
 }
 
 /** Analyst-authored case material (Case notes view): timeline entries, tasks and notes. */
+export type RowMarkVerdict = 'relevant' | 'noise' | 'pivot'
+
+/**
+ * What a row was, at the moment it was marked.
+ *
+ * Row ids are not stable: deleting evidence and re-ingesting it renumbers everything, which is a
+ * routine mid-case action when a fuller collection arrives. Recording where the row came from lets
+ * a later pass re-attach the mark without any change to this schema.
+ */
+export interface RowProvenance {
+  sourceFile: string | null
+  sourceSha256: string | null
+  sourceIndex: number | null
+  /** EventRecordID for an EVTX row: unique within its channel and file. */
+  recordId: number | null
+  channel: string | null
+  computer: string | null
+  messageId: string | null
+  ts: number | null
+}
+
+/** An analyst's verdict on one evidence row. Never stored on the row itself: that is evidence. */
+export interface RowMark {
+  id?: number
+  caseId: number
+  source: 'events' | 'mails'
+  rowId: number
+  evidenceId: number | null
+  verdict: RowMarkVerdict
+  tags: string[]
+  reason: string
+  provenance?: RowProvenance
+  by: 'analyst' | 'ai'
+  createdAt: number
+  updatedAt: number
+}
+
 export interface CaseNote {
   id?: number
   caseId: number
@@ -401,6 +438,7 @@ export class RemnDB extends Dexie {
   customRules!: Table<CustomRule, number>
   kv!: Table<KV, string>
   caseNotes!: Table<CaseNote, number>
+  rowMarks!: Table<RowMark, number>
 
   constructor(name = 'remn') {
     super(name)
@@ -425,6 +463,11 @@ export class RemnDB extends Dexie {
       events:
         '++id, caseId, evidenceId, ts, eventId, [caseId+id], [caseId+artifactType], [caseId+ts], [caseId+eventId], [caseId+evidenceId], computer, targetUser, subjectUser, ipAddress, logonType, channel, provider, category',
       mails: '++id, caseId, evidenceId, date, [caseId+id], [caseId+date], [caseId+evidenceId], fromAddr, fromDomain, fromRegistrable, fromNameNorm, originIp, folder, risk, messageId, *flags',
+    })
+    // A new table only: existing stores are untouched, so an existing case opens without an
+    // upgrade function and without rewriting a single row.
+    this.version(4).stores({
+      rowMarks: '++id, caseId, [caseId+source+rowId], [caseId+source], [caseId+verdict], evidenceId, *tags',
     })
   }
 }
@@ -458,17 +501,22 @@ export const CASE_KV_KEYS = (caseId: number) =>
     'relationship-cache',
   ].map((p) => `${p}-${caseId}`)
 
+/**
+ * Every table whose rows carry a caseId. One list, because it was previously written twice inside
+ * deleteCaseData and a table added to only one of them would be left behind on delete.
+ */
+export const CASE_TABLES = (db: RemnDB): Table<{ caseId: number }, number>[] =>
+  [db.events, db.mails, db.mailBodies, db.attachments, db.urls, db.findings, db.iocs, db.facets, db.aiSessions, db.savedSearches, db.evidence, db.caseNotes, db.rowMarks] as Table<
+    { caseId: number },
+    number
+  >[]
+
 export async function deleteCaseData(db: RemnDB, caseId: number): Promise<void> {
-  await db.transaction(
-    'rw',
-    [db.events, db.mails, db.mailBodies, db.attachments, db.urls, db.findings, db.iocs, db.facets, db.aiSessions, db.savedSearches, db.evidence, db.caseNotes, db.kv],
-    async () => {
-      for (const t of [db.events, db.mails, db.mailBodies, db.attachments, db.urls, db.findings, db.iocs, db.facets, db.aiSessions, db.savedSearches, db.evidence, db.caseNotes]) {
-        await (t as Table<{ caseId: number }, number>).where('caseId').equals(caseId).delete()
-      }
-      await db.kv.bulkDelete(CASE_KV_KEYS(caseId)) // chain snapshot, diagnostics, calibration state, archived reviews
-    },
-  )
+  const tables = CASE_TABLES(db)
+  await db.transaction('rw', [...tables, db.kv], async () => {
+    for (const t of tables) await t.where('caseId').equals(caseId).delete()
+    await db.kv.bulkDelete(CASE_KV_KEYS(caseId)) // chain snapshot, diagnostics, calibration state, archived reviews
+  })
 }
 
 /** Everything of a case, the case row included: rows, derived state, custom rules, and the last-case pointer when it was this one. */

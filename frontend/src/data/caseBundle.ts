@@ -3,7 +3,7 @@ import { API_HEADERS, readNdjsonBody } from '../api/client'
 import { CASE_KV_KEYS, deleteCase, getDb, newServerKey, type Case } from '../db/schema'
 import { caseRows, importServerBatch, type TransferRow } from './caseTransfer'
 
-const TABLES = ['evidence', 'events', 'mails', 'mailBodies', 'attachments', 'urls', 'findings', 'iocs', 'facets', 'aiSessions', 'savedSearches', 'caseNotes', 'customRules']
+const TABLES = ['evidence', 'events', 'mails', 'mailBodies', 'attachments', 'urls', 'findings', 'iocs', 'facets', 'aiSessions', 'savedSearches', 'caseNotes', 'customRules', 'rowMarks']
 type Sink = { write: (text: string) => Promise<unknown> }
 type RecordLine = { table: string; row: TransferRow }
 
@@ -179,6 +179,7 @@ async function restoreRecords(original: Case, records: () => AsyncGenerator<Reco
       if (key === 'caseId') out[mappedKey] = newId
       else if (key === 'evidenceId') out[mappedKey] = mapId('evidence', v)
       else if (key === 'mailId') out[mappedKey] = mapId('mails', v)
+      else if (key === 'rowId') out[mappedKey] = mapId(source === 'mails' ? 'mails' : 'events', v)
       else if (key === 'id' && typeof v === 'number') out[mappedKey] = mapId(parent === 'findings' || parent === 'unlinked' ? 'findings' : table || source, v)
       else if (key === 'seed' || key === 'relatedSeeds') out[mappedKey] = remap(v, String((!Array.isArray(v) && (v as TransferRow)?.source) || 'mails'), key)
       else if (key === 'steps' || key === 'link') out[mappedKey] = remap(v, '', key)
