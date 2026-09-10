@@ -1,6 +1,6 @@
 from django.urls import path
 
-from api.views import ai, chains, enrich, health, ingest, meta, reputation, rules, store, upload
+from api.views import ai, chains, enrich, health, ingest, meta, relationships, reputation, rules, store, upload
 
 urlpatterns = [
     path("health", health.health),
@@ -8,6 +8,7 @@ urlpatterns = [
     # browser-stored cases: streamed NDJSON ingestion
     path("ingest/evtx", ingest.ingest_evtx),
     path("ingest/mail", ingest.ingest_mail),
+    path("ingest/package", ingest.ingest_package),
     path("analyze/attachment", ingest.analyze_single_attachment),
     # rule-format converters (Sigma -> REMN DSL)
     path("rules/convert/sigma", rules.convert_sigma),
@@ -18,6 +19,7 @@ urlpatterns = [
     path("rules/packs/<str:pack_id>/license", rules.pack_license),
     # cross-source attack chains
     path("chains/build", chains.build),
+    path("relationships/build", relationships.relationships),
     # enrichment passes (sender baseline, campaigns)
     path("enrich/mails", enrich.mails),
     path("enrich/mails/rescore", enrich.rescore),

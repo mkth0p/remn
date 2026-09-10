@@ -7,6 +7,7 @@ import { createSHA256 } from 'hash-wasm'
 import { getDb, type AttachmentRow, type EventRow, type Facet, type Ioc, type MailBody, type MailRow, type UrlRow } from '../db/schema'
 import { setApiToken, streamNdjson } from '../api/client'
 import { isPublicIp } from '../util/format'
+import { duplicateEvidence } from '../data/duplicateEvidence'
 
 export interface IngestRequest {
   cmd: 'ingest'
@@ -14,7 +15,8 @@ export interface IngestRequest {
   caseId: number
   evidenceId: number
   file: File
-  kind: 'evtx' | 'mail'
+  kind: 'evtx' | 'mail' | 'package'
+  sourceName?: string
   includeRaw: boolean
   settings: { internalDomains: string[]; brands: string[]; vipNames: string[]; trustedSenders?: string[] }
   /** access token for remote deployments - the worker has its own api/client module instance */
@@ -35,7 +37,23 @@ export type WorkerRequest = IngestRequest | HashRequest | RebuildRequest
 const ctx = self as unknown as DedicatedWorkerGlobalScope
 const post = (msg: Record<string, unknown>) => ctx.postMessage(msg)
 
-const EVENT_FACETS = ['eventId', 'channel', 'provider', 'computer', 'targetUser', 'subjectUser', 'ipAddress', 'logonType', 'category', 'levelName', 'processName', 'serviceName']
+const EVENT_FACETS = [
+  'eventId',
+  'recordKind',
+  'artifactType',
+  'sourceFile',
+  'channel',
+  'provider',
+  'computer',
+  'targetUser',
+  'subjectUser',
+  'ipAddress',
+  'logonType',
+  'category',
+  'levelName',
+  'processName',
+  'serviceName',
+]
 const MAIL_FACETS = ['fromDomain', 'fromAddr', 'fromNameNorm', 'folder', 'originIp', 'flags', 'sourceFormat', 'attExt', 'riskBand']
 const FACET_CAP = 4000
 const BATCH = 2000
@@ -236,21 +254,30 @@ async function ingest(req: IngestRequest): Promise<void> {
     abort,
   )
   post({ type: 'hash', sha256 })
+  const duplicate = await duplicateEvidence(caseId, evidenceId, req.sourceName ?? file.name, kind, sha256)
+  if (duplicate) {
+    await db.evidence.delete(evidenceId)
+    post({ type: 'duplicate', evidenceId: duplicate.id })
+    return
+  }
   await db.evidence.update(evidenceId, { sha256Client: sha256, status: 'uploading' })
 
   post({ type: 'phase', phase: 'uploading' })
   const form = new FormData()
   form.append('file', file, file.name)
-  if (kind === 'evtx') form.append('raw', req.includeRaw ? '1' : '0')
-  else
+  form.append('sourceName', req.sourceName ?? file.name)
+  form.append('raw', req.includeRaw ? '1' : '0')
+  if (kind !== 'evtx')
     form.append(
       'settings',
       JSON.stringify({ internalDomains: req.settings.internalDomains, brands: req.settings.brands, vipNames: req.settings.vipNames, trustedSenders: req.settings.trustedSenders ?? [] }),
     )
 
   const fc = new FacetCounter()
+  const mailFc = new FacetCounter()
   const ic = new IocCounter()
   let batch: Record<string, unknown>[] = []
+  let batchType: 'event' | 'mail' = 'event'
   let inserted = 0
   const st = { meta: null as Record<string, unknown> | null, done: null as Record<string, unknown> | null, errorMsg: null as string | null }
   let lastProgress = 0
@@ -317,12 +344,19 @@ async function ingest(req: IngestRequest): Promise<void> {
     delete row.type
     row.caseId = caseId
     row.evidenceId = evidenceId
+    if (type === 'event' || type === 'mail') {
+      if (batch.length && type !== batchType) {
+        if (batchType === 'event') await flushEvents()
+        else await flushMails()
+      }
+      batchType = type
+    }
     if (type === 'event') {
       accumulateEvent(caseId, row, fc, ic)
       batch.push(row)
       if (batch.length >= BATCH) await flushEvents()
     } else if (type === 'mail') {
-      accumulateMail(caseId, row as unknown as MailRow, fc, ic)
+      accumulateMail(caseId, row as unknown as MailRow, mailFc, ic)
       batch.push(row)
       if (batch.length >= 200) await flushMails()
     }
@@ -334,12 +368,14 @@ async function ingest(req: IngestRequest): Promise<void> {
   }
 
   try {
-    await streamNdjson(kind === 'evtx' ? '/api/ingest/evtx' : '/api/ingest/mail', form, onRow, { onBytes: (n) => post({ type: 'bytes', bytes: n }) })
-    if (kind === 'evtx') await flushEvents()
+    await streamNdjson(`/api/ingest/${kind}`, form, onRow, { onBytes: (n) => post({ type: 'bytes', bytes: n }) })
+    if (!st.done) throw new Error('Ingestion stream ended before its completion record; imported rows may be partial')
+    if (batchType === 'event') await flushEvents()
     else await flushMails()
     post({ type: 'progress', rows: inserted })
     post({ type: 'log', level: 'info', text: 'writing facets and indicators…' })
-    await flushFacets(caseId, kind === 'evtx' ? 'events' : 'mails', fc)
+    await flushFacets(caseId, 'events', fc)
+    await flushFacets(caseId, 'mails', mailFc)
     await flushIocs(caseId, ic)
     const serverHash = (st.done?.sha256 as string) || (st.meta?.sha256 as string) || ''
     const integrity = serverHash ? (serverHash === sha256 ? 'verified' : 'mismatch') : 'pending'
@@ -356,10 +392,20 @@ async function ingest(req: IngestRequest): Promise<void> {
   } catch (e) {
     const msg = (e as Error).message || String(e)
     try {
-      if (kind === 'evtx') await flushEvents()
+      if (batchType === 'event') await flushEvents()
       else await flushMails()
     } catch {
       /* ignore */
+    }
+    // A truncated stream still commits the rows it received, so the facets and indicators derived
+    // from them have to be written too. Without this the rows exist while the facet and IOC tables
+    // hold nothing for them, and no rebuild is scheduled. Failures here must not mask the original.
+    try {
+      await flushFacets(caseId, 'events', fc)
+      await flushFacets(caseId, 'mails', mailFc)
+      await flushIocs(caseId, ic)
+    } catch {
+      /* the original error is the one worth reporting */
     }
     await db.evidence.update(evidenceId, { status: 'error', error: msg, count: inserted })
     post({ type: 'error', error: msg, count: inserted })

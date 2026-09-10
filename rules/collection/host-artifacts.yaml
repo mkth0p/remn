@@ -1,0 +1,64 @@
+id: collection-persistence-user-path
+title: Collected persistence configuration launches from a user-writable location
+description: A service, autorun or task references a temporary or user profile location. Check the binary and authorized deployment; observation does not establish when persistence was created.
+source: events
+severity: high
+attack: [T1543.003, T1547.001, T1053.005]
+where:
+  artifactType|in: [service, autorun, task]
+  any_of:
+    - image|contains: ['\temp\', '\appdata\', '\users\public\', '\downloads\']
+    - serviceFile|contains: ['\temp\', '\appdata\', '\users\public\', '\downloads\']
+    - commandLine|contains: ['\temp\', '\appdata\', '\users\public\', '\downloads\']
+---
+id: collection-encoded-execution
+title: Encoded or download-and-execute command in collected artifacts
+description: Encoded PowerShell or explicit download/execution primitives in a process or persistence configuration. Review the complete command and its source.
+source: events
+severity: high
+attack: [T1059.001, T1027]
+where:
+  artifactType|in: [process, service, task, autorun]
+  any_of:
+    - commandLine|contains: [' -enc ', ' -encodedcommand ', 'downloadstring(', 'frombase64string(', 'invoke-expression']
+    - serviceFile|contains: [' -enc ', ' -encodedcommand ', 'downloadstring(', 'frombase64string(']
+---
+id: collection-script-host-connection
+title: Collected script interpreter with a network endpoint
+description: A script interpreter is explicitly recorded with a destination address. This is a triage lead; check whether the destination and execution were expected.
+source: events
+severity: medium
+attack: [T1059]
+where:
+  artifactType: connection
+  destinationIp|exists: true
+  image|contains: [powershell.exe, pwsh.exe, wscript.exe, cscript.exe, mshta.exe]
+---
+id: collection-remote-service
+title: Remote execution service present in collection
+description: A collected service name resembles a common remote administration or execution service. Legitimate administration can produce the same artifact.
+source: events
+severity: medium
+attack: [T1569.002]
+where:
+  artifactType: service
+  serviceName|contains: [PSEXESVC, PAExec, RemComSvc, csexecsvc]
+---
+id: collection-defender-alert-text
+title: Defender support log contains a threat or protection alert
+description: A collected Defender log line explicitly mentions a threat detection or disabled protection. Read surrounding evidence; text is not a verified Defender verdict.
+source: events
+severity: medium
+where:
+  artifactType: defender
+  message|contains: ['threat detected', 'malware detected', 'real-time protection disabled', 'realtime protection disabled']
+---
+id: collection-prefetch-script-execution
+title: Prefetch records execution of a script host or administration utility
+description: Prefetch execution evidence for an interpreter or remote administration utility. Review run times and referenced files; these tools also have legitimate uses.
+source: events
+severity: low
+attack: [T1059]
+where:
+  artifactType: prefetch
+  processName|contains: [powershell.exe, pwsh.exe, mshta.exe, wscript.exe, cscript.exe, psexec.exe]

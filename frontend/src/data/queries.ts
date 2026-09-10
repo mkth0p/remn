@@ -58,12 +58,15 @@ export async function searchEvents(caseId: number, filter: Filter, opts: { limit
       .limit(limit + 1)
       .toArray()
     truncated = rows.length > limit
-    return { rows: rows.slice(0, limit), truncated }
+    rows = rows.slice(0, limit)
+    const undated = await undatedEvents(caseId, pred, limit)
+    return { rows: rows.concat(undated as typeof rows), truncated }
   }
   rows = await coll
     .filter((r) => pred(r as Record<string, unknown>))
     .limit(HARD_CAP)
     .toArray()
+  rows = rows.concat((await undatedEvents(caseId, pred, HARD_CAP - rows.length)) as typeof rows)
   truncated = rows.length >= HARD_CAP
   sortRows(rows as Record<string, unknown>[], sort.field, sort.dir)
   if (rows.length > limit) {
@@ -71,6 +74,24 @@ export async function searchEvents(caseId: number, filter: Filter, opts: { limit
     truncated = true
   }
   return { rows, truncated }
+}
+
+/**
+ * Collection snapshots (autoruns, services, installed programs) have no event time, and Dexie
+ * omits rows with a null key from the [caseId+ts] index, so they are invisible to every read
+ * that walks it. They are still counted in the case totals, so without this they read as missing
+ * evidence. Only meaningful when no time range is set: an undated row cannot be inside one.
+ */
+function undatedEventCollection(caseId: number, pred: (r: Record<string, unknown>) => boolean) {
+  return getDb()
+    .events.where('caseId')
+    .equals(caseId)
+    .filter((r) => (r as { ts?: number | null }).ts == null && pred(r as Record<string, unknown>))
+}
+
+async function undatedEvents(caseId: number, pred: { from?: number | null; to?: number | null } & ((r: Record<string, unknown>) => boolean), limit: number) {
+  if (pred.from != null || pred.to != null || limit <= 0) return []
+  return undatedEventCollection(caseId, pred).limit(limit).toArray()
 }
 
 export async function countEvents(caseId: number, filter: Filter, settings?: SettingsLike): Promise<number> {
@@ -88,8 +109,9 @@ export async function countEvents(caseId: number, filter: Filter, settings?: Set
   const from = pred.from ?? Dexie.minKey
   const to = pred.to ?? Dexie.maxKey
   const coll = db.events.where('[caseId+ts]').between([caseId, from], [caseId, to], true, true)
-  if (!hasConds) return coll.count()
-  return coll.filter((r) => pred(r as Record<string, unknown>)).count()
+  const dated = hasConds ? await coll.filter((r) => pred(r as Record<string, unknown>)).count() : await coll.count()
+  if (pred.from != null || pred.to != null) return dated
+  return dated + (await undatedEventCollection(caseId, pred).count())
 }
 
 export interface AggGroup {
@@ -119,6 +141,7 @@ async function eachEvent(caseId: number, filter: Filter, settings: SettingsLike 
     const from = pred.from ?? Dexie.minKey
     const to = pred.to ?? Dexie.maxKey
     await db.events.where('[caseId+ts]').between([caseId, from], [caseId, to], true, true).each(visit)
+    if (pred.from == null && pred.to == null) await undatedEventCollection(caseId, pred).each(visit)
   }
   return n
 }
@@ -379,8 +402,18 @@ export async function caseSummary(caseId: number): Promise<Record<string, unknow
   const evRange = { first: null as number | null, last: null as number | null }
   const mailRange = { first: null as number | null, last: null as number | null }
   for (const e of evidence) {
-    const s = e.stats as { firstTs?: number; lastTs?: number } | undefined
+    const s = e.stats as { firstTs?: number; lastTs?: number; eventRange?: { firstTs?: number; lastTs?: number }; mailRange?: { firstTs?: number; lastTs?: number } } | undefined
     if (!s) continue
+    if (e.kind === 'package') {
+      for (const [range, target] of [
+        [s.eventRange, evRange],
+        [s.mailRange, mailRange],
+      ] as const) {
+        if (range?.firstTs != null) target.first = target.first == null ? range.firstTs : Math.min(target.first, range.firstTs)
+        if (range?.lastTs != null) target.last = target.last == null ? range.lastTs : Math.max(target.last, range.lastTs)
+      }
+      continue
+    }
     const tgt = e.kind === 'evtx' ? evRange : mailRange
     if (s.firstTs != null) tgt.first = tgt.first == null ? s.firstTs : Math.min(tgt.first, s.firstTs)
     if (s.lastTs != null) tgt.last = tgt.last == null ? s.lastTs : Math.max(tgt.last, s.lastTs)

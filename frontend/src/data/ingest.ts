@@ -6,14 +6,16 @@ import type { IngestRequest } from '../workers/ingest.worker'
 import { chunkedUpload } from './upload'
 import { waitForJob } from './jobs'
 import { getSource } from './source'
+import { duplicateEvidence } from './duplicateEvidence'
 
 let jobSeq = 1
 
-export function detectKind(file: File): 'evtx' | 'mail' {
+export function detectKind(file: File): 'evtx' | 'mail' | 'package' {
+  if (file.webkitRelativePath || isArchive(file)) return 'package'
   const n = file.name.toLowerCase()
   if (n.endsWith('.evtx')) return 'evtx'
   // Microsoft 365 audit / Entra sign-in exports ride the event pipeline (format sniffed server-side)
-  if (/\.(csv|json|jsonl|ndjson)$/.test(n)) return 'evtx'
+  if (/\.(csv|tsv|json|jsonl|ndjson|pf|cab|reg|hiv|xml|txt|log)$/.test(n)) return 'package'
   if (isArchive(file) && /evtx|winevt|eventlog|event[-_ ]?logs?|sysmon|security[-_ ]?log/i.test(n)) return 'evtx'
   return 'mail'
 }
@@ -31,7 +33,7 @@ export function thresholdBytes(): number {
  * Entry point used by the drop zones. Large files dropped in a browser-stored
  * case are held back for the analyst's decision (convert the case or ingest anyway).
  */
-export function requestIngest(files: File[], kase: Case, kindOverride?: 'evtx' | 'mail'): void {
+export function requestIngest(files: File[], kase: Case, kindOverride?: 'evtx' | 'mail' | 'package'): void {
   if (!files.length) return
   const big = kase.storage !== 'server' && files.some((f) => f.size > thresholdBytes())
   const archives = files.filter(isArchive)
@@ -39,18 +41,31 @@ export function requestIngest(files: File[], kase: Case, kindOverride?: 'evtx' |
     useStore.getState().setPendingIngest({ files, kindOverride, reason: big ? 'big' : 'archive' })
     return
   }
-  files.forEach((f) => ingestFile(f, kase, kindOverride ?? detectKind(f)))
+  void ingestFiles(files, kase, (f) => kindOverride ?? detectKind(f))
 }
 
-export async function ingestFile(file: File, kase: Case, kind: 'evtx' | 'mail' = detectKind(file)): Promise<number> {
+/** Keep folder imports bounded: one ingest worker / server job at a time. */
+export async function ingestFiles(files: File[], kase: Case, kind: (file: File) => 'evtx' | 'mail' | 'package' = detectKind): Promise<void> {
+  if (files.length > 1) log('info', `${files.length} evidence files queued for import`)
+  const batchCase = files.length > 1 ? { ...kase, settings: { ...kase.settings, autoRunRules: false } } : kase
+  try {
+    for (const file of files) await ingestFile(file, batchCase, kind(file))
+  } catch (error) {
+    toast('err', `Import queue stopped: ${(error as Error).message}`, 0)
+  } finally {
+    if (files.length > 1) autoRunAfterIngest(kase)
+  }
+}
+
+export async function ingestFile(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package' = detectKind(file)): Promise<number> {
   if (kase.storage === 'server' && kase.serverKey) return ingestToServer(file, kase, kind)
   return ingestToBrowser(file, kase, kind)
 }
 
-async function createEvidence(file: File, kase: Case, kind: 'evtx' | 'mail'): Promise<number> {
+async function createEvidence(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package'): Promise<number> {
   const evidence: Evidence = {
     caseId: kase.id!,
-    name: file.name,
+    name: file.webkitRelativePath || file.name,
     size: file.size,
     kind,
     integrity: 'pending',
@@ -66,7 +81,7 @@ async function createEvidence(file: File, kase: Case, kind: 'evtx' | 'mail'): Pr
 // ---------------------------------------------------------------------------
 // server store: chunked upload + ingestion job
 // ---------------------------------------------------------------------------
-export async function ingestToServer(file: File, kase: Case, kind: 'evtx' | 'mail'): Promise<number> {
+export async function ingestToServer(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package'): Promise<number> {
   const db = getDb()
   const evidenceId = await createEvidence(file, kase, kind)
   const jobId = jobSeq++
@@ -77,6 +92,14 @@ export async function ingestToServer(file: File, kase: Case, kind: 'evtx' | 'mai
     const up = await chunkedUpload(file, (p) => {
       useStore.getState().upsertJob({ id: jobId, phase: p.uploaded < p.total ? 'uploading' : 'hashing', progress: Math.min(p.uploaded, p.hashed) / Math.max(1, p.total), bytes: p.uploaded })
     })
+    const duplicate = up.sha256Client === up.sha256Server ? await duplicateEvidence(kase.id!, evidenceId, file.webkitRelativePath || file.name, kind, up.sha256Client) : undefined
+    if (duplicate) {
+      await fetch(`/api/upload/${up.uploadId}`, { method: 'DELETE', headers: API_HEADERS })
+      await db.evidence.delete(evidenceId)
+      useStore.getState().upsertJob({ id: jobId, phase: 'done', progress: 1 })
+      toast('info', `${file.name}: already imported as evidence #${duplicate.id}; skipped`)
+      return duplicate.id!
+    }
     await db.evidence.update(evidenceId, { sha256Client: up.sha256Client, sha256Server: up.sha256Server, status: 'parsing', integrity: up.sha256Client === up.sha256Server ? 'verified' : 'mismatch' })
     log('ok', `[${file.name}] uploaded ${up.size} bytes, SHA-256 ${up.sha256Client}${up.sha256Client === up.sha256Server ? ' (server hash matches)' : ' (SERVER HASH DIFFERS)'}`)
     if (up.sha256Client !== up.sha256Server) toast('err', `${file.name}: the server received a file with a different hash`, 0)
@@ -84,7 +107,7 @@ export async function ingestToServer(file: File, kase: Case, kind: 'evtx' | 'mai
     const { jobId: serverJob } = await apiPost<{ jobId: string }>(`/api/store/${kase.serverKey}/ingest`, {
       uploadId: up.uploadId,
       kind,
-      evidence: { id: evidenceId, name: file.name, size: file.size, sha256Client: up.sha256Client, addedAt: Date.now() },
+      evidence: { id: evidenceId, name: file.webkitRelativePath || file.name, size: file.size, sha256Client: up.sha256Client, addedAt: Date.now() },
       options: {
         includeRaw: kase.settings.includeRaw !== false,
         keepBodies: kase.settings.keepBodies !== false,
@@ -123,7 +146,7 @@ export async function ingestToServer(file: File, kase: Case, kind: 'evtx' | 'mai
 // ---------------------------------------------------------------------------
 // browser store: worker (hash + NDJSON stream + IndexedDB)
 // ---------------------------------------------------------------------------
-export async function ingestToBrowser(file: File, kase: Case, kind: 'evtx' | 'mail'): Promise<number> {
+export async function ingestToBrowser(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package'): Promise<number> {
   const db = getDb()
   const evidenceId = await createEvidence(file, kase, kind)
   const jobId = jobSeq++
@@ -139,6 +162,7 @@ export async function ingestToBrowser(file: File, kase: Case, kind: 'evtx' | 'ma
     evidenceId,
     file,
     kind,
+    sourceName: file.webkitRelativePath || file.name,
     includeRaw: kase.settings.includeRaw !== false,
     settings: { internalDomains: kase.settings.internalDomains, brands: kase.settings.brands, vipNames: kase.settings.vipNames, trustedSenders: kase.settings.trustedSenders ?? [] },
     token: API_HEADERS['X-Forensic-Client'],
@@ -148,6 +172,12 @@ export async function ingestToBrowser(file: File, kase: Case, kind: 'evtx' | 'ma
       const m = ev.data
       const s = useStore.getState()
       switch (m.type) {
+        case 'duplicate':
+          toast('info', `${file.name}: already imported as evidence #${m.evidenceId}; skipped`)
+          worker.terminate()
+          s.removeJob(jobId)
+          resolve(Number(m.evidenceId))
+          break
         case 'phase':
           s.upsertJob({ id: jobId, phase: m.phase as 'hashing' })
           break

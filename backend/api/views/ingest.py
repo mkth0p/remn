@@ -218,3 +218,32 @@ def analyze_single_attachment(request: HttpRequest):
 
 def _unused() -> None:
     _ = io, Any
+
+
+@require_POST
+def ingest_package(request: HttpRequest):
+    from services.ingest.package import PackageSource
+
+    if (err := _too_large(request)) is not None:
+        return err
+    src = _Source(request)
+    if src.error is not None:
+        return src.error
+    source_name = str(request.POST.get("sourceName") or src.name)[:2048]
+    package = PackageSource(
+        source_name, src.path, src.data, str(settings.FILE_UPLOAD_TEMP_DIR), _ctx_from_request(request), request.POST.get("raw", "1") != "0", src.sha256
+    )
+
+    def gen() -> Iterator[bytes]:
+        try:
+            yield ndjson_line({"type": "meta", "format": package.format, "name": src.name, "size": src.size, "sha256": src.sha256})
+            yield from (ndjson_line(row) for row in package)
+            yield ndjson_line({"type": "done", "format": package.format, "stats": package.stats(), "sha256": src.sha256})
+        except Exception as exc:  # noqa: BLE001
+            yield ndjson_line({"type": "error", "error": str(exc)[:300]})
+            package.inventory_complete = False
+            yield ndjson_line({"type": "done", "format": package.format, "stats": package.stats(), "sha256": src.sha256})
+        finally:
+            src.cleanup()
+
+    return _stream(gen())

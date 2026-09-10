@@ -125,3 +125,37 @@ describe('queries over IndexedDB', () => {
     expect(risky.rows).toHaveLength(1)
   })
 })
+
+describe('collection snapshots without an event time', () => {
+  // Autoruns, services and installed programs are snapshots: the collection parser sets ts: null.
+  // Dexie omits rows with a null key from the [caseId+ts] index, so a read that walks that index
+  // never sees them, while the case totals still count them. They then read as missing evidence.
+  beforeAll(async () => {
+    const db = new RemnDB('test-queries-undated')
+    setDb(db)
+    await db.events.bulkAdd([
+      { caseId: 1, evidenceId: 9, ts: T0, eventId: 4624, provider: 'Security', channel: 'Security', summary: 'dated logon' },
+      { caseId: 1, evidenceId: 9, ts: null, recordKind: 'observation', artifactType: 'autorun', summary: 'Run key: updater.exe' },
+      { caseId: 1, evidenceId: 9, ts: null, recordKind: 'observation', artifactType: 'service', summary: 'Service: RemoteRegistry' },
+    ] as unknown as EventRow[])
+  })
+
+  it('lists undated observations alongside dated events when no time range is set', async () => {
+    const { rows } = await searchEvents(1, {}, { limit: 100 })
+    const summaries = rows.map((r) => (r as { summary?: string }).summary)
+    expect(summaries).toContain('Run key: updater.exe')
+    expect(summaries).toContain('Service: RemoteRegistry')
+    expect(rows).toHaveLength(3)
+  })
+
+  it('counts them, so the total agrees with the list', async () => {
+    expect(await countEvents(1, {})).toBe(3)
+  })
+
+  it('excludes them when a time range is set, since an undated row is not inside one', async () => {
+    const ranged = { timeRange: { from: T0 - 1000, to: T0 + 1000 } }
+    const { rows } = await searchEvents(1, ranged, { limit: 100 })
+    expect(rows).toHaveLength(1)
+    expect(await countEvents(1, ranged)).toBe(1)
+  })
+})

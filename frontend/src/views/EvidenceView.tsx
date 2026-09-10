@@ -8,6 +8,8 @@ import { hashOnly, refreshCounts, requestIngest } from '../data/ingest'
 import { getSource } from '../data/source'
 import { Jobs } from '../components/ConsolePanel'
 import { IconTrash } from '../components/Icons'
+import { PackageCoverage } from '../components/PackageCoverage'
+import { packageCoverageIssues } from '../data/packageCoverage'
 
 export function EvidenceView() {
   const kase = useStore((s) => s.currentCase)
@@ -56,7 +58,7 @@ export function EvidenceView() {
         <Badge sev={isServer ? 'accent' : 'info'}>{isServer ? 'server store (GB-scale)' : `browser store (files over ${threshold} MB will ask to switch)`}</Badge>
       </div>
       <div className="view-body col" style={{ gap: 14 }}>
-        <Dropzone onFiles={(files) => requestIngest(files, kase)} />
+        <Dropzone onFiles={(files) => requestIngest(files, kase)} allowFolders />
         <Jobs />
         <table className="table">
           <thead>
@@ -91,6 +93,7 @@ export function EvidenceView() {
                 </td>
                 <td>
                   <Badge sev={e.status === 'done' ? 'ok' : e.status === 'error' ? 'critical' : 'medium'}>{e.status}</Badge>
+                  {packageCoverageIssues(e).length > 0 && <Badge sev="medium">partial coverage</Badge>}
                   {e.error && (
                     <span className="small" style={{ color: 'var(--danger)', marginLeft: 6 }}>
                       {e.error.slice(0, 60)}
@@ -155,8 +158,9 @@ export function EvidenceView() {
               }}
             />
           </label>
+          {detail.kind === 'package' && detail.stats && <PackageCoverage stats={detail.stats} />}
           {detail.stats && (
-            <details open>
+            <details open={detail.kind !== 'package'}>
               <summary className="small dim" style={{ cursor: 'pointer' }}>
                 parser statistics
               </summary>

@@ -14,6 +14,8 @@ import { exportCsv, exportJson } from '../util/export'
 import { Badge } from '../components/ui'
 
 const FACETS: FacetDef[] = [
+  { field: 'recordKind', label: 'Events / observations', open: true },
+  { field: 'artifactType', label: 'Collection artifact' },
   { field: 'eventId', label: 'Event ID', open: true },
   { field: 'channel', label: 'Channel', open: true },
   { field: 'provider', label: 'Provider' },
@@ -29,6 +31,9 @@ const FACETS: FacetDef[] = [
   { field: 'serviceName', label: 'Service' },
 ]
 const FIELDS = [
+  'recordKind',
+  'artifactType',
+  'observedAt',
   'eventId',
   'provider',
   'channel',
@@ -147,7 +152,7 @@ export function EventsView() {
 
   const columns: Column<EventRow>[] = useMemo(
     () => [
-      { key: 'ts', label: 'time (UTC)', width: 160, render: (r) => fmtTs(r.ts) },
+      { key: 'ts', label: 'event time', width: 160, render: (r) => (r.recordKind === 'observation' ? <span title={`Collected: ${fmtTs(r.observedAt)}`}>snapshot (no event time)</span> : fmtTs(r.ts)) },
       {
         key: 'eventId',
         label: 'id',
