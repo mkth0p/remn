@@ -421,7 +421,8 @@ async function ingest(req: IngestRequest): Promise<void> {
       status: st.errorMsg ? 'error' : 'done',
       error: st.errorMsg ?? undefined,
       count: inserted,
-      stats: (st.done?.stats as Record<string, unknown>) ?? undefined,
+      // the engine's own account of its run sits with the parser statistics, where the evidence detail shows it
+      stats: engineSummaries.length ? { ...((st.done?.stats as Record<string, unknown>) ?? {}), engines: engineSummaries } : ((st.done?.stats as Record<string, unknown>) ?? undefined),
       sha256Server: serverHash || undefined,
       integrity,
       progress: 1,

@@ -171,7 +171,7 @@ export interface Health {
     error?: string
     numCtx?: number
   }
-  optional: { pst: boolean; yara: boolean; yaraRules: number; claudeCode?: boolean }
+  optional: { pst: boolean; yara: boolean; yaraRules: number; claudeCode?: boolean; hayabusa?: boolean }
   providers: ProviderInfo[]
 }
 export interface ProviderInfo {
