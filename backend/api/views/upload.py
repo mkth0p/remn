@@ -102,7 +102,10 @@ def cleanup_stale(max_age_s: int | None = None) -> int:
         max_age_s = settings.FORENSIC_UPLOAD_MAX_AGE_S
     n = 0
     now = time.time()
-    for directory, suffixes in ((upload_dir(), (".part", ".json")), (Path(settings.FILE_UPLOAD_TEMP_DIR), (".upload",))):
+    # .member, .decoded and .manifest are the parsers own staging. A parse releases them itself,
+    # but a process killed mid-parse cannot, and nothing else reclaims them.
+    parser_temp = (".upload", ".member", ".decoded", ".manifest")
+    for directory, suffixes in ((upload_dir(), (".part", ".json")), (Path(settings.FILE_UPLOAD_TEMP_DIR), parser_temp)):
         try:
             for p in directory.iterdir():
                 if not p.is_file() or p.suffix not in suffixes:

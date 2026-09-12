@@ -16,7 +16,7 @@ from typing import Any
 
 from services.ingest.pipeline import EvtxSource, MailSource, Member, detect_archive, looks_like_mail
 from services.ingest.reconcile import reconcile
-from services.parsers import collection, m365
+from services.parsers import collection, m365, native
 from services.parsers.mail.common import ParseContext
 
 MAX_FILES = 20_000
@@ -24,15 +24,42 @@ MAX_FILES = 20_000
 # where they are read: an uncapped list is both unbounded memory and the driver of the
 # reconciliation cost, and a summary CSV naming them is attacker-controlled.
 MAX_EXPECTATIONS = 10_000
-# Registry hives and prefetch files are decoded by a subprocess each, individually bounded to
-# 512 MiB, 64 MiB of output and 30 seconds. Nothing bounded HOW MANY, so a package of twenty
-# thousand hives was twenty thousand subprocesses on one request. A real collection carries a few
-# dozen; past these the member is still inventoried and hashed, and says why it was not decoded.
-MAX_NATIVE_DECODES = 200
-MAX_NATIVE_SECONDS = 120.0
+# Registry hives and prefetch files are decoded by a worker process bounded to 512 MiB, 64 MiB of
+# output and 30 seconds. Nothing bounded HOW MANY, so a package of twenty thousand hives was twenty
+# thousand subprocesses on one request. What the first version of that cap got wrong was the size
+# of a real collection: prefetch files come in the hundreds, one interpreter start each, and a
+# genuine 354-file collection spent its whole allowance on process startup and reported two thirds
+# of its prefetch as unsupported. Prefetch is now decoded in groups, which costs one startup per
+# sixty-four artifacts, so the allowance can be what a large collection actually needs.
+MAX_NATIVE_DECODES = 5_000
+MAX_NATIVE_SECONDS = 300.0
+# Held-back artifacts wait on disk in the staging area, which on a public instance is RAM. This
+# is a ceiling on what one REQUEST holds at once, tracked in the shared budget: when it lived on
+# the instance, each nesting level got its own allowance and four levels held four times as much
+# as the tmpfs was sized for.
+MAX_DEFERRED_BYTES = 256 * 1024**2
+# A genuine Defender support cab expands about ten to one. Many CFFILE entries can point at the
+# same folder data, so the expanded total counts bytes written rather than bytes allocated, and
+# without a ratio a few kilobytes of cabinet can manufacture the whole ceiling.
+MAX_CAB_RATIO = 200
+ENCODING_LABEL = {
+    "utf-16": "UTF-16",
+    "utf-16-le": "UTF-16LE, which the file does not declare",
+    "utf-16-be": "UTF-16BE, which the file does not declare",
+    "cp1252": "Windows-1252",
+}
+BUDGET_SPENT = f"native decoding budget for this package is spent ({MAX_NATIVE_DECODES} artifacts or {MAX_NATIVE_SECONDS:g}s); inventoried and hashed only"
 MAX_MEMBER = 4 * 1024**3
 MAX_TOTAL = 16 * 1024**3
 MAX_STRUCTURED = 64 * 1024**2
+
+
+def _unlink(path: str | None) -> None:
+    if path:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
 
 
 class PackageSource:
@@ -68,6 +95,11 @@ class PackageSource:
         self.inherited_context = inherited_context or {}
         self.expectations = []
         self.nested_reconciliation = []
+        # Artifacts decoded as a group later, keyed by staged path so a release is idempotent.
+        # A group being decoded stays in here: taking it out is what stranded the files when a
+        # client disconnected part-way through one.
+        self.deferred: dict[str, tuple[dict[str, Any], str, str, int]] = {}
+        self.budget.setdefault("deferredBytes", 0)
 
     def stats(self) -> dict[str, Any]:
         return {
@@ -82,6 +114,108 @@ class PackageSource:
             "context": self.context,
             "reconciliation": reconcile(self.files, self.expectations) + self.nested_reconciliation,
         }
+
+    def _release(self, tmp_path: str) -> None:
+        """Give a held-back artifact its staging bytes back. Safe to call more than once."""
+        held = self.deferred.pop(tmp_path, None)
+        if held is not None:
+            self.budget["deferredBytes"] = max(0, self.budget["deferredBytes"] - int(held[0].get("size") or 0))
+        _unlink(tmp_path)
+
+    def _emit(self, entry: dict[str, Any], member_name: str, index: int, rows) -> Iterator[dict[str, Any]]:
+        """Stamp provenance onto a member's rows and account for them against the package."""
+        for row_index, (kind, row) in enumerate(rows):
+            if row.get("artifactType") == "collection-summary" and len(self.expectations) < MAX_EXPECTATIONS:
+                self.expectations.append(row["data"])
+            row.update(type=kind, packageId=self.package_id, sourceFile=member_name, sourceSha256=entry["sha256"], memberIndex=index)
+            row.setdefault("sourceIndex", row_index)
+            if str(row.get("parserVersion", "")).startswith("dissect-"):
+                row["sourceIndex"] = row_index
+            row.setdefault("recordKind", "event")
+            row.setdefault("parserVersion", "remn/0.1.1")
+            if kind == "event" and not row.get("computer") and self.context.get("host"):
+                row["computer"] = self.context["host"]
+            entry["count"] += 1
+            bucket = "observations" if row["recordKind"] == "observation" else "mails" if kind == "mail" else "events"
+            self.counts[bucket] += 1
+            ts = row.get("date") if kind == "mail" else row.get("ts")
+            if isinstance(ts, int):
+                time_range = self.ranges["mailRange" if kind == "mail" else "eventRange"]
+                time_range["firstTs"] = ts if time_range["firstTs"] is None else min(ts, time_range["firstTs"])
+                time_range["lastTs"] = ts if time_range["lastTs"] is None else max(ts, time_range["lastTs"])
+            yield row
+
+    def _decode_one(self, held: tuple[dict[str, Any], str, str, int], raw_records=None, failure: str | None = None) -> Iterator[dict[str, Any]]:
+        """Turn one held-back artifact into rows, whether a group decoded it or it decoded alone."""
+        entry, tmp_path, member_name, index = held
+        rows = None
+        try:
+            if raw_records is None:
+                raw_records = collection.native_records("prefetch", tmp_path, member_name, self.context, self.tmp_dir)
+            else:
+                raw_records = collection.native_rows("prefetch", raw_records, member_name, self.context)
+            rows = (("event", row) for row in raw_records)
+            yield from self._emit(entry, member_name, index, rows)
+            if failure:
+                # Records decoded before the failure are kept, exactly as for a lone artifact.
+                raise ValueError(failure)
+            entry["status"] = "parsed"
+        except Exception as exc:  # noqa: BLE001
+            entry.update(status="error", reason=str(exc)[:300])
+        finally:
+            closer = getattr(rows, "close", None)
+            if closer is not None:
+                try:
+                    closer()
+                except Exception:  # noqa: BLE001
+                    pass
+            self._release(tmp_path)
+
+    def _drain_native(self) -> Iterator[dict[str, Any]]:
+        """Decode the prefetch artifacts held back from the member loop, in groups.
+
+        One interpreter start per artifact is fine for a handful of registry hives and ruinous for
+        prefetch, which arrives in the hundreds. A real 354-file collection spent its whole
+        decoding allowance on process startup and reported two thirds of its prefetch as
+        unsupported: artifacts the parser understands perfectly well, described as ones it does not.
+        """
+        while self.deferred:
+            if self.budget["decodes"] >= MAX_NATIVE_DECODES or self.budget["decodeSeconds"] >= MAX_NATIVE_SECONDS:
+                for entry, tmp_path, _name, _index in list(self.deferred.values()):
+                    entry.update(status="unsupported", reason=BUDGET_SPENT)
+                    self._release(tmp_path)
+                return
+            # Never take more into a group than the allowance still covers, or the allowance would
+            # be enforced only between groups and a hostile package could overshoot it by a group.
+            size = min(native.MAX_BATCH, MAX_NATIVE_DECODES - self.budget["decodes"])
+            group = list(self.deferred.values())[:size]
+            started = time.monotonic()
+            try:
+                results = native.batch_records("prefetch", [held[1] for held in group], self.tmp_dir)
+            except Exception:  # noqa: BLE001
+                results = []  # every artifact falls back to its own decode below
+            finally:
+                self.budget["decodeSeconds"] += time.monotonic() - started
+            reached = set()
+            for position, raw_records, failure in results:
+                reached.add(position)
+                self.budget["decodes"] += 1
+                yield from self._decode_one(group[position], raw_records, failure)
+            # An artifact the group never reached is decoded on its own, so one artifact that
+            # exhausts a group limit costs its own decode rather than its neighbours.
+            for position, held in enumerate(group):
+                if position in reached:
+                    continue
+                if self.budget["decodes"] >= MAX_NATIVE_DECODES or self.budget["decodeSeconds"] >= MAX_NATIVE_SECONDS:
+                    held[0].update(status="unsupported", reason=BUDGET_SPENT)
+                    self._release(held[1])
+                    continue
+                self.budget["decodes"] += 1
+                started = time.monotonic()
+                try:
+                    yield from self._decode_one(held)
+                finally:
+                    self.budget["decodeSeconds"] += time.monotonic() - started
 
     def _members(self) -> Iterator[tuple[Member, str | None]]:
         if self.path:
@@ -124,6 +258,16 @@ class PackageSource:
             )
 
     def __iter__(self) -> Iterator[dict[str, Any]]:
+        try:
+            yield from self._iterate()
+        finally:
+            # A cancelled ingest must not leave held-back artifacts in the staging area. They
+            # are named like any other staged member, so the periodic sweep would not reclaim
+            # them until their retention window expired.
+            for held_path in list(self.deferred):
+                self._release(held_path)
+
+    def _iterate(self) -> Iterator[dict[str, Any]]:
         # A small explicit manifest supplies collection context regardless of archive order.
         for member, reason in self._members():
             if not reason and member.name == "collection-manifest.json":
@@ -165,6 +309,7 @@ class PackageSource:
             tmp_path = None
             rows = source = None
             decode_started = None
+            notes: dict[str, Any] = {}
             try:
                 digest = hashlib.sha256()
                 with tempfile.NamedTemporaryFile(dir=self.tmp_dir, suffix=".member", delete=False) as out:
@@ -191,9 +336,21 @@ class PackageSource:
                     decoded = None
                     try:
                         if head.startswith(b"MSCF"):
-                            from services.parsers.native import decode
-
-                            decoded = decode("cab", tmp_path, self.tmp_dir)
+                            # A cabinet is a native decode like any other: it spawns the same
+                            # bounded worker and manufactures a whole nested package, so it is
+                            # gated and charged against the same allowance instead of being free.
+                            if self.budget["decodes"] >= MAX_NATIVE_DECODES or self.budget["decodeSeconds"] >= MAX_NATIVE_SECONDS:
+                                raise ValueError(BUDGET_SPENT)
+                            self.budget["decodes"] += 1
+                            cab_started = time.monotonic()
+                            try:
+                                decoded = native.decode("cab", tmp_path, self.tmp_dir)
+                            finally:
+                                self.budget["decodeSeconds"] += time.monotonic() - cab_started
+                            # What it expanded to counts against the package, like any other bytes.
+                            self.budget["bytes"] += os.path.getsize(decoded)
+                            if self.budget["bytes"] > MAX_TOTAL:
+                                raise ValueError("package exceeds 16 GiB expanded-byte limit")
                         inherited = {**self.context, "artifactDefault": collection.category(member.name) or self.context.get("artifactDefault")}
                         nested = PackageSource(
                             "nested.zip" if decoded else member.name,
@@ -251,14 +408,24 @@ class PackageSource:
                     continue
                 if head.startswith(b"regf") or low.endswith(".pf"):
                     if self.budget["decodes"] >= MAX_NATIVE_DECODES or self.budget["decodeSeconds"] >= MAX_NATIVE_SECONDS:
-                        entry.update(
-                            status="unsupported",
-                            reason=f"native decoding budget for this package is spent ({MAX_NATIVE_DECODES} artifacts or {MAX_NATIVE_SECONDS:g}s); inventoried and hashed only",
-                        )
+                        entry.update(status="unsupported", reason=BUDGET_SPENT)
                         continue
                     source = None
                     kind = "registry" if head.startswith(b"regf") else "prefetch"
                     entry["format"] = f"dissect-{kind}/1"
+                    if (
+                        kind == "prefetch"
+                        # decode() refuses an oversized artifact before spawning anything, so an
+                        # artifact the lone path would reject must not reach a shared worker.
+                        and size <= native.MAX_OUTPUT
+                        and self.budget["deferredBytes"] + size <= MAX_DEFERRED_BYTES
+                    ):
+                        # Held back so a group of these can share one interpreter start. The staged
+                        # copy is released by the drain, not by this iteration finally block.
+                        self.deferred[tmp_path] = (entry, tmp_path, member.name, index)
+                        self.budget["deferredBytes"] += size
+                        tmp_path = None
+                        continue
                     self.budget["decodes"] += 1
                     decode_started = time.monotonic()
                     rows = (("event", r) for r in collection.native_records(kind, tmp_path, member.name, self.context, self.tmp_dir))
@@ -275,7 +442,7 @@ class PackageSource:
                     entry["format"] = collection.VERSION
                     source = None
                     parse_name = member.name if collection.category(member.name) else f"WdSupportLogs/{member.name}"
-                    rows = (("event", collection.normalize(r, parse_name, i, self.context)) for i, r in enumerate(collection.records(tmp_path, parse_name)))
+                    rows = (("event", collection.normalize(r, parse_name, i, self.context)) for i, r in enumerate(collection.records(tmp_path, parse_name, notes)))
                 elif low.endswith((".eml", ".msg", ".mbox", ".mbx", ".pst", ".ost")) or looks_like_mail(head):
                     source = MailSource(member.name, tmp_path, None, self.ctx, self.tmp_dir)
                     entry["format"] = source.format
@@ -283,35 +450,42 @@ class PackageSource:
                 else:
                     entry.update(status="unsupported", reason="no parser for this member; inventoried and hashed")
                     continue
-                for row_index, (kind, row) in enumerate(rows):
-                    if row.get("artifactType") == "collection-summary" and len(self.expectations) < MAX_EXPECTATIONS:
-                        self.expectations.append(row["data"])
-                    row.update(type=kind, packageId=self.package_id, sourceFile=member.name, sourceSha256=entry["sha256"], memberIndex=index)
-                    row.setdefault("sourceIndex", row_index)
-                    if str(row.get("parserVersion", "")).startswith("dissect-"):
-                        row["sourceIndex"] = row_index
-                    row.setdefault("recordKind", "event")
-                    row.setdefault("parserVersion", "remn/0.1.1")
-                    if kind == "event" and not row.get("computer") and self.context.get("host"):
-                        row["computer"] = self.context["host"]
-                    entry["count"] += 1
-                    bucket = "observations" if row["recordKind"] == "observation" else "mails" if kind == "mail" else "events"
-                    self.counts[bucket] += 1
-                    ts = row.get("date") if kind == "mail" else row.get("ts")
-                    if isinstance(ts, int):
-                        time_range = self.ranges["mailRange" if kind == "mail" else "eventRange"]
-                        time_range["firstTs"] = ts if time_range["firstTs"] is None else min(ts, time_range["firstTs"])
-                        time_range["lastTs"] = ts if time_range["lastTs"] is None else max(ts, time_range["lastTs"])
-                    yield row
-                if decode_started is not None:
-                    self.budget["decodeSeconds"] += time.monotonic() - decode_started
-                    decode_started = None
+                yield from self._emit(entry, member.name, index, rows)
                 if source is not None and source.stats.errors:
                     raise ValueError(f"parser reported {source.stats.errors} error(s); any emitted rows are partial")
                 entry["status"] = "parsed"
             except Exception as exc:  # noqa: BLE001
                 entry.update(status="error", reason=str(exc)[:300])
             finally:
+                # Charged here rather than after the row loop: a decode that raises jumps
+                # straight past that point, so a failing decode used to cost the allowance nothing
+                # and only the artifact count stopped a package of them.
+                if decode_started is not None:
+                    self.budget["decodeSeconds"] += time.monotonic() - decode_started
+                    decode_started = None
+                # Every compromise the parser made to read this member is reported on it, so a
+                # table that looks complete cannot quietly be one that was repaired or cut short.
+                if notes:
+                    encoding = notes.get("encoding")
+                    repaired = notes.get("repairedRows", 0)
+                    malformed = notes.get("malformedRows", 0)
+                    truncated = notes.get("truncatedAtLine", 0)
+                    said = []
+                    if encoding:
+                        said.append(f"decoded as {ENCODING_LABEL.get(encoding, encoding)}")
+                    if repaired:
+                        said.append(f"{repaired} row(s) had columns merged by the exporter and were split back apart")
+                    if malformed:
+                        said.append(f"{malformed} row(s) do not match the header and were kept with the mismatch marked")
+                    if notes.get("defenderKept") is not None:
+                        said.append(
+                            f"Defender engine log: {notes.get('defenderScanned', 0):,} lines read, "
+                            f"{notes['defenderKept']:,} kept: those naming a detection, threat, quarantine, remediation, "
+                            f"exclusion or protection change, with the lines either side that qualify them"
+                        )
+                    if truncated:
+                        said.append(f"kept the first {truncated:,} lines; the file is longer than that")
+                    entry["note"] = "; ".join(said)
                 # The parsers hold the member file open across their yields, and CPython only
                 # clears this frame after the finally block, so the handles are still live here.
                 # Windows refuses to unlink an open file, which would both raise out of generator
@@ -323,8 +497,6 @@ class PackageSource:
                             closer()
                         except Exception:  # noqa: BLE001
                             pass
-                if tmp_path:
-                    try:
-                        os.unlink(tmp_path)
-                    except OSError:
-                        pass
+                _unlink(tmp_path)
+
+        yield from self._drain_native()

@@ -117,12 +117,22 @@ finishes.
 - **Swept on a timer**, every `FORENSIC_UPLOAD_SWEEP_S` seconds (300 by default) as well as at
   startup, so an abandoned upload clears without waiting for a restart. Set it to 0 to disable.
   The sweep covers Django's own multipart spool as well as the chunked staging area: a request
-  that dies part-way through a single-request upload leaves a file there too.
+  that dies part-way through a single-request upload leaves a file there too. It also covers the
+  parsers' own staging, the `.member`, `.decoded` and `.manifest` files a parse writes while it
+  works. A parse releases those itself, and a process killed mid-parse cannot.
 - **A total budget.** `FORENSIC_TMP_MAX_GB` (4 by default) caps what the staging area may hold at
   once. A new upload that would exceed it triggers a sweep and is then refused with 507, so a
   stream of abandoned uploads cannot fill the disk however short the lifetime is.
 - **Private to the server account.** The staging directory is 0700 and each staged file 0600, so
   evidence in transit is not readable by other accounts on the host.
+- **A ceiling on what one parse holds.** A package parse holds artifacts back to decode them in
+  groups, and that hold is capped per request rather than per archive, so nesting cannot multiply
+  it. A client that disconnects mid-parse releases everything the parse was holding rather than
+  stranding it for the sweeper to find later.
+- **A ceiling on what one parse spends.** Every native decode is counted and timed against one
+  allowance per package, whether it succeeds or fails, and cabinets are counted against the same
+  allowance rather than being free. A cabinet that claims to expand by more than a couple of
+  hundred times its own size is refused: real support cabinets are around ten to one.
 
 None of this makes a public instance a place for real evidence. It bounds the exposure of the
 files people do send.

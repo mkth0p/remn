@@ -25,6 +25,11 @@ version. Original fields remain in `data`. Original archive bytes and unsupporte
 member contents are not retained by either store; keep the acquisition separately.
 Case migration, export/import and deletion include normalized rows and provenance.
 
+A structured export is parsed under a 64 MiB budget counted while reading, not checked against
+the file size. An export past it contributes every record read before the ceiling and is reported
+as an error member with the reason, rather than contributing nothing but a hash. The member and
+package byte budgets are unchanged.
+
 ## Collection adapters
 
 CSV (comma, semicolon or tab), TSV, JSON objects/arrays, JSON `records` arrays and
@@ -58,6 +63,35 @@ CLIXML, `Field : value` command output and TCP/UDP `netstat -ano` rows. Unrecogn
 text lines remain searchable observations with their original line numbers.
 Other XML schemas/actions produce an explicit parser error.
 
+Text encoding is determined from the bytes, not from a byte order mark. Several
+Windows Defender support logs are UTF-16 with nothing declaring it; read as UTF-8
+some of them decode without error into text carrying a NUL after every character.
+An export whose encoding cannot be identified is read as Windows-1252 rather than
+discarded. The chosen encoding is reported on the member when it is not UTF-8.
+
+A row that does not match its header no longer ends the file. Where an exporter has
+quoted a run of columns as one cell, `'True','Auto'`, the cell is split back apart
+when doing so reproduces the header exactly. Otherwise the row is kept as it is:
+surplus values go to `_unmappedValues`, a short row is padded and marked in
+`_partialRow`, and the counts appear on the member. A well-formed export is never
+altered by this.
+
+Defender engine logs above 500 lines are reduced to the lines naming a detection,
+threat, quarantine, remediation, exclusion or change of protection state, each with
+the four lines either side. The context is the point: in a resource-scan block it is
+the neighbouring lines that carry the path of the file and the name of the process,
+so a filter that kept the threat name alone would report that something was found
+while discarding what it was. Files that are state dumps rather than engine logs,
+such as MPRegistry, MPStateInfo and MPDetection, are kept whole however long they
+are. The member records how many lines were read and how many were kept; the file
+itself is inventoried and hashed in full either way.
+
+A row the parser reassembled says so on the row, not only in the count on the
+member, so it stays distinguishable from a clean one wherever it is read. A repair
+is accepted only when a single grouped cell was split and that split alone accounts
+for the whole shortfall; reaching the header width by combining several splits is a
+coincidence rather than a repair.
+
 Native decoders use Dissect for Prefetch v23/30/31 (including MAM compression) and
 REGF registry hives. Prefetch emits each recorded execution time, run count and
 referenced filenames; these filenames are not automatically resolved to host drive
@@ -68,7 +102,11 @@ configuration observations. Memory/disk images and arbitrary collector schemas
 still require exported records or additional adapters.
 
 CAB supports uncompressed and MSZIP members; LZX/Quantum and duplicate-name CABs
-produce explicit errors. ZIP/TAR/CAB can nest up to three container levels, sharing
+produce explicit errors. A CAB expands to at most 256 MiB across at most 20,000
+members, sized for a genuine Defender support cab rather than for record output,
+and at a ratio of at most 200 to its own size: several entries may point at the
+same folder data, so the expanded total counts bytes written rather than bytes
+allocated and would otherwise put no limit on what a few kilobytes can produce. ZIP/TAR/CAB can nest up to three container levels, sharing
 the outer package's budgets. Provenance uses `container.zip!/member` paths and
 retains container hashes. A nested manifest can override inherited host/time defaults.
 
@@ -132,7 +170,13 @@ is truthful or activity is malicious. Contextual links are weaker associations.
 Shared entities do not establish causation. Existing scored attack chains and their
 review workflow remain separate; this explorer does not require a mail seed.
 
-**Load more records** extends the graph in pages of 1,000 events and 1,000 mails.
+**Build relationships** scans successive pages of 1,000 events and 1,000 mails,
+with progress and a **Stop after this page** control. **Continue scanning** resumes
+a stopped scan. Resource limits still apply and incomplete scans remain labeled.
+**Cross-source links** highlights entities supported by multiple source files or
+evidence items, prioritizing hashes, files and process instances over general hubs.
+Each entry names its sources and opens supporting records. Repeated rows from one
+source do not count as independent support; overlap does not establish maliciousness.
 Browser queries use case/ID indexes; both stores use an independent process context
 index/query so page boundaries do not prevent snapshot matching. Process context
 caps at 20,000 records; exceeding it disables snapshot inference and marks the graph
@@ -140,7 +184,9 @@ partial. Each page caps at 20,000 nodes/40,000 edges; the merged view caps at
 100,000 nodes/200,000 edges, with 30 sample references per edge. Server attachment
 and URL joins cap at 100,000 rows each per page. Narrow the evidence scope when a
 limit is reached. A cached graph and its cursor resume on return and are invalidated
-by changed evidence. They are rebuildable analysis, not authoritative evidence.
+by changed evidence. Graphs above the cache budget must be rebuilt after leaving
+the view; saved analyst reviews remain available. They are rebuildable analysis,
+not authoritative evidence.
 
 The related-evidence timeline follows two connections from any entity, up to 200
 source records, and distinguishes event time from collection time. Save accepted or
@@ -163,10 +209,19 @@ temporary files; archive paths are never used as extraction destinations. Links,
 encrypted members and traversal paths are skipped. Temporary files are cleaned up.
 An inventory cut short is marked incomplete.
 
-Native decoders run in disposable subprocesses, monitored at 50 ms intervals with
-30-second, 512 MiB RSS and 64 MiB input/output limits. These are sampled limits, not
-an OS sandbox. Text exports cap at 100,000 lines; registry traversal at 100,000 keys
-and depth 128. No evidence command or executable is run. Native decoder dependencies
+Native decoders run in subprocesses, monitored at 50 ms intervals with 30-second,
+512 MiB RSS and 64 MiB input/output limits; CAB output is allowed 512 MiB because it
+is an archive rather than records. These are sampled limits, not an OS sandbox.
+Prefetch is decoded in groups of up to 64 artifacts per process, since a collection
+carries hundreds of them and an interpreter start each cost more than the decoding.
+An artifact a group does not reach is decoded on its own, so one damaged artifact
+costs only itself, and only artifacts the single-artifact path would accept are held
+back. A package may decode 5,000 native artifacts or spend 300 seconds decoding,
+whichever comes first, counting cabinets and counting decodes that fail; past that,
+members are inventoried and hashed with the reason recorded. Held-back artifacts
+occupy at most 256 MiB of staging per request rather than per archive. Text exports keep their first 100,000 lines and are marked
+truncated rather than discarded; registry traversal caps at 100,000 keys and depth
+128. No evidence command or executable is run. Native decoder dependencies
 include AGPL-licensed Dissect and LGPL-licensed cabarchive; see `THIRD_PARTY_NOTICES.md`.
 
 Generate a synthetic package with mail, EVTX, host exports, native Prefetch, a REGF

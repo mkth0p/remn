@@ -7,8 +7,10 @@ import io
 import json
 import os
 import re
+from collections import deque
 from collections.abc import Iterator
 from datetime import datetime
+from itertools import chain, islice
 from typing import Any
 
 VERSION = "collection/1"
@@ -154,20 +156,225 @@ class _ByteBudget(io.RawIOBase):
         return n
 
 
-def records(path: str, name: str) -> Iterator[dict[str, Any]]:
+# Collection exports are written by whatever produced them, and some write CSV badly. Two
+# breakages show up in real service and process exports: a run of columns arrives joined into a
+# single cell as 'a','b','c' because the writer quoted the group instead of its members, and a
+# stray quote in a free-text description swallows a delimiter. Neither justifies discarding the
+# file. A services list is evidence, and the rows that survive are worth more than an empty table
+# with an error beside it.
+MAX_TEXT_LINES = 100_000
+
+
+def _text_encoding(raw) -> str:
+    """Work out how a text export is encoded rather than trusting it to say so.
+
+    Windows Defender writes several of its support logs as UTF-16 with no byte order mark. Read as
+    UTF-8 some of those decode without raising at all, and every character comes back with a NUL
+    after it: mojibake, handed to the analyst as evidence. The rest raise, and a strict decode
+    discarded a nine-megabyte operational log over it. Neither outcome is acceptable, so the shape
+    of the bytes decides, and an encoding that cannot be identified degrades instead of failing.
+    """
+    position = raw.tell()
+    sample = raw.read(65536)
+    raw.seek(position)
+    if sample.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return "utf-16"
+    if len(sample) > 16:
+        # In UTF-16 text that is mostly ASCII, half the bytes are NUL, and which half says which
+        # byte order it is.
+        if sum(1 for i in range(1, len(sample), 2) if sample[i] == 0) > len(sample) * 0.4:
+            return "utf-16-le"
+        if sum(1 for i in range(0, len(sample), 2) if sample[i] == 0) > len(sample) * 0.4:
+            return "utf-16-be"
+    try:
+        sample.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        # A multi-byte character cut in half by the end of the sample is not a failed decode.
+        if exc.start < len(sample) - 4:
+            return "cp1252"
+    return "utf-8-sig"
+
+
+_GROUPED_CELL = re.compile(r"^'[^']*'(?:,'[^']*')+$")
+SPILL_KEY = "_unmappedValues"
+PARTIAL_KEY = "_partialRow"
+REPAIRED_KEY = "_repairedRow"
+# A row with more values than its header used to abort the member. Keeping it must not mean
+# building one unbounded string out of however many delimiters the file happened to contain.
+MAX_SPILL_VALUES = 64
+MAX_SPILL_CHARS = 4096
+
+
+def _ungroup(row: list[str]) -> list[str]:
+    out: list[str] = []
+    for cell in row:
+        value = cell.strip()
+        if _GROUPED_CELL.match(value):
+            out.extend(value[1:-1].split("','"))
+        else:
+            out.append(cell)
+    return out
+
+
+# A Defender support cab carries a quarter of a million lines of engine logging. One row per line
+# buries the few hundred that name a threat, a quarantine, an exclusion or a change of protection
+# state under the scan bookkeeping around them, and duplicates the operational event log, which
+# arrives in the same cab as a .evtx and is parsed properly there. Small files are state dumps
+# where every line is content, so they are kept whole. Larger ones are reduced to their signal,
+# and the member says how many lines were read to find it.
+# A Defender support cab carries a quarter of a million lines of engine logging. One row per line
+# buries the few hundred that name a threat under the scan bookkeeping around them, and duplicates
+# the operational event log, which arrives in the same cab as a .evtx and is parsed properly there.
+#
+# A matching line alone is not enough, though. In a resource-scan block it is the NEIGHBOURING
+# lines that carry the path of the file and the name of the process, so a match brings its
+# surroundings with it. Files that are state dumps rather than engine logs are kept whole however
+# long they are, because in those every line is a fact about how the machine was configured.
+DEFENDER_WHOLE_FILE_LINES = 500
+DEFENDER_CONTEXT = 4
+DEFENDER_KEEP_WHOLE = re.compile(
+    r"(mpdetection|mpstateinfo|mpregistry|wdatpinfo|networkprotectionstate|wsc(info|registry)|mpsupporteffectiveconfig|securityhealth)",
+    re.I,
+)
+# Cheap substring gate in front of the precise test. The same bytes used to take a branch that ran
+# at 45 MiB/s and this one runs at 1.6, which on a public instance is an amplifier by itself.
+DEFENDER_TERMS = (
+    "threat", "detect", "quarantin", "remediat", "cleaned", "removed", "blocked", "exclusion",
+    "lowfi", "malware", "trojan", "backdoor", "ransom", "hacktool", "riskware", "pua:", "unwanted",
+    "tamper", "time protection", "scan result", "scan finished", "scan started",
+    # switching protection off is the move an attacker makes before the rest, so it is evidence
+    "removedefinitions", "disableantispyware", "disablerealtime", "disablebehavior",
+    "disableioav", "disablescriptscanning",
+)
+
+
+def _defender_signal(line: str) -> bool:
+    low = line.lower()
+    return any(term in low for term in DEFENDER_TERMS)
+
+
+def _defender_filtered(pairs, notes: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    """Lines that say something, each with the lines around it that qualify it."""
+    recent: deque[tuple[int, str]] = deque(maxlen=DEFENDER_CONTEXT)
+    after = 0
+    last = -1
+    kept = 0
+    for index, line in pairs:
+        if _defender_signal(line):
+            for held_index, held_line in recent:
+                if held_index > last:
+                    kept += 1
+                    last = held_index
+                    yield {"Message": held_line, "LineNumber": held_index + 1}
+            recent.clear()
+            after = DEFENDER_CONTEXT
+        elif after:
+            after -= 1
+        else:
+            recent.append((index, line))
+            continue
+        if index > last:
+            kept += 1
+            last = index
+            yield {"Message": line, "LineNumber": index + 1}
+    notes["defenderKept"] = kept
+
+
+def _defender_records(fh, name: str, notes: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    def pairs():
+        for index, raw_line in enumerate(fh):
+            if index >= MAX_TEXT_LINES:
+                notes["truncatedAtLine"] = MAX_TEXT_LINES
+                return
+            line = raw_line.strip()
+            if line:
+                yield index, line
+
+    stream = pairs()
+    head = list(islice(stream, DEFENDER_WHOLE_FILE_LINES + 1))
+    if len(head) <= DEFENDER_WHOLE_FILE_LINES or DEFENDER_KEEP_WHOLE.search(name):
+        for index, line in chain(head, stream):
+            yield {"Message": line, "LineNumber": index + 1}
+        return
+
+    counted = {"scanned": 0}
+
+    def counting():
+        for pair in chain(head, stream):
+            counted["scanned"] += 1
+            yield pair
+
+    yield from _defender_filtered(counting(), notes)
+    notes["defenderScanned"] = counted["scanned"]
+
+
+def _mark(out: dict[str, Any], header: list[str], key: str, value: str) -> None:
+    """Record a parser marker without overwriting a column the export genuinely has."""
+    while key in header:
+        key += "_"
+    out[key] = value
+
+
+def _row_to_dict(row: list[str], header: list[str], notes: dict[str, Any]) -> dict[str, Any]:
+    width = len(header)
+    original = row
+    if len(row) < width:
+        repaired = _ungroup(row)
+        # Trust the repair only when ONE cell was grouped and splitting that cell alone closes the
+        # whole gap. Accepting any combination that happens to reach the header width lets a row
+        # short for one reason and groupable for another be filed confidently under wrong columns.
+        if len(repaired) == width and sum(1 for c in row if _GROUPED_CELL.match(c.strip())) == 1:
+            row = repaired
+            notes["repairedRows"] = notes.get("repairedRows", 0) + 1
+    if len(row) == width:
+        out = dict(zip(header, row))
+        if row is not original:
+            # Stamped on the row, not only counted on the member, so a row seen anywhere else
+            # still says it was reassembled rather than read.
+            _mark(out, header, REPAIRED_KEY, f"{len(original)} cells split to {width}")
+        return out
+    out = dict(zip(header, row))
+    notes["malformedRows"] = notes.get("malformedRows", 0) + 1
+    if len(row) < width:
+        for column in header[len(row) :]:
+            out[column] = ""
+        _mark(out, header, PARTIAL_KEY, f"{len(row)} of {width} values")
+    else:
+        # Surplus values keep their content instead of being dropped: an unquoted delimiter inside
+        # a command line is exactly what an analyst needs to see. Bounded, because a row of nothing
+        # but delimiters used to abort the member and now becomes one enormous value instead.
+        surplus = row[width:]
+        spill = " | ".join(surplus[:MAX_SPILL_VALUES])[:MAX_SPILL_CHARS]
+        if len(surplus) > MAX_SPILL_VALUES:
+            spill += f" ... and {len(surplus) - MAX_SPILL_VALUES} more"
+        _mark(out, header, SPILL_KEY, spill)
+    return out
+
+
+def records(path: str, name: str, notes: dict[str, Any] | None = None) -> Iterator[dict[str, Any]]:
+    if notes is None:
+        notes = {}
     if name.lower().endswith(".xml"):
         yield from _xml_records(path, name)
         return
     with open(path, "rb") as raw:
-        head = raw.read(4)
-        raw.seek(0)
-        encoding = "utf-16" if head.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8-sig"
-        with io.TextIOWrapper(io.BufferedReader(_ByteBudget(raw, MAX_PARSE_BYTES)), encoding=encoding, errors="strict", newline="") as fh:
-            if name.lower().endswith((".txt", ".log")):
+        encoding = _text_encoding(raw)
+        if encoding != "utf-8-sig":
+            notes["encoding"] = encoding
+        # Lenient because the encoding above is chosen, not guessed at random: what "replace"
+        # covers here is a corrupt byte in one line, and losing the file over that helps nobody.
+        with io.TextIOWrapper(io.BufferedReader(_ByteBudget(raw, MAX_PARSE_BYTES)), encoding=encoding, errors="replace", newline="") as fh:
+            if category(name) == "defender" and name.lower().endswith((".txt", ".log")):
+                yield from _defender_records(fh, name, notes)
+            elif name.lower().endswith((".txt", ".log")):
                 record = {}
                 for index, line in enumerate(fh):
-                    if index >= 100000:
-                        raise ValueError("text export exceeds 100,000 lines")
+                    if index >= MAX_TEXT_LINES:
+                        # Stop, rather than throw away the lines already read. A ten-megabyte
+                        # engine log is exactly where the first hundred thousand lines are worth
+                        # keeping and the file being absent is worth nothing.
+                        notes["truncatedAtLine"] = MAX_TEXT_LINES
+                        break
                     line = line.strip()
                     if category(name) == "connection" and (net := re.match(r"^(TCP|UDP)\s+(\S+)\s+(\S+)(?:\s+(\S+))?\s+(\d+)$", line, re.I)):
                         proto, local_ep, remote_ep, state, pid = net.groups()
@@ -230,13 +437,13 @@ def records(path: str, name: str) -> Iterator[dict[str, Any]]:
                     dialect = csv.Sniffer().sniff(sample, delimiters=",;\t")
                 except csv.Error:
                     dialect = csv.excel_tab if name.lower().endswith(".tsv") else csv.excel
-                reader = csv.DictReader(fh, dialect=dialect)
-                if not reader.fieldnames or len(set(reader.fieldnames)) != len(reader.fieldnames):
+                reader = csv.reader(fh, dialect=dialect)
+                header = next(reader, None)
+                if not header or len(set(header)) != len(header):
                     raise ValueError("missing or duplicate column names")
                 for row in reader:
-                    if None in row:
-                        raise ValueError("row has more values than its header")
-                    yield dict(row)
+                    if row:
+                        yield _row_to_dict(row, header, notes)
 
 
 def normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, Any]) -> dict[str, Any]:
@@ -341,7 +548,13 @@ def normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, Any
 def native_records(kind: str, path: str, name: str, context: dict, tmp_dir: str):
     from services.parsers import native
 
-    for i, raw in enumerate(native.records(kind, path, tmp_dir)):
+    yield from native_rows(kind, native.records(kind, path, tmp_dir), name, context)
+
+
+def native_rows(kind: str, raw_records, name: str, context: dict):
+    """Normalize records a decoder produced. How they were decoded is the caller's business, so
+    one artifact at a time and a whole group in one worker share this."""
+    for i, raw in enumerate(raw_records):
         row = normalize(raw, f"{'Prefetch Files' if kind == 'prefetch' else 'Registry'}/{name}", i, context)
         row["parserVersion"] = f"dissect-{kind}/1"
         if kind == "prefetch":

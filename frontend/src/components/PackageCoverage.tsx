@@ -7,7 +7,12 @@ export function PackageCoverage({ stats }: { stats: Record<string, unknown> }) {
   const [issuesOnly, setIssuesOnly] = useState(false)
   const [limit, setLimit] = useState(100)
   const members = (Array.isArray(stats.files) ? stats.files : []).filter((f): f is Record<string, unknown> => !!f && typeof f === 'object' && 'status' in f)
-  const filtered = members.filter((m) => (!issuesOnly || !['parsed', 'metadata'].includes(String(m.status))) && String(m.name).toLowerCase().includes(query.toLowerCase()))
+  // A member that was repaired, filtered or truncated still parsed, so it carries a note rather
+  // than an error status. Without it here, the one view an analyst uses to review a large package
+  // is the one view that hides what the parser had to compromise on.
+  const filtered = members.filter(
+    (m) => (!issuesOnly || !!m.note || !['parsed', 'metadata'].includes(String(m.status))) && String(m.name).toLowerCase().includes(query.toLowerCase()),
+  )
   const checks = (Array.isArray(stats.reconciliation) ? stats.reconciliation : []) as { name: string; status: string; expected?: number; actual?: number; reason?: string }[]
   return (
     <section className="col" style={{ gap: 10 }}>
@@ -64,13 +69,16 @@ export function PackageCoverage({ stats }: { stats: Record<string, unknown> }) {
                   <div className="small mono muted">{String(m.sha256 ?? 'hash unavailable')}</div>
                 </td>
                 <td>
-                  <Badge sev={m.status === 'parsed' || m.status === 'metadata' ? 'ok' : 'medium'}>{String(m.status)}</Badge>
+                  <Badge sev={m.note ? 'medium' : m.status === 'parsed' || m.status === 'metadata' ? 'ok' : 'medium'}>
+                    {String(m.status)}
+                    {m.note ? ' (partial)' : ''}
+                  </Badge>
                 </td>
                 <td>{Number(m.count ?? 0)}</td>
                 <td>{fmtBytes(Number(m.size ?? 0))}</td>
                 <td>
                   {String(m.format ?? '')}
-                  <div className="small">{String(m.reason ?? '')}</div>
+                  <div className="small">{[m.reason, m.note].filter(Boolean).map(String).join(' · ')}</div>
                 </td>
               </tr>
             ))}
