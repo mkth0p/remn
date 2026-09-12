@@ -1,3 +1,4 @@
+import { persistEngineFindings, type EngineFinding } from './engineFindings'
 import { autoRunAfterIngest } from './findingsState'
 import { apiPost, API_HEADERS } from '../api/client'
 import { getDb, type Case, type Evidence } from '../db/schema'
@@ -133,8 +134,13 @@ export async function ingestToServer(file: File, kase: Case, kind: 'evtx' | 'mai
       const p = j.progress as { rows?: number; format?: string }
       useStore.getState().upsertJob({ id: jobId, phase: 'parsing', rows: Number(p.rows ?? 0) })
     })
-    const r = (job.result ?? {}) as { count?: number; stats?: Record<string, unknown>; format?: string; integrity?: string; seconds?: number }
+    const r = (job.result ?? {}) as { count?: number; stats?: Record<string, unknown>; format?: string; integrity?: string; seconds?: number; findings?: EngineFinding[] }
     await db.evidence.update(evidenceId, { status: 'done', count: r.count ?? 0, stats: r.stats, format: r.format, progress: 1 })
+    if (r.findings?.length) {
+      const engine = String(r.findings[0].engine ?? 'hayabusa')
+      const n = await persistEngineFindings(kase.id!, evidenceId, engine, r.findings)
+      log('ok', `[${name}] ${n} finding(s) from ${engine} stored`)
+    }
     useStore.getState().upsertJob({ id: jobId, phase: 'done', rows: r.count ?? 0, progress: 1 })
     log('ok', `[${file.name}] ${r.count} rows stored on the server in ${r.seconds ?? '?'} s (format ${r.format})`)
     toast('ok', `${file.name}: ${(r.count ?? 0).toLocaleString('en-US')} rows ingested (server store)`)
@@ -225,6 +231,13 @@ export async function ingestToBrowser(file: File, kase: Case, kind: 'evtx' | 'ma
         case 'log':
           log(m.level as 'info', `[${file.name}] ${m.text}`)
           break
+        case 'findings': {
+          const findings = m.findings as EngineFinding[]
+          persistEngineFindings(kase.id!, evidenceId, String(m.engine), findings)
+            .then((n) => log('ok', `[${file.name}] ${n} finding(s) from ${m.engine} stored`))
+            .catch((e: Error) => log('err', `[${file.name}] engine findings not stored: ${e.message}`))
+          break
+        }
         case 'done': {
           const integ = m.integrity as string
           s.upsertJob({ id: jobId, phase: m.error ? 'error' : 'done', rows: Number(m.count), progress: 1, error: m.error ? String(m.error) : undefined })

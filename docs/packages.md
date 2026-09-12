@@ -30,6 +30,32 @@ the file size. An export past it contributes every record read before the ceilin
 as an error member with the reason, rather than contributing nothing but a hash. The member and
 package byte budgets are unchanged.
 
+## Triage collections
+
+A collection laid out like a drive is read as one target by dissect rather than member by
+member: KAPE's target output, Velociraptor's offline collector archive (`uploads/` with the
+drive letters URL-encoded, `results/` beside it), acquire, or a plain copy of a volume with
+its `Windows\System32` in place. The layout is recognised from the member names; the archive
+is handed to dissect whole, and a fixed set of its functions runs in the same bounded worker as
+the native decoders: services, run keys, scheduled tasks, Defender's MPLog, quarantine,
+exclusions and MpCmdRun log, Amcache, ShimCache, UserAssist, BAM, ShellBags, PowerShell
+history, browser history and downloads, the activities cache and SRUM. Each function has a
+record cap, gets its own row in the coverage table as `triage!/<function>`, and reports
+whether it ran, was absent from this collection, or was cut short. Registry hives inside such
+a collection are not walked raw, because the pass reads them for what they mean. Event logs
+and prefetch files still go through the member loop, with provenance per file. The `$MFT`
+and USN journal are not read by default; they run to millions of rows.
+
+Exports written by other tools land in the same fields. The Zimmerman parsers are recognised
+by their headers wherever the file sits (EvtxECmd rows become events, PECmd prefetch,
+AmcacheParser and AppCompatCacheParser execution evidence, RECmd registry values, LECmd,
+JLECmd, MFTECmd and SBECmd files and folders, SrumECmd network usage), so KAPE module output
+needs no renaming. Velociraptor result files are mapped by the artifact that produced them,
+including its event log exports, which become events. DFIR-ORC archives are 7z, expanded once
+into the staging area within the package byte budget, and their `GetThis`, `NTFSInfo`,
+`USNInfo` and `RegInfo` CSVs are read by name. Timestamps these tools write without a zone
+are taken as UTC, which is what their documentation fixes.
+
 ## Collection adapters
 
 CSV (comma, semicolon or tab), TSV, JSON objects/arrays, JSON `records` arrays and

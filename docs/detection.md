@@ -1,5 +1,26 @@
 # Detection
 
+## External engines
+
+Hayabusa runs Sigma over Windows event logs with thousands of curated rules and tuned levels,
+and it does that better than a converted rule set can. When the binary is present (`hayabusa`
+on PATH or `HAYABUSA_PATH`, rules beside it or at `HAYABUSA_RULES`; the container image ships
+it pinned by version and by the SHA-256 of the release archive) every ingested event log is
+also handed to it, and its detections come back as findings with rule ids under
+`engine:hayabusa:`, the level mapped to a severity, the MITRE techniques it tags, and refs to
+the rows REMN parsed from the same records, linked by computer, channel and record id. The
+rules run in REMN's own engines are untouched; they cover mail, cloud and collected artifacts,
+which Hayabusa does not.
+
+It runs the way the native decoders do: a separate process, watched for memory, time and
+output, killed rather than trusted past a limit, with whatever it wrote before that kept and
+the stop stated in the ingest log. `HAYABUSA_ENABLED=0` keeps it out of ingest;
+`HAYABUSA_MIN_LEVEL` and `HAYABUSA_MAX_S` set the floor and the time bound; `HAYABUSA_ARGS`
+replaces the option set for a release whose flags have moved. Engine findings are stored per
+piece of evidence and replaced when that evidence is ingested again; analyst decisions on a
+finding whose key survives are kept, and orphan pruning leaves them alone.
+
+
 Findings come from three places: the rules bundled with REMN (Windows, mail, Microsoft
 365), the community rule packs converted from SigmaHQ and Sublime Security, and the mail
 risk score computed at ingest. All rules are written in one YAML language and run on two

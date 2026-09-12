@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import tarfile
 import tempfile
 import time
@@ -14,9 +15,10 @@ from collections.abc import Iterator
 from pathlib import PurePosixPath
 from typing import Any
 
+from services.analysis import hayabusa
 from services.ingest.pipeline import EvtxSource, MailSource, Member, detect_archive, looks_like_mail
 from services.ingest.reconcile import reconcile
-from services.parsers import collection, m365, native
+from services.parsers import collection, m365, native, triage
 from services.parsers.mail.common import ParseContext
 
 MAX_FILES = 20_000
@@ -100,6 +102,20 @@ class PackageSource:
         # client disconnected part-way through one.
         self.deferred: dict[str, tuple[dict[str, Any], str, str, int]] = {}
         self.budget.setdefault("deferredBytes", 0)
+        # A collection laid out like a drive (KAPE, Velociraptor, acquire, a copied volume) is read
+        # by dissect as one target after the member loop; see _drain_triage.
+        self.triage = False
+        self.triage_summary: dict[str, Any] = {}
+        # a 7z archive (DFIR-ORC) has no streaming member access, so it is extracted once
+        self._extracted: str | None = None
+        # External detection engines to run over the event logs this package carries. The event
+        # log members are held back for that, within the same hold allowance as prefetch, and the
+        # findings are collected rather than streamed, so consumers that only want rows are not
+        # handed something that is not one.
+        self.engines: list[str] = []
+        self.evtx_held: dict[str, tuple[dict[str, Any], str]] = {}
+        self.findings: list[dict[str, Any]] = []
+        self.engine_summaries: list[dict[str, Any]] = []
 
     def stats(self) -> dict[str, Any]:
         return {
@@ -217,6 +233,120 @@ class PackageSource:
                 finally:
                     self.budget["decodeSeconds"] += time.monotonic() - started
 
+    def _members_7z(self, src) -> Iterator[tuple[Member, str | None]]:
+        """DFIR-ORC ships 7z. py7zr offers no streaming member access, so the archive is expanded
+        once into the staging area, within the package byte budget, and read from there."""
+        try:
+            import py7zr
+        except ImportError:
+            yield Member(self.name, 0, lambda: io.BytesIO(b"")), "7z archives need py7zr (backend/requirements-optional.txt)"
+            return
+        if self._extracted is None:
+            try:
+                with py7zr.SevenZipFile(src, mode="r") as archive:
+                    # summed from the member list: archiveinfo() insists on a file name, and an
+                    # in-memory package has none
+                    expanded = sum(int(getattr(member, "uncompressed", 0) or 0) for member in archive.list())
+                    if self.budget["bytes"] + expanded > MAX_TOTAL:
+                        yield Member(self.name, expanded, lambda: io.BytesIO(b"")), "package exceeds 16 GiB expanded-byte limit"
+                        return
+                    self._extracted = tempfile.mkdtemp(dir=self.tmp_dir, suffix=".7z")
+                    archive.extractall(path=self._extracted)
+                    self.budget["bytes"] += expanded
+            except Exception as exc:  # noqa: BLE001
+                yield Member(self.name, 0, lambda: io.BytesIO(b"")), f"7z: {type(exc).__name__}: {exc}"[:300]
+                return
+        root = os.path.realpath(self._extracted)
+        found = sorted(os.path.join(dirpath, filename) for dirpath, _dirs, files in os.walk(root) for filename in files)
+        for i, path in enumerate(found):
+            if i >= MAX_FILES:
+                self.inventory_complete = False
+                break
+            real = os.path.realpath(path)
+            if not real.startswith(root + os.sep):
+                continue  # a member that escaped the extraction directory is not evidence
+            name = os.path.relpath(real, root).replace(os.sep, "/")
+            yield Member(name, os.path.getsize(real), lambda p=real: open(p, "rb")), None
+
+    def _release_evtx(self) -> None:
+        for tmp_path, (entry, _name) in list(self.evtx_held.items()):
+            self.budget["deferredBytes"] = max(0, self.budget["deferredBytes"] - int(entry.get("size") or 0))
+            _unlink(tmp_path)
+        self.evtx_held = {}
+
+    def _drain_engines(self) -> None:
+        """Run the external engines over the event logs held back for them, once, together."""
+        if not self.engines or not self.evtx_held:
+            self._release_evtx()
+            return
+        remaining = MAX_NATIVE_SECONDS - self.budget["decodeSeconds"]
+        if remaining <= 0:
+            self.engine_summaries.append({"engine": hayabusa.ENGINE, "status": "unsupported", "findings": 0, "seconds": 0.0, "reason": BUDGET_SPENT})
+            self._release_evtx()
+            return
+        staged = None
+        started = time.monotonic()
+        try:
+            staged = hayabusa.stage([(name, path) for path, (_entry, name) in self.evtx_held.items()], self.tmp_dir)
+            findings, summary = hayabusa.run(staged, self.tmp_dir, deadline_s=remaining)
+            for finding in findings:
+                finding["packageId"] = self.package_id
+            self.findings.extend(findings)
+            summary["members"] = len(self.evtx_held)
+            self.engine_summaries.append(summary)
+        finally:
+            self.budget["decodeSeconds"] += time.monotonic() - started
+            if staged:
+                shutil.rmtree(staged, ignore_errors=True)
+            self._release_evtx()
+
+    def _drain_triage(self) -> Iterator[dict[str, Any]]:
+        """Read the collection as one dissect target and turn its records into rows.
+
+        Every function gets an entry in the coverage table, so the analyst sees which artifacts
+        this collection carried, which it did not, and which were cut short.
+        """
+        if not self.triage:
+            return
+        remaining = MAX_NATIVE_SECONDS - self.budget["decodeSeconds"]
+        if remaining <= 0 or self.budget["decodes"] >= MAX_NATIVE_DECODES:
+            self.files.append({"name": "triage!/dissect", "size": 0, "memberIndex": -1, "status": "unsupported", "count": 0, "reason": BUDGET_SPENT})
+            return
+        staged = None
+        target = self.path
+        if target is None:
+            # dissect picks its loader partly by suffix, so the staged copy keeps the archive's own
+            suffix = PurePosixPath(self.name.replace("\\", "/")).suffix.lower() or ".zip"
+            with tempfile.NamedTemporaryFile(dir=self.tmp_dir, suffix=suffix, delete=False) as out:
+                out.write(self.data or b"")
+                staged = target = out.name
+        run = triage.TriagePass(target, self.tmp_dir, self.context, deadline_s=remaining)
+        entries: dict[str, dict[str, Any]] = {}
+        started = time.monotonic()
+        try:
+            for function, row in run:
+                entry = entries.get(function)
+                if entry is None:
+                    entry = {"name": f"triage!/{function}", "size": 0, "memberIndex": -1, "status": "pending", "count": 0, "format": triage.VERSION, "sha256": self.package_id or None, "artifactType": row.get("artifactType")}
+                    entries[function] = entry
+                    self.files.append(entry)
+                yield from self._emit(entry, entry["name"], -1, [("event", row)])
+        finally:
+            self.budget["decodeSeconds"] += time.monotonic() - started
+            self.budget["decodes"] += 1
+            _unlink(staged)
+        for function, info in run.summary.items():
+            entry = entries.get(function)
+            if entry is None:
+                entry = {"name": f"triage!/{function}", "size": 0, "memberIndex": -1, "status": "pending", "count": 0, "format": triage.VERSION, "sha256": self.package_id or None}
+                self.files.append(entry)
+            entry["status"] = info.get("status", "parsed")
+            if info.get("reason"):
+                entry["reason"] = info["reason"]
+            if info.get("note"):
+                entry["note"] = info["note"]
+        self.triage_summary = {"target": run.target, "functions": run.summary}
+
     def _members(self) -> Iterator[tuple[Member, str | None]]:
         if self.path:
             with open(self.path, "rb") as fh:
@@ -237,6 +367,8 @@ class PackageSource:
                     if (info.external_attr >> 16) & 0o170000 == 0o120000:
                         reason = "symbolic link"
                     yield Member(info.filename, info.file_size, lambda info=info: zf.open(info)), reason
+        elif fmt == "7z":
+            yield from self._members_7z(src)
         elif fmt == "tar":
             with tarfile.open(name=self.path, fileobj=None if self.path else src, mode="r:*") as tf:
                 for i, info in enumerate(tf):
@@ -266,10 +398,17 @@ class PackageSource:
             # them until their retention window expired.
             for held_path in list(self.deferred):
                 self._release(held_path)
+            self._release_evtx()
+            if self._extracted:
+                shutil.rmtree(self._extracted, ignore_errors=True)
+                self._extracted = None
 
     def _iterate(self) -> Iterator[dict[str, Any]]:
         # A small explicit manifest supplies collection context regardless of archive order.
+        names: list[str] = []
         for member, reason in self._members():
+            if len(names) < MAX_FILES:
+                names.append(member.name)
             if not reason and member.name == "collection-manifest.json":
                 self.manifest_count += 1
                 if member.size > 65536:
@@ -288,6 +427,7 @@ class PackageSource:
             self.context = {}
             self.expectations = []
         self.context = {**self.inherited_context, **self.context}
+        self.triage = triage.is_triage_layout(names)
         for index, (member, reason) in enumerate(self._members()):
             if self.budget["files"] >= MAX_FILES:
                 self.inventory_complete = False
@@ -364,6 +504,7 @@ class PackageSource:
                             depth=self.depth + 1,
                             inherited_context=inherited,
                         )
+                        nested.engines = list(self.engines)
                         nested_error = None
                         try:
                             for row in nested:
@@ -380,6 +521,8 @@ class PackageSource:
                             f["name"] = member.name + "!/" + f["name"]
                             f.setdefault("containerSha256", entry["sha256"])
                         self.files.extend(nested.files)
+                        self.findings.extend(nested.findings)
+                        self.engine_summaries.extend(nested.engine_summaries)
                         for k, v in nested.counts.items():
                             self.counts[k] += v
                         for k, v in nested.ranges.items():
@@ -405,6 +548,11 @@ class PackageSource:
                         if not isinstance(json.load(fh), dict):
                             raise ValueError("manifest must be an object")
                     entry.update(status="metadata", format="collection-manifest")
+                    continue
+                if head.startswith(b"regf") and self.triage:
+                    # Walked raw, a hive is a hundred thousand keys of noise. The triage pass reads
+                    # the same file for what it means: services, run keys, tasks, exclusions.
+                    entry.update(status="metadata", format="regf", reason="registry hive read by the triage pass")
                     continue
                 if head.startswith(b"regf") or low.endswith(".pf"):
                     if self.budget["decodes"] >= MAX_NATIVE_DECODES or self.budget["decodeSeconds"] >= MAX_NATIVE_SECONDS:
@@ -451,6 +599,11 @@ class PackageSource:
                     entry.update(status="unsupported", reason="no parser for this member; inventoried and hashed")
                     continue
                 yield from self._emit(entry, member.name, index, rows)
+                if self.engines and isinstance(source, EvtxSource) and tmp_path and self.budget["deferredBytes"] + size <= MAX_DEFERRED_BYTES:
+                    # kept for the engines that run once the loop is done; released by _drain_engines
+                    self.evtx_held[tmp_path] = (entry, member.name)
+                    self.budget["deferredBytes"] += size
+                    tmp_path = None
                 if source is not None and source.stats.errors:
                     raise ValueError(f"parser reported {source.stats.errors} error(s); any emitted rows are partial")
                 entry["status"] = "parsed"
@@ -500,3 +653,5 @@ class PackageSource:
                 _unlink(tmp_path)
 
         yield from self._drain_native()
+        yield from self._drain_triage()
+        self._drain_engines()

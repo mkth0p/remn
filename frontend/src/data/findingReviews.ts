@@ -90,10 +90,11 @@ export async function pruneOrphanFindings(caseId: number, knownRuleIds: Iterable
   const known = new Set(knownRuleIds)
   known.add('chain')
   return db.transaction('rw', [db.findings, db.kv], async () => {
+    // an engine's findings belong to no rule in the catalogue and are replaced per evidence instead
     const orphans = await db.findings
       .where('caseId')
       .equals(caseId)
-      .filter((f) => !known.has(f.ruleId))
+      .filter((f) => !known.has(f.ruleId) && !f.ruleId.startsWith('engine:'))
       .toArray()
     if (!orphans.length) return 0
     await rememberReviews(caseId, orphans)

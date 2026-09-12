@@ -49,6 +49,8 @@ def detect_archive(name: str, head: bytes) -> str | None:
     n = (name or "").lower()
     if head.startswith(b"PK\x03\x04"):
         return "zip"
+    if head.startswith(b"7z\xbc\xaf\x27\x1c"):
+        return "7z"
     if head.startswith(b"\x1f\x8b") or n.endswith((".tar.gz", ".tgz")):
         return "tar"
     if head.startswith(b"BZh") or n.endswith((".tar.bz2", ".tbz2")):

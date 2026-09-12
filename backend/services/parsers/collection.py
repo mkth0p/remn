@@ -9,7 +9,7 @@ import os
 import re
 from collections import deque
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import UTC, datetime
 from itertools import chain, islice
 from typing import Any
 
@@ -36,13 +36,102 @@ def key(value: str) -> str:
     return re.sub(r"[^a-z0-9]", "", value.lower())
 
 
+# --- exports written by other tools ---------------------------------------------------------
+# Velociraptor names a result file after the artifact that produced it; KAPE's module output
+# lands in directories named by category; DFIR-ORC names each CSV after the tool that wrote it.
+VELOCIRAPTOR: tuple[tuple[str, str], ...] = (
+    ("windowseventlogs", "event-export"),
+    ("windowssystemservices", "service"),
+    ("windowssysprograms", "program"),
+    ("windowsforensicsprefetch", "prefetch"),
+    ("windowsnetworknetstat", "connection"),
+    ("windowsnetworkarpcache", "connection"),
+    ("windowssystemdns", "connection"),
+    ("windowssystemtaskscheduler", "task"),
+    ("windowssysinternalsautoruns", "autorun"),
+    ("windowssystempslist", "process"),
+    ("windowssysusers", "account"),
+    ("windowsforensicsamcache", "amcache"),
+    ("windowsregistryuserassist", "userassist"),
+    ("windowsregistryappcompatcache", "shimcache"),
+    ("windowsforensicsbam", "bam"),
+    ("windowsforensicsshellbags", "shellbag"),
+    ("windowsforensicssrum", "sru"),
+    ("windowsforensicslnk", "file"),
+    ("windowsforensicsrecentdocs", "file"),
+    ("windowsforensicsusn", "file"),
+    ("windowsntfsmft", "file"),
+    ("windowsforensicstimeline", "file"),
+    ("windowsapplicationschromehistory", "browser-history"),
+    ("windowsapplicationsedgehistory", "browser-history"),
+    ("windowsapplicationsfirefoxhistory", "browser-history"),
+    ("windowssystempowershell", "powershell-history"),
+)
+KAPE_MODULES: dict[str, str] = {
+    "eventlogs": "event-export",
+    "programexecution": "amcache",
+    "filefolderaccess": "file",
+    "filesystem": "file",
+    "srum": "sru",
+    "lnk": "file",
+    "jumplists": "file",
+    "recyclebin": "file",
+    "amcache": "amcache",
+    "windowstimeline": "activity",
+    "antivirus": "defender",
+}
+ORC_TOOLS: tuple[tuple[str, str], ...] = (
+    ("ntfsinfo", "file"),
+    ("usninfo", "file"),
+    ("getthis", "file"),
+    ("fatinfo", "file"),
+    ("getsamples", "file"),
+    ("reginfo", "registry"),
+    ("jobstatistics", "system"),
+    ("processstatistics", "system"),
+)
+# Eric Zimmerman's parsers write CSV with stable, distinctive headers, and KAPE's module output
+# is made of them. The header decides the artifact whatever directory the file sits in.
+EZ_SIGNATURES: tuple[tuple[frozenset[str], str], ...] = (
+    (frozenset({"eventrecordid", "mapdescription", "timecreated"}), "event-export"),
+    (frozenset({"executablename", "runcount", "lastrun"}), "prefetch"),
+    (frozenset({"programid", "fullpath", "sha1"}), "amcache"),
+    (frozenset({"programid", "installdate", "publisher"}), "program"),
+    (frozenset({"cacheentryposition", "lastmodifiedtimeutc"}), "shimcache"),
+    (frozenset({"entrynumber", "parentpath", "created0x10"}), "file"),
+    (frozenset({"hivepath", "keypath", "valuename", "valuedata"}), "registry"),
+    (frozenset({"absolutepath", "shelltype", "lastwritetime"}), "shellbag"),
+    (frozenset({"targetidabsolutepath"}), "file"),
+    (frozenset({"appid", "appiddescription"}), "file"),
+    (frozenset({"exeinfo", "bytessent", "bytesreceived"}), "sru"),
+)
+
+
+def _ez_kind(fields: dict[str, Any]) -> str | None:
+    present = set(fields)
+    for needed, kind in EZ_SIGNATURES:
+        if needed <= present:
+            return kind
+    return None
+
+
 def category(name: str) -> str | None:
-    for part in name.replace("\\", "/").split("/"):
+    parts = name.replace("\\", "/").split("/")
+    for part in parts:
         k = key(part.rsplit(".", 1)[0])
         if k in CATEGORIES:
             return CATEGORIES[k]
+        if k in KAPE_MODULES:
+            return KAPE_MODULES[k]
     if "forensicscollectionsummary" in key(name):
         return "collection-summary"
+    stem = key(parts[-1].rsplit(".", 1)[0]) if parts else ""
+    for prefix, kind in VELOCIRAPTOR:
+        if stem.startswith(prefix):
+            return kind
+    for prefix, kind in ORC_TOOLS:
+        if stem.startswith(prefix):
+            return kind
     return None
 
 
@@ -59,6 +148,102 @@ def timestamp(value: Any) -> int | None:
         return int(dt.timestamp() * 1000) if dt.tzinfo is not None else None
     except (ValueError, OverflowError):
         return None
+
+
+_FRACTION = re.compile(r"(\.\d{6})\d+")
+
+
+def timestamp_utc(value: Any) -> int | None:
+    """Timestamps from tools whose documentation fixes the zone as UTC without writing it: the
+    Zimmerman parsers, DFIR-ORC and Velociraptor. Anything a zone is written on goes through
+    timestamp(); this only fills in for the formats those tools are known to write."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    parsed = timestamp(text)
+    if parsed is not None:
+        return parsed
+    text = _FRACTION.sub(r"\1", text)  # seven fractional digits is more than strptime takes
+    for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S", "%m/%d/%Y %H:%M:%S.%f", "%m/%d/%Y %H:%M:%S"):
+        try:
+            return int(datetime.strptime(text, fmt).replace(tzinfo=UTC).timestamp() * 1000)
+        except ValueError:
+            continue
+    return None
+
+
+def _flatten(raw: dict[str, Any]) -> dict[str, Any]:
+    """One level of nesting folded into dotted keys, so Laddr.IP is a column like any other."""
+    out: dict[str, Any] = {}
+    for k, v in raw.items():
+        if isinstance(v, dict) and v and all(isinstance(sub, str) for sub in v):
+            for sub, value in v.items():
+                if not isinstance(value, (dict, list)):
+                    out[f"{k}.{sub}"] = value
+        out[k] = v
+    return out
+
+
+def _event_export(raw: dict[str, Any], fields: dict[str, Any], kind: str | None, name: str, index: int, context: dict[str, Any]) -> dict[str, Any] | None:
+    """Event log records another tool exported become event rows, not observations.
+
+    EvtxECmd writes one flat CSV row per record; Velociraptor writes the record's System and
+    EventData objects as JSON. Both carry the same identity: channel, record id, event id, time.
+    """
+    system = raw.get("System") if isinstance(raw.get("System"), dict) else None
+    if system is None and kind != "event-export":
+        return None
+
+    def get(*names: str) -> str | None:
+        for n in names:
+            v = fields.get(key(n))
+            if v is not None and str(v).strip() and not isinstance(v, (dict, list)):
+                return str(v).strip()
+        return None
+
+    if system is not None:
+        event_id = system.get("EventID")
+        if isinstance(event_id, dict):
+            event_id = event_id.get("Value")
+        provider = system.get("Provider")
+        if isinstance(provider, dict):
+            provider = provider.get("Name")
+        created = system.get("TimeCreated")
+        when = created.get("SystemTime") if isinstance(created, dict) else created
+        channel, computer, record_id = system.get("Channel"), system.get("Computer"), system.get("EventRecordID")
+        message = raw.get("Message")
+        user = None
+        payload = raw.get("EventData") if isinstance(raw.get("EventData"), dict) else {}
+        if isinstance(payload, dict):
+            user = payload.get("TargetUserName") or payload.get("SubjectUserName")
+    else:
+        event_id, provider, when = get("EventId", "EventID"), get("Provider"), get("TimeCreated")
+        channel, computer, record_id = get("Channel"), get("Computer"), get("EventRecordId", "RecordNumber")
+        message = get("MapDescription", "Message")
+        user = get("UserName", "TargetUserName")
+        payload = " ".join(v for v in (get(f"PayloadData{i}") for i in range(1, 7)) if v)
+        if payload:
+            message = f"{message}: {payload}" if message else payload
+    row: dict[str, Any] = {
+        "recordKind": "event",
+        "artifactType": "event-export",
+        "eventId": int(event_id) if str(event_id or "").strip().isdigit() else None,
+        "ts": timestamp(when) or timestamp_utc(when) if isinstance(when, str) else None,
+        "observedAt": timestamp(context.get("collectedAt")) if context.get("collectedAt") else None,
+        "sourceIndex": index,
+        "parserVersion": VERSION,
+        "provider": str(provider) if provider else None,
+        "channel": str(channel) if channel else None,
+        "computer": (str(computer) if computer else None) or context.get("host"),
+        "recordId": int(record_id) if str(record_id or "").strip().isdigit() else None,
+        "category": "collection:event-export",
+        "targetUser": str(user) if user else None,
+        "message": str(message)[:4000] if message else None,
+        "data": raw,
+    }
+    label = f"{row['provider'] or row['channel'] or 'event'} {row['eventId'] or ''}".strip()
+    row["summary"] = f"{label}: {row['message'] or ''}".strip(": ")[:2000]
+    return row
 
 
 def _xml_records(path: str, name: str) -> Iterator[dict[str, Any]]:
@@ -528,7 +713,11 @@ def normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, Any
         from services.parsers.deception import normalize as normalize_deception
 
         return normalize_deception(raw, index, context)
+    raw = _flatten(raw)
     fields = {key(k): v for k, v in raw.items()}
+    exported = _event_export(raw, fields, _ez_kind(fields) or category(name), name, index, context)
+    if exported is not None:
+        return exported
 
     def get(*names: str) -> str | None:
         for n in names:
@@ -537,7 +726,7 @@ def normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, Any
                 return str(v).strip()
         return None
 
-    kind = category(name) or "unknown"
+    kind = _ez_kind(fields) or category(name) or "unknown"
     observed_text = get("CollectedAt", "CollectionTime", "CollectionTimestamp", "ObservedAt") or context.get("collectedAt")
     row: dict[str, Any] = {
         "recordKind": "observation",
@@ -562,10 +751,10 @@ def normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, Any
         "parentProcessGuid": ("ParentProcessGuid",),
         "processId": ("ProcessId", "PID", "OwningProcess", "Id"),
         "parentProcessId": ("ParentProcessId", "PPID"),
-        "destinationIp": ("RemoteAddress", "RemoteIP", "DestinationIp"),
-        "destinationPort": ("RemotePort", "DestinationPort"),
-        "sourceIp": ("LocalAddress", "LocalIP", "SourceIp"),
-        "sourcePort": ("LocalPort", "SourcePort"),
+        "destinationIp": ("RemoteAddress", "RemoteIP", "DestinationIp", "Raddr.IP"),
+        "destinationPort": ("RemotePort", "DestinationPort", "Raddr.Port"),
+        "sourceIp": ("LocalAddress", "LocalIP", "SourceIp", "Laddr.IP"),
+        "sourcePort": ("LocalPort", "SourcePort", "Laddr.Port"),
         "protocol": ("Protocol",),
         "status": ("State", "Status"),
         "query": ("DomainName", "QueryName") if kind == "connection" else (),
@@ -608,7 +797,35 @@ def normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, Any
         row["path"] = get("FullName", "Path", "ImagePath", "FilePath")
     if kind == "autorun":
         row["image"] = row.get("image") or get("LaunchString") or _launch_image(get("Data"))
-        row["targetObject"] = get("Key", "KeyPath", "RegistryKey")
+        row["targetObject"] = get("Key", "KeyPath", "RegistryKey", "Entry Location")
+    if kind == "program":
+        row["path"] = row.get("path") or get("RootDirPath")
+    if kind in ("amcache", "shimcache", "userassist", "bam", "shellbag", "sru", "activity", "browser-history", "browser-download", "powershell-history", "registry", "file"):
+        candidate = get("FullPath", "Path", "AbsolutePath", "LocalPath", "TargetIDAbsolutePath", "FullName", "ExeInfo", "ImagePath", "FilePath")
+        if kind == "file" and not candidate and get("ParentPath") and get("FileName"):
+            candidate = get("ParentPath").rstrip("\\") + "\\" + get("FileName")
+        row["path"] = row.get("path") or candidate
+        if kind in ("amcache", "shimcache", "userassist", "bam", "sru"):
+            row["image"] = row.get("image") or candidate
+        if kind == "registry":
+            row["targetObject"] = get("KeyPath", "Key")
+            row["name"] = row.get("name") or get("ValueName")
+            row["image"] = row.get("image") or _launch_image(get("ValueData", "Data"))
+        if kind == "file":
+            row["commandLine"] = row.get("commandLine") or get("Arguments")
+            row["url"] = get("URL", "Url")
+        if kind in ("browser-history", "browser-download"):
+            row["url"] = get("URL", "Url", "VisitURL")
+        when = get(
+            "LastRun", "Timestamp", "TimeStamp", "LastModifiedTimeUTC", "FileKeyLastWriteTimestamp", "LastWriteTimestamp", "LastWriteTime",
+            "TargetModified", "SourceModified", "Created0x10", "LastModificationDate", "LinkDate", "LastVisitedTime", "VisitTime",
+        )
+        # A registry last-write time stays metadata, as it does for hives decoded natively; the
+        # other exports carry a moment something happened.
+        if kind != "registry":
+            row["ts"] = row.get("ts") or timestamp_utc(when)
+        if row["ts"] is not None:
+            row["recordKind"] = "event"
     hashes = []
     for algorithm, length in (("SHA256", 64), ("SHA1", 40), ("MD5", 32)):
         v = get(algorithm)
@@ -618,7 +835,11 @@ def normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, Any
     # Collection timestamps and file timestamps remain raw unless explicitly identified.
     # Prefetch exports can provide an execution timestamp; it is not a collection time.
     if kind == "prefetch":
-        row["ts"] = timestamp(get("LastRunTime", "LastExecutionTime"))
+        row["processName"] = row.get("processName") or get("ExecutableName", "Executable", "Name")
+        loaded = get("FilesLoaded")
+        if loaded and not row.get("image"):
+            row["image"] = row["path"] = _prefetch_image(row.get("processName"), [p.strip() for p in loaded.split(",")])
+        row["ts"] = timestamp(get("LastRunTime", "LastExecutionTime")) or timestamp_utc(get("LastRun"))
         if row["ts"] is not None:
             row["recordKind"] = "event"
     label = row.get("taskName") or row.get("serviceName") or row.get("image") or row.get("path") or get("Name", "DisplayName", "UserName") or kind

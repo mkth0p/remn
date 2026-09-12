@@ -134,6 +134,16 @@ OLLAMA_NUM_CTX = _env_int("OLLAMA_NUM_CTX", 32768)
 OLLAMA_TIMEOUT = _env_int("OLLAMA_TIMEOUT", 600)
 # Claude Code connector: the server runs the local "claude" command line as the analyst model
 # (evidence excerpts leave the machine for Anthropic). Operators can switch it off.
+# Hayabusa, Sigma over EVTX, as an optional detection engine. Found on PATH or at HAYABUSA_PATH,
+# with its rules beside the binary or at HAYABUSA_RULES. Every ingested event log is handed to
+# it when present; HAYABUSA_ENABLED=0 keeps it out of ingest without uninstalling it.
+HAYABUSA_ENABLED = _env_bool("HAYABUSA_ENABLED", True)
+HAYABUSA_PATH = os.environ.get("HAYABUSA_PATH", "").strip()
+HAYABUSA_RULES = os.environ.get("HAYABUSA_RULES", "").strip()
+HAYABUSA_MIN_LEVEL = os.environ.get("HAYABUSA_MIN_LEVEL", "low").strip() or "low"
+HAYABUSA_MAX_S = _env_int("HAYABUSA_MAX_S", 300)
+# Replaces the option set wholesale for a release whose flags moved; see services/analysis/hayabusa.py
+HAYABUSA_ARGS = os.environ.get("HAYABUSA_ARGS", "").strip()
 CLAUDE_CODE_ENABLED = _env_bool("CLAUDE_CODE_ENABLED", True)
 CLAUDE_CODE_BIN = os.environ.get("CLAUDE_CODE_BIN", "").strip()
 CLAUDE_CODE_TIMEOUT = _env_int("CLAUDE_CODE_TIMEOUT", 600)

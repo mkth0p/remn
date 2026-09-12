@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 import time
 from collections.abc import Iterator
 from typing import Any
@@ -18,6 +19,7 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 
 from api.jobs import Job, manager
 from api.views.upload import discard_upload, get_upload
+from services.analysis import hayabusa
 from services.common import ndjson_line
 from services.ingest.package import PackageSource
 from services.ingest.pipeline import EvtxSource, MailSource, MailStats
@@ -146,8 +148,11 @@ def ingest(request: HttpRequest, key: str):
         count = 0
         last = 0.0
         try:
+            findings: list[dict[str, Any]] = []
+            engine_summaries: list[dict[str, Any]] = []
             if kind == "package":
                 package = PackageSource(name, str(path), None, tmp_dir, ctx, include_raw, str(meta.get("sha256") or ""))
+                package.engines = hayabusa.engines()
                 ew = EventWriter(st, evidence_id, include_raw=include_raw)
                 pmw = MailWriter(st, evidence_id, keep_bodies=keep_bodies)
                 try:
@@ -163,6 +168,8 @@ def ingest(request: HttpRequest, key: str):
                     pmw.flush()
                 stats = package.stats()
                 fmt = package.format
+                findings = hayabusa.resolve_refs(st, evidence_id, package.findings)
+                engine_summaries = package.engine_summaries
             elif kind == "evtx":
                 src = EvtxSource(name, str(path), None, tmp_dir, include_raw=include_raw)
                 w = EventWriter(st, evidence_id, include_raw=include_raw)
@@ -177,6 +184,15 @@ def ingest(request: HttpRequest, key: str):
                 stats = src.stats.to_dict()
                 stats["files"] = src.files
                 fmt = src.format
+                if hayabusa.available():
+                    job.update(phase="engines")
+                    staged = hayabusa.stage([(name, str(path))], tmp_dir)
+                    try:
+                        found, summary = hayabusa.run(staged, tmp_dir)
+                    finally:
+                        shutil.rmtree(staged, ignore_errors=True)
+                    findings = hayabusa.resolve_refs(st, evidence_id, found)
+                    engine_summaries = [summary]
             else:
                 src2 = MailSource(name, str(path), None, ctx, tmp_dir)
                 mw = MailWriter(st, evidence_id, keep_bodies=keep_bodies)
@@ -230,6 +246,8 @@ def ingest(request: HttpRequest, key: str):
             "stats": stats,
             "sha256Server": meta.get("sha256"),
             "integrity": integrity,
+            "findings": findings,
+            "engineSummaries": engine_summaries,
             "format": fmt,
             "evidenceId": evidence_id,
             "seconds": round(time.time() - t0, 1),

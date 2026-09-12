@@ -115,7 +115,88 @@ def batch(manifest_path, output):
             out.flush()
 
 
+def _jsonable(value, depth=0):
+    """Record field values as JSON: dissect types carry datetimes, paths, digests and byte blobs."""
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if depth > 6:
+        return str(value)[:4096]
+    if isinstance(value, bytes):
+        return value[:4096].hex()
+    if isinstance(value, dict):
+        return {str(k): _jsonable(v, depth + 1) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_jsonable(v, depth + 1) for v in list(value)[:10000]]
+    if hasattr(value, "isoformat"):
+        try:
+            return value.isoformat()
+        except Exception:  # noqa: BLE001
+            pass
+    for algo in ("md5", "sha1", "sha256"):
+        if hasattr(value, algo) and hasattr(value, "sha256"):
+            return {a: getattr(value, a, None) for a in ("md5", "sha1", "sha256")}
+    if hasattr(value, "executable") and hasattr(value, "args"):
+        # the flow.record command type: a quoted executable makes its str() raise
+        executable = value.executable
+        args = value.args or []
+        parts = [str(executable)] if executable else []
+        parts += [str(a) for a in args]
+        return " ".join(parts)
+    try:
+        return str(value)[:4096]
+    except Exception:  # noqa: BLE001
+        return repr(value)[:4096]
+
+
+def triage(target_path, manifest_path, output):
+    """Run dissect functions over a collection laid out like a drive, one framed line per record.
+
+    Each function is its own attempt: one that the collection has no artifacts for is reported
+    as skipped, one that raises part-way keeps what it yielded, and the file is flushed after
+    every function so a worker that is killed still leaves behind everything it finished.
+    """
+    from dissect.target import Target
+    from dissect.target.exceptions import UnsupportedPluginError
+
+    with open(manifest_path, encoding="utf-8") as fh:
+        functions = json.load(fh)
+    target = Target.open(target_path)
+    with open(output, "w", encoding="utf-8") as out:
+        info = {"loader": type(getattr(target, "_loader", None)).__name__, "os": str(getattr(target, "os", "") or "")}
+        for attr in ("hostname", "version", "domain"):
+            try:
+                info[attr] = _jsonable(getattr(target, attr))
+            except Exception:  # noqa: BLE001
+                info[attr] = None
+        print(json.dumps({"_target": info}, ensure_ascii=False), file=out)
+        out.flush()
+        for name, cap in functions:
+            written = 0
+            try:
+                obj = target
+                for part in str(name).split("."):
+                    obj = getattr(obj, part)
+                truncated = False
+                for record in obj():
+                    if written >= int(cap):
+                        truncated = True
+                        break
+                    fields = {k: _jsonable(v) for k, v in record._asdict().items() if not k.startswith("_")}
+                    fields["_type"] = record._desc.name
+                    print(json.dumps({"_fn": name, "r": fields}, ensure_ascii=False), file=out)
+                    written += 1
+                print(json.dumps({"_fn": name, "done": written, "truncated": truncated}), file=out)
+            except UnsupportedPluginError as exc:
+                print(json.dumps({"_fn": name, "skipped": f"not in this collection: {str(exc)[:200]}"}, ensure_ascii=False), file=out)
+            except Exception as exc:  # noqa: BLE001
+                print(json.dumps({"_fn": name, "done": written, "failed": f"{type(exc).__name__}: {exc}"[:500]}, ensure_ascii=False), file=out)
+            out.flush()
+
+
 if __name__ == "__main__":
+    if sys.argv[1] == "triage":
+        triage(sys.argv[2], sys.argv[3], sys.argv[4])
+        sys.exit(0)
     if sys.argv[1] == "batch":
         batch(sys.argv[2], sys.argv[3])
         sys.exit(0)

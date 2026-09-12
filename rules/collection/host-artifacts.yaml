@@ -129,13 +129,13 @@ where:
 ---
 id: collection-execution-user-path
 title: Executable ran from a temporary or user profile location
-description: Prefetch or a process snapshot records execution from a location an unprivileged user can write to. Installers and updaters do this too; weigh the name, the run count and what else ran around the same time.
+description: Prefetch, Amcache, ShimCache, UserAssist, BAM or a process snapshot records execution from a location an unprivileged user can write to. Installers and updaters do this too; weigh the name, the run count and what else ran around the same time.
 source: events
 severity: medium
 attack: [T1204.002]
 entities: [computer, processName, image]
 where:
-  artifactType|in: [process, prefetch]
+  artifactType|in: [process, prefetch, amcache, shimcache, userassist, bam]
   image|contains: ['\temp\', '\appdata\', '\users\public\', '\downloads\']
 ---
 id: collection-program-user-location

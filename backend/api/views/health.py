@@ -9,6 +9,7 @@ from django.views.decorators.http import require_GET
 
 from api.services import ollama_service
 from services.ai import claude_code
+from services.analysis import hayabusa
 from services.analysis.attachments import yara_scan
 from services.parsers.mail import pst
 from services.reputation.base import registry
@@ -47,6 +48,7 @@ def health(request):
             "yara": yara_scan.available(),
             "yaraRules": yara_scan.rule_count(),
             "claudeCode": claude_code.available() and not browser_only,
+            "hayabusa": hayabusa.available(),
         },
         "providers": [] if browser_only else registry.list(),
         "rulesDir": str(settings.RULES_DIR),

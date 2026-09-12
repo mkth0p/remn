@@ -137,6 +137,63 @@ def batch_records(kind: str, paths: list[str], tmp_dir: str) -> list[tuple[int, 
                 pass
 
 
+# A triage pass reads whole hives, an amcache and browser databases in one worker, so it gets more
+# room than a single artifact: the allowance is per function set, and the package's own decoding
+# budget still bounds the total.
+MAX_TRIAGE_RSS = 1024 * 1024**2
+MAX_TRIAGE_SECONDS = 300.0
+MAX_TRIAGE_OUTPUT = 256 * 1024**2
+
+
+def triage_records(path: str, tmp_dir: str, functions: list[tuple[str, int]], *, deadline_s: float | None = None):
+    """Run the dissect functions over one target in the worker and yield its framed lines.
+
+    The worker is killed, not failed, when it passes a limit: the lines it flushed stay, and the
+    functions it never reached are reported by the caller as unfinished rather than absent.
+    """
+    fd, manifest = tempfile.mkstemp(dir=tmp_dir, suffix=".manifest")
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump([[name, int(cap)] for name, cap in functions], fh)
+    fd, output = tempfile.mkstemp(dir=tmp_dir, suffix=".decoded")
+    os.close(fd)
+    command = [sys.executable, str(Path(__file__).with_name("native_worker.py")), "triage", path, manifest, output]
+    limit = min(MAX_TRIAGE_SECONDS, deadline_s) if deadline_s else MAX_TRIAGE_SECONDS
+    process = None
+    try:
+        process = subprocess.Popen(
+            command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        )
+        monitor = psutil.Process(process.pid)
+        started = time.monotonic()
+        while process.poll() is None:
+            try:
+                rss = monitor.memory_info().rss
+            except psutil.NoSuchProcess:
+                break
+            if rss > MAX_TRIAGE_RSS or os.path.getsize(output) > MAX_TRIAGE_OUTPUT or time.monotonic() - started > limit:
+                break
+            time.sleep(0.05)
+        if process.poll() is None:
+            process.kill()
+        process.wait()
+        with open(output, encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    yield json.loads(line)
+                except ValueError:
+                    break  # the truncated final line a killed worker leaves
+    finally:
+        if process is not None:
+            if process.poll() is None:
+                process.kill()
+            process.wait()
+        for p in (manifest, output):
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+
+
 class PartialDecode(Exception):
     """Raised after yielding every record a failed worker managed to decode."""
 

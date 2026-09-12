@@ -9,6 +9,9 @@ from __future__ import annotations
 import io
 import json
 import logging
+import os
+import shutil
+import tempfile
 import time
 from collections.abc import Iterator
 from typing import Any
@@ -18,6 +21,7 @@ from django.http import HttpRequest, JsonResponse, StreamingHttpResponse
 from django.views.decorators.http import require_POST
 
 from api.views.upload import discard_upload, get_upload
+from services.analysis import hayabusa
 from services.analysis.attachments.analyzer import analyze_attachment
 from services.common import ndjson_line, sha256_chunks
 from services.ingest.pipeline import EvtxSource, MailSource, detect_mail_format, iter_mbox_fileobj
@@ -108,6 +112,34 @@ def _expired(deadline: float | None) -> bool:
     return deadline is not None and time.monotonic() > deadline
 
 
+def _engine_lines(src, tmp_dir: str, deadline: float | None) -> Iterator[bytes]:
+    """Hayabusa over the staged event log, its detections as finding lines and one summary line."""
+    remaining = max(1.0, deadline - time.monotonic()) if deadline else None
+    target = src.path
+    staged = None
+    if target is None or not str(target).lower().endswith(".evtx"):
+        # the engine picks files by extension, and an in-memory upload has no path at all
+        fd, staged = tempfile.mkstemp(dir=tmp_dir, suffix=".evtx")
+        with os.fdopen(fd, "wb") as out:
+            if target is None:
+                out.write(src.data or b"")
+            else:
+                with open(target, "rb") as fh:
+                    shutil.copyfileobj(fh, out)
+        target = staged
+    try:
+        findings, summary = hayabusa.run(target, tmp_dir, deadline_s=remaining)
+    finally:
+        if staged:
+            try:
+                os.unlink(staged)
+            except OSError:
+                pass
+    for finding in findings:
+        yield ndjson_line({"type": "finding", **finding})
+    yield ndjson_line({"type": "engine", **summary})
+
+
 def _stream(gen: Iterator[bytes]) -> StreamingHttpResponse:
     resp = StreamingHttpResponse(gen, content_type=NDJSON)
     resp["Cache-Control"] = "no-store"
@@ -148,7 +180,8 @@ def ingest_evtx(request: HttpRequest):
     def gen() -> Iterator[bytes]:
         n = 0
         evsrc = EvtxSource(src.name, src.path, src.data, tmp_dir, include_raw=include_raw)
-        yield ndjson_line({"type": "meta", "format": evsrc.format, "name": src.name, "size": src.size, "sha256": src.sha256, "includeRaw": include_raw})
+        engines = hayabusa.engines() if request.POST.get("engines", "1") != "0" else []
+        yield ndjson_line({"type": "meta", "format": evsrc.format, "name": src.name, "size": src.size, "sha256": src.sha256, "includeRaw": include_raw, "engines": engines})
         deadline = _deadline()
         try:
             for row in evsrc:
@@ -159,6 +192,8 @@ def ingest_evtx(request: HttpRequest):
                     evsrc.stats.errors += 1
                     yield ndjson_line({"type": "error", "error": DEADLINE_REASON, "emitted": n})
                     break
+            if engines:
+                yield from _engine_lines(src, tmp_dir, deadline)
         except Exception as exc:  # noqa: BLE001
             log.exception("evtx ingestion failed")
             yield ndjson_line({"type": "error", "error": str(exc)[:300], "emitted": n})
@@ -258,11 +293,13 @@ def ingest_package(request: HttpRequest):
         source_name, src.path, src.data, str(settings.FILE_UPLOAD_TEMP_DIR), _ctx_from_request(request), request.POST.get("raw", "1") != "0", src.sha256
     )
 
+    package.engines = hayabusa.engines() if request.POST.get("engines", "1") != "0" else []
+
     def gen() -> Iterator[bytes]:
         rows = iter(package)
         deadline = _deadline()
         try:
-            yield ndjson_line({"type": "meta", "format": package.format, "name": src.name, "size": src.size, "sha256": src.sha256})
+            yield ndjson_line({"type": "meta", "format": package.format, "name": src.name, "size": src.size, "sha256": src.sha256, "engines": package.engines})
             for row in rows:
                 yield ndjson_line(row)
                 if _expired(deadline):
@@ -272,6 +309,10 @@ def ingest_package(request: HttpRequest):
                     package.inventory_complete = False
                     yield ndjson_line({"type": "error", "error": DEADLINE_REASON})
                     break
+            for finding in package.findings:
+                yield ndjson_line({"type": "finding", **finding})
+            for summary in package.engine_summaries:
+                yield ndjson_line({"type": "engine", **summary})
             yield ndjson_line({"type": "done", "format": package.format, "stats": package.stats(), "sha256": src.sha256})
         except Exception as exc:  # noqa: BLE001
             yield ndjson_line({"type": "error", "error": str(exc)[:300]})

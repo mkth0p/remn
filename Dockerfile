@@ -28,12 +28,36 @@ RUN /opt/venv/bin/pip install -r /tmp/requirements.txt \
     && if [ -n "$EXTRA_PIP" ]; then /opt/venv/bin/pip install $EXTRA_PIP; fi \
     && /opt/venv/bin/python -m pip uninstall -y pip
 
+# Hayabusa: Sigma over EVTX as a detection engine, pinned by version and by the release
+# archive's SHA-256 so a substituted download fails the build. HAYABUSA=0 builds without it.
+FROM python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285 AS hayabusa
+ARG TARGETARCH
+ARG HAYABUSA=1
+ARG HAYABUSA_VERSION=4.0.0
+RUN mkdir -p /opt/hayabusa \
+    && if [ "$HAYABUSA" = "1" ]; then \
+        apt-get update && apt-get -y --no-install-recommends install ca-certificates curl unzip && rm -rf /var/lib/apt/lists/* \
+        && case "$TARGETARCH" in \
+            amd64) asset=lin-x64-gnu; sum=1137e27c795e83f8837c962f2136cf1634a67a655d7ba8efa8b2d38a33ba09b4 ;; \
+            arm64) asset=lin-aarch64-gnu; sum=e41e9ecac3197f59874e47b8d982ec0557e2686d68f172a9d99f4ca7ac3ae594 ;; \
+            *) echo "no Hayabusa build for $TARGETARCH" >&2; exit 1 ;; \
+        esac \
+        && curl -fsSL -o /tmp/hayabusa.zip "https://github.com/Yamato-Security/hayabusa/releases/download/v${HAYABUSA_VERSION}/hayabusa-${HAYABUSA_VERSION}-${asset}.zip" \
+        && echo "${sum}  /tmp/hayabusa.zip" | sha256sum -c - \
+        && unzip -q /tmp/hayabusa.zip -d /opt/hayabusa \
+        && mv "/opt/hayabusa/hayabusa-${HAYABUSA_VERSION}-${asset}" /opt/hayabusa/hayabusa \
+        && chmod 0755 /opt/hayabusa/hayabusa && test -d /opt/hayabusa/rules \
+        && rm -f /tmp/hayabusa.zip; \
+    fi
+
 FROM python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH="/opt/venv/bin:$PATH"
 # Debian's security updates as of the build (the base tag lags them by days); no package manager stays behind
 RUN apt-get update && apt-get -y --no-install-recommends upgrade && rm -rf /var/lib/apt/lists/* \
     && python -m pip uninstall -y pip && rm -rf /usr/local/lib/python3.*/ensurepip/_bundled /root/.cache
 COPY --from=python-build /opt/venv /opt/venv
+COPY --from=hayabusa /opt/hayabusa /opt/hayabusa
+ENV HAYABUSA_PATH=/opt/hayabusa/hayabusa
 WORKDIR /app
 COPY backend/ backend/
 COPY rules/ rules/

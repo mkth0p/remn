@@ -4,6 +4,7 @@
  * the NDJSON stream and writes rows / facets / IOCs into IndexedDB.
  */
 import { createSHA256 } from 'hash-wasm'
+import { refKey, resolveEngineRefs, type EngineFinding } from '../data/engineFindings'
 import { getDb, type AttachmentRow, type EventRow, type Facet, type Ioc, type MailBody, type MailRow, type UrlRow } from '../db/schema'
 import { setApiToken, streamNdjson } from '../api/client'
 import { isPublicIp } from '../util/format'
@@ -292,11 +293,26 @@ async function ingest(req: IngestRequest): Promise<void> {
   const st = { meta: null as Record<string, unknown> | null, done: null as Record<string, unknown> | null, errorMsg: null as string | null }
   let lastProgress = 0
 
+  // Findings an engine produced on the server name their rows by record identity; the ids those
+  // rows get here are only known once they are inserted, so the index is built on the way in,
+  // and only when the server said an engine would run.
+  const engineFindings: EngineFinding[] = []
+  const engineSummaries: Record<string, unknown>[] = []
+  const refIndex = new Map<string, number>()
+  const wantRefs = () => Array.isArray(st.meta?.engines) && (st.meta!.engines as unknown[]).length > 0
   const flushEvents = async () => {
     if (!batch.length) return
     const rows = batch as EventRow[]
     batch = []
-    await db.events.bulkAdd(rows)
+    if (wantRefs()) {
+      const ids = (await db.events.bulkAdd(rows, { allKeys: true })) as number[]
+      rows.forEach((row, i) => {
+        const r = row as unknown as Record<string, unknown>
+        if (r.recordId != null) refIndex.set(refKey(r), ids[i])
+      })
+    } else {
+      await db.events.bulkAdd(rows)
+    }
     inserted += rows.length
   }
   const flushMails = async () => {
@@ -344,6 +360,18 @@ async function ingest(req: IngestRequest): Promise<void> {
     }
     if (type === 'done') {
       st.done = row
+      return
+    }
+    if (type === 'finding') {
+      delete row.type
+      engineFindings.push(row as unknown as EngineFinding)
+      return
+    }
+    if (type === 'engine') {
+      delete row.type
+      engineSummaries.push(row)
+      const status = String(row.status ?? '')
+      post({ type: 'log', level: status === 'parsed' ? 'info' : 'warn', text: `${row.engine}: ${row.findings} finding(s) in ${row.seconds}s${row.reason ? ' - ' + row.reason : ''}` })
       return
     }
     if (type === 'error') {
@@ -398,6 +426,10 @@ async function ingest(req: IngestRequest): Promise<void> {
       integrity,
       progress: 1,
     })
+    if (engineFindings.length) {
+      // resolved here, where the index is; stored by the main thread, which owns the case
+      post({ type: 'findings', engine: String(engineFindings[0].engine ?? 'hayabusa'), findings: resolveEngineRefs(engineFindings, refIndex), summaries: engineSummaries })
+    }
     post({ type: 'done', count: inserted, stats: st.done?.stats ?? null, sha256, sha256Server: serverHash, integrity, error: st.errorMsg })
   } catch (e) {
     const msg = (e as Error).message || String(e)

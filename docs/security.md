@@ -134,6 +134,12 @@ finishes.
   sent, an error line saying why, and the result marked incomplete. The rate limiter shapes how
   fast requests arrive, not how many are in flight, and the server cannot reap a request once it
   is running; this is what stops a few slow parses holding every worker thread indefinitely.
+- **External engines under the same bounds.** Hayabusa, when installed, runs as a separate
+  process watched for memory (1.5 GiB), output (256 MiB) and time (`HAYABUSA_MAX_S`, 300 s by
+  default, and never past the request deadline), and is killed rather than trusted past any of
+  them. A collection's event logs are held back for one engine run within the same per-request
+  hold allowance as prefetch, and released with the parse. The binary in the image is pinned by
+  version and by the SHA-256 of its release archive.
 - **A ceiling on what one parse spends.** Every native decode is counted and timed against one
   allowance per package, whether it succeeds or fails, and cabinets are counted against the same
   allowance rather than being free. A cabinet that claims to expand by more than a couple of
