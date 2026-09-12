@@ -165,6 +165,79 @@ class _ByteBudget(io.RawIOBase):
 MAX_TEXT_LINES = 100_000
 
 
+# Where a Defender log names what it found. Threat names have a fixed shape, Category:Platform/Name,
+# so they can be lifted out of a free-text line without knowing which log it came from.
+THREAT_NAME = re.compile(r"(?<![\w/])(?!(?i:lowfi|file|https?|ftp|urn):)([A-Za-z]{3,}:[A-Za-z0-9]+/[A-Za-z0-9._!#-]+)")
+
+# `reg query /s` output: a key on its own line, its values indented beneath it in three columns
+# separated by runs of spaces. Collectors dump the autostart keys this way and call it Autoruns.
+REG_KEY = re.compile(r"^HKEY_[A-Z_]+\\")
+REG_VALUE = re.compile(r"^\s{2,}(?P<name>.+?)\s{2,}(?P<type>REG_[A-Z_]+)(?:\s{2,}(?P<data>.*))?$")
+LAUNCHABLE = re.compile(r"\.(exe|dll|cmd|bat|ps1|vbs|vbe|js|jse|wsf|hta|scr|com|msi|lnk|cpl)\b", re.I)
+
+
+def _looks_like_reg_query(lines: list[str]) -> bool:
+    return any(REG_KEY.match(line) for line in lines) and any(REG_VALUE.match(line.rstrip()) for line in lines)
+
+
+def _reg_query_records(lines, notes: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    """One record per registry value, under the key it was listed beneath."""
+    key = None
+    for index, raw_line in enumerate(lines):
+        if index >= MAX_TEXT_LINES:
+            notes["truncatedAtLine"] = MAX_TEXT_LINES
+            break
+        line = raw_line.rstrip()
+        if not line.strip():
+            continue
+        if REG_KEY.match(line):
+            key = line.strip()
+            continue
+        match = REG_VALUE.match(line) if key else None
+        if match:
+            yield {
+                "Key": key,
+                "ValueName": match.group("name").strip(),
+                "Type": match.group("type"),
+                "Data": (match.group("data") or "").strip(),
+                "LineNumber": index + 1,
+            }
+        else:
+            # what reg query says when a key is absent, in whatever language the host speaks
+            yield {"Message": line.strip(), "LineNumber": index + 1}
+
+
+def _launch_image(value: str | None) -> str | None:
+    """A registry value that launches something, as opposed to a flag or a resource reference."""
+    if not value or len(value) > 4096 or value.startswith("@"):
+        return None
+    if "\\" in value or LAUNCHABLE.search(value):
+        return value
+    return None
+
+
+def _first_token(command: str | None) -> str | None:
+    """The executable of a command line: the quoted first token, or up to the first space."""
+    if not command:
+        return None
+    command = command.strip()
+    if command.startswith('"'):
+        end = command.find('"', 1)
+        return command[1:end] if end > 0 else command[1:]
+    return command.split(" ", 1)[0] or None
+
+
+def _prefetch_image(name: str | None, referenced) -> str | None:
+    """The executable's own path among the files a prefetch entry references."""
+    if not name:
+        return None
+    want = str(name).upper()
+    for entry in referenced or ():
+        if isinstance(entry, str) and entry.upper().rsplit("\\", 1)[-1] == want:
+            return entry
+    return None
+
+
 def _text_encoding(raw) -> str:
     """Work out how a text export is encoded rather than trusting it to say so.
 
@@ -367,8 +440,12 @@ def records(path: str, name: str, notes: dict[str, Any] | None = None) -> Iterat
             if category(name) == "defender" and name.lower().endswith((".txt", ".log")):
                 yield from _defender_records(fh, name, notes)
             elif name.lower().endswith((".txt", ".log")):
+                head = list(islice(fh, 200))
+                if _looks_like_reg_query(head):
+                    yield from _reg_query_records(chain(head, fh), notes)
+                    return
                 record = {}
-                for index, line in enumerate(fh):
+                for index, line in enumerate(chain(head, fh)):
                     if index >= MAX_TEXT_LINES:
                         # Stop, rather than throw away the lines already read. A ten-megabyte
                         # engine log is exactly where the first hundred thousand lines are worth
@@ -476,11 +553,11 @@ def normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, Any
         "data": raw,
     }
     mappings = {
-        "targetUser": ("UserName", "User", "AccountName", "Account", "RunAsUser", "ClientUserName"),
+        "targetUser": ("UserName", "User", "AccountName", "Account", "RunAsUser", "ClientUserName", "Exécuter en tant qu'utilisateur"),
         "targetDomain": ("Domain", "DomainName"),
         "targetSid": ("SID", "UserSid"),
         "image": ("ExecutablePath", "ImagePath", "Image", "ProcessPath"),
-        "commandLine": ("CommandLine", "Command"),
+        "commandLine": ("CommandLine", "Command", "Task To Run", "Tâche à exécuter"),
         "processGuid": ("ProcessGuid",),
         "parentProcessGuid": ("ParentProcessGuid",),
         "processId": ("ProcessId", "PID", "OwningProcess", "Id"),
@@ -509,23 +586,29 @@ def normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, Any
             row[n] = None
     if kind == "process":
         row["processName"] = get("ProcessName", "Name") or row.get("image")
-    row["name"] = get("Name", "DisplayName", "Entry", "EntryName")
+    row["name"] = get("Name", "DisplayName", "Entry", "EntryName", "ValueName", "Nom de la tâche")
     row["message"] = get("Message")
+    if kind == "defender" and row["message"]:
+        found = THREAT_NAME.search(row["message"])
+        if found:
+            row["threatName"] = found.group(1)
     if kind == "account":
         row["targetUser"] = row.get("targetUser") or get("Name")
         row["memberName"] = get("MemberName", "Member")
     if kind == "program":
         row["company"] = get("Publisher", "Vendor", "Company")
+        row["path"] = get("InstallLocation", "InstallSource")
     if kind == "service":
         row["serviceName"] = get("ServiceName", "Name", "DisplayName")
         row["serviceFile"] = get("PathName", "BinaryPathName", "ImagePath")
     if kind == "task":
-        row["taskName"] = get("TaskName", "TaskPath", "Name")
-        row["image"] = row.get("image") or get("Execute", "Executable")
+        row["taskName"] = get("TaskName", "TaskPath", "Name", "Nom de la tâche")
+        row["image"] = row.get("image") or get("Execute", "Executable") or _first_token(row.get("commandLine"))
     if kind in ("file", "prefetch", "autorun"):
         row["path"] = get("FullName", "Path", "ImagePath", "FilePath")
     if kind == "autorun":
-        row["image"] = row.get("image") or get("LaunchString")
+        row["image"] = row.get("image") or get("LaunchString") or _launch_image(get("Data"))
+        row["targetObject"] = get("Key", "KeyPath", "RegistryKey")
     hashes = []
     for algorithm, length in (("SHA256", 64), ("SHA1", 40), ("MD5", 32)):
         v = get(algorithm)
@@ -540,6 +623,9 @@ def normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, Any
             row["recordKind"] = "event"
     label = row.get("taskName") or row.get("serviceName") or row.get("image") or row.get("path") or get("Name", "DisplayName", "UserName") or kind
     row["summary"] = f"{kind}: {label}"[:2000]
+    if kind == "autorun" and row.get("targetObject"):
+        launches = f" -> {row['image']}" if row.get("image") else ""
+        row["summary"] = f"autorun: {row['targetObject']}\\{row.get('name') or ''}{launches}"[:2000]
     if row.get("message"):
         row["summary"] = f"{kind}: {row['message']}"[:2000]
     return row
@@ -559,6 +645,10 @@ def native_rows(kind: str, raw_records, name: str, context: dict):
         row["parserVersion"] = f"dissect-{kind}/1"
         if kind == "prefetch":
             row["processName"] = raw.get("Name")
+            executable = _prefetch_image(raw.get("Name"), raw.get("ReferencedFiles"))
+            if executable:
+                row["image"] = executable
+                row["path"] = executable
         else:
             row["targetObject"] = raw["KeyPath"]
             row["data"]["keyLastWriteTime"] = raw.get("LastWriteTime")

@@ -86,6 +86,20 @@ such as MPRegistry, MPStateInfo and MPDetection, are kept whole however long the
 are. The member records how many lines were read and how many were kept; the file
 itself is inventoried and hashed in full either way.
 
+Collected artifacts are mapped into the fields the rules read, and a few export shapes
+needed specific handling before any rule could reach them. `schtasks /fo csv` writes
+its headers in the host's language and carries the command under "Task To Run", so
+that column and its French form become `commandLine`, with `image` taken from the
+quoted first token and the run-as account becoming `targetUser`. A prefetch entry
+names its own executable among the files it references, so `image` and `path` now
+carry that full path rather than the bare file name. Installed programs expose their
+install location or source as `path`. A Defender log line naming a threat has it
+lifted into `threatName`, whatever the surrounding text, so detections can be grouped
+by name. An autoruns member that is concatenated `reg query /s` output becomes one
+row per registry value, with the key in `targetObject`, the value name in `name` and
+launch strings in `image`; flags and resource references get no `image`, and the
+collector's own error lines are kept as messages.
+
 A row the parser reassembled says so on the row, not only in the count on the
 member, so it stays distinguishable from a clean one wherever it is read. A repair
 is accepted only when a single grouped cell was split and that split alone accounts

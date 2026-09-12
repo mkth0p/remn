@@ -1,5 +1,11 @@
 {
  "diagnostics": {
+  "collection-defender-detection": "no_selector_match",
+  "collection-defender-exclusions": "no_selector_match",
+  "collection-defender-pua": "no_selector_match",
+  "collection-execution-user-path": "no_selector_match",
+  "collection-persistence-script-host": "no_selector_match",
+  "collection-program-user-location": "no_selector_match",
   "m365-anonymous-sharing": "no_selector_match",
   "m365-app-registered": "no_selector_match",
   "m365-audit-disabled": "no_selector_match",
@@ -103,6 +109,9 @@
   ],
   "collection-script-host-connection": [
    "collection-script-host-connection|109"
+  ],
+  "collection-service-unquoted-path": [
+   "collection-service-unquoted-path|112"
   ],
   "m365-app-consent": [
    "m365-app-consent|105"
@@ -266,11 +275,18 @@
  },
  "rules": [
   "collection-defender-alert-text",
+  "collection-defender-detection",
+  "collection-defender-exclusions",
+  "collection-defender-pua",
   "collection-encoded-execution",
+  "collection-execution-user-path",
+  "collection-persistence-script-host",
   "collection-persistence-user-path",
   "collection-prefetch-script-execution",
+  "collection-program-user-location",
   "collection-remote-service",
   "collection-script-host-connection",
+  "collection-service-unquoted-path",
   "m365-anonymous-sharing",
   "m365-app-consent",
   "m365-app-registered",
