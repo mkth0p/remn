@@ -97,14 +97,16 @@ def command(target: str, output: str) -> list[str]:
     """The invocation. Kept in one place because it is the part most likely to move between
     Hayabusa releases; HAYABUSA_ARGS replaces the option set wholesale when it does."""
     override = str(getattr(settings, "HAYABUSA_ARGS", "") or "").strip()
-    args = [binary() or ENGINE, "json-timeline"]
+    # Hayabusa 4.0 merged csv-timeline and json-timeline into dfir-timeline, with the format chosen
+    # by -t. Releases before it want `json-timeline -L` instead: set HAYABUSA_ARGS for those.
+    args = [binary() or ENGINE, "dfir-timeline"]
     if override:
         args += override.split()
     else:
-        # -L one object per line, -w no wizard, -q/-Q quiet and no error logs, -C overwrite the
-        # output, -b full channel and provider names rather than abbreviations, verbose profile
+        # -t jsonl one object per line, -w no wizard, -q/-Q quiet and no error logs, -C overwrite
+        # the output, -b full channel and provider names rather than abbreviations, verbose profile
         # for rule file, tags and the source file, and no colour codes in what we parse.
-        args += ["-L", "-w", "-q", "-Q", "-C", "-b", "--no-color", "-p", "verbose", "-m", str(getattr(settings, "HAYABUSA_MIN_LEVEL", "low") or "low")]
+        args += ["-t", "jsonl", "-w", "-q", "-Q", "-C", "-b", "--no-color", "-p", "verbose", "-m", str(getattr(settings, "HAYABUSA_MIN_LEVEL", "low") or "low")]
         rules = rules_dir()
         if rules:
             args += ["-r", rules]
