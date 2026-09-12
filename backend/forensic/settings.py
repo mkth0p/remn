@@ -107,6 +107,11 @@ FORENSIC_CHUNK_MB = _env_int("FORENSIC_CHUNK_MB", 16)
 FORENSIC_UPLOAD_MAX_AGE_S = _env_int("FORENSIC_UPLOAD_MAX_AGE_S", 1800 if FORENSIC_BROWSER_ONLY else 6 * 3600)
 # How often the sweeper runs. 0 disables the periodic sweep (it still runs at startup).
 FORENSIC_UPLOAD_SWEEP_S = _env_int("FORENSIC_UPLOAD_SWEEP_S", 300)
+# How long one ingest request may parse before its stream is ended with what it has. The rate
+# limiter shapes arrivals, not concurrent work, and the server cannot reap a request already in
+# flight, so without this a handful of slow parses hold every worker thread for as long as they
+# like. Off on a private instance; an instance open to strangers gets thirty minutes.
+FORENSIC_INGEST_MAX_S = _env_int("FORENSIC_INGEST_MAX_S", 1800 if FORENSIC_BROWSER_ONLY else 0)
 # Total bytes the staging area may hold. A new upload is refused above it, after a sweep, so a
 # stream of abandoned uploads cannot fill the disk however short the lifetime is.
 FORENSIC_TMP_MAX_GB = _env_int("FORENSIC_TMP_MAX_GB", 4)

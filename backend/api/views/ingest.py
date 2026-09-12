@@ -9,6 +9,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import time
 from collections.abc import Iterator
 from typing import Any
 
@@ -94,6 +95,19 @@ class _Source:
             discard_upload(self.upload_id)
 
 
+DEADLINE_REASON = "parse stopped at the FORENSIC_INGEST_MAX_S limit; the rows already sent are kept and the result is marked incomplete"
+
+
+def _deadline() -> float | None:
+    """When this request must stop parsing, or None when no limit is configured."""
+    limit = int(settings.FORENSIC_INGEST_MAX_S or 0)
+    return time.monotonic() + limit if limit > 0 else None
+
+
+def _expired(deadline: float | None) -> bool:
+    return deadline is not None and time.monotonic() > deadline
+
+
 def _stream(gen: Iterator[bytes]) -> StreamingHttpResponse:
     resp = StreamingHttpResponse(gen, content_type=NDJSON)
     resp["Cache-Control"] = "no-store"
@@ -135,11 +149,16 @@ def ingest_evtx(request: HttpRequest):
         n = 0
         evsrc = EvtxSource(src.name, src.path, src.data, tmp_dir, include_raw=include_raw)
         yield ndjson_line({"type": "meta", "format": evsrc.format, "name": src.name, "size": src.size, "sha256": src.sha256, "includeRaw": include_raw})
+        deadline = _deadline()
         try:
             for row in evsrc:
                 row["type"] = "event"
                 yield ndjson_line(row)
                 n += 1
+                if _expired(deadline):
+                    evsrc.stats.errors += 1
+                    yield ndjson_line({"type": "error", "error": DEADLINE_REASON, "emitted": n})
+                    break
         except Exception as exc:  # noqa: BLE001
             log.exception("evtx ingestion failed")
             yield ndjson_line({"type": "error", "error": str(exc)[:300], "emitted": n})
@@ -182,11 +201,16 @@ def ingest_mail(request: HttpRequest):
         )
         n = 0
         msrc = MailSource(src.name, src.path, src.data, ctx, tmp_dir)
+        deadline = _deadline()
         try:
             for row in msrc:
                 row["type"] = "mail"
                 yield ndjson_line(row)
                 n += 1
+                if _expired(deadline):
+                    msrc.stats.errors += 1
+                    yield ndjson_line({"type": "error", "error": DEADLINE_REASON, "emitted": n})
+                    break
         except Exception as exc:  # noqa: BLE001
             log.exception("mail ingestion failed")
             msrc.stats.errors += 1
@@ -235,15 +259,26 @@ def ingest_package(request: HttpRequest):
     )
 
     def gen() -> Iterator[bytes]:
+        rows = iter(package)
+        deadline = _deadline()
         try:
             yield ndjson_line({"type": "meta", "format": package.format, "name": src.name, "size": src.size, "sha256": src.sha256})
-            yield from (ndjson_line(row) for row in package)
+            for row in rows:
+                yield ndjson_line(row)
+                if _expired(deadline):
+                    # Closing the iterator runs the package's own cleanup, which releases every
+                    # artifact it was holding back for group decoding.
+                    rows.close()
+                    package.inventory_complete = False
+                    yield ndjson_line({"type": "error", "error": DEADLINE_REASON})
+                    break
             yield ndjson_line({"type": "done", "format": package.format, "stats": package.stats(), "sha256": src.sha256})
         except Exception as exc:  # noqa: BLE001
             yield ndjson_line({"type": "error", "error": str(exc)[:300]})
             package.inventory_complete = False
             yield ndjson_line({"type": "done", "format": package.format, "stats": package.stats(), "sha256": src.sha256})
         finally:
+            rows.close()
             src.cleanup()
 
     return _stream(gen())

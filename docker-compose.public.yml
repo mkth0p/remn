@@ -28,6 +28,8 @@ services:
       CLAUDE_CODE_ENABLED: "0"
       # staging lives in RAM here, so keep the budget inside the tmpfs below
       FORENSIC_TMP_MAX_GB: ${REMN_TMP_MAX_GB:-1}
+      # one parse may hold a worker thread this long, then it is ended with what it has
+      FORENSIC_INGEST_MAX_S: ${REMN_INGEST_MAX_S:-1800}
     # This is the process that runs attacker-controlled EVTX, PST, OLE and registry hives through
     # libpff, the EVTX reader and oletools: the most CVE-prone libraries in the stack. It cannot be
     # made unexploitable, so it is made to be worth little. Nothing here changes what it can parse.
@@ -62,9 +64,13 @@ services:
     environment:
       REMN_DOMAIN: ${REMN_DOMAIN:?set REMN_DOMAIN to the name browsers will use}
     volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # The directory, not the file. Docker binds a single file by inode, and git pull writes a
+      # new file, so the container kept reading the old Caddyfile until it was recreated. A
+      # directory bind sees the new file, and caddy reload picks it up.
+      - ./deploy:/etc/caddy/site:ro
       - caddy-data:/data
       - caddy-config:/config
+    command: ["caddy", "run", "--config", "/etc/caddy/site/Caddyfile", "--adapter", "caddyfile"]
     depends_on:
       - remn
     restart: unless-stopped

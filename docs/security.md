@@ -129,6 +129,11 @@ finishes.
   groups, and that hold is capped per request rather than per archive, so nesting cannot multiply
   it. A client that disconnects mid-parse releases everything the parse was holding rather than
   stranding it for the sweeper to find later.
+- **A ceiling on how long one parse runs.** `FORENSIC_INGEST_MAX_S` (30 minutes in
+  browser-only mode, off otherwise) ends an ingest stream at the limit with the rows already
+  sent, an error line saying why, and the result marked incomplete. The rate limiter shapes how
+  fast requests arrive, not how many are in flight, and the server cannot reap a request once it
+  is running; this is what stops a few slow parses holding every worker thread indefinitely.
 - **A ceiling on what one parse spends.** Every native decode is counted and timed against one
   allowance per package, whether it succeeds or fails, and cabinets are counted against the same
   allowance rather than being free. A cabinet that claims to expand by more than a couple of

@@ -32,8 +32,9 @@ services:
       options: {max-size: 1m, max-file: "2"}
     environment:
       REMN_ARCHIVE_DOMAIN: ${REMN_ARCHIVE_DOMAIN:?set a distinct archive domain}
+    # the deploy directory is already mounted by the public file; this only picks the other config
+    command: ["caddy", "run", "--config", "/etc/caddy/site/Caddyfile.honeypot", "--adapter", "caddyfile"]
     volumes:
-      - ./deploy/Caddyfile.honeypot:/etc/caddy/Caddyfile:ro
       - type: volume
         source: archive-socket
         target: /run/archive
