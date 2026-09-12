@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Chain, ChainStep } from './chains'
-import { buildCampaignGraph, buildChainGraph, MAX_COLUMNS } from './chainGraph'
+import { buildCampaignGraph, buildChainGraph, LANE_LABEL, LANES, MAX_COLUMNS } from './chainGraph'
 
 const M = 60_000
 const step = (p: Partial<ChainStep> & { title: string; ts: number }): ChainStep => ({
@@ -152,5 +152,21 @@ describe('folding', () => {
     expect(stepNodes[1].stepIdx).toBe(30)
     expect(g.edges.filter((e) => e.kind === 'artifact')).toHaveLength(1)
     expect(g.columns).toBeLessThanOrEqual(MAX_COLUMNS + 1)
+  })
+})
+
+describe('lanes', () => {
+  it('lists the artifact lane between host and infra; a chain graph never uses it', () => {
+    expect(LANES.indexOf('artifact')).toBe(LANES.indexOf('host') + 1)
+    expect(LANES.indexOf('infra')).toBe(LANES.indexOf('artifact') + 1)
+    expect(LANE_LABEL.artifact).toBe('files & processes')
+    const steps: ChainStep[] = []
+    for (let i = 0; i < 30; i++) steps.push(step({ title: `sign-in (${i})`, ts: 1000 + i * M, ipAddress: '203.0.113.9', computer: 'WS-1', origin: i % 2 ? 'host' : 'm365' }))
+    for (const c of [chain(), chain({ steps }), chain({ seed: { ...chain().seed, source: 'events' } })]) {
+      const g = buildChainGraph(c)
+      expect(g.nodes.some((n) => n.lane === 'artifact')).toBe(false)
+      expect(g.nodes.every((n) => n.recordIds === undefined)).toBe(true)
+    }
+    expect(buildCampaignGraph([chain()]).nodes.some((n) => n.lane === 'artifact')).toBe(false)
   })
 })

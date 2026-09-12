@@ -17,7 +17,8 @@ server for gigabyte cases.
 - **Search** across events and mails with facets, filter chips, regex on any field,
   time and business-hours filters, saved searches, CSV/JSON export.
 - **Import investigation packages** with mixed mail, EVTX and structured host exports,
-  member hashes and explicit coverage; explore evidence-backed entity relationships.
+  member hashes and explicit coverage; read the evidence as relationship stories, records
+  tied across source files through shared digests, files, processes, URLs and accounts.
 - **Detect** with a YAML rule catalogue (Windows, mail, Microsoft 365) plus the SigmaHQ
   and Sublime Security community packs, two rule engines (browser and SQL) kept in
   parity, and a calibrated mail risk score measured on public phishing corpora.

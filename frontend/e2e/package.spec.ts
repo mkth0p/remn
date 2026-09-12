@@ -25,24 +25,42 @@ test('mixed package coverage and evidence-backed relationships in the built brow
   await expect(page.locator('tr').filter({ hasText: 'Prefetch Files/POWERSHELL.pf' })).toContainText('parsed')
   await expect(page.locator('tr').filter({ hasText: 'Prefetch Files/unknown.bin' })).toContainText('unsupported')
   await page.getByRole('button', { name: 'close', exact: true }).last().click()
+
+  // Relationships: the graph is built once, then read as stories.
   await page.getByText('Relationships', { exact: true }).first().click()
   await page.getByRole('button', { name: 'Build relationships' }).click()
-  await expect(page.getByRole('img', { name: 'Connections around the selected entity' })).toBeVisible({ timeout: 30000 })
-  await page.getByRole('combobox', { name: 'Entity type' }).selectOption('hash')
-  await page
-    .getByRole('button')
-    .filter({ hasText: /^hash ·/ })
+  const stories = page.locator('.story-row')
+  await expect(stories.first()).toBeVisible({ timeout: 30000 })
+  // The attachment SHA-256 is also reported by a collected process row, so the digest ties two
+  // source files and its story names it; a finding-backed story may rank above it.
+  await stories
+    .filter({ hasText: /digest/ })
     .first()
     .click()
-  await expect(page.getByText('attachment digest', { exact: true })).toBeVisible()
-  await expect(page.getByText('reported digest', { exact: true })).toBeVisible()
-  const link = page.locator('details').filter({ has: page.getByText('attachment digest', { exact: true }) })
+  await page.getByRole('button', { name: 'Links', exact: true }).click()
+  const link = page
+    .locator('details')
+    .filter({ has: page.getByText('attachment digest', { exact: true }) })
+    .first()
+  await expect(link).toBeVisible()
   await link.locator('summary').click()
   await link.getByLabel('Relationship decision').selectOption('accepted')
   await link.getByLabel('Include accepted link in report').check()
   await link.getByLabel('Relationship notes').fill('The collected process and attachment report the same SHA-256.')
   await link.getByRole('button', { name: 'Save relationship review' }).click()
   await expect(link.getByText('Saved', { exact: true })).toBeVisible()
+
+  // Explore mode keeps the entity browser and the neighbour diagram.
+  await page.getByRole('button', { name: 'Explore', exact: true }).click()
+  await page.getByRole('combobox', { name: 'Entity type' }).selectOption('hash')
+  await page
+    .getByRole('button')
+    .filter({ hasText: /^hash ·/ })
+    .first()
+    .click()
+  await expect(page.getByRole('img', { name: 'Connections around the selected entity' })).toBeVisible()
+  await expect(page.getByText('reported digest', { exact: true }).first()).toBeVisible()
+
   await page.getByText('Evidence', { exact: true }).first().click()
   await page.getByText('Relationships', { exact: true }).first().click()
   await expect(page.getByRole('button', { name: 'Rebuild relationships' })).toBeVisible()
