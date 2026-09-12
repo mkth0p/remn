@@ -556,7 +556,7 @@ export function SettingsView() {
                 <div className="k">optional</div>
                 <div className="v">
                   PST/OST {health?.optional.pst ? 'yes' : 'no (pip install libpff-python)'} · YARA {health?.optional.yara ? `yes (${health.optional.yaraRules} rule file(s))` : 'no'} · Hayabusa{' '}
-                  {health?.mode === 'browser-only' ? 'not disclosed in browser-only mode' : health?.optional.hayabusa ? 'yes (runs on every event log ingested)' : 'no (binary not found)'}
+                  {health?.engines?.includes('hayabusa') ? 'yes (runs on every event log ingested; findings under engine:hayabusa)' : 'no (binary or its rules not found on the server)'}
                 </div>
               </div>
               <div className="divider" />

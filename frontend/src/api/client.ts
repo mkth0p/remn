@@ -172,6 +172,8 @@ export interface Health {
     numCtx?: number
   }
   optional: { pst: boolean; yara: boolean; yaraRules: number; claudeCode?: boolean; hayabusa?: boolean }
+  /** external detection engines this server runs on every event log it ingests */
+  engines?: string[]
   providers: ProviderInfo[]
 }
 export interface ProviderInfo {

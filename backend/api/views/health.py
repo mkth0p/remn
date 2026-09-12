@@ -53,6 +53,7 @@ def health(request):
         "providers": [] if browser_only else registry.list(),
         "rulesDir": str(settings.RULES_DIR),
         "dataDir": str(settings.DATA_DIR),
+        "engines": hayabusa.engines(),
     }
     if browser_only:
         # The same reasoning as the paths and platform: an instance open to strangers should not

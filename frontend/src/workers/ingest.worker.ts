@@ -354,6 +354,9 @@ async function ingest(req: IngestRequest): Promise<void> {
     if (type === 'meta') {
       st.meta = row
       post({ type: 'meta', meta: row })
+      if (kind === 'evtx' && Array.isArray(row.engines) && (row.engines as unknown[]).length === 0) {
+        post({ type: 'log', level: 'info', text: 'no detection engine on this server (Hayabusa not installed); only the rules run from the browser apply' })
+      }
       await db.evidence.update(evidenceId, { status: 'parsing', format: String(row.format ?? ''), sha256Server: String(row.sha256 ?? '') })
       post({ type: 'phase', phase: 'parsing' })
       return
