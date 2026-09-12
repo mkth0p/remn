@@ -179,3 +179,30 @@ def test_refs_resolve_against_a_server_store(tmp_path):
         registry.close_all()
 
     assert len(resolved[0]["refs"]) == 1 and "refKeys" not in resolved[0]
+
+
+def test_only_one_engine_run_at_a_time_and_the_other_ingest_carries_on(engine, tmp_path, monkeypatch):
+    """Two uploads at once must not add up to the container's memory limit. The second finds the
+    slot taken, waits briefly, and finishes its ingest without the engine rather than queueing."""
+    import threading
+
+    evtx = tmp_path / "Security.evtx"
+    evtx.write_bytes(evtx_bytes())
+    monkeypatch.setenv("FAKE_HAYABUSA_SLEEP", "3")
+    results: list[tuple[list, dict]] = []
+
+    def one():
+        with override_settings(HAYABUSA_WAIT_S=1, HAYABUSA_CONCURRENCY=1):
+            results.append(hayabusa.run(str(evtx), str(tmp_path)))
+
+    workers = [threading.Thread(target=one) for _ in range(2)]
+    for w in workers:
+        w.start()
+    for w in workers:
+        w.join()
+
+    statuses = sorted(summary["status"] for _findings, summary in results)
+    assert statuses == ["parsed", "unsupported"], results
+    busy = next(summary for _f, summary in results if summary["status"] == "unsupported")
+    assert "busy" in busy["reason"]
+    assert not [p for p in tmp_path.iterdir() if p.suffix == ".jsonl" and p.name != "detections.jsonl"], "the declined run leaves no output file"

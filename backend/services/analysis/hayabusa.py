@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 from collections.abc import Iterator
 from datetime import datetime
@@ -45,9 +46,24 @@ STAMP = re.compile(r"^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2}(?:\.\d+)?)\s*([+
 TECHNIQUE = re.compile(r"\bT\d{4}(?:\.\d{3})?\b", re.I)
 
 # The bounds. An engine over a few hundred megabytes of logs wants more memory than a decoder
-# over one artifact, and the container's memory limit is the ceiling above this one.
-MAX_RSS = 1536 * 1024**2
+# over one artifact, and the container's memory limit is the ceiling above this one, so the
+# operator sizes it (HAYABUSA_MAX_MB) and only HAYABUSA_CONCURRENCY runs share it at once. On a
+# public instance that is one: two anonymous uploads must not be able to add up to the container.
 MAX_OUTPUT = 256 * 1024**2
+_slots: threading.BoundedSemaphore | None = None
+_slots_size = 0
+
+
+def max_rss() -> int:
+    return int(getattr(settings, "HAYABUSA_MAX_MB", 1536) or 1536) * 1024**2
+
+
+def _slot() -> threading.BoundedSemaphore:
+    global _slots, _slots_size
+    size = max(1, int(getattr(settings, "HAYABUSA_CONCURRENCY", 1) or 1))
+    if _slots is None or _slots_size != size:
+        _slots, _slots_size = threading.BoundedSemaphore(size), size
+    return _slots
 
 
 def binary() -> str | None:
@@ -190,6 +206,16 @@ def run(target: str, tmp_dir: str, *, deadline_s: float | None = None) -> tuple[
     summary: dict[str, Any] = {"engine": ENGINE, "status": "parsed", "findings": 0, "seconds": 0.0}
     process = None
     started = time.monotonic()
+    slot = _slot()
+    # Waiting holds a worker thread, so the wait is short: an ingest that finds the engine busy
+    # says so and carries on without it rather than queueing behind a stranger's upload.
+    if not slot.acquire(timeout=float(getattr(settings, "HAYABUSA_WAIT_S", 20) or 20)):
+        summary.update(status="unsupported", reason=f"{ENGINE} is busy with another ingest; no detections for this evidence, ingest it again later")
+        try:
+            os.unlink(output)
+        except OSError:
+            pass
+        return [], summary
     try:
         exe = binary()
         process = subprocess.Popen(
@@ -206,8 +232,8 @@ def run(target: str, tmp_dir: str, *, deadline_s: float | None = None) -> tuple[
                 rss = monitor.memory_info().rss
             except psutil.NoSuchProcess:
                 break
-            if rss > MAX_RSS:
-                stopped = f"stopped at the {MAX_RSS // 1024**2} MiB memory limit"
+            if rss > max_rss():
+                stopped = f"stopped at the {max_rss() // 1024**2} MiB memory limit"
             elif os.path.getsize(output) > MAX_OUTPUT:
                 stopped = f"stopped at the {MAX_OUTPUT // 1024**2} MiB output limit"
             elif time.monotonic() - started > limit:
@@ -229,6 +255,7 @@ def run(target: str, tmp_dir: str, *, deadline_s: float | None = None) -> tuple[
         summary.update(status="error", reason=f"{ENGINE} {type(exc).__name__}: {exc}"[:300])
         return [], summary
     finally:
+        slot.release()
         summary["seconds"] = round(time.monotonic() - started, 2)
         if process is not None and process.poll() is None:
             process.kill()

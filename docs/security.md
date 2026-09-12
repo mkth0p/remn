@@ -135,9 +135,12 @@ finishes.
   fast requests arrive, not how many are in flight, and the server cannot reap a request once it
   is running; this is what stops a few slow parses holding every worker thread indefinitely.
 - **External engines under the same bounds.** Hayabusa, when installed, runs as a separate
-  process watched for memory (1.5 GiB), output (256 MiB) and time (`HAYABUSA_MAX_S`, 300 s by
-  default, and never past the request deadline), and is killed rather than trusted past any of
-  them. A collection's event logs are held back for one engine run within the same per-request
+  process watched for memory (`HAYABUSA_MAX_MB`, 1536 by default and 768 in the public
+  compose), output (256 MiB) and time (`HAYABUSA_MAX_S`, 300 s by default, and never past the
+  request deadline), and is killed rather than trusted past any of them. Only
+  `HAYABUSA_CONCURRENCY` runs share the box at once, one by default, so two uploads cannot add
+  up to the container's memory limit; an ingest that finds the engine busy waits
+  `HAYABUSA_WAIT_S` and then carries on without it, saying so. A collection's event logs are held back for one engine run within the same per-request
   hold allowance as prefetch, and released with the parse. The binary in the image is pinned by
   version and by the SHA-256 of its release archive.
 - **A ceiling on what one parse spends.** Every native decode is counted and timed against one

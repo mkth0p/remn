@@ -142,6 +142,12 @@ HAYABUSA_PATH = os.environ.get("HAYABUSA_PATH", "").strip()
 HAYABUSA_RULES = os.environ.get("HAYABUSA_RULES", "").strip()
 HAYABUSA_MIN_LEVEL = os.environ.get("HAYABUSA_MIN_LEVEL", "low").strip() or "low"
 HAYABUSA_MAX_S = _env_int("HAYABUSA_MAX_S", 300)
+# Memory one engine run may reach before it is killed, and how many may run at once. Size the
+# product of the two under the container's memory limit with room for the parser itself.
+HAYABUSA_MAX_MB = _env_int("HAYABUSA_MAX_MB", 1536)
+HAYABUSA_CONCURRENCY = _env_int("HAYABUSA_CONCURRENCY", 1)
+# How long an ingest waits for a free slot before carrying on without the engine.
+HAYABUSA_WAIT_S = _env_int("HAYABUSA_WAIT_S", 20)
 # Replaces the option set wholesale for a release whose flags moved; see services/analysis/hayabusa.py
 HAYABUSA_ARGS = os.environ.get("HAYABUSA_ARGS", "").strip()
 CLAUDE_CODE_ENABLED = _env_bool("CLAUDE_CODE_ENABLED", True)

@@ -30,6 +30,10 @@ services:
       FORENSIC_TMP_MAX_GB: ${REMN_TMP_MAX_GB:-1}
       # one parse may hold a worker thread this long, then it is ended with what it has
       FORENSIC_INGEST_MAX_S: ${REMN_INGEST_MAX_S:-1800}
+      # Hayabusa: one run at a time, well inside the 2g container limit; REMN_HAYABUSA=0 turns it off
+      HAYABUSA_ENABLED: ${REMN_HAYABUSA:-1}
+      HAYABUSA_MAX_MB: ${REMN_HAYABUSA_MAX_MB:-768}
+      HAYABUSA_CONCURRENCY: "1"
     # This is the process that runs attacker-controlled EVTX, PST, OLE and registry hives through
     # libpff, the EVTX reader and oletools: the most CVE-prone libraries in the stack. It cannot be
     # made unexploitable, so it is made to be worth little. Nothing here changes what it can parse.
