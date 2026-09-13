@@ -763,6 +763,10 @@ def normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, Any
         "shareName": ("ShareName", "Share"),
         "destinationHostname": ("RemoteHost", "DestinationHostname", "ClientComputerName"),
         "processStart": ("CreationDate", "StartTime", "ProcessStartTime"),
+        "processEnd": ("EndTime", "ProcessEndTime", "ExitTime"),
+        "bootId": ("BootId", "BootIdentifier"),
+        "logonGuid": ("LogonGuid",),
+        "targetLogonId": ("TargetLogonId", "LogonId"),
     }
     for target, aliases in mappings.items():
         if (v := get(*aliases)) is not None:

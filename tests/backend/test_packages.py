@@ -488,7 +488,7 @@ def test_hex_and_decimal_pids_are_the_same_process():
     from services.analysis import relationships as R
 
     assert R.process_id("0x1f4") == R.process_id("500") == "500"
-    assert R.process_id(None) == "" and R.process_id("not-a-pid") == "not-a-pid"
+    assert R.process_id(None) == "" and R.process_id("not-a-pid") == ""
 
 
 def test_a_reported_digest_belongs_to_the_file_the_record_is_about():

@@ -209,14 +209,17 @@ two logs is not news and does not start a story. From a seed the walk goes recor
 entity to record. A strong entity (digest, file, process, URL, service, scheduled task,
 autorun, program) always joins two records. A medium one (domain, address, SID,
 account) joins them only when both carry an event time within the story window, or
-when both are collection observations without one. One extra entity hop is allowed
+when both are collection observations whose collection times fall within that same
+window. Missing event times do not permit unlimited-time joins. One extra entity hop is allowed
 when at least one of the two entities is strong, so an attachment digest reaches the
 process that ran the file through the file path, and a DNS domain reaches the mail
 through the URL; the weaker of the two decides whether time still matters. The walk
 continues past a record only when that record itself carries a finding or a mark, and
 stops three hops from the seed: routine rows are pulled in as context, they do not pull
 in more. An entity named by more than 150 records case-wide is a hub; it is shown as
-context and never walked. Two seeds that reach each other become one story.
+context and never walked. Two seeds that reach each other become one story. A finding
+or analyst-marked seed still expands its own links when an earlier walk already
+reached it at the hop limit; covered automatic leads remain context.
 
 A story carries a severity and a score, kept apart on purpose. The severity is the
 worst finding inside it, raised only when the score alone reaches a band (20 low,
@@ -256,7 +259,10 @@ all, the tab says so and Explore still lists every entity.
 A story holds at most 600 records; past that it is marked partial and its seeds and
 finding- or mark-bearing rows are kept first. At most 200 stories are shown, 2,000
 seeds are taken, the 60 strongest cross-source entities are considered as seeds, and
-each story lists 80 entities and 600 edges. Stories are recomputed from the cached
+each story lists 80 entities and 600 edges. Entity and edge limits also mark the story
+partial; retained edges only point to retained records and entities. Entity support
+counts distinct records, even when a record names an entity through multiple relations.
+Stories are recomputed from the cached
 graph each time the tab opens, after rules run and when the window changes, so a new
 finding or mark shows up without a rebuild; the graph itself needs a rebuild after the
 evidence changes.

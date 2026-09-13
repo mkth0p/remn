@@ -220,7 +220,7 @@ export function buildStoryGraph(story: Story): Graph {
       seenEdge.add(key)
       edges.push({ source: rt, target: ensureEntity(ent), kind: ent.bridge ? 'artifact' : 'entity', label: ent.bridge ? e.relation : undefined })
     } else if (entities.has(e.source) && entities.has(e.target) && shown.has(e.source) && shown.has(e.target)) {
-      const key = `${e.source}>${e.target}`
+      const key = `${e.source}>${e.target}>${e.relation}`
       if (seenEdge.has(key)) continue
       seenEdge.add(key)
       edges.push({ source: ensureEntity(entities.get(e.source)!), target: ensureEntity(entities.get(e.target)!), kind: 'entity', label: e.relation })

@@ -1,5 +1,7 @@
 import type { Finding, RowMark, Severity } from '../db/schema'
 import { relationshipLeads } from './relationshipLeads'
+import { joinDecision } from './relationshipIntelligence'
+import { referenceIdentity, sourceIdentity } from './relationships'
 import type { RelationshipEdge, RelationshipNode, RelationshipRef, RelationshipResult } from './relationships'
 
 /**
@@ -86,6 +88,7 @@ export interface StoryScore {
 }
 
 export interface Story {
+  blockedLinks?: { from: string; ref: RelationshipRef; reason: string }[]
   id: string
   /** the record the story is anchored on: its strongest seed (worst finding, then a pivot mark, then a relevant mark, then a cross-source entity), earliest first */
   anchor: string
@@ -138,6 +141,7 @@ export const WEIGHT: Record<string, number> = {
   hash: 8,
   file: 6,
   process: 6,
+  'logon-session': 6,
   url: 5,
   service: 5,
   task: 5,
@@ -276,13 +280,6 @@ function makeRecord(ix: Index, nodeId: string, hop: number): StoryRecord | null 
 
 /** Two records may be joined through an entity of this weight: strong entities always, medium
  * ones when both are timed and close, or both are collection snapshots. */
-function compatible(a: StoryRecord, b: StoryRecord, weight: number, windowMs: number): boolean {
-  if (weight >= STRONG) return true
-  if (weight < MEDIUM) return false
-  if (a.ts != null && b.ts != null) return Math.abs(a.ts - b.ts) <= windowMs
-  return a.ts == null && b.ts == null && a.observedAt != null && b.observedAt != null
-}
-
 export function buildStories(result: RelationshipResult | null, findings: Finding[], marks: RowMark[], options: StoryOptions = {}): StoryResult {
   const opt = { ...DEFAULTS, ...options }
   const empty: StoryResult = { stories: [], stats: { seeds: { finding: 0, mark: 0, lead: 0 }, records: 0, entities: 0, hubs: 0, truncated: false } }
@@ -337,6 +334,7 @@ export function buildStories(result: RelationshipResult | null, findings: Findin
   const records = new Map<string, StoryRecord>()
   const union = new Union()
   const capped = new Set<number>()
+  const blockedLinks: NonNullable<Story['blockedLinks']> = []
   let truncated = false
   const interesting = (node: string) => findingsOn.has(node) || markedBy.has(node)
   const recordsVia = (entity: string): string[] => [...(ix.recordsOf.get(entity) ?? [])]
@@ -348,8 +346,10 @@ export function buildStories(result: RelationshipResult | null, findings: Findin
     return 'names'
   }
   for (const s of seeds) {
-    if (owner.has(s.node)) continue
-    const story = union.make()
+    // Findings and analyst marks get their own bounded expansion, even when reached at
+    // another seed's hop limit. Covered automatic leads remain leaves to control noise.
+    if (owner.has(s.node) && s.reason === 'lead') continue
+    const story = owner.get(s.node) ?? union.make()
     let count = 0
     const queue: { node: string; hop: number; via: StoryVia | null }[] = [{ node: s.node, hop: 0, via: null }]
     while (queue.length) {
@@ -359,18 +359,18 @@ export function buildStories(result: RelationshipResult | null, findings: Findin
         if (union.find(existing) !== union.find(story)) union.union(existing, story)
         const known = records.get(node)
         if (known && via && !known.via.some((v) => v.entityId === via.entityId)) known.via.push(via)
-        continue
+        if (hop !== 0 || via !== null) continue
       }
       if (count >= opt.maxStoryRecords) {
         truncated = true
         capped.add(story)
         break
       }
-      const rec = makeRecord(ix, node, hop)
+      const rec = records.get(node) ?? makeRecord(ix, node, hop)
       if (!rec) continue
       owner.set(node, story)
       records.set(node, rec)
-      count++
+      if (existing == null) count++
       if (via) rec.via.push(via)
       rec.seed = seedReasons.get(node) ?? []
       rec.findings = findingsOn.get(node) ?? []
@@ -383,27 +383,42 @@ export function buildStories(result: RelationshipResult | null, findings: Findin
         if (!en || en.kind === 'record') continue
         const w = weightOf(entity)
         if (w < MEDIUM || isHub(entity)) continue
-        const reach = (through: string, throughWeight: number) => {
+        const reach = (through: string, witness?: RelationshipEdge) => {
           for (const other of recordsVia(through)) {
             if (other === node || noise.has(other) || (owner.get(other) != null && union.find(owner.get(other)!) === union.find(story))) continue
             const probe = records.get(other) ?? makeRecord(ix, other, hop + 1)
-            if (!probe || !compatible(rec, probe, throughWeight, opt.windowMs)) continue
+            if (!probe) continue
+            const decisions = [joinDecision(rec, probe, en, opt.windowMs), joinDecision(rec, probe, ix.nodes.get(through)!, opt.windowMs)]
+            const blocked = decisions.find((decision) => !decision.allowed)
+            if (blocked) {
+              if (
+                probe.ref &&
+                blockedLinks.length < 1000 &&
+                !blockedLinks.some((link) => link.from === rec.nodeId && referenceIdentity(link.ref) === referenceIdentity(probe.ref!) && link.reason === blocked.reason)
+              )
+                blockedLinks.push({ from: rec.nodeId, ref: probe.ref, reason: blocked.reason })
+              continue
+            }
+            // A file->digest assertion is about the version in its witness record, not every
+            // record naming that path. Never borrow another record's content attribution.
+            if (witness && witness.relation !== 'has host' && !witness.refs.some((ref) => [rec.ref, probe.ref].some((r) => r && referenceIdentity(r) === referenceIdentity(ref)))) continue
             const tn = ix.nodes.get(through)!
             queue.push({ node: other, hop: hop + 1, via: { entityId: through, kind: tn.kind, label: tn.label, relation: relationBetween(other, through), fromNodeId: node } })
           }
         }
-        reach(entity, w)
+        reach(entity)
         // one entity hop more when one of the two is strong: attachment digest <- file <- process
         // record, DNS domain <- URL <- mail, in either direction. The weaker of the two decides
         // whether time still matters.
         for (const j of ix.adjacent.get(entity) ?? []) {
           const f = result.edges[j]
+          if (f.assertion === 'hypothesized' || f.assertion === 'correlated') continue
           const next = f.source === entity ? f.target : f.source
           const fn = ix.nodes.get(next)
           if (!fn || fn.kind === 'record' || next === entity || isHub(next)) continue
           const wn = weightOf(next)
           if (wn < MEDIUM || Math.max(w, wn) < STRONG) continue
-          reach(next, Math.min(w, wn))
+          reach(next, f)
         }
       }
     }
@@ -430,24 +445,27 @@ export function buildStories(result: RelationshipResult | null, findings: Findin
       cut = true
     }
     const entityMap = new Map<string, StoryEntity>()
-    const sourcesOf = new Map<string, Set<string>>()
-    for (const r of recs)
+    const sourcesOf = new Map<string, Map<string, string>>()
+    for (const r of recs) {
+      const named = new Set<string>()
       for (const i of ix.adjacent.get(r.nodeId) ?? []) {
         const e = result.edges[i]
         const entity = e.source === r.nodeId ? e.target : e.source
         const en = ix.nodes.get(entity)
-        if (!en || en.kind === 'record') continue
+        if (!en || en.kind === 'record' || named.has(entity)) continue
+        named.add(entity)
         let ent = entityMap.get(entity)
         if (!ent) {
           ent = { id: entity, kind: en.kind, label: en.label, value: en.value, scope: en.scope, records: 0, sources: [], weight: weightOf(entity), bridge: false, hub: isHub(entity) }
           entityMap.set(entity, ent)
-          sourcesOf.set(entity, new Set())
+          sourcesOf.set(entity, new Map())
         }
         ent.records++
-        sourcesOf.get(entity)!.add(r.sourceFile ?? `evidence ${r.evidenceId ?? '?'}`)
+        sourcesOf.get(entity)!.set(r.ref ? sourceIdentity(r.ref) : r.nodeId, r.sourceFile ?? `evidence ${r.evidenceId ?? '?'}`)
       }
+    }
     for (const ent of entityMap.values()) {
-      ent.sources = [...sourcesOf.get(ent.id)!]
+      ent.sources = [...sourcesOf.get(ent.id)!.values()]
       ent.bridge = ent.sources.length >= 2 && ent.weight >= MEDIUM && !ent.hub
       if (ent.hub) hubs.add(ent.id)
     }
@@ -489,14 +507,18 @@ export function buildStories(result: RelationshipResult | null, findings: Findin
       }
     const storyFindings = [...findingMap.values()].sort((a, b) => rank(b.severity) - rank(a.severity) || b.count - a.count)
     const sources = [...new Set(recs.map((r) => r.sourceFile ?? `evidence ${r.evidenceId ?? '?'}`))]
-    const breakdown = scoreStory(storyFindings, entities, sources, recs)
+    const breakdown = scoreStory(storyFindings, entities, [...new Set(recs.map((r) => (r.ref ? sourceIdentity(r.ref) : r.nodeId)))], recs)
     const worstFinding = worst(storyFindings)
-    const byScore: Severity = breakdown.total >= 80 ? 'critical' : breakdown.total >= 60 ? 'high' : breakdown.total >= 40 ? 'medium' : breakdown.total >= 20 ? 'low' : 'info'
-    const severity = worstFinding && rank(worstFinding) > rank(byScore) ? worstFinding : byScore
+    const severity = worstFinding ?? 'info'
     const start = timed.length ? Math.min(...timed.map((r) => recordTime(r)!)) : null
     const end = timed.length ? Math.max(...timed.map((r) => recordTime(r)!)) : null
     const first = anchorOf(recs)
+    const keptEntities = entities.slice(0, 80)
+    const keptNodes = new Set([...recs.map((r) => r.nodeId), ...keptEntities.map((e) => e.id)])
+    const keptEdges = edges.filter((e) => keptNodes.has(e.source) && keptNodes.has(e.target)).slice(0, 600)
+    if (keptEntities.length < entities.length || keptEdges.length < edges.length) cut = true
     stories.push({
+      blockedLinks: blockedLinks.filter((link) => keptNodes.has(link.from)).slice(0, 30),
       id: `story:${first.source}:${first.id ?? first.nodeId}:${first.evidenceId ?? ''}`,
       anchor: first.nodeId,
       title: titleOf(storyFindings, entities, first),
@@ -507,8 +529,8 @@ export function buildStories(result: RelationshipResult | null, findings: Findin
       start,
       end,
       records: recs,
-      entities: entities.slice(0, 80),
-      edges: edges.slice(0, 600),
+      entities: keptEntities,
+      edges: keptEdges,
       sources,
       findings: storyFindings,
       truncated: cut,
@@ -544,7 +566,10 @@ export function scoreStory(findings: { severity: Severity; count: number }[], en
   const s = Math.min(15, Math.max(0, sources.length - 1) * 5)
   const m = Math.min(
     15,
-    records.reduce((t, r) => t + r.marks.reduce((u, v) => u + (v === 'pivot' ? 6 : v === 'relevant' ? 4 : 0), 0), 0),
+    [...new Map(records.map((r) => [r.ref ? referenceIdentity(r.ref) : r.nodeId, r])).values()].reduce(
+      (t, r) => t + r.marks.reduce((u, v) => u + (v === 'pivot' ? 6 : v === 'relevant' ? 4 : 0), 0),
+      0,
+    ),
   )
   return { findings: f, bridges: b, sources: s, marks: m, total: Math.min(100, f + b + s + m) }
 }

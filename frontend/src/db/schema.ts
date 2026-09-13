@@ -516,6 +516,8 @@ export async function deleteCaseData(db: RemnDB, caseId: number): Promise<void> 
   await db.transaction('rw', [...tables, db.kv], async () => {
     for (const t of tables) await t.where('caseId').equals(caseId).delete()
     await db.kv.bulkDelete(CASE_KV_KEYS(caseId)) // chain snapshot, diagnostics, calibration state, archived reviews
+    await db.kv.where('key').startsWith(`relationship-ai-${caseId}-`).delete()
+    await db.kv.where('key').startsWith(`relationship-hypothesis-${caseId}-`).delete()
   })
 }
 

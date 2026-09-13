@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { RelationshipInvestigation } from '../components/RelationshipInvestigation'
+import { assessStory, INTELLIGENCE_VERSION } from '../data/relationshipIntelligence'
 import { AddToTimeline } from '../components/AddToTimeline'
 import { ChainGraph } from '../components/ChainGraph'
 import { EventDetail, MailDetail } from '../components/Detail'
 import { IconAi, IconHost, IconLayers, IconMail, IconPlay } from '../components/Icons'
 import { Badge, Dot, Sev, Spinner, Tabs } from '../components/ui'
 import { buildRelationships, scanRelationships, type RelationshipAliases, type RelationshipEdge, type RelationshipNode, type RelationshipRef, type RelationshipResult } from '../data/relationships'
-import { loadRelationshipReviews, relationshipKey, saveRelationshipReview, type RelationshipReview } from '../data/relationshipReviews'
+import { loadRelationshipReviews, relationshipKey, reviewedRelationships, saveRelationshipReview, type RelationshipReview } from '../data/relationshipReviews'
 import { relationshipLeads } from '../data/relationshipLeads'
 import { buildStories, recordTime, type Story, type StoryEntity, type StoryRecord, type StoryResult } from '../data/relationshipStories'
 import { buildStoryGraph } from '../data/storyGraph'
@@ -22,7 +24,7 @@ import { fmtNum, fmtTs } from '../util/format'
  */
 
 type Mode = 'stories' | 'explore'
-type StoryTab = 'story' | 'graph' | 'links' | 'entities' | 'json'
+type StoryTab = 'investigate' | 'story' | 'graph' | 'links' | 'entities' | 'json'
 type Detail = { source: 'events'; row: EventRow } | { source: 'mails'; row: MailRow } | null
 
 const SEV_ORDER: Severity[] = ['info', 'low', 'medium', 'high', 'critical']
@@ -188,9 +190,22 @@ function LinkList({
         <details key={`${keyPrefix}-${i}`} className="card">
           <summary style={{ cursor: 'pointer', overflowWrap: 'anywhere' }}>
             {nodes.get(edge.source)?.label} → <strong>{edge.relation}</strong> → {nodes.get(edge.target)?.label} <Badge sev={edge.confidence === 'high' ? 'ok' : 'info'}>{edge.confidence}</Badge> ·{' '}
-            {edge.count} observations
+            {edge.count} supporting observations{edge.supportTruncated ? ' (capped sample; total may include duplicate imports)' : ''} · {edge.assertion ?? 'observed'}
           </summary>
           <p>{edge.reason}</p>
+          <div className="small muted">
+            Rule: {edge.rule ?? 'explicit source fields'} · {(edge.assumptions ?? []).join('; ')}
+          </div>
+          {edge.refs.some((r) => r.context) && (
+            <details>
+              <summary>Matching fields and time constraints</summary>
+              {edge.refs.slice(0, 5).map((ref, idx) => (
+                <pre className="small" key={idx}>
+                  {JSON.stringify({ source: ref.source, id: ref.id, ts: ref.ts, observedAt: ref.observedAt, fields: ref.context }, null, 2)}
+                </pre>
+              ))}
+            </details>
+          )}
           <RelationshipEditor key={relationshipKey(edge, nodes)} edge={edge} nodes={nodes} aliases={aliases} review={reviews[relationshipKey(edge, nodes)]} onSave={onSave} />
           <div className="row">
             <button className="btn xs" onClick={() => onExplore(edge.source)}>
@@ -343,6 +358,7 @@ function ExploreList({
 /** Severity, title, summary, the score breakdown and the entity pills of the selected story. */
 function StoryHeader({ story, onEntity, onAsk }: { story: Story; onEntity: (e: StoryEntity) => void; onAsk: () => void }) {
   const b = story.scoreBreakdown
+  const assessment = useMemo(() => assessStory(story), [story])
   return (
     <div style={{ padding: '12px 16px 8px', borderBottom: '1px solid var(--line)', background: 'var(--surface)' }}>
       <div className="row" style={{ gap: 10, alignItems: 'flex-start' }}>
@@ -355,7 +371,7 @@ function StoryHeader({ story, onEntity, onAsk }: { story: Story; onEntity: (e: S
         </div>
         <AddToTimeline ts={story.start} text={`Story: ${story.title}: ${story.summary}`} severity={story.severity} />
         <button className="btn sm" onClick={onAsk}>
-          <IconAi /> ask the analyst
+          <IconAi /> investigate
         </button>
       </div>
       <div
@@ -363,11 +379,15 @@ function StoryHeader({ story, onEntity, onAsk }: { story: Story; onEntity: (e: S
         style={{ marginTop: 6, color: 'var(--fg-3)' }}
         title="how the score is built: each part is bounded, so a long story of routine rows cannot outscore a short corroborated one"
       >
-        {`score ${b.total} = findings ${b.findings}/40 · links ${b.bridges}/30 · sources ${b.sources}/15 · marks ${b.marks}/15`}
+        {`priority ${b.total} = findings ${b.findings}/40 · links ${b.bridges}/30 · sources ${b.sources}/15 · marks ${b.marks}/15`}
+      </div>
+      <div className="small" style={{ marginTop: 6 }}>
+        Association confidence: {assessment.confidence} · {assessment.coverage.uniqueRecords} unique records · {assessment.coverage.sources} source contents · {assessment.issues.length} checks or
+        caveats
       </div>
       {story.truncated && (
         <div className="hint" style={{ marginTop: 4, color: 'var(--sev-medium)' }}>
-          Partial story: the record cap was reached. Seeds and records with findings or marks were kept first.
+          Partial story: a record, entity or link limit was reached. Seeds and records with findings or marks were kept first.
         </div>
       )}
       <div className="row wrap small" style={{ gap: 6, marginTop: 8 }}>
@@ -626,8 +646,6 @@ const CACHE_BUDGET = 20_000
 export function RelationshipsView() {
   const kase = useStore((s) => s.currentCase)
   const setEntity = useStore((s) => s.setEntity)
-  const setAiPrompt = useStore((s) => s.setAiPrompt)
-  const setView = useStore((s) => s.setView)
   const rulesVersion = useStore((s) => s.rulesVersion)
   const [result, setResult] = useState<RelationshipResult | null>(null)
   const [busy, setBusy] = useState(false)
@@ -678,8 +696,8 @@ export function RelationshipsView() {
           setEvidence(rows)
           setReviews(saved)
           setAliasesText(JSON.stringify(aliases?.value ?? {}, null, 2))
-          const cached = cache?.value as { fingerprint: string; result?: RelationshipResult; aliases: RelationshipAliases; scope: string; tooLarge?: number } | undefined
-          if (cached?.fingerprint === fingerprint(rows) && cached.result) {
+          const cached = cache?.value as { version?: number; fingerprint: string; result?: RelationshipResult; aliases: RelationshipAliases; scope: string; tooLarge?: number } | undefined
+          if (cached?.version === INTELLIGENCE_VERSION && cached.fingerprint === fingerprint(rows) && cached.result) {
             setResult(cached.result)
             setActiveAliases(cached.aliases)
             setEvidenceId(cached.scope)
@@ -704,7 +722,7 @@ export function RelationshipsView() {
     Promise.all([getDb().findings.where('caseId').equals(caseId).toArray(), getDb().rowMarks.where('caseId').equals(caseId).toArray()])
       .then(([findings, marks]) => {
         if (cancelled) return
-        const built = buildStories(result, findings, marks, { windowMs: hours * 3_600_000 })
+        const built = buildStories(reviewedRelationships(result, reviews), findings, marks, { windowMs: hours * 3_600_000 })
         setStories(built)
         setStoryId((cur) => (cur && built.stories.some((s) => s.id === cur) ? cur : (built.stories[0]?.id ?? null)))
       })
@@ -714,7 +732,7 @@ export function RelationshipsView() {
     return () => {
       cancelled = true
     }
-  }, [kase?.id, result, hours, rulesVersion])
+  }, [kase?.id, result, hours, rulesVersion, reviews])
 
   const byId = useMemo(() => new Map(result?.nodes.map((n) => [n.id, n]) ?? []), [result])
   const degrees = useMemo(() => {
@@ -780,8 +798,8 @@ export function RelationshipsView() {
         {
           key: `relationship-cache-${kase.id}`,
           value: cacheable
-            ? { fingerprint: fingerprint(evidence), result: next, aliases, scope: evidenceId }
-            : { fingerprint: fingerprint(evidence), aliases, scope: evidenceId, cursor: next.cursor, tooLarge: next.nodes.length + next.edges.length },
+            ? { version: INTELLIGENCE_VERSION, fingerprint: fingerprint(evidence), result: next, aliases, scope: evidenceId }
+            : { version: INTELLIGENCE_VERSION, fingerprint: fingerprint(evidence), aliases, scope: evidenceId, cursor: next.cursor, tooLarge: next.nodes.length + next.edges.length },
         },
       ])
       if (!alive.current || generation.current !== current) return
@@ -808,9 +826,11 @@ export function RelationshipsView() {
       const ds = getSource(kase)
       if (source === 'events') {
         const row = await ds.getEvent(id)
+        if (!row) throw new Error(`Event #${id} is no longer available. Rebuild relationships.`)
         if (row && alive.current) setDetail({ source: 'events', row })
       } else {
         const mail = await ds.getMail(id)
+        if (!mail) throw new Error(`Mail #${id} is no longer available. Rebuild relationships.`)
         if (mail && alive.current) setDetail({ source: 'mails', row: mail.row })
       }
     } catch (e) {
@@ -842,27 +862,7 @@ export function RelationshipsView() {
     if (ref) setEntity(ref)
     else explore(e.id)
   }
-  const ask = (s: Story) => {
-    const b = s.scoreBreakdown
-    const bridges = s.entities.filter((e) => e.bridge)
-    setAiPrompt(
-      `Walk me through the story "${s.title}" (severity ${s.severity}, score ${s.score}: findings ${b.findings}/40, links ${b.bridges}/30, sources ${b.sources}/15, marks ${b.marks}/15). ${s.records.length} records from ${s.sources.length} source file(s)${
-        s.start != null && s.end != null ? ` between ${new Date(s.start).toISOString()} and ${new Date(s.end).toISOString()}` : ''
-      }. Records: ${s.records
-        .slice(0, 30)
-        .map((r) => {
-          const t = recordTime(r)
-          return `${t != null ? new Date(t).toISOString() : 'no time'} ${r.title}${r.findings.length ? ' [' + r.findings.map((f) => f.ruleId).join('; ') + ']' : ''}${r.marks.length ? ' (marked ' + r.marks.join(', ') + ')' : ''}`
-        })
-        .join(' | ')}${s.records.length > 30 ? ` | and ${s.records.length - 30} more` : ''}. Entities tying the sources together: ${
-        bridges
-          .slice(0, 10)
-          .map((e) => `${e.kind} ${e.label} (${e.sources.length} sources)`)
-          .join('; ') || 'none'
-      }. Which records show malicious activity, which are context, and what should be checked or contained next?`,
-    )
-    setView('ai')
-  }
+  const ask = (_s: Story) => setTab('investigate')
   const recordPane = story && record && <RecordPane story={story} record={record} onOpen={(r) => openRow(r.source, r.id)} onClose={() => setSelectedRecord(null)} />
   return (
     <div className="view">
@@ -954,7 +954,7 @@ export function RelationshipsView() {
         )}
         {stories?.stats.truncated && (
           <div role="status" className="hint">
-            Some stories were cut at the record or story cap. Narrow the evidence scope or the window to read them whole.
+            Some stories were cut at a record, entity, link or story limit. Narrow the evidence scope or the window to read them whole.
           </div>
         )}
       </div>
@@ -996,6 +996,7 @@ export function RelationshipsView() {
                   { id: 'story' as const, label: 'Story' },
                   { id: 'graph' as const, label: 'Graph' },
                   { id: 'links' as const, label: 'Links' },
+                  { id: 'investigate' as const, label: 'Investigate' },
                   { id: 'entities' as const, label: 'Entities' },
                   { id: 'json' as const, label: 'JSON' },
                 ]}
@@ -1036,6 +1037,9 @@ export function RelationshipsView() {
                   </div>
                   {recordPane}
                 </div>
+              )}
+              {tab === 'investigate' && (
+                <RelationshipInvestigation key={`${kase.id}:${story.id}`} kase={kase} story={story} partial={!!result?.cursor || !!result?.stats.truncated} reviews={reviews} onOpen={openRow} />
               )}
               {tab === 'links' && (
                 <div className="view-body col" style={{ gap: 10 }}>

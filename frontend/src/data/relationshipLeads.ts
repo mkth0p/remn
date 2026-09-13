@@ -1,4 +1,5 @@
 import type { RelationshipNode, RelationshipRef, RelationshipResult } from './relationships'
+import { referenceIdentity, sourceIdentity } from './relationships'
 
 export interface RelationshipLead {
   node: RelationshipNode
@@ -27,8 +28,8 @@ export function relationshipLeads(result: RelationshipResult | null): Relationsh
       for (const ref of edge.refs) {
         // A source is an archive member or evidence item, not an arbitrary row.
         if (ref.evidenceId == null) continue
-        const source = JSON.stringify([ref.evidenceId, ref.sourceFile || null])
-        const record = JSON.stringify([source, ref.source, ref.id, ref.sourceIndex])
+        const source = sourceIdentity(ref)
+        const record = referenceIdentity(ref)
         item.sources.set(source, ref.sourceFile || `Evidence ${ref.evidenceId}`)
         if (!item.records.has(record) && item.references.length < 8) item.references.push(ref)
         item.records.add(record)

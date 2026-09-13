@@ -6,6 +6,61 @@ import type { RelationshipEdge, RelationshipNode, RelationshipRef, RelationshipR
 const H = 3_600_000
 const T0 = Date.UTC(2026, 7, 19, 8, 0, 0)
 
+it('bounds snapshot-to-snapshot address links by collection time', () => {
+  const f = new Fixture()
+  const account = f.entity('ip', '198.51.100.42')
+  for (const [id, elapsed] of [
+    [1, 0],
+    [2, H],
+    [3, 10 * 24 * H],
+  ]) {
+    f.link(f.record('events', id, { title: `snapshot ${id}`, sourceFile: 'snapshot.csv', observedAt: T0 + elapsed }), account, 'names account')
+  }
+  const result = buildStories(f.result(), [], [mark('events', 1, 'pivot')])
+  expect(result.stories[0].records.map((r) => r.id)).toEqual([1, 2])
+})
+
+it("expands a finding seed already reached at another seed's hop limit", () => {
+  const f = new Fixture()
+  const records = [1, 2, 3, 4, 5].map((id) => f.record('events', id, { title: `record ${id}`, sourceFile: 'host.csv', ts: T0 + id * H }))
+  for (let i = 0; i < 4; i++) {
+    const hash = f.entity('hash', `digest-${i}`)
+    f.link(records[i], hash, 'reports hash')
+    f.link(records[i + 1], hash, 'reports hash')
+  }
+  const result = buildStories(
+    f.result(),
+    [1, 2, 3, 4].map((id) => finding({ source: 'events', refs: [id], ruleId: `r${id}` })),
+    [],
+  )
+  expect(result.stories).toHaveLength(1)
+  expect(result.stories[0].records.map((r) => r.nodeId)).toEqual(records)
+  expect(result.stories[0].records[4].via).toContainEqual(expect.objectContaining({ fromNodeId: records[3] }))
+})
+
+it('flags entity limits and keeps all exported link endpoints inside the story', () => {
+  const f = new Fixture()
+  const r = f.record('events', 1, { title: 'many entities', sourceFile: 'host.csv', ts: T0 })
+  for (let i = 0; i < 81; i++) f.link(r, f.entity('file', `c:\\file${i}`, 'ws01'), 'names file')
+  const result = buildStories(f.result(), [finding({ source: 'events', refs: [1] })], [])
+  const s = result.stories[0]
+  expect(s.entities).toHaveLength(80)
+  expect(s.truncated && result.stats.truncated).toBe(true)
+  const ids = new Set([...s.records.map((record) => record.nodeId), ...s.entities.map((entity) => entity.id)])
+  expect(s.edges.every((edge) => ids.has(edge.source) && ids.has(edge.target))).toBe(true)
+})
+
+it('counts supporting records once across different relations and flags the link cap', () => {
+  const f = new Fixture()
+  const r = f.record('events', 1, { title: 'many relations', sourceFile: 'host.csv', ts: T0 })
+  const hash = f.entity('hash', 'sha256:' + 'ab'.repeat(32))
+  for (let i = 0; i < 601; i++) f.link(r, hash, `relation ${i}`)
+  const result = buildStories(f.result(), [finding({ source: 'events', refs: [1] })], [])
+  expect(result.stories[0].entities[0].records).toBe(1)
+  expect(result.stories[0].edges).toHaveLength(600)
+  expect(result.stories[0].truncated && result.stats.truncated).toBe(true)
+})
+
 /** A small builder that mirrors the shapes the backend produces: record nodes scoped "<source>:<id>:<evidence>", entities by kind. */
 class Fixture {
   nodes: RelationshipNode[] = []
@@ -182,7 +237,7 @@ describe('stories from the relationship graph', () => {
   it('expansion continues past a record only when that record carries a finding or a mark', () => {
     const f = new Fixture()
     const ip = f.entity('ip', '198.51.100.7')
-    const bob = f.entity('account', 'corp\bob')
+    const bob = f.entity('logon-session', 'boot1:123', 'ws01')
     const logon = f.record('events', 1, { title: 'logon from the address', sourceFile: 'Security.evtx', ts: T0 })
     const rdp = f.record('events', 2, { title: 'rdp session', sourceFile: 'TerminalServices.evtx', ts: T0 + 1 * H })
     const bobMail = f.record('mails', 3, { title: 'bob forwards the invoice', sourceFile: 'bob.eml', ts: T0 + 2 * H })
@@ -196,7 +251,7 @@ describe('stories from the relationship graph', () => {
     const marked = buildStories(f.result(), [seed], [mark('events', 2, 'relevant')]).stories[0]
     expect(marked.records.map((r) => r.title)).toEqual(['logon from the address', 'rdp session', 'bob forwards the invoice'])
     expect(marked.records[2].hop).toBe(2)
-    expect(marked.records[2].via[0]).toMatchObject({ kind: 'account', relation: 'sent by', fromNodeId: rdp })
+    expect(marked.records[2].via[0]).toMatchObject({ kind: 'logon-session', relation: 'sent by', fromNodeId: rdp })
   })
 
   it('analyst marks seed stories, add to the score, and a noise mark keeps a row out', () => {
@@ -283,7 +338,7 @@ describe('stories from the relationship graph', () => {
       Array.from({ length: 9 }, () => ({ severity: 'critical' as const, count: 1 })),
       [entity('hash', 8), entity('file', 6), entity('process', 6), entity('url', 5), entity('ip', 3), entity('domain', 3), entity('account', 2)],
       ['a', 'b', 'c', 'd', 'e', 'f'],
-      Array.from({ length: 5 }, () => ({ marks: ['pivot' as const] }) as never),
+      Array.from({ length: 5 }, (_, i) => ({ nodeId: `record:${i}`, marks: ['pivot' as const] }) as never),
     )
     expect(s).toEqual({ findings: 40, bridges: 30, sources: 15, marks: 15, total: 100 })
   })

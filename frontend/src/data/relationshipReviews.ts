@@ -1,5 +1,6 @@
 import { getDb } from '../db/schema'
 import type { RelationshipEdge, RelationshipNode, RelationshipRef, RelationshipAliases } from './relationships'
+import type { RelationshipResult } from './relationships'
 
 export interface RelationshipReview {
   key: string
@@ -43,6 +44,12 @@ export function relationshipKey(edge: RelationshipEdge, nodes: Map<string, Relat
 
 export async function loadRelationshipReviews(caseId: number): Promise<Record<string, RelationshipReview>> {
   return ((await getDb().kv.get(`relationship-reviews-${caseId}`))?.value as Record<string, RelationshipReview>) ?? {}
+}
+
+/** Rejected links remain reviewable in Explore but cannot join records into stories. */
+export function reviewedRelationships(result: RelationshipResult, reviews: Record<string, RelationshipReview>): RelationshipResult {
+  const nodes = new Map(result.nodes.map((n) => [n.id, n]))
+  return { ...result, edges: result.edges.filter((edge) => edge.assertion !== 'hypothesized' && reviews[relationshipKey(edge, nodes)]?.status !== 'rejected') }
 }
 
 export async function saveRelationshipReview(caseId: number, review: RelationshipReview): Promise<void> {

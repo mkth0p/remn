@@ -102,6 +102,10 @@ export async function runAgent(messages: ChatMessage[], kase: Case, opts: AgentO
     messages.push(assistant)
     opts.onMessage?.(assistant)
     if (!calls.length) return messages
+    if (opts.tools === false) {
+      messages.push({ role: 'assistant', content: '(stopped: this request does not permit tool calls)', ts: Date.now() })
+      return messages
+    }
     for (const c of calls) {
       if (opts.signal?.aborted) return messages
       opts.onToolCall?.(c.name, c.arguments)

@@ -1,5 +1,6 @@
 """Explicit aliases and conservative process resolution within one collection snapshot."""
 
+from services.analysis.relationship_identity import instant, numeric_id
 from services.parsers.collection import timestamp
 
 
@@ -36,7 +37,7 @@ def prepare(events, options=None, process_context=None):
         observed = row.get("observedAt")
         return (
             row.get("computer"),
-            str(row.get("processId") or row.get("newProcessId") or ""),
+            numeric_id(row.get("processId") or row.get("newProcessId")),
             row.get("packageId"),
             observed if type(observed) is int else timestamp(observed),
         )
@@ -56,14 +57,21 @@ def prepare(events, options=None, process_context=None):
             if qualified:
                 row[field] = canonical("accounts", qualified)
         key = snapshot(row)
-        start = timestamp(row.get("processStart"))
-        if row.get("artifactType") == "process" and all(v is not None and v != "" for v in key) and start is not None and start <= key[3]:
+        start = instant(row.get("processStart"))
+        end = instant(row.get("processEnd"))
+        if (
+            row.get("artifactType") == "process"
+            and all(v is not None and v != "" for v in key)
+            and start is not None
+            and start <= key[3]
+            and (end is None or key[3] <= end)
+        ):
             candidates.setdefault(key, []).append(row)
     for row in rows:
         if (options or {}).get("resolveSnapshots") is False:
             break
         matches = candidates.get(snapshot(row), [])
-        if row.get("artifactType") == "connection" and not row.get("processGuid") and timestamp(row.get("processStart")) is None and len(matches) == 1:
+        if row.get("artifactType") == "connection" and not row.get("processGuid") and instant(row.get("processStart")) is None and len(matches) == 1:
             row["processStart"] = matches[0]["processStart"]
             if matches[0].get("processGuid"):
                 row["processGuid"] = matches[0]["processGuid"]

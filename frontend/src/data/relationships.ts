@@ -19,6 +19,8 @@ export interface RelationshipRef {
   ts: number | null
   observedAt: number | null
   title: string
+  context?: Record<string, string | number>
+  identityIssues?: string[]
 }
 export interface RelationshipEdge {
   source: string
@@ -28,6 +30,10 @@ export interface RelationshipEdge {
   confidence: string
   refs: RelationshipRef[]
   count: number
+  assertion?: 'observed' | 'correlated' | 'hypothesized'
+  rule?: string
+  assumptions?: string[]
+  supportTruncated?: boolean
 }
 export interface RelationshipResult {
   nodes: RelationshipNode[]
@@ -41,7 +47,7 @@ export interface RelationshipResult {
 export type RelationshipAliases = { hosts?: Record<string, string>; accounts?: Record<string, string> }
 export const RELATIONSHIP_CAP = 20_000
 const FIELDS =
-  'id evidenceId sourceFile sourceName sourceIndex sourceSha256 packageId memberIndex recordKind artifactType observedAt ts date computer targetUser targetDomain targetSid subjectUser subjectDomain user upn image processName processGuid processId newProcessId callerProcessId imageLoaded processStart parentProcessGuid parentImage parentProcessName serviceName serviceFile taskName path targetFilename hashes destinationIp sourceIp ipAddress destinationHostname query fromAddr toList to summary subject name groupName memberName serviceAccount company deceptionEpisodeId deceptionExhibitId deceptionParentExhibitId deceptionScope deceptionAction deceptionResult deceptionStage'.split(
+  'id evidenceId sourceFile sourceName sourceIndex sourceSha256 packageId memberIndex recordKind artifactType observedAt ts date computer targetUser targetDomain targetSid subjectUser subjectDomain user upn image processName processGuid processId newProcessId callerProcessId imageLoaded processStart processEnd bootId logonGuid targetLogonId subjectLogonId eventId provider channel parentProcessGuid parentImage parentProcessName serviceName serviceFile taskName path targetFilename hashes destinationIp sourceIp ipAddress destinationHostname query fromAddr toList to summary subject name groupName memberName serviceAccount company deceptionEpisodeId deceptionExhibitId deceptionParentExhibitId deceptionScope deceptionAction deceptionResult deceptionStage'.split(
     ' ',
   )
 
@@ -124,10 +130,18 @@ export function mergeRelationships(previous: RelationshipResult | null, next: Re
       capped = true
       continue
     }
+    const refs = [...new Map([...(old?.refs ?? []), ...edge.refs].map((r) => [referenceIdentity(r), r])).values()]
     edges.set(
       key,
       old
-        ? { ...old, count: old.count + edge.count, refs: [...old.refs, ...edge.refs].slice(0, next.stats.referenceCap), confidence: old.confidence === 'contextual' ? 'contextual' : edge.confidence }
+        ? {
+            ...old,
+            count: old.count + edge.count - (old.refs.length + edge.refs.length - refs.length),
+            refs: refs.slice(0, next.stats.referenceCap),
+            supportTruncated: old.supportTruncated || edge.supportTruncated || old.count > old.refs.length || edge.count > edge.refs.length || refs.length > next.stats.referenceCap,
+            assertion: old.assertion === 'correlated' || edge.assertion === 'correlated' ? 'correlated' : (old.assertion ?? edge.assertion),
+            confidence: old.confidence === 'contextual' ? 'contextual' : edge.confidence,
+          }
         : edge,
     )
   }
@@ -139,6 +153,14 @@ export function mergeRelationships(previous: RelationshipResult | null, next: Re
     processContextTruncated: next.processContextTruncated ?? previous.processContextTruncated,
     stats: { ...next.stats, events: previous.stats.events + next.stats.events, mails: previous.stats.mails + next.stats.mails, truncated: previous.stats.truncated || next.stats.truncated || capped },
   }
+}
+
+/** Content provenance, independent of database IDs and renamed copies of hashed exports. */
+export function sourceIdentity(ref: RelationshipRef): string {
+  return JSON.stringify([ref.source, ref.sourceSha256?.toLowerCase() || ref.sourceFile?.toLowerCase() || `evidence:${ref.evidenceId}`])
+}
+export function referenceIdentity(ref: RelationshipRef): string {
+  return JSON.stringify([sourceIdentity(ref), ref.sourceIndex ?? [ref.ts, ref.observedAt, ref.title]])
 }
 
 /** Scan successive pages once, retaining the current page when the analyst stops. */

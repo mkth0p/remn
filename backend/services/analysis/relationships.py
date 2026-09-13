@@ -15,7 +15,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from services.analysis.collection_context import prepare
-from services.parsers.collection import timestamp
+from services.analysis.relationship_identity import instant, numeric_id, process_guid
 
 ROW_CAP = 20_000
 NODE_CAP = 20_000
@@ -51,6 +51,14 @@ FIELDS = (
     "callerProcessId",
     "imageLoaded",
     "processStart",
+    "processEnd",
+    "bootId",
+    "logonGuid",
+    "targetLogonId",
+    "subjectLogonId",
+    "eventId",
+    "provider",
+    "channel",
     "parentProcessGuid",
     "parentImage",
     "parentProcessName",
@@ -101,13 +109,7 @@ def process_id(value: Any) -> str:
     Windows reports process identifiers in both decimal and 0x-hex depending on the channel, and
     comparing the raw text makes "0x1f4" and "500" two different processes.
     """
-    text = clean(value)
-    if not text:
-        return ""
-    try:
-        return str(int(text, 16) if text[:2].lower() == "0x" else int(text, 10))
-    except ValueError:
-        return text
+    return numeric_id(value)
 
 
 def subject_process_id(row: dict[str, Any]) -> tuple[str, str]:
@@ -145,6 +147,7 @@ def build(events: list[dict[str, Any]], mails: list[dict[str, Any]], options: di
     events = prepare(events, options, process_context)
     nodes: dict[str, dict[str, Any]] = {}
     edges: dict[tuple[str, str, str], dict[str, Any]] = {}
+    witnesses: dict[tuple[str, str, str], set[str]] = {}
     limited = False
 
     def node(kind: str, value: str, scope: str = "", label: str | None = None) -> str | None:
@@ -168,11 +171,41 @@ def build(events: list[dict[str, Any]], mails: list[dict[str, Any]], options: di
             if len(edges) >= EDGE_CAP:
                 limited = True
                 return
-            edges[k] = {"source": a, "target": b, "relation": relation, "reason": reason, "confidence": confidence, "refs": [], "count": 0}
+            edges[k] = {
+                "source": a,
+                "target": b,
+                "relation": relation,
+                "reason": reason,
+                "confidence": confidence,
+                "refs": [],
+                "count": 0,
+                "assertion": "correlated" if "snapshot match" in reason or "inferred, not stated" in reason else "observed",
+                "rule": "explicit-fields/v2",
+                "assumptions": [reason],
+                "supportTruncated": False,
+            }
+            witnesses[k] = set()
         edge = edges[k]
+        if confidence == "contextual":
+            edge["confidence"] = confidence
+        if "snapshot match" in reason or "inferred, not stated" in reason:
+            edge["assertion"] = "correlated"
+        witness = json.dumps(
+            [
+                ref.get("source"),
+                ref.get("sourceSha256") or ref.get("sourceFile") or ref.get("evidenceId"),
+                ref.get("sourceIndex") if ref.get("sourceIndex") is not None else ref.get("id"),
+            ],
+            sort_keys=True,
+        )
+        if witness in witnesses[k]:
+            return
+        witnesses[k].add(witness)
         edge["count"] += 1
         if len(edge["refs"]) < REF_CAP:
             edge["refs"].append(ref)
+        else:
+            edge["supportTruncated"] = True
 
     def ip(value: Any) -> str | None:
         try:
@@ -193,8 +226,12 @@ def build(events: list[dict[str, Any]], mails: list[dict[str, Any]], options: di
         v = clean(value).casefold()
         if not v or v in ("-", "n/a"):
             return None
+        if v.startswith((".\\", "nt authority\\", "builtin\\")):
+            return node("account", v.removeprefix(".\\"), host or ref_scope)
         if "@" in v or "\\" in v:
             return node("account", v)
+        if clean(realm) == ".":
+            return node("account", v, host or ref_scope)
         if clean(realm):
             return node("account", clean(realm).casefold() + "\\" + v)
         return node("account", v, host or ref_scope, f"{v} ({host or 'unresolved scope'})")
@@ -207,6 +244,11 @@ def build(events: list[dict[str, Any]], mails: list[dict[str, Any]], options: di
                 ts=row.get("ts") if source == "events" else row.get("date"),
                 recordKind=row.get("recordKind") or "event",
                 title=clean(row.get("summary") or row.get("subject")),
+                context={
+                    k: clean(row[k]) if isinstance(row[k], str) else row[k]
+                    for k in FIELDS
+                    if k in row and k not in ("summary", "subject", "urls", "attachments", "to", "toList") and isinstance(row[k], (str, int, float))
+                },
             )
             if not ref["sourceFile"]:
                 ref["sourceFile"] = row.get("sourceName")
@@ -252,7 +294,7 @@ def build(events: list[dict[str, Any]], mails: list[dict[str, Any]], options: di
                 )
             sid = clean(row.get("targetSid"))
             if re.fullmatch(r"S-1-(?:\d+-)*\d+", sid, re.I):
-                sn = node("sid", sid.upper())
+                sn = node("sid", sid.upper(), (host or scope) if not sid.upper().startswith("S-1-5-21-") else "")
                 link(record, sn, "names SID", "Security identifier explicitly recorded", "high", ref)
                 link(
                     account(row.get("targetUser"), row.get("targetDomain"), host, scope),
@@ -266,8 +308,18 @@ def build(events: list[dict[str, Any]], mails: list[dict[str, Any]], options: di
             file_scope = host or scope
             fn = node("file", image_value, file_scope)
             link(record, fn, "names executable", "Full Windows path in the executable field, scoped to its host", "high" if host else "contextual", ref)
-            guid = clean(row.get("processGuid")).casefold()
-            start = timestamp(row.get("processStart"))
+            guid = process_guid(row.get("processGuid"))
+            start = instant(row.get("processStart"))
+            end = instant(row.get("processEnd"))
+            at = instant(row.get("ts") if row.get("recordKind") != "observation" else row.get("observedAt"))
+            invalid_lifetime = (start is not None and end is not None and start > end) or (
+                at is not None and ((start is not None and at < start) or (end is not None and at > end))
+            )
+            if invalid_lifetime:
+                guid, start = "", None
+                ref["identityIssues"] = ["Record time falls outside the stated process lifetime; process instance was not joined"]
+            elif row.get("processGuid") and not guid:
+                ref["identityIssues"] = ["Invalid or zero process GUID; no GUID identity was created"]
             pid, pid_field = subject_process_id(row)
             process_key = guid if guid else f"{pid}@{start}" if pid and start is not None else ""
             pn = node("process", process_key, host, f"{image_value or 'process'} · {process_key}") if host and process_key else None
@@ -297,10 +349,26 @@ def build(events: list[dict[str, Any]], mails: list[dict[str, Any]], options: di
                 "contextual" if row.get("_processResolution") else "high",
                 ref,
             )
-            parent_guid = clean(row.get("parentProcessGuid")).casefold()
+            parent_guid = process_guid(row.get("parentProcessGuid"))
             if host and parent_guid:
                 parent = node("process", parent_guid, host)
                 link(parent, pn, "parent of", "Explicit parent process GUID", "high", ref)
+            # A logon LUID is unique only within a host boot. Without a boot boundary it is
+            # retained as a record-scoped observation, never used to glue account activity.
+            logon_guid = process_guid(row.get("logonGuid"))
+            for field in ("targetLogonId", "subjectLogonId"):
+                luid = numeric_id(row.get(field))
+                boot = clean(row.get("bootId"))
+                session_key = logon_guid or (f"{boot}:{luid}" if boot and luid else "")
+                session = node("logon-session", session_key, host) if host and session_key else node("logon-observation", luid, scope)
+                link(
+                    record,
+                    session,
+                    "names logon session",
+                    f"{field}; exact sessions require a host and a logon GUID or boot-scoped LUID",
+                    "high" if session_key else "contextual",
+                    ref,
+                )
             for field, kind in (("serviceName", "service"), ("taskName", "task")):
                 entity = node(kind, clean(row.get(field)).casefold(), file_scope)
                 link(record, entity, "observed configuration", f"{field} appears in this record; observation does not establish creation time", "high", ref)

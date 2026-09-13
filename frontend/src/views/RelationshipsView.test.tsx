@@ -10,8 +10,10 @@ vi.mock('../api/client', () => ({ apiPost: vi.fn(), apiGet: vi.fn(), API_HEADERS
 vi.mock('../data/source', () => ({ getSource: () => ({ kind: 'browser', getEvent: async () => null, getMail: async () => null }) }))
 // the ECharts renderer needs a canvas; the view only has to hand it the story graph
 vi.mock('../components/ChainGraph', () => ({ ChainGraph: () => 'story graph placeholder' }))
+vi.mock('../ai/chat', () => ({ runAgent: vi.fn() }))
 
 import { RelationshipsView } from './RelationshipsView'
+import { runAgent } from '../ai/chat'
 
 const WAIT = { timeout: 8000 }
 const TEST_TIMEOUT = 30_000 // jsdom + fake-indexeddb are slow on first render
@@ -107,7 +109,7 @@ afterEach(async () => {
 /** The cache the view reads on mount, keyed by the same evidence fingerprint the view computes. */
 async function cache(result: RelationshipResult) {
   const fingerprint = JSON.stringify([[9, 'abc', 2, 'done']])
-  await db.kv.put({ key: 'relationship-cache-1', value: { fingerprint, result, aliases: {}, scope: '' } })
+  await db.kv.put({ key: 'relationship-cache-1', value: { version: 2, fingerprint, result, aliases: {}, scope: '' } })
 }
 
 const sub = () => document.querySelector('.view-header .sub')?.textContent ?? ''
@@ -124,6 +126,19 @@ async function loadStory() {
 
 describe('RelationshipsView', () => {
   it(
+    'shows investigation evidence and makes no automatic AI request',
+    async () => {
+      await loadStory()
+      fireEvent.click(screen.getByRole('button', { name: /^Investigate$/ }))
+      await waitFor(() => expect(screen.getByText('Evidence-bound AI review')).toBeTruthy(), WAIT)
+      expect(screen.getByText('Contradictions, alternatives and gaps')).toBeTruthy()
+      expect(screen.getByText('Next useful checks')).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Review selected story with AI' })).toBeTruthy()
+      expect(runAgent).not.toHaveBeenCalled()
+    },
+    TEST_TIMEOUT,
+  )
+  it(
     'lists the story a finding seeds and reads it as a timeline with the finding badge and the anchor',
     async () => {
       await loadStory()
@@ -134,7 +149,7 @@ describe('RelationshipsView', () => {
       expect(row.querySelector('.meta')?.textContent).toContain('2 records')
       expect(row.querySelector('.meta')?.textContent).toContain('1 links')
       // the first story is selected: its header, breakdown and records are shown
-      expect(screen.getByText(/^score \d+ = findings \d+\/40 · links \d+\/30 · sources \d+\/15 · marks \d+\/15$/)).toBeTruthy()
+      expect(screen.getByText(/^priority \d+ = findings \d+\/40 · links \d+\/30 · sources \d+\/15 · marks \d+\/15$/)).toBeTruthy()
       await waitFor(() => expect(steps().length).toBe(2), WAIT)
       const titles = Array.from(document.querySelectorAll('.story .step .title')).map((el) => el.textContent)
       expect(titles).toEqual(['Invoice 2026-08', 'process upd.exe'])

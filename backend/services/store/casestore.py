@@ -50,6 +50,8 @@ EVENT_COLUMNS: list[tuple[str, tuple[str, Any]]] = [
     ("artifactType", _S),
     ("observedAt", _L),
     ("processStart", _S),
+    ("processEnd", _S),
+    ("bootId", _S),
     ("packageId", _S),
     ("sourceSha256", _S),
     ("sourceIndex", _L),
