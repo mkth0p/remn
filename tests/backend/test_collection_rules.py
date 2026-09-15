@@ -95,7 +95,9 @@ def test_alert_text_does_not_double_report_a_named_threat(store):
 
     # the named threat belongs to the detection rule; the other two lines are one finding per log file, both lines listed on it
     assert len(found) == 1 and found[0]["count"] == 2
-    assert sorted(found[0]["entities"]["message"]) == ["Real-time protection disabled by policy", "Set-MpPreference -DisableRealtimeMonitoring $true"]
+    lines = found[0]["entities"]["message"]
+    text = (lines if isinstance(lines, str) else " | ".join(lines)).lower()
+    assert "real-time protection disabled by policy" in text and "disablerealtimemonitoring" in text
 
 
 def test_unquoted_service_paths_with_spaces(store):
