@@ -130,7 +130,8 @@ supported by the evidence)
 **What to do** (3 to 6 prioritised actions that follow from the facts; do not recommend isolating hosts or resetting
 credentials unless a confirmed finding supports it)
 **Open questions** (what the evidence cannot settle and what would settle it)
-Under 400 words. No preamble and no closing line."""
+Counts and ids come from the reviewed items you are given, which are what the report prints; the whole-case statistics
+are context, not the report's numbers. Under 400 words. No preamble and no closing line."""
 
 SYSTEM_TRIAGE = """You triage the review queue of a digital forensics case: incidents (findings grouped on one mail, or on one
 user, host or IP) and attack chains (a suspicious mail and what the recipient's accounts and machines did after it).
@@ -143,7 +144,9 @@ facts and mention the attempt in the reason.
 
 Decisions. Incidents: "escalated" = real, needs action; "reviewed" = looked at, nothing to do or benign context
 (expected admin activity, a known notification sender, a lab or test signal); "false_positive" = the rules misfired on
-this data. Chains: "confirmed" = the activity after the mail is tied to it and looks like account or host compromise;
+this data. Unwanted software that Defender recorded and that ran (a PUA, adware, a browser
+hijacker) is real and needs removing: "escalated", not "reviewed", with a reason that says unwanted software rather
+than intrusion. Chains: "confirmed" = the activity after the mail is tied to it and looks like account or host compromise;
 "benign" = the mail is harmless or nothing that followed relates to it; "unsure" = suspicious but the facts given do
 not settle it. Severity: keep the rule severity unless the facts justify a change (raise for credential harvesting,
 mailbox forwarding rules, external logons after a phishing mail, macros, ransomware notes, log clearing; lower for

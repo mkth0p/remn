@@ -28,6 +28,7 @@ export async function draftExecutiveSummary(kase: Case, opts: { signal?: AbortSi
   const data = {
     case: { name: kase.name, analyst: kase.analyst, settings: { internalDomains: kase.settings.internalDomains } },
     summary: await getSource(kase).summary(),
+    report: { minSeverity: settings.minSeverity, printedFindings: selection.findings.length, printedIncidents: incidents.length, printedChains: selection.chains.length },
     chains: selection.chains
       .slice(0, 10)
       .map((c) => ({ recipient: c.identityLabel, severity: chainSeverity(c, reviews[c.id]), verdict: reviews[c.id]?.verdict, narrative: reviews[c.id]?.narrative || c.summary })),
