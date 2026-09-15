@@ -195,6 +195,12 @@ describe('RelationshipsView', () => {
     async () => {
       await loadStory()
       fireEvent.click(screen.getByRole('button', { name: 'Links' }))
+      // the review form mounts when a link is opened
+      await waitFor(() => expect(document.querySelectorAll('details.card').length).toBeGreaterThan(0), WAIT)
+      for (const d of document.querySelectorAll<HTMLDetailsElement>('details.card')) {
+        d.open = true
+        fireEvent(d, new Event('toggle'))
+      }
       await waitFor(() => expect(screen.getAllByLabelText('Relationship decision').length).toBeGreaterThan(0), WAIT)
       expect(screen.getByText('attachment digest', { exact: true })).toBeTruthy()
       expect(screen.getAllByText('Include accepted link in report').length).toBeGreaterThan(0)
@@ -243,7 +249,11 @@ describe('RelationshipsView', () => {
       await waitFor(() => expect(screen.getAllByRole('button').filter((b) => /^host · /.test(b.textContent ?? ''))).toHaveLength(1), WAIT)
       fireEvent.click(screen.getAllByRole('button').filter((b) => /^host · /.test(b.textContent ?? ''))[0])
       await waitFor(() => expect(screen.getByText('observed on', { exact: true })).toBeTruthy(), WAIT)
-      expect(screen.getAllByLabelText('Relationship decision')).toHaveLength(1)
+      // one link (the related-evidence timeline is a card too), whose review form mounts once it is opened
+      const link = screen.getByText('observed on', { exact: true }).closest('details')!
+      link.open = true
+      fireEvent(link, new Event('toggle'))
+      await waitFor(() => expect(screen.getAllByLabelText('Relationship decision')).toHaveLength(1), WAIT)
     },
     TEST_TIMEOUT,
   )

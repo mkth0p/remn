@@ -234,6 +234,34 @@ describe('stories from the relationship graph', () => {
     expect(mail.seed).toEqual(['lead'])
   })
 
+  it('a digest seen on most hosts is a hub even below the record threshold; the threshold itself grows with the case', () => {
+    const f = new Fixture()
+    const digest = f.entity('hash', 'sha256:' + '77'.repeat(32))
+    for (let i = 0; i < 8; i++) {
+      const host = f.entity('host', `ws${i}`)
+      const r = f.record('events', 100 + i, { title: `svchost on ws${i}`, sourceFile: `ws${i}/processes.csv`, observedAt: T0 })
+      f.link(r, host, 'observed on')
+      f.link(r, digest, 'reports hash')
+    }
+    const seed = finding({ source: 'events', refs: [100], title: 'Odd process' })
+    const wide = buildStories(f.result(), [seed], []).stories.find((s) => s.title === 'Odd process')!
+    expect(wide.records).toHaveLength(1)
+    expect(wide.entities.find((e) => e.kind === 'hash')).toMatchObject({ hub: true, bridge: false })
+    const narrow = buildStories(f.result(), [seed], [], { hubHosts: 10 }).stories.find((s) => s.title === 'Odd process')!
+    expect(narrow.records).toHaveLength(8)
+    // 1% of the records: with 2,000 record nodes an entity needs more than 20 records to be a hub, whatever a lower option says
+    const big = new Fixture()
+    const ip = big.entity('ip', '198.51.100.9')
+    const dc = big.entity('host', 'dc01')
+    for (let i = 0; i < 2_000; i++) {
+      const r = big.record('events', i + 1, { title: `row ${i}`, sourceFile: 'Security.evtx', ts: T0 + i })
+      big.link(r, i < 15 ? ip : dc, i < 15 ? 'names address' : 'observed on')
+    }
+    const { stories } = buildStories(big.result(), [finding({ source: 'events', refs: [1], title: 'Seed' })], [], { windowMs: 10 * H, hubRecords: 10 })
+    expect(stories[0].entities.find((e) => e.kind === 'ip')).toMatchObject({ hub: false })
+    expect(stories[0].records).toHaveLength(15)
+  })
+
   it('expansion continues past a record only when that record carries a finding or a mark', () => {
     const f = new Fixture()
     const ip = f.entity('ip', '198.51.100.7')

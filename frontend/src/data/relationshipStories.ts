@@ -25,7 +25,7 @@ import type { RelationshipEdge, RelationshipNode, RelationshipRef, RelationshipR
  * attachment and a prefetch entry is medium and well corroborated.
  */
 
-export type StoryLane = 'mail' | 'host'
+export type StoryLane = 'mail' | 'cloud' | 'host'
 
 export interface StoryVia {
   /** the entity this record was reached through */
@@ -128,8 +128,10 @@ export interface StoryResult {
 export interface StoryOptions {
   /** two timed records joined through a medium entity must be this close (ms); strong entities ignore time */
   windowMs?: number
-  /** an entity named by more records than this, case-wide, is a hub */
+  /** an entity named by more records than this, or than 1% of the case's records, is a hub */
   hubRecords?: number
+  /** a global entity (digest, URL, domain, address) seen on more hosts than this, or than a fifth of the case's hosts, is a hub */
+  hubHosts?: number
   maxStoryRecords?: number
   maxStories?: number
   maxSeeds?: number
@@ -161,7 +163,9 @@ export const WEIGHT: Record<string, number> = {
 export const STRONG = 4
 export const MEDIUM = 2
 
-const DEFAULTS: Required<StoryOptions> = { windowMs: 72 * 3_600_000, hubRecords: 150, maxStoryRecords: 600, maxStories: 200, maxSeeds: 2_000 }
+const DEFAULTS: Required<StoryOptions> = { windowMs: 72 * 3_600_000, hubRecords: 150, hubHosts: 6, maxStoryRecords: 600, maxStories: 200, maxSeeds: 2_000 }
+/** entities that are the same thing on every host, so their spread across hosts says how common they are */
+const GLOBAL_KINDS = new Set(['hash', 'url', 'domain', 'ip'])
 const SEV: Severity[] = ['info', 'low', 'medium', 'high', 'critical']
 const rank = (s: string) => Math.max(0, SEV.indexOf(s as Severity))
 const worst = (items: { severity: Severity }[]): Severity | null => (items.length ? SEV[Math.max(...items.map((f) => rank(f.severity)))] : null)
@@ -179,6 +183,12 @@ interface Index {
   refOf: Map<string, RelationshipRef>
   /** entity id -> record node ids naming it */
   recordsOf: Map<string, Set<string>>
+  /** record node id -> the host node it was observed on */
+  hostOf: Map<string, string>
+  /** how many host nodes the graph has */
+  hosts: number
+  /** how many record nodes the graph has */
+  records: number
 }
 
 function parseRecord(node: RelationshipNode): { source: 'events' | 'mails'; id: number | null; evidenceId: number | null } | null {
@@ -196,6 +206,13 @@ function index(result: RelationshipResult): Index {
   const recordByRow = new Map<string, string>()
   const refOf = new Map<string, RelationshipRef>()
   const recordsOf = new Map<string, Set<string>>()
+  const hostOf = new Map<string, string>()
+  let hosts = 0
+  let records = 0
+  for (const n of result.nodes) {
+    if (n.kind === 'host') hosts++
+    else if (n.kind === 'record') records++
+  }
   const push = (id: string, i: number) => {
     const list = adjacent.get(id)
     if (list) list.push(i)
@@ -207,6 +224,7 @@ function index(result: RelationshipResult): Index {
     const src = nodes.get(e.source)
     if (src?.kind === 'record') {
       if (!refOf.has(e.source) && e.refs[0]) refOf.set(e.source, e.refs[0])
+      if (nodes.get(e.target)?.kind === 'host') hostOf.set(e.source, e.target)
       const set = recordsOf.get(e.target)
       if (set) set.add(e.source)
       else recordsOf.set(e.target, new Set([e.source]))
@@ -225,7 +243,7 @@ function index(result: RelationshipResult): Index {
     const parsed = parseRecord(n)
     if (parsed && parsed.id != null) recordByRow.set(`${parsed.source}:${parsed.id}`, n.id)
   }
-  return { nodes, adjacent, recordByRow, refOf, recordsOf }
+  return { nodes, adjacent, recordByRow, refOf, recordsOf, hostOf, hosts, records }
 }
 
 class Union {
@@ -268,7 +286,7 @@ function makeRecord(ix: Index, nodeId: string, hop: number): StoryRecord | null 
     recordKind: ref?.recordKind ?? 'event',
     title: ref?.title || node.label || `${source} record`,
     sourceFile: ref?.sourceFile ?? null,
-    lane: source === 'mails' ? 'mail' : 'host',
+    lane: source === 'mails' ? 'mail' : ref?.origin === 'm365' ? 'cloud' : 'host',
     hop,
     seed: [],
     via: [],
@@ -286,7 +304,28 @@ export function buildStories(result: RelationshipResult | null, findings: Findin
   if (!result || !result.nodes.length) return empty
   const ix = index(result)
   const weightOf = (id: string) => WEIGHT[ix.nodes.get(id)?.kind ?? ''] ?? 2
-  const isHub = (id: string) => (ix.recordsOf.get(id)?.size ?? 0) > opt.hubRecords
+  // A hub is relative to the case: 150 records is a lot in a lab and nothing in a 500,000-row
+  // collection, and a digest present on most machines is a system binary whatever its count.
+  const hubRecords = Math.max(opt.hubRecords, Math.floor(ix.records / 100))
+  const hubHosts = Math.max(opt.hubHosts, Math.ceil(ix.hosts / 5))
+  const hubMemo = new Map<string, boolean>()
+  const isHub = (id: string): boolean => {
+    const known = hubMemo.get(id)
+    if (known !== undefined) return known
+    const named = ix.recordsOf.get(id)
+    let hub = (named?.size ?? 0) > hubRecords
+    if (!hub && named && GLOBAL_KINDS.has(ix.nodes.get(id)?.kind ?? '')) {
+      const seen = new Set<string>()
+      for (const r of named) {
+        const h = ix.hostOf.get(r)
+        if (h) seen.add(h)
+        if (seen.size > hubHosts) break
+      }
+      hub = seen.size > hubHosts
+    }
+    hubMemo.set(id, hub)
+    return hub
+  }
   const noise = new Set<string>()
   const markedBy = new Map<string, RowMark['verdict'][]>()
   for (const m of marks) {

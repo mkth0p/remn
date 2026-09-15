@@ -216,8 +216,9 @@ process that ran the file through the file path, and a DNS domain reaches the ma
 through the URL; the weaker of the two decides whether time still matters. The walk
 continues past a record only when that record itself carries a finding or a mark, and
 stops three hops from the seed: routine rows are pulled in as context, they do not pull
-in more. An entity named by more than 150 records case-wide is a hub; it is shown as
-context and never walked. Two seeds that reach each other become one story. A finding
+in more. An entity named by more than 150 records case-wide, or by more than one record in a
+hundred, is a hub; so is a digest, URL, domain or address seen on more than six hosts or
+on more than a fifth of the case's hosts. A hub is shown as context and never walked. Two seeds that reach each other become one story. A finding
 or analyst-marked seed still expands its own links when an earlier walk already
 reached it at the hop limit; covered automatic leads remain context.
 
@@ -262,10 +263,11 @@ seeds are taken, the 60 strongest cross-source entities are considered as seeds,
 each story lists 80 entities and 600 edges. Entity and edge limits also mark the story
 partial; retained edges only point to retained records and entities. Entity support
 counts distinct records, even when a record names an entity through multiple relations.
-Stories are recomputed from the cached
-graph each time the tab opens, after rules run and when the window changes, so a new
-finding or mark shows up without a rebuild; the graph itself needs a rebuild after the
-evidence changes.
+Stories are computed in a worker from the
+cached graph each time the tab opens, after rules run, when a link review or the window
+changes, so a new finding or mark shows up without a rebuild; the graph itself needs a
+rebuild after the evidence changes. The stories of the last build are kept apart from the
+graph, so a graph too large to cache still leaves its stories readable until the rebuild.
 
 The graph joins service → executable → digest ← mail attachment, and source record →
 process instance → observed endpoint. Instances require a host plus a GUID or PID with

@@ -499,6 +499,7 @@ export const CASE_KV_KEYS = (caseId: number) =>
     'relationship-reviews',
     'relationship-aliases',
     'relationship-cache',
+    'relationship-stories',
   ].map((p) => `${p}-${caseId}`)
 
 /**

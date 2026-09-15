@@ -59,6 +59,7 @@ FIELDS = (
     "eventId",
     "provider",
     "channel",
+    "category",
     "parentProcessGuid",
     "parentImage",
     "parentProcessName",
@@ -93,6 +94,13 @@ FIELDS = (
     "deceptionResult",
     "deceptionStage",
 )
+
+
+def origin(row: dict[str, Any]) -> str:
+    """Where an event row comes from, the way chains.py tells cloud audit rows from host logs."""
+    provider = clean(row.get("provider")).casefold()
+    category = clean(row.get("category")).casefold()
+    return "m365" if "unified audit" in provider or "entra" in provider or category.startswith(("m365", "entra")) else "host"
 
 
 def clean(value: Any) -> str:
@@ -244,6 +252,7 @@ def build(events: list[dict[str, Any]], mails: list[dict[str, Any]], options: di
                 ts=row.get("ts") if source == "events" else row.get("date"),
                 recordKind=row.get("recordKind") or "event",
                 title=clean(row.get("summary") or row.get("subject")),
+                origin=origin(row) if source == "events" else None,
                 context={
                     k: clean(row[k]) if isinstance(row[k], str) else row[k]
                     for k in FIELDS

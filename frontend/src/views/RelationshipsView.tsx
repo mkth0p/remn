@@ -4,12 +4,13 @@ import { assessStory, INTELLIGENCE_VERSION } from '../data/relationshipIntellige
 import { AddToTimeline } from '../components/AddToTimeline'
 import { ChainGraph } from '../components/ChainGraph'
 import { EventDetail, MailDetail } from '../components/Detail'
-import { IconAi, IconHost, IconLayers, IconMail, IconPlay } from '../components/Icons'
+import { IconAi, IconCloud, IconHost, IconLayers, IconMail, IconPlay } from '../components/Icons'
 import { Badge, Dot, Sev, Spinner, Tabs } from '../components/ui'
 import { buildRelationships, scanRelationships, type RelationshipAliases, type RelationshipEdge, type RelationshipNode, type RelationshipRef, type RelationshipResult } from '../data/relationships'
-import { loadRelationshipReviews, relationshipKey, reviewedRelationships, saveRelationshipReview, type RelationshipReview } from '../data/relationshipReviews'
+import { loadRelationshipReviews, relationshipKey, saveRelationshipReview, type RelationshipReview } from '../data/relationshipReviews'
 import { relationshipLeads } from '../data/relationshipLeads'
-import { buildStories, recordTime, type Story, type StoryEntity, type StoryRecord, type StoryResult } from '../data/relationshipStories'
+import { recordTime, type Story, type StoryEntity, type StoryRecord, type StoryResult } from '../data/relationshipStories'
+import { StoriesClient } from '../data/storiesClient'
 import { buildStoryGraph } from '../data/storyGraph'
 import { getSource } from '../data/source'
 import { getDb, type EventRow, type Evidence, type MailRow, type Severity } from '../db/schema'
@@ -187,11 +188,46 @@ function LinkList({
   return (
     <>
       {edges.slice(0, limit).map((edge, i) => (
-        <details key={`${keyPrefix}-${i}`} className="card">
-          <summary style={{ cursor: 'pointer', overflowWrap: 'anywhere' }}>
-            {nodes.get(edge.source)?.label} → <strong>{edge.relation}</strong> → {nodes.get(edge.target)?.label} <Badge sev={edge.confidence === 'high' ? 'ok' : 'info'}>{edge.confidence}</Badge> ·{' '}
-            {edge.count} supporting observations{edge.supportTruncated ? ' (capped sample; total may include duplicate imports)' : ''} · {edge.assertion ?? 'observed'}
-          </summary>
+        <LinkItem key={`${keyPrefix}-${i}`} edge={edge} nodes={nodes} aliases={aliases} reviews={reviews} onSave={onSave} onExplore={onExplore} onOpen={onOpen} />
+      ))}
+      {edges.length > limit && (
+        <span className="small muted">
+          Showing {limit} of {fmtNum(edges.length)} links.
+        </span>
+      )}
+    </>
+  )
+}
+
+/** One link. The summary is always there; the review form and the supporting rows mount when the link is opened, so a story with hundreds of links costs hundreds of lines, not hundreds of forms. */
+function LinkItem({
+  edge,
+  nodes,
+  aliases,
+  reviews,
+  onSave,
+  onExplore,
+  onOpen,
+}: {
+  edge: RelationshipEdge
+  nodes: Map<string, RelationshipNode>
+  aliases: RelationshipAliases
+  reviews: Record<string, RelationshipReview>
+  onSave: (r: RelationshipReview) => Promise<void>
+  onExplore: (nodeId: string) => void
+  onOpen: (ref: RelationshipRef) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const label = (id: string) => nodes.get(id)?.label ?? id
+  return (
+    <details className="card" onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}>
+      <summary style={{ cursor: 'pointer', overflowWrap: 'anywhere' }}>
+        {label(edge.source)} → <strong>{edge.relation}</strong> → {label(edge.target)} <Badge sev={edge.confidence === 'high' ? 'ok' : 'info'}>{edge.confidence}</Badge> · {edge.count} supporting
+        observations
+        {edge.supportTruncated ? ' (capped sample; total may include duplicate imports)' : ''} · {edge.assertion ?? 'observed'}
+      </summary>
+      {open && (
+        <>
           <p>{edge.reason}</p>
           <div className="small muted">
             Rule: {edge.rule ?? 'explicit source fields'} · {(edge.assumptions ?? []).join('; ')}
@@ -206,7 +242,11 @@ function LinkList({
               ))}
             </details>
           )}
-          <RelationshipEditor key={relationshipKey(edge, nodes)} edge={edge} nodes={nodes} aliases={aliases} review={reviews[relationshipKey(edge, nodes)]} onSave={onSave} />
+          {nodes.size ? (
+            <RelationshipEditor key={relationshipKey(edge, nodes)} edge={edge} nodes={nodes} aliases={aliases} review={reviews[relationshipKey(edge, nodes)]} onSave={onSave} />
+          ) : (
+            <p className="small muted">These stories come from the last build; rebuild relationships to review links.</p>
+          )}
           <div className="row">
             <button className="btn xs" onClick={() => onExplore(edge.source)}>
               Explore source
@@ -234,14 +274,9 @@ function LinkList({
               Showing {edge.refs.length} of {edge.count} supporting observations.
             </p>
           )}
-        </details>
-      ))}
-      {edges.length > limit && (
-        <span className="small muted">
-          Showing {limit} of {fmtNum(edges.length)} links.
-        </span>
+        </>
       )}
-    </>
+    </details>
   )
 }
 
@@ -414,7 +449,7 @@ function StoryTimeline({ story, selected, onSelect }: { story: Story; selected: 
       {story.records.map((r) => {
         const time = recordTime(r)
         const collected = r.recordKind === 'observation'
-        const Icon = r.source === 'mails' ? IconMail : collected ? IconLayers : IconHost
+        const Icon = r.source === 'mails' ? IconMail : r.lane === 'cloud' ? IconCloud : collected ? IconLayers : IconHost
         const via = r.via[0]
         return (
           <div key={r.nodeId} className={'step' + (selected === r.nodeId ? ' active' : '')} onClick={() => onSelect(r.nodeId)}>
@@ -424,8 +459,8 @@ function StoryTimeline({ story, selected, onSelect }: { story: Story; selected: 
               {r.nodeId === story.anchor ? <span style={{ color: 'var(--accent)' }}>anchor</span> : <span>{recordKindText(r)}</span>}
             </span>
             <span
-              className={'n ' + (r.source === 'mails' ? 'mail' : 'host') + (collected ? ' collected' : '')}
-              title={r.source === 'mails' ? 'mailbox' : collected ? 'collected artifact' : 'Windows host'}
+              className={'n ' + (r.source === 'mails' ? 'mail' : r.lane === 'cloud' ? 'm365' : 'host') + (collected ? ' collected' : '')}
+              title={r.source === 'mails' ? 'mailbox' : r.lane === 'cloud' ? 'Microsoft 365 / Entra' : collected ? 'collected artifact' : 'Windows host'}
             >
               <Icon />
             </span>
@@ -642,6 +677,8 @@ function Explorer({
 
 /** Nodes plus edges a cached graph may hold; past it only the cursor and options are kept. */
 const CACHE_BUDGET = 20_000
+/** records, entities and edges the cached stories of a case may hold in total */
+const STORY_CACHE_BUDGET = 60_000
 
 export function RelationshipsView() {
   const kase = useStore((s) => s.currentCase)
@@ -660,6 +697,16 @@ export function RelationshipsView() {
   // stories
   const [hoursText, setHoursText] = useState('72')
   const [stories, setStories] = useState<StoryResult | null>(null)
+  /** stories read back from the last build because the graph itself was too large to cache */
+  const [storiesFromCache, setStoriesFromCache] = useState(false)
+  const client = useRef<StoriesClient | null>(null)
+  useEffect(() => {
+    client.current = new StoriesClient()
+    return () => {
+      client.current?.dispose()
+      client.current = null
+    }
+  }, [])
   const [mode, setMode] = useState<Mode>('stories')
   const [storyId, setStoryId] = useState<string | null>(null)
   const [selectedRecord, setSelectedRecord] = useState<string | null>(null)
@@ -691,7 +738,12 @@ export function RelationshipsView() {
         .equals(kase.id)
         .toArray()
         .then(async (rows) => {
-          const [saved, aliases, cache] = await Promise.all([loadRelationshipReviews(kase.id!), getDb().kv.get(`relationship-aliases-${kase.id}`), getDb().kv.get(`relationship-cache-${kase.id}`)])
+          const [saved, aliases, cache, storyCache] = await Promise.all([
+            loadRelationshipReviews(kase.id!),
+            getDb().kv.get(`relationship-aliases-${kase.id}`),
+            getDb().kv.get(`relationship-cache-${kase.id}`),
+            getDb().kv.get(`relationship-stories-${kase.id}`),
+          ])
           if (!alive.current || current !== generation.current) return
           setEvidence(rows)
           setReviews(saved)
@@ -703,6 +755,16 @@ export function RelationshipsView() {
             setEvidenceId(cached.scope)
             setSelected(relationshipLeads(cached.result)[0]?.node.id ?? cached.result.nodes.find((n) => n.kind !== 'record')?.id ?? '')
           } else if (cached?.tooLarge) {
+            // the stories are small whatever the graph's size, so the last build's stories are shown
+            // read-only until a rebuild brings the graph back
+            const kept = storyCache?.value as { version?: number; fingerprint: string; scope: string; hours: number; stories: StoryResult } | undefined
+            if (kept?.version === INTELLIGENCE_VERSION && kept.fingerprint === fingerprint(rows) && kept.stories) {
+              setStories(kept.stories)
+              setStoriesFromCache(true)
+              setEvidenceId(kept.scope)
+              setHoursText(String(kept.hours))
+              setStoryId(kept.stories.stories[0]?.id ?? null)
+            }
             setError('The previous graph was too large to cache. Rebuild to scan the evidence again; your saved reviews are retained.')
           }
         })
@@ -711,20 +773,28 @@ export function RelationshipsView() {
     }
   }, [kase?.id])
 
-  // stories: from the graph, the findings and the analyst's marks; again when the rules ran or the window changed
+  // stories: from the graph, the findings and the analyst's marks, built in a worker; again when
+  // the rules ran, a review or the window changed. The result is cached by evidence fingerprint
+  // so a graph too large to cache still leaves its stories behind.
   useEffect(() => {
     const caseId = kase?.id
     if (!caseId || !result) {
-      setStories(null)
+      if (!storiesFromCache) setStories(null)
       return
     }
     let cancelled = false
     Promise.all([getDb().findings.where('caseId').equals(caseId).toArray(), getDb().rowMarks.where('caseId').equals(caseId).toArray()])
-      .then(([findings, marks]) => {
-        if (cancelled) return
-        const built = buildStories(reviewedRelationships(result, reviews), findings, marks, { windowMs: hours * 3_600_000 })
+      .then(([findings, marks]) => (cancelled ? null : client.current?.build(result, findings, marks, reviews, { windowMs: hours * 3_600_000 })))
+      .then((built) => {
+        if (cancelled || !built) return
         setStories(built)
+        setStoriesFromCache(false)
         setStoryId((cur) => (cur && built.stories.some((s) => s.id === cur) ? cur : (built.stories[0]?.id ?? null)))
+        const size = built.stories.reduce((t, s) => t + s.records.length + s.entities.length + s.edges.length, 0)
+        if (size <= STORY_CACHE_BUDGET)
+          getDb()
+            .kv.put({ key: `relationship-stories-${caseId}`, value: { version: INTELLIGENCE_VERSION, fingerprint: fingerprint(evidence), scope: evidenceId, hours, stories: built } })
+            .catch(() => {})
       })
       .catch((e) => {
         if (!cancelled) setError((e as Error).message)
@@ -732,7 +802,9 @@ export function RelationshipsView() {
     return () => {
       cancelled = true
     }
-  }, [kase?.id, result, hours, rulesVersion, reviews])
+    // evidence and evidenceId only label the cache entry; they change together with result
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kase?.id, result, hours, rulesVersion, reviews, storiesFromCache])
 
   const byId = useMemo(() => new Map(result?.nodes.map((n) => [n.id, n]) ?? []), [result])
   const degrees = useMemo(() => {
@@ -955,6 +1027,11 @@ export function RelationshipsView() {
         {stories?.stats.truncated && (
           <div role="status" className="hint">
             Some stories were cut at a record, entity, link or story limit. Narrow the evidence scope or the window to read them whole.
+          </div>
+        )}
+        {storiesFromCache && (
+          <div role="status" className="hint">
+            Stories from the last build. The graph was too large to keep, so Explore, the link reviews and new findings need a rebuild.
           </div>
         )}
       </div>

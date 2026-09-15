@@ -491,6 +491,23 @@ def test_hex_and_decimal_pids_are_the_same_process():
     assert R.process_id(None) == "" and R.process_id("not-a-pid") == ""
 
 
+def test_a_reference_says_whether_the_row_is_cloud_audit_or_host_log():
+    from services.analysis import relationships as R
+
+    rows = [
+        {"id": 1, "evidenceId": 1, "computer": "ws01", "provider": "Microsoft-Windows-Security-Auditing", "summary": "logon"},
+        {"id": 2, "evidenceId": 1, "provider": "Microsoft 365 Unified Audit", "targetUser": "alice@corp.test", "summary": "sign-in"},
+        {"id": 3, "evidenceId": 1, "category": "entra:signin", "targetUser": "alice@corp.test", "summary": "sign-in"},
+    ]
+    graph = R.build(rows, [{"id": 9, "evidenceId": 1, "subject": "hello", "fromAddr": "x@evil.test"}])
+    by_row = {}
+    for edge in graph["edges"]:
+        for ref in edge["refs"]:
+            by_row[(ref["source"], ref["id"])] = ref.get("origin")
+    assert by_row[("events", 1)] == "host" and by_row[("events", 2)] == "m365" and by_row[("events", 3)] == "m365"
+    assert by_row[("mails", 9)] is None
+
+
 def test_a_reported_digest_belongs_to_the_file_the_record_is_about():
     """A Sysmon FileCreateStreamHash or ImageLoad reports the digest of the target or the loaded
     module, not of the executable of the process doing it."""

@@ -16,6 +16,8 @@ export interface RelationshipRef {
   sourceSha256: string | null
   sourceIndex: number | null
   recordKind: string
+  /** events only: a Microsoft 365 / Entra audit row, or a Windows host row */
+  origin?: 'host' | 'm365'
   ts: number | null
   observedAt: number | null
   title: string
@@ -47,7 +49,7 @@ export interface RelationshipResult {
 export type RelationshipAliases = { hosts?: Record<string, string>; accounts?: Record<string, string> }
 export const RELATIONSHIP_CAP = 20_000
 const FIELDS =
-  'id evidenceId sourceFile sourceName sourceIndex sourceSha256 packageId memberIndex recordKind artifactType observedAt ts date computer targetUser targetDomain targetSid subjectUser subjectDomain user upn image processName processGuid processId newProcessId callerProcessId imageLoaded processStart processEnd bootId logonGuid targetLogonId subjectLogonId eventId provider channel parentProcessGuid parentImage parentProcessName serviceName serviceFile taskName path targetFilename hashes destinationIp sourceIp ipAddress destinationHostname query fromAddr toList to summary subject name groupName memberName serviceAccount company deceptionEpisodeId deceptionExhibitId deceptionParentExhibitId deceptionScope deceptionAction deceptionResult deceptionStage'.split(
+  'id evidenceId sourceFile sourceName sourceIndex sourceSha256 packageId memberIndex recordKind artifactType observedAt ts date computer targetUser targetDomain targetSid subjectUser subjectDomain user upn image processName processGuid processId newProcessId callerProcessId imageLoaded processStart processEnd bootId logonGuid targetLogonId subjectLogonId eventId provider channel category parentProcessGuid parentImage parentProcessName serviceName serviceFile taskName path targetFilename hashes destinationIp sourceIp ipAddress destinationHostname query fromAddr toList to summary subject name groupName memberName serviceAccount company deceptionEpisodeId deceptionExhibitId deceptionParentExhibitId deceptionScope deceptionAction deceptionResult deceptionStage'.split(
     ' ',
   )
 

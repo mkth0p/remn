@@ -108,7 +108,7 @@ export function buildStoryGraph(story: Story): Graph {
   type Group = { items: StoryRecord[]; lane: Lane; key: string; pinned: boolean }
   const groups: Group[] = []
   for (const r of story.records) {
-    const lane: Lane = r.lane === 'mail' ? 'mail' : 'host'
+    const lane: Lane = r.lane === 'mail' ? 'mail' : r.lane === 'cloud' ? 'cloud' : 'host'
     const key = titleKey(r.title)
     const pinned = !plain(r)
     const last = groups[groups.length - 1]
@@ -124,7 +124,14 @@ export function buildStoryGraph(story: Story): Graph {
       if (a.pinned || b.pinned || (sameLane && a.lane !== b.lane)) continue
       a.items.push(...b.items)
       a.key = '*'
-      if (!sameLane) a.lane = a.items.filter((r) => r.lane === 'mail').length * 2 >= a.items.length ? 'mail' : 'host'
+      if (!sameLane) {
+        const count = new Map<Lane, number>()
+        for (const r of a.items) {
+          const l: Lane = r.lane === 'mail' ? 'mail' : r.lane === 'cloud' ? 'cloud' : 'host'
+          count.set(l, (count.get(l) ?? 0) + 1)
+        }
+        a.lane = [...count.entries()].sort((x, y) => y[1] - x[1])[0][0]
+      }
       groups.splice(g + 1, 1)
       return true
     }
