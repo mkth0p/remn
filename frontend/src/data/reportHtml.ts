@@ -111,14 +111,17 @@ export function computeVerdict(d: ReportData): Verdict {
     const sevs = [...confirmedChains.map((c) => chainSeverity(c, d.reviews[c.id])), ...escalated.map((i) => i.severity)]
     const severity = worstOf(sevs)
     const confirmedFindings = [...escalated.flatMap((i) => i.findings), ...confirmedChains.flatMap((c) => d.membersOf.get(c.id) ?? [])]
+    // unwanted software is the verdict when a confirmed item names it and nothing confirmed rises above medium:
+    // the runs of the same browser from a user profile are the same thing, not a second threat
     const onlyUnwanted = confirmedFindings.length > 0 && confirmedFindings.every(isUnwanted)
-    if (onlyUnwanted)
+    const unwantedPresent = confirmedFindings.some(isUnwanted)
+    if (onlyUnwanted || (unwantedPresent && rank(severity) < rank('high')))
       return {
         ...base,
         kind: 'unwanted',
         severity,
         label: 'Unwanted software',
-        detail: `${confirmed} confirmed item${confirmed === 1 ? '' : 's'} describe unwanted or adware-class software, no intrusion.`,
+        detail: `${confirmed} confirmed item${confirmed === 1 ? '' : 's'} describe unwanted or adware-class software at ${severity} severity, no intrusion.`,
       }
     if (rank(severity) >= rank('high'))
       return { ...base, kind: 'compromise', severity, label: 'Compromise confirmed', detail: `${confirmed} confirmed item${confirmed === 1 ? '' : 's'}, the worst at ${severity} severity.` }

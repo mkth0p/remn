@@ -174,6 +174,29 @@ describe('report html', () => {
     const unwanted = data({ chains: [], reviews: {}, incidents: inc, findings: [pua] })
     expect(computeVerdict(unwanted)).toMatchObject({ kind: 'unwanted', label: 'Unwanted software' })
     expect(buildReportHtml(unwanted)).toContain('class="seal unwanted"')
+    // the runs of the same unwanted program, confirmed alongside its detection, stay one verdict; a confirmed high finding does not
+    const run = f({
+      ruleId: 'collection-execution-user-path',
+      severity: 'medium',
+      source: 'events',
+      refs: [6],
+      title: 'Executable ran from a user profile location',
+      status: 'escalated',
+      entities: { computer: 'WS-1', image: 'c:/users/bob/appdata/local/shift/shift.exe' },
+    })
+    const withRuns = data({ chains: [], reviews: {}, incidents: buildIncidents([pua, run], {}), findings: [pua, run] })
+    expect(computeVerdict(withRuns).kind).toBe('unwanted')
+    const beacon = f({
+      ruleId: 'win-sysmon-network-lolbin',
+      severity: 'high',
+      source: 'events',
+      refs: [7],
+      title: 'Network connection by a script host',
+      status: 'escalated',
+      entities: { computer: 'WS-1' },
+    })
+    const withBeacon = data({ chains: [], reviews: {}, incidents: buildIncidents([pua, beacon], {}), findings: [pua, beacon] })
+    expect(computeVerdict(withBeacon).kind).toBe('compromise')
   })
 
   it('draws the threat profile from the ATT&CK techniques and rule tags of the printed findings', () => {
