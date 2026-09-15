@@ -38,6 +38,8 @@ export function ReportView() {
   const [iocs, setIocs] = useState<Ioc[]>([])
   const [notes, setNotes] = useState<CaseNote[]>([])
   const [summary, setSummary] = useState<string>('')
+  /** who wrote the summary last: the model's draft is labelled in the report until the analyst edits it */
+  const [summaryBy, setSummaryBy] = useState<'analyst' | 'ai' | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState('')
   const [fontData, setFontData] = useState<string | undefined>(undefined)
@@ -58,6 +60,7 @@ export function ReportView() {
       .then((r) => setIocs(r.rows))
       .catch(() => setIocs([]))
     db.kv.get(`report-summary-${kase.id}`).then((k) => setSummary((k?.value as string) ?? ''))
+    db.kv.get(`report-summary-by-${kase.id}`).then((k) => setSummaryBy((k?.value as 'analyst' | 'ai' | undefined) ?? undefined))
     listNotes(kase.id).then(setNotes)
     loadChains(kase.id).then((r) => {
       setChains(r?.chains ?? [])
@@ -104,6 +107,8 @@ export function ReportView() {
     setBusy(true)
     try {
       setSummary(await draftExecutiveSummary(kase))
+      setSummaryBy('ai')
+      await getDb().kv.put({ key: `report-summary-by-${kase.id}`, value: 'ai' })
     } catch (e) {
       toast('err', (e as Error).message)
     } finally {
@@ -117,6 +122,7 @@ export function ReportView() {
       generatedAt: Date.now(),
       settings,
       summary,
+      summaryBy,
       evidence,
       chains: selection.chains,
       reviews,
@@ -223,8 +229,16 @@ export function ReportView() {
                 className="textarea"
                 style={{ marginTop: 8, minHeight: 120 }}
                 value={summary}
-                onChange={(e) => setSummary(e.target.value)}
-                onBlur={() => getDb().kv.put({ key: `report-summary-${kase.id}`, value: summary })}
+                onChange={(e) => {
+                  setSummary(e.target.value)
+                  setSummaryBy('analyst')
+                }}
+                onBlur={() =>
+                  getDb().kv.bulkPut([
+                    { key: `report-summary-${kase.id}`, value: summary },
+                    { key: `report-summary-by-${kase.id}`, value: summaryBy ?? 'analyst' },
+                  ])
+                }
                 placeholder="edit the summary…"
               />
             </div>

@@ -3,7 +3,7 @@ import type { Case, Finding } from '../db/schema'
 import type { Chain } from './chains'
 import { buildIncidents } from '../rules/incidents'
 import { DEFAULT_REPORT } from './review'
-import { buildReportHtml, foldSteps, MAX_STEP_ROWS, type ReportData } from './reportHtml'
+import { bottomLine, buildReportHtml, computeVerdict, foldSteps, groupByRule, MAX_STEP_ROWS, threatProfile, type ReportData } from './reportHtml'
 import type { ChainStep } from './chains'
 
 let seq = 1
@@ -146,6 +146,57 @@ describe('report html', () => {
     expect(html).toContain("@font-face{font-family:'Gulax'")
     expect(html).toContain('every item decided')
     expect(html).not.toContain('undefined')
+    // the cover opens on the verdict and the threat profile
+    expect(html).toContain('class="seal compromise"')
+    expect(html).toContain('Compromise confirmed')
+    expect(html).toContain('<h2>What happened</h2>')
+    expect(html).toContain('<h2>Findings by rule</h2>')
+    expect(html).toContain('<h2>Method and limits</h2>')
+  })
+
+  it('reads a verdict from the decisions, never from the findings alone', () => {
+    const d = data()
+    expect(computeVerdict(d).kind).toBe('compromise')
+    const undecided = data({ reviews: {}, incidents: d.incidents.map((i) => ({ ...i, status: 'new' as const })), undecided: 2 })
+    expect(computeVerdict(undecided)).toMatchObject({ kind: 'pending', confirmed: 0 })
+    const reviewedOnly = data({ reviews: { [chain.id]: { verdict: 'unsure' } } })
+    expect(computeVerdict(reviewedOnly).kind).toBe('unconfirmed')
+    const pua = f({
+      ruleId: 'collection-defender-pua',
+      severity: 'medium',
+      source: 'events',
+      refs: [5],
+      title: 'Defender recorded a potentially unwanted application',
+      status: 'escalated',
+      entities: { threatName: 'PUA:Win32/Sample' },
+    })
+    const inc = buildIncidents([pua], {})
+    const unwanted = data({ chains: [], reviews: {}, incidents: inc, findings: [pua] })
+    expect(computeVerdict(unwanted)).toMatchObject({ kind: 'unwanted', label: 'Unwanted software' })
+    expect(buildReportHtml(unwanted)).toContain('class="seal unwanted"')
+  })
+
+  it('draws the threat profile from the ATT&CK techniques and rule tags of the printed findings', () => {
+    const d = data()
+    const profile = threatProfile(d)
+    const by = Object.fromEntries(profile.map((b) => [b.def.id, b]))
+    expect(by['initial-access'].state).toBe('confirmed')
+    expect(by['impact'].state).toBe('none')
+    const html = buildReportHtml(d)
+    expect(html).toContain('class="hex confirmed"')
+    expect(html).toContain('class="hex none"')
+  })
+
+  it('groups findings by rule with counts, spans and the values matched, and quotes the bottom line', () => {
+    const rows = [1, 2, 3].map((i) =>
+      f({ ruleId: 'win-new-firewall-rule', severity: 'medium', source: 'events', refs: [i], ts: i * 60_000, entities: { computer: 'WS-1', applicationPath: `c:\\app${i}.exe` } }),
+    )
+    const g = groupByRule(rows, { computer: 'WS-1' })
+    expect(g).toHaveLength(1)
+    expect(g[0]).toMatchObject({ findings: 3, rows: 3, first: 60_000, last: 180_000 })
+    expect(g[0].values).toEqual(['c:\\app1.exe', 'c:\\app2.exe', 'c:\\app3.exe'])
+    expect(bottomLine('**Bottom line** The host ran an installer.\n\n**What happened**\n- 08:30 tasks created')).toBe('The host ran an installer.')
+    expect(bottomLine('Plain first paragraph.\n\nSecond.')).toBe('Plain first paragraph.')
   })
 
   it('folds runs of the same step into one row with a count and a span, and caps the rows it prints', () => {
