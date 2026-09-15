@@ -182,6 +182,7 @@ describe('report html', () => {
       refs: [6],
       title: 'Executable ran from a user profile location',
       status: 'escalated',
+      attack: ['T1204.002'],
       entities: { computer: 'WS-1', image: 'c:/users/bob/appdata/local/shift/shift.exe' },
     })
     const withRuns = data({ chains: [], reviews: {}, incidents: buildIncidents([pua, run], {}), findings: [pua, run] })
@@ -197,6 +198,19 @@ describe('report html', () => {
     })
     const withBeacon = data({ chains: [], reviews: {}, incidents: buildIncidents([pua, beacon], {}), findings: [pua, beacon] })
     expect(computeVerdict(withBeacon).kind).toBe('compromise')
+    // a confirmed medium item that is not user execution (persistence, evasion, lateral movement) is a second threat, not the same one
+    const task = f({
+      ruleId: 'win-scheduled-task-suspicious-content',
+      severity: 'medium',
+      source: 'events',
+      refs: [8],
+      title: 'Scheduled task with suspicious command',
+      status: 'escalated',
+      attack: ['T1053.005'],
+      entities: { computer: 'WS-1' },
+    })
+    const withTask = data({ chains: [], reviews: {}, incidents: buildIncidents([pua, task], {}), findings: [pua, task] })
+    expect(computeVerdict(withTask).kind).toBe('suspicious')
   })
 
   it('draws the threat profile from the ATT&CK techniques and rule tags of the printed findings', () => {

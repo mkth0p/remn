@@ -97,7 +97,9 @@ export interface Verdict {
   falsePositives: number
 }
 
-const isUnwanted = (f: Finding) => /pua|adware|unwanted|potentially/i.test(f.ruleId) || (f.tags ?? []).some((t) => /pua|adware|unwanted/i.test(t)) || /potentially unwanted|PUA:/i.test(f.title)
+const isUnwanted = (f: Finding) => /(^|-)(pua|adware|unwanted)($|-)/i.test(f.ruleId) || (f.tags ?? []).some((t) => /^(pua|adware|unwanted)$/i.test(t)) || /potentially unwanted|\bPUA:/i.test(f.title)
+/** a finding that only says the user ran something (ATT&CK T1204) below high: the runs of an unwanted program, not a second threat */
+const userExecution = (f: Finding) => rank(effectiveSeverity(f)) < rank('high') && f.attack.length > 0 && f.attack.every((t) => t.toUpperCase().startsWith('T1204'))
 
 /** What the review concluded, from the decisions on chains and incidents. Findings decide nothing on their own. */
 export function computeVerdict(d: ReportData): Verdict {
@@ -113,9 +115,9 @@ export function computeVerdict(d: ReportData): Verdict {
     const confirmedFindings = [...escalated.flatMap((i) => i.findings), ...confirmedChains.flatMap((c) => d.membersOf.get(c.id) ?? [])]
     // unwanted software is the verdict when a confirmed item names it and nothing confirmed rises above medium:
     // the runs of the same browser from a user profile are the same thing, not a second threat
-    const onlyUnwanted = confirmedFindings.length > 0 && confirmedFindings.every(isUnwanted)
     const unwantedPresent = confirmedFindings.some(isUnwanted)
-    if (onlyUnwanted || (unwantedPresent && rank(severity) < rank('high')))
+    const onlyUnwanted = unwantedPresent && confirmedFindings.every((f) => isUnwanted(f) || userExecution(f))
+    if (onlyUnwanted)
       return {
         ...base,
         kind: 'unwanted',

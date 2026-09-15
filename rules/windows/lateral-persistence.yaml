@@ -14,13 +14,10 @@ where:
     - serviceName|contains: [PSEXESVC, PAExec, csexecsvc, winexesvc, RemComSvc, BTOBTO, smbexec, mssecsvc, wmiexec, atexec, sysmon64bak, "\\\\"]
     - serviceFile|re: "(?i)^[a-z]:\\\\[a-z0-9]{6,}\\.exe$"
     - serviceName|re: "^[A-Za-z0-9]{8}$"
-# A kernel driver under a vendor's tools folder is firmware or hardware support, and a short
-# alphanumeric name is how vendors name drivers: neither is enough on its own outside a
-# user-writable path.
+# Firmware and hardware tools install drivers from their own folders under vendor names; that is
+# the only exclusion, so a driver dropped under System32\drivers with a random name still counts.
 exclude:
-  any_of:
-    - serviceFile|contains: ["\\swtools\\", "\\program files\\lenovo\\", "\\program files (x86)\\lenovo\\", "\\program files\\intel\\", "\\program files (x86)\\intel\\", "\\program files\\dell\\", "\\program files (x86)\\dell\\", "\\program files\\hp\\", "\\program files (x86)\\hp\\", "\\program files\\nvidia", "\\program files\\amd\\"]
-    - { serviceFile|re: "(?i)\\.sys$", serviceName|re: "^[A-Za-z0-9]{8}$", serviceFile|not_contains: ["\\temp\\", "\\tmp\\", "\\appdata\\", "\\users\\", "\\programdata\\", "\\downloads\\", "\\perflogs\\", "\\windows\\tasks\\"] }
+  serviceFile|contains: ["\\swtools\\", "\\program files\\lenovo\\", "\\program files (x86)\\lenovo\\", "\\program files\\intel\\", "\\program files (x86)\\intel\\", "\\program files\\dell\\", "\\program files (x86)\\dell\\", "\\program files\\hp\\", "\\program files (x86)\\hp\\", "\\program files\\nvidia", "\\program files\\amd\\"]
 ---
 id: win-service-installed-any
 title: New service installed (inventory)
@@ -92,11 +89,6 @@ where:
   eventId|in: [4698, 4702]
   # not a bare "hidden": every task's XML carries <Hidden>true</Hidden>
   taskContent|contains: [powershell, pwsh, cmd.exe, cmd /c, mshta, wscript, cscript, rundll32, regsvr32, certutil, bitsadmin, "\\temp\\", "\\appdata\\", "\\users\\public\\", "\\programdata\\", "-enc", "-w hidden", "-windowstyle hidden", "windowstyle hidden", downloadstring, iex, "http", ".vbs", ".js", ".hta", ".ps1", ".bat"]
-# Windows' own tasks (Defender maintenance, update orchestration, the per-user SoftLanding tasks)
-# mention script hosts and URLs in their XML; they count only with a strong term in the command
-exclude:
-  taskName|contains: ["\\Microsoft\\Windows\\", "\\SoftLanding\\"]
-  taskContent|not_contains: ["-enc", "-e ", "downloadstring", "iex", "frombase64", "invoke-expression", "\\temp\\", "\\users\\public\\", "-w hidden", "-windowstyle hidden"]
 ---
 id: win-user-account-created
 title: User account created
