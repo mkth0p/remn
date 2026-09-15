@@ -40,6 +40,7 @@ export function ReportView() {
   const [summary, setSummary] = useState<string>('')
   /** who wrote the summary last: the model's draft is labelled in the report until the analyst edits it */
   const [summaryBy, setSummaryBy] = useState<'analyst' | 'ai' | undefined>(undefined)
+  const [summaryAt, setSummaryAt] = useState<number | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState('')
   const [fontData, setFontData] = useState<string | undefined>(undefined)
@@ -61,6 +62,7 @@ export function ReportView() {
       .catch(() => setIocs([]))
     db.kv.get(`report-summary-${kase.id}`).then((k) => setSummary((k?.value as string) ?? ''))
     db.kv.get(`report-summary-by-${kase.id}`).then((k) => setSummaryBy((k?.value as 'analyst' | 'ai' | undefined) ?? undefined))
+    db.kv.get(`report-summary-at-${kase.id}`).then((k) => setSummaryAt((k?.value as number | undefined) ?? undefined))
     listNotes(kase.id).then(setNotes)
     loadChains(kase.id).then((r) => {
       setChains(r?.chains ?? [])
@@ -108,7 +110,11 @@ export function ReportView() {
     try {
       setSummary(await draftExecutiveSummary(kase))
       setSummaryBy('ai')
-      await getDb().kv.put({ key: `report-summary-by-${kase.id}`, value: 'ai' })
+      setSummaryAt(Date.now())
+      await getDb().kv.bulkPut([
+        { key: `report-summary-by-${kase.id}`, value: 'ai' },
+        { key: `report-summary-at-${kase.id}`, value: Date.now() },
+      ])
     } catch (e) {
       toast('err', (e as Error).message)
     } finally {
@@ -123,6 +129,8 @@ export function ReportView() {
       settings,
       summary,
       summaryBy,
+      summaryAt,
+      falsePositives: buildIncidents(findings, { chains }).filter((i) => (i.kind === 'chain' && i.chain ? reviews[i.chain.id]?.verdict === 'benign' : i.status === 'false_positive')).length,
       evidence,
       chains: selection.chains,
       reviews,
@@ -233,12 +241,14 @@ export function ReportView() {
                   setSummary(e.target.value)
                   setSummaryBy('analyst')
                 }}
-                onBlur={() =>
-                  getDb().kv.bulkPut([
+                onBlur={() => {
+                  setSummaryAt(Date.now())
+                  void getDb().kv.bulkPut([
                     { key: `report-summary-${kase.id}`, value: summary },
                     { key: `report-summary-by-${kase.id}`, value: summaryBy ?? 'analyst' },
+                    { key: `report-summary-at-${kase.id}`, value: Date.now() },
                   ])
-                }
+                }}
                 placeholder="edit the summary…"
               />
             </div>

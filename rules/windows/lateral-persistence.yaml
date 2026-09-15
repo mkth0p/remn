@@ -76,7 +76,7 @@ where:
   any_of:
     - { eventId|in: [4698, 4702] }
     - { eventId|in: [106, 140], provider|contains: TaskScheduler }
-  taskName|not_contains: ["\\Microsoft\\Windows\\", "\\Microsoft\\Office\\", "OneDrive", "GoogleUpdate", "MicrosoftEdgeUpdate", "Adobe", "Mozilla", "Firefox", "Brave", "Opera", "Dropbox", "npcap", "Intel", "NVIDIA", "Lenovo", "Dell", "HP"]
+  taskName|not_contains: ["\\Microsoft\\Windows\\", "\\Microsoft\\Office\\", "\\SoftLanding\\", "OneDrive", "GoogleUpdate", "MicrosoftEdgeUpdate", "Adobe", "Mozilla", "Firefox", "Brave", "Opera", "Dropbox", "npcap", "Intel", "NVIDIA", "Lenovo", "Dell", "HP"]
 ---
 id: win-scheduled-task-suspicious-content
 title: Scheduled task with suspicious command
@@ -90,7 +90,13 @@ group_by: [computer, taskName]
 threshold: ">= 1"
 where:
   eventId|in: [4698, 4702]
-  taskContent|contains: [powershell, pwsh, cmd.exe, cmd /c, mshta, wscript, cscript, rundll32, regsvr32, certutil, bitsadmin, "\\temp\\", "\\appdata\\", "\\users\\public\\", "\\programdata\\", "-enc", "-w hidden", "hidden", downloadstring, iex, "http", ".vbs", ".js", ".hta", ".ps1", ".bat"]
+  # not a bare "hidden": every task's XML carries <Hidden>true</Hidden>
+  taskContent|contains: [powershell, pwsh, cmd.exe, cmd /c, mshta, wscript, cscript, rundll32, regsvr32, certutil, bitsadmin, "\\temp\\", "\\appdata\\", "\\users\\public\\", "\\programdata\\", "-enc", "-w hidden", "-windowstyle hidden", "windowstyle hidden", downloadstring, iex, "http", ".vbs", ".js", ".hta", ".ps1", ".bat"]
+# Windows' own tasks (Defender maintenance, update orchestration, the per-user SoftLanding tasks)
+# mention script hosts and URLs in their XML; they count only with a strong term in the command
+exclude:
+  taskName|contains: ["\\Microsoft\\Windows\\", "\\SoftLanding\\"]
+  taskContent|not_contains: ["-enc", "-e ", "downloadstring", "iex", "frombase64", "invoke-expression", "\\temp\\", "\\users\\public\\", "-w hidden", "-windowstyle hidden"]
 ---
 id: win-user-account-created
 title: User account created
@@ -197,7 +203,6 @@ where:
 group_by: [computer, applicationPath]
 window: 6h
 threshold: ">= 1"
-distinct: ruleName
 ---
 id: win-rdp-enabled-registry
 title: RDP enabled / hardening changed via registry

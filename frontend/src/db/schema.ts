@@ -491,6 +491,7 @@ export const CASE_KV_KEYS = (caseId: number) =>
     'mail-calibration',
     'report-summary',
     'report-summary-by',
+    'report-summary-at',
     'finding-reviews',
     'chain-reviews',
     'report-settings',

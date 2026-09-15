@@ -28,6 +28,10 @@ export interface ReportData {
   summary: string
   /** who wrote the executive summary last, when known */
   summaryBy?: 'analyst' | 'ai'
+  /** when the summary was last written; older than the newest finding means it may describe another state of the case */
+  summaryAt?: number
+  /** false positives decided across the whole case, printed or not (the incidents list only carries what prints) */
+  falsePositives?: number
   evidence: Evidence[]
   chains: Chain[]
   reviews: Record<string, ChainReview>
@@ -100,7 +104,7 @@ export function computeVerdict(d: ReportData): Verdict {
   const confirmedChains = d.chains.filter((c) => d.reviews[c.id]?.verdict === 'confirmed')
   const escalated = d.incidents.filter((i) => i.status === 'escalated')
   const reviewed = d.chains.filter((c) => d.reviews[c.id]?.verdict === 'unsure').length + d.incidents.filter((i) => i.status === 'reviewed').length
-  const falsePositives = d.incidents.filter((i) => i.status === 'false_positive').length
+  const falsePositives = d.falsePositives ?? d.incidents.filter((i) => i.status === 'false_positive').length
   const confirmed = confirmedChains.length + escalated.length
   const base = { confirmed, reviewed, falsePositives }
   if (confirmed) {
@@ -656,16 +660,28 @@ td .sub{display:block;font-size:10px;color:var(--ink-3)}
 .empty{color:var(--ink-3);font-size:11.5px}
 `
 
-/** The paragraph the cover quotes: the "Bottom line" block of a structured summary, else the first paragraph. */
+/** The paragraph the cover quotes: the "Bottom line" block of a structured summary, else the first paragraph that reads as prose rather than a heading. */
 export function bottomLine(summary: string): string {
   const t = summary.trim()
   if (!t) return ''
   const m = /\*\*bottom line\*\*:?\s*([\s\S]*?)(?=\n\s*\n|\n\s*\*\*|$)/i.exec(t)
-  const para = (m ? m[1] : t.split(/\n\s*\n/)[0])
-    .replace(/^#+\s*/, '')
-    .replace(/^\*\*[^*]+\*\*:?\s*/, '')
-    .trim()
-  return para.slice(0, 600)
+  const clean = (s: string) =>
+    s
+      .replace(/^#+\s*/, '')
+      .replace(/^\*\*[^*]+\*\*:?\s*/, '')
+      .replace(/^[-*]\s+/, '')
+      .trim()
+  if (m) return clean(m[1]).slice(0, 600)
+  // "Executive Summary — Case 1" or "Summary" is a title, not the bottom line: the first paragraph that is a sentence
+  const paras = t
+    .split(/\n\s*\n/)
+    .map(clean)
+    .filter(Boolean)
+  const prose = paras.find((p) => p.length >= 40 && /[.!?]/.test(p) && !/^[A-Z][^.!?]{0,60}$/.test(p)) ?? paras.find((p) => p.length >= 40) ?? paras[0] ?? ''
+  return prose
+    .replace(/^(summary|overview)\s*[:.]?\s*/i, '')
+    .split(/\n/)[0]
+    .slice(0, 600)
 }
 
 function method(d: ReportData, v: Verdict, conf: Confidence): string {
@@ -718,7 +734,11 @@ export function buildReportHtml(d: ReportData): string {
     sections.push({
       id: 'summary',
       title: 'Executive summary',
-      body: `<div class="narr">${md(d.summary)}</div>${d.summaryBy === 'ai' ? '<div class="cap ai">drafted by the analyst model from the reviewed items; the decisions it rests on are the analyst\'s</div>' : ''}`,
+      body: `<div class="narr">${md(d.summary)}</div>${d.summaryBy === 'ai' ? '<div class="cap ai">drafted by the analyst model from the reviewed items; the decisions it rests on are the analyst\'s</div>' : ''}${
+        d.summaryAt && d.findings.some((f) => f.createdAt > d.summaryAt!)
+          ? '<div class="cap">written before the findings last changed: the numbers and ids in it may describe an earlier state of the case</div>'
+          : ''
+      }`,
     })
   sections.push({
     id: 'happened',
