@@ -211,6 +211,29 @@ describe('report html', () => {
     })
     const withTask = data({ chains: [], reviews: {}, incidents: buildIncidents([pua, task], {}), findings: [pua, task] })
     expect(computeVerdict(withTask).kind).toBe('suspicious')
+    // a confirmed item without an event time (a collected artefact) still appears in what happened, after the timed ones
+    const html = buildReportHtml(
+      data({
+        chains: [],
+        reviews: {},
+        incidents: buildIncidents(
+          [
+            { ...pua, ts: null },
+            { ...run, ts: 5, entities: { computer: 'WS-2' } },
+          ],
+          {},
+        ),
+        findings: [
+          { ...pua, ts: null },
+          { ...run, ts: 5, entities: { computer: 'WS-2' } },
+        ],
+      }),
+    )
+    expect(html).toContain('<h2>What happened</h2>')
+    expect(html.indexOf('no event time')).toBeGreaterThan(html.indexOf('<ol class="moments">'))
+    // the timed item (an incident titled after its host) comes first, the collected one last
+    expect(html.indexOf('<b>WS-2</b>')).toBeGreaterThan(html.indexOf('<ol class="moments">'))
+    expect(html.indexOf('no event time')).toBeGreaterThan(html.indexOf('<b>WS-2</b>'))
   })
 
   it('draws the threat profile from the ATT&CK techniques and rule tags of the printed findings', () => {

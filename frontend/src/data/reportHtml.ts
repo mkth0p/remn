@@ -453,6 +453,8 @@ ${groupedFindings(i.findings, i.entities)}
 // what happened
 // ---------------------------------------------------------------------------
 
+/** the time slot of a confirmed item that has no event time: after every timed one */
+const UNTIMED = Number.MAX_SAFE_INTEGER
 interface Moment {
   ts: number
   end: number | null
@@ -482,9 +484,10 @@ export function moments(d: ReportData): { items: Moment[]; decided: boolean } {
     })
   }
   for (const i of d.incidents) {
-    if (i.status === 'new' || i.status === 'false_positive' || i.ts == null) continue
+    if (i.status === 'new' || i.status === 'false_positive') continue
+    // a collected artefact has no event time; it still happened, so it closes the list rather than dropping out of it
     out.push({
-      ts: i.ts,
+      ts: i.ts ?? UNTIMED,
       end: i.tsEnd,
       severity: i.severity,
       title: i.title,
@@ -504,7 +507,7 @@ const momentsList = (ms: Moment[]) =>
   `<ol class="moments">${ms
     .map(
       (m) =>
-        `<li class="${h(m.severity)}"><div class="t">${fmtTs(m.ts)}${m.end && m.end !== m.ts ? `<span class="sub">to ${fmtTs(m.end)}</span>` : ''}</div><div class="b"><div class="hd">${pill(m.severity)}<b>${h(m.title)}</b><span class="stamp ${m.decision === 'confirmed' ? 'st-escalated' : 'st-reviewed'}">${h(m.decision)}</span></div>${m.entities.length ? `<div class="ents">${m.entities.map((e) => chip(e)).join('')}</div>` : ''}${m.note ? `<div class="nt">${h(m.note)}</div>` : ''}</div></li>`,
+        `<li class="${h(m.severity)}"><div class="t">${m.ts === UNTIMED ? 'no event time<span class="sub">collected artefact</span>' : `${fmtTs(m.ts)}${m.end && m.end !== m.ts ? `<span class="sub">to ${fmtTs(m.end)}</span>` : ''}`}</div><div class="b"><div class="hd">${pill(m.severity)}<b>${h(m.title)}</b><span class="stamp ${m.decision === 'confirmed' ? 'st-escalated' : 'st-reviewed'}">${h(m.decision)}</span></div>${m.entities.length ? `<div class="ents">${m.entities.map((e) => chip(e)).join('')}</div>` : ''}${m.note ? `<div class="nt">${h(m.note)}</div>` : ''}</div></li>`,
     )
     .join('')}</ol>`
 
