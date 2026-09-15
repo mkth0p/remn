@@ -21,15 +21,24 @@ where:
 ---
 id: win-event-log-service-stopped
 title: Event log service stopped or logging shut down
-description: 1100 (logging service shut down) or 6006 outside a normal reboot sequence; attackers stop logging before acting.
+description: 1100 (logging service shut down) or 6006. Both are written at every clean shutdown, so the finding says when the system started again within thirty minutes (a shutdown sequence, not tampering); a stop with no restart after it is the one to read. The stop and its pair within fifteen minutes are one finding.
 severity: medium
 source: events
 attack: [T1562.002]
 tags: [defense-evasion, log-tampering]
+entities: [computer]
 where:
   any_of:
     - { eventId: 1100 }
     - { eventId: 6006, provider|contains: Eventlog }
+group_by: [computer]
+window: 15m
+threshold: ">= 1"
+then:
+  where: { eventId|in: [6005, 6009, 12, 4608] }
+  within: 30m
+  severity: medium
+  title: system started again within 30 min (shutdown sequence, not tampering)
 ---
 id: win-audit-policy-changed
 title: Audit policy changed (4719)
@@ -219,17 +228,21 @@ where:
 ---
 id: win-applocker-codeintegrity-block
 title: AppLocker / Code Integrity / SmartScreen block
-description: AppLocker 8004/8007 (blocked), CodeIntegrity 3077, SmartScreen 1002, Exploit protection 10 - something tried to run and was stopped.
+description: AppLocker 8004/8007 (blocked), CodeIntegrity 3077, SmartScreen 1002, Exploit protection 10 - something tried to run and was stopped. One finding per blocked path and host within six hours; the path and the user are on the finding.
 severity: medium
 source: events
 attack: [T1204]
 tags: [execution, blocked]
+entities: [computer, path, targetUser]
 where:
   any_of:
     - { eventId|in: [8004, 8007], provider|contains: AppLocker }
     - { eventId|in: [3077, 3033], provider|contains: CodeIntegrity }
     - { eventId: 1002, provider|contains: SmartScreen }
     - { eventId: 10, provider|contains: Security-Mitigations }
+group_by: [computer, path]
+window: 6h
+threshold: ">= 1"
 ---
 id: win-suspicious-dns-sysmon
 title: Suspicious DNS query (Sysmon 22)

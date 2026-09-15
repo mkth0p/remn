@@ -5,6 +5,7 @@ severity: high
 source: events
 attack: [T1543.003, T1569.002]
 tags: [persistence, lateral-movement]
+entities: [computer, serviceName, serviceFile]
 where:
   eventId|in: [7045, 4697]
   any_of:
@@ -13,6 +14,13 @@ where:
     - serviceName|contains: [PSEXESVC, PAExec, csexecsvc, winexesvc, RemComSvc, BTOBTO, smbexec, mssecsvc, wmiexec, atexec, sysmon64bak, "\\\\"]
     - serviceFile|re: "(?i)^[a-z]:\\\\[a-z0-9]{6,}\\.exe$"
     - serviceName|re: "^[A-Za-z0-9]{8}$"
+# A kernel driver under a vendor's tools folder is firmware or hardware support, and a short
+# alphanumeric name is how vendors name drivers: neither is enough on its own outside a
+# user-writable path.
+exclude:
+  any_of:
+    - serviceFile|contains: ["\\swtools\\", "\\program files\\lenovo\\", "\\program files (x86)\\lenovo\\", "\\program files\\intel\\", "\\program files (x86)\\intel\\", "\\program files\\dell\\", "\\program files (x86)\\dell\\", "\\program files\\hp\\", "\\program files (x86)\\hp\\", "\\program files\\nvidia", "\\program files\\amd\\"]
+    - { serviceFile|re: "(?i)\\.sys$", serviceName|re: "^[A-Za-z0-9]{8}$", serviceFile|not_contains: ["\\temp\\", "\\tmp\\", "\\appdata\\", "\\users\\", "\\programdata\\", "\\downloads\\", "\\perflogs\\", "\\windows\\tasks\\"] }
 ---
 id: win-service-installed-any
 title: New service installed (inventory)
@@ -56,11 +64,14 @@ threshold: ">= 1"
 ---
 id: win-scheduled-task-created
 title: Scheduled task created or updated
-description: 4698/4702 (Security) or 106/140 (TaskScheduler) - persistence or remote execution (at, schtasks /s).
+description: 4698/4702 (Security) or 106/140 (TaskScheduler) - persistence or remote execution (at, schtasks /s). One finding per task name and host; the task name and the account are on the finding.
 severity: medium
 source: events
 attack: [T1053.005]
 tags: [persistence]
+entities: [computer, subjectUser, taskName]
+group_by: [computer, taskName]
+threshold: ">= 1"
 where:
   any_of:
     - { eventId|in: [4698, 4702] }
@@ -69,11 +80,14 @@ where:
 ---
 id: win-scheduled-task-suspicious-content
 title: Scheduled task with suspicious command
-description: Task XML (4698/4702) references cmd, powershell, mshta, script hosts, temp folders or encoded commands.
+description: Task XML (4698/4702) references cmd, powershell, mshta, script hosts, temp folders or encoded commands. One finding per task name and host; the task name and the account are on the finding, the command is in the rows.
 severity: high
 source: events
 attack: [T1053.005]
 tags: [persistence, execution]
+entities: [computer, subjectUser, taskName]
+group_by: [computer, taskName]
+threshold: ">= 1"
 where:
   eventId|in: [4698, 4702]
   taskContent|contains: [powershell, pwsh, cmd.exe, cmd /c, mshta, wscript, cscript, rundll32, regsvr32, certutil, bitsadmin, "\\temp\\", "\\appdata\\", "\\users\\public\\", "\\programdata\\", "-enc", "-w hidden", "hidden", downloadstring, iex, "http", ".vbs", ".js", ".hta", ".ps1", ".bat"]
@@ -169,16 +183,21 @@ where:
     - objectName|contains: ["\\CurrentVersion\\Run", "\\CurrentVersion\\RunOnce", "\\Winlogon\\", "\\Image File Execution Options\\", "\\WDigest", "\\Lsa\\"]
 ---
 id: win-new-firewall-rule
-title: Firewall rule added or all rules deleted
-description: 2004 (rule added), 2033 (all rules deleted) or 4946/4948 - attackers open ports for C2/RDP or wipe the firewall.
+title: Firewall rules added for an application, or all rules deleted
+description: 2004 (rule added), 2033 (all rules deleted) or 4946/4948 - attackers open ports for C2/RDP or wipe the firewall. One finding per application within six hours, since an installer adds its rules in a burst; the rule names are listed on the finding.
 severity: medium
 source: events
 attack: [T1562.004]
 tags: [defense-evasion, firewall]
+entities: [computer, applicationPath, ruleName]
 where:
   any_of:
     - { eventId|in: [2004, 2033], provider|contains: Firewall }
     - { eventId|in: [4946, 4948] }
+group_by: [computer, applicationPath]
+window: 6h
+threshold: ">= 1"
+distinct: ruleName
 ---
 id: win-rdp-enabled-registry
 title: RDP enabled / hardening changed via registry

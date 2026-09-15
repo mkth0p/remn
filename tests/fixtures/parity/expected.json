@@ -1,5 +1,6 @@
 {
  "diagnostics": {
+  "collection-defender-alert-text": "below_threshold",
   "collection-defender-detection": "no_selector_match",
   "collection-defender-exclusions": "no_selector_match",
   "collection-defender-pua": "no_selector_match",
@@ -92,9 +93,6 @@
  },
  "errors": [],
  "findings": {
-  "collection-defender-alert-text": [
-   "collection-defender-alert-text|110"
-  ],
   "collection-encoded-execution": [
    "collection-encoded-execution|108"
   ],

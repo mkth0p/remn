@@ -49,9 +49,13 @@ where:
 ---
 id: collection-defender-alert-text
 title: Defender support log contains a threat or protection alert
-description: A collected Defender log line explicitly mentions a threat detection or disabled protection. Read surrounding evidence; text is not a verified Defender verdict.
+description: A collected Defender log line explicitly mentions a threat detection or disabled protection. One finding per log file and host, the matched lines listed on it. Read surrounding evidence; text is not a verified Defender verdict.
 source: events
 severity: medium
+entities: [computer, sourceFile]
+group_by: [computer, sourceFile]
+threshold: ">= 1"
+distinct: message
 where:
   artifactType: defender
   threatName|exists: false

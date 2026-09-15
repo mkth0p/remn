@@ -161,6 +161,12 @@ export function describeIncident(inc: Incident): Record<string, unknown> {
       severity: effectiveSeverity(f),
       title: short(f.title, 140),
       rows: f.count,
+      // the matched values (task name, path, service file, listed lines) so the model decides on
+      // what was seen, not on the rule's title; values the incident already carries are not repeated
+      ...(() => {
+        const own = Object.entries(f.entities ?? {}).filter(([k, v]) => v != null && v !== '' && inc.entities[k] !== String(v))
+        return own.length ? { values: Object.fromEntries(own.slice(0, 6).map(([k, v]) => [k, short(Array.isArray(v) ? v.join(' | ') : String(v), 160)])) } : {}
+      })(),
       ...(f.escalation ? { note: short(f.escalation, 120) } : {}),
       ...(f.notes ? { analystNote: short(f.notes, 200) } : {}),
     })),

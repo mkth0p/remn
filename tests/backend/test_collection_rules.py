@@ -93,7 +93,9 @@ def test_alert_text_does_not_double_report_a_named_threat(store):
     ]
     found = fire(store, "collection-defender-alert-text", rows)
 
-    assert len(found) == 2, "the named threat belongs to the detection rule, the other two to this one"
+    # the named threat belongs to the detection rule; the other two lines are one finding per log file, both lines listed on it
+    assert len(found) == 1 and found[0]["count"] == 2
+    assert sorted(found[0]["entities"]["message"]) == ["Real-time protection disabled by policy", "Set-MpPreference -DisableRealtimeMonitoring $true"]
 
 
 def test_unquoted_service_paths_with_spaces(store):
