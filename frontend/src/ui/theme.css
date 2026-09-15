@@ -2286,3 +2286,330 @@ label.field > span {
 .vrow.row-noise:hover {
   opacity: 1;
 }
+
+/* ---------- review: the verdict bar (the report's cover, live), the grouped rail, the facts table and the decision bar ----------
+   The seal and the hex badges are the same shapes the printed report draws, in the app's tokens. */
+.verdict-bar {
+  display: grid;
+  grid-template-columns: 96px minmax(220px, 1fr) auto auto;
+  gap: 16px 20px;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.verdict-bar .seal {
+  position: relative;
+  width: 96px;
+  height: 96px;
+}
+.verdict-bar .seal svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.verdict-bar .seal svg polygon {
+  fill: var(--surface-2);
+  stroke: var(--fg-3);
+  stroke-width: 3;
+}
+.verdict-bar .seal-in {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0 12px;
+}
+.verdict-bar .seal .k {
+  font-family: var(--mono);
+  font-size: 7.5px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+.verdict-bar .seal .w {
+  font-weight: 700;
+  font-size: 10.5px;
+  line-height: 1.15;
+  margin-top: 2px;
+  color: var(--fg-1);
+}
+.verdict-bar .seal .s {
+  margin-top: 3px;
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.verdict-bar .seal.compromise svg polygon {
+  stroke: var(--sev-critical);
+  fill: color-mix(in srgb, var(--sev-critical) 10%, var(--surface));
+}
+.verdict-bar .seal.compromise .w,
+.verdict-bar .seal.compromise .s {
+  color: var(--sev-critical);
+}
+.verdict-bar .seal.suspicious svg polygon {
+  stroke: var(--sev-medium);
+  fill: color-mix(in srgb, var(--sev-medium) 12%, var(--surface));
+}
+.verdict-bar .seal.suspicious .w,
+.verdict-bar .seal.suspicious .s {
+  color: var(--sev-medium);
+}
+.verdict-bar .seal.unwanted svg polygon {
+  stroke: #6b4fd6;
+  fill: color-mix(in srgb, #6b4fd6 10%, var(--surface));
+}
+.verdict-bar .seal.unwanted .w,
+.verdict-bar .seal.unwanted .s {
+  color: #6b4fd6;
+}
+.verdict-bar .seal.unconfirmed svg polygon {
+  stroke: var(--sev-low);
+  fill: color-mix(in srgb, var(--sev-low) 10%, var(--surface));
+}
+.verdict-bar .seal.unconfirmed .w {
+  color: var(--sev-low);
+}
+.verdict-bar .seal.pending svg polygon {
+  stroke: var(--fg-3);
+  stroke-dasharray: 6 4;
+  fill: var(--surface-3);
+}
+.verdict-bar .seal.pending .w {
+  color: var(--fg-2);
+}
+.verdict-bar .seal.clean svg polygon {
+  stroke: var(--accent);
+  fill: var(--accent-dim);
+}
+.verdict-bar .seal.clean .w {
+  color: var(--accent);
+}
+.verdict-text .line {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg-1);
+  margin-bottom: 4px;
+}
+.verdict-text .conf b {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-right: 6px;
+}
+.verdict-text .conf.high b {
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+.verdict-text .conf.medium b {
+  color: var(--sev-medium);
+  background: color-mix(in srgb, var(--sev-medium) 12%, transparent);
+}
+.verdict-text .conf.low b {
+  color: var(--sev-high);
+  background: color-mix(in srgb, var(--sev-high) 12%, transparent);
+}
+.verdict-badges .k {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  margin-bottom: 4px;
+}
+.verdict-badges .hexes {
+  display: flex;
+  gap: 2px;
+}
+.verdict-badges .hex {
+  position: relative;
+  width: 34px;
+  height: 34px;
+}
+.verdict-badges .hex svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.verdict-badges .hex svg polygon {
+  fill: var(--surface);
+  stroke: var(--line-2);
+  stroke-width: 3;
+}
+.verdict-badges .hex .code {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--line-2);
+}
+.verdict-badges .hex.observed svg polygon {
+  stroke: var(--accent);
+}
+.verdict-badges .hex.observed .code {
+  color: var(--accent);
+}
+.verdict-badges .hex.confirmed svg polygon {
+  stroke: var(--sev-high);
+  fill: var(--sev-high);
+}
+.verdict-badges .hex.confirmed .code {
+  color: #fff;
+}
+.report-contents {
+  border-bottom: 1px solid var(--line);
+  padding: 4px 16px;
+  background: var(--surface-2);
+}
+.report-contents > summary {
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--fg-2);
+  font-family: var(--mono);
+}
+.review-rail .group-head {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 12px 4px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+}
+.review-done {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-lg);
+  background: var(--accent-dim);
+  color: var(--fg-1);
+  font-size: 12.5px;
+}
+.review-done > svg {
+  color: var(--accent);
+}
+.review-card .stamp {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border: 1.5px solid currentColor;
+  border-radius: 4px;
+  transform: rotate(-2deg);
+  white-space: nowrap;
+  align-self: center;
+}
+.review-card .stamp.st-escalated {
+  color: var(--sev-critical);
+}
+.review-card .stamp.st-reviewed {
+  color: var(--accent);
+}
+.review-card .stamp.st-false_positive {
+  color: var(--fg-3);
+}
+.review-card .stamp.st-new {
+  color: var(--fg-3);
+  border-style: dashed;
+}
+.facts td.vals code {
+  display: block;
+  font-size: 10.5px;
+  color: var(--fg-2);
+  overflow-wrap: anywhere;
+}
+.decide {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.decide .choices {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.decide .choice {
+  flex: 1;
+  min-width: 140px;
+  padding: 9px 12px;
+  border: 1.5px solid var(--line-2);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg-1);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.decide .choice kbd {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-3);
+  border: 1px solid var(--line-2);
+  border-radius: 3px;
+  padding: 0 5px;
+}
+.decide .choice.confirm.active {
+  border-color: var(--sev-critical);
+  background: color-mix(in srgb, var(--sev-critical) 10%, var(--surface));
+  color: var(--sev-critical);
+}
+.decide .choice.review.active {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.decide .choice.dismiss.active {
+  border-color: var(--fg-3);
+  background: var(--surface-3);
+  color: var(--fg-2);
+}
+.decide .choice:hover {
+  border-color: var(--fg-3);
+}
+.decide .effect {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--fg-2);
+}
+.decide .controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  align-items: center;
+}
+.decide .controls .lbl {
+  font-size: 11px;
+  color: var(--fg-3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-right: 6px;
+}
