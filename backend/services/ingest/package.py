@@ -314,12 +314,25 @@ class PackageSource:
             return
         staged = None
         target = self.path
+        # dissect picks its loader by suffix (ZipLoader and VelociraptorLoader want ".zip"), so the
+        # target it opens must carry the archive's own
+        suffix = PurePosixPath(self.name.replace("\\", "/")).suffix.lower() or ".zip"
         if target is None:
-            # dissect picks its loader partly by suffix, so the staged copy keeps the archive's own
-            suffix = PurePosixPath(self.name.replace("\\", "/")).suffix.lower() or ".zip"
             with tempfile.NamedTemporaryFile(dir=self.tmp_dir, suffix=suffix, delete=False) as out:
                 out.write(self.data or b"")
                 staged = target = out.name
+        elif not str(target).lower().endswith(suffix):
+            # A chunked upload, which is every collection over 32 MiB, is staged as <id>.part. Under
+            # that name dissect fell back to its raw loader and reported every artifact "not in this
+            # collection". A hard link gives it the right name without a second copy of the upload.
+            fd, staged = tempfile.mkstemp(dir=self.tmp_dir, suffix=suffix)
+            os.close(fd)
+            os.unlink(staged)
+            try:
+                os.link(target, staged)
+            except OSError:
+                shutil.copyfile(target, staged)
+            target = staged
         run = triage.TriagePass(target, self.tmp_dir, self.context, deadline_s=remaining)
         entries: dict[str, dict[str, Any]] = {}
         started = time.monotonic()

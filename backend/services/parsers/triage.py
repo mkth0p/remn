@@ -157,7 +157,10 @@ def to_row(function: str, artifact: str, rec: dict[str, Any], index: int, contex
     elif kind in ("windows/appcompat/InventoryApplicationFile", "windows/appcompat/file"):
         path = _text(rec.get("path"))
         row.update(image=path, path=path, name=_text(rec.get("name")), company=_text(_first(rec, "publisher", "company_name")), hashes=_hashes(rec.get("digest")))
-        ts = _first(rec, "link_date", "mtime_regf")
+        # When the entry was written, which is when Windows first saw the file. link_date is the PE
+        # compile time, set by whoever built the binary: a dropper built in 2011 and run in 2026
+        # was placed in 2011. It stays in data.
+        ts = rec.get("mtime_regf")
     elif kind in ("windows/appcompat/InventoryApplication", "windows/appcompat/programs"):
         row.update(name=_text(rec.get("name")), company=_text(rec.get("publisher")), path=_text(_first(rec, "root_dir_path", "path", "uninstall_key")))
         ts = _first(rec, "install_date", "mtime_regf")
@@ -166,9 +169,11 @@ def to_row(function: str, artifact: str, rec: dict[str, Any], index: int, contex
         row.update(image=path, path=path, name=_text(rec.get("name")))
         ts = rec.get("ts")
     elif kind == "windows/shimcache":
+        # ShimCache shows the file was on the system, not when (or on Windows 10 and later, whether)
+        # it ran. last_modified is the file's own modification time, not a moment of activity, so
+        # the row is an observation; the time stays in data.
         path = _text(rec.get("path"))
         row.update(image=path, path=path, name=_text(rec.get("name")))
-        ts = rec.get("last_modified")
     elif kind in ("windows/registry/userassist", "windows/registry/bam"):
         path = _text(rec.get("path"))
         row.update(image=path, path=path)
@@ -204,8 +209,9 @@ def to_row(function: str, artifact: str, rec: dict[str, Any], index: int, contex
         row.update(url=_text(rec.get("url")), path=_text(rec.get("path")))
         ts = _first(rec, "ts_start", "ts_end")
     elif kind == "powershell/history":
-        row.update(commandLine=_text(rec.get("command")))
-        ts = rec.get("mtime")
+        # ConsoleHost_history.txt has no time per line: dissect gives every line the file's mtime,
+        # which put a command typed months ago at the last write. The lines are observations, in order.
+        row.update(commandLine=_text(rec.get("command")), order=rec.get("order"))
     elif kind == "windows/activitiescache":
         row.update(image=_text(rec.get("app_id")))
         ts = _first(rec, "start_time", "last_modified_time")

@@ -683,7 +683,14 @@ def records(path: str, name: str, notes: dict[str, Any] | None = None) -> Iterat
                             raise ValueError("expected an object per line")
                         yield row
             elif name.lower().endswith(".json"):
-                value = json.load(fh)
+                text = fh.read()
+                try:
+                    value = json.loads(text)
+                except json.JSONDecodeError as exc:
+                    if exc.msg != "Extra data":
+                        raise
+                    # Velociraptor writes results/<Artifact>.json as one object per line
+                    value = [json.loads(line) for line in text.splitlines() if line.strip()]
                 rows = value if isinstance(value, list) else value.get("records", [value]) if isinstance(value, dict) else None
                 if not isinstance(rows, list) or any(not isinstance(r, dict) for r in rows):
                     raise ValueError("expected an object, array of objects, or records array")
@@ -820,13 +827,16 @@ def normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, Any
             row["url"] = get("URL", "Url")
         if kind in ("browser-history", "browser-download"):
             row["url"] = get("URL", "Url", "VisitURL")
+        # A link file's own times are when the user opened the target (SourceModified: last opened);
+        # TargetModified is the target file's time, not an action of the user's, so it comes after.
         when = get(
-            "LastRun", "Timestamp", "TimeStamp", "LastModifiedTimeUTC", "FileKeyLastWriteTimestamp", "LastWriteTimestamp", "LastWriteTime",
-            "TargetModified", "SourceModified", "Created0x10", "LastModificationDate", "LinkDate", "LastVisitedTime", "VisitTime",
+            "LastRun", "Timestamp", "TimeStamp", "FileKeyLastWriteTimestamp", "LastWriteTimestamp", "LastWriteTime",
+            "SourceModified", "SourceCreated", "TargetModified", "Created0x10", "LastModificationDate", "LinkDate", "LastVisitedTime", "VisitTime",
         )
-        # A registry last-write time stays metadata, as it does for hives decoded natively; the
-        # other exports carry a moment something happened.
-        if kind != "registry":
+        # A registry last-write time stays metadata, as it does for hives decoded natively. ShimCache
+        # holds the file's own modification time and PowerShell history no time per line, so neither
+        # is an event; the other exports carry a moment something happened.
+        if kind not in ("registry", "shimcache", "powershell-history"):
             row["ts"] = row.get("ts") or timestamp_utc(when)
         if row["ts"] is not None:
             row["recordKind"] = "event"

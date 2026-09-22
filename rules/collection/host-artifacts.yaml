@@ -132,8 +132,8 @@ where:
   serviceFile|re: '(?i)^[a-z]:\\[^"]* [^"]*\.exe'
 ---
 id: collection-execution-user-path
-title: Executable ran from a temporary or user profile location
-description: Prefetch, Amcache, ShimCache, UserAssist, BAM or a process snapshot records execution from a location an unprivileged user can write to. Installers and updaters do this too; weigh the name, the run count and what else ran around the same time. One finding per executable and host, with the run count and the span.
+title: Executable ran from, or sat in, a temporary or user profile location
+description: Prefetch, UserAssist, BAM or a process snapshot records execution, and Amcache or ShimCache records the file's presence, in a location an unprivileged user can write to. ShimCache on Windows 10 and later does not show that the file ran. Installers and updaters do this too; weigh the name, the run count and what else ran around the same time. One finding per executable and host, with the run count and the span.
 source: events
 severity: medium
 attack: [T1204.002]

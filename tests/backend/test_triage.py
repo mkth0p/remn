@@ -160,3 +160,49 @@ def test_a_collection_without_a_system_directory_is_not_treated_as_a_drive(tmp_p
     list(source)
     assert source.triage is False
     assert not [f for f in source.files if f["name"].startswith("triage!/")]
+
+
+def test_a_chunked_upload_is_read_as_the_archive_it_is(collection, tmp_path):
+    """Every collection over 32 MiB reaches the parser as a chunked upload staged as <id>.part.
+    dissect picks its loader by suffix, and under that name it read nothing, reporting every
+    artifact as "not in this collection". The same bytes at a .part path give the same rows."""
+    staged = tmp_path / "0123456789abcdef0123456789abcdef.part"
+    staged.write_bytes(zipped(collection))
+    source = PackageSource("Collection-WS01.zip", str(staged), None, str(tmp_path), ParseContext(analyze_attachments=False))
+    rows = list(source)
+    services = {r["serviceName"] for r in rows if r.get("artifactType") == "service"}
+    assert services == {"Spooler", "SyncHelper"}
+    assert source.triage_summary["target"]["os"] == "windows"
+    assert staged.exists() and [p.name for p in tmp_path.iterdir() if p.suffix == ".zip"] == []
+
+
+def test_artifact_times_mean_what_the_timeline_says():
+    """A time on the timeline is a moment of activity. Amcache is placed when Windows first saw the
+    file, not when the binary was compiled; ShimCache and PowerShell history carry no such moment,
+    so they are observations rather than events."""
+    amcache = triage.to_row(
+        "amcache.files",
+        "amcache",
+        {"_type": "windows/appcompat/InventoryApplicationFile", "path": "C:\\Users\\jdoe\\AppData\\Local\\Temp\\drop.exe", "link_date": "2011-02-03T00:00:00+00:00", "mtime_regf": "2026-09-01T09:00:00+00:00"},
+        0,
+        {},
+    )
+    assert amcache["recordKind"] == "event" and amcache["ts"] == triage.timestamp("2026-09-01T09:00:00+00:00")
+    shim = triage.to_row("shimcache", "shimcache", {"_type": "windows/shimcache", "path": "C:\\Temp\\drop.exe", "last_modified": "2011-02-03T00:00:00+00:00"}, 0, {})
+    assert shim["recordKind"] == "observation" and shim["ts"] is None
+    history = triage.to_row("powershell.history", "powershell-history", {"_type": "powershell/history", "command": "Invoke-Mimikatz", "order": 3, "mtime": "2026-09-20T08:00:00+00:00"}, 0, {})
+    assert history["recordKind"] == "observation" and history["ts"] is None and history["order"] == 3
+
+
+def test_ez_exports_keep_the_same_meanings():
+    from services.parsers import collection
+
+    shim = collection.normalize({"Path": "C:\\Temp\\drop.exe", "LastModifiedTimeUTC": "2019-03-02 08:00:00", "CacheEntryPosition": "4"}, "AppCompatCache.csv", 0, {})
+    assert shim["artifactType"] == "shimcache" and shim["recordKind"] == "observation" and shim["ts"] is None
+    lnk = collection.normalize(
+        {"SourceFile": "C:\\Users\\jdoe\\Recent\\q3.lnk", "SourceCreated": "2026-09-01 10:00:00", "SourceModified": "2026-09-02 11:00:00", "TargetModified": "2015-06-01 00:00:00", "LocalPath": "C:\\Users\\jdoe\\q3.xlsx", "TargetIDAbsolutePath": "My Computer\\C:\\Users\\jdoe\\q3.xlsx"},
+        "LECmd_Output.csv",
+        0,
+        {},
+    )
+    assert lnk["ts"] == collection.timestamp_utc("2026-09-02 11:00:00"), "last opened, not the target's own time"

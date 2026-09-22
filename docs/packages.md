@@ -48,7 +48,7 @@ and USN journal are not read by default; they run to millions of rows.
 
 Exports written by other tools land in the same fields. The Zimmerman parsers are recognised
 by their headers wherever the file sits (EvtxECmd rows become events, PECmd prefetch,
-AmcacheParser and AppCompatCacheParser execution evidence, RECmd registry values, LECmd,
+AmcacheParser and AppCompatCacheParser presence and execution evidence, RECmd registry values, LECmd,
 JLECmd, MFTECmd and SBECmd files and folders, SrumECmd network usage), so KAPE module output
 needs no renaming. Velociraptor result files are mapped by the artifact that produced them,
 including its event log exports, which become events. DFIR-ORC archives are 7z, expanded once
@@ -181,6 +181,16 @@ snapshots and offers type/artifact filters; snapshots do not create historical
 timeline activity. Only timestamps with an explicit timezone are normalized;
 ambiguous originals remain in `data`. Prefetch exports with explicit
 `LastRunTime`/`LastExecutionTime` become timestamped activity records.
+
+A time on the timeline is a moment of activity, so a few artifacts take a particular one or
+none at all:
+
+| Artifact | Time used | Why |
+| --- | --- | --- |
+| Amcache file entry | when the entry was written (first seen by Windows) | the PE link date is the compile time, set by whoever built the binary; it stays in `data` |
+| ShimCache | none: an observation | the time it holds is the file's own modification time, and on Windows 10 and later an entry shows the file was present, not that it ran |
+| PowerShell history | none: an observation, with `order` | the history file has no time per line; its modification time is only when the last line was written |
+| LNK (LECmd) | when the link was last opened (`SourceModified`), then created | the target's own times describe the file, not the user |
 
 Observations share the existing event record store and query interface with an
 explicit record type, keeping migration, rules and deletion compatible. They are

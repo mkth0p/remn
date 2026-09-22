@@ -114,7 +114,14 @@ def test_a_velociraptor_collector_zip_yields_results_and_triage_rows(tmp_path):
                 z.write(path, f"uploads/auto/{rel}")
                 uploads.append({"vfs_path": f"auto/{rel}", "file_size": path.stat().st_size})
         z.writestr("uploads.json", "\n".join(json.dumps(u) for u in uploads) + "\n")
-        z.writestr("results/Windows.System.Services.json", json.dumps({"Name": "SyncHelper", "DisplayName": "Sync Helper", "PathName": "C:\\Users\\Public\\svc.exe -k", "StartMode": "Auto", "State": "Running"}) + "\n")
+        # Velociraptor writes one object per line, so a real result file has many lines
+        z.writestr(
+            "results/Windows.System.Services.json",
+            json.dumps({"Name": "SyncHelper", "DisplayName": "Sync Helper", "PathName": "C:\\Users\\Public\\svc.exe -k", "StartMode": "Auto", "State": "Running"})
+            + "\n"
+            + json.dumps({"Name": "Spooler", "DisplayName": "Print Spooler", "PathName": "C:\\Windows\\System32\\spoolsv.exe", "StartMode": "Auto", "State": "Running"})
+            + "\n",
+        )
         z.writestr(
             "results/Windows.EventLogs.Evtx.json",
             json.dumps({"System": {"Provider": {"Name": "Microsoft-Windows-Security-Auditing"}, "EventID": {"Value": 4688}, "TimeCreated": {"SystemTime": "2026-08-19T01:35:00Z"}, "Channel": "Security", "Computer": "WS01", "EventRecordID": 7}, "EventData": {"NewProcessName": "C:\\Users\\jdoe\\Downloads\\upd.exe", "SubjectUserName": "jdoe"}, "Message": "A new process has been created"}) + "\n",
@@ -130,6 +137,8 @@ def test_a_velociraptor_collector_zip_yields_results_and_triage_rows(tmp_path):
     assert source.triage is True, "the drive under uploads/ is read by dissect"
     assert any(r.get("serviceName") == "SyncHelper" and r["sourceFile"].startswith("results/") for r in by_type["service"])
     assert any(r.get("serviceName") == "Spooler" and r["sourceFile"].startswith("triage!/") for r in by_type["service"])
+    velo = [r["serviceName"] for r in by_type["service"] if r["sourceFile"] == "results/Windows.System.Services.json"]
+    assert velo == ["SyncHelper", "Spooler"], "a two-line result file gives two rows, not an error"
     event = by_type["event-export"][0]
     assert event["eventId"] == 4688 and event["recordId"] == 7 and event["targetUser"] == "jdoe" and event["recordKind"] == "event"
     net = by_type["connection"][0]
