@@ -178,6 +178,7 @@ def _ctx_from_request(request: HttpRequest) -> ParseContext:
         analyze_attachments=bool(s.get("analyzeAttachments", True)),
         trusted_senders=[str(x) for x in (s.get("trustedSenders") or s.get("trusted_senders") or []) if x],
         max_message_bytes=settings.FORENSIC_MAX_MESSAGE_MB * 1024 * 1024,
+        trusted_arc_sealers=[str(x).lower() for x in (s.get("trustedArcSealers") or []) if x],
     )
 
 

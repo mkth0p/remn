@@ -140,7 +140,29 @@ def dumps(obj: Any) -> str:
 
 
 def ndjson_line(obj: Any) -> bytes:
-    return (dumps(obj) + "\n").encode("utf-8")
+    line = dumps(obj) + "\n"
+    try:
+        return line.encode("utf-8")
+    except UnicodeEncodeError:
+        # A lone surrogate the parsers did not decode (fix_surrogates) becomes "?" rather than
+        # ending the stream: one odd byte in one message must not cost the rest of a mailbox.
+        return line.encode("utf-8", "replace")
+
+
+def fix_surrogates(text: str) -> str:
+    """Text with raw 8-bit bytes kept as surrogate escapes, decoded properly.
+
+    The stdlib email parser keeps a header byte it cannot decode as ASCII (common in spam, legacy
+    and phishing mail) as a lone surrogate, which cannot be written as UTF-8. The bytes are read as
+    UTF-8 when they form valid UTF-8, and as Windows-1252 otherwise, the usual source of raw 8-bit
+    header text."""
+    if not any("\udc80" <= ch <= "\udcff" for ch in text):
+        return text
+    raw = text.encode("utf-8", "surrogateescape")
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("cp1252", "replace")
 
 
 def is_public_ip(value: str | None) -> bool:

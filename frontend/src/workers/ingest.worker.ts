@@ -23,7 +23,7 @@ export interface IngestRequest {
   uploadSha256?: string
   sourceName?: string
   includeRaw: boolean
-  settings: { internalDomains: string[]; brands: string[]; vipNames: string[]; trustedSenders?: string[] }
+  settings: { internalDomains: string[]; brands: string[]; vipNames: string[]; trustedSenders?: string[]; trustedArcSealers?: string[] }
   /** access token for remote deployments - the worker has its own api/client module instance */
   token?: string
 }
@@ -281,7 +281,13 @@ async function ingest(req: IngestRequest): Promise<void> {
   if (kind !== 'evtx')
     form.append(
       'settings',
-      JSON.stringify({ internalDomains: req.settings.internalDomains, brands: req.settings.brands, vipNames: req.settings.vipNames, trustedSenders: req.settings.trustedSenders ?? [] }),
+      JSON.stringify({
+        internalDomains: req.settings.internalDomains,
+        brands: req.settings.brands,
+        vipNames: req.settings.vipNames,
+        trustedSenders: req.settings.trustedSenders ?? [],
+        trustedArcSealers: req.settings.trustedArcSealers ?? [],
+      }),
     )
 
   const fc = new FacetCounter()

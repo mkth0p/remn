@@ -20,6 +20,8 @@ export interface CaseSettings {
   brands: string[]
   /** senders (addresses or domains) the analyst trusts: risk capped, spoofing rules skip them */
   trustedSenders: string[]
+  /** mailing lists and forwarders whose ARC seal is trusted to vouch for the original authentication */
+  trustedArcSealers?: string[]
   networkAllowed: boolean
   providers: string[] // reputation providers enabled (empty = all configured)
   includeRaw: boolean

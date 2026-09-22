@@ -411,6 +411,18 @@ export function SettingsView() {
                   placeholder={'notifications.supplier.com\nfacture@partenaire.fr'}
                 />
               </label>
+              <label className="field">
+                <span>
+                  trusted ARC sealers (mailing lists and forwarders) - their verified ARC seal vouches for mail they forwarded; the internal domains always count. Applies to mail imported after the
+                  change.
+                </span>
+                <ListInput
+                  mono
+                  value={s.trustedArcSealers ?? []}
+                  onChange={(v) => patch({ trustedArcSealers: v.map((x) => x.toLowerCase().replace(/^@/, '')) })}
+                  placeholder={'lists.partner.org\ngoogle.com'}
+                />
+              </label>
               <div className="row">
                 <button className="btn sm" onClick={runSuggest} disabled={suggesting}>
                   {suggesting ? 'scanning…' : 'suggest trusted senders'}

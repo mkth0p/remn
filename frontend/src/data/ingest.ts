@@ -126,6 +126,7 @@ export async function ingestToServer(file: File, kase: Case, kind: 'evtx' | 'mai
           brands: kase.settings.brands,
           vipNames: kase.settings.vipNames,
           trustedSenders: kase.settings.trustedSenders ?? [],
+          trustedArcSealers: kase.settings.trustedArcSealers ?? [],
           analyzeAttachments: kase.settings.deepAttachments !== false,
         },
       },
@@ -196,7 +197,13 @@ export async function ingestToBrowser(file: File, kase: Case, kind: 'evtx' | 'ma
     kind,
     sourceName: file.webkitRelativePath || file.name,
     includeRaw: kase.settings.includeRaw !== false,
-    settings: { internalDomains: kase.settings.internalDomains, brands: kase.settings.brands, vipNames: kase.settings.vipNames, trustedSenders: kase.settings.trustedSenders ?? [] },
+    settings: {
+      internalDomains: kase.settings.internalDomains,
+      brands: kase.settings.brands,
+      vipNames: kase.settings.vipNames,
+      trustedSenders: kase.settings.trustedSenders ?? [],
+      trustedArcSealers: kase.settings.trustedArcSealers ?? [],
+    },
     token: API_HEADERS['X-Forensic-Client'],
   }
   return new Promise<number>((resolve) => {

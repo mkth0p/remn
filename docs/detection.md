@@ -173,8 +173,21 @@ scoring:
   of the wording, so IT password-expiry notices and CEO newsletters stay quiet.
 - Hidden marketing preheaders count as informational, not as hidden-text salting;
   click-tracker link mismatches are expected in newsletters; `.msg` and `.pst` exports
-  without transport headers are not treated as forged mail; a valid ARC seal restores
-  trust for mailing-list forwarding.
+  without transport headers are not treated as forged mail.
+- **Only the receiver's own verdict is believed.** That is the topmost
+  `Authentication-Results`, read without its RFC 8601 comments. Lower result headers,
+  `ARC-Authentication-Results` and claims in comments ("arc=pass (i=1 spf=pass dmarc=pass)")
+  can all be written by the sender, and they are shown but never counted. SPF or DKIM
+  passing counts as authentication only for a domain aligned with the From address: a
+  pass for the attacker's own envelope domain authenticates that domain. A mail claiming
+  one of the organisation's domains whose only pass is for another domain is an
+  `internal_spoof`. `X-MS-Exchange-Organization-AuthAs: Internal` is ignored when the
+  receiver failed the sender, since on a mailbox Exchange did not receive anyone can add it.
+- **ARC forgives failures only from a sealer you trust.** arc=pass says the ARC chain is
+  intact, and anyone can seal their own chain. Mailing-list forwarding is restored when the
+  receiver verified the seal and the sealer is in the case's *trusted ARC sealers* (the
+  internal domains always are), or when the receiver's composite verdict passed
+  (`compauth=pass`, Microsoft's ARC override). The flag `arc_trusted_sealer` marks it.
 - Static HTML in an archive, a normal CSV-export button, PDF JavaScript, encrypted
   content and bank-change wording remain review signals. Stronger findings require
   payload behaviour or corroborating identity, link or authentication evidence. Related
