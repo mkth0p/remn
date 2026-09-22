@@ -2176,7 +2176,7 @@ where:
   provider: Ntfs
   eventId: 55
   data.Origin: File System Driver
-  description|contains_all:
+  data.Description|contains_all:
   - contains a corrupted file record
   - The name of the file is "\"
 sigma:

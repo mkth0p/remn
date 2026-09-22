@@ -139,7 +139,7 @@ where:
   signed: 1
   signatureStatus: Valid
   any_of:
-  - description|in:
+  - data.Description|in:
     - '-'
     - ''
     company|in:
@@ -154,7 +154,7 @@ where:
     fileVersion|in:
     - '-'
     - ''
-  - description|exists: false
+  - data.Description|exists: false
     company|exists: false
     product|exists: false
     originalFileName|exists: false

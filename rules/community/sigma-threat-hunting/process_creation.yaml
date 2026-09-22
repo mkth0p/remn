@@ -1911,7 +1911,7 @@ where:
   - channel: Security
     eventId: 4688
   any_of_2:
-  - description|contains: 7-Zip
+  - data.Description|contains: 7-Zip
   - image|endswith:
     - \7z.exe
     - \7za.exe
@@ -2291,7 +2291,7 @@ where:
   - originalFileName|in:
     - PowerShell.EXE
     - pwsh.dll
-  - description: Windows Powershell
+  - data.Description: Windows Powershell
   - product: PowerShell Core 6
   commandLine|re: .{1000,}
 sigma:
@@ -2461,7 +2461,7 @@ where:
     - channel: Security
       eventId: 4688
   - any_of:
-    - description: WMI Commandline Utility
+    - data.Description: WMI Commandline Utility
     - originalFileName: wmic.exe
     - image|endswith: \WMIC.exe
     - processName|endswith: \WMIC.exe

@@ -127,7 +127,7 @@ where:
   - channel|contains: sysmon
     eventId: 7
   - any_of:
-    - description: System.Management.Automation
+    - data.Description: System.Management.Automation
     - originalFileName: System.Management.Automation.dll
     - imageLoaded|endswith:
       - \System.Management.Automation.dll
@@ -2225,7 +2225,7 @@ references:
 where:
   channel|contains: sysmon
   eventId: 7
-  description|contains: st2stager
+  data.Description|contains: st2stager
 sigma:
   id: 75c505b1-711d-4f68-a357-8c3fe37dbf2d
   status: test
@@ -2395,7 +2395,7 @@ where:
       imageLoaded|startswith:
       - C:\Program Files\
       - C:\Program Files (x86)\
-      description: OpenJDK Platform binary
+      data.Description: OpenJDK Platform binary
       originalFileName: jli.dll
       product|startswith: OpenJDK Platform
       signed: 'true'
@@ -3760,7 +3760,7 @@ where:
   all_of:
   - channel|contains: sysmon
     eventId: 7
-  - description: Python Core
+  - data.Description: Python Core
   - not:
       any_of:
       - image|contains: Python
@@ -3983,7 +3983,7 @@ where:
       - imageLoaded|contains: \AppData\Local\Programs\Python\Python3
       - product: Python
         signed: 'true'
-        description: Python
+        data.Description: Python
         company: Python Software Foundation
   - not:
       any_of:
@@ -4042,7 +4042,7 @@ where:
         - C:\Program Files (x86)\
       - signed: 1
         signatureStatus: Valid
-        description|endswith: C Runtime Library
+        data.Description|endswith: C Runtime Library
   - not:
       image|startswith: C:\Users\
       image|contains: \AppData\Local\Microsoft\OneDrive\

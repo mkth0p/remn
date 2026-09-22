@@ -198,7 +198,10 @@ FIELD_MAP: dict[str, str] = {
     "CreationUtcTime": "creationUtcTime",
     "PreviousCreationUtcTime": "previousCreationUtcTime",
     "Company": "company",
-    "Description": "description",
+    # "Description" (the PE file description in Sysmon 1/6/7, the error text in Sysmon 255) is
+    # deliberately not a column: "description" holds REMN's name for the event type, which
+    # overwrote it, so no rule on the real value could match. It stays whole in data.Description,
+    # which is where the Sigma converter sends the field.
     "Product": "product",
     "FileVersion": "fileVersion",
     "Consumer": "wmiConsumer",
@@ -288,6 +291,14 @@ def _scalar(value: Any) -> Any:
     if isinstance(value, list):
         return [_scalar(v) for v in value]
     return value
+
+
+# The text rules search whole: a command line (Windows allows 32,767 characters), a script
+# block, a task definition, a WMI consumer. Cut at 4,000 characters, an indicator placed after
+# the cut escaped every rule, and padding a command is trivial. Other columns keep the short cut;
+# every value stays whole in data.
+_LONG_FIELDS = frozenset({"commandLine", "parentCommandLine", "scriptBlockText", "taskContent", "payload", "contextInfo", "details", "wmiConsumer", "destination"})
+LONG_LIMIT = 65_536
 
 
 def _str(value: Any, limit: int = 4000) -> str | None:
@@ -406,7 +417,7 @@ def flatten(event: dict[str, Any], record: dict[str, Any] | None = None, include
             continue
         if key in row and row[key] not in (None, ""):
             continue  # first mapping wins
-        row[key] = _str(v)
+        row[key] = _str(v, LONG_LIMIT if key in _LONG_FIELDS else 4000)
 
     # Event-specific fix-ups
     if event_id in _GROUP_EVENTS and row.get("targetUser"):
