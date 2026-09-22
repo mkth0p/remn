@@ -14,7 +14,9 @@ In the browser store, rows live only in the analyst's browser; the server parses
 file in a temporary location and keeps nothing. In the server store, rows live in a
 DuckDB file per case on the REMN host, unencrypted at rest. In both modes the browser
 keeps the case, the findings, the notes, the chains, the decisions and the AI sessions.
-Upload temporary files are deleted when the request ends. See [Storage modes](storage.md).
+Upload temporary files are deleted when the parse ends, including when the client goes away
+part-way through; a resumable chunked upload that is never completed is removed by the sweep
+described below. See [Storage modes](storage.md).
 
 ## What leaves the machine
 
@@ -78,26 +80,42 @@ server then does what it does for a browser-store case and nothing else: parse e
 and return the rows, run rules and correlation over posted rows, convert rules, serve the
 rule packs and the prompt bundle for the analyst's own model. Everything that keeps state
 on the server, reaches a third party or runs a model on the server's account answers 403
-with the code `browserOnly`: the server store and its jobs, chunked uploads, reputation
-lookups, the server-proxy and Claude Code transports. The health endpoint says
-`"mode": "browser-only"` and stops reporting paths and platform details, and the
-interface hides the server store, the conversion, the two server-side transports and the
-lookups toggle. Every case, its evidence rows included, lives in the visitor's browser.
+with the code `browserOnly`: the server store and its jobs, reputation lookups, the
+server-proxy and Claude Code transports. Chunked uploads stay open: a file larger than
+32 MiB reaches the parser that way, staged exactly as a single-request upload would be. The
+health endpoint says `"mode": "browser-only"` and stops reporting paths and platform
+details, and the interface hides the server store, the conversion, the two server-side
+transports and the lookups toggle. Every case, its evidence rows included, lives in the
+visitor's browser.
 
-Two settings go with it. `FORENSIC_RATE_LIMIT_PER_MIN` gives each client address a
-budget on the heavy paths (parsing, correlation, enrichment, conversion, lookups, models,
-store writes and store queries that run rules or SQL); over budget is a 429 with a
-Retry-After, and health, meta, rule packs and plain reads are never counted. Behind a
-reverse proxy every request arrives from the proxy's address, so `FORENSIC_TRUST_PROXY=1`
-takes the client address from the first X-Forwarded-For entry; set it only when a proxy
-you control is the only way to reach the server, since the header is otherwise free to
-forge. `docker-compose.public.yml` is this configuration with Caddy in front, and
+Two limits go with it, one on how often requests arrive and one on how many run at once.
+
+- `FORENSIC_RATE_LIMIT_PER_MIN` gives each client a budget on the heavy paths (parsing,
+  correlation, enrichment, conversion, lookups, models, store writes and store queries that
+  run rules or SQL); over budget is a 429 with a Retry-After, and health, meta, rule packs
+  and plain reads are never counted. A client is an IPv4 address, or an IPv6 /64: one host
+  is normally given a whole /64, and a budget kept per address would give it a fresh one for
+  every request.
+- `FORENSIC_MAX_HEAVY_REQUESTS` and `FORENSIC_MAX_HEAVY_PER_CLIENT` cap the heavy requests in
+  flight: in browser-only mode, all worker threads but two, and two per client. A streamed
+  parse to a client that stops reading holds its worker thread until the client goes away,
+  so without a cap a handful of such clients took every thread and the page itself stopped
+  answering. `FORENSIC_MAX_JSON_INFLIGHT_MB` (64 in that mode) caps the JSON bodies being
+  worked on at once by size, since parsing one takes about seventeen times its size in
+  memory. Past any of these the answer is 503 with a Retry-After.
+
+Behind a reverse proxy every request arrives from the proxy's address, so
+`FORENSIC_TRUST_PROXY=1` takes the client address from the rightmost X-Forwarded-For entry,
+the one the proxy added; set it only when a proxy you control is the only way to reach the
+server. `docker-compose.public.yml` is this configuration with Caddy in front, and
 `FORENSIC_MAX_UPLOAD_MB` lowered.
 
-Browser-only mode withholds more than paths: the health endpoint also omits the version and
-which optional parsers are compiled in, since version plus "libpff and yara-python are present"
-is what selects a CVE off a shelf, and the browser only needs to know a capability exists at the
-moment a file needs it. The content security policy narrows `connect-src` to the origin and
+The health endpoint reports the build (`version+commit`) and a link to that exact source in
+every mode, and the app shows both: a visitor who trusts the server with evidence can read the
+code that parses it. It withholds the machine: paths, platform, interpreter, and which native
+libraries are compiled in, reporting only coarse formats (`"formats": {"pst": true}`). The
+source is public, so the commit tells an attacker nothing the repository does not, and it tells
+a visitor what they need to check. The content security policy narrows `connect-src` to the origin and
 loopback in that mode. An operator's own instance may point the browser-direct model transport
 at any address on their network, so it stays open there; a public page served over HTTPS can
 only reach loopback anyway, so the narrower policy costs that deployment nothing and removes the
@@ -131,7 +149,9 @@ finishes.
   stranding it for the sweeper to find later.
 - **A ceiling on how long one parse runs.** `FORENSIC_INGEST_MAX_S` (30 minutes in
   browser-only mode, off otherwise) ends an ingest stream at the limit with the rows already
-  sent, an error line saying why, and the result marked incomplete. The rate limiter shapes how
+  sent, an error line saying why, and the result marked incomplete. The limit is checked
+  between archive members as well as between rows, so an archive whose members produce no
+  rows cannot walk around it. The rate limiter shapes how
   fast requests arrive, not how many are in flight, and the server cannot reap a request once it
   is running; this is what stops a few slow parses holding every worker thread indefinitely.
 - **External engines under the same bounds.** Hayabusa, when installed, runs as a separate
@@ -143,10 +163,38 @@ finishes.
   `HAYABUSA_WAIT_S` and then carries on without it, saying so. A collection's event logs are held back for one engine run within the same per-request
   hold allowance as prefetch, and released with the parse. The binary in the image is pinned by
   version and by the SHA-256 of its release archive.
+- **A ceiling on what one message costs.** Parsing a mail holds about a dozen copies of it, and
+  a highly compressible message makes a small upload large: a 128 MiB message inside a 128 KiB
+  zip took the parser past 1.7 GiB. A message larger than `FORENSIC_MAX_MESSAGE_MB` (48 in
+  browser-only mode, 256 otherwise) is not parsed; it becomes an error row that says why. An
+  archive member larger than half the staging budget is not copied out, and bzip2, xz and
+  LZMA data inside attachments and archives is expanded only up to the analysis limit, with
+  the attachment flagged as a decompression bomb when it goes past it.
+- **Every member accounted for.** An archive's members are listed in the stream's last line
+  as parsed (with their row count), skipped or failed, with the reason: too large, encrypted,
+  a compression method that is not read, not a mail file, not an event log. Nothing is left
+  out without a line saying so.
+- **Rules read without expansion.** The Sigma and Sublime converters take YAML from visitors,
+  and a safe YAML loader is safe against object construction, not against anchors that each
+  repeat the last one ten times: 450 bytes took five seconds and half a gigabyte. Uploaded
+  rules with YAML aliases are refused; neither rule format uses them.
+- **The request spool on the staging volume.** The web server writes a request body over
+  512 KiB to a temporary file before the application sees it. `backend/run.py` points those
+  at `FORENSIC_TMP_DIR`, the volume sized for evidence, rather than at the system `/tmp`,
+  which the public compose keeps at 64 MiB.
 - **A ceiling on what one parse spends.** Every native decode is counted and timed against one
   allowance per package, whether it succeeds or fails, and cabinets are counted against the same
   allowance rather than being free. A cabinet that claims to expand by more than a couple of
   hundred times its own size is refused: real support cabinets are around ten to one.
+
+### What the server log holds
+
+The log is the one thing on a browser-only server that outlives a parse. It holds operational
+lines: requests refused, sweeps, the engine's state. In browser-only mode a failure in the
+parsing code is logged by exception type and place (`UnicodeDecodeError at common.py:104`),
+never with the exception's text, which is often a piece of the input, and never with a file,
+member or attachment name. `docker-compose.public.yml` rotates the log (three files of 10 MB)
+rather than keeping it for the life of the container.
 
 None of this makes a public instance a place for real evidence. It bounds the exposure of the
 files people do send.

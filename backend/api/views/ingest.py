@@ -21,10 +21,11 @@ from django.http import HttpRequest, JsonResponse, StreamingHttpResponse
 from django.views.decorators.http import require_POST
 
 from api.views.upload import discard_upload, get_upload
+from forensic.build import build_id
 from services.analysis import hayabusa
 from services.analysis.attachments.analyzer import analyze_attachment
 from services.common import ndjson_line, sha256_chunks
-from services.ingest.pipeline import EvtxSource, MailSource, detect_mail_format, iter_mbox_fileobj
+from services.ingest.pipeline import DeadlineExceeded, EvtxSource, MailSource, detect_mail_format, iter_mbox_fileobj
 from services.parsers.mail import pst as pst_mod
 from services.parsers.mail.common import ParseContext
 
@@ -112,6 +113,21 @@ def _expired(deadline: float | None) -> bool:
     return deadline is not None and time.monotonic() > deadline
 
 
+def _max_member() -> int:
+    """The largest archive member copied out for parsing: never more than half the staging budget,
+    so one member of a small upload cannot fill the area every other visitor's upload shares."""
+    return min(4 * 1024**3, int(settings.FORENSIC_TMP_MAX_GB) * 1024**3 // 2)
+
+
+def _members_line_stats(members: list[dict[str, Any]], limit: int = 2000) -> dict[str, Any]:
+    """The member manifest for the done line, capped so a huge archive cannot make one huge line."""
+    counts = {"parsed": 0, "skipped": 0, "error": 0}
+    for m in members:
+        key = str(m.get("status") or "parsed")
+        counts[key] = counts.get(key, 0) + 1
+    return {"members": members[:limit], "membersTotal": len(members), "memberCounts": counts}
+
+
 def _engine_lines(src, tmp_dir: str, deadline: float | None) -> Iterator[bytes]:
     """Hayabusa over the staged event log, its detections as finding lines and one summary line."""
     remaining = max(1.0, deadline - time.monotonic()) if deadline else None
@@ -161,6 +177,7 @@ def _ctx_from_request(request: HttpRequest) -> ParseContext:
         include_headers=bool(s.get("includeHeaders", True)),
         analyze_attachments=bool(s.get("analyzeAttachments", True)),
         trusted_senders=[str(x) for x in (s.get("trustedSenders") or s.get("trusted_senders") or []) if x],
+        max_message_bytes=settings.FORENSIC_MAX_MESSAGE_MB * 1024 * 1024,
     )
 
 
@@ -179,28 +196,44 @@ def ingest_evtx(request: HttpRequest):
 
     def gen() -> Iterator[bytes]:
         n = 0
-        evsrc = EvtxSource(src.name, src.path, src.data, tmp_dir, include_raw=include_raw)
-        engines = hayabusa.engines() if request.POST.get("engines", "1") != "0" else []
-        yield ndjson_line({"type": "meta", "format": evsrc.format, "name": src.name, "size": src.size, "sha256": src.sha256, "includeRaw": include_raw, "engines": engines})
         deadline = _deadline()
+        # The terminal line is yielded after the try, never inside a finally: a client that goes away
+        # closes this generator at a yield, and a yield in a finally then aborts the cleanup below it.
         try:
-            for row in evsrc:
-                row["type"] = "event"
-                yield ndjson_line(row)
-                n += 1
-                if _expired(deadline):
-                    evsrc.stats.errors += 1
-                    yield ndjson_line({"type": "error", "error": DEADLINE_REASON, "emitted": n})
-                    break
-            if engines:
-                yield from _engine_lines(src, tmp_dir, deadline)
-        except Exception as exc:  # noqa: BLE001
-            log.exception("evtx ingestion failed")
-            yield ndjson_line({"type": "error", "error": str(exc)[:300], "emitted": n})
-        finally:
+            evsrc = EvtxSource(src.name, src.path, src.data, tmp_dir, include_raw=include_raw, max_member=_max_member(), deadline=deadline)
+            engines = hayabusa.engines() if request.POST.get("engines", "1") != "0" else []
+            yield ndjson_line(
+                {
+                    "type": "meta",
+                    "format": evsrc.format,
+                    "name": src.name,
+                    "size": src.size,
+                    "sha256": src.sha256,
+                    "includeRaw": include_raw,
+                    "engines": engines,
+                    "parser": build_id(),
+                }
+            )
+            try:
+                for row in evsrc:
+                    row["type"] = "event"
+                    yield ndjson_line(row)
+                    n += 1
+                    if _expired(deadline):
+                        raise DeadlineExceeded()
+                if engines:
+                    yield from _engine_lines(src, tmp_dir, deadline)
+            except DeadlineExceeded:
+                evsrc.stats.errors += 1
+                yield ndjson_line({"type": "error", "error": DEADLINE_REASON, "emitted": n})
+            except Exception as exc:  # noqa: BLE001
+                log.error("evtx ingestion failed: %s", type(exc).__name__)
+                evsrc.stats.errors += 1
+                yield ndjson_line({"type": "error", "error": str(exc)[:300], "emitted": n})
             stats = evsrc.stats.to_dict()
             stats["files"] = evsrc.files
-            yield ndjson_line({"type": "done", "format": evsrc.format, "stats": stats, "emitted": n, "sha256": src.sha256})
+            yield ndjson_line({"type": "done", "format": evsrc.format, "stats": stats, "emitted": n, "sha256": src.sha256, "parser": build_id()})
+        finally:
             src.cleanup()
 
     return _stream(gen())
@@ -224,34 +257,41 @@ def ingest_mail(request: HttpRequest):
     tmp_dir = str(settings.FILE_UPLOAD_TEMP_DIR)
 
     def gen() -> Iterator[bytes]:
-        yield ndjson_line(
-            {
-                "type": "meta",
-                "format": fmt,
-                "name": src.name,
-                "size": src.size,
-                "sha256": src.sha256,
-                "settings": {"internalDomains": ctx.internal_domains, "brands": ctx.brands, "vipNames": ctx.vip_names},
-            }
-        )
         n = 0
-        msrc = MailSource(src.name, src.path, src.data, ctx, tmp_dir)
         deadline = _deadline()
+        # as for event logs: the terminal line is never yielded from a finally, so cleanup always runs
         try:
-            for row in msrc:
-                row["type"] = "mail"
-                yield ndjson_line(row)
-                n += 1
-                if _expired(deadline):
-                    msrc.stats.errors += 1
-                    yield ndjson_line({"type": "error", "error": DEADLINE_REASON, "emitted": n})
-                    break
-        except Exception as exc:  # noqa: BLE001
-            log.exception("mail ingestion failed")
-            msrc.stats.errors += 1
-            yield ndjson_line({"type": "error", "error": str(exc)[:300], "emitted": n})
+            msrc = MailSource(src.name, src.path, src.data, ctx, tmp_dir, max_member=_max_member(), deadline=deadline)
+            yield ndjson_line(
+                {
+                    "type": "meta",
+                    "format": fmt,
+                    "name": src.name,
+                    "size": src.size,
+                    "sha256": src.sha256,
+                    "settings": {"internalDomains": ctx.internal_domains, "brands": ctx.brands, "vipNames": ctx.vip_names},
+                    "parser": build_id(),
+                }
+            )
+            try:
+                for row in msrc:
+                    row["type"] = "mail"
+                    yield ndjson_line(row)
+                    n += 1
+                    if _expired(deadline):
+                        raise DeadlineExceeded()
+            except DeadlineExceeded:
+                msrc.stats.errors += 1
+                yield ndjson_line({"type": "error", "error": DEADLINE_REASON, "emitted": n})
+            except Exception as exc:  # noqa: BLE001
+                log.error("mail ingestion failed: %s", type(exc).__name__)
+                msrc.stats.errors += 1
+                yield ndjson_line({"type": "error", "error": str(exc)[:300], "emitted": n})
+            stats = msrc.stats.to_dict()
+            if msrc.members:
+                stats.update(_members_line_stats(msrc.members))
+            yield ndjson_line({"type": "done", "format": msrc.format, "stats": stats, "emitted": n, "sha256": src.sha256, "parser": build_id()})
         finally:
-            yield ndjson_line({"type": "done", "format": msrc.format, "stats": msrc.stats.to_dict(), "emitted": n, "sha256": src.sha256})
             src.cleanup()
 
     return _stream(gen())

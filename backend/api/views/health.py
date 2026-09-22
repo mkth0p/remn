@@ -8,13 +8,12 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_GET
 
 from api.services import ollama_service
+from forensic.build import VERSION, build_id, source_url
 from services.ai import claude_code
 from services.analysis import hayabusa
 from services.analysis.attachments import yara_scan
 from services.parsers.mail import pst
 from services.reputation.base import registry
-
-VERSION = "0.1.1"
 
 
 @require_GET
@@ -31,6 +30,9 @@ def health(request):
         "ok": True,
         "name": "REMN forensic analyzer",
         "version": VERSION,
+        # the exact source this server runs, so anyone can read and check it; kept in every mode
+        "build": build_id(),
+        "source": source_url(),
         "stateless": True,
         "mode": "browser-only" if browser_only else "full",
         "python": sys.version.split()[0],
@@ -56,11 +58,12 @@ def health(request):
         "engines": hayabusa.engines(),
     }
     if browser_only:
-        # The same reasoning as the paths and platform: an instance open to strangers should not
-        # hand out its exact version and which native parsers are compiled in. libpff and
-        # yara-python are the most CVE-prone parts of the stack, and the browser needs to know
-        # only whether a capability exists, which it learns when a file needs it.
-        for k in ("python", "platform", "store", "rulesDir", "dataDir", "version"):
+        # An instance open to strangers keeps the machine's paths, platform and interpreter to
+        # itself. It does say which commit it runs: the source is public, and a visitor trusting
+        # the server with evidence should be able to read exactly what parses it. What the parser
+        # can read is given as coarse formats, not as the native libraries behind them.
+        for k in ("python", "platform", "store", "rulesDir", "dataDir"):
             payload.pop(k, None)
         payload["optional"] = {"claudeCode": False}
+        payload["formats"] = {"pst": pst.available()}
     return JsonResponse(payload)

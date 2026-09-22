@@ -60,6 +60,7 @@ def _ctx_from(settings_obj: dict[str, Any] | None) -> ParseContext:
         include_headers=bool(s.get("includeHeaders", True)),
         analyze_attachments=bool(s.get("analyzeAttachments", True)),
         trusted_senders=[str(x) for x in (s.get("trustedSenders") or s.get("trusted_senders") or []) if x],
+        max_message_bytes=settings.FORENSIC_MAX_MESSAGE_MB * 1024 * 1024,
     )
 
 

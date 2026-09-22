@@ -251,6 +251,8 @@ class ParseContext:
     analyze_attachments: bool = True
     evidence_id: str | None = None
     trusted_senders: list[str] = field(default_factory=list)
+    # messages larger than this are recorded as errors instead of being parsed
+    max_message_bytes: int = 256 * 1024 * 1024
 
 
 @dataclass

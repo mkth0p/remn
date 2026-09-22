@@ -161,7 +161,7 @@ def init(request: HttpRequest):
         # than the operator-scale chunked ceiling: an unfinished upload holds disk until it is swept.
         limit = min(limit, settings.FORENSIC_MAX_UPLOAD_MB * 1024**2)
     if size <= 0 or size > limit:
-        return JsonResponse({"error": f"size must be between 1 byte and {settings.FORENSIC_MAX_CHUNKED_GB} GB"}, status=400)
+        return JsonResponse({"error": f"size must be between 1 byte and {limit // 1024**2:,} MB"}, status=400)
     # Refuse rather than accept an upload the disk cannot take. Sweep first, so a burst of
     # abandoned uploads does not lock out a legitimate one for the rest of the retention window.
     budget = settings.FORENSIC_TMP_MAX_GB * 1024**3

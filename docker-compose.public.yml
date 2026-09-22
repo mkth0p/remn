@@ -1,6 +1,6 @@
 # An instance open to people you do not know: browser-only mode, with Caddy in front for HTTPS.
 #
-#   REMN_DOMAIN=remn.example.tech docker compose -f docker-compose.public.yml up -d --build
+#   REMN_DOMAIN=remn.example.tech bash deploy/update.sh
 #
 # The name must already point at this machine (an A or AAAA record) and ports 80 and 443 must be
 # reachable, so that Caddy can obtain and renew its certificate. The application container is not
@@ -8,7 +8,8 @@
 #
 # What the server does here: parse evidence and return rows, run rules and correlation, serve the
 # rule packs and the prompt bundle for the analyst's own model. What it refuses: server stores,
-# chunked uploads, jobs, reputation lookups, server-side models. Every case stays in the visitor's
+# jobs, reputation lookups, server-side models. A file larger than 32 MiB reaches the parser as a
+# chunked upload staged in RAM, deleted when its parse ends. Every case stays in the visitor's
 # browser, the server keeps nothing. Each address gets REMN_RATE_LIMIT heavy requests a minute and
 # uploads are capped at REMN_MAX_UPLOAD_MB. See docs/security.md.
 services:
@@ -17,6 +18,9 @@ services:
       context: .
       args:
         EXTRA_PIP: ${REMN_EXTRA_PIP:-yara-python libpff-python}
+        # the commit this image is built from, shown to visitors with a link to its source;
+        # deploy/update.sh sets it, an unset value shows as "unknown"
+        REMN_BUILD_ID: ${REMN_BUILD_ID:-}
     image: remn
     environment:
       FORENSIC_BROWSER_ONLY: "1"
@@ -53,6 +57,12 @@ services:
       # principle. Sized to hold one upload at the 512 MiB ceiling with room to parse it.
       - /app/backend/tmp:rw,noexec,nosuid,nodev,size=${REMN_TMP_SIZE:-1g},uid=1000,gid=1000,mode=0700
       - /tmp:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700
+    # The log holds operational lines only: in browser-only mode the parsers' failures are logged by
+    # exception type and place, never with a file name or text from the evidence. It is rotated
+    # rather than kept for the life of the container.
+    logging:
+      driver: local
+      options: {max-size: 10m, max-file: "3"}
     restart: unless-stopped
 
   caddy:
@@ -77,6 +87,9 @@ services:
     command: ["caddy", "run", "--config", "/etc/caddy/site/Caddyfile", "--adapter", "caddyfile"]
     depends_on:
       - remn
+    logging:
+      driver: local
+      options: {max-size: 10m, max-file: "3"}
     restart: unless-stopped
 
 networks:

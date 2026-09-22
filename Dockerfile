@@ -15,6 +15,10 @@ WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./
+# the source commit, shown in the app and checked against the server's; the checkout's .git is not
+# copied into the build, so deploy/update.sh passes it: --build-arg REMN_BUILD_ID=$(git rev-parse HEAD)
+ARG REMN_BUILD_ID=""
+ENV REMN_BUILD_ID=$REMN_BUILD_ID
 RUN npm run build
 
 FROM python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285 AS python-build
@@ -72,4 +76,6 @@ VOLUME ["/app/backend/data", "/app/backend/tmp"]
 EXPOSE 8000
 # the container's own name is what browsers reach it by; add yours in FORENSIC_ALLOWED_HOSTS
 ENV FORENSIC_ALLOWED_HOSTS=localhost,127.0.0.1 FORENSIC_TMP_DIR=/app/backend/tmp
+ARG REMN_BUILD_ID=""
+ENV REMN_BUILD_ID=$REMN_BUILD_ID
 CMD ["python", "backend/run.py", "--host", "0.0.0.0", "--port", "8000"]

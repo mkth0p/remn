@@ -26,6 +26,7 @@ from typing import Any
 
 import yaml
 
+from services.common import load_untrusted_yaml_all
 from services.parsers.evtx_parser import FIELD_MAP
 
 LEVELS = {"informational": "info", "info": "info", "low": "low", "medium": "medium", "high": "high", "critical": "critical"}
@@ -628,7 +629,7 @@ def convert_text(text: str, source_name: str = "") -> list[dict[str, Any]]:
     """Convert every Sigma document in a YAML text (multi-document files are common)."""
     out: list[dict[str, Any]] = []
     try:
-        docs = [d for d in yaml.safe_load_all(text) if isinstance(d, dict)]
+        docs = [d for d in load_untrusted_yaml_all(text) if isinstance(d, dict)]
     except yaml.YAMLError as exc:
         return [{"ok": False, "id": source_name or "?", "title": source_name or "(invalid yaml)", "error": f"yaml: {str(exc)[:160]}", "warnings": []}]
     for doc in docs:

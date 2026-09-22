@@ -86,6 +86,45 @@ def sha256_file(fh: BinaryIO, chunk_size: int = 4 * 1024 * 1024) -> str:
     return h.hexdigest()
 
 
+def read_zip_member(zf: Any, info: Any, limit: int) -> bytes | None:
+    """At most limit bytes of one member of an untrusted zip, or None when it is larger or uses a
+    compression method this refuses.
+
+    zipfile stops at the declared size, but it expands every read of a bzip2 or LZMA member without
+    an output bound, so a few kilobytes of either can become gigabytes before that cut. Office
+    files, mail exports and collections use stored or deflate members, where each small read
+    expands at most about a thousand times, so only those are read, in small steps."""
+    import zipfile
+
+    if getattr(info, "file_size", 0) > limit or getattr(info, "compress_type", 0) not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+        return None
+    out = bytearray()
+    with zf.open(info) as fh:
+        while chunk := fh.read(16 * 1024):
+            out += chunk
+            if len(out) > limit:
+                return None
+    return bytes(out)
+
+
+def load_untrusted_yaml_all(text: str) -> list[Any]:
+    """Every document in YAML text that came from a visitor, with aliases refused.
+
+    safe_load is safe against object construction, not against expansion: ten levels of anchors that
+    each repeat the previous one ten times turn a few hundred bytes into billions of nodes. Sigma and
+    Sublime rules do not use anchors, so a rule that does is rejected rather than expanded."""
+    import yaml
+
+    class _NoAliasLoader(yaml.SafeLoader):
+        def compose_node(self, parent: Any, index: Any) -> Any:
+            if self.check_event(yaml.AliasEvent):
+                mark = self.peek_event().start_mark
+                raise yaml.composer.ComposerError(None, None, "YAML aliases (*name) are not accepted in uploaded rules", mark)
+            return super().compose_node(parent, index)
+
+    return list(yaml.load_all(text, Loader=_NoAliasLoader))  # noqa: S506 - SafeLoader subclass
+
+
 def json_default(obj: Any) -> Any:
     if isinstance(obj, (bytes, bytearray)):
         return obj.decode("utf-8", "replace")

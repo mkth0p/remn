@@ -516,3 +516,20 @@ def test_store_auth_campaign_and_visible_cap(store, monkeypatch):
 def test_foreign_qualified_identity_is_not_bypassed_by_bare_alias():
     identities = C.event_identities({"upn": "alice@other.example", "subjectUser": "alice"})
     assert len(identities) == 1 and identities[0][2] == "other.example"
+
+
+def test_the_browser_sends_every_data_key_the_chain_builder_reads():
+    """chains.ts sends only these keys of an event's data; a key read here and missing there would
+    silently change a browser-store chain, so the two lists are compared."""
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    py = (root / "backend/services/analysis/chains.py").read_text(encoding="utf-8")
+    ts = (root / "frontend/src/data/chains.ts").read_text(encoding="utf-8")
+    read = set(re.findall(r'data\.get\("([^"]+)"\)', py)) | set(re.findall(r'data\["([^"]+)"\]', py))
+    for group in re.findall(r"for k in \(([^)]*)\):\s*\n\s*if data\.get\(k\)", py):
+        read |= set(re.findall(r'"([^"]+)"', group))
+    block = ts[ts.index("export const CHAIN_DATA_KEYS") : ts.index("] as const", ts.index("export const CHAIN_DATA_KEYS"))]
+    sent = set(re.findall(r"'([^']+)'", block))
+    assert read and read <= sent, f"read by chains.py but not sent by chains.ts: {sorted(read - sent)}"

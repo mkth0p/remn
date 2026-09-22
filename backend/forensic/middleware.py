@@ -14,6 +14,7 @@ so the frontend can prompt for the token.
 from __future__ import annotations
 
 import hmac
+import ipaddress
 import re
 import threading
 import time
@@ -41,6 +42,20 @@ def client_address(request) -> str:
         if forwarded:
             return forwarded[-1]
     return request.META.get("REMOTE_ADDR", "") or "?"
+
+
+def client_key(request) -> str:
+    """The unit a budget is kept per: the address, or its /64 for IPv6.
+
+    One host on IPv6 is normally given a whole /64, 2^64 addresses it can send from, so a budget
+    kept per address gives it a fresh one for every request."""
+    addr = client_address(request)
+    if ":" in addr:
+        try:
+            return str(ipaddress.IPv6Network(f"{addr}/64", strict=False))
+        except ValueError:
+            return addr
+    return addr
 
 
 class ApiClientHeaderMiddleware:
@@ -166,7 +181,7 @@ class RateLimitMiddleware:
     def __call__(self, request):
         limit = int(settings.FORENSIC_RATE_LIMIT_PER_MIN or 0)
         if limit > 0 and BUDGETED.match(request.path):
-            addr = client_address(request)
+            addr = client_key(request)
             now = time.monotonic()
             with self._lock:
                 tokens, last = self._buckets.get(addr, (float(limit), now))
@@ -181,3 +196,116 @@ class RateLimitMiddleware:
                     for k in [k for k, (_, t) in self._buckets.items() if now - t > 600]:
                         del self._buckets[k]
         return self.get_response(request)
+
+
+# The paths whose requests hold a worker thread for as long as they run: parsing (its response is
+# streamed for the whole parse), correlation and conversion. Chunk uploads, health, meta and packs
+# return at once and are not counted.
+HEAVY = re.compile(
+    r"^/api/(ingest/|analyze/|chains/|relationships/|enrich/|rules/convert/|reputation/lookup|ai/(chat|query)|store/[^/]+/(ingest|import|export|rules/run|sql))"
+)
+
+
+def _busy(reason: str) -> JsonResponse:
+    resp = JsonResponse({"error": reason, "code": "busy"}, status=503)
+    resp["Retry-After"] = "30"
+    return resp
+
+
+class ConcurrencyGuardMiddleware:
+    """A cap on heavy requests in flight, overall and per client.
+
+    The rate limit shapes how often requests arrive, not how long they last. A streamed response to
+    a client that stops reading holds its worker thread for as long as the connection stays open:
+    waitress blocks the thread once the output buffer is full. With nothing else in the way, as many
+    such clients as there are threads take every thread, and the site, the page included, stops
+    answering. The overall cap keeps threads free for everything else; the per-client cap stops one
+    client, or one IPv6 /64, from taking all the slots the cap leaves. Past either, the answer is
+    503 with a Retry-After. A slot is given back when the response is closed: at its end, or when
+    the client goes away."""
+
+    _lock = threading.Lock()
+    _total = 0
+    _json_bytes = 0
+    _per_client: dict[str, int] = {}
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    @classmethod
+    def in_flight(cls) -> int:
+        with cls._lock:
+            return cls._total
+
+    def __call__(self, request):
+        total_cap = int(settings.FORENSIC_MAX_HEAVY_REQUESTS or 0)
+        client_cap = int(settings.FORENSIC_MAX_HEAVY_PER_CLIENT or 0)
+        json_cap = int(settings.FORENSIC_MAX_JSON_INFLIGHT_MB or 0) * 1024 * 1024
+        if (total_cap <= 0 and client_cap <= 0 and json_cap <= 0) or request.method != "POST" or not HEAVY.match(request.path):
+            return self.get_response(request)
+        key = client_key(request)
+        # A JSON body becomes about seventeen times its size in Python objects while it is parsed, so
+        # the bodies being worked on at once are budgeted by size as well as by count.
+        json_bytes = 0
+        if str(request.META.get("CONTENT_TYPE", "")).startswith("application/json"):
+            try:
+                json_bytes = max(0, int(request.META.get("CONTENT_LENGTH") or 0))
+            except ValueError:
+                json_bytes = 0
+        cls = type(self)
+        with cls._lock:
+            if client_cap > 0 and cls._per_client.get(key, 0) >= client_cap:
+                return _busy(f"this address already has {client_cap} parses running; wait for one to finish")
+            if total_cap > 0 and cls._total >= total_cap:
+                return _busy("the server is busy with other parses; try again in a moment")
+            if json_cap > 0 and json_bytes and cls._json_bytes + json_bytes > json_cap and cls._json_bytes > 0:
+                return _busy("the server is busy correlating other cases; try again in a moment")
+            cls._total += 1
+            cls._json_bytes += json_bytes
+            cls._per_client[key] = cls._per_client.get(key, 0) + 1
+        released = False
+
+        def release() -> None:
+            nonlocal released
+            with cls._lock:
+                if released:
+                    return
+                released = True
+                cls._total -= 1
+                cls._json_bytes -= json_bytes
+                left = cls._per_client.get(key, 1) - 1
+                if left > 0:
+                    cls._per_client[key] = left
+                else:
+                    cls._per_client.pop(key, None)
+
+        try:
+            resp = self.get_response(request)
+        except BaseException:
+            release()
+            raise
+        if getattr(resp, "streaming", False):
+            # held until the server closes the response: after the last line, or on disconnect
+            resp._resource_closers.append(release)
+        else:
+            release()
+        return resp
+
+
+class JsonErrorsMiddleware:
+    """An API client reads JSON: a body over DATA_UPLOAD_MAX_MEMORY_SIZE gets a 413 that says so,
+    not Django's HTML 400, which the pages could only show as "400 Bad Request"."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        return self.get_response(request)
+
+    def process_exception(self, request, exception):
+        from django.core.exceptions import RequestDataTooBig
+
+        if request.path.startswith("/api/") and isinstance(exception, RequestDataTooBig):
+            mib = settings.DATA_UPLOAD_MAX_MEMORY_SIZE // (1024 * 1024)
+            return JsonResponse({"error": f"request larger than the server accepts ({mib} MiB)", "code": "tooLarge"}, status=413)
+        return None

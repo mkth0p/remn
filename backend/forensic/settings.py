@@ -46,15 +46,29 @@ ALLOWED_HOSTS = ["127.0.0.1", "localhost"] + [h.strip() for h in os.environ.get(
 FORENSIC_AUTH_TOKEN = os.environ.get("FORENSIC_AUTH_TOKEN", "").strip()
 
 # Browser-only ingestion mode, for an instance open to people you do not know: the server parses
-# evidence and returns rows, and keeps nothing. The server store, chunked uploads, jobs, reputation
-# lookups and the server-side model transports answer 403. See docs/security.md.
+# evidence and returns rows, and keeps nothing. The server store, jobs, reputation lookups and the
+# server-side model transports answer 403; parsing, chunked uploads (the staging area a large file
+# needs to reach the parser), correlation and rule conversion stay open. See docs/security.md.
 FORENSIC_BROWSER_ONLY = _env_bool("FORENSIC_BROWSER_ONLY", False)
 # Behind a reverse proxy the peer address is the proxy's; with this on, the client address is the
-# first X-Forwarded-For entry. Only set it when a proxy you control is the only way in.
+# rightmost X-Forwarded-For entry, the one the proxy itself added. Only set it when a proxy you
+# control is the only way in.
 FORENSIC_TRUST_PROXY = _env_bool("FORENSIC_TRUST_PROXY", False)
-# Requests a minute per client address on the heavy paths (parsing, correlation, conversion,
-# lookups, models, store writes). 0 turns the budget off.
+# Requests a minute per client address (per /64 for IPv6) on the heavy paths (parsing,
+# correlation, conversion, lookups, models, store writes). 0 turns the budget off.
 FORENSIC_RATE_LIMIT_PER_MIN = _env_int("FORENSIC_RATE_LIMIT_PER_MIN", 0)
+# Worker threads of backend/run.py (waitress); run.py sets it from --threads.
+FORENSIC_THREADS = _env_int("FORENSIC_THREADS", 8)
+# Heavy requests (parses, correlation, conversion) in flight at once, overall and per client
+# address. A streamed parse to a client that stops reading holds a thread until it disconnects, so
+# an instance open to strangers keeps two threads free for the page and everything else, and lets
+# no single client hold more than two. 0 turns a cap off.
+FORENSIC_MAX_HEAVY_REQUESTS = _env_int("FORENSIC_MAX_HEAVY_REQUESTS", max(1, FORENSIC_THREADS - 2) if FORENSIC_BROWSER_ONLY else 0)
+FORENSIC_MAX_HEAVY_PER_CLIENT = _env_int("FORENSIC_MAX_HEAVY_PER_CLIENT", 2 if FORENSIC_BROWSER_ONLY else 0)
+# JSON bodies (correlation, enrichment) being worked on at once, in MiB. Parsing one takes about
+# seventeen times its size, so this bounds what they can take together. One body is always let
+# through on its own, whatever its size under DATA_UPLOAD_MAX_MEMORY_SIZE. 0 turns it off.
+FORENSIC_MAX_JSON_INFLIGHT_MB = _env_int("FORENSIC_MAX_JSON_INFLIGHT_MB", 64 if FORENSIC_BROWSER_ONLY else 0)
 
 INSTALLED_APPS = ["api"]
 
@@ -63,6 +77,8 @@ MIDDLEWARE = [
     "forensic.middleware.ApiClientHeaderMiddleware",
     "forensic.middleware.ModeGuardMiddleware",
     "forensic.middleware.RateLimitMiddleware",
+    "forensic.middleware.ConcurrencyGuardMiddleware",
+    "forensic.middleware.JsonErrorsMiddleware",
     "forensic.middleware.SecurityHeadersMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -115,6 +131,10 @@ FORENSIC_INGEST_MAX_S = _env_int("FORENSIC_INGEST_MAX_S", 1800 if FORENSIC_BROWS
 # Total bytes the staging area may hold. A new upload is refused above it, after a sweep, so a
 # stream of abandoned uploads cannot fill the disk however short the lifetime is.
 FORENSIC_TMP_MAX_GB = _env_int("FORENSIC_TMP_MAX_GB", 4)
+# The largest single message (eml, msg, or one message of an mbox) that is parsed. Parsing holds
+# about a dozen copies of a message in memory, so a 128 MiB message inside a 128 KiB zip took the
+# parser past 1.7 GiB. A larger message gets an error row that says why it was not read.
+FORENSIC_MAX_MESSAGE_MB = _env_int("FORENSIC_MAX_MESSAGE_MB", 48 if FORENSIC_BROWSER_ONLY else 256)
 # Advisory threshold (MB) above which the UI suggests the server store instead of IndexedDB.
 FORENSIC_STORE_THRESHOLD_MB = _env_int("FORENSIC_STORE_THRESHOLD_MB", 150)
 # Files smaller than this are handled fully in memory by the parsers.
@@ -186,7 +206,9 @@ LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {"std": {"format": "%(asctime)s %(levelname)s %(name)s: %(message)s"}},
-    "handlers": {"console": {"class": "logging.StreamHandler", "formatter": "std"}},
+    "filters": {"redact": {"()": "forensic.logfilter.RedactEvidence"}},
+    # in browser-only mode, exceptions from the parsing code are logged by type and place, not text
+    "handlers": {"console": {"class": "logging.StreamHandler", "formatter": "std", "filters": ["redact"] if FORENSIC_BROWSER_ONLY else []}},
     "root": {"handlers": ["console"], "level": os.environ.get("FORENSIC_LOG_LEVEL", "INFO")},
     "loggers": {
         "django.request": {"level": "WARNING"},

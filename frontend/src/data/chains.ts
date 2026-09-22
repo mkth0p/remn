@@ -118,6 +118,47 @@ const EVENT_FIELDS = [
   'data',
 ] as const
 
+/**
+ * The keys of an event's `data` that services/analysis/chains.py reads. The rest of EventData
+ * stays in the browser: a 4624 carries about a kilobyte of it, and sending all of it for 50,000
+ * logons took the request past what the server accepts. tests/backend/test_chains.py checks this
+ * list against the Python.
+ */
+export const CHAIN_DATA_KEYS = [
+  'UserId',
+  'MailboxOwnerUPN',
+  'country',
+  'clientAppUsed',
+  'riskLevelDuringSignIn',
+  'riskLevelAggregated',
+  'riskState',
+  'appDisplayName',
+  'ForwardTo',
+  'ForwardAsAttachmentTo',
+  'RedirectTo',
+  'DeleteMessage',
+  'MoveToFolder',
+  'SubjectContainsWords',
+  'ForwardingSmtpAddress',
+  'ForwardingAddress',
+  'AuditEnabled',
+  'MailAccessType',
+  'Role.DisplayName',
+  'Target',
+  'ConsentAction.Permissions',
+] as const
+/** keys chains.py tests for by prefix only (a user update that touches MFA methods) */
+const CHAIN_DATA_PREFIXES = ['StrongAuthentication']
+
+export function chainData(data: unknown): Record<string, unknown> | undefined {
+  if (!data || typeof data !== 'object') return undefined
+  const src = data as Record<string, unknown>
+  const out: Record<string, unknown> = {}
+  for (const k of CHAIN_DATA_KEYS) if (src[k] !== undefined && src[k] !== null && src[k] !== '') out[k] = src[k]
+  for (const k of Object.keys(src)) if (CHAIN_DATA_PREFIXES.some((p) => k.startsWith(p))) out[k] = true
+  return Object.keys(out).length ? out : undefined
+}
+
 function slimFinding(f: Finding) {
   return { ruleId: f.ruleId, title: f.title, severity: f.severity, source: f.source, refs: f.refs.slice(0, 2000), ts: f.ts }
 }
@@ -172,6 +213,9 @@ export async function buildChains(kase: Case, opts: ChainOptions = {}): Promise<
         if (!(auth && authCount <= EVENT_CAP) && !(mailHit && mailCount <= EVENT_CAP)) return
         const slim: Record<string, unknown> = {}
         for (const k of EVENT_FIELDS) if (row[k] !== undefined) slim[k] = row[k]
+        const kept = chainData(row.data)
+        if (kept) slim.data = kept
+        else delete slim.data
         events.push(slim)
       })
     const replies = allMails.filter((m) => m.date != null && m.date >= tMin && m.date <= tMax && !seeds.includes(m) && idents.has(identityKey(m.fromAddr) ?? ''))

@@ -134,11 +134,16 @@ def test_a_forged_forwarded_header_cannot_buy_a_fresh_budget():
 
 
 @override_settings(FORENSIC_BROWSER_ONLY=True)
-def test_browser_only_withholds_the_version_and_the_compiled_parsers():
-    """Version plus which native parsers are compiled in is exactly what picks a CVE off a shelf."""
+def test_browser_only_names_its_source_and_withholds_the_machine():
+    """A visitor trusting the server with evidence can read exactly which code parses it; the
+    machine's paths, platform, interpreter and compiled-in native libraries stay private."""
+    from forensic.build import build_id, source_url
+
     body = Client().get("/api/health", **HDR).json()
-    assert "version" not in body and "python" not in body and "platform" not in body
+    assert body["build"] == build_id() and body["source"] == source_url()
+    assert "python" not in body and "platform" not in body and "rulesDir" not in body and "store" not in body
     assert body["optional"] == {"claudeCode": False}
+    assert set(body["formats"]) == {"pst"}
     assert body["mode"] == "browser-only"
 
 

@@ -102,7 +102,11 @@ def test_zip_of_exports_is_walked(exports, tmp_path):
     src = EvtxSource(z.name, str(z), None, str(tmp_path))
     rows = list(src)
     assert src.format == "zip" and len(rows) == len(make_m365.ual_records()) + len(make_m365.entra_signins())
-    assert {f["format"] for f in src.files} == {"m365-ual-csv", "entra-signin-json"}
+    assert {f["format"] for f in src.files if f["status"] == "parsed"} == {"m365-ual-csv", "entra-signin-json"}
+    # the note is not a log, and the member list says so rather than leaving it out
+    assert [f for f in src.files if f["status"] == "skipped"] == [
+        {"name": "notes/readme.txt", "size": 9, "status": "skipped", "reason": "not an event log or cloud export"}
+    ]
     assert {r["sourceFile"] for r in rows} == {"ual/ual_export.csv", "entra/signins.json"}
 
 
