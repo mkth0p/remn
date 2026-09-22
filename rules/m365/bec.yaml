@@ -352,7 +352,7 @@ entities: [targetUser]
 ---
 id: m365-signin-password-spray
 title: Password spray - many accounts failing from one IP
-description: Eight or more distinct accounts with failed sign-ins (wrong password / locked / blocked) from one IP within 15 minutes.
+description: Eight or more distinct accounts with failed sign-ins (wrong password / locked / blocked) from one IP within 15 minutes. MFA interrupts (50074, 50076, 50079) are not failures - every MFA-protected sign-in passes through one - so they are not counted.
 severity: high
 source: events
 attack: [T1110.003]
@@ -360,7 +360,7 @@ tags: [m365, entra, sign-in, brute-force]
 where:
   any_of:
     - category: Entra sign-in
-      status|in: ["50126", "50053", "50055", "50056", "50057", "50076", "50074", "50079", "53003", "-1"]
+      status|in: ["50126", "50053", "50055", "50056", "50057", "53003", "-1"]
     - operation: UserLoginFailed
   ipAddress|exists: true
 group_by: [ipAddress]
@@ -379,7 +379,7 @@ tags: [m365, entra, sign-in, brute-force]
 where:
   any_of:
     - category: Entra sign-in
-      status|in: ["50126", "50053", "50055", "50056", "50057", "50076", "50074", "50079", "53003", "-1"]
+      status|in: ["50126", "50053", "50055", "50056", "50057", "53003", "-1"]
     - operation: UserLoginFailed
 group_by: [targetUser]
 window: 15m
@@ -397,15 +397,15 @@ then:
 entities: [targetUser]
 ---
 id: m365-signin-mfa-failed-then-success
-title: MFA denied or interrupted, then a successful sign-in
-description: Error 500121 (MFA denied / not completed) followed within an hour by a successful sign-in for the same account - MFA fatigue or a stolen session.
+title: MFA denied, then a successful sign-in
+description: Error 500121 (MFA denied / not completed) followed within an hour by a successful sign-in for the same account - MFA fatigue or a stolen session. The interrupts 50074 and 50076 (MFA required) are not denials and are not counted.
 severity: high
 source: events
 attack: [T1621]
 tags: [m365, entra, sign-in, mfa]
 where:
   category: Entra sign-in
-  status|in: ["500121", "50074", "50076"]
+  status|in: ["500121"]
 group_by: [targetUser]
 window: 60m
 threshold: ">= 3"

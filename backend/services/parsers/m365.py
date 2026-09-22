@@ -32,11 +32,13 @@ from __future__ import annotations
 
 import csv
 import io
+import ipaddress
+import itertools
 import json
 import logging
 import os
 import re
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime
 from typing import Any
 
@@ -110,23 +112,51 @@ def detect_format(name: str, head: bytes) -> str | None:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-_IP_RE = re.compile(r"^\[?([0-9a-fA-F:.]+?)\]?(?::\d+)?$")
+_BRACKETED_RE = re.compile(r"^\[([0-9a-fA-F:.]+)\](?::\d+)?$")
 
 
 def clean_ip(v: Any) -> str | None:
+    """The address in "1.2.3.4", "1.2.3.4:443", "2001:db8::1" or "[2001:db8::1]:443".
+
+    A bare IPv6 address is taken whole: its last group can be all digits, and reading that as a
+    port turned 2001:db8::1 into 2001:db8:. Anything that is not an address is kept as it came."""
     s = str(v or "").strip()
     if not s or s.lower() in ("null", "none", "<null>"):
         return None
-    m = _IP_RE.match(s)
-    if m:
-        ip = m.group(1)
-        # IPv4 with port "1.2.3.4:443" is handled; bare IPv6 keeps its colons
-        return ip
-    return s[:100]
+    m = _BRACKETED_RE.match(s)
+    candidate = m.group(1) if m else s.rsplit(":", 1)[0] if s.count(":") == 1 else s
+    try:
+        ipaddress.ip_address(candidate)
+        return candidate
+    except ValueError:
+        return s[:100]
 
 
-def parse_ts(v: Any) -> tuple[int | None, str | None]:
-    """ISO-8601 (with or without zone / fractional seconds) or portal 'M/D/YYYY, h:mm:ss AM' -> (ms, iso)."""
+_NUMERIC_DATE_RE = re.compile(r"^\s*(\d{1,2})[/.](\d{1,2})[/.](\d{4})\b")
+
+
+def date_order(values: Iterable[Any]) -> bool | None:
+    """Whether the numeric dates of one export are day-first (True), month-first (False), or
+    cannot tell (None). An export is written in one culture, so one value with a day above 12
+    settles the order for all of them; before this, 05/01 in a French export was read as 1 May
+    while 15/01 in the same file was read as 15 January."""
+    day_first = month_first = False
+    for v in values:
+        m = _NUMERIC_DATE_RE.match(str(v or ""))
+        if not m:
+            continue
+        a, b = int(m.group(1)), int(m.group(2))
+        day_first = day_first or a > 12
+        month_first = month_first or b > 12
+    if day_first == month_first:
+        return None
+    return day_first
+
+
+def parse_ts(v: Any, day_first: bool | None = None) -> tuple[int | None, str | None]:
+    """ISO-8601 (with or without zone / fractional seconds), portal 'M/D/YYYY, h:mm:ss AM', or a
+    culture's numeric date -> (ms, iso). day_first is the order date_order found for the file;
+    None keeps the portal's own month-first order for slashes. Dotted dates are always day-first."""
     if v is None:
         return None, None
     if isinstance(v, (int, float)):
@@ -140,7 +170,8 @@ def parse_ts(v: Any) -> tuple[int | None, str | None]:
     try:
         dt = datetime.fromisoformat(s2)
     except ValueError:
-        for fmt in ("%m/%d/%Y, %I:%M:%S %p", "%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%d/%m/%Y %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"):
+        slashes = ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y, %H:%M:%S", "%d/%m/%Y %H:%M") if day_first else ("%m/%d/%Y, %I:%M:%S %p", "%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M")
+        for fmt in (*slashes, "%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"):
             try:
                 dt = datetime.strptime(s, fmt)
                 break
@@ -174,6 +205,94 @@ def _named_list(items: Any, name_key: str = "Name", value_key: str = "Value") ->
         if isinstance(it, dict) and it.get(name_key) is not None:
             out[str(it[name_key])] = _scalar(it.get(value_key))
     return out
+
+
+_EMAIL_RE = re.compile(r"[\w.+'-]+@[\w-]+(?:\.[\w-]+)+")
+
+
+def _json_value(v: Any) -> Any:
+    if isinstance(v, str) and v.strip()[:1] in ("[", "{"):
+        try:
+            return json.loads(v)
+        except ValueError:
+            return v
+    return v
+
+
+def _strings(v: Any) -> Iterator[str]:
+    if isinstance(v, str):
+        yield v
+    elif isinstance(v, dict):
+        for x in v.values():
+            yield from _strings(x)
+    elif isinstance(v, list):
+        for x in v:
+            yield from _strings(x)
+
+
+def _walk(v: Any) -> Iterator[tuple[str, Any]]:
+    if isinstance(v, dict):
+        for k, x in v.items():
+            yield str(k), x
+            yield from _walk(x)
+    elif isinstance(v, list):
+        for x in v:
+            yield from _walk(x)
+
+
+def outlook_rule_fields(data: dict[str, Any]) -> dict[str, Any]:
+    """The fields of an inbox rule made in Outlook or over MAPI (UpdateInboxRules), under the names
+    the New-/Set-InboxRule cmdlets use, so the same rules read both.
+
+    UpdateInboxRules logs the rule as RuleActions and RuleCondition, each a JSON string, rather than
+    as cmdlet parameters. An attacker in a stolen Outlook session makes exactly this kind of rule,
+    and with only the cmdlet names looked at, a forward-and-delete rule raised a low finding."""
+    out: dict[str, Any] = {}
+    if data.get("RuleName") and not data.get("Name"):
+        out["Name"] = data["RuleName"]
+    actions = _json_value(data.get("RuleActions"))
+    for action in actions if isinstance(actions, list) else [actions] if isinstance(actions, dict) else []:
+        if not isinstance(action, dict):
+            continue
+        kind = str(action.get("ActionType") or action.get("Type") or "").lower()
+        recipients = sorted({m.lower() for text in _strings(action) for m in _EMAIL_RE.findall(text)})
+        if "redirect" in kind:
+            key = "RedirectTo"
+        elif "forward" in kind and "attach" in kind:
+            key = "ForwardAsAttachmentTo"
+        elif "forward" in kind:
+            key = "ForwardTo"
+        else:
+            key = ""
+        if key and recipients:
+            out[key] = ";".join(recipients)
+        if "delete" in kind:
+            out["DeleteMessage" if "permanent" in kind or "soft" not in kind else "SoftDeleteMessage"] = "True"
+        if "markasread" in kind.replace(" ", "") or "markread" in kind.replace(" ", ""):
+            out["MarkAsRead"] = "True"
+        if "move" in kind:
+            folder = action.get("Folder") or action.get("FolderName") or action.get("TargetFolder") or action.get("FolderId")
+            if folder:
+                out["MoveToFolder"] = str(folder)[:200]
+    condition = _json_value(data.get("RuleCondition"))
+    words: dict[str, list[str]] = {}
+    for k, v in _walk(condition):
+        if k.lower() not in ("words", "value", "values"):
+            continue
+        items = v if isinstance(v, list) else [v]
+        texts = [str(x) for x in items if isinstance(x, (str, int, float))]
+        if texts:
+            words.setdefault("SubjectOrBodyContainsWords", []).extend(texts)
+    for k, v in _walk(condition):
+        if k.lower() in ("type", "conditiontype") and isinstance(v, str):
+            low = v.lower()
+            if "subject" in low and "body" not in low and "SubjectOrBodyContainsWords" in words:
+                words["SubjectContainsWords"] = words.pop("SubjectOrBodyContainsWords")
+            elif "from" in low and "SubjectOrBodyContainsWords" in words:
+                words["FromAddressContainsWords"] = words.pop("SubjectOrBodyContainsWords")
+    for k, v in words.items():
+        out[k] = ";".join(v)[:500]
+    return {k: v for k, v in out.items() if k not in data}
 
 
 def flatten_audit(a: dict[str, Any]) -> dict[str, Any]:
@@ -250,8 +369,10 @@ def ual_row(a: dict[str, Any], record_type: Any = None) -> dict[str, Any]:
                 break
     if not target and a.get("MailboxOwnerUPN"):
         target = str(a["MailboxOwnerUPN"])
+    if op.lower() == "updateinboxrules":
+        data.update(outlook_rule_fields(data))
     obj = str(a.get("ObjectId") or "")
-    if op.lower() in ("new-inboxrule", "set-inboxrule", "remove-inboxrule", "enable-inboxrule", "disable-inboxrule") and data.get("Name"):
+    if op.lower() in ("new-inboxrule", "set-inboxrule", "remove-inboxrule", "enable-inboxrule", "disable-inboxrule", "updateinboxrules") and data.get("Name"):
         obj = str(data["Name"])
     row: dict[str, Any] = {
         "ts": ts,
@@ -290,7 +411,7 @@ def _ual_summary(op: str, user: str, ip: str | None, d: dict[str, Any], obj: str
     if ip:
         parts += ["from", ip]
     lo = op.lower()
-    if lo in ("new-inboxrule", "set-inboxrule"):
+    if lo in ("new-inboxrule", "set-inboxrule", "updateinboxrules"):
         bits = []
         for k in ("ForwardTo", "ForwardAsAttachmentTo", "RedirectTo"):
             if d.get(k):
@@ -380,7 +501,7 @@ _PORTAL_MAP = {
 }
 
 
-def entra_row(o: dict[str, Any]) -> dict[str, Any]:
+def entra_row(o: dict[str, Any], day_first: bool | None = None) -> dict[str, Any]:
     g = dict(o)
     # portal CSV headers -> Graph names
     for k in list(g.keys()):
@@ -412,7 +533,7 @@ def entra_row(o: dict[str, Any]) -> dict[str, Any]:
     country = country or g.get("country")
     dev = g.get("deviceDetail") if isinstance(g.get("deviceDetail"), dict) else {}
     user = str(g.get("userPrincipalName") or g.get("userDisplayName") or "").strip()
-    ts, iso = parse_ts(g.get("createdDateTime"))
+    ts, iso = parse_ts(g.get("createdDateTime"), day_first)
     ip = clean_ip(g.get("ipAddress"))
     success = err in (0, None, "0")
     risk_signin = g.get("riskLevelDuringSignIn")
@@ -493,8 +614,11 @@ def _open_text(path: str | None, data: bytes | None) -> io.TextIOBase:
     return io.TextIOWrapper(io.BytesIO(data or b""), encoding="utf-8-sig", errors="replace", newline="")
 
 
-def _iter_json_objects(fh: io.TextIOBase) -> Iterator[Any]:
-    """A JSON array, a single object, or NDJSON."""
+def _iter_json_objects(fh: io.TextIOBase, stats: Any = None) -> Iterator[Any]:
+    """A JSON array, a single object (a Graph page {"value": [...]} included, however it is
+    indented), or NDJSON. A line of NDJSON that does not parse is counted as an error, never
+    dropped without a trace: a pretty-printed Graph page read line by line used to give 0 rows
+    and 0 errors, which reads as "no sign-ins"."""
     head = fh.read(1)
     fh.seek(0)
     if head == "[":
@@ -504,6 +628,27 @@ def _iter_json_objects(fh: io.TextIOBase) -> Iterator[Any]:
             raise ValueError(f"invalid JSON array: {str(exc)[:120]}") from None
         yield from (x for x in arr if isinstance(x, dict))
         return
+    first = ""
+    while not first:
+        line = fh.readline()
+        if not line:
+            break
+        first = line.strip().rstrip(",")
+    fh.seek(0)
+    try:
+        whole = not isinstance(json.loads(first), dict)
+    except ValueError:
+        whole = True  # the first line is not an object on its own: one indented document
+    if whole:
+        try:
+            doc = json.load(fh)
+        except ValueError as exc:
+            raise ValueError(f"invalid JSON document: {str(exc)[:120]}") from None
+        if isinstance(doc, dict) and isinstance(doc.get("value"), list):
+            yield from (x for x in doc["value"] if isinstance(x, dict))
+        elif isinstance(doc, dict):
+            yield doc
+        return
     for line in fh:
         line = line.strip().rstrip(",")
         if not line or line in ("[", "]"):
@@ -511,6 +656,8 @@ def _iter_json_objects(fh: io.TextIOBase) -> Iterator[Any]:
         try:
             obj = json.loads(line)
         except ValueError:
+            if stats is not None:
+                stats.errors += 1
             continue
         if isinstance(obj, dict):
             if "value" in obj and isinstance(obj["value"], list):  # Graph page {"value": [...]}
@@ -552,7 +699,7 @@ def iter_records(path: str | None, data: bytes | None, fmt: str, stats: Any = No
                     continue
                 yield _finish(ual_row(ad, rtype), ad, stats, include_raw)
         elif fmt == "m365-ual-json":
-            for obj in _iter_json_objects(fh):
+            for obj in _iter_json_objects(fh, stats):
                 ad, rtype = _audit_from_row(obj)
                 if ad is None:
                     if stats is not None:
@@ -560,13 +707,17 @@ def iter_records(path: str | None, data: bytes | None, fmt: str, stats: Any = No
                     continue
                 yield _finish(ual_row(ad, rtype), ad, stats, include_raw)
         elif fmt == "entra-signin-json":
-            for obj in _iter_json_objects(fh):
+            for obj in _iter_json_objects(fh, stats):
                 yield _finish(entra_row(obj), obj, stats, include_raw)
         elif fmt == "entra-signin-csv":
             reader = csv.DictReader(fh)
-            for rec in reader:
+            # the date order is decided from the file's own dates before any row is read
+            head = list(itertools.islice(reader, 5000))
+            date_keys = [k for k in (reader.fieldnames or []) if _PORTAL_MAP.get(k.strip().lower()) == "createdDateTime" or k == "createdDateTime"]
+            day_first = date_order(rec.get(k) for rec in head for k in date_keys)
+            for rec in itertools.chain(head, reader):
                 obj = {k: v for k, v in rec.items() if k is not None}
-                yield _finish(entra_row(obj), obj, stats, include_raw)
+                yield _finish(entra_row(obj, day_first), obj, stats, include_raw)
         else:
             raise ValueError(f"unknown M365 format {fmt}")
     finally:

@@ -168,3 +168,108 @@ def test_ingest_endpoint_streams_ual(exports):
     events = [l for l in lines if l["type"] == "event"]
     assert len(events) == len(make_m365.ual_records()) and events[0]["provider"] == m365.UAL_PROVIDER
     assert lines[-1]["type"] == "done" and lines[-1]["stats"]["errors"] == 0
+
+
+def _fired(store, rows: list[dict]) -> dict[str, list]:
+    w = EventWriter(store, 1)
+    for row in rows:
+        w.add(row)
+    w.flush()
+    rules = [d for d in yaml.safe_load_all(RULES.read_text(encoding="utf-8")) if isinstance(d, dict)]
+    return {r["id"]: hits for r in rules if (hits := R.run_rule(store, r, {"internal_domains": ["contoso.com"]}))}
+
+
+def test_ipv6_client_addresses_keep_their_last_group():
+    assert m365.clean_ip("2a01:e0a:1f2:3450::12") == "2a01:e0a:1f2:3450::12"
+    assert m365.clean_ip("2001:db8::1") == "2001:db8::1"
+    assert m365.clean_ip("[2001:db8::1]:443") == "2001:db8::1"
+    assert m365.clean_ip("203.0.113.5:51000") == "203.0.113.5"
+    assert m365.clean_ip("not an address") == "not an address"
+
+
+def test_a_culture_date_order_is_decided_per_file(tmp_path):
+    """A fr-FR Export-Csv writes 05/01/2024 for 5 January. One date in the file with a day above
+    12 settles the order for every row; a de-DE export uses dots and is always day-first."""
+    fr = tmp_path / "signins-fr.csv"
+    fr.write_text(
+        "Date (UTC),Request ID,User,Username,IP address,Status,Sign-in error code,Application\n"
+        "05/01/2024 10:11:12,r1,Alice,alice@contoso.com,203.0.113.5,Success,0,Office 365\n"
+        "15/01/2024 10:11:12,r2,Alice,alice@contoso.com,203.0.113.5,Success,0,Office 365\n",
+        encoding="utf-8",
+    )
+    rows = list(m365.iter_records(str(fr), None, "entra-signin-csv"))
+    assert [r["tsIso"][:10] for r in rows] == ["2024-01-05", "2024-01-15"]
+    assert m365.parse_ts("05.01.2024 10:11:12")[1] == "2024-01-05T10:11:12.000Z"
+    # a file that cannot tell keeps the portal's month-first order
+    assert m365.date_order(["05/01/2024 10:11:12", "06/01/2024 10:11:12"]) is None
+
+
+def test_an_indented_graph_page_is_read_not_dropped(tmp_path):
+    page = {"@odata.context": "https://graph.microsoft.com/v1.0/$metadata#auditLogs/signIns", "value": make_m365.entra_signins()[:3]}
+    f = tmp_path / "signins.json"
+    f.write_text(json.dumps(page, indent=2), encoding="utf-8")
+    assert m365.detect_format(f.name, f.read_bytes()[:4096]) == "entra-signin-json"
+    assert len(list(m365.iter_records(str(f), None, "entra-signin-json"))) == 3
+
+
+def test_an_ndjson_line_that_does_not_parse_is_counted():
+    from services.parsers.evtx_parser import Stats
+
+    stats = Stats()
+    data = (json.dumps(make_m365.entra_signins()[0]) + "\n{broken\n").encode()
+    rows = list(m365.iter_records(None, data, "entra-signin-json", stats=stats))
+    assert len(rows) == 1 and stats.errors == 1
+
+
+def _update_inbox_rules(actions: list[dict], condition: dict) -> dict:
+    return m365.ual_row(
+        {
+            "CreationTime": "2026-09-01T10:00:00",
+            "Operation": "UpdateInboxRules",
+            "Workload": "Exchange",
+            "UserId": "alice@contoso.com",
+            "ClientIP": "198.51.100.23",
+            "ResultStatus": "Succeeded",
+            "OperationProperties": [
+                {"Name": "RuleName", "Value": "."},
+                {"Name": "RuleOperation", "Value": "AddMailboxRule"},
+                {"Name": "RuleActions", "Value": json.dumps(actions)},
+                {"Name": "RuleCondition", "Value": json.dumps(condition)},
+            ],
+        },
+        1,
+    )
+
+
+def test_an_outlook_made_forward_and_delete_rule_raises_the_same_findings_as_the_cmdlet(store):
+    """An attacker in a stolen Outlook session makes the rule over MAPI, logged as UpdateInboxRules
+    with JSON RuleActions and RuleCondition; the forwarding and hiding rules read it."""
+    row = _update_inbox_rules(
+        [{"ActionType": "Forward", "Recipients": ["attacker@evil.example"]}, {"ActionType": "Delete"}],
+        {"Type": "AndCondition", "SubConditions": [{"Type": "SubjectContainsCondition", "Words": ["invoice"]}]},
+    )
+    assert row["objectName"] == "." and row["data"]["ForwardTo"] == "attacker@evil.example"
+    assert row["data"]["DeleteMessage"] == "True" and row["data"]["SubjectContainsWords"] == "invoice"
+    fired = _fired(store, [row])
+    assert {"m365-inbox-rule-forwarding", "m365-inbox-rule-hiding"} <= set(fired)
+
+
+def test_mfa_interrupts_are_not_failures(store):
+    """Every MFA-protected sign-in passes through 50074 or 50076 before it succeeds: nine users
+    doing that from the office's own address is a normal morning, not a password spray."""
+    rows = []
+    for i in range(9):
+        for status in ("50074", "0"):
+            rows.append(
+                m365.entra_row(
+                    {
+                        "createdDateTime": f"2026-09-01T08:{i:02d}:{10 if status != '0' else 40}Z",
+                        "userPrincipalName": f"user{i}@contoso.com",
+                        "ipAddress": "203.0.113.10",
+                        "status": {"errorCode": int(status)},
+                        "appDisplayName": "Office 365 Exchange Online",
+                    }
+                )
+            )
+    fired = _fired(store, rows)
+    assert "m365-signin-password-spray" not in fired and "m365-signin-mfa-failed-then-success" not in fired
