@@ -79,7 +79,12 @@ The Findings page is a triage queue. Its default unit is the incident: every fin
 one mail (the rules that fired, the score band) is one line, event findings about the
 same user, host or IP within six hours are one line, the way Sentinel and Elastic group
 alerts on shared entities, and a chain with the findings on its steps is one line (see
-[Attack chains](chains.md)). Incidents are derived from the findings table, nothing new
+[Attack chains](chains.md)). An entity incident is about one person, whatever the
+spelling: `daniel.roy`, `NORTHSTAR\daniel.roy` and `daniel.roy@northstar.example` are one
+account when the NetBIOS domain is the first label of a domain seen in the case, and a
+bare name joins the one domain that has it (or the internal one, from Settings, when
+several do). Accounts of different domains never merge, and the incident lists the other
+spellings it was seen as. Incidents are derived from the findings table, nothing new
 is stored, and setting an incident's status sets every member. Flat, rule, entity and
 source views keep the per-rule detail. Severity tiles show the change since the last run,
 and the flyouts carry About, Investigation (entity pages, referenced rows), Insights

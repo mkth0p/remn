@@ -1,3 +1,4 @@
+import { resolveUsers } from './identity'
 import type { Finding, Severity } from '../db/schema'
 import type { Chain } from '../data/chains'
 
@@ -46,6 +47,8 @@ export interface IncidentOptions {
   chains?: Chain[]
   /** severity of a chain incident (the Review page passes the analyst's override); default the chain's */
   severityOf?: (c: Chain) => Severity
+  /** the case's internal domains: they decide which realm a bare account name belongs to */
+  internalDomains?: string[]
 }
 
 export const ORDER: Severity[] = ['critical', 'high', 'medium', 'low', 'info']
@@ -163,6 +166,12 @@ function finish(id: string, kind: IncidentKind, members: Finding[], title?: stri
 }
 
 /** Group findings into incidents. Pure; the order is severity, then breadth (rules), then recency. */
+let caseInternalDomains: string[] = []
+/** The open case's internal domains, the default for every incident grouping (App sets it with the case). */
+export function setCaseInternalDomains(domains: string[] | undefined): void {
+  caseInternalDomains = domains ?? []
+}
+
 export function buildIncidents(findings: Finding[], opts: IncidentOptions = {}): Incident[] {
   const gap = opts.gapMs ?? DEFAULT_GAP_MS
   const mail = new Map<number, Finding[]>()
@@ -171,6 +180,15 @@ export function buildIncidents(findings: Finding[], opts: IncidentOptions = {}):
   const chains = opts.chains ?? []
   const membership = chainMembership(findings, chains)
   const byChain = new Map<string, Finding[]>()
+  // one key per person across DOMAIN\user, user@domain and a bare user (rules/identity.ts)
+  const users = resolveUsers(
+    findings.flatMap((f) => {
+      const pe = f.source === 'events' ? primaryEntity(f) : null
+      return pe && USER_FIELDS.includes(pe.field) ? [pe.value] : []
+    }),
+    opts.internalDomains ?? caseInternalDomains,
+  )
+  const aliases = new Map<string, Set<string>>()
   for (const f of findings) {
     const chainId = f.id != null ? membership.get(f.id) : undefined
     if (chainId) {
@@ -189,8 +207,11 @@ export function buildIncidents(findings: Finding[], opts: IncidentOptions = {}):
     if (f.source === 'events') {
       const pe = primaryEntity(f)
       if (pe) {
-        const key = `${pe.field === 'computer' || pe.field === 'host' || pe.field === 'workstation' ? 'host' : IP_FIELDS.includes(pe.field) ? 'ip' : 'user'}:${pe.value.toLowerCase()}`
-        const e = byEntity.get(key) ?? { field: pe.field, value: pe.value, items: [] }
+        const kind = pe.field === 'computer' || pe.field === 'host' || pe.field === 'workstation' ? 'host' : IP_FIELDS.includes(pe.field) ? 'ip' : 'user'
+        const who = kind === 'user' ? users.get(pe.value.toLowerCase()) : undefined
+        const key = `${kind}:${who ? who.key : pe.value.toLowerCase()}`
+        if (who) aliases.set(key, (aliases.get(key) ?? new Set()).add(pe.value))
+        const e = byEntity.get(key) ?? { field: pe.field, value: who ? who.label : pe.value, items: [] }
         e.items.push(f)
         byEntity.set(key, e)
         continue
@@ -233,8 +254,15 @@ export function buildIncidents(findings: Finding[], opts: IncidentOptions = {}):
       if (!cluster) return
       const items = cluster.items
       const rules = new Set(items.map((f) => f.ruleId)).size
+      const seenAs = [...(aliases.get(key) ?? [])].filter((a) => a.toLowerCase() !== e.value.toLowerCase())
       out.push(
-        finish(`${key}|${n++}`, 'entity', items, e.value, `${sortMembers(items)[0].title} · ${items.length} finding${items.length === 1 ? '' : 's'} from ${rules} rule${rules === 1 ? '' : 's'}`),
+        finish(
+          `${key}|${n++}`,
+          'entity',
+          items,
+          e.value,
+          `${sortMembers(items)[0].title} · ${items.length} finding${items.length === 1 ? '' : 's'} from ${rules} rule${rules === 1 ? '' : 's'}${seenAs.length ? ` · also seen as ${seenAs.slice(0, 3).join(', ')}` : ''}`,
+        ),
       )
       cluster = null
     }

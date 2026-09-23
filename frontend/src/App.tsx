@@ -8,6 +8,7 @@ import { getSource } from './data/source'
 import { setLocalTime } from './util/format'
 import { getTransport } from './ai/transport'
 import { deployment } from './data/deployment'
+import { setCaseInternalDomains } from './rules/incidents'
 import {
   IconAi,
   IconDashboard,
@@ -194,6 +195,9 @@ export default function App() {
     const t = setInterval(load, 30000)
     return () => clearInterval(t)
   }, [setCurrentCase, setHealth, setMeta, setThreshold])
+
+  // incidents group one person's accounts by the case's internal domains (rules/identity.ts)
+  useEffect(() => setCaseInternalDomains(kase?.settings.internalDomains), [kase?.settings.internalDomains])
 
   useEffect(() => {
     if (kase?.id) {
