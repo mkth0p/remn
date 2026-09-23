@@ -56,6 +56,11 @@ on real modern mail; use a reviewed manifest of your own samples for that measur
 
 The browser regression starts the production Python server with built assets and exercises
 upload, hashing/ingestion workers, detection, analyst review, streamed export and restore.
+A second server runs the configuration of a public instance (browser-only mode, the public
+profile) behind a host name that is not loopback: the test checks the closed paths, that the
+pages name the host that parses evidence, the notice before the first upload, that the page
+makes no request to the visitor's localhost on its own, and that the linked lab's quick-start
+pack reads to its ground truth (14,000 events, 1,000 mails, the five planted chains).
 It runs in CI and is required by the release workflow before packaging.
 
 What the harness does not cover: Windows event detection has no public ground truth
