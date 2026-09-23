@@ -80,6 +80,17 @@ background job parses it; the Evidence page shows the job's progress and its err
 and `GET /api/jobs` lists them. An interrupted upload resumes from the last received
 offset when the same file is dropped again.
 
+A browser-store import writes its rows as they arrive and completes the evidence (status,
+count, facets, indicators) at the end, so a tab closed, reloaded or crashed part-way would
+leave rows nothing counts and a file that, added again, doubles them. Each import holds a
+Web Lock while it runs, which the browser releases with the tab. When the app starts, an
+evidence still importing whose lock is free is stopped: its partial rows are removed, the
+case's derived state is rebuilt as for a removed file, and the evidence stays listed as an
+import that stopped, with the reason, until it is removed or the file is added again. The
+browser asks for confirmation before leaving the page while an import runs. Without Web
+Locks (an old browser, a page not served over HTTPS or from localhost) a stopped import
+cannot be told from one running in another tab, and nothing is removed.
+
 ## Removing evidence
 
 Removing an evidence file deletes everything derived from it at once: its events, mails,

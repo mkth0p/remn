@@ -8,6 +8,7 @@ import { chunkedUpload } from './upload'
 import { waitForJob } from './jobs'
 import { getSource } from './source'
 import { duplicateEvidence } from './duplicateEvidence'
+import { whileImporting } from './interruptedImports'
 
 let jobSeq = 1
 
@@ -95,7 +96,7 @@ export async function ingestFile(file: File, kase: Case, kind: 'evtx' | 'mail' |
   return ingestToBrowser(file, kase, kind)
 }
 
-async function createEvidence(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package'): Promise<number> {
+async function createEvidence(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package', importLock?: string): Promise<number> {
   const evidence: Evidence = {
     caseId: kase.id!,
     name: file.webkitRelativePath || file.name,
@@ -107,6 +108,7 @@ async function createEvidence(file: File, kase: Case, kind: 'evtx' | 'mail' | 'p
     status: 'hashing',
     count: 0,
     analyst: kase.analyst,
+    importLock,
   }
   return getDb().evidence.add(evidence)
 }
@@ -185,9 +187,14 @@ export async function ingestToServer(file: File, kase: Case, kind: 'evtx' | 'mai
 // ---------------------------------------------------------------------------
 // browser store: worker (hash + NDJSON stream + IndexedDB)
 // ---------------------------------------------------------------------------
-export async function ingestToBrowser(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package'): Promise<number> {
+export function ingestToBrowser(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package'): Promise<number> {
+  // the lock is taken before the evidence exists, so no other tab ever sees it unlocked
+  return whileImporting((lock) => importToBrowser(file, kase, kind, lock))
+}
+
+async function importToBrowser(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package', lock: string | undefined): Promise<number> {
   const db = getDb()
-  const evidenceId = await createEvidence(file, kase, kind)
+  const evidenceId = await createEvidence(file, kase, kind, lock)
   const jobId = jobSeq++
   const store = useStore.getState()
   store.upsertJob({ id: jobId, evidenceId, name: file.name, kind, phase: 'hashing', progress: 0, rows: 0, bytes: 0, startedAt: Date.now() })

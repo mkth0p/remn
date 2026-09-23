@@ -21,6 +21,9 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   pages, overlapping slices, an earlier export) is added once and the repeat is counted; sign-ins
   keep their session, token, protocol, method and conditional-access fields; the messages
   MailItemsAccessed read, or a delete moved, are named and open in the mailbox evidence.
+- An import cut short by a closed or crashed tab no longer leaves rows that count twice: the
+  next start removes them and the evidence says the import stopped; leaving the page while an
+  import runs asks first.
 - A report and a case that hold: times in UTC, a verdict over the whole case, confidence that
   falls when a file was not read in full or the rules are behind, a valid STIX export, AI
   triage that proposes rather than decides, bundles that carry their rules, and search that

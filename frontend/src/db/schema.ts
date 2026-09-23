@@ -87,6 +87,8 @@ export interface Evidence {
   error?: string
   note?: string
   analyst?: string
+  /** the Web Lock its import holds while it runs (data/interruptedImports.ts) */
+  importLock?: string
 }
 
 export interface EventRow {
@@ -554,7 +556,8 @@ export async function deleteCase(db: RemnDB, caseId: number): Promise<void> {
   if (last?.value === caseId) await db.kv.delete('lastCase')
 }
 
-export async function deleteEvidenceData(db: RemnDB, caseId: number, evidenceId: number): Promise<void> {
+/** The rows of one evidence, and the evidence row itself unless `keepRecord` (an import that stopped keeps its record). */
+export async function deleteEvidenceData(db: RemnDB, caseId: number, evidenceId: number, keepRecord = false): Promise<void> {
   await db.transaction('rw', [db.events, db.mails, db.mailBodies, db.attachments, db.urls, db.evidence], async () => {
     await db.events.where('[caseId+evidenceId]').equals([caseId, evidenceId]).delete()
     const mailIds = await db.mails.where('[caseId+evidenceId]').equals([caseId, evidenceId]).primaryKeys()
@@ -564,7 +567,7 @@ export async function deleteEvidenceData(db: RemnDB, caseId: number, evidenceId:
     await db.mails.where('[caseId+evidenceId]').equals([caseId, evidenceId]).delete()
     await db.attachments.where('evidenceId').equals(evidenceId).delete()
     await db.urls.where('evidenceId').equals(evidenceId).delete()
-    await db.evidence.delete(evidenceId)
+    if (!keepRecord) await db.evidence.delete(evidenceId)
   })
 }
 

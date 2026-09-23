@@ -9,6 +9,7 @@ import { setLocalTime } from './util/format'
 import { getTransport } from './ai/transport'
 import { deployment } from './data/deployment'
 import { setCaseInternalDomains } from './rules/incidents'
+import { repairInterruptedImports } from './data/interruptedImports'
 import {
   IconAi,
   IconDashboard,
@@ -150,6 +151,16 @@ export default function App() {
       const current = all.find((c) => c.id === last) ?? all[0]
       setCurrentCase({ ...current, settings: { ...defaultSettings(), ...current.settings } })
       setReady(true)
+      // an import a closed or crashed tab left half-done: its rows go, and the evidence says it stopped
+      repairInterruptedImports((st) => {
+        useStore.getState().log('warn', `evidence #${st.evidenceId} ${st.name}: the import stopped before it finished; ${st.rows} partial row(s) removed`)
+        toast('warn', `${st.name}: its import stopped before it finished (the tab was closed or reloaded). The partial rows were removed; add the file again.`, 0)
+      })
+        .then((stopped) => {
+          const open = useStore.getState().currentCase
+          if (stopped.length && open) refreshCounts(open)
+        })
+        .catch((e: Error) => useStore.getState().log('err', `interrupted imports not checked: ${e.message}`))
     })()
     const load = () => {
       getHealth()
@@ -195,6 +206,18 @@ export default function App() {
     const t = setInterval(load, 30000)
     return () => clearInterval(t)
   }, [setCurrentCase, setHealth, setMeta, setThreshold])
+
+  // leaving while an import runs stops it; the browser asks first
+  const importing = jobs.some((j) => j.phase !== 'done' && j.phase !== 'error')
+  useEffect(() => {
+    if (!importing) return
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [importing])
 
   // incidents group one person's accounts by the case's internal domains (rules/identity.ts)
   useEffect(() => setCaseInternalDomains(kase?.settings.internalDomains), [kase?.settings.internalDomains])
