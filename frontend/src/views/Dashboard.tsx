@@ -27,7 +27,7 @@ export function Dashboard() {
   const jobs = useStore((s) => s.jobs)
   const [evidence, setEvidence] = useState<Evidence[]>([])
   const [findings, setFindings] = useState<Finding[]>([])
-  const [storage, setStorage] = useState<{ usage: number; quota: number } | null>(null)
+  const [storage, setStorage] = useState<{ usage: number; quota: number; persisted: boolean | null } | null>(null)
   const [summary, setSummary] = useState<Summary | null>(null)
   const ds = useMemo(() => (kase ? getSource(kase) : null), [kase])
   useEffect(() => {
@@ -145,6 +145,11 @@ export function Dashboard() {
               </div>
             )}
             {isServer && <div className="small muted">DuckDB file on this machine · {kase.serverKey?.slice(0, 8)}…</div>}
+            {!isServer && storage && storage.persisted !== null && (
+              <div className="small muted" title="a browser short of space may clear a site's storage unless the site is allowed to keep it">
+                {storage.persisted ? 'kept by the browser until you delete it' : 'not persistent: the browser may clear it when short of space; export a case bundle to keep a copy'}
+              </div>
+            )}
           </div>
           <div className="card">
             <div className="stat">

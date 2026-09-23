@@ -212,7 +212,7 @@ def run(target: str, tmp_dir: str, *, deadline_s: float | None = None) -> tuple[
     # Waiting holds a worker thread, so the wait is short: an ingest that finds the engine busy
     # says so and carries on without it rather than queueing behind a stranger's upload.
     if not slot.acquire(timeout=float(getattr(settings, "HAYABUSA_WAIT_S", 20) or 20)):
-        summary.update(status="unsupported", reason=f"{ENGINE} is busy with another ingest; no detections for this evidence, ingest it again later")
+        summary.update(status="unsupported", reason=f"{ENGINE} is busy with another ingest; no detections for this evidence. To run it, remove the evidence and add the file again later")
         try:
             os.unlink(output)
         except OSError:

@@ -14,7 +14,10 @@ case exists outside that browser profile. It is comfortable up to a few hundred 
 of evidence; beyond that, queries and rule runs slow down and the server store is the
 better fit. In both modes the browser keeps the case itself, its findings, notes, chains,
 decisions and AI sessions, so a case can be exported as a bundle and imported elsewhere.
-The bundle also carries the custom rules its findings came from (a custom rule is global
+When evidence is first added, the app asks the browser to keep the site's storage
+(`navigator.storage.persist()`); without that grant a browser short of space may clear a
+site's IndexedDB, and the Dashboard says which applies. Export a case bundle to keep a copy
+either way. The bundle also carries the custom rules its findings came from (a custom rule is global
 in the browser that made it; it arrives as a rule of the imported case), the pack and
 disabled-rule choices in force at export, and the decisions on relationship hypotheses.
 A finding the analyst decided is never pruned because its rule is missing from the

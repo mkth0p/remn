@@ -554,14 +554,30 @@ export async function deleteEvidenceData(db: RemnDB, caseId: number, evidenceId:
   })
 }
 
-export async function estimateStorage(): Promise<{ usage: number; quota: number } | null> {
+export async function estimateStorage(): Promise<{ usage: number; quota: number; persisted: boolean | null } | null> {
   try {
     if (navigator.storage?.estimate) {
       const e = await navigator.storage.estimate()
-      return { usage: e.usage ?? 0, quota: e.quota ?? 0 }
+      const persisted = navigator.storage.persisted ? await navigator.storage.persisted() : null
+      return { usage: e.usage ?? 0, quota: e.quota ?? 0, persisted }
     }
   } catch {
     /* ignore */
   }
   return null
+}
+
+/**
+ * Ask the browser to keep this site's storage. Without it, a browser short of space may clear the
+ * whole IndexedDB of a site it considers idle, and with it every case, finding and decision: in
+ * browser-store mode that copy is the only one. Asked when evidence is first added, where it matters.
+ */
+export async function requestPersistentStorage(): Promise<boolean | null> {
+  try {
+    if (!navigator.storage?.persist) return null
+    if (navigator.storage.persisted && (await navigator.storage.persisted())) return true
+    return await navigator.storage.persist()
+  } catch {
+    return null
+  }
 }

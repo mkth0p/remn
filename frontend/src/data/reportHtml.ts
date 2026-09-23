@@ -183,10 +183,13 @@ export function evidenceIssue(e: Evidence): string {
   const stats = (e.stats ?? {}) as Record<string, unknown>
   if (e.status === 'error') return e.error ? `parse stopped: ${e.error}` : 'parse stopped'
   const errors = Number(stats.errors ?? 0)
-  const counts = (stats.memberCounts ?? {}) as Record<string, number>
+  // a member skipped as out of scope ("not a mail file") was not evidence of this kind; one skipped
+  // for a size limit, encryption or a compression method was, and was not read
+  const members = (Array.isArray(stats.members) ? stats.members : Array.isArray(stats.files) ? stats.files : []) as { status?: string; reason?: string }[]
+  const unread = members.filter((m) => m.status === 'skipped' && !/^not (a|an) /i.test(String(m.reason ?? ''))).length
   const bits: string[] = []
   if (errors > 0) bits.push(`${errors} parse error${errors === 1 ? '' : 's'}`)
-  if (counts.skipped) bits.push(`${counts.skipped} archive member${counts.skipped === 1 ? '' : 's'} not read`)
+  if (unread) bits.push(`${unread} archive member${unread === 1 ? '' : 's'} not read`)
   if (e.error) bits.push(e.error)
   return bits.join('; ')
 }

@@ -9,6 +9,7 @@ import { getSource } from '../data/source'
 import { Jobs } from '../components/ConsolePanel'
 import { IconTrash } from '../components/Icons'
 import { PackageCoverage } from '../components/PackageCoverage'
+import { coverageMembers } from '../data/packageCoverage'
 import { packageCoverageIssues } from '../data/packageCoverage'
 
 export function EvidenceView() {
@@ -159,6 +160,7 @@ export function EvidenceView() {
             />
           </label>
           {detail.kind === 'package' && detail.stats && <PackageCoverage stats={detail.stats} />}
+          {detail.kind !== 'package' && coverageMembers(detail.stats).length > 0 && <PackageCoverage stats={detail.stats!} archive />}
           {detail.stats && (
             <details open={detail.kind !== 'package'}>
               <summary className="small dim" style={{ cursor: 'pointer' }}>

@@ -118,7 +118,11 @@ The Rules page lists the bundled rules, the community packs with a toggle each, 
 custom rules, with an editor, the import buttons, and after a run the reason every
 silent rule found nothing. The Indicators page lists the IPs, domains, URLs and hashes
 extracted from the evidence with their counts and, when external lookups are enabled
-for the case, their reputation; it exports STIX 2.1 and CSV.
+for the case, their reputation; it exports STIX 2.1 and CSV. The STIX bundle carries every
+value as a cyber-observable and makes an indicator only of the values a reputation check
+flagged, with identifiers derived from the content (an export imported twice is the same
+objects), an identity for the case and a TLP:AMBER marking. On a browser-only server the
+page offers no lookups, which the server refuses; it says so and offers the exports.
 
 ## Review
 

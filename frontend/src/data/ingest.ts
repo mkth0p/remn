@@ -1,7 +1,7 @@
 import { persistEngineFindings, type EngineFinding } from './engineFindings'
 import { autoRunAfterIngest } from './findingsState'
 import { apiPost, API_HEADERS } from '../api/client'
-import { getDb, type Case, type Evidence } from '../db/schema'
+import { getDb, requestPersistentStorage, type Case, type Evidence } from '../db/schema'
 import { log, toast, useStore } from '../state/store'
 import type { IngestRequest } from '../workers/ingest.worker'
 import { chunkedUpload } from './upload'
@@ -76,6 +76,10 @@ export function requestIngest(files: File[], kase: Case, kindOverride?: 'evtx' |
 /** Keep folder imports bounded: one ingest worker / server job at a time. */
 export async function ingestFiles(files: File[], kase: Case, kind: (file: File) => 'evtx' | 'mail' | 'package' = detectKind): Promise<void> {
   if (files.length > 1) log('info', `${files.length} evidence files queued for import`)
+  if (kase.storage !== 'server')
+    void requestPersistentStorage().then((kept) => {
+      if (kept === false) log('warn', 'the browser did not grant persistent storage: under storage pressure it may clear this site; export a case bundle to keep a copy')
+    })
   const batchCase = files.length > 1 ? { ...kase, settings: { ...kase.settings, autoRunRules: false } } : kase
   try {
     for (const file of files) await ingestFile(file, batchCase, kind(file))
@@ -230,12 +234,22 @@ export async function ingestToBrowser(file: File, kase: Case, kind: 'evtx' | 'ma
       const m = ev.data
       const s = useStore.getState()
       switch (m.type) {
-        case 'duplicate':
-          toast('info', `${file.name}: already imported as evidence #${m.evidenceId}; skipped`)
+        case 'duplicate': {
+          // the file was staged for a parse that will not happen: the server should not keep it
+          if (upload?.uploadId) fetch(`/api/upload/${upload.uploadId}`, { method: 'DELETE', headers: API_HEADERS }).catch(() => undefined)
+          const skipped = (m.skippedEngines as string[] | undefined) ?? []
+          toast(
+            skipped.length ? 'warn' : 'info',
+            skipped.length
+              ? `${file.name}: already imported as evidence #${m.evidenceId}, but its ${skipped.join(', ')} run was skipped then. To run it, remove evidence #${m.evidenceId} and add the file again; the rules and your decisions are rebuilt from the rows.`
+              : `${file.name}: already imported as evidence #${m.evidenceId}; skipped`,
+            skipped.length ? 0 : undefined,
+          )
           worker.terminate()
           s.removeJob(jobId)
           resolve(Number(m.evidenceId))
           break
+        }
         case 'phase':
           s.upsertJob({ id: jobId, phase: m.phase as 'hashing' })
           break

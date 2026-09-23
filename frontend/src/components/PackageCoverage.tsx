@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { Badge } from './ui'
 import { fmtBytes, fmtNum } from '../util/format'
+import { coverageMembers } from '../data/packageCoverage'
 
-export function PackageCoverage({ stats }: { stats: Record<string, unknown> }) {
+export function PackageCoverage({ stats, archive = false }: { stats: Record<string, unknown>; archive?: boolean }) {
   const [query, setQuery] = useState('')
   const [issuesOnly, setIssuesOnly] = useState(false)
   const [limit, setLimit] = useState(100)
-  const members = (Array.isArray(stats.files) ? stats.files : []).filter((f): f is Record<string, unknown> => !!f && typeof f === 'object' && 'status' in f)
+  const members = coverageMembers(stats)
+  const count = (status: string) => members.filter((m) => m.status === status).length
   // A member that was repaired, filtered or truncated still parsed, so it carries a note rather
   // than an error status. Without it here, the one view an analyst uses to review a large package
   // is the one view that hides what the parser had to compromise on.
@@ -14,16 +16,24 @@ export function PackageCoverage({ stats }: { stats: Record<string, unknown> }) {
   const checks = (Array.isArray(stats.reconciliation) ? stats.reconciliation : []) as { name: string; status: string; expected?: number; actual?: number; reason?: string }[]
   return (
     <section className="col" style={{ gap: 10 }}>
-      <h3>Package coverage</h3>
+      <h3>{archive ? 'Archive coverage' : 'Package coverage'}</h3>
       <div className="row">
-        <Badge sev="accent">{fmtNum(members.length)} members</Badge>
-        <span>
-          {Number(stats.events ?? 0)} events · {Number(stats.observations ?? 0)} observations · {Number(stats.mails ?? 0)} mails
-        </span>
+        <Badge sev="accent">{fmtNum(Number(stats.membersTotal ?? members.length))} members</Badge>
+        {archive ? (
+          <span>
+            {count('parsed')} read · {count('skipped')} skipped · {count('error')} failed
+          </span>
+        ) : (
+          <span>
+            {Number(stats.events ?? 0)} events · {Number(stats.observations ?? 0)} observations · {Number(stats.mails ?? 0)} mails
+          </span>
+        )}
       </div>
       <div className="hint">
-        {Number(stats.unsupported ?? 0)} unsupported · {Number(stats.errors ?? 0)} failed · {Number(stats.skipped ?? 0)} skipped. Unsupported files are inventoried and hashed; their contents are not
-        searchable. Partial parser output is kept and identified below.
+        {archive
+          ? 'Every file in the archive is listed: read, with the rows it gave, or skipped or failed, with the reason.'
+          : `${Number(stats.unsupported ?? 0)} unsupported · ${Number(stats.errors ?? 0)} failed · ${Number(stats.skipped ?? 0)} skipped. Unsupported files are inventoried and hashed; their contents are not searchable. Partial parser output is kept and identified below.`}
+        {Number(stats.membersTotal ?? 0) > members.length ? ` The list shows the first ${fmtNum(members.length)}.` : ''}
       </div>
       {checks.length > 0 && (
         <details className="card">

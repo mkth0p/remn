@@ -267,7 +267,11 @@ async function ingest(req: IngestRequest): Promise<void> {
   const duplicate = await duplicateEvidence(caseId, evidenceId, req.sourceName ?? file.name, kind, sha256)
   if (duplicate) {
     await db.evidence.delete(evidenceId)
-    post({ type: 'duplicate', evidenceId: duplicate.id })
+    // an engine that was skipped then (busy, over a limit) did not look at this file: say which
+    const skippedEngines = ((duplicate.stats?.engines as { engine?: string; status?: string }[] | undefined) ?? [])
+      .filter((e) => e.status && e.status !== 'parsed')
+      .map((e) => String(e.engine ?? 'engine'))
+    post({ type: 'duplicate', evidenceId: duplicate.id, skippedEngines })
     return
   }
   await db.evidence.update(evidenceId, { sha256Client: sha256, status: 'uploading' })
@@ -417,6 +421,10 @@ async function ingest(req: IngestRequest): Promise<void> {
   try {
     await streamNdjson(`/api/ingest/${kind}`, form, onRow, { onBytes: (n) => post({ type: 'bytes', bytes: n }) })
     if (!st.done) throw new Error('Ingestion stream ended before its completion record; imported rows may be partial')
+    // the server counts the rows it sent; a stream that lost some on the way is not a complete import
+    const emitted = Number(st.done.emitted)
+    const received = inserted + batch.length
+    if (Number.isFinite(emitted) && emitted !== received && !st.errorMsg) st.errorMsg = `the server sent ${emitted} rows and ${received} arrived; the import is incomplete`
     if (batchType === 'event') await flushEvents()
     else await flushMails()
     post({ type: 'progress', rows: inserted })
