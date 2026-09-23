@@ -1,0 +1,208 @@
+# Correlation rules: several events that are ordinary alone and mean an attack together (bursts, sweeps, sequences).
+id: win-kerberos-password-spray
+title: Kerberos password spraying - one client fails for many accounts within minutes
+description: One client address gets Kerberos failures for eight or more different account names within five minutes, either a wrong password (4771 or 4768 with status 0x18) or a name that does not exist (4768 with status 0x6). Spraying tools such as kerbrute and Rubeus try one password across a user list this way, and when the list holds names that do not exist the unknown-name failures mix with the wrong-password ones. The finding turns critical when the same address then obtains a TGT (4768 with status 0x0) within 15 minutes through a request the Windows logon client does not make (ticket options other than 0x40810010, as kerbrute, impacket and Rubeus send), which is what a spray that found a valid password looks like; a spray run through the Windows client itself (DomainPasswordSpray and other LDAP-bind scripts) stays high. Benign causes are servers that authenticate users on their behalf (ADFS, Exchange, VPN and RADIUS servers, web servers with integrated authentication) and terminal servers shared by many users, whose users' failures all come from one address; a password expiry wave or a logon storm can reach the threshold there, and a non-Windows appliance that authenticates users with Kerberos (a VPN gateway or a reverse proxy) will also escalate it with its users' tickets. Check what the source address is before acting. The unknown-name part alone is also reported by win-kerberos-user-enumeration.
+severity: high
+source: events
+attack: [T1110.003]
+tags: [authentication, kerberos, spraying, correlation]
+where:
+  eventId|in: [4768, 4771]
+  status|in: ["0x6", "0x18"]
+  ipAddress|exists: true
+  targetUser|not_endswith: "$"
+group_by: [ipAddress]
+window: 5m
+distinct: targetUser
+threshold: ">= 8"
+then:
+  where: { eventId: 4768, status: "0x0", targetUser|not_endswith: "$", ticketOptions|nin: ["0x40810010"] }
+  join: [ipAddress]
+  within: 15m
+  severity: critical
+  title: the same client then obtained a TGT with a tool's request
+---
+id: win-eventlog-crash-after-remote-pipe
+title: Event Log service crashed right after a remote client opened its pipe
+description: A remote client connects to the \eventlog named pipe over SMB (Sysmon 18 with image System, the kernel serving an SMB client) and within a minute WerFault starts under the svchost that hosts the Event Log service (the LocalServiceNetworkRestricted group, or "-s EventLog" on split service hosts). Malformed requests to the EventLog RPC interface crash the service so that nothing is logged until it restarts (the technique published by byt3bl33d3r); the service restarts by itself, so the crash is often the only trace. Benign cause is a genuine crash of that service host while a log collector or an administrator's Event Viewer happens to be reading the logs remotely, which is rare.
+severity: high
+source: events
+attack: [T1562.002]
+tags: [defense-evasion, eventlog, correlation]
+entities: [computer]
+where:
+  provider|contains: Sysmon
+  any_of:
+    - { eventId: 18, pipeName: "\\eventlog", image: System }
+    - eventId: 1
+      image|endswith: "\\werfault.exe"
+      parentImage|endswith: "\\svchost.exe"
+      any_of:
+        - parentCommandLine|contains: "-s eventlog"
+        - parentCommandLine|re: "localservicenetworkrestricted( -p)?\\s*$"
+group_by: [computer]
+window: 1m
+distinct: eventId
+threshold: ">= 2"
+---
+id: win-ppid-spoofing-handle
+title: Handle with create-process rights on a usual parent process (possible parent PID spoofing)
+description: A script host, a LOLBin or a program outside the Windows and Program Files folders opens explorer.exe, svchost.exe or another process that normally starts other programs with the PROCESS_CREATE_PROCESS right (Sysmon 10). That handle is what parent PID spoofing needs - the program passes it to CreateProcess so that its child appears to be started by the other process and escapes parent-child detections, and under a SYSTEM parent such as winlogon or lsass the child also runs as SYSTEM. The finding is raised to high when a process is created under that parent (its parentProcessId) within two seconds, which is the spoofed child (spoofing tools create it within milliseconds) or a child started by code injected into the parent. The handles one program opens with no more than two seconds between them form one finding; when they reach several processes, as a listing such as Get-Process | Select-Object * does (the .NET Handle property asks for full access), the finding names them all and is never raised. On its own the handle stays low - a script that reads the Handle of one process gets it, some desktop tools open explorer with full rights, and a dumping tool that opens lsass with full access has that right too (win-credential-dumping reports the dump). Benign causes of the raised finding are installers that start the installed program un-elevated under explorer.exe at the end of setup, and a child the parent happened to start itself in the same two seconds. UAC elevation creates processes under the requesting parent the same way, but it runs from svchost.exe and is not counted.
+severity: low
+source: events
+attack: [T1134.004]
+tags: [defense-evasion, ppid-spoofing, correlation]
+entities: [computer, sourceImage, sourceProcessId, targetImage, grantedAccess]
+where:
+  eventId: 10
+  provider|contains: Sysmon
+  grantedAccess|re: "^0x[0-9a-f]*[89a-f][0-9a-f]$"
+  targetImage|endswith: ["\\explorer.exe", "\\svchost.exe", "\\winlogon.exe", "\\services.exe", "\\wininit.exe", "\\lsass.exe", "\\spoolsv.exe", "\\sihost.exe", "\\runtimebroker.exe", "\\taskhostw.exe", "\\dllhost.exe", "\\searchindexer.exe", "\\wmiprvse.exe"]
+  any_of:
+    - sourceImage|endswith: ["\\powershell.exe", "\\pwsh.exe", "\\powershell_ise.exe", "\\wscript.exe", "\\cscript.exe", "\\mshta.exe", "\\rundll32.exe", "\\regsvr32.exe", "\\msbuild.exe", "\\installutil.exe", "\\regasm.exe", "\\regsvcs.exe"]
+    - sourceImage|not_startswith: ["c:\\windows\\", "c:\\program files\\", "c:\\program files (x86)\\", "c:\\programdata\\microsoft\\windows defender\\"]
+group_by: [computer, sourceProcessId]
+window: 2s
+distinct: targetProcessId
+threshold: ">= 1"
+then:
+  where: { eventId: 1, provider|contains: Sysmon }
+  join: [computer, targetProcessId=parentProcessId]
+  within: 2s
+  severity: high
+  title: a process was started under that parent
+---
+id: win-remote-named-pipe-enumeration
+title: Remote named-pipe enumeration - many different pipes opened over SMB within seconds
+description: The kernel (Sysmon 18 with image System, i.e. on behalf of an SMB client) connects to six or more different named pipes within five seconds, not counting the pipes every domain client uses (lsass, lsarpc, samr, netlogon, srvsvc, wkssvc, spoolss, winreg, epmapper, browser, svcctl, and protected_storage, which clients open on domain controllers to back up their DPAPI keys). Probing a host's RPC pipes one after the other (atsvc, eventlog, InitShutdown, ntsvcs, scerpc, tapsrv, trkwks ...), as Metasploit's pipe_auditor and similar scanners do, maps which services it exposes before lateral movement or coercion. Sysmon does not say which client opened a pipe, so on a busy server the pipes of all clients count together. Benign causes are credentialed vulnerability scanners, which enumerate accessible pipes, an administrator opening several remote management consoles on the host at once, and on a busy server several management tools polling it in the same seconds.
+severity: medium
+source: events
+attack: [T1046, T1018]
+tags: [discovery, named-pipe, correlation]
+where:
+  eventId: 18
+  provider|contains: Sysmon
+  image: System
+  pipeName|nin: ["\\lsass", "\\lsarpc", "\\samr", "\\netlogon", "\\srvsvc", "\\wkssvc", "\\spoolss", "\\winreg", "\\epmapper", "\\browser", "\\svcctl", "\\protected_storage"]
+group_by: [computer]
+window: 5s
+distinct: pipeName
+threshold: ">= 6"
+---
+id: win-ipc-rpc-user-session-recon
+title: One SMB session queries the SAMR, LSA, server and registry pipes in seconds (SharpHound, PsLoggedOn)
+description: A single logon session (5145 on IPC$, same subjectLogonId) opens three or more of the samr, lsarpc, srvsvc, winreg and wkssvc pipes within ten seconds. That is the footprint of remote user and session discovery - SharpHound and BloodHound collectors (SAMR group members, LSA SID lookups, NetSessionEnum over srvsvc), PsLoggedOn and PowerView's Get-NetLoggedon or Invoke-UserHunter (remote registry HKEY_USERS, NetWkstaUserEnum, NetSessionEnum), and null-session tools such as enum4linux. Machine accounts are left out, and so are the accounts listed as service accounts in the case settings. Benign causes are administrators using Computer Management or other remote consoles on the host, a user who browses the host's shares in Explorer (srvsvc, winreg) and opens a folder's permissions (lsarpc) within seconds, file-permission auditing and inventory tools that walk shares, local groups and sessions under a service account, and old logon scripts that run "net time" and "net user /domain" together.
+severity: medium
+source: events
+attack: [T1087.002, T1069.002, T1033]
+tags: [discovery, smb, correlation]
+entities: [computer, subjectUser, ipAddress, subjectLogonId]
+where:
+  eventId: 5145
+  shareName|endswith: "\\IPC$"
+  relativeTargetName|in: [samr, lsarpc, srvsvc, winreg, wkssvc]
+  subjectUser|not_endswith: "$"
+exclude:
+  subjectUser|in_setting: service_accounts
+group_by: [computer, subjectLogonId]
+window: 10s
+distinct: relativeTargetName
+threshold: ">= 3"
+---
+id: win-process-sweep-unbacked-code
+title: Code in unbacked memory opens handles to many processes within seconds (implant process listing)
+description: One process opens handles to ten or more different processes within five seconds (Sysmon 10) and the call that opened them came straight from memory that no file backs (the frame after KERNELBASE is UNKNOWN). That is how the ps command of Meterpreter, Cobalt Strike and similar implants lists processes from reflectively loaded code, whatever the name of the host process. Benign causes are PowerShell scripts and .NET programs that call OpenProcess themselves for every process, whose interop code is generated in memory (inventory and incident-response scripts, Get-InjectedThread among them), and protection products that inject into other processes; check the source image and, for PowerShell, the script block log.
+severity: high
+source: events
+attack: [T1057]
+tags: [discovery, process-access, correlation]
+entities: [computer, sourceImage, sourceProcessId]
+where:
+  eventId: 10
+  provider|contains: Sysmon
+  callTrace|re: "kernelbase\\.dll\\+[0-9a-f]+\\|unknown\\("
+group_by: [computer, sourceProcessId]
+window: 5s
+distinct: targetProcessId
+threshold: ">= 10"
+---
+id: win-smb-connection-sweep
+title: The kernel opens SMB connections to many hosts within seconds (share or session hunting)
+description: The System process (the SMB client) opens outgoing connections to port 445 or 139 on five or more different hosts within three seconds (Sysmon 3). Session and share hunting (PowerView's Invoke-UserHunter and Find-LocalAdminAccess, SharpHound, net view loops, ransomware looking for shares) touches every host it can reach in a burst. Benign causes are servers that talk SMB to many machines by design - print servers answering clients, software distribution and backup servers, vulnerability scanners - and, on a workstation, a logon that maps drives on many different file servers at once.
+severity: medium
+source: events
+attack: [T1018, T1135, T1033]
+tags: [discovery, smb, correlation]
+where:
+  eventId: 3
+  provider|contains: Sysmon
+  image: System
+  initiated: "true"
+  destinationPort|in: [445, 139]
+  destinationIp|nin: ["127.0.0.1", "::1", "0:0:0:0:0:0:0:1"]
+group_by: [computer]
+window: 3s
+distinct: destinationIp
+threshold: ">= 5"
+---
+id: win-rdp-connect-then-run-dialog
+title: Run-dialog command typed seconds after an inbound RDP connection (SharpRDP-style)
+description: An inbound RDP connection (Sysmon 3 on port 3389) and a new entry in the Run dialog history (RunMRU written by explorer.exe, Sysmon 13) on the same host within ten seconds of each other. SharpRDP and similar tools execute commands by opening an automated RDP session and typing them into the Run dialog, so each connection is followed a few seconds later by a RunMRU write; several findings in a row, each with a new command, mean automation. The commands themselves can look harmless (notepad, cmd, powershell). Benign causes are an administrator who reconnects to an existing session and immediately runs something with Win+R, and busy terminal servers, where one user's connection and another user's Run command can fall in the same ten seconds; the rule cannot tell which user wrote the RunMRU entry, so a single finding is weak and a series of them is what matters.
+severity: low
+source: events
+attack: [T1021.001]
+tags: [lateral-movement, rdp, correlation]
+where:
+  provider|contains: Sysmon
+  any_of:
+    - eventId: 3
+      initiated: "false"
+      any_of:
+        - destinationPort: 3389
+        - sourcePort: 3389
+    - eventId: 13
+      targetObject|contains: "\\Explorer\\RunMRU\\"
+      image|endswith: "\\explorer.exe"
+group_by: [computer]
+window: 10s
+distinct: eventId
+threshold: ">= 2"
+---
+id: win-script-host-remote-task-rpc
+title: Script host loads the Task Scheduler API and connects to RPC on another host (remote scheduled task)
+description: The same PowerShell, Windows Script Host, mshta or rundll32 process loads taskschd.dll (the Schedule.Service COM API, Sysmon 7) and opens a connection to port 135 (the RPC endpoint mapper) on a remote host within two minutes (Sysmon 3). Creating a scheduled task on another machine through the COM API is a common way to execute remotely without schtasks.exe on the command line; the task itself (4698) is only logged on the target. Benign causes are administration scripts that manage scheduled tasks on other servers through Schedule.Service, and scripts that use Schedule.Service locally and query WMI or event logs on another host over DCOM in the same two minutes, which also connects to port 135.
+severity: medium
+source: events
+attack: [T1053.005]
+tags: [lateral-movement, scheduled-task, correlation]
+entities: [computer, image, processGuid]
+where:
+  provider|contains: Sysmon
+  image|endswith: ["\\powershell.exe", "\\pwsh.exe", "\\powershell_ise.exe", "\\wscript.exe", "\\cscript.exe", "\\mshta.exe", "\\rundll32.exe"]
+  any_of:
+    - { eventId: 7, imageLoaded|endswith: "\\taskschd.dll" }
+    - { eventId: 3, initiated: "true", destinationPort: 135, destinationIp|nin: ["127.0.0.1", "::1", "0:0:0:0:0:0:0:1"] }
+group_by: [computer, processGuid]
+window: 2m
+distinct: eventId
+threshold: ">= 2"
+---
+id: win-smb-coerced-connect-back
+title: Host connects back over SMB to a peer that has just connected to it (coerced authentication)
+description: The kernel accepts an SMB connection from a peer and, within five seconds, opens an SMB connection to port 445 of that same peer (Sysmon 3, image System). Coercion tricks such as the printer bug (SpoolSample), PetitPotam and DFSCoerce make the victim authenticate back to the address the attacker chooses, usually to relay or capture its machine account. The peer can only be matched when Sysmon records the inbound connection with the local port 445 as its source, as the Sysmon versions of 2019 did in the logs examined; the 2020 and later logs put the peer in the source fields, and the rule language cannot compare a source address with a destination address, so on such logs the rule stays silent. Sysmon writes network events in batches, so two connections milliseconds apart can be logged seconds apart. The evidence is two ordinary connections, so confirm it with a 5145 on spoolss, efsrpc, lsarpc or netdfs from the peer, or with the host's machine account logging on at the peer. Benign causes are a server that opens its own shares through its own name or address (both sides of that one connection are logged), print servers that open the MS-RPRN change-notification channel back to their clients - the channel the printer bug abuses; newer clients mostly use the asynchronous print protocols, which do not connect back - and two servers that access each other's shares at the same moment.
+severity: low
+source: events
+attack: [T1187]
+tags: [credential-access, coercion, smb, correlation]
+where:
+  eventId: 3
+  provider|contains: Sysmon
+  image: System
+  destinationIp|nin: ["127.0.0.1", "::1", "0:0:0:0:0:0:0:1"]
+  any_of:
+    - { initiated: "false", sourcePort: 445 }
+    - { initiated: "true", destinationPort: 445 }
+group_by: [computer, destinationIp]
+window: 5s
+distinct: initiated
+threshold: ">= 2"

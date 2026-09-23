@@ -1,0 +1,145 @@
+# Image loads (Sysmon 7): DLL hijacks and proxy loads into Windows processes, RDP control hosting, tampered process images; plus the process-access, named-pipe and file-time rules reviewed with them.
+id: win-system-process-unsigned-dll
+title: Windows system process loads an unsigned DLL (DLL hijack, phantom DLL, proxy load)
+description: A program that lives in System32, SysWOW64 or another Windows folder loads an unsigned DLL from anywhere except Program Files. That can be the system folders themselves, a user-writable folder such as ProgramData, Users or Temp, or a network share. Every DLL that Windows ships is signed, so an unsigned DLL inside a service host (svchost, fxssvc, wermgr), an auto-elevating binary (sysprep, cliconfg, migwiz, consent), wuauclt or lsass is almost always a planted file. This is how a service DLL or phantom DLL hijack runs code as SYSTEM (Update Session Orchestrator, CDPSvc, Fax), how a UAC bypass runs code at high integrity, and how wuauclt /UpdateDeploymentProvider proxies a payload. A copy of Windows in a folder whose name ends with a space ("C:\Windows \System32", the mock trusted folder trick) counts as a Windows folder. Some DLLs are left out. These are DLLs from Program Files, the .NET global assembly cache and native images, the .NET Framework folder, Windows Installer custom actions, WinSxS, the driver store and print drivers. Some processes are left out as well. Vendor programs that only sit under System32 are not Windows binaries and are left out. These are driver services in the driver store, and apps installed per user for SYSTEM or a service account under config\systemprofile or ServiceProfiles. rundll32 and regsvr32 are covered by a Sigma rule. PowerShell, the PowerShell remoting host, the troubleshooting host (sdiagnhost) and the UWP background task host are left out because they load generated or app assemblies. The IIS worker (w3wp) loads web application DLLs, and the device installer (drvinst) loads co-installers. msiexec, dllhost, dism and the spooler are left out too. The phantom DLLs that the Sigma phantom-DLL rule already names in System32 are left to that rule. Known benign causes are old vendor software that copies unsigned DLLs into System32 (network providers, IMEs, credential providers, CSPs, WMI providers), in-house COM components used by cscript, wscript or mmc, per-user shell extensions loaded into a file dialog, and database client DLLs loaded by MSDTC. Allow-list such a file by path once it is identified. One finding per host, process and DLL per day.
+severity: high
+source: events
+attack: [T1574.001, T1548.002, T1218]
+tags: [defense-evasion, privilege-escalation, persistence, dll-hijack]
+entities: [computer, image, imageLoaded]
+where:
+  eventId: 7
+  provider|contains: Sysmon
+  signed|in: [false, "false", "False"]
+  image|contains: [":\\windows\\system32\\", ":\\windows\\syswow64\\", ":\\windows\\ehome\\", "\\windows \\"]
+  # vendor programs that only live under System32: driver services from the driver store, and per-user apps installed for SYSTEM or a service account
+  image|not_contains: ["\\driverstore\\", "\\config\\systemprofile\\", "\\serviceprofiles\\"]
+  image|not_endswith: ["\\rundll32.exe", "\\regsvr32.exe", "\\msiexec.exe", "\\dllhost.exe", "\\powershell.exe", "\\powershell_ise.exe", "\\wsmprovhost.exe", "\\sdiagnhost.exe", "\\backgroundtaskhost.exe", "\\w3wp.exe", "\\drvinst.exe", "\\spoolsv.exe", "\\printisolationhost.exe", "\\splwow64.exe", "\\dism.exe", "\\dismhost.exe"]
+  imageLoaded|not_contains: ["\\program files\\", "\\program files (x86)\\", "\\windows\\assembly\\", "\\microsoft.net\\", "\\windows\\installer\\", "\\winsxs\\", "\\driverstore\\", "\\spool\\drivers\\"]
+  imageLoaded|not_endswith: [":\\windows\\system32\\axeonoffhelper.dll", ":\\windows\\system32\\cdpsgshims.dll", ":\\windows\\system32\\oci.dll", ":\\windows\\system32\\offdmpsvc.dll", ":\\windows\\system32\\shellchromeapi.dll", ":\\windows\\system32\\tsmsisrv.dll", ":\\windows\\system32\\tsvipsrv.dll", ":\\windows\\system32\\wbem\\wbemcomn.dll", ":\\windows\\system32\\wlbsctrl.dll", ":\\windows\\system32\\wow64log.dll", ":\\windows\\system32\\wptsextensions.dll"]
+group_by: [computer, image, imageLoaded]
+window: 1d
+threshold: ">= 1"
+---
+id: win-rdp-activex-unusual-host
+title: RDP client control loaded by a program that is not an RDP client (SharpRDP-style lateral movement)
+description: The Remote Desktop ActiveX control is loaded by a program outside Program Files that is not a known RDP client, or by a script host. The control is mstscax.dll, or its .NET interop AxInterop.MSTSCLib.dll, Interop.MSTSCLib.dll or MSTSCLib.dll. Tools such as SharpRDP embed this control to log on to another host over RDP and type a command into the session without opening mstsc. The finding therefore names the tool on the source side of RDP lateral movement. SharpRDP started with its computername= and command= arguments is also matched. Benign causes are portable or in-house RDP managers run from a user folder. RDCMan, mRemoteNG, Royal TS, Remote Desktop Manager, Terminals and MobaXterm are excluded by name. So are the Windows programs that host the control (mstsc, vmconnect, the Remote Desktops MMC snap-in, Windows Sandbox and Explorer).
+severity: high
+source: events
+attack: [T1021.001]
+tags: [lateral-movement, rdp, hacktool]
+entities: [computer, image, imageLoaded, commandLine]
+where:
+  any_of:
+    - eventId: 7
+      provider|contains: Sysmon
+      imageLoaded|endswith: ["\\mstscax.dll", "\\axinterop.mstsclib.dll", "\\interop.mstsclib.dll", "\\mstsclib.dll"]
+      image|not_contains: ["\\program files\\", "\\program files (x86)\\", "\\windowsapps\\", "\\mobaxterm"]
+      image|not_endswith: ["\\mstsc.exe", "\\vmconnect.exe", "\\mmc.exe", "\\explorer.exe", "\\windowssandbox.exe", "\\windowssandboxclient.exe", "\\windowssandboxremotesession.exe", "\\rdcman.exe", "\\mremoteng.exe", "\\royalts.exe", "\\remotedesktopmanager.exe", "\\remotedesktopmanager64.exe", "\\remotedesktopmanagerfree.exe", "\\terminals.exe", "\\msrdc.exe"]
+      # a Windows binary hosting the control is left out, except a script host or LOLBin running a loaded tool
+      not: { image|contains: [":\\windows\\system32\\", ":\\windows\\syswow64\\"], image|not_endswith: ["\\powershell.exe", "\\rundll32.exe", "\\regsvr32.exe", "\\mshta.exe", "\\wscript.exe", "\\cscript.exe", "\\cmd.exe"] }
+    - any_of:
+        - { eventId: 4688 }
+        - { eventId: 1, provider|contains: Sysmon }
+      any_of_2:
+        - { originalFileName: SharpRDP.exe }
+        - { commandLine|contains_all: ["computername=", "command="] }
+group_by: [computer, image]
+window: 10m
+threshold: ">= 1"
+---
+id: win-process-image-tampering
+title: Process started from a file that changed after it was mapped (Herpaderping, Ghosting, Doppelganging)
+description: 'Signs that a process runs code that differs from the file on disk. Process Herpaderping, Ghosting and Doppelganging build a process from a section of a file, then overwrite, delete or roll back that file before the process starts. Three signals are matched. First, a Sysmon 10 handle to or from a process whose image has no path (a bare "name.exe"). Sysmon falls back to the short process name when the process was built from a section and it never resolved the file. Windows Error Reporting snapshots of a crashing process are built the same way, so handles opened by WerFault, WerFaultSecure and wermgr are left out. Second, a main image (Sysmon 7, .exe) outside Program Files, WindowsApps and Windows that claims to be Microsoft in its version information, carries no signature, and has an all-zero import hash. That is an executable whose headers do not match its content, such as a file that Herpaderping overwrote with a Microsoft binary after mapping it. An old unsigned Microsoft tool still has an import table and does not match. .NET native images (.ni.exe) and packaged Store apps also claim Microsoft without a signature or an import hash, and their folders are left out. Third, the ProcessHerpaderping proof of concept by name. Windows pseudo-processes (System, Registry, MemCompression) have no .exe name and are not matched. A benign cause of the first signal is a process snapshot taken by a debugging or dump tool (procdump -r), which is worth a look anyway.'
+severity: high
+source: events
+attack: [T1055, T1055.013]
+tags: [defense-evasion, injection, process-tampering]
+entities: [computer, sourceImage, targetImage, image, imageLoaded]
+where:
+  any_of:
+    - { eventId: 10, provider|contains: Sysmon, targetImage|endswith: ".exe", targetImage|not_contains: "\\", sourceImage|not_endswith: ["\\werfault.exe", "\\werfaultsecure.exe", "\\wermgr.exe"] }
+    - { eventId: 10, provider|contains: Sysmon, sourceImage|endswith: ".exe", sourceImage|not_contains: "\\" }
+    - { eventId: 7, provider|contains: Sysmon, imageLoaded|endswith: ".exe", company: Microsoft Corporation, signed|in: [false, "false", "False"], hashes|contains: "IMPHASH=00000000000000000000000000000000", imageLoaded|not_contains: ["\\program files\\", "\\program files (x86)\\", "\\windowsapps\\", ":\\windows\\"], imageLoaded|not_endswith: ".ni.exe" }
+    - { eventId|in: [1, 4688], any_of: [ { image|endswith: "\\processherpaderping.exe" }, { processName|endswith: "\\processherpaderping.exe" }, { parentImage|endswith: "\\processherpaderping.exe" }, { parentProcessName|endswith: "\\processherpaderping.exe" } ] }
+    - { eventId: 10, provider|contains: Sysmon, sourceImage|endswith: "\\processherpaderping.exe" }
+group_by: [computer]
+window: 10m
+threshold: ">= 1"
+---
+id: win-credential-app-memory-read
+title: Memory of TeamViewer or KeePass read or written by another program (credential theft)
+description: Another program opens TeamViewer or KeePass with the right to read or write its memory (PROCESS_VM_READ or PROCESS_VM_WRITE, Sysmon 10). Both applications keep secrets in clear in memory. TeamViewer holds its saved and session passwords, and KeePass holds the unlocked database. Public dumpers read or inject into them, such as the TeamViewer credential dumpers built on Frida, KeeThief and KeeFarce. The source must be outside Program Files, Windows Defender, the SCCM client and any folder or file named after TeamViewer or KeePass. That last exclusion covers the vendors' own services, QuickSupport, installers and portable copies that start or restart the application. System32 and SysWOW64 binaries are left out as well. The exception is a script host or LOLBin (PowerShell, rundll32, regsvr32, mshta, wscript, cscript) that asks for the right to write the process memory. Even then, the full-access handle a parent gets on a child it starts is left out, as is the read-only handle that Get-Process opens to list modules. Benign causes are a launcher or remote-management agent outside Program Files that starts TeamViewer (it holds a full-access handle on its child), a security agent installed outside Program Files, and process tools run by an administrator. Process Explorer, Process Hacker and System Informer are excluded by name, and so is a handle whose source Sysmon could not name.
+severity: high
+source: events
+attack: [T1555, T1555.005]
+tags: [credential-access]
+entities: [computer, sourceImage, targetImage, grantedAccess]
+where:
+  eventId: 10
+  provider|contains: Sysmon
+  targetImage|endswith: ["\\teamviewer.exe", "\\keepass.exe", "\\keepassxc.exe"]
+  # a source Sysmon could not name (often the parent that just started the process) says nothing
+  sourceImage|exists: true
+  sourceImage|not_contains: ["teamviewer", "keepass", "\\program files\\", "\\program files (x86)\\", "\\windows defender\\", "\\windows\\ccm\\"]
+  sourceImage|not_endswith: ["\\explorer.exe", "\\procexp.exe", "\\procexp64.exe", "\\processhacker.exe", "\\systeminformer.exe"]
+  any_of:
+    # a program outside the Windows system folders: PROCESS_VM_READ (0x10) or PROCESS_VM_WRITE (0x20), i.e. the second hex digit from the right is not 0, 4, 8 or c
+    - sourceImage|not_contains: [":\\windows\\system32\\", ":\\windows\\syswow64\\"]
+      grantedAccess|re: '[1235679abdef][0-9a-f]$'
+    # a script host or LOLBin: PROCESS_VM_WRITE, and not the full-access handle it gets on a child it starts
+    - sourceImage|endswith: ["\\powershell.exe", "\\rundll32.exe", "\\regsvr32.exe", "\\mshta.exe", "\\wscript.exe", "\\cscript.exe"]
+      grantedAccess|re: '[2367abef][0-9a-f]$'
+      grantedAccess|nin: ["0x1fffff"]
+---
+id: win-kekeo-named-pipe
+title: Kekeo default named pipe created or opened
+description: A named pipe whose name starts with kekeo was created or connected to (Sysmon 17/18). \kekeo_tsssp_endpoint is the default pipe of the tsssp module of Kekeo, the Kerberos toolkit from the author of Mimikatz. The module runs a CredSSP (TSSSP) endpoint to obtain the credentials a client delegates to it. No legitimate software uses this name.
+severity: critical
+source: events
+attack: [T1558, T1003]
+tags: [credential-access, hacktool, named-pipe]
+entities: [computer, image, pipeName]
+where:
+  eventId|in: [17, 18]
+  provider|contains: Sysmon
+  pipeName|startswith: "\\kekeo"
+---
+id: win-psexec-renamed-service-pipe
+title: PsExec console pipes under a renamed service (PsExec -r)
+description: A named pipe was created or connected to (Sysmon 17/18) with the shape of PsExec's console redirection, \<service>-<host>-<pid>-stdin, -stdout or -stderr, and a service name other than PSEXESVC. PsExec -r, and tools that copy its protocol, run the remote service under another name so that rules keyed on PSEXESVC miss it. Attackers pick system-looking names such as svchost. The remote service binary on the target creates the pipe, and PsExec on the source connects to it. The benign cause is an administrator who renames the PsExec service on purpose, which should be known and rare.
+severity: high
+source: events
+attack: [T1569.002, T1021.002, T1036.004]
+tags: [lateral-movement, execution, named-pipe]
+entities: [computer, image, pipeName]
+where:
+  eventId|in: [17, 18]
+  provider|contains: Sysmon
+  pipeName|re: '^\\[^\\]+-[^\\]+-[0-9]+-std(in|out|err)$'
+  pipeName|not_startswith: "\\psexesvc-"
+group_by: [computer, image]
+window: 10m
+threshold: ">= 1"
+---
+id: win-timestomp-whole-second
+title: Creation time of an executable or script set to a whole second (timestomping)
+description: Sysmon 2 reports that a program changed the creation time of an executable, library, script or shortcut. The new time has no fraction of a second (.000) while the previous one had one. File system times carry sub-second precision, so a whole-second value was typed in by a timestomping tool or script to make a dropped file look old, such as PowerShell CreationTime, Metasploit timestomp or SetMACE. This often sits next to a persistence step such as the Startup folder. A stomp that copies the times of another file keeps their fraction and is not caught. Archivers, copy and sync tools that restore stored times (7-Zip, WinRAR, tar, robocopy, xcopy, OneDrive, Dropbox, Google Drive), Windows Installer and servicing are excluded. Files in Program Files and in the Temp folders, where installers unpack their payloads, are left out too. The remaining benign cause is an installer, archiver or sync client that restores whole-second times outside those folders. Allow-list it by image.
+severity: medium
+source: events
+attack: [T1070.006]
+tags: [defense-evasion, timestomp]
+entities: [computer, image, targetFilename, creationUtcTime, previousCreationUtcTime]
+where:
+  eventId: 2
+  provider|contains: Sysmon
+  creationUtcTime|endswith: ".000"
+  previousCreationUtcTime|exists: true
+  previousCreationUtcTime|not_endswith: ".000"
+  targetFilename|endswith: [.exe, .dll, .sys, .scr, .cpl, .ocx, .ps1, .psm1, .vbs, .vbe, .js, .jse, .wsf, .hta, .bat, .cmd, .jar, .lnk, .url]
+  targetFilename|not_contains: ["\\program files\\", "\\program files (x86)\\", "\\appdata\\local\\temp\\", "\\windows\\temp\\"]
+  image|not_endswith: ["\\7z.exe", "\\7zg.exe", "\\7zfm.exe", "\\winrar.exe", "\\rar.exe", "\\unrar.exe", "\\tar.exe", "\\robocopy.exe", "\\xcopy.exe", "\\onedrive.exe", "\\dropbox.exe", "\\googledrivefs.exe", "\\msiexec.exe", "\\tiworker.exe", "\\trustedinstaller.exe"]
+group_by: [computer, image]
+window: 10m
+threshold: ">= 1"
+distinct: targetFilename

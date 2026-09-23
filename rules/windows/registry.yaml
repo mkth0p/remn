@@ -1,0 +1,303 @@
+# Registry tampering seen through Sysmon 12/13 (and Security 4657 where it records the same write): SAM account records, PowerShell lockdown, shares and null sessions, COM, UAC-bypass and autostart keys.
+id: win-sam-builtin-admin-password-set
+title: Built-in Administrator password set (SAM registry, Sysmon 13)
+description: LSASS rewrote the password data (V) or the ForcePasswordReset value of RID 500, the built-in Administrator, in the SAM hive. That is what a password change or reset of that account leaves on a host that logs Sysmon registry events but not Security 4723/4724, including a reset with mimikatz lsadump::setntlm or changentlm, or net user Administrator. Attackers reset it to get a known local admin password that works on every host built from the same image. The log does not say who asked for the change. Windows LAPS or legacy LAPS rotating the password, and an administrator setting it by hand, write the same values; on a LAPS-managed host expect one finding per rotation. LSASS also writes the F value at every logon of the account, which is why F is not watched.
+severity: low
+source: events
+attack: [T1098]
+tags: [persistence, account, registry]
+entities: [computer, targetObject, image]
+where:
+  eventId: 13
+  provider|contains: Sysmon
+  image|endswith: "\\lsass.exe"
+  targetObject|contains: "\\SAM\\Domains\\Account\\Users\\000001F4\\"
+  targetObject|endswith: ["\\ForcePasswordReset", "\\V"]
+group_by: [computer]
+window: 10m
+threshold: ">= 1"
+---
+id: win-sam-written-outside-lsass
+title: SAM account database written by a process other than LSASS (RID hijacking)
+description: A process other than lsass.exe set, renamed or deleted a key or value under SAM\SAM\Domains in the registry. The SAM service inside LSASS is the only normal writer of these keys. RID hijacking overwrites a user's F value so that an account such as Guest logs on with the Administrator RID, and hidden-account tools copy F and V values or write Users\Names keys directly; both need SYSTEM and show up here with the attacker's process as the writer. Sysmon 12 CreateKey is not used, because Sysmon also logs it when a program running as SYSTEM (an inventory or vulnerability-scan agent) only opens an existing SAM key to read it; the value written right after a real key creation is still reported. Benign causes are rare on a running system (offline password-reset tools and imaging do their work while Windows is not running); an OS upgrade or migration tool is the one to rule out.
+severity: critical
+source: events
+attack: [T1098, T1078.001, T1136.001]
+tags: [persistence, account, privilege-escalation, registry]
+entities: [computer, image, targetObject, processName, objectName]
+where:
+  any_of:
+    - eventId|in: [13, 14]
+      provider|contains: Sysmon
+      targetObject|contains: "\\SAM\\SAM\\Domains\\"
+      image|not_endswith: "\\lsass.exe"
+      image|nin: [System, Registry]
+    - eventId: 12
+      provider|contains: Sysmon
+      eventType|in: [DeleteKey, DeleteValue]
+      targetObject|contains: "\\SAM\\SAM\\Domains\\"
+      image|not_endswith: "\\lsass.exe"
+      image|nin: [System, Registry]
+    - { eventId: 4657, objectName|contains: "\\SAM\\SAM\\Domains\\", processName|not_endswith: "\\lsass.exe" }
+---
+id: win-sam-local-account-created
+title: Local account created (SAM registry, Sysmon 12/13)
+description: LSASS created a new name under SAM\SAM\Domains\Account\Users\Names, the Sysmon view of Security 4720 for hosts that log Sysmon registry events but not account management. A local account created by hand on a workstation or server is a common backdoor, and the finding becomes high when the local Administrators group changes on the same host within the hour. Known benign causes are an administrator or deployment tool creating a service or support account and Windows LAPS creating its managed account; the setup accounts Windows creates and deletes during feature updates (defaultuser0, defaultuser100000...) and WDAGUtilityAccount are excluded, and names ending in $ are left to the hidden-account rule of the Sigma pack.
+severity: medium
+source: events
+attack: [T1136.001]
+tags: [persistence, account, registry]
+entities: [computer, image]
+where:
+  provider|contains: Sysmon
+  image|endswith: "\\lsass.exe"
+  targetObject|contains: "\\SAM\\Domains\\Account\\Users\\Names\\"
+  any_of:
+    - { eventId: 12, eventType: CreateKey }
+    - { eventId: 13, targetObject|endswith: "\\(Default)" }
+  targetObject|not_endswith: ["$", "$\\(Default)"]
+  targetObject|not_contains: ["\\Names\\defaultuser", "\\Names\\WDAGUtilityAccount"]
+group_by: [computer]
+window: 1h
+distinct: targetObject
+threshold: ">= 1"
+then:
+  where: { eventId: 13, provider|contains: Sysmon, image|endswith: "\\lsass.exe", targetObject|contains: "\\SAM\\Domains\\Builtin\\Aliases\\00000220\\" }
+  join: [computer]
+  within: 1h
+  severity: high
+  title: local Administrators group changed within the hour
+---
+id: win-sam-privileged-group-changed
+title: Membership of a privileged local group changed (SAM registry, Sysmon 13)
+description: LSASS rewrote the member list (C value) of a privileged built-in group in the SAM hive, the Sysmon view of Security 4732/4733 - Administrators (alias 0x220), Backup Operators (0x227), Remote Desktop Users (0x22B) or Remote Management Users (0x244). Adding an account to local Administrators is the usual way to keep admin rights on a host. The registry write does not say whether a member was added or removed, which is why the severity is medium. Known benign causes are joining the domain (Domain Admins is added once), an administrator or a management tool (Intune, Group Policy restricted groups, LAPS account management) changing the membership, and a change of the group's description.
+severity: medium
+source: events
+attack: [T1098]
+tags: [persistence, account, privilege, registry]
+entities: [computer, targetObject, image]
+where:
+  eventId: 13
+  provider|contains: Sysmon
+  image|endswith: "\\lsass.exe"
+  targetObject|contains: ["\\SAM\\Domains\\Builtin\\Aliases\\00000220\\", "\\SAM\\Domains\\Builtin\\Aliases\\00000227\\", "\\SAM\\Domains\\Builtin\\Aliases\\0000022B\\", "\\SAM\\Domains\\Builtin\\Aliases\\00000244\\"]
+  targetObject|endswith: "\\C"
+group_by: [computer, targetObject]
+window: 1h
+threshold: ">= 1"
+---
+id: win-powershell-clm-lockdown-removed
+title: PowerShell Constrained Language lockdown removed (__PSLockdownPolicy)
+description: The system environment variable __PSLockdownPolicy was deleted or set to a value other than 4. With the value 4 every PowerShell session on the host runs in Constrained Language Mode, which blocks the .NET, COM and Add-Type calls most offensive PowerShell needs; removing it gives the attacker full language mode back for every new session. Setting it to 4 (turning the lockdown on) is not reported. Known benign causes are an administrator removing the variable while troubleshooting or after moving enforcement to AppLocker or WDAC, and a Group Policy Preferences environment item being withdrawn (then the writer is svchost.exe).
+severity: high
+source: events
+attack: [T1562.001, T1112]
+tags: [defense-evasion, powershell, registry]
+entities: [computer, image, targetObject, details, processName]
+where:
+  any_of:
+    - { eventId|in: [12, 13], provider|contains: Sysmon, targetObject|endswith: "\\Session Manager\\Environment\\__PSLockdownPolicy" }
+    - { eventId: 4657, objectName|endswith: "\\Session Manager\\Environment", data.ObjectValueName: __PSLockdownPolicy }
+  not:
+    any_of:
+      - details|in: ["4", "DWORD (0x00000004)"]
+      - data.NewValue: "4"
+---
+id: win-powershell-execution-policy-relaxed
+title: PowerShell execution policy set to Bypass or Unrestricted by a Windows binary (registry)
+description: PowerShell itself (Set-ExecutionPolicy), reg.exe or another binary under System32 or SysWOW64 wrote Bypass or Unrestricted as the execution policy of the machine or of the user, so unsigned scripts run without a prompt from then on. The Sigma rule "Potential PowerShell Execution Policy Tampering" of the community pack reports the same change and deliberately ignores these writers, so this rule only reports them, at low severity; the Sigma rule does not read Security 4657, so there every writer but svchost.exe is reported. The execution policy is not a security boundary, but a persistent machine-wide relaxation is a common step before running a toolkit. Known benign causes are administrators and developers running Set-ExecutionPolicy Unrestricted, and software installers that relax it; Group Policy writes (svchost.exe) are excluded.
+severity: low
+source: events
+attack: [T1059.001, T1112]
+tags: [defense-evasion, powershell, registry]
+entities: [computer, image, targetObject, details, processName]
+where:
+  any_of:
+    - eventId: 13
+      provider|contains: Sysmon
+      targetObject|endswith: ["\\ShellIds\\Microsoft.PowerShell\\ExecutionPolicy", "\\Policies\\Microsoft\\Windows\\PowerShell\\ExecutionPolicy"]
+      details|in: [Bypass, Unrestricted]
+      image|contains: [":\\Windows\\System32\\", ":\\Windows\\SysWOW64\\"]
+      image|not_endswith: "\\svchost.exe"
+    - eventId: 4657
+      objectName|endswith: ["\\ShellIds\\Microsoft.PowerShell", "\\Policies\\Microsoft\\Windows\\PowerShell"]
+      data.ObjectValueName: ExecutionPolicy
+      data.NewValue|in: [Bypass, Unrestricted]
+      processName|not_endswith: "\\svchost.exe"
+---
+id: win-network-share-created
+title: New network share created (LanmanServer registry, Sysmon 13 / 4657)
+description: A share was added to or changed in the Server service, seen as a value written under Services\LanmanServer\Shares, which is what net share, New-SmbShare or the Computer Management console leave behind. Attackers create a share on a workstation to stage tools or collected data for lateral movement and exfiltration. This is the registry view for hosts that log Sysmon but not Security 5142; a share on a drive root or the Windows folder seen in 5142 has its own rule. Known benign causes are file servers, where shares are created routinely, administrators sharing a folder, printer sharing (print$), and software that publishes shares (SCCM distribution points, backup agents, older Docker Desktop drive sharing). Share permission values under Shares\Security are not reported, and the writes of one host within an hour make one finding, so a file-server migration or cluster failover that rewrites every share does not flood the case.
+severity: medium
+source: events
+attack: [T1021.002, T1074.002]
+tags: [lateral-movement, share, registry]
+entities: [computer, targetObject, details, image, objectName]
+where:
+  any_of:
+    - { eventId: 13, provider|contains: Sysmon, targetObject|contains: "\\Services\\LanmanServer\\Shares\\", targetObject|not_contains: "\\Shares\\Security\\" }
+    - { eventId: 4657, objectName|endswith: "\\Services\\LanmanServer\\Shares" }
+group_by: [computer]
+window: 1h
+threshold: ">= 1"
+---
+id: win-null-session-pipes-changed
+title: Named pipes or shares opened to anonymous (null session) access
+description: The Server service's NullSessionPipes or NullSessionShares list was changed, or RestrictNullSessAccess was set to 0, by a process other than the Group Policy and security-template engines (svchost.exe, services.exe, lsass.exe). A pipe or share on those lists can be opened over SMB without credentials; Turla and similar implants add their own pipe there to keep an unauthenticated backdoor for lateral movement. Sysmon shows the list as Binary Data, so the pipe added is not visible. Known benign causes are hardening scripts and baseline tools applied outside Group Policy (secedit, LGPO, DSC) that clear the lists, promoting a domain controller, and legacy applications that still need an anonymous pipe; changes pushed by Group Policy security settings are excluded.
+severity: high
+source: events
+attack: [T1021.002, T1112]
+tags: [lateral-movement, defense-evasion, registry]
+entities: [computer, image, targetObject, details, processName]
+where:
+  any_of:
+    - eventId: 13
+      provider|contains: Sysmon
+      any_of:
+        - targetObject|endswith: ["\\LanmanServer\\Parameters\\NullSessionPipes", "\\LanmanServer\\Parameters\\NullSessionShares"]
+        - { targetObject|endswith: "\\LanmanServer\\Parameters\\RestrictNullSessAccess", details: "DWORD (0x00000000)" }
+      image|not_endswith: ["\\svchost.exe", "\\services.exe", "\\lsass.exe"]
+    - eventId: 4657
+      objectName|endswith: "\\LanmanServer\\Parameters"
+      any_of:
+        - data.ObjectValueName|in: [NullSessionPipes, NullSessionShares]
+        - { data.ObjectValueName: RestrictNullSessAccess, data.NewValue: "0" }
+      processName|not_endswith: ["\\svchost.exe", "\\services.exe", "\\lsass.exe"]
+---
+id: win-com-server-suspicious-path
+title: COM server registered from a staging folder (COM hijacking)
+description: The InprocServer32 or LocalServer32 of a CLSID was set to a file in a folder where programs are not installed - directly in C:\ProgramData or in the root of AppData, under the Desktop, Downloads, Documents or Pictures folder of a user profile (OneDrive-redirected ones included), or under Users\Public, Temp, PerfLogs or the Recycle Bin. Registering such a path, most often in the user's own Classes hive where no admin right is needed, makes every program that creates that COM object (Explorer, a browser, Office) load the attacker's DLL - persistence by COM hijacking. The finding becomes critical when a process then loads that same DLL (Sysmon 7). Per-user installers register COM servers in their own AppData subfolders (OneDrive, Teams, Google Update), which is why those paths are not reported. Known benign causes are developers registering COM builds from a project under Documents, and installers registering a helper from Temp for the duration of the setup.
+severity: high
+source: events
+attack: [T1546.015]
+tags: [persistence, com, registry]
+entities: [computer, image, targetObject, details]
+where:
+  eventId: 13
+  provider|contains: Sysmon
+  targetObject|contains: "\\CLSID\\"
+  targetObject|contains_any: ["\\InprocServer32\\", "\\LocalServer32\\"]
+  any_of:
+    - details|re: "^\"?[a-z]:\\\\programdata\\\\[^\\\\]+$"
+    - details|re: "^\"?[a-z]:\\\\users\\\\[^\\\\]+\\\\appdata\\\\(local|roaming)\\\\[^\\\\]+$"
+    - details|re: "\\\\users\\\\[^\\\\]+\\\\(onedrive[^\\\\]*\\\\)?(desktop|downloads|documents|pictures)\\\\"
+    - details|contains: ["\\Users\\Public\\", "\\AppData\\Local\\Temp\\", "\\Windows\\Temp\\", "\\PerfLogs\\", "\\$Recycle.Bin\\", "%temp%", "%tmp%"]
+exclude:
+  details|contains: "\\ISBEW64.exe"
+group_by: [computer, targetObject, details]
+threshold: ">= 1"
+then:
+  where: { eventId: 7, provider|contains: Sysmon }
+  join: [computer, "details=imageLoaded"]
+  within: 24h
+  severity: critical
+  title: and a process loaded that DLL
+---
+id: win-ieak-pending-gpo-persistence
+title: IEAK PendingGPOs entry registered (logon persistence through an INF)
+description: A PathN value was written under Software\Microsoft\IEAK\GroupPolicy\PendingGPOs, which makes Windows install the named INF file (its DefaultInstall section by default) at the user's next logon. The INF can run any command, so the key is a little-known autostart location that no Run-key rule watches. The Internet Explorer Administration Kit that used this key for branding packages is retired with Internet Explorer, so a write here on a current Windows is almost always persistence; a legacy IEAK deployment on an old estate is the only known benign cause.
+severity: high
+source: events
+attack: [T1547]
+tags: [persistence, registry]
+entities: [computer, image, targetObject, details, processName]
+where:
+  any_of:
+    - { eventId: 13, provider|contains: Sysmon, targetObject|re: "\\\\Software\\\\Microsoft\\\\IEAK\\\\GroupPolicy\\\\PendingGPOs\\\\Path[0-9]+$" }
+    - { eventId: 4657, objectName|endswith: "\\Software\\Microsoft\\IEAK\\GroupPolicy\\PendingGPOs", data.ObjectValueName|startswith: Path }
+---
+id: win-update-orchestrator-rogue-command
+title: Update Orchestrator scheduled work set to run a shell (CVE-2020-1313)
+description: A command line registered for the Windows Update Orchestrator scheduler (WindowsUpdate\Orchestrator\UScheduler or UScheduler_Oobe) names a shell, a script host or a LOLBin, or its start or pause arguments carry cmd syntax (/c, /k), whoami or a file in a user download or temp folder. The Orchestrator service runs these entries as SYSTEM; CVE-2020-1313 let any user register one through the service's COM interface, which is why the writer is the service (svchost.exe) and not the attacker. Legitimate entries are written by Windows, Office, Edge and Teams setup and point to their own updaters under Program Files or Windows; URLs and switches such as -command are not watched in the arguments because updaters pass them too. No benign cause is known for a shell here.
+severity: high
+source: events
+attack: [T1068, T1053]
+tags: [privilege-escalation, registry]
+entities: [computer, image, targetObject, details]
+where:
+  eventId: 13
+  provider|contains: Sysmon
+  targetObject|contains: "\\Orchestrator\\UScheduler"
+  any_of:
+    - targetObject|endswith: ["\\cmdLine", "\\CMD"]
+      details|contains: ["cmd.exe", "powershell", "pwsh", "mshta", "wscript", "cscript", "rundll32", "regsvr32", "certutil", "bitsadmin", "\\Users\\Public\\", "\\AppData\\Local\\Temp\\", "\\Windows\\Temp\\", "\\Downloads\\"]
+    - targetObject|endswith: ["\\startArg", "\\pauseArg"]
+      details|contains: ["/c ", "/k ", "whoami", "\\Users\\Public\\", "\\AppData\\Local\\Temp\\", "\\Windows\\Temp\\", "\\Downloads\\"]
+group_by: [computer]
+window: 10m
+threshold: ">= 1"
+---
+id: win-uac-bypass-user-open-command
+title: Per-user shell open command set to a shell (UAC bypass, e.g. changepk / Launcher.SystemSettings)
+description: A shell\open\command handler in the user's own Classes hive was set to cmd, PowerShell, a script host or rundll32/regsvr32, or any handler was registered for Launcher.SystemSettings. Auto-elevating Windows binaries (changepk.exe and slui.exe for Launcher.SystemSettings in UACME method 61, and others) look their handlers up in the user's Classes first, so a non-admin user makes them start the command at High integrity without a UAC prompt. The handlers already covered by the Sigma pack's UAC-bypass rules (ms-settings, exefile, mscfile, Folder and the two AppX ids) are excluded here so the same write is not reported twice. Known benign causes are rare. "Open with" choices land under Classes\Applications, which is excluded, and a user or tool associating a file type with a script host in their own profile is the one to rule out.
+severity: high
+source: events
+attack: [T1548.002, T1112]
+tags: [privilege-escalation, defense-evasion, registry]
+entities: [computer, image, targetObject, details]
+where:
+  eventId: 13
+  provider|contains: Sysmon
+  targetObject|re: "^(HKU\\\\[^\\\\]+_Classes|HKU\\\\[^\\\\]+\\\\Software\\\\Classes|HKCU\\\\Software\\\\Classes)\\\\"
+  targetObject|contains: "\\shell\\open\\command"
+  any_of:
+    - targetObject|contains: "\\Launcher.SystemSettings\\"
+    - details|contains: ["cmd.exe", "cmd /c", "powershell", "pwsh", "mshta", "wscript", "cscript", "rundll32", "regsvr32"]
+  targetObject|not_contains: ["\\Applications\\", "\\ms-settings\\", "\\exefile\\", "\\mscfile\\", "\\Folder\\shell\\", "\\AppX82a6gwre4fdg3bt635tn5ctqjf8msdd2\\", "\\AppXypsaf9f1qserqevf0sws76dx4k9a5206\\"]
+---
+id: win-registry-symbolic-link-created
+title: Registry symbolic link created by a user program (registry link exploit)
+description: A SymbolicLinkValue was written, which turns a registry key into a link to another key, by a program outside the Windows and Program Files folders, in one of the user-writable Windows folders (Temp, Tasks, Tracing) or by PowerShell. Registry links are an exploit primitive (CVE-2020-1377 and other symbolic-link elevation bugs), since a privileged service that writes to the linked key really writes to the target, for example a service configuration under HKLM\SYSTEM. Windows itself creates links at boot and logon (CurrentControlSet, the user's Classes key) from the kernel and its own services, which are not reported. Known benign causes are software that virtualises the registry and security research tools.
+severity: high
+source: events
+attack: [T1068, T1112]
+tags: [privilege-escalation, registry]
+entities: [computer, image, targetObject, details]
+where:
+  eventId: 13
+  provider|contains: Sysmon
+  targetObject|endswith: "\\SymbolicLinkValue"
+  image|exists: true
+  any_of:
+    - image|not_re: "^[a-z]:\\\\(windows|program files|program files \\(x86\\))\\\\"
+    - image|contains: ["\\Windows\\Temp\\", "\\Windows\\Tasks\\", "\\Windows\\Tracing\\"]
+    - image|endswith: ["\\powershell.exe", "\\pwsh.exe", "\\powershell_ise.exe"]
+  image|nin: [System, Registry]
+---
+id: win-user-systemroot-redirected
+title: SystemRoot or windir redefined for a user (UAC bypass by environment)
+description: SYSTEMROOT or windir was written in the user's Volatile Environment key, or SYSTEMROOT in the user's Environment key, to something other than the Windows folder. Auto-elevating binaries started from the user's session (perfmon.exe starting mmc.exe in WinPwnage, scheduled tasks such as SilentCleanup) expand %SystemRoot% or %windir% from that environment, so they start the attacker's copy of a system program at High integrity. Windows never defines these two variables per user, so there is no known benign cause. windir in the persistent Environment key is left to the Sigma pack's SilentCleanup rule.
+severity: high
+source: events
+attack: [T1548.002, T1574.007]
+tags: [privilege-escalation, defense-evasion, registry]
+entities: [computer, image, targetObject, details, processName, objectName]
+where:
+  any_of:
+    - eventId: 13
+      provider|contains: Sysmon
+      targetObject|startswith: ["HKU\\", "HKCU\\"]
+      targetObject|endswith: ["\\Volatile Environment\\SYSTEMROOT", "\\Volatile Environment\\windir", "\\Environment\\SYSTEMROOT"]
+      details|nin: ["%SystemRoot%", "C:\\Windows"]
+    - eventId: 4657
+      objectName|startswith: "\\REGISTRY\\USER\\"
+      objectName|endswith: ["\\Volatile Environment", "\\Environment"]
+      data.ObjectValueName|in: [SystemRoot, windir]
+      data.NewValue|nin: ["%SystemRoot%", "C:\\Windows"]
+---
+id: win-directinput-from-user-folder
+title: Program in a download or temp folder registered as a DirectInput client (keylogger)
+description: A program running from Desktop, Downloads, Documents, a Temp folder or Users\Public registered itself under Software\Microsoft\DirectInput\MostRecentApplication, which Windows does when a program opens a DirectInput device. DirectInput keyloggers read the keyboard this way instead of through the hooks that endpoint products watch. Games and emulators write the same key, so the rule ignores installed programs and only looks at executables started from folders users download to; a portable game or controller tool run from the Desktop or Downloads is the known benign cause, which is why the severity is low. The program name is in the Name value on the finding.
+severity: low
+source: events
+attack: [T1056.001]
+tags: [collection, credential-access, registry]
+entities: [computer, image, details]
+where:
+  eventId: 13
+  provider|contains: Sysmon
+  targetObject|contains: "\\Software\\Microsoft\\DirectInput\\MostRecentApplication\\"
+  targetObject|endswith: "\\Name"
+  image|contains: ["\\Desktop\\", "\\Downloads\\", "\\Documents\\", "\\AppData\\Local\\Temp\\", "\\Windows\\Temp\\", "\\Users\\Public\\"]
+group_by: [computer, image]
+threshold: ">= 1"

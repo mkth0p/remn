@@ -1,6 +1,6 @@
 id: win-service-installed-suspicious
 title: Suspicious service installed (7045 / 4697)
-description: New service whose binary path points to a temp/user folder, a script host, cmd/powershell, a UNC path or a well-known remote-execution service (PsExec, PAExec, WinRM...).
+description: New service whose binary path points to a temp folder, a user profile (a service runs as SYSTEM from a folder any user can write), a script host, cmd/powershell, a UNC path or a well-known remote-execution service (PsExec, PAExec, WinRM...).
 severity: high
 source: events
 attack: [T1543.003, T1569.002]
@@ -9,7 +9,7 @@ entities: [computer, serviceName, serviceFile]
 where:
   eventId|in: [7045, 4697]
   any_of:
-    - serviceFile|contains: ["\\temp\\", "\\tmp\\", "\\appdata\\", "\\users\\public\\", "\\programdata\\", "\\downloads\\", "\\perflogs\\", "\\recycle", "\\windows\\tasks\\", "\\windows\\debug\\"]
+    - serviceFile|contains: ["\\temp\\", "\\tmp\\", "\\appdata\\", "\\users\\", "\\programdata\\", "\\downloads\\", "\\perflogs\\", "\\recycle", "\\windows\\tasks\\", "\\windows\\debug\\"]
     - serviceFile|contains: [cmd.exe, cmd /c, powershell, pwsh, mshta, rundll32, regsvr32, wscript, cscript, certutil, bitsadmin, msiexec /q, "%comspec%", "\\\\", "-enc", "-e ", "iex", "downloadstring", "base64", "ADMIN$", "C$"]
     - serviceName|contains: [PSEXESVC, PAExec, csexecsvc, winexesvc, RemComSvc, BTOBTO, smbexec, mssecsvc, wmiexec, atexec, sysmon64bak, "\\\\"]
     - serviceFile|re: "(?i)^[a-z]:\\\\[a-z0-9]{6,}\\.exe$"
@@ -182,7 +182,7 @@ where:
 ---
 id: win-service-registry-suspicious
 title: Service binary set to a suspicious command in the registry (Sysmon 13 / 4657)
-description: A service's ImagePath or ServiceDll written to point at a user-writable folder, a shell or script host, a named pipe (Meterpreter getsystem), or an executable dropped straight into the Windows folder (PsExec and its renamed copies). The registry view of win-service-installed-suspicious, for hosts that log Sysmon but not the System channel. Any write under a Services key used to count as Run-key persistence, which included the Background Activity Moderator updating its own state.
+description: A service's ImagePath or ServiceDll written to point at a user profile or another user-writable folder, a shell or script host, a named pipe (Meterpreter getsystem), or an executable dropped straight into the Windows folder (PsExec and its renamed copies). The registry view of win-service-installed-suspicious, for hosts that log Sysmon but not the System channel. Any write under a Services key used to count as Run-key persistence, which included the Background Activity Moderator updating its own state.
 severity: high
 source: events
 attack: [T1543.003, T1569.002]
@@ -193,9 +193,9 @@ where:
     - { eventId: 13, provider|contains: Sysmon, targetObject|contains: "\\Services\\", targetObject|endswith: ["\\ImagePath", "\\ServiceDll", "\\FailureCommand"] }
     - { eventId: 4657, objectName|contains: "\\Services\\", data.ObjectValueName|in: [ImagePath, ServiceDll, FailureCommand] }
   any_of_2:
-    - details|contains: ["\\temp\\", "\\tmp\\", "\\appdata\\", "\\users\\public\\", "\\programdata\\", "\\downloads\\", "\\perflogs\\", "\\windows\\tasks\\", "cmd.exe", "cmd /c", "%comspec%", "powershell", "pwsh", "mshta", "rundll32", "regsvr32", "wscript", "cscript", "\\\\.\\pipe\\", "PSEXESVC", "PAExec"]
+    - details|contains: ["\\temp\\", "\\tmp\\", "\\appdata\\", "\\users\\", "\\programdata\\", "\\downloads\\", "\\perflogs\\", "\\windows\\tasks\\", "cmd.exe", "cmd /c", "%comspec%", "powershell", "pwsh", "mshta", "rundll32", "regsvr32", "wscript", "cscript", "\\\\.\\pipe\\", "PSEXESVC", "PAExec"]
     - details|re: "(?i)^\"?(c:\\\\windows|%systemroot%|\\\\systemroot)\\\\[^\\\\]+\\.exe"
-    - data.NewValue|contains: ["\\temp\\", "\\appdata\\", "\\users\\public\\", "\\programdata\\", "cmd.exe", "%comspec%", "powershell", "rundll32", "\\\\.\\pipe\\", "PSEXESVC"]
+    - data.NewValue|contains: ["\\temp\\", "\\appdata\\", "\\users\\", "\\programdata\\", "cmd.exe", "%comspec%", "powershell", "rundll32", "\\\\.\\pipe\\", "PSEXESVC"]
 ---
 id: win-spooler-driver-dll
 title: Print spooler loads or is pointed at a DLL from its driver folder (SpoolFool, CVE-2020-1030, PrintNightmare)
