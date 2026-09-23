@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useStore } from '../state/store'
 import type { Case } from '../db/schema'
 
@@ -11,6 +11,7 @@ describe('requestIngest', () => {
   beforeEach(() => {
     useStore.setState({ pendingIngest: null, dataNotice: 'unknown', toasts: [] } as never)
   })
+  afterEach(() => vi.unstubAllGlobals())
 
   it('refuses a file over the public server limit before hashing it', async () => {
     const { requestIngest } = await import('./ingest')
@@ -25,5 +26,17 @@ describe('requestIngest', () => {
     useStore.setState({ health: { mode: 'browser-only', limits: { maxUploadMb: 512 } }, dataNotice: 'required' } as never)
     requestIngest([file('a.evtx', 1)], kase)
     expect(useStore.getState().pendingIngest?.reason).toBe('notice')
+  })
+
+  it('asks first while the server has not answered, unless the page is on this machine', async () => {
+    const { requestIngest } = await import('./ingest')
+    useStore.setState({ health: null } as never)
+    vi.stubGlobal('location', { hostname: 'remn.tech' })
+    requestIngest([file('a.evtx', 1)], kase)
+    expect(useStore.getState().pendingIngest?.reason).toBe('notice')
+    useStore.setState({ pendingIngest: null } as never)
+    vi.stubGlobal('location', { hostname: '127.0.0.1' })
+    requestIngest([file('a.evtx', 1)], kase)
+    expect(useStore.getState().pendingIngest?.reason).not.toBe('notice')
   })
 })

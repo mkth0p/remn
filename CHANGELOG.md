@@ -31,6 +31,8 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   parser, and an update validates the new proxy before it replaces the running one.
 - Browser-store searches, counts, timelines and pivots run in query workers and stop when
   their answer is no longer wanted, so a large case no longer freezes the page.
+- A file dropped before the server has answered no longer goes out without the notice: a page
+  on another host asks first until it knows what an upload there means.
 - A report and a case that hold: times in UTC, a verdict over the whole case, confidence that
   falls when a file was not read in full or the rules are behind, a valid STIX export, AI
   triage that proposes rather than decides, bundles that carry their rules, and search that

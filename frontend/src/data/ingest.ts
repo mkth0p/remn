@@ -9,6 +9,7 @@ import { waitForJob } from './jobs'
 import { getSource } from './source'
 import { duplicateEvidence } from './duplicateEvidence'
 import { whileImporting } from './interruptedImports'
+import { deployment } from './deployment'
 
 let jobSeq = 1
 
@@ -61,7 +62,11 @@ export function requestIngest(files: File[], kase: Case, kindOverride?: 'evtx' |
     files = files.filter((f) => !over.includes(f))
   }
   if (!files.length) return
-  if (!noticeRead && useStore.getState().dataNotice === 'required') {
+  // Before the server has answered, a page served from another host cannot tell what an upload
+  // there means, so it asks first: a file dropped in the first moment, or while health failed,
+  // used to go out without the notice.
+  const notice = useStore.getState().dataNotice
+  if (!noticeRead && (notice === 'required' || (notice === 'unknown' && deployment(health).tier !== 'this-machine'))) {
     useStore.getState().setPendingIngest({ files, kindOverride, reason: 'notice' })
     return
   }
