@@ -3,7 +3,8 @@ import type { Case, Finding } from '../db/schema'
 import type { Chain } from './chains'
 import { buildIncidents } from '../rules/incidents'
 import { DEFAULT_REPORT } from './review'
-import { bottomLine, buildReportHtml, computeVerdict, foldSteps, groupByRule, MAX_STEP_ROWS, threatProfile, type ReportData } from './reportHtml'
+import { bottomLine, buildReportHtml, computeConfidence, computeVerdict, foldSteps, groupByRule, MAX_MOMENTS, MAX_STEP_ROWS, moments, threatProfile, type ReportData } from './reportHtml'
+import { setLocalTime } from '../util/format'
 import type { ChainStep } from './chains'
 
 let seq = 1
@@ -307,5 +308,55 @@ describe('report html', () => {
     expect(html).not.toContain('<h2>Evidence and chain of custody</h2>')
     expect(html).not.toContain('<h2>Indicators of compromise</h2>')
     expect(html).toContain('<b>3</b> items without a decision')
+  })
+})
+
+describe('what the report claims about the case', () => {
+  it('keeps a confirmed item in the verdict when the print settings leave it out', () => {
+    const reviewedOnly = data({ reviews: { [chain.id]: { verdict: 'unsure' } } })
+    expect(computeVerdict(reviewedOnly).kind).toBe('unconfirmed')
+    const hidden = f({ ruleId: 'local-admin-added', severity: 'low', refs: [21], status: 'escalated' })
+    const v = computeVerdict({ ...reviewedOnly, unprintedConfirmed: [{ severity: 'low', findings: [hidden] }] })
+    expect(v.confirmed).toBe(1)
+    expect(v.kind).not.toBe('unconfirmed')
+    expect(v.detail).toContain('not printed')
+  })
+
+  it('does not call an analysis complete when a file was not read in full or the rules are behind', () => {
+    expect(computeConfidence(data({ iocsChecked: 1, rules: { lastRun: 1, evidenceAfter: 0, errors: 0 } })).level).toBe('high')
+    const stopped = data({
+      iocsChecked: 1,
+      evidence: [{ id: 1, caseId: 1, name: 'dc.evtx', size: 1, kind: 'evtx', status: 'error', error: 'parse stopped at the limit', integrity: 'verified', addedAt: 0, count: 10 } as never],
+    })
+    const c = computeConfidence(stopped)
+    expect(c.level).not.toBe('high')
+    expect(c.reasons.join(' ')).toContain('not read completely')
+    expect(buildReportHtml(stopped)).toContain('incomplete: parse stopped')
+    expect(computeConfidence(data({ iocsChecked: 1, rules: { lastRun: null, evidenceAfter: 0, errors: 0 } })).reasons).toContain('the rules have not run on this case')
+  })
+
+  it('says indicators were checked only when a lookup ran', () => {
+    const on = data({ kase: { ...kase, settings: { ...kase.settings, networkAllowed: true } } })
+    expect(buildReportHtml(on)).toContain('No indicator was checked against a reputation service')
+    expect(buildReportHtml({ ...on, iocsChecked: 3, iocsTotal: 10 })).toContain('3 of 10 indicators were checked')
+  })
+
+  it('says how many moments it leaves out of What happened, and counts them all', () => {
+    const many = Array.from({ length: MAX_MOMENTS + 6 }, (_, i) => f({ ruleId: `r${i}`, severity: 'high', refs: [100 + i], status: 'escalated', ts: i * 60_000 }))
+    const incs = buildIncidents(many, {})
+    const d = data({ chains: [], reviews: {}, incidents: incs, findings: many })
+    const m = moments(d)
+    expect(m.items).toHaveLength(MAX_MOMENTS)
+    expect(m.total).toBe(incs.length)
+    expect(buildReportHtml(d)).toContain(`The first ${MAX_MOMENTS} of ${incs.length} are listed`)
+  })
+
+  it('prints UTC whatever the display setting', () => {
+    setLocalTime(true)
+    try {
+      expect(buildReportHtml(data())).toContain('1970-01-01 00:01:00Z')
+    } finally {
+      setLocalTime(false)
+    }
   })
 })

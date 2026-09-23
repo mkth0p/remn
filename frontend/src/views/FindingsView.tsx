@@ -1070,6 +1070,7 @@ export function FindingsView() {
                     <div className="section">
                       <h3>Notes</h3>
                       <textarea
+                        key={selected.id}
                         className="textarea"
                         placeholder="analyst notes…"
                         defaultValue={selected.notes ?? ''}

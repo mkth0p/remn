@@ -179,7 +179,14 @@ that runs no script but keeps the app's origin, which the browser requires befor
 page may call print on it.
 
 The printed report (`frontend/src/data/reportHtml.ts`) is one self-contained HTML file in
-REMN's own look, laid out for A4 and print-to-PDF. The cover carries the wordmark (the
+REMN's own look, laid out for A4 and print-to-PDF. Every time in it is UTC, whatever the
+display setting. Its verdict is about the case, not about what prints: a confirmed item
+below the severity floor or left out still counts, and the cover says how many are not
+printed. Its confidence is never "high" while a file was not read completely (a parse
+error, a limit, a skipped archive member, listed in the evidence table's "read" column),
+while the rules have not run or evidence arrived after the last run, and it says
+indicators were checked only when a lookup actually ran on them. "What happened" says
+when it lists only the first of more items. The cover carries the wordmark (the
 Gulax face embedded as base64 from the app's own files), an accent rule, the case name,
 five key numbers, a severity bar, the decision counts and a numbered table of contents.
 Then come numbered sections: the executive summary, the evidence with its hashes, the

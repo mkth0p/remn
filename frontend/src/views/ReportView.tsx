@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { getSource } from '../data/source'
 import { chainCoverageWarnings, loadChains, type Chain } from '../data/chains'
 import { listNotes } from '../data/caseNotes'
-import { chainSeverity, effectiveSeverity, loadChainReviews, loadReportSettings, selectForReport, type ChainReview, type ReportSettings } from '../data/review'
+import { chainSeverity, effectiveSeverity, loadChainReviews, loadReportSettings, selectForReport, unprintedConfirmed, type ChainReview, type ReportSettings } from '../data/review'
 import { getDb, type CaseNote, type Evidence, type Finding, type Ioc } from '../db/schema'
 import { buildIncidents } from '../rules/incidents'
 import { toast, useStore } from '../state/store'
@@ -16,6 +16,7 @@ import { draftExecutiveSummary } from '../data/reportSummary'
 import { buildCampaignGraph } from '../data/chainGraph'
 import { IconAi, IconCheck, IconDownload } from '../components/Icons'
 import { reportRelationships, type RelationshipReview } from '../data/relationshipReviews'
+import { findingsStaleness } from '../data/findingsState'
 
 const ORDER = ['critical', 'high', 'medium', 'low', 'info']
 
@@ -36,6 +37,8 @@ export function ReportView() {
   const [relationships, setRelationships] = useState<RelationshipReview[]>([])
   const [settings, setSettings] = useState<ReportSettings | null>(null)
   const [iocs, setIocs] = useState<Ioc[]>([])
+  const [iocCounts, setIocCounts] = useState<{ total: number; checked: number }>({ total: 0, checked: 0 })
+  const [rulesState, setRulesState] = useState<{ lastRun: number | null; evidenceAfter: number; errors: number } | undefined>(undefined)
   const [notes, setNotes] = useState<CaseNote[]>([])
   const [summary, setSummary] = useState<string>('')
   /** who wrote the summary last: the model's draft is labelled in the report until the analyst edits it */
@@ -60,6 +63,13 @@ export function ReportView() {
       .listIocs({ onlyBad: true, limit: 500 })
       .then((r) => setIocs(r.rows))
       .catch(() => setIocs([]))
+    // what the report says about enrichment follows the lookups that ran, not the setting
+    Promise.all([getSource(kase).listIocs({ limit: 1 }), getSource(kase).listIocs({ unchecked: true, limit: 1 })])
+      .then(([all, unchecked]) => setIocCounts({ total: all.total, checked: Math.max(0, all.total - unchecked.total) }))
+      .catch(() => setIocCounts({ total: 0, checked: 0 }))
+    findingsStaleness(kase.id)
+      .then((s) => setRulesState({ lastRun: s.lastRun, evidenceAfter: s.evidenceAfter, errors: s.errors.length }))
+      .catch(() => setRulesState(undefined))
     db.kv.get(`report-summary-${kase.id}`).then((k) => setSummary((k?.value as string) ?? ''))
     db.kv.get(`report-summary-by-${kase.id}`).then((k) => setSummaryBy((k?.value as 'analyst' | 'ai' | undefined) ?? undefined))
     db.kv.get(`report-summary-at-${kase.id}`).then((k) => setSummaryAt((k?.value as number | undefined) ?? undefined))
@@ -151,6 +161,10 @@ export function ReportView() {
       tasks,
       notes: analystNotes,
       undecided,
+      unprintedConfirmed: unprintedConfirmed(findings, chains, reviews, selection),
+      rules: rulesState,
+      iocsTotal: iocCounts.total,
+      iocsChecked: iocCounts.checked,
       fontData,
     })
   /** The report in its own tab: the browser's own print-to-PDF, or to keep it open next to the case. */

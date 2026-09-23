@@ -1,6 +1,6 @@
 import { createSHA256 } from 'hash-wasm'
 import { API_HEADERS, readNdjsonBody } from '../api/client'
-import { CASE_KV_KEYS, deleteCase, getDb, newServerKey, type Case } from '../db/schema'
+import { CASE_KV_KEYS, CASE_KV_PREFIXES_WITH_SUFFIX, deleteCase, getDb, newServerKey, type Case } from '../db/schema'
 import { caseRows, importServerBatch, type TransferRow } from './caseTransfer'
 
 const TABLES = ['evidence', 'events', 'mails', 'mailBodies', 'attachments', 'urls', 'findings', 'iocs', 'facets', 'aiSessions', 'savedSearches', 'caseNotes', 'customRules', 'rowMarks']
@@ -22,11 +22,25 @@ export async function writeCaseBundle(kase: Case, sink: Sink, progress?: (messag
     progress?.(`Exporting ${table}…`)
     for await (const page of caseRows(table, kase.id!)) for (const row of page) await write({ table, row })
   }
+  // A custom rule is global in the browser that made it, so the case's own rows would carry none.
+  // The rules the case's findings came from travel with it and arrive as rules of the imported case:
+  // without them the next rule run on the other machine pruned those findings as orphans.
+  const db = getDb()
+  const ruleIds = new Set((await db.findings.where('caseId').equals(kase.id!).toArray()).map((f) => f.ruleId))
+  for (const rule of await db.customRules.filter((r) => r.caseId === null && ruleIds.has(r.ruleId)).toArray()) await write({ table: 'customRules', row: { ...rule, caseId: kase.id } })
+  await write({
+    table: 'kv',
+    row: {
+      key: `rule-context-${kase.id}`,
+      value: { disabledRules: (await db.kv.get('disabledRules'))?.value ?? [], packOverrides: (await db.kv.get('packOverrides'))?.value ?? {}, exportedAt: Date.now() },
+    },
+  })
   for (const key of CASE_KV_KEYS(kase.id!)) {
-    if (key.startsWith('relationship-cache-')) continue // Rebuildable graph IDs belong to this database only.
-    const row = await getDb().kv.get(key)
+    if (key.startsWith('relationship-cache-') || key.startsWith('rule-context-')) continue // Rebuildable graph IDs belong to this database only.
+    const row = await db.kv.get(key)
     if (row) await write({ table: 'kv', row })
   }
+  for (const prefix of CASE_KV_PREFIXES_WITH_SUFFIX(kase.id!)) for (const row of await db.kv.where('key').startsWith(prefix).toArray()) await write({ table: 'kv', row })
   if (kase.storage === 'server' && kase.serverKey) {
     progress?.('Exporting server evidence…')
     const response = await fetch(`/api/store/${kase.serverKey}/export`, { headers: API_HEADERS })
@@ -201,8 +215,11 @@ async function restoreRecords(original: Case, records: () => AsyncGenerator<Reco
       validateRecord({ table, row })
       let mapped: TransferRow
       if (table === 'kv') {
-        if (!CASE_KV_KEYS(original.id!).includes(String(row.key))) throw new Error('Backup contains a key outside this case')
-        mapped = { key: String(row.key).replace(/-\d+$/, `-${newId}`), value: remap(row.value) }
+        const key = String(row.key)
+        const suffixed = CASE_KV_PREFIXES_WITH_SUFFIX(original.id!).find((p) => key.startsWith(p))
+        if (suffixed) mapped = { key: key.replace(suffixed, suffixed.replace(`-${original.id}-`, `-${newId}-`)), value: remap(row.value) }
+        else if (CASE_KV_KEYS(original.id!).includes(key)) mapped = { key: key.replace(/-\d+$/, `-${newId}`), value: remap(row.value) }
+        else throw new Error('Backup contains a key outside this case')
       } else if (table === 'serverRows') {
         if (!kase.serverKey) throw new Error('Unexpected server data in a browser case')
         mapped = { ...row, evidenceId: mapId('evidence', row.evidenceId ?? row.id) }

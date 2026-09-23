@@ -6,7 +6,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 import type { Chain } from '../data/chains'
 import { buildCampaignGraph, buildChainGraph, LANE_LABEL, LANES, type GNode, type Graph } from '../data/chainGraph'
 import type { EntityRef } from '../state/store'
-import { fmtTs } from '../util/format'
+import { escapeHtml, fmtTs } from '../util/format'
 
 echarts.use([GraphChart, TooltipComponent, LegendComponent, CanvasRenderer])
 
@@ -199,15 +199,13 @@ export function graphOption(
       textStyle: { color: t.fg1, fontSize: 11 },
       confine: true,
       formatter: (p: { dataType: string; data: { node?: GNode; value?: string; source?: string; target?: string } }) => {
-        if (p.dataType === 'edge') return String(p.data.value || '')
+        // ECharts writes this as HTML, and labels, edge values and details come from the evidence
+        if (p.dataType === 'edge') return escapeHtml(String(p.data.value || ''))
         const n = p.data.node
         if (!n) return ''
-        const lines = [`<b>${n.label}</b>`, n.sub ?? '', n.ts ? fmtTs(n.ts) : '', ...(n.detail ?? []).slice(0, 8)]
+        const lines = [n.sub ?? '', n.ts ? fmtTs(n.ts) : '', ...(n.detail ?? []).slice(0, 8)]
         if (n.degree) lines.push(`in ${n.degree} chain(s)`)
-        return lines
-          .filter(Boolean)
-          .map((s) => String(s).replace(/</g, '&lt;'))
-          .join('<br/>')
+        return [`<b>${escapeHtml(String(n.label))}</b>`, ...lines.filter(Boolean).map((s) => escapeHtml(String(s)))].join('<br/>')
       },
     },
     series: [

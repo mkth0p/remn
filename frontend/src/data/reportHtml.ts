@@ -5,7 +5,8 @@ import { chainSeverity, effectiveSeverity, stepVisible } from './review'
 import type { Incident } from '../rules/incidents'
 import type { RelationshipReview } from './relationshipReviews'
 import { packageCoverageIssues } from './packageCoverage'
-import { defang, escapeHtml, fmtBytes, fmtNum, fmtTs, renderMarkdown } from '../util/format'
+// every time in the report is UTC, whatever the analyst's display setting
+import { defang, escapeHtml, fmtBytes, fmtNum, fmtUtc as fmtTs, renderMarkdown } from '../util/format'
 
 /**
  * The printed report: one self-contained HTML file laid out for A4 and the browser's print-to-PDF.
@@ -51,6 +52,17 @@ export interface ReportData {
   tasks: CaseNote[]
   notes: CaseNote[]
   undecided: number
+  /**
+   * Confirmed chains and incidents that the printed selection leaves out (below the severity floor,
+   * excluded, or a chain switched off). The verdict is about the case, not about what prints, so
+   * they still count; the cover says how many are not printed.
+   */
+  unprintedConfirmed?: { severity: Severity; findings: Finding[] }[]
+  /** the state of the last rule run, when known: the report's confidence depends on it */
+  rules?: { lastRun: number | null; evidenceAfter: number; errors: number }
+  /** indicators in the case, and how many were actually checked against a reputation service */
+  iocsTotal?: number
+  iocsChecked?: number
   /** base64 woff2 of the display face for the wordmark, when it could be loaded */
   fontData?: string
 }
@@ -107,12 +119,16 @@ export function computeVerdict(d: ReportData): Verdict {
   const escalated = d.incidents.filter((i) => i.status === 'escalated')
   const reviewed = d.chains.filter((c) => d.reviews[c.id]?.verdict === 'unsure').length + d.incidents.filter((i) => i.status === 'reviewed').length
   const falsePositives = d.falsePositives ?? d.incidents.filter((i) => i.status === 'false_positive').length
-  const confirmed = confirmedChains.length + escalated.length
+  // a confirmed item the print settings leave out is still confirmed: a presentation filter must not
+  // turn "Compromise confirmed" into "Nothing confirmed"
+  const unprinted = d.unprintedConfirmed ?? []
+  const confirmed = confirmedChains.length + escalated.length + unprinted.length
   const base = { confirmed, reviewed, falsePositives }
+  const notPrinted = unprinted.length ? ` ${unprinted.length} of them ${unprinted.length === 1 ? 'is' : 'are'} not printed (below the severity floor or left out).` : ''
   if (confirmed) {
-    const sevs = [...confirmedChains.map((c) => chainSeverity(c, d.reviews[c.id])), ...escalated.map((i) => i.severity)]
+    const sevs = [...confirmedChains.map((c) => chainSeverity(c, d.reviews[c.id])), ...escalated.map((i) => i.severity), ...unprinted.map((u) => u.severity)]
     const severity = worstOf(sevs)
-    const confirmedFindings = [...escalated.flatMap((i) => i.findings), ...confirmedChains.flatMap((c) => d.membersOf.get(c.id) ?? [])]
+    const confirmedFindings = [...escalated.flatMap((i) => i.findings), ...confirmedChains.flatMap((c) => d.membersOf.get(c.id) ?? []), ...unprinted.flatMap((u) => u.findings)]
     // unwanted software is the verdict when a confirmed item names it and nothing confirmed rises above medium:
     // the runs of the same browser from a user profile are the same thing, not a second threat
     const unwantedPresent = confirmedFindings.some(isUnwanted)
@@ -123,16 +139,22 @@ export function computeVerdict(d: ReportData): Verdict {
         kind: 'unwanted',
         severity,
         label: 'Unwanted software',
-        detail: `${confirmed} confirmed item${confirmed === 1 ? '' : 's'} describe unwanted or adware-class software at ${severity} severity, no intrusion.`,
+        detail: `${confirmed} confirmed item${confirmed === 1 ? '' : 's'} describe unwanted or adware-class software at ${severity} severity, no intrusion.${notPrinted}`,
       }
     if (rank(severity) >= rank('high'))
-      return { ...base, kind: 'compromise', severity, label: 'Compromise confirmed', detail: `${confirmed} confirmed item${confirmed === 1 ? '' : 's'}, the worst at ${severity} severity.` }
+      return {
+        ...base,
+        kind: 'compromise',
+        severity,
+        label: 'Compromise confirmed',
+        detail: `${confirmed} confirmed item${confirmed === 1 ? '' : 's'}, the worst at ${severity} severity.${notPrinted}`,
+      }
     return {
       ...base,
       kind: 'suspicious',
       severity,
       label: 'Suspicious activity confirmed',
-      detail: `${confirmed} confirmed item${confirmed === 1 ? '' : 's'} at ${severity} severity; nothing reached high.`,
+      detail: `${confirmed} confirmed item${confirmed === 1 ? '' : 's'} at ${severity} severity; nothing reached high.${notPrinted}`,
     }
   }
   if (reviewed)
@@ -156,6 +178,19 @@ export function computeVerdict(d: ReportData): Verdict {
   }
 }
 
+/** Why a non-package evidence file was not read completely, or '' when it was. */
+export function evidenceIssue(e: Evidence): string {
+  const stats = (e.stats ?? {}) as Record<string, unknown>
+  if (e.status === 'error') return e.error ? `parse stopped: ${e.error}` : 'parse stopped'
+  const errors = Number(stats.errors ?? 0)
+  const counts = (stats.memberCounts ?? {}) as Record<string, number>
+  const bits: string[] = []
+  if (errors > 0) bits.push(`${errors} parse error${errors === 1 ? '' : 's'}`)
+  if (counts.skipped) bits.push(`${counts.skipped} archive member${counts.skipped === 1 ? '' : 's'} not read`)
+  if (e.error) bits.push(e.error)
+  return bits.join('; ')
+}
+
 export interface Confidence {
   level: 'high' | 'medium' | 'low'
   reasons: string[]
@@ -171,9 +206,18 @@ export function computeConfidence(d: ReportData): Confidence {
   if (unverified) reasons.push(`${unverified} evidence file${unverified === 1 ? '' : 's'} without a verified digest`)
   const issues = d.evidence.filter((e) => e.kind === 'package').flatMap((e) => packageCoverageIssues(e))
   if (issues.length) reasons.push(`package coverage: ${issues.length} reported issue${issues.length === 1 ? '' : 's'}`)
+  // a parse that failed, stopped at a limit, or skipped members read less than the file holds
+  const incomplete = d.evidence.filter((e) => e.kind !== 'package' && evidenceIssue(e)).length
+  if (incomplete) reasons.push(`${incomplete} evidence file${incomplete === 1 ? ' was' : 's were'} not read completely`)
   if (d.coverageWarnings?.length) reasons.push(`chain analysis incomplete (${d.coverageWarnings.length} limit${d.coverageWarnings.length === 1 ? '' : 's'} reached)`)
-  if (!d.kase.settings.networkAllowed) reasons.push('indicators not enriched (external lookups off)')
-  const level: Confidence['level'] = ratio >= 0.95 && !unverified && !issues.length && !d.coverageWarnings?.length ? 'high' : ratio >= 0.7 && !unverified ? 'medium' : 'low'
+  const rules = d.rules
+  const rulesIssue = !!rules && (rules.lastRun == null || rules.evidenceAfter > 0 || rules.errors > 0)
+  if (rules?.lastRun == null && rules) reasons.push('the rules have not run on this case')
+  else if (rules?.evidenceAfter) reasons.push(`${rules.evidenceAfter} evidence file${rules.evidenceAfter === 1 ? '' : 's'} added after the last rule run`)
+  if (rules?.errors) reasons.push(`${rules.errors} rule${rules.errors === 1 ? '' : 's'} failed in the last run`)
+  if (!(d.iocsChecked ?? 0)) reasons.push('indicators not enriched (no reputation lookup was run)')
+  const complete = !issues.length && !incomplete && !d.coverageWarnings?.length && !rulesIssue
+  const level: Confidence['level'] = ratio >= 0.95 && !unverified && complete ? 'high' : ratio >= 0.7 && !unverified ? 'medium' : 'low'
   if (level === 'high') reasons.unshift('every item decided, evidence verified, analysis complete')
   return { level, reasons }
 }
@@ -467,7 +511,9 @@ interface Moment {
 }
 
 /** The decided items in time order: what a reader should know happened, in the order it happened. */
-export function moments(d: ReportData): { items: Moment[]; decided: boolean } {
+export const MAX_MOMENTS = 14
+
+export function moments(d: ReportData): { items: Moment[]; decided: boolean; total: number } {
   const out: Moment[] = []
   for (const c of d.chains) {
     const r = d.reviews[c.id]
@@ -500,7 +546,7 @@ export function moments(d: ReportData): { items: Moment[]; decided: boolean } {
   const decided = out.length > 0
   const confirmed = out.filter((m) => m.decision === 'confirmed')
   const chosen = (confirmed.length ? confirmed : out).sort((a, b) => a.ts - b.ts)
-  return { items: chosen.slice(0, 14), decided }
+  return { items: chosen.slice(0, MAX_MOMENTS), decided, total: chosen.length }
 }
 
 const momentsList = (ms: Moment[]) =>
@@ -582,7 +628,7 @@ code,.mono{font-family:var(--mono);font-size:10.5px}
 .ribbons{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 0}
 .ribbon{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line-2);border-radius:6px;padding:4px 9px;font-size:10.5px;color:var(--ink-2);background:var(--surface)}
 .ribbon i{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ink-3)}
-.ribbon.ok i{background:var(--accent)}.ribbon.warn i{background:var(--medium)}.ribbon.ai i{background:var(--violet)}
+span.warn{color:var(--medium);font-weight:600}.ribbon.ok i{background:var(--accent)}.ribbon.warn i{background:var(--medium)}.ribbon.ai i{background:var(--violet)}
 .ribbon b{color:var(--ink);font-weight:600}
 /* contents */
 .toc{columns:2;column-gap:28px;font-size:11.5px;margin:18px 0 8px;padding:0;list-style:none}
@@ -716,7 +762,12 @@ function method(d: ReportData, v: Verdict, conf: Confidence): string {
     'Collection snapshots record when an artefact was collected, not when it was created or run.',
     ...(d.coverageWarnings ?? []).map((w) => `Chain analysis incomplete: ${w}`),
     ...issues.slice(0, 6).map((x) => `Package coverage: ${x}`),
-    d.kase.settings.networkAllowed ? 'Indicators were checked against the configured reputation providers.' : 'External reputation lookups were off; indicators are not enriched.',
+    d.iocsChecked
+      ? `${d.iocsChecked} of ${d.iocsTotal ?? d.iocsChecked} indicators were checked against reputation services.`
+      : 'No indicator was checked against a reputation service; indicators are not enriched.',
+    ...(d.rules && d.rules.lastRun == null ? ['The detection rules had not run on this case when the report was made.'] : []),
+    ...(d.rules?.evidenceAfter ? [`${d.rules.evidenceAfter} evidence file(s) were added after the last rule run; their findings may be missing.`] : []),
+    ...d.evidence.filter((e) => e.kind !== 'package' && evidenceIssue(e)).map((e) => `${e.name}: ${evidenceIssue(e)}.`),
     ...conf.reasons.filter((r) => !/^every item decided/.test(r)).map((r) => `Confidence: ${r}.`),
   ]
   return `<div class="method"><div><h4>How this was produced</h4><ul>${sources.map((s) => `<li>${s}</li>`).join('')}</ul></div><div><h4>Where it stops</h4><ul>${limits.map((s) => `<li>${h(s)}</li>`).join('')}</ul></div></div>`
@@ -751,9 +802,9 @@ export function buildReportHtml(d: ReportData): string {
   sections.push({
     id: 'happened',
     title: 'What happened',
-    count: happened.items.length,
+    count: happened.total,
     body: happened.items.length
-      ? `<p class="intro">${happened.items.some((m) => m.decision === 'confirmed') ? 'The confirmed items in the order they happened.' : 'Nothing was confirmed; the reviewed items in the order they happened.'} Dates are event times, UTC.</p>${momentsList(happened.items)}`
+      ? `<p class="intro">${happened.items.some((m) => m.decision === 'confirmed') ? 'The confirmed items in the order they happened.' : 'Nothing was confirmed; the reviewed items in the order they happened.'} Dates are event times, UTC.${happened.total > happened.items.length ? ` The first ${happened.items.length} of ${happened.total} are listed; the other ${happened.total - happened.items.length}, the latest, are printed in full in the incident and chain sections.` : ''}</p>${momentsList(happened.items)}`
       : `<div class="empty">${happened.decided ? 'No dated item to place.' : 'No item has been decided yet: run the review before printing.'}</div>`,
   })
   if (d.chains.length) {
@@ -783,16 +834,21 @@ export function buildReportHtml(d: ReportData): string {
       body:
         (d.evidence.length
           ? table(
-              ['file', 'kind', 'size', 'rows', 'SHA-256', 'integrity', 'added (UTC)'],
-              d.evidence.map((e) => [
-                h(e.name),
-                h(e.format || e.kind),
-                fmtBytes(e.size),
-                n(e.count),
-                `<code>${h(e.sha256Client ?? '')}</code>`,
-                h(e.integrity),
-                `<span class="nowrap">${fmtTs(e.addedAt)}</span>`,
-              ]),
+              ['file', 'kind', 'size', 'rows', 'SHA-256', 'integrity', 'read', 'added (UTC)'],
+              d.evidence.map((e) => {
+                // the digest says the file is the one received; this says whether all of it was read
+                const issue = e.kind === 'package' ? packageCoverageIssues(e).join('; ') : evidenceIssue(e)
+                return [
+                  h(e.name),
+                  h(e.format || e.kind),
+                  fmtBytes(e.size),
+                  n(e.count),
+                  `<code>${h(e.sha256Client ?? '')}</code>`,
+                  h(e.integrity),
+                  issue ? `<span class="warn">incomplete: ${h(issue)}</span>` : 'complete',
+                  `<span class="nowrap">${fmtTs(e.addedAt)}</span>`,
+                ]
+              }),
             )
           : '<div class="empty">No evidence file.</div>') +
         (packages.length
@@ -889,7 +945,7 @@ export function buildReportHtml(d: ReportData): string {
   sections.push({
     id: 'settings',
     title: 'Case settings',
-    body: `<div class="settings">internal domains: ${h(kase.settings.internalDomains.join(', ') || '—')} · VIPs: ${h(kase.settings.vipNames.join(', ') || '—')} · business hours ${kase.settings.businessHours.start}h–${kase.settings.businessHours.end}h (${h(kase.settings.businessHours.tz)}) · external lookups ${kase.settings.networkAllowed ? 'enabled' : 'disabled'} · report floor ${h(settings.minSeverity)}${settings.onlyReviewed ? ' · reviewed items only' : ''}${settings.includeFp ? ' · false positives included' : ''} · chain steps: ${h(settings.chainDetail)}</div>`,
+    body: `<div class="settings">internal domains: ${h(kase.settings.internalDomains.join(', ') || '—')} · VIPs: ${h(kase.settings.vipNames.join(', ') || '—')} · business hours ${kase.settings.businessHours.start}h–${kase.settings.businessHours.end}h (${h(kase.settings.businessHours.tz)}) · reputation lookups ${d.iocsChecked ? `run on ${n(d.iocsChecked)} indicator${d.iocsChecked === 1 ? '' : 's'}` : 'not run'} · report floor ${h(settings.minSeverity)}${settings.onlyReviewed ? ' · reviewed items only' : ''}${settings.includeFp ? ' · false positives included' : ''} · chain steps: ${h(settings.chainDetail)}</div>`,
   })
 
   const num = (i: number) => String(i + 1).padStart(2, '0')
@@ -909,7 +965,7 @@ export function buildReportHtml(d: ReportData): string {
 <div class="sevbar">${ORDER.map((s) => (bySev[s] ? `<span title="${s} ${bySev[s]}" style="width:${((bySev[s] / total) * 100).toFixed(1)}%;background:var(--${s})"></span>` : '')).join('')}</div>
 <div class="legend">${ORDER.map((s) => `<span><i style="background:var(--${s})"></i>${s} ${bySev[s] ?? 0}</span>`).join('')}<span class="dim">· Decisions: <b>${verdict.confirmed}</b> confirmed · <b>${verdict.reviewed}</b> reviewed or unsure · <b>${verdict.falsePositives}</b> false positive${verdict.falsePositives === 1 ? '' : 's'}${d.undecided ? ` · <b>${d.undecided}</b> item${d.undecided === 1 ? '' : 's'} without a decision` : ' · every item decided'}</span></div>
 <div class="profile"><div class="k"><span>threat profile</span><span>${confirmedBadges.length ? `${confirmedBadges.length} confirmed · ` : ''}${seen.length} of ${profile.length} tactics observed</span></div><div class="hexes">${profile.map(badge).join('')}</div></div>
-<div class="ribbons"><span class="ribbon ${verified === d.evidence.length && d.evidence.length ? 'ok' : 'warn'}"><i></i><b>${n(verified)}/${n(d.evidence.length)}</b> evidence files verified by digest</span><span class="ribbon ${d.undecided ? 'warn' : 'ok'}"><i></i><b>${d.undecided ? n(d.undecided) + ' undecided' : 'review complete'}</b></span>${d.findings.some((f) => f.ruleId.startsWith('engine:')) ? '<span class="ribbon ok"><i></i>external detection engine ran</span>' : ''}${aiUsed ? '<span class="ribbon ai"><i></i>model-drafted text, labelled where it appears</span>' : '<span class="ribbon"><i></i>no model-drafted text</span>'}${d.kase.settings.networkAllowed ? '' : '<span class="ribbon"><i></i>indicators not enriched</span>'}</div>
+<div class="ribbons"><span class="ribbon ${verified === d.evidence.length && d.evidence.length ? 'ok' : 'warn'}"><i></i><b>${n(verified)}/${n(d.evidence.length)}</b> evidence files verified by digest</span><span class="ribbon ${d.undecided ? 'warn' : 'ok'}"><i></i><b>${d.undecided ? n(d.undecided) + ' undecided' : 'review complete'}</b></span>${d.findings.some((f) => f.ruleId.startsWith('engine:')) ? '<span class="ribbon ok"><i></i>external detection engine ran</span>' : ''}${aiUsed ? '<span class="ribbon ai"><i></i>model-drafted text, labelled where it appears</span>' : '<span class="ribbon"><i></i>no model-drafted text</span>'}${d.iocsChecked ? '' : '<span class="ribbon"><i></i>indicators not enriched</span>'}</div>
 </div>
 <ul class="toc">${sections.map((s, i) => `<li><span class="n">${num(i)}</span>${h(s.title)}${s.count != null ? ` <span class="dim">(${n(s.count)})</span>` : ''}</li>`).join('')}</ul>
 </div>

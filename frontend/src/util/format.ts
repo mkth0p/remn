@@ -10,21 +10,35 @@ export function getLocalTime(): boolean {
 
 const pad = (n: number, w = 2) => String(n).padStart(w, '0')
 
-export function fmtTs(ms: number | null | undefined, opts: { ms?: boolean; date?: boolean } = {}): string {
+function formatTime(ms: number | null | undefined, local: boolean, opts: { ms?: boolean; date?: boolean }): string {
   if (ms == null || !Number.isFinite(ms)) return ''
   const d = new Date(ms)
   if (Number.isNaN(d.getTime())) return ''
-  const y = useLocalTime ? d.getFullYear() : d.getUTCFullYear()
-  const mo = useLocalTime ? d.getMonth() + 1 : d.getUTCMonth() + 1
-  const da = useLocalTime ? d.getDate() : d.getUTCDate()
-  const h = useLocalTime ? d.getHours() : d.getUTCHours()
-  const mi = useLocalTime ? d.getMinutes() : d.getUTCMinutes()
-  const s = useLocalTime ? d.getSeconds() : d.getUTCSeconds()
+  const y = local ? d.getFullYear() : d.getUTCFullYear()
+  const mo = local ? d.getMonth() + 1 : d.getUTCMonth() + 1
+  const da = local ? d.getDate() : d.getUTCDate()
+  const h = local ? d.getHours() : d.getUTCHours()
+  const mi = local ? d.getMinutes() : d.getUTCMinutes()
+  const s = local ? d.getSeconds() : d.getUTCSeconds()
   let out = `${y}-${pad(mo)}-${pad(da)}`
   if (opts.date) return out
   out += ` ${pad(h)}:${pad(mi)}:${pad(s)}`
   if (opts.ms) out += `.${pad(d.getUTCMilliseconds(), 3)}`
-  return out + (useLocalTime ? '' : 'Z')
+  return out + (local ? '' : 'Z')
+}
+
+/** A time as the analyst chose to see it on screen: UTC by default, local time when set. */
+export function fmtTs(ms: number | null | undefined, opts: { ms?: boolean; date?: boolean } = {}): string {
+  return formatTime(ms, useLocalTime, opts)
+}
+
+/**
+ * A time for what is printed or handed over: always UTC. The report says "Times are UTC", and a
+ * report must read the same whoever prints it; the display setting printed Paris times under
+ * that line.
+ */
+export function fmtUtc(ms: number | null | undefined, opts: { ms?: boolean; date?: boolean } = {}): string {
+  return formatTime(ms, false, opts)
 }
 
 export function fmtBytes(n: number | null | undefined): string {

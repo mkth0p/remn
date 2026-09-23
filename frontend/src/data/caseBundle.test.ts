@@ -177,3 +177,18 @@ it('restores legacy browser bundles with remapped references', async () => {
   const id = await restoreCaseBundle(file)
   expect((await db.findings.where('caseId').equals(id).first())?.refs).toEqual([140])
 })
+
+it('carries the rules its findings came from, the rule choices and the hypothesis decisions', async () => {
+  // a custom rule is global where it was made; the case's finding came from it
+  await db.customRules.add({ id: 3, caseId: null, ruleId: 'mail-test', yaml: 'id: mail-test\ntitle: t\nsource: mails\nwhere: {risk|gte: 0}\n', enabled: true, updatedAt: 1 })
+  await db.customRules.add({ id: 4, caseId: null, ruleId: 'unrelated', yaml: 'id: unrelated', enabled: true, updatedAt: 1 })
+  await db.kv.bulkPut([
+    { key: 'packOverrides', value: { sublime: false } },
+    { key: 'relationship-hypothesis-1-abc', value: { status: 'accepted' } },
+  ])
+  const newId = await restoreCaseBundle(await backup())
+  const rules = await db.customRules.where('caseId').equals(newId).toArray()
+  expect(rules.map((r) => r.ruleId)).toEqual(['mail-test'])
+  expect((await db.kv.get(`rule-context-${newId}`))?.value).toMatchObject({ packOverrides: { sublime: false } })
+  expect((await db.kv.get(`relationship-hypothesis-${newId}-abc`))?.value).toEqual({ status: 'accepted' })
+})

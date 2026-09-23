@@ -8,7 +8,7 @@ import { getSource } from '../data/source'
 import { listNotes } from '../data/caseNotes'
 import { getDb, type CaseNote, type Finding } from '../db/schema'
 import { useStore } from '../state/store'
-import { classNames, fmtNum, fmtTs } from '../util/format'
+import { classNames, escapeHtml, fmtNum, fmtTs, getLocalTime } from '../util/format'
 import { Badge, Dot, Sev } from '../components/ui'
 import { IconClock } from '../components/Icons'
 
@@ -195,6 +195,8 @@ export function TimelineView() {
         {
           backgroundColor: 'transparent',
           animation: false,
+          // the axis in the same zone as every other time on the page
+          useUTC: !getLocalTime(),
           textStyle: { fontFamily: t.mono, color: t.fg2 },
           tooltip: {
             trigger: 'axis',
@@ -205,8 +207,12 @@ export function TimelineView() {
             formatter: (params: { seriesName: string; value: [number, number, ...unknown[]]; marker: string }[]) => {
               const ts = params[0]?.value?.[0]
               return (
-                `<b>${fmtTs(ts as number)}</b><br/>` +
-                params.map((p) => `${p.marker} ${p.seriesName}: ${p.seriesName === 'findings' || p.seriesName === 'case timeline' ? String(p.value[2] ?? '') : fmtNum(p.value[1])}`).join('<br/>')
+                // ECharts puts this string into the page as HTML, and a finding title or a timeline
+                // entry can carry a mail subject an attacker wrote: every text is escaped
+                `<b>${escapeHtml(fmtTs(ts as number))}</b><br/>` +
+                params
+                  .map((p) => `${p.marker} ${escapeHtml(p.seriesName)}: ${escapeHtml(p.seriesName === 'findings' || p.seriesName === 'case timeline' ? String(p.value[2] ?? '') : fmtNum(p.value[1]))}`)
+                  .join('<br/>')
               )
             },
           },

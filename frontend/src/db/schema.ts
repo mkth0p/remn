@@ -504,7 +504,12 @@ export const CASE_KV_KEYS = (caseId: number) =>
     'relationship-aliases',
     'relationship-cache',
     'relationship-stories',
+    // the rule choices in force when the case was exported (packs, disabled rules), for the record
+    'rule-context',
   ].map((p) => `${p}-${caseId}`)
+
+/** kv keys of one case that carry an extra suffix after the case id (one record per hypothesis). */
+export const CASE_KV_PREFIXES_WITH_SUFFIX = (caseId: number) => [`relationship-hypothesis-${caseId}-`]
 
 /**
  * Every table whose rows carry a caseId. One list, because it was previously written twice inside

@@ -14,6 +14,12 @@ case exists outside that browser profile. It is comfortable up to a few hundred 
 of evidence; beyond that, queries and rule runs slow down and the server store is the
 better fit. In both modes the browser keeps the case itself, its findings, notes, chains,
 decisions and AI sessions, so a case can be exported as a bundle and imported elsewhere.
+The bundle also carries the custom rules its findings came from (a custom rule is global
+in the browser that made it; it arrives as a rule of the imported case), the pack and
+disabled-rule choices in force at export, and the decisions on relationship hypotheses.
+A finding the analyst decided is never pruned because its rule is missing from the
+importing browser: it is a conclusion, not an orphan. Removing one evidence file removes
+the findings built on it and keeps the engine (Hayabusa) findings of the other files.
 
 ## Server store
 

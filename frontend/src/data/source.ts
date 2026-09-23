@@ -162,7 +162,7 @@ class BrowserSource implements DataSource {
     const { rebuildDerived } = await import('./ingest')
     const { forgetUpload } = await import('./upload')
     await deleteEvidenceData(db, this.id, evidenceId) // events, mails, bodies, attachments, urls, evidence row
-    const cleared = await clearDerivedState(this.id) // findings, chain snapshot, diagnostics (reviews archived)
+    const cleared = await clearDerivedState(this.id, evidenceId) // findings, chain snapshot, diagnostics (reviews archived)
     if (ev) await forgetUpload(ev) // resume record + server-side partial, if any
     await rebuildDerived(this.id) // facets and indicators from the rows that remain
     return cleared
@@ -284,7 +284,7 @@ class ServerSource implements DataSource {
     const { clearDerivedState } = await import('./caseState')
     const { forgetUpload } = await import('./upload')
     if (ev) await forgetUpload(ev)
-    return clearDerivedState(this.kase.id!)
+    return clearDerivedState(this.kase.id!, evidenceId)
   }
   sql(sql: string, limit = 200) {
     return this.post<{ rows: Record<string, unknown>[]; columns: string[]; truncated: boolean }>('sql', { sql, limit })

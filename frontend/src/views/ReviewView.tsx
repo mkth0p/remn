@@ -38,6 +38,7 @@ import {
   type ReportSettings,
   type ReviewItem,
   type Verdict,
+  unprintedConfirmed,
 } from '../data/review'
 import { getDb, type Evidence, type Finding, type Severity } from '../db/schema'
 import { buildIncidents, type Incident } from '../rules/incidents'
@@ -254,6 +255,7 @@ export function ReviewView() {
       tasks: [],
       notes: [],
       undecided,
+      unprintedConfirmed: unprintedConfirmed(findings, chains, reviews, selection),
     }
     return { data, verdict: computeVerdict(data), confidence: computeConfidence(data), profile: threatProfile(data) }
   }, [kase, settings, findings, chains, reviews, evidence, undecided])

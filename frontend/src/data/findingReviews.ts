@@ -32,21 +32,26 @@ export async function rememberReviews(caseId: number, findings: Finding[]): Prom
   const key = `finding-reviews-${caseId}`
   const saved = ((await db.kv.get(key))?.value as Record<string, Review>) ?? {}
   for (const f of findings) {
-    if (decided(f))
-      saved[f.key] = {
-        source: f.source,
-        refs: f.refs,
-        ruleId: f.ruleId,
-        status: f.status,
-        notes: f.notes,
-        createdAt: f.createdAt,
-        severityOverride: f.severityOverride,
-        reportExclude: f.reportExclude,
-        chainUnlinked: f.chainUnlinked,
-        decidedBy: f.decidedBy,
-        aiReason: f.aiReason,
-        notesBy: f.notesBy,
-      }
+    // a finding the analyst set back to undecided takes its old decision out of the archive, or the
+    // false positive they reverted would come back the next time the finding is rebuilt
+    if (!decided(f)) {
+      delete saved[f.key]
+      continue
+    }
+    saved[f.key] = {
+      source: f.source,
+      refs: f.refs,
+      ruleId: f.ruleId,
+      status: f.status,
+      notes: f.notes,
+      createdAt: f.createdAt,
+      severityOverride: f.severityOverride,
+      reportExclude: f.reportExclude,
+      chainUnlinked: f.chainUnlinked,
+      decidedBy: f.decidedBy,
+      aiReason: f.aiReason,
+      notesBy: f.notesBy,
+    }
   }
   await db.kv.put({ key, value: saved })
   return new Map([...Object.entries(saved), ...findings.map((f) => [f.key, f] as [string, Review])])
@@ -84,7 +89,11 @@ export async function replaceFindings(caseId: number, ruleIds: string[], finding
   })
 }
 
-/** Drop findings of rules that no longer exist (a pack refreshed, a custom rule deleted); chains are kept. */
+/**
+ * Drop findings of rules that no longer exist (a pack refreshed, a custom rule deleted); chains are
+ * kept, and so is every finding the analyst decided on: a confirmed finding whose rule this browser
+ * does not have (a case imported from another analyst) is a conclusion, not an orphan.
+ */
 export async function pruneOrphanFindings(caseId: number, knownRuleIds: Iterable<string>): Promise<number> {
   const db = getDb()
   const known = new Set(knownRuleIds)
@@ -94,7 +103,7 @@ export async function pruneOrphanFindings(caseId: number, knownRuleIds: Iterable
     const orphans = await db.findings
       .where('caseId')
       .equals(caseId)
-      .filter((f) => !known.has(f.ruleId) && !f.ruleId.startsWith('engine:'))
+      .filter((f) => !known.has(f.ruleId) && !f.ruleId.startsWith('engine:') && !decided(f))
       .toArray()
     if (!orphans.length) return 0
     await rememberReviews(caseId, orphans)
