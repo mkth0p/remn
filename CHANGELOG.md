@@ -46,6 +46,11 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   the BITS rule no longer excludes every record, credential dumping covers PowerShell and
   other script hosts, service keys are no longer Run-key persistence but a rule of their
   own, process access by a LOLBin has a rule, and the print spooler DLL tricks are caught.
+- Windows detection measured and extended on EVTX-ATTACK-SAMPLES (278 logs, one attack each):
+  75 new core rules for what the packs missed (Security-channel tricks, the channels no rule
+  read, bursts and sequences, registry keys, DLL loads, parent-child pairs), taking the samples
+  detected from 171 to 269; a CI job fails when a sample's detection stops firing or the two
+  engines disagree on any sample.
 - A report and a case that hold: times in UTC, a verdict over the whole case, confidence that
   falls when a file was not read in full or the rules are behind, a valid STIX export, AI
   triage that proposes rather than decides, bundles that carry their rules, and search that

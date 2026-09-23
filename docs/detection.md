@@ -88,6 +88,24 @@ score bands and the sender-baseline rules on the mail side; and the 28 business 
 compromise rules over Microsoft 365 and Entra rows listed on the [data sources
 page](sources.md). Every rule carries MITRE ATT&CK technique ids.
 
+The Windows set was extended against EVTX-ATTACK-SAMPLES, a public library of one attack
+technique per log (see `docs/reviews/2026-09-23-evtx-attack-samples.md`). The techniques
+the packs left undetected are covered by six files of their own: `security-audit.yaml`
+(Security channel: Zerologon traces, machine-account resets, browser credential stores,
+boot configuration, hive copies and executables written to drive shares, privileged group
+enumeration, token and logon tricks), `other-channels.yaml` (the channels no rule read: RPC
+ETW, Netlogon, ProcessExitMonitor, MSSQL, RdpCoreTS, DistributedCOM, Program Compatibility,
+Application Experience, Winsock, classic PowerShell, BITS), `correlation.yaml` (what only a
+burst or a sequence shows: share and pipe enumeration, SMB sweeps, Kerberos spraying,
+process listing), `registry.yaml` (persistence and defence-evasion keys), `image-load.yaml`
+(DLL hijacks, unsigned loads into service hosts, pipes of known tools, timestomping) and
+`process-lineage.yaml` (parent-child pairs that should not happen, renamed binaries,
+accessibility-binary backdoors). Each rule was written for a sample the packs missed, then
+reviewed for false positives against the rest of the library and the benign background of
+the linked lab, and runs the same in both engines. `tools/evtx_attack_samples.py` and a CI
+job hold the detections in place: the job fails when a rule that identifies a sample's
+attack stops firing on it, or when the engines disagree on any sample.
+
 ## Community rule packs
 
 The public collections ship with REMN as packs under `rules/community/`, already

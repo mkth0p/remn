@@ -1,0 +1,1157 @@
+{
+ "AutomatedTestingTools/Malware/DE_timestomp_and_dll_sideloading_and_RunPersist.evtx": [
+  "sigma-02ee49e2-e294-4d0f-9278-f5b3212fc588",
+  "sigma-20f0ee37-5942-4e45-b7d5-c5b5db9df5cd",
+  "sigma-9637e8a5-7131-4f7f-bdc7-2b05d8670c43",
+  "win-registry-run-key"
+ ],
+ "AutomatedTestingTools/Malware/rundll32_cmd_schtask.evtx": [
+  "sigma-69bd9b97-2be2-41b6-9816-fb08757a4d1a",
+  "sigma-81325ce1-be01-4250-944f-b4789644556f",
+  "sigma-dd2a821e-3b07-4d3b-a9ac-929fe4c6ca0c",
+  "sigma-dd6b39d9-d9be-4a3b-8fe0-fe3c6a5c1795",
+  "sigma-e593cf51-88db-4ee1-b920-37e89012a3c9"
+ ],
+ "AutomatedTestingTools/Malware/rundll32_hollowing_wermgr_masquerading.evtx": [
+  "sigma-58bf96d9-ff5f-44bd-8dcc-1c4f79bf3a27",
+  "sigma-d8937fe7-42d5-4b4d-8178-e089c908f63f"
+ ],
+ "AutomatedTestingTools/Malware/sideloading_injection_persistence_run_key.evtx": [
+  "sigma-02ee49e2-e294-4d0f-9278-f5b3212fc588",
+  "sigma-20f0ee37-5942-4e45-b7d5-c5b5db9df5cd",
+  "win-registry-run-key"
+ ],
+ "AutomatedTestingTools/Malware/sideloading_uacbypass_rundll32_injection_c2.evtx": [
+  "sigma-02d1d718-dd13-41af-989d-ea85c7fab93f",
+  "sigma-0b0cd537-fc77-4e6e-a973-e53495c1083d",
+  "sigma-1775e15e-b61b-4d14-a1a3-80981298085a",
+  "sigma-2e4e488a-6164-4811-9ea1-f960c7359c40",
+  "sigma-49f2f17b-b4c8-4172-a68b-d5bf95d05130",
+  "sigma-4b60e6f2-bf39-47b4-b4ea-398e33cfe253",
+  "sigma-e2e01011-5910-4267-9c3b-4149ed5479cf",
+  "win-remote-thread-injection"
+ ],
+ "AutomatedTestingTools/PanacheSysmon_vs_AtomicRedTeam01.evtx": [
+  "sigma-0f06a3a5-6a09-413f-8743-e6cf35561297",
+  "sigma-1444443e-6757-43e4-9ea4-c8fc705f79a2",
+  "sigma-1fb76ab8-fa60-4b01-bddd-71e89bf555da",
+  "sigma-213d6a77-3d55-4ce8-ba74-fcfef741974e",
+  "sigma-21d856f9-9281-4ded-9377-51a1a6e2a432",
+  "sigma-24c8392b-aa3c-46b7-a545-43f71657fe98",
+  "sigma-2ddef153-167b-4e89-86b6-757a9e65dcac",
+  "sigma-327ff235-94eb-4f06-b9de-aaee571324be",
+  "sigma-4f73421b-5a0b-4bbf-a892-5a7fb99bea66",
+  "sigma-4f84b697-c9ed-4420-8ab5-e09af5b2345d",
+  "sigma-5afee48e-67dd-4e03-a783-f74259dcf998",
+  "sigma-60fc936d-2eb0-4543-8a13-911c750a1dfc",
+  "sigma-8bc64091-6875-4881-aaf9-7bd25b5dda08",
+  "sigma-8d63dadf-b91b-4187-87b6-34a1114577ea",
+  "sigma-92fa78e7-4d39-45f1-91a3-8b23f3f1088d",
+  "sigma-9ace0707-b560-49b8-b6ca-5148b42f39fb",
+  "sigma-b9cbbc17-d00d-4e3d-a827-b06d03d2380d",
+  "sigma-baca5663-583c-45f9-b5dc-ea96a22ce542",
+  "sigma-c73124a7-3e89-44a3-bdc1-25fe4df754b1",
+  "sigma-c947b146-0abc-4c87-9c64-b17e9d7274a2",
+  "sigma-cc9cbe82-7bc0-4ef5-bc23-bbfb83947be7",
+  "sigma-e7be6119-fc37-43f0-ad4f-1f3f99be2f9f",
+  "sigma-f57f8d16-1f39-4dcb-a604-6c73d9b54b3d",
+  "sigma-fd877b94-9bb5-4191-bb25-d79cbd93c167",
+  "sigma-ffa6861c-4461-4f59-8a41-578c39f3f23e",
+  "win-credential-dumping",
+  "win-registry-run-key",
+  "win-shadow-copy-deletion",
+  "win-wmi-persistence"
+ ],
+ "AutomatedTestingTools/WinDefender_Events_1117_1116_AtomicRedTeam.evtx": [
+  "sigma-57b649ef-ff42-4fb0-8bf6-62da243a1708",
+  "win-defender-detection"
+ ],
+ "AutomatedTestingTools/panache_sysmon_vs_EDRTestingScript.evtx": [
+  "sigma-0dba975d-a193-4ed1-a067-424df57570d1",
+  "sigma-1cf465a1-2609-4c15-9b66-c32dbe4bfd67",
+  "sigma-1fb76ab8-fa60-4b01-bddd-71e89bf555da",
+  "sigma-24c8392b-aa3c-46b7-a545-43f71657fe98",
+  "sigma-2ddef153-167b-4e89-86b6-757a9e65dcac",
+  "sigma-322ed9ec-fcab-4f67-9a34-e7c6aef43614",
+  "sigma-42a5f1e7-9603-4f6d-97ae-3f37d130d794",
+  "sigma-4782eb5a-a513-4523-a0ac-f3082b26ac5c",
+  "sigma-56321594-9087-49d9-bf10-524fe8479452",
+  "sigma-5b80a791-ad9b-4b75-bcc1-ad4e1e89c200",
+  "sigma-67f113fa-e23d-4271-befa-30113b3e08b1",
+  "sigma-6f0947a4-1c5e-4e0d-8ac7-53159b8f23ca",
+  "sigma-737e618a-a410-49b5-bec3-9e55ff7fbc15",
+  "sigma-8518ed3d-f7c9-4601-a26c-f361a4256a0c",
+  "sigma-85b0b087-eddf-4a2b-b033-d771fa2b9775",
+  "sigma-867356ee-9352-41c9-a8f2-1be690d78216",
+  "sigma-8d63dadf-b91b-4187-87b6-34a1114577ea",
+  "sigma-a54f842a-3713-4b45-8c84-5f136fdebd3c",
+  "sigma-b98d0db6-511d-45de-ad02-e82a98729620",
+  "sigma-c7e91a02-d771-4a6d-a700-42587e0b1095",
+  "sigma-c90362e0-2df3-4e61-94fe-b37615814cb1",
+  "sigma-cc9cbe82-7bc0-4ef5-bc23-bbfb83947be7",
+  "sigma-d042284c-a296-4988-9be5-f424fadcc28c",
+  "sigma-d3c3861d-c504-4c77-ba55-224ba82d0118",
+  "sigma-e66779cc-383e-4224-a3a4-267eeb585c40",
+  "sigma-f0540f7e-2db3-4432-b9e0-3965486744bc",
+  "win-sysmon-network-lolbin"
+ ],
+ "Command and Control/DE_RDP_Tunnel_5156.evtx": [
+  "sigma-51e33403-2a37-4d66-a574-1fda1782cc31",
+  "sigma-5bed80b6-b3e8-428e-a3ae-d3c757589e41"
+ ],
+ "Command and Control/DE_RDP_Tunneling_4624.evtx": [
+  "sigma-51e33403-2a37-4d66-a574-1fda1782cc31"
+ ],
+ "Command and Control/DE_RDP_Tunneling_TerminalServices-RemoteConnectionManagerOperational_1149.evtx": [
+  "win-rdp-loopback-tunnel"
+ ],
+ "Command and Control/DE_sysmon-3-rdp-tun.evtx": [
+  "sigma-48a61b29-389f-4032-b317-b30de6b95314",
+  "sigma-8a3038e8-9c9d-46f8-b184-66234a160f6f",
+  "sigma-ed74fe75-7594-4b4b-ae38-e38e3fd2eb23"
+ ],
+ "Command and Control/bits_openvpn.evtx": [
+  "win-bits-download"
+ ],
+ "Command and Control/tunna_iis_rdp_smb_tunneling_sysmon_3.evtx": [
+  "sigma-ed74fe75-7594-4b4b-ae38-e38e3fd2eb23"
+ ],
+ "Credential Access/4794_DSRM_password_change_t1098.evtx": [
+  "sigma-53ad8e36-f573-46bf-97e4-15ba5bf4bb51"
+ ],
+ "Credential Access/CA_4624_4625_LogonType2_LogonProc_chrome.evtx": [
+  "win-browser-password-reauth"
+ ],
+ "Credential Access/CA_DCSync_4662.evtx": [
+  "sigma-17d619c1-e020-4347-957e-1d1207455c93"
+ ],
+ "Credential Access/CA_Mimikatz_Memssp_Default_Logs_Sysmon_11.evtx": [
+  "sigma-9e099d99-44c2-42b6-a6d8-54c3545cab29"
+ ],
+ "Credential Access/CA_PetiPotam_etw_rpc_efsr_5_6.evtx": [
+  "win-rpc-efsr-coercion"
+ ],
+ "Credential Access/CA_chrome_firefox_opera_4663.evtx": [
+  "win-browser-credential-store-read"
+ ],
+ "Credential Access/CA_hashdump_4663_4656_lsass_access.evtx": [
+  "sigma-4a1b6da0-d94f-4fc3-98fc-2d9cb9e5ee76",
+  "sigma-962fe167-e48d-4fd6-9974-11e5b9a5d6d1"
+ ],
+ "Credential Access/CA_keefarce_keepass_credump.evtx": [
+  "sigma-77564cc2-7382-438b-a7f6-395c2ae53b9a"
+ ],
+ "Credential Access/CA_keepass_KeeThief_Get-KeePassDatabaseKey.evtx": [
+  "sigma-77564cc2-7382-438b-a7f6-395c2ae53b9a"
+ ],
+ "Credential Access/CA_protectedstorage_5145_rpc_masterkey.evtx": [
+  "sigma-45545954-4016-43c6-855e-eae8f1c369dc"
+ ],
+ "Credential Access/CA_sysmon_hashdump_cmd_meterpreter.evtx": [
+  "sigma-a18dd26b-6450-46de-8c91-9659150cf088",
+  "sigma-f239b326-2f41-4d6b-9dfa-c846a60ef505",
+  "win-credential-dumping"
+ ],
+ "Credential Access/CA_teamviewer-dumper_sysmon_10.evtx": [
+  "win-credential-app-memory-read"
+ ],
+ "Credential Access/LsassSilentProcessExit_process_exit_monitor_3001_lsass.evtx": [
+  "win-lsass-silentprocessexit-dump"
+ ],
+ "Credential Access/MSSQL_multiple_failed_logon_EventID_18456.evtx": [
+  "sigma-218d2855-2bba-4f61-9c85-81d0ea63ac71",
+  "win-mssql-login-spray"
+ ],
+ "Credential Access/Powershell_4104_MiniDumpWriteDump_Lsass.evtx": [
+  "sigma-84c174ab-d3ef-481f-9c86-a50d0b8e3edb",
+  "sigma-f62176f3-8128-4faa-bf6c-83261322e5eb",
+  "win-powershell-suspicious-scriptblock"
+ ],
+ "Credential Access/Sysmon_13_Local_Admin_Password_Changed.evtx": [
+  "win-sam-builtin-admin-password-set"
+ ],
+ "Credential Access/Zerologon_VoidSec_CVE-2020-1472_4626_LT3_Anonym_follwedby_4742_DC_Anony_DC.evtx": [
+  "win-anonymous-logon",
+  "win-zerologon-anonymous-account-change"
+ ],
+ "Credential Access/babyshark_mimikatz_powershell.evtx": [
+  "win-credential-dumping"
+ ],
+ "Credential Access/dc_applog_ntdsutil_dfir_325_326_327.evtx": [
+  "win-credential-dumping"
+ ],
+ "Credential Access/discovery_sysmon_1_iis_pwd_and_config_discovery_appcmd.evtx": [
+  "sigma-2d3cdeec-c0db-45b4-aa86-082f7eb75701",
+  "sigma-4ebc877f-4612-45cb-b3a5-8e3834db36c9",
+  "sigma-754ed792-634f-40ae-b3bc-e0448d33f695",
+  "sigma-8202070f-edeb-4d31-a010-a26c72ac5600",
+  "sigma-bed2a484-9348-4143-8a8a-b801c979301c"
+ ],
+ "Credential Access/etw_rpc_zerologon.evtx": [
+  "win-rpc-zerologon-passwordset"
+ ],
+ "Credential Access/kerberos_pwd_spray_4771.evtx": [
+  "win-kerberos-password-spray",
+  "win-kerberos-user-enumeration"
+ ],
+ "Credential Access/phish_windows_credentials_powershell_scriptblockLog_4104.evtx": [
+  "sigma-ca8b77a9-d499-4095-b793-5d5f330d450e"
+ ],
+ "Credential Access/ppl_bypass_ppldump_knowdll_hijack_sysmon_security.evtx": [
+  "sigma-24e3e58a-646b-4b50-adef-02ef935b9fc8",
+  "sigma-5ef9853e-4d0e-4a70-846f-a9ca37d876da",
+  "sigma-a5a2d357-1ab8-4675-a967-ef9990a59391",
+  "sigma-ffa6861c-4461-4f59-8a41-578c39f3f23e",
+  "win-credential-dumping"
+ ],
+ "Credential Access/remote_pwd_reset_rpc_mimikatz_postzerologon_target_DC.evtx": [
+  "win-machine-account-password-reset",
+  "win-password-reset-by-other"
+ ],
+ "Credential Access/remote_sam_registry_access_via_backup_operator_priv.evtx": [
+  "sigma-b210394c-ba12-4f89-9117-44a2464b9511",
+  "win-registry-hive-written-to-share",
+  "win-special-privileges-non-admin"
+ ],
+ "Credential Access/sysmon17_18_kekeo_tsssp_default_np.evtx": [
+  "win-kekeo-named-pipe"
+ ],
+ "Credential Access/sysmon_10_11_lsass_memdump.evtx": [
+  "sigma-5ef9853e-4d0e-4a70-846f-a9ca37d876da",
+  "sigma-69ca12af-119d-44ed-b50f-a47af0ebc364",
+  "sigma-9bd012ee-0dff-44d7-84a0-aa698cfd87a3",
+  "sigma-9f5c1d59-33be-4e60-bcab-85d2f566effd",
+  "sigma-a5a2d357-1ab8-4675-a967-ef9990a59391",
+  "win-credential-dumping"
+ ],
+ "Credential Access/sysmon_10_11_outlfank_dumpert_and_andrewspecial_memdump.evtx": [
+  "sigma-5ef9853e-4d0e-4a70-846f-a9ca37d876da",
+  "sigma-93d94efc-d7ad-4161-ad7d-1638c4f908d8",
+  "sigma-9bd012ee-0dff-44d7-84a0-aa698cfd87a3",
+  "sigma-9f5c1d59-33be-4e60-bcab-85d2f566effd",
+  "sigma-a5a2d357-1ab8-4675-a967-ef9990a59391",
+  "win-credential-dumping"
+ ],
+ "Credential Access/sysmon_10_1_memdump_comsvcs_minidump.evtx": [
+  "sigma-646ea171-dded-4578-8a4d-65e9822892e3",
+  "sigma-8a582fe2-0882-4b89-a82a-da6b2dc32937",
+  "win-credential-dumping"
+ ],
+ "Credential Access/sysmon_10_lsass_mimikatz_sekurlsa_logonpasswords.evtx": [
+  "sigma-d0d2f720-d14f-448d-8242-51ff396a334e",
+  "win-credential-dumping"
+ ],
+ "Credential Access/sysmon_13_keylogger_directx.evtx": [
+  "win-directinput-from-user-folder"
+ ],
+ "Credential Access/sysmon_2x10_lsass_with_different_pid_RtlCreateProcessReflection.evtx": [
+  "sigma-5ef9853e-4d0e-4a70-846f-a9ca37d876da",
+  "sigma-9bd012ee-0dff-44d7-84a0-aa698cfd87a3",
+  "win-credential-dumping"
+ ],
+ "Credential Access/sysmon_3_10_Invoke-Mimikatz_hosted_Github.evtx": [
+  "sigma-5ef9853e-4d0e-4a70-846f-a9ca37d876da",
+  "win-sysmon-network-lolbin"
+ ],
+ "Credential Access/sysmon_rdrleakdiag_lsass_dump.evtx": [
+  "sigma-c8da0dfd-4ed0-4b68-962d-13c9c884384e",
+  "sigma-edadb1e5-5919-4e4c-8462-a9e643b02c4b",
+  "win-remote-thread-injection"
+ ],
+ "Credential Access/tutto_malseclogon.evtx": [
+  "sigma-c8da0dfd-4ed0-4b68-962d-13c9c884384e",
+  "win-credential-dumping"
+ ],
+ "Defense Evasion/DE_104_system_log_cleared.evtx": [
+  "sigma-100ef69e-3327-481c-8e5c-6d80d9507556",
+  "win-event-log-cleared"
+ ],
+ "Defense Evasion/DE_1102_security_log_cleared.evtx": [
+  "sigma-d99b79d2-0a6f-4f46-ad8b-260b6e17f982",
+  "win-audit-log-cleared"
+ ],
+ "Defense Evasion/DE_BYOV_Zam64_CA_Memdump_sysmon_7_10.evtx": [
+  "sigma-5ef9853e-4d0e-4a70-846f-a9ca37d876da",
+  "sigma-9bd012ee-0dff-44d7-84a0-aa698cfd87a3",
+  "win-credential-dumping"
+ ],
+ "Defense Evasion/DE_EventLog_Service_Crashed.evtx": [
+  "win-eventlog-service-crash"
+ ],
+ "Defense Evasion/DE_Fake_ComputerAccount_4720.evtx": [
+  "sigma-7b449a5e-1db5-4dd0-a2dc-4e3a67282538",
+  "sigma-cfeed607-6aa4-4bbd-9627-b637deb723c8"
+ ],
+ "Defense Evasion/DE_KernelDebug_and_TestSigning_ON_Security_4826.evtx": [
+  "win-boot-kernel-debug-enabled",
+  "win-boot-test-signing-enabled"
+ ],
+ "Defense Evasion/DE_Powershell_CLM_Disabled_Sysmon_12.evtx": [
+  "win-powershell-clm-lockdown-removed"
+ ],
+ "Defense Evasion/DE_ProcessHerpaderping_Sysmon_11_10_1_7.evtx": [
+  "sigma-9637e8a5-7131-4f7f-bdc7-2b05d8670c43",
+  "win-process-image-tampering"
+ ],
+ "Defense Evasion/DE_UAC_Disabled_Sysmon_12_13.evtx": [
+  "sigma-48437c39-9e5f-47fb-af95-3d663c3f2919"
+ ],
+ "Defense Evasion/DE_remote_eventlog_svc_crash_byt3bl33d3r_sysmon_17_1_3.evtx": [
+  "win-eventlog-crash-after-remote-pipe"
+ ],
+ "Defense Evasion/DE_renamed_psexec_service_sysmon_17_18.evtx": [
+  "win-psexec-renamed-service-pipe"
+ ],
+ "Defense Evasion/DE_suspicious_remote_eventlog_svc_access_5145.evtx": [
+  "win-admin-share-access",
+  "win-remote-eventlog-pipe"
+ ],
+ "Defense Evasion/DE_xp_cmdshell_enabled_MSSQL_EID_15457.evtx": [
+  "sigma-d08dd86f-681e-4a00-a92c-1db218754417"
+ ],
+ "Defense Evasion/DSE_bypass_BYOV_TDL_dummydriver_sysmon_6_7_13.evtx": [
+  "sigma-72cd00d6-490c-4650-86ff-1d11f491daa1",
+  "sigma-7aaaf4b8-e47c-4295-92ee-6ed40a6f60c8",
+  "sigma-d38d2fa4-98e6-4a24-aff1-410b0c9ad177",
+  "win-unsigned-driver-loaded"
+ ],
+ "Defense Evasion/Sysmon 7  Update Session Orchestrator Dll Hijack.evtx": [
+  "sigma-b5de0c9a-6f19-43e0-af4e-55ad01f550af",
+  "win-system-process-unsigned-dll"
+ ],
+ "Defense Evasion/Sysmon 7 dllhijack_cdpsshims_CDPSvc.evtx": [
+  "win-system-process-unsigned-dll"
+ ],
+ "Defense Evasion/Sysmon_10_Evasion_Suspicious_NtOpenProcess_CallTrace.evtx": [
+  "sigma-3f3f3506-1895-401b-9cc3-e86b16e630d0"
+ ],
+ "Defense Evasion/Sysmon_12_DE_AntiForensics_MRU_DeleteKey.evtx": [
+  "sigma-3a9b8c1e-5b2e-4f7a-9d1c-2a7f3b6e1c55"
+ ],
+ "Defense Evasion/Win_4985_T1186_Process_Doppelganging.evtx": [
+  "win-txf-transaction-user-path"
+ ],
+ "Defense Evasion/apt10_jjs_sideloading_prochollowing_persist_as_service_sysmon_1_7_8_13.evtx": [
+  "sigma-16c37b52-b141-42a5-a3ea-bbe098444397",
+  "sigma-7a3b6d1f-4a2b-4f8c-9d7e-e9f8cbf21a35",
+  "sigma-f17211f1-1f24-4d0c-829f-31e28dc93cdd",
+  "win-remote-thread-injection",
+  "win-service-registry-suspicious"
+ ],
+ "Defense Evasion/de_PsScriptBlockLogging_disabled_sysmon12_13.evtx": [
+  "sigma-fecfd1a1-cc78-4313-a1ea-2ee2e8ec27a7"
+ ],
+ "Defense Evasion/de_hiding_files_via_attrib_cmdlet.evtx": [
+  "sigma-4281cb20-2994-4580-aa63-c8b86d019934"
+ ],
+ "Defense Evasion/de_portforward_netsh_rdp_sysmon_13_1.evtx": [
+  "sigma-322ed9ec-fcab-4f67-9a34-e7c6aef43614",
+  "sigma-782d6f3e-4c5d-4b8c-92a3-1d05fed72e63",
+  "sigma-a54f842a-3713-4b45-8c84-5f136fdebd3c"
+ ],
+ "Defense Evasion/de_powershell_execpolicy_changed_sysmon_13.evtx": [
+  "win-powershell-execution-policy-relaxed"
+ ],
+ "Defense Evasion/de_sysmon_13_VBA_Security_AccessVBOM.evtx": [
+  "sigma-1a5c46e9-f32f-42f7-b2bc-6e9084db7fbf"
+ ],
+ "Defense Evasion/de_unmanagedpowershell_psinject_sysmon_7_8_10.evtx": [
+  "sigma-092bc4b9-3d1d-43b4-a6b4-8c8acd83522f",
+  "sigma-a1a144b7-5c9b-4853-a559-2172be8d4a03",
+  "win-remote-thread-injection"
+ ],
+ "Defense Evasion/evasion_codeinj_odzhan_conhost_sysmon_10_1.evtx": [
+  "sigma-7dc2dedd-7603-461a-bc13-15803d132355",
+  "sigma-a24e5861-c6ca-4fde-a93c-ba9256feddf0",
+  "win-process-access-hollowing"
+ ],
+ "Defense Evasion/evasion_codeinj_odzhan_spoolsv_sysmon_10_1.evtx": [
+  "sigma-a24e5861-c6ca-4fde-a93c-ba9256feddf0",
+  "win-process-from-suspicious-path",
+  "win-spoolsv-unexpected-child"
+ ],
+ "Defense Evasion/faxhell_sysmon_7_1_18_3_bindshell_dllhijack.evtx": [
+  "sigma-828af599-4c53-4ed2-ba4a-a9f835c434ea"
+ ],
+ "Defense Evasion/meterpreter_migrate_to_explorer_sysmon_8.evtx": [
+  "win-remote-thread-injection"
+ ],
+ "Defense Evasion/process_suspend_sysmon_10_ga_800.evtx": [
+  "sigma-d0d2f720-d14f-448d-8242-51ff396a334e"
+ ],
+ "Defense Evasion/sideloading_wwlib_sysmon_7_1_11.evtx": [
+  "sigma-e2e01011-5910-4267-9c3b-4149ed5479cf"
+ ],
+ "Defense Evasion/sysmon_10_1_ppid_spoofing.evtx": [
+  "win-ppid-spoofing-handle"
+ ],
+ "Defense Evasion/sysmon_13_rdp_settings_tampering.evtx": [
+  "sigma-01aeb693-138d-49d2-9403-c4f52d7d3d62",
+  "sigma-3f6b7b62-61aa-45db-96bd-9c31b36b653c",
+  "sigma-509e84b9-a71a-40e0-834f-05470369bd1e",
+  "sigma-612e47e9-8a59-43a6-b404-f48683f45bd6",
+  "sigma-a2863fbc-d5cb-48d5-83fb-d976d4b1743b",
+  "sigma-cd5cfd80-aa5f-44c0-9c20-108c4ae12e3c",
+  "win-rdp-enabled-registry"
+ ],
+ "Defense Evasion/sysmon_2_11_evasion_timestomp_MACE.evtx": [
+  "sigma-28208707-fe31-437f-9a7f-4b1108b94d2e",
+  "sigma-2aa0a6b4-a865-495b-ab51-c28249537b75",
+  "win-timestomp-whole-second"
+ ],
+ "Discovery/4799_remote_local_groups_enumeration.evtx": [
+  "win-privileged-local-group-enumeration"
+ ],
+ "Discovery/Discovery_Remote_System_NamedPipes_Sysmon_18.evtx": [
+  "win-remote-named-pipe-enumeration"
+ ],
+ "Discovery/dicovery_4661_net_group_domain_admins_target.evtx": [
+  "sigma-35ba1d85-724d-42a3-889f-2e2362bcaf23",
+  "sigma-968eef52-9cff-4454-8992-1e74b9cbad6c"
+ ],
+ "Discovery/discovery_UEFI_Settings_rweverything_sysmon_6.evtx": [
+  "sigma-72cd00d6-490c-4650-86ff-1d11f491daa1",
+  "sigma-7aaaf4b8-e47c-4295-92ee-6ed40a6f60c8"
+ ],
+ "Discovery/discovery_bloodhound.evtx": [
+  "win-ipc-rpc-user-session-recon"
+ ],
+ "Discovery/discovery_local_user_or_group_windows_security_4799_4798.evtx": [
+  "win-privileged-local-group-enumeration"
+ ],
+ "Discovery/discovery_meterpreter_ps_cmd_process_listing_sysmon_10.evtx": [
+  "win-credential-dumping",
+  "win-process-sweep-unbacked-code"
+ ],
+ "Discovery/discovery_psloggedon.evtx": [
+  "win-ipc-rpc-user-session-recon"
+ ],
+ "Discovery/discovery_sysmon_3_Invoke_UserHunter_SourceMachine.evtx": [
+  "win-smb-connection-sweep"
+ ],
+ "Execution/Exec_sysmon_meterpreter_reversetcp_msipackage.evtx": [
+  "sigma-1e53dd56-8d83-4eb4-a43e-b790a05510aa"
+ ],
+ "Execution/Exec_via_cpl_Application_Experience_EventID_17_ControlPanelApplet.evtx": [
+  "win-pca-cpl-user-path"
+ ],
+ "Execution/Sysmon_Exec_CompiledHTML.evtx": [
+  "sigma-2c28c248-7f50-417a-9186-a85b223010ee",
+  "sigma-4782eb5a-a513-4523-a0ac-f3082b26ac5c",
+  "sigma-52cad028-0ff0-4854-8f67-d25dfcbc78b4",
+  "sigma-68c8acb4-1b60-4890-8e82-3ddf7a6dba84",
+  "sigma-9fc51a3c-81b3-4fa7-b35f-7c02cf10fd2d",
+  "sigma-f5d19838-41b5-476c-98d8-ba8af4929ee2",
+  "sigma-fff9d2b7-e11c-4a69-93d3-40ef66189767"
+ ],
+ "Execution/Sysmon_meterpreter_ReflectivePEInjection_to_notepad_.evtx": [
+  "sigma-5bb68627-3198-40ca-b458-49f973db8752",
+  "sigma-a1a144b7-5c9b-4853-a559-2172be8d4a03",
+  "sigma-a7c3d773-caef-227e-a7e7-c2f13c622329",
+  "sigma-c3a99af4-35a9-4668-879e-c09aeb4f2bdf",
+  "win-remote-thread-injection"
+ ],
+ "Execution/evasion_execution_imageload_wuauclt_lolbas.evtx": [
+  "win-system-process-unsigned-dll"
+ ],
+ "Execution/exec_driveby_cve-2018-15982_sysmon_1_10.evtx": [
+  "win-browser-spawns-shell"
+ ],
+ "Execution/exec_msxsl_xsl_sysmon_1_7.evtx": [
+  "sigma-9e50a8b3-dd05-4eb8-9153-bdb6b79d50b0"
+ ],
+ "Execution/exec_persist_rundll32_mshta_scheduledtask_sysmon_1_3_11.evtx": [
+  "sigma-2c28c248-7f50-417a-9186-a85b223010ee",
+  "sigma-3a6586ad-127a-4d3b-a677-1e6eacdf8fde",
+  "sigma-4782eb5a-a513-4523-a0ac-f3082b26ac5c",
+  "sigma-92626ddd-662c-49e3-ac59-f6535f12d189",
+  "sigma-b98d0db6-511d-45de-ad02-e82a98729620",
+  "sigma-c3a99af4-35a9-4668-879e-c09aeb4f2bdf",
+  "sigma-cc7abbd0-762b-41e3-8a26-57ad50d2eea3",
+  "sigma-f2c64357-b1d2-41b7-849f-34d2682c0fad",
+  "win-sysmon-network-lolbin"
+ ],
+ "Execution/exec_sysmon_1_11_lolbin_rundll32_openurl_FileProtocolHandler.evtx": [
+  "sigma-3a6586ad-127a-4d3b-a677-1e6eacdf8fde",
+  "sigma-e32f92d1-523e-49c3-9374-bdb13b46a3ba",
+  "sigma-e593cf51-88db-4ee1-b920-37e89012a3c9"
+ ],
+ "Execution/exec_sysmon_1_11_lolbin_rundll32_shdocvw_openurl.evtx": [
+  "sigma-e593cf51-88db-4ee1-b920-37e89012a3c9"
+ ],
+ "Execution/exec_sysmon_1_11_lolbin_rundll32_zipfldr_RouteTheCall.evtx": [
+  "sigma-e593cf51-88db-4ee1-b920-37e89012a3c9"
+ ],
+ "Execution/exec_sysmon_1_7_jscript9_defense_evasion.evtx": [
+  "sigma-867356ee-9352-41c9-a8f2-1be690d78216",
+  "sigma-b236190c-1c61-41e9-84b3-3fe03f6d76b0",
+  "win-bits-job-notify-command",
+  "win-renamed-windows-lolbin",
+  "win-script-engine-selected-by-clsid"
+ ],
+ "Execution/exec_sysmon_1_ftp.evtx": [
+  "sigma-06b401f4-107c-4ff9-947f-9ec1e7649f1e"
+ ],
+ "Execution/exec_sysmon_1_lolbin_pcalua.evtx": [
+  "sigma-0955e4e1-c281-4fb9-9ee1-5ee7b4b754d2"
+ ],
+ "Execution/exec_sysmon_1_lolbin_renamed_regsvr32_scrobj.evtx": [
+  "win-renamed-windows-lolbin"
+ ],
+ "Execution/exec_sysmon_1_lolbin_rundll32_advpack_RegisterOCX.evtx": [
+  "sigma-e593cf51-88db-4ee1-b920-37e89012a3c9"
+ ],
+ "Execution/exec_sysmon_1_rundll32_pcwutl_LaunchApplication.evtx": [
+  "sigma-9386d78a-7207-4048-9c9f-a93a7c2d1c05",
+  "sigma-e593cf51-88db-4ee1-b920-37e89012a3c9"
+ ],
+ "Execution/exec_sysmon_lobin_regsvr32_sct.evtx": [
+  "sigma-4b991083-3d0e-44ce-8fc4-b254025d8d4b",
+  "sigma-867356ee-9352-41c9-a8f2-1be690d78216",
+  "sigma-b236190c-1c61-41e9-84b3-3fe03f6d76b0",
+  "sigma-c7e91a02-d771-4a6d-a700-42587e0b1095",
+  "win-sysmon-network-lolbin"
+ ],
+ "Execution/exec_wmic_xsl_internet_sysmon_3_1_11.evtx": [
+  "sigma-8d63dadf-b91b-4187-87b6-34a1114577ea",
+  "win-sysmon-network-lolbin"
+ ],
+ "Execution/execution_evasion_visual_studio_prebuild_event.evtx": [
+  "sigma-f4bbd493-b796-416e-bbf2-121235348529",
+  "win-msbuild-exec-task-script-host"
+ ],
+ "Execution/revshell_cmd_svchost_sysmon_1.evtx": [
+  "win-service-host-interactive-shell"
+ ],
+ "Execution/rogue_msi_url_1040_1042.evtx": [
+  "sigma-5594e67a-7f92-4a04-b65d-1a42fd824a60"
+ ],
+ "Execution/susp_explorer_exec.evtx": [
+  "sigma-1228c958-e64e-4e71-92ad-7d429f4138ba",
+  "sigma-949f1ffb-6e85-4f00-ae1e-c3c5b190d605",
+  "sigma-e32d4572-9826-4738-b651-95fa63747e8a"
+ ],
+ "Execution/susp_explorer_exec_root_cmdline_@rimpq_@CyberRaiju.evtx": [
+  "sigma-949f1ffb-6e85-4f00-ae1e-c3c5b190d605"
+ ],
+ "Execution/sysmon_11_1_lolbas_downldr_desktopimgdownldr.evtx": [
+  "sigma-bb58aa4a-b80b-415a-a2c0-2f65a4c81009",
+  "sigma-fc4f4817-0c53-4683-a4ee-b17a64bc1039"
+ ],
+ "Execution/sysmon_1_11_rundll32_cpl_ostap.evtx": [
+  "sigma-1228c958-e64e-4e71-92ad-7d429f4138ba",
+  "sigma-99b7460d-c9f1-40d7-a316-1f36f61d52ee"
+ ],
+ "Execution/sysmon_exec_from_vss_persistence.evtx": [
+  "sigma-3c89a1e8-0fba-449e-8f1b-8409d6267ec8",
+  "sigma-526be59f-a573-4eea-b5f7-f0973207634d",
+  "sigma-b17ea6f7-6e90-447e-a799-e6c0a493d6ce",
+  "sigma-f57f8d16-1f39-4dcb-a604-6c73d9b54b3d"
+ ],
+ "Execution/sysmon_lolbas_rundll32_zipfldr_routethecall_shell.evtx": [
+  "sigma-1228c958-e64e-4e71-92ad-7d429f4138ba",
+  "sigma-e32d4572-9826-4738-b651-95fa63747e8a",
+  "sigma-e593cf51-88db-4ee1-b920-37e89012a3c9"
+ ],
+ "Execution/sysmon_lolbin_bohops_vshadow_exec.evtx": [
+  "sigma-d7c75059-2901-4578-b209-8837fd31c6a8"
+ ],
+ "Execution/sysmon_mshta_sharpshooter_stageless_meterpreter.evtx": [
+  "sigma-1228c958-e64e-4e71-92ad-7d429f4138ba",
+  "sigma-cea72823-df4d-4567-950c-0b579eaf0846"
+ ],
+ "Execution/sysmon_vbs_sharpshooter_stageless_meterpreter.evtx": [
+  "sigma-1228c958-e64e-4e71-92ad-7d429f4138ba",
+  "sigma-cea72823-df4d-4567-950c-0b579eaf0846"
+ ],
+ "Execution/sysmon_zipexec.evtx": [
+  "sigma-36480ae1-a1cb-4eaa-a0d6-29801d7e9142",
+  "sigma-90dcf730-1b71-4ae7-9ffc-6fcf62bd0132",
+  "sigma-b1ec66c6-f4d1-4b5c-96dd-af28ccae7727"
+ ],
+ "Execution/temp_scheduled_task_4698_4699.evtx": [
+  "win-scheduled-task-suspicious-content"
+ ],
+ "Execution/windows_bits_4_59_60_lolbas desktopimgdownldr.evtx": [
+  "win-bits-download"
+ ],
+ "Lateral Movement/ImpersonateUser-via local Pass The Hash Sysmon and Security.evtx": [
+  "sigma-52d8b0c6-53d6-439a-9e41-52ad442ad9ad",
+  "sigma-8eef149c-bd26-49f2-9e5a-9b00e3af499b",
+  "win-pass-the-hash-hint"
+ ],
+ "Lateral Movement/LM_4624_mimikatz_sekurlsa_pth_source_machine.evtx": [
+  "sigma-192a0330-c20b-4356-90b6-7b7049ae0b87",
+  "sigma-8eef149c-bd26-49f2-9e5a-9b00e3af499b",
+  "sigma-def8b624-e08f-4ae1-8612-1ba21190da6b",
+  "win-pass-the-hash-hint"
+ ],
+ "Lateral Movement/LM_5145_Remote_FileCopy.evtx": [
+  "win-admin-share-access",
+  "win-executable-written-to-drive-share"
+ ],
+ "Lateral Movement/LM_DCOM_MSHTA_LethalHTA_Sysmon_3_1.evtx": [
+  "sigma-ed5d72a6-f8f4-479d-ba79-02f6a80d7471"
+ ],
+ "Lateral Movement/LM_ImageLoad_NFSH_Sysmon_7.evtx": [
+  "sigma-857c8db3-c89b-42fb-882b-f681c7cf4da2"
+ ],
+ "Lateral Movement/LM_NewShare_Added_Sysmon_12_13.evtx": [
+  "win-network-share-created"
+ ],
+ "Lateral Movement/LM_PowershellRemoting_sysmon_1_wsmprovhost.evtx": [
+  "sigma-734f8d9b-42b8-41b2-bcf5-abaf49d5a3c8"
+ ],
+ "Lateral Movement/LM_REMCOM_5145_TargetHost.evtx": [
+  "sigma-586a8d6b-6bfe-4ad9-9d78-888cd2fe50c3",
+  "win-admin-share-access",
+  "win-psexec-pattern"
+ ],
+ "Lateral Movement/LM_Remote_Service01_5145_svcctl.evtx": [
+  "sigma-586a8d6b-6bfe-4ad9-9d78-888cd2fe50c3",
+  "win-admin-share-access"
+ ],
+ "Lateral Movement/LM_Remote_Service02_7045.evtx": [
+  "win-service-installed-any",
+  "win-service-installed-suspicious"
+ ],
+ "Lateral Movement/LM_ScheduledTask_ATSVC_target_host.evtx": [
+  "sigma-f6de6525-4509-495a-8a82-1f8b0ed73a00",
+  "win-admin-share-access",
+  "win-scheduled-task-created",
+  "win-scheduled-task-suspicious-content"
+ ],
+ "Lateral Movement/LM_WMIC_4648_rpcss.evtx": [
+  "sigma-941e5c45-cda7-4864-8cea-bbb7458d194a",
+  "win-explicit-credentials-4648"
+ ],
+ "Lateral Movement/LM_WMI_4624_4688_TargetHost.evtx": [
+  "sigma-d21374ff-f574-44a7-9998-4a8c8bf33d7d"
+ ],
+ "Lateral Movement/LM_add_new_namedpipe_tp_nullsession_registry_turla_like_ttp.evtx": [
+  "win-null-session-pipes-changed"
+ ],
+ "Lateral Movement/LM_dcom_shwnd_shbrwnd_mmc20_failed_traces_system_10016.evtx": [
+  "win-dcom-lateral-denied"
+ ],
+ "Lateral Movement/LM_impacket_docmexec_mmc_sysmon_01.evtx": [
+  "sigma-05a2ab7e-ce11-4b63-86db-ab32e763e11d",
+  "sigma-10c14723-61c7-4c75-92ca-9af245723ad2",
+  "sigma-ab9e3b40-0c85-4ba1-aede-455d226fd124",
+  "sigma-f1f3bf22-deb2-418d-8cce-e1a45e46a5bd"
+ ],
+ "Lateral Movement/LM_regsvc_DirectoryServiceExtPt_Lsass_NTDS_AdamXpn.evtx": [
+  "sigma-b3503044-60ce-4bf4-bbcb-e3db98788823"
+ ],
+ "Lateral Movement/LM_renamed_psexecsvc_5145.evtx": [
+  "sigma-52d8b0c6-53d6-439a-9e41-52ad442ad9ad",
+  "sigma-c462f537-a1e3-41a6-b5fc-b2c2cef9bf82",
+  "win-psexec-pattern"
+ ],
+ "Lateral Movement/LM_sysmon_1_12_13_3_tsclient_SharpRdp.evtx": [
+  "win-tsclient-execution"
+ ],
+ "Lateral Movement/LM_sysmon_3_12_13_1_SharpRDP.evtx": [
+  "win-rdp-connect-then-run-dialog"
+ ],
+ "Lateral Movement/LM_sysmon_3_DCOM_ShellBrowserWindow_ShellWindows.evtx": [
+  "win-unexpected-inbound-listener"
+ ],
+ "Lateral Movement/LM_sysmon_psexec_smb_meterpreter.evtx": [
+  "sigma-4a5f5a5e-ac01-474b-9b4e-d61298c9df1d",
+  "sigma-536e2947-3729-478c-9903-745aaffe60d2",
+  "sigma-5a6b7c8d-9e0f-1a2b-3c4d-5e6f7a8b9c0d",
+  "sigma-61a7697c-cb79-42a8-a2ff-5f0cdfae0130",
+  "sigma-98767d61-b2e8-4d71-b661-e36783ee24c1",
+  "sigma-d75d6b6b-adb9-48f7-824b-ac2e786efe1f",
+  "sigma-d7bcd677-645d-4691-a8d4-7a5602b780d1",
+  "sigma-e32d4572-9826-4738-b651-95fa63747e8a"
+ ],
+ "Lateral Movement/LM_sysmon_remote_task_src_powershell.evtx": [
+  "win-script-host-remote-task-rpc"
+ ],
+ "Lateral Movement/LM_tsclient_startup_folder.evtx": [
+  "sigma-2aa0a6b4-a865-495b-ab51-c28249537b75",
+  "sigma-52753ea4-b3a0-4365-910d-36cff487b789"
+ ],
+ "Lateral Movement/LM_typical_IIS_webshell_sysmon_1_10_traces.evtx": [
+  "sigma-8202070f-edeb-4d31-a010-a26c72ac5600"
+ ],
+ "Lateral Movement/LM_winrm_exec_sysmon_1_winrshost.evtx": [
+  "sigma-79df3f68-dccb-48e9-9171-b75cbc37c51d"
+ ],
+ "Lateral Movement/LM_winrm_target_wrmlogs_91_wsmanShellStarted_poorLog.evtx": [
+  "win-winrm-remote-shell"
+ ],
+ "Lateral Movement/LM_wmi_PoisonHandler_Mr-Un1k0d3r_sysmon_1_13.evtx": [
+  "sigma-8a582fe2-0882-4b89-a82a-da6b2dc32937",
+  "sigma-e593cf51-88db-4ee1-b920-37e89012a3c9"
+ ],
+ "Lateral Movement/LM_wmiexec_impacket_sysmon_whoami.evtx": [
+  "sigma-058f4380-962d-40a5-afce-50207d36d7e2",
+  "sigma-10c14723-61c7-4c75-92ca-9af245723ad2",
+  "sigma-ab9e3b40-0c85-4ba1-aede-455d226fd124"
+ ],
+ "Lateral Movement/LM_xp_cmdshell_MSSQL_Events.evtx": [
+  "sigma-7f103213-a04e-4d59-8261-213dddf22314",
+  "sigma-d08dd86f-681e-4a00-a92c-1db218754417"
+ ],
+ "Lateral Movement/MSSQL_15281_xp_cmdshell_exec_failed_attempt.evtx": [
+  "win-mssql-xpcmdshell-blocked"
+ ],
+ "Lateral Movement/RemotePowerShell_MS_Windows-Remote_Management_EventID_169.evtx": [
+  "win-winrm-remote-shell"
+ ],
+ "Lateral Movement/dfir_rdpsharp_target_RdpCoreTs_168_68_131.evtx": [
+  "win-rdp-headless-client"
+ ],
+ "Lateral Movement/lateral_movement_startup_3_11.evtx": [
+  "sigma-2aa0a6b4-a865-495b-ab51-c28249537b75"
+ ],
+ "Lateral Movement/lm_remote_registry_sysmon_1_13_3.evtx": [
+  "sigma-20f0ee37-5942-4e45-b7d5-c5b5db9df5cd",
+  "win-registry-run-key"
+ ],
+ "Lateral Movement/lm_sysmon_18_remshell_over_namedpipe.evtx": [
+  "sigma-fe3ac066-98bb-432a-b1e7-a5229cb39d4a"
+ ],
+ "Lateral Movement/net_share_drive_5142.evtx": [
+  "win-share-on-system-folder"
+ ],
+ "Lateral Movement/powercat_revShell_sysmon_1_3.evtx": [
+  "sigma-0ef56343-059e-4cb6-adc1-4c3c967c5e46",
+  "sigma-502b42de-4306-40b4-9596-6f590c81f073",
+  "win-unexpected-inbound-listener"
+ ],
+ "Lateral Movement/remote task update 4624 4702 same logonid.evtx": [
+  "sigma-614cf376-6651-47c4-9dcc-6b9527f749f4",
+  "win-scheduled-task-created",
+  "win-scheduled-task-suspicious-content"
+ ],
+ "Lateral Movement/remote_file_copy_system_proc_file_write_sysmon_11.evtx": [
+  "sigma-259e5a6a-b8d2-4c38-86e2-26c5e651361d",
+  "sigma-fdfcbd78-48f1-4a4b-90ac-d82241e368c5"
+ ],
+ "Lateral Movement/sharprdp_sysmon_7_mstscax.dll.evtx": [
+  "win-rdp-activex-unusual-host"
+ ],
+ "Lateral Movement/smb_bi_auth_conn_spoolsample.evtx": [
+  "win-smb-coerced-connect-back"
+ ],
+ "Lateral Movement/smbmap_upload_exec_sysmon.evtx": [
+  "sigma-058f4380-962d-40a5-afce-50207d36d7e2",
+  "sigma-10c14723-61c7-4c75-92ca-9af245723ad2",
+  "sigma-5cdb711b-5740-4fb2-ba88-f7945027afac",
+  "sigma-8a582fe2-0882-4b89-a82a-da6b2dc32937"
+ ],
+ "Lateral Movement/spoolsample_5145.evtx": [
+  "sigma-214e8f95-100a-4e04-bb31-ef6cba8ce07e"
+ ],
+ "Lateral Movement/sysmon_1_exec_via_sql_xpcmdshell.evtx": [
+  "sigma-869b9ca7-9ea2-4a5a-8325-e80e62f75445"
+ ],
+ "Lateral Movement/wmi_remote_registry_sysmon.evtx": [
+  "sigma-20f0ee37-5942-4e45-b7d5-c5b5db9df5cd",
+  "win-registry-run-key"
+ ],
+ "Other/emotet/exec_emotet_ps_4104.evtx": [
+  "win-powershell-suspicious-scriptblock"
+ ],
+ "Other/emotet/exec_emotet_ps_800_get-item.evtx": [
+  "win-ps800-download-cradle"
+ ],
+ "Other/emotet/exec_emotet_ps_800_invoke-item.evtx": [
+  "win-ps800-download-cradle"
+ ],
+ "Other/emotet/exec_emotet_ps_800_new-item.evtx": [
+  "win-ps800-download-cradle"
+ ],
+ "Other/emotet/exec_emotet_ps_800_new-object.evtx": [
+  "win-ps800-download-cradle"
+ ],
+ "Other/emotet/exec_emotet_sysmon_1.evtx": [
+  "win-process-from-suspicious-path"
+ ],
+ "Other/maldoc_mshta_via_shellbrowserwind_rundll32.evtx": [
+  "sigma-1228c958-e64e-4e71-92ad-7d429f4138ba",
+  "sigma-1bf0ba65-9a39-42a2-9271-31d31bf2f0bf",
+  "sigma-4aa6040b-3f28-44e3-a769-9208e5feb5ec",
+  "sigma-5a6b7c8d-9e0f-1a2b-3c4d-5e6f7a8b9c0d",
+  "sigma-bfd34392-c591-4009-b938-9fd985a28b85",
+  "sigma-c3a99af4-35a9-4668-879e-c09aeb4f2bdf",
+  "sigma-cea72823-df4d-4567-950c-0b579eaf0846"
+ ],
+ "Other/rdpcorets_148_mst120_bluekeep_rpdscan_full.evtx": [
+  "win-rdp-bluekeep-ms-t120"
+ ],
+ "Persistence/DACL_DCSync_Right_Powerview_ Add-DomainObjectAcl.evtx": [
+  "sigma-2c99737c-585d-4431-b61a-c911d86ff32f"
+ ],
+ "Persistence/Network_Service_Guest_added_to_admins_4732.evtx": [
+  "sigma-c265cf08-3f99-46c1-8d59-328247057d57",
+  "win-user-added-privileged-group"
+ ],
+ "Persistence/Persistence_Shime_Microsoft-Windows-Application-Experience_Program-Telemetry_500.evtx": [
+  "win-shim-accessibility-binary"
+ ],
+ "Persistence/Persistence_Winsock_Catalog Change EventId_1.evtx": [
+  "win-winsock-lsp-installed"
+ ],
+ "Persistence/evasion_persis_hidden_run_keyvalue_sysmon_13.evtx": [
+  "sigma-20f0ee37-5942-4e45-b7d5-c5b5db9df5cd",
+  "win-registry-run-key"
+ ],
+ "Persistence/persist_bitsadmin_Microsoft-Windows-Bits-Client-Operational.evtx": [
+  "win-bits-download"
+ ],
+ "Persistence/persist_firefox_comhijack_sysmon_11_13_7_1.evtx": [
+  "sigma-9637e8a5-7131-4f7f-bdc7-2b05d8670c43",
+  "win-com-server-suspicious-path"
+ ],
+ "Persistence/persist_turla_outlook_backdoor_comhijack.evtx": [
+  "sigma-9b0f8a61-91b2-464f-aceb-0527e0a45020"
+ ],
+ "Persistence/persist_valid_account_guest_rid_hijack.evtx": [
+  "win-sam-written-outside-lsass"
+ ],
+ "Persistence/persistence_SilentProcessExit_ImageHijack_sysmon_13_1.evtx": [
+  "sigma-36803969-5421-41ec-b92f-8500f79c23b0",
+  "sigma-cbf93e5d-ca6c-4722-8bea-e9119007c248",
+  "win-registry-run-key"
+ ],
+ "Persistence/persistence_accessibility_features_osk_sysmon1.evtx": [
+  "sigma-79ce34ca-af29-4d0e-b832-fc1b377020db",
+  "win-accessibility-binary-shell"
+ ],
+ "Persistence/persistence_hidden_local_account_sysmon.evtx": [
+  "sigma-460479f3-80b7-42da-9c43-2cc1d54dbccd"
+ ],
+ "Persistence/persistence_pendingGPO_sysmon_13.evtx": [
+  "win-ieak-pending-gpo-persistence"
+ ],
+ "Persistence/persistence_security_dcshadow_4742.evtx": [
+  "sigma-17d619c1-e020-4347-957e-1d1207455c93",
+  "sigma-32e19d25-4aed-4860-a55a-be99cb0bf7ed"
+ ],
+ "Persistence/persistence_startup_UserShellStartup_Folder_Changed_sysmon_13.evtx": [
+  "sigma-9c226817-8dc9-46c2-a58d-66655aafd7dc"
+ ],
+ "Persistence/persistence_sysmon_11_13_1_shime_appfix.evtx": [
+  "sigma-517490a7-115a-48c6-8862-1a481504d5a8",
+  "sigma-79ce34ca-af29-4d0e-b832-fc1b377020db",
+  "sigma-dfb5b4e8-91d0-4291-b40a-e3b0d3942c45",
+  "sigma-ee63c85c-6d51-4d12-ad09-04e25877a947"
+ ],
+ "Persistence/sysmon_13_1_persistence_via_winlogon_shell.evtx": [
+  "sigma-cbf93e5d-ca6c-4722-8bea-e9119007c248",
+  "win-registry-run-key"
+ ],
+ "Persistence/sysmon_1_persist_bitsjob_SetNotifyCmdLine.evtx": [
+  "sigma-867356ee-9352-41c9-a8f2-1be690d78216",
+  "sigma-b236190c-1c61-41e9-84b3-3fe03f6d76b0",
+  "sigma-c7e91a02-d771-4a6d-a700-42587e0b1095",
+  "win-bits-job-notify-command",
+  "win-sysmon-network-lolbin"
+ ],
+ "Persistence/sysmon_1_smss_child_proc_bootexecute_setupexecute.evtx": [
+  "sigma-d522eca2-2973-4391-a3e0-ef0374321dae"
+ ],
+ "Persistence/sysmon_20_21_1_CommandLineEventConsumer.evtx": [
+  "sigma-0f06a3a5-6a09-413f-8743-e6cf35561297",
+  "win-wmi-persistence"
+ ],
+ "Persistence/sysmon_local_account_creation_and_added_admingroup_12_13.evtx": [
+  "win-sam-local-account-created",
+  "win-sam-privileged-group-changed"
+ ],
+ "Persistence/wmighost_sysmon_20_21_1.evtx": [
+  "sigma-0f06a3a5-6a09-413f-8743-e6cf35561297",
+  "sigma-ec1d5e28-8f3b-4188-a6f8-6e8df81dc28e",
+  "sigma-fe21810c-2a8c-478f-8dd3-5a287fb2a0e0",
+  "win-wmi-persistence"
+ ],
+ "Privilege Escalation/4624 LT3 AnonymousLogon Localhost - JuicyPotato.evtx": [
+  "sigma-16f5d8ca-44bd-47c8-acbe-6fc95a16c12f"
+ ],
+ "Privilege Escalation/4765_sidhistory_add_t1178.evtx": [
+  "sigma-2632954e-db1c-49cb-9936-67d1ef1d17d2"
+ ],
+ "Privilege Escalation/CVE-2020-0796_SMBV3Ghost_LocalPrivEsc_Sysmon_3_1_10.evtx": [
+  "sigma-09706624-b7f6-455d-9d02-adee024cee1d",
+  "sigma-d522eca2-2973-4391-a3e0-ef0374321dae"
+ ],
+ "Privilege Escalation/EfsPotato_sysmon_17_18_privesc_seimpersonate_to_system.evtx": [
+  "sigma-637f689e-b4a5-4a86-be0e-0100a0a33ba2"
+ ],
+ "Privilege Escalation/Invoke_TokenDuplication_UAC_Bypass4624.evtx": [
+  "sigma-192a0330-c20b-4356-90b6-7b7049ae0b87",
+  "sigma-8eef149c-bd26-49f2-9e5a-9b00e3af499b",
+  "sigma-def8b624-e08f-4ae1-8612-1ba21190da6b",
+  "win-pass-the-hash-hint"
+ ],
+ "Privilege Escalation/NTLM2SelfRelay-med0x2e-security_4624_4688.evtx": [
+  "sigma-d21374ff-f574-44a7-9998-4a8c8bf33d7d"
+ ],
+ "Privilege Escalation/PrivEsc_CVE-2020-1313_Sysmon_13_UScheduler_Cmdline.evtx": [
+  "win-update-orchestrator-rogue-command"
+ ],
+ "Privilege Escalation/PrivEsc_Imperson_NetSvc_to_Sys_Decoder_Sysmon_1_17_18.evtx": [
+  "sigma-590a5f4c-6c8c-4f10-8307-89afe9453a9d",
+  "sigma-79ce34ca-af29-4d0e-b832-fc1b377020db"
+ ],
+ "Privilege Escalation/PrivEsc_NetSvc_SessionToken_Retrival_via_localSMB_Auth_5145.evtx": [
+  "sigma-52d8b0c6-53d6-439a-9e41-52ad442ad9ad",
+  "win-service-account-loopback-pipe"
+ ],
+ "Privilege Escalation/PrivEsc_SeImpersonatePriv_enabled_back_for_upnp_localsvc_4698.evtx": [
+  "win-scheduled-task-created",
+  "win-scheduled-task-suspicious-content"
+ ],
+ "Privilege Escalation/RogueWinRM.evtx": [
+  "sigma-590a5f4c-6c8c-4f10-8307-89afe9453a9d",
+  "sigma-79ce34ca-af29-4d0e-b832-fc1b377020db",
+  "win-unexpected-inbound-listener"
+ ],
+ "Privilege Escalation/Runas_4624_4648_Webshell_CreateProcessAsUserA.evtx": [
+  "win-explicit-credentials-4648",
+  "win-web-worker-admin-logon"
+ ],
+ "Privilege Escalation/Sysmon_13_1_UACBypass_SDCLTBypass.evtx": [
+  "sigma-da2738f2-fadb-4394-afa7-0a0674885afa"
+ ],
+ "Privilege Escalation/Sysmon_13_1_UAC_Bypass_EventVwrBypass.evtx": [
+  "sigma-674202d0-b22a-4af4-ae5f-2eda1f3da1af",
+  "sigma-be344333-921d-4c4d-8bb8-e584cf584780"
+ ],
+ "Privilege Escalation/Sysmon_UACME_22.evtx": [
+  "sigma-1ca6bd18-0ba0-44ca-851c-92ed89a61085",
+  "sigma-6360757a-d460-456c-8b13-74cf0e60cceb",
+  "sigma-d38d2fa4-98e6-4a24-aff1-410b0c9ad177"
+ ],
+ "Privilege Escalation/Sysmon_UACME_23.evtx": [
+  "sigma-a743ceba-c771-4d75-97eb-8a90f7f4844c",
+  "sigma-d38d2fa4-98e6-4a24-aff1-410b0c9ad177"
+ ],
+ "Privilege Escalation/Sysmon_UACME_30.evtx": [
+  "sigma-4b991083-3d0e-44ce-8fc4-b254025d8d4b",
+  "sigma-6b98b92b-4f00-4f62-b4fe-4d1920215771",
+  "sigma-d38d2fa4-98e6-4a24-aff1-410b0c9ad177"
+ ],
+ "Privilege Escalation/Sysmon_UACME_32.evtx": [
+  "sigma-68578b43-65df-4f81-9a9b-92f32711a951",
+  "sigma-d38d2fa4-98e6-4a24-aff1-410b0c9ad177"
+ ],
+ "Privilege Escalation/Sysmon_UACME_33.evtx": [
+  "sigma-152f3630-77c1-4284-bcc0-4cc68ab2f6e7",
+  "sigma-46dd5308-4572-4d12-aa43-8938f0184d4f",
+  "sigma-7f741dcf-fc22-4759-87b4-9ae8376676a2",
+  "sigma-d38d2fa4-98e6-4a24-aff1-410b0c9ad177"
+ ],
+ "Privilege Escalation/Sysmon_UACME_34.evtx": [
+  "sigma-724ea201-6514-4f38-9739-e5973c34f49a",
+  "sigma-b697e69c-746f-4a86-9f59-7bfff8eab881",
+  "sigma-d38d2fa4-98e6-4a24-aff1-410b0c9ad177"
+ ],
+ "Privilege Escalation/Sysmon_UACME_36_FileCreate.evtx": [
+  "sigma-39ed3c80-e6a1-431b-9df3-911ac53d08a7",
+  "sigma-d38d2fa4-98e6-4a24-aff1-410b0c9ad177"
+ ],
+ "Privilege Escalation/Sysmon_UACME_37_FileCreate.evtx": [
+  "sigma-39ed3c80-e6a1-431b-9df3-911ac53d08a7",
+  "sigma-d38d2fa4-98e6-4a24-aff1-410b0c9ad177"
+ ],
+ "Privilege Escalation/Sysmon_UACME_38.evtx": [
+  "sigma-d38d2fa4-98e6-4a24-aff1-410b0c9ad177",
+  "sigma-e52cb31c-10ed-4aea-bcb7-593c9f4a315b"
+ ],
+ "Privilege Escalation/Sysmon_UACME_39.evtx": [
+  "sigma-93a19907-d4f9-4deb-9f91-aac4692776a6",
+  "sigma-d38d2fa4-98e6-4a24-aff1-410b0c9ad177"
+ ],
+ "Privilege Escalation/Sysmon_UACME_41.evtx": [
+  "sigma-49f2f17b-b4c8-4172-a68b-d5bf95d05130",
+  "sigma-4b60e6f2-bf39-47b4-b4ea-398e33cfe253",
+  "sigma-d38d2fa4-98e6-4a24-aff1-410b0c9ad177"
+ ],
+ "Privilege Escalation/Sysmon_UACME_43.evtx": [
+  "sigma-49f2f17b-b4c8-4172-a68b-d5bf95d05130",
+  "sigma-4b60e6f2-bf39-47b4-b4ea-398e33cfe253",
+  "sigma-d38d2fa4-98e6-4a24-aff1-410b0c9ad177"
+ ],
+ "Privilege Escalation/Sysmon_UACME_45.evtx": [
+  "sigma-152f3630-77c1-4284-bcc0-4cc68ab2f6e7",
+  "sigma-503d581c-7df0-4bbe-b9be-5840c0ecc1fc",
+  "sigma-d38d2fa4-98e6-4a24-aff1-410b0c9ad177"
+ ],
+ "Privilege Escalation/Sysmon_UACME_53.evtx": [
+  "sigma-40f9af16-589d-4984-b78d-8c2aec023197",
+  "sigma-46dd5308-4572-4d12-aa43-8938f0184d4f",
+  "sigma-d38d2fa4-98e6-4a24-aff1-410b0c9ad177",
+  "sigma-da2738f2-fadb-4394-afa7-0a0674885afa"
+ ],
+ "Privilege Escalation/Sysmon_UACME_54.evtx": [
+  "sigma-d38d2fa4-98e6-4a24-aff1-410b0c9ad177"
+ ],
+ "Privilege Escalation/Sysmon_UACME_56.evtx": [
+  "sigma-46dd5308-4572-4d12-aa43-8938f0184d4f",
+  "sigma-89a9a0e0-f61a-42e5-8957-b1479565a658",
+  "sigma-d38d2fa4-98e6-4a24-aff1-410b0c9ad177",
+  "sigma-d797268e-28a9-49a7-b9a8-2f5039011c5c"
+ ],
+ "Privilege Escalation/Sysmon_UACME_63.evtx": [
+  "sigma-05a2ab7e-ce11-4b63-86db-ab32e763e11d",
+  "sigma-e52cb31c-10ed-4aea-bcb7-593c9f4a315b"
+ ],
+ "Privilege Escalation/Sysmon_UACME_64.evtx": [
+  "sigma-80fc36aa-945e-4181-89f2-2f907ab6775d",
+  "sigma-bdd8157d-8e85-4397-bb82-f06cc9c71dbb",
+  "sigma-d38d2fa4-98e6-4a24-aff1-410b0c9ad177"
+ ],
+ "Privilege Escalation/Sysmon_uacme_58.evtx": [
+  "sigma-4b60e6f2-bf39-47b4-b4ea-398e33cfe253",
+  "sigma-724ea201-6514-4f38-9739-e5973c34f49a",
+  "sigma-966315ef-c5e1-4767-ba25-fce9c8de3660",
+  "sigma-d38d2fa4-98e6-4a24-aff1-410b0c9ad177"
+ ],
+ "Privilege Escalation/System_7045_namedpipe_privesc.evtx": [
+  "sigma-1d61f71d-59d2-479e-9562-4ff5f4ead16b",
+  "sigma-26481afe-db26-4228-b264-25a29fe6efc7",
+  "sigma-843544a7-56e0-4dcc-a44f-5cc266dd97d6",
+  "win-service-installed-suspicious"
+ ],
+ "Privilege Escalation/UACME_59_Sysmon.evtx": [
+  "sigma-3d7679bd-0c00-440c-97b0-3f204273e6c7",
+  "win-autoelevate-binary-unusual-parent"
+ ],
+ "Privilege Escalation/UACME_61_Changepk.evtx": [
+  "win-uac-bypass-user-open-command"
+ ],
+ "Privilege Escalation/eop_appcontainer_il_broker_filewrite.evtx": [
+  "sigma-b8fd0e93-ff58-4cbd-8f48-1c114e342e62"
+ ],
+ "Privilege Escalation/privesc_KrbRelayUp_windows_4624.evtx": [
+  "sigma-749c9f5e-b353-4b90-a9c1-05243357ca4b"
+ ],
+ "Privilege Escalation/privesc_registry_symlink_CVE-2020-1377.evtx": [
+  "win-registry-symbolic-link-created"
+ ],
+ "Privilege Escalation/privesc_roguepotato_sysmon_17_18.evtx": [
+  "sigma-24e3e58a-646b-4b50-adef-02ef935b9fc8",
+  "sigma-637f689e-b4a5-4a86-be0e-0100a0a33ba2"
+ ],
+ "Privilege Escalation/privesc_rotten_potato_from_webshell_metasploit_sysmon_1_8_3.evtx": [
+  "sigma-02d1d718-dd13-41af-989d-ea85c7fab93f",
+  "sigma-a1a144b7-5c9b-4853-a559-2172be8d4a03",
+  "sigma-a24e5861-c6ca-4fde-a93c-ba9256feddf0",
+  "sigma-e81528db-fc02-45e8-8e98-4e84aba1f10b",
+  "win-remote-thread-injection",
+  "win-service-account-spawns-system",
+  "win-unexpected-inbound-listener"
+ ],
+ "Privilege Escalation/privesc_seimpersonate_tosys_spoolsv_sysmon_17_18.evtx": [
+  "sigma-637f689e-b4a5-4a86-be0e-0100a0a33ba2"
+ ],
+ "Privilege Escalation/privesc_spoolfool_mahdihtm_sysmon_1_11_7_13.evtx": [
+  "win-spooler-driver-dll"
+ ],
+ "Privilege Escalation/privesc_spoolsv_spl_file_write_sysmon11.evtx": [
+  "sigma-396f6630-f3ac-44e3-bfc8-1b161bc00c4e",
+  "sigma-4b991083-3d0e-44ce-8fc4-b254025d8d4b",
+  "sigma-69bd9b97-2be2-41b6-9816-fb08757a4d1a"
+ ],
+ "Privilege Escalation/privesc_sysmon_cve_20201030_spooler.evtx": [
+  "sigma-9637e8a5-7131-4f7f-bdc7-2b05d8670c43",
+  "win-spooler-driver-dll"
+ ],
+ "Privilege Escalation/privesc_unquoted_svc_sysmon_1_11.evtx": [
+  "sigma-36480ae1-a1cb-4eaa-a0d6-29801d7e9142",
+  "sigma-8c3c76ca-8f8b-4b1d-aaf3-81aebcd367c9",
+  "sigma-d522eca2-2973-4391-a3e0-ef0374321dae"
+ ],
+ "Privilege Escalation/privexchange_dirkjan.evtx": [
+  "sigma-2c99737c-585d-4431-b61a-c911d86ff32f"
+ ],
+ "Privilege Escalation/samaccount_spoofing_CVE-2021-42287_CVE-2021-42278_DC_securitylogs.evtx": [
+  "sigma-20d96d95-5a20-4cf1-a483-f3bda8a7c037",
+  "sigma-45eb2ae2-9aa2-4c3a-99a5-6e5077655466",
+  "win-password-reset-by-other"
+ ],
+ "Privilege Escalation/security_4624_4673_token_manip.evtx": [
+  "sigma-192a0330-c20b-4356-90b6-7b7049ae0b87",
+  "sigma-8eef149c-bd26-49f2-9e5a-9b00e3af499b",
+  "sigma-def8b624-e08f-4ae1-8612-1ba21190da6b",
+  "win-pass-the-hash-hint",
+  "win-uac-bypass-token-duplication"
+ ],
+ "Privilege Escalation/sysmon_11_1_15_WScriptBypassUAC.evtx": [
+  "sigma-2c28c248-7f50-417a-9186-a85b223010ee",
+  "sigma-5a6b7c8d-9e0f-1a2b-3c4d-5e6f7a8b9c0d",
+  "sigma-c74c0390-3e20-41fd-a69a-128f0275a5ea"
+ ],
+ "Privilege Escalation/sysmon_11_1_7_uacbypass_cliconfg.evtx": [
+  "sigma-c74c0390-3e20-41fd-a69a-128f0275a5ea"
+ ],
+ "Privilege Escalation/sysmon_11_7_1_uacbypass_windirectory_mocking.evtx": [
+  "sigma-0cbe38c0-270c-41d9-ab79-6e5a9a669290",
+  "sigma-4ac47ed3-44c2-4b1f-9d51-bf46e8914126",
+  "sigma-4fc0deee-0057-4998-ab31-d24e46e0aba4",
+  "sigma-b6f91281-20aa-446a-b986-38a92813a18f"
+ ],
+ "Privilege Escalation/sysmon_13_1_12_11_perfmonUACBypass.evtx": [
+  "win-process-from-suspicious-path",
+  "win-user-systemroot-redirected"
+ ],
+ "Privilege Escalation/sysmon_13_1_compmgmtlauncherUACBypass.evtx": [
+  "sigma-674202d0-b22a-4af4-ae5f-2eda1f3da1af"
+ ],
+ "Privilege Escalation/sysmon_13_1_meterpreter_getsystem_NamedPipeImpersonation.evtx": [
+  "sigma-15619216-e993-4721-b590-4c520615a67d",
+  "sigma-9bd04a79-dabe-4f1f-a5ff-92430265c96b"
+ ],
+ "Privilege Escalation/sysmon_1_11_exec_as_system_via_schedtask.evtx": [
+  "sigma-81325ce1-be01-4250-944f-b4789644556f"
+ ],
+ "Privilege Escalation/sysmon_1_13_11_cmstp_ini_uacbypass.evtx": [
+  "sigma-49f2f17b-b4c8-4172-a68b-d5bf95d05130",
+  "sigma-4b60e6f2-bf39-47b4-b4ea-398e33cfe253",
+  "sigma-b6d235fc-1d38-4b12-adbe-325f06728f37",
+  "sigma-e66779cc-383e-4224-a3a4-267eeb585c40"
+ ],
+ "Privilege Escalation/sysmon_1_13_UACBypass_AppPath_Control.evtx": [
+  "sigma-da2738f2-fadb-4394-afa7-0a0674885afa"
+ ],
+ "Privilege Escalation/sysmon_1_7_11_mcx2prov_uacbypass.evtx": [
+  "sigma-4fc0deee-0057-4998-ab31-d24e46e0aba4",
+  "sigma-c74c0390-3e20-41fd-a69a-128f0275a5ea"
+ ],
+ "Privilege Escalation/sysmon_1_7_11_migwiz.evtx": [
+  "sigma-c74c0390-3e20-41fd-a69a-128f0275a5ea"
+ ],
+ "Privilege Escalation/sysmon_1_7_11_sysprep_uacbypass.evtx": [
+  "sigma-c74c0390-3e20-41fd-a69a-128f0275a5ea"
+ ],
+ "Privilege Escalation/sysmon_1_7_elevate_uacbypass_sysprep.evtx": [
+  "sigma-f4bbd493-b796-416e-bbf2-121235348529",
+  "win-system-process-unsigned-dll"
+ ],
+ "Privilege Escalation/sysmon_privesc_from_admin_to_system_handle_inheritance.evtx": [
+  "sigma-d522eca2-2973-4391-a3e0-ef0374321dae"
+ ],
+ "Privilege Escalation/sysmon_privesc_psexec_dwell.evtx": [
+  "sigma-41504465-5e3a-4a5b-a5b4-2a0baadd4463",
+  "sigma-7c0dcd3d-acf8-4f71-9570-f448b0034f94",
+  "sigma-fdfcbd78-48f1-4a4b-90ac-d82241e368c5"
+ ],
+ "Privilege Escalation/sysmon_uacbypass_CDSSync_schtask_hijack_byeintegrity5.evtx": [
+  "sigma-4fc0deee-0057-4998-ab31-d24e46e0aba4",
+  "sigma-966315ef-c5e1-4767-ba25-fce9c8de3660",
+  "sigma-9e9a9002-56c4-40fd-9eff-e4b09bfa5f6c"
+ ],
+ "Privilege Escalation/win10_4703_SeDebugPrivilege_enabled.evtx": [
+  "win-hacktool-privilege-enabled"
+ ],
+ "UACME_59_Sysmon.evtx": [
+  "sigma-3d7679bd-0c00-440c-97b0-3f204273e6c7",
+  "win-autoelevate-binary-unusual-parent"
+ ]
+}

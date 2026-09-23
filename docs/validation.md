@@ -72,9 +72,16 @@ chains) and the regression opens it and checks that no request uploads anything.
 Regenerate it after a parser, rule or chain change with `npm run demo:bundle` in
 `frontend/`, which writes it through the same browser path.
 
-What the harness does not cover: Windows event detection has no public ground truth
-with labelled attacks that fits a drop-in; the EVTX-ATTACK-SAMPLES archive below is the
-closest, and endpoint protection quarantined it on the development machine. Microsoft
+Windows event detection is measured on EVTX-ATTACK-SAMPLES, 278 public logs of one attack
+technique each (commit 4ceed2f): every sample was judged for whether an enabled rule
+identifies the attack it records, and the gaps were closed with parser, engine and rule
+fixes (`docs/reviews/2026-09-23-evtx-attack-samples.md`). `tools/evtx_attack_samples.py`
+parses the library, runs the rules and fails when a rule listed for a sample in
+`tests/fixtures/evtx-attack-samples/expected.json` stops firing on it; the
+`attack-samples` CI job runs it, then `frontend/src/rules/attackSamples.test.ts` runs the
+browser engine on the same rows and fails on any finding the SQL engine does not share.
+It runs in CI because endpoint protection tends to quarantine the library on a
+workstation. Microsoft
 365 detection was checked for parsing only: the Invictus IR Unified Audit Log set,
 9,608 records of real business email compromise, loads, and its inbox-rule and
 mailbox-permission rules fire. Re-run with
@@ -92,8 +99,7 @@ alters rows fails with the file, how many rows differ and the first of them, and
 generator is reported as such rather than blamed on a parser. When the change is intended,
 review it and freeze it with `tools/golden_corpus.py --write`. The corpus is also the answer a
 later parser, such as the planned in-browser one, has to agree with row by row. Public attack
-samples (EVTX-ATTACK-SAMPLES) are not part of it yet: they are to be read in CI only, since
-endpoint protection quarantines them on a workstation.
+samples are checked separately, by detection rather than by rows (see above).
 
 ## The synthetic lab
 
