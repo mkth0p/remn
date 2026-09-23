@@ -40,9 +40,20 @@ test('a public browser-only instance says where evidence goes and reads the link
   await expect(page.locator('.nav-item', { hasText: 'Events' })).toContainText('14,000')
   await expect(page.locator('.nav-item', { hasText: 'Mails' })).toContainText('1,000')
 
+  // the rules run once the last file is in; chains built before that carry no findings
+  await expect(page.getByText(/finding\(s\) from \d+ rule\(s\)/).first()).toBeVisible({ timeout: 300_000 })
   await page.getByText('Chains', { exact: true }).first().click()
   await page.getByRole('button', { name: /build chains/ }).click()
-  await expect(page.getByText(/^5 chain\(s\)/)).toBeVisible({ timeout: 180_000 })
+  // the ground truth: one chain per planted attack, each critical once its findings are attached
+  await expect(
+    page
+      .locator('.view-header .sub, h1 + .sub, .sub')
+      .filter({ hasText: /chain\(s\) ·/ })
+      .first(),
+  ).toContainText('5 chain(s) · 5 critical', { timeout: 180_000 })
+  // the five planted attack stories each give a chain; the other-tenant Alice joins none of them
+  for (const who of ['alice.martin', 'benoit.durand', 'carla.morel', 'daniel.roy', 'farah.benali']) await expect(page.locator('main').getByText(`${who}@northstar.example`).first()).toBeVisible()
+  await expect(page.locator('main').getByText('other-tenant.example')).toHaveCount(0)
 
   expect(probes, 'a page served from another host must not probe the visitor’s localhost on its own').toEqual([])
 })

@@ -527,7 +527,7 @@ def test_the_browser_sends_every_data_key_the_chain_builder_reads():
     root = Path(__file__).resolve().parents[2]
     py = (root / "backend/services/analysis/chains.py").read_text(encoding="utf-8")
     ts = (root / "frontend/src/data/chains.ts").read_text(encoding="utf-8")
-    read = set(re.findall(r'data\.get\("([^"]+)"\)', py)) | set(re.findall(r'data\["([^"]+)"\]', py))
+    read = set(re.findall(r"""data\.get\(["']([^"']+)["']\)""", py)) | set(re.findall(r"""data\[["']([^"']+)["']\]""", py))
     for group in re.findall(r"for k in \(([^)]*)\):\s*\n\s*if data\.get\(k\)", py):
         read |= set(re.findall(r'"([^"]+)"', group))
     block = ts[ts.index("export const CHAIN_DATA_KEYS") : ts.index("] as const", ts.index("export const CHAIN_DATA_KEYS"))]
