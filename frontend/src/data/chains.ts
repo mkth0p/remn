@@ -40,6 +40,8 @@ export interface Chain {
   identityLabel: string
   seed: ChainSeed
   relatedSeeds?: ChainSeed[]
+  /** authentication campaigns against the same person, in the chain's window, folded into its steps */
+  authCampaigns?: { account: string; summary: string; severity: string }[]
   steps: ChainStep[]
   start: number
   end: number

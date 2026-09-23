@@ -374,6 +374,11 @@ export function ChainsView() {
                     </span>
                   ))}
                   {(chain.relatedSeeds?.length ?? 0) > 0 && <span className="muted">+{chain.relatedSeeds!.length} related mail(s) to the same identity</span>}
+                  {chain.authCampaigns?.map((a) => (
+                    <span key={a.account + a.summary} className="muted" title={a.summary}>
+                      + password guessing against {a.account}, the same person
+                    </span>
+                  ))}
                 </div>
               </div>
               <Tabs

@@ -14,9 +14,19 @@ form an authentication campaign: at least ten failures within thirty minutes for
 same qualified account, source IP and destination. Failures alone score 50 (medium).
 A successful login after the tenth failure in that window scores 75 (high); it warrants
 investigation and does not establish that the attacker succeeded. Sporadic mistakes,
-different tenants, source IPs and destination hosts are kept separate. A campaign already
-fully represented by a mail-led chain is not duplicated. Event seeds open the event itself
-and retain their source in findings, reports and case backups.
+different tenants, source IPs and destination hosts are kept separate. Event seeds open
+the event itself and retain their source in findings, reports and case backups.
+
+A campaign against the person a mail-led chain is about, starting in that chain's window,
+joins that chain instead of standing as a second one, whatever spelling the logs use for
+the account: `NORTHSTAR\daniel.roy` in the Security log and the mail to
+`daniel.roy@northstar.example` are one person when the NetBIOS name is the first label of
+the recipient's domain (or of an internal domain), or when the case shows the two side by
+side; `OTHER\daniel.roy`, tied by the case to another organisation, is not. The campaign's
+steps replace the routine logon steps they cover, the chain is scored again, and the chain
+says which campaign it took in. This happens whether or not a rule has flagged the
+failures yet, so the chains read the same before and after a rule run. A campaign fully
+represented by a chain of another account is not duplicated.
 
 This first event-led pattern detects repeated attempts against one account. Distributed
 password spraying across many accounts or IPs needs a separate grouping pattern.

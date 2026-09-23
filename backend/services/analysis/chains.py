@@ -708,19 +708,14 @@ def build_chains(
                     s["title"] = f"{s['title']} ×{s['count']}"
             artifact_links = sum(1 for s in steps for a in s["artifacts"] if is_link(a))
             # Routine activity (logons, sign-ins, DNS, mailbox reads at weight 1, without a link to the
-            # mail or a finding) is context, not evidence: it contributes at most 3 points however long
-            # the window is, and a chain made only of it is not a chain at all.
+            # mail or a finding) is context, not evidence: a chain made only of it is not a chain at all.
             linked = {id(s) for s in steps if s["findings"] or any(is_link(a) for a in s["artifacts"])}
-            routine = [s for s in steps if s["weight"] <= 1 and id(s) not in linked]
             if not artifact_links and not any(id(s) in linked or s["weight"] >= 2 for s in steps):
                 continue
-            routine_ids = {id(s) for s in routine}
             top_seed = max((SEV_WEIGHT.get(str(f.get("severity")), 0) for f in (seed_findings or [])), default=0)
-            top_step = max((SEV_WEIGHT.get(str(f.get("severity")), 0) for s in steps for f in s["findings"]), default=0)
-            score, breakdown = score_chain(int(seed.get("risk") or 0), steps, routine_ids, artifact_links, top_seed, top_step)
+            score, breakdown, severity = _score_steps(int(seed.get("risk") or 0), steps, top_seed)
             if score < min_score:
                 continue
-            severity = "critical" if score >= 80 else "high" if score >= 55 else "medium" if score >= 35 else "low"
             ips = sorted({str(s["ipAddress"]) for s in steps if s.get("ipAddress")})
             hosts = sorted({str(s["computer"]) for s in steps if s.get("computer")})
             attacker = sorted(art["senders"])
@@ -758,6 +753,7 @@ def build_chains(
                         "attackerAddresses": sorted(set(attacker))[:10],
                         "domains": sorted(art["domains"])[:10],
                     },
+                    "_topSeed": top_seed,
                 }
             )
     # one chain per identity per 24 h: keep the best, attach the others as related seeds
@@ -770,10 +766,21 @@ def build_chains(
             continue
         kept.append(c)
     coverage = [{r for s in c["steps"] if s["source"] == "events" for r in (s.get("refs") or [s.get("id")])} for c in kept]
+    mail_led = list(kept)
     for campaign in authentication_chains(events, f_by_ref):
+        # A campaign against the person a phish reached, in that chain's window, is part of that
+        # chain's story whatever spelling the logs use for the account (CONTOSO\alice for the mail
+        # to alice@contoso.com): it joins the chain rather than standing as a second one, and the
+        # chain reads the same whether or not a rule has flagged the failures yet.
+        owner = _owner_chain(mail_led, campaign, internal, known_labels, netbios_map, before_ms, window_ms)
+        if owner is not None:
+            _absorb(owner, campaign)
+            continue
         refs = {r for s in campaign["steps"] for r in s["refs"]}
         if not any(refs <= covered for covered in coverage):
             kept.append(campaign)
+    for c in kept:
+        c.pop("_topSeed", None)
     kept.sort(key=lambda c: -c["score"])
     chains_truncated = len(kept) > max_chains
     kept = kept[:max_chains]
@@ -792,6 +799,77 @@ def build_chains(
             "chainsTruncated": int(chains_truncated),
         },
     }
+
+
+def _score_steps(seed_risk: int, steps: list[dict[str, Any]], top_seed: int) -> tuple[int, dict[str, Any], str]:
+    """Score and severity of a mail-led chain from its steps. Routine activity (logons, sign-ins,
+    DNS, mailbox reads at weight 1, without a link to the mail or a finding) is context: it
+    contributes at most 3 points however long the window is."""
+    artifact_links = sum(1 for s in steps for a in s["artifacts"] if is_link(a))
+    linked = {id(s) for s in steps if s["findings"] or any(is_link(a) for a in s["artifacts"])}
+    routine_ids = {id(s) for s in steps if s["weight"] <= 1 and id(s) not in linked}
+    top_step = max((SEV_WEIGHT.get(str(f.get("severity")), 0) for s in steps for f in s["findings"]), default=0)
+    score, breakdown = score_chain(seed_risk, steps, routine_ids, artifact_links, top_seed, top_step)
+    severity = "critical" if score >= 80 else "high" if score >= 55 else "medium" if score >= 35 else "low"
+    return score, breakdown, severity
+
+
+def _owner_chain(
+    chains: list[dict[str, Any]],
+    campaign: dict[str, Any],
+    internal: set[str],
+    known_labels: set[str],
+    netbios_map: dict[str, set[str]],
+    before_ms: int,
+    window_ms: int,
+) -> dict[str, Any] | None:
+    """The best mail-led chain of the campaign's account, resolved as the chain resolves its own
+    events (same name, same organisation), whose window the campaign starts in."""
+    user = campaign["entities"]["user"]
+    key = identity_key(user)
+    realm, kind = identity_realm(user)
+    if not key:
+        return None
+    best = None
+    for c in chains:
+        if identity_key(c["identity"]) != key or not (c["seed"]["ts"] - before_ms <= campaign["start"] <= c["seed"]["ts"] + window_ms):
+            continue
+        if not realm_matches(identity_realm(c["identity"])[0], realm, kind, internal, known_labels, netbios_map):
+            continue
+        if best is None or c["score"] > best["score"]:
+            best = c
+    return best
+
+
+def _absorb(chain: dict[str, Any], campaign: dict[str, Any]) -> None:
+    """Add a campaign's steps to a mail-led chain and score it again. A routine step (a logon, a
+    failed logon: weight 1 or less, no finding, no link to the mail) whose rows the campaign holds
+    gives way to the campaign's own step, which says what they are together; a step a finding or a
+    link made keeps its rows."""
+    campaign_rows = {r for s in campaign["steps"] for r in s["refs"]}
+
+    def routine(s: dict[str, Any]) -> bool:
+        rows = set(s.get("refs") or [s.get("id")])
+        return s["source"] == "events" and s["weight"] <= 1 and not s["findings"] and not any(is_link(a) for a in s["artifacts"]) and rows <= campaign_rows
+
+    chain["steps"] = [s for s in chain["steps"] if not routine(s)]
+    have = {r for s in chain["steps"] if s["source"] == "events" for r in (s.get("refs") or [s.get("id")])}
+    t0 = chain["seed"]["ts"]
+    for s in campaign["steps"]:
+        refs = [r for r in s["refs"] if r not in have]
+        if not refs:
+            continue
+        step = {**s, "refs": refs, "id": refs[0], "count": len(refs), "offsetMin": round((s["ts"] - t0) / 60_000, 1)}
+        if len(refs) > 1:
+            step["title"] = f"{s['title']} ×{len(refs)}"
+        chain["steps"].append(step)
+    chain["steps"].sort(key=lambda s: s["ts"])
+    chain["end"] = max(s["tsEnd"] for s in chain["steps"])
+    ents = chain["entities"]
+    ents["ips"] = sorted(set(ents["ips"]) | set(campaign["entities"]["ips"]))[:20]
+    ents["hosts"] = sorted(set(ents["hosts"]) | set(campaign["entities"]["hosts"]))[:20]
+    chain.setdefault("authCampaigns", []).append({"account": campaign["identityLabel"], "summary": campaign["summary"], "severity": campaign["severity"]})
+    chain["score"], chain["scoreBreakdown"], chain["severity"] = _score_steps(int(chain["seed"]["risk"]), chain["steps"], int(chain.get("_topSeed") or 0))
 
 
 def authentication_outcome(ev: dict[str, Any]) -> str | None:

@@ -533,3 +533,49 @@ def test_the_browser_sends_every_data_key_the_chain_builder_reads():
     block = ts[ts.index("export const CHAIN_DATA_KEYS") : ts.index("] as const", ts.index("export const CHAIN_DATA_KEYS"))]
     sent = set(re.findall(r"'([^']+)'", block))
     assert read and read <= sent, f"read by chains.py but not sent by chains.ts: {sorted(read - sent)}"
+
+
+def test_a_campaign_against_the_phished_person_joins_their_chain_rules_or_not():
+    """The mail went to alice@contoso.com and the password guesses name CONTOSO\\alice: one person,
+    one chain, before the rules run as after (a flagged failure used to be what pulled them in)."""
+    thread = "<p@evil-login.net>"
+    mails = [
+        _mail(1, -30, "Password expiry", PHISHER, [VICTIM], 90, urls=["evil-login.net"], message_id=thread),
+        _mail(2, -20, "RE: Password expiry", VICTIM, [PHISHER], 0, in_reply_to=thread),
+    ]
+    events = auth_events()
+    flagged = [
+        {
+            "ruleId": "win-brute-force",
+            "title": "Brute force",
+            "severity": "high",
+            "source": "events",
+            "refs": [e["id"] for e in events[:12]],
+            "ts": events[0]["ts"],
+        }
+    ]
+    for findings in ([], flagged):
+        chains = C.build_chains(mails, [dict(e) for e in events], findings)["chains"]
+        assert [c["identity"] for c in chains] == [VICTIM], chains
+        rows = {r for s in chains[0]["steps"] if s["source"] == "events" for r in s["refs"]}
+        assert rows == {e["id"] for e in events}
+    chain = C.build_chains(mails, [dict(e) for e in events])["chains"][0]
+    assert chain["authCampaigns"][0]["account"] == "contoso\\alice" and chain["severity"] in ("high", "critical")
+    assert "203.0.113.25" in chain["entities"]["ips"] and chain["end"] == events[-1]["ts"]
+    assert any("Successful login after repeated failures" in s["title"] for s in chain["steps"])
+
+
+def test_a_campaign_of_another_organisation_or_time_stays_its_own_chain():
+    thread = "<p@evil-login.net>"
+    mails = [
+        _mail(1, -30, "Password expiry", PHISHER, [VICTIM], 90, urls=["evil-login.net"], message_id=thread),
+        _mail(2, -20, "RE: Password expiry", VICTIM, [PHISHER], 0, in_reply_to=thread),
+    ]
+    # OTHER is seen next to other-tenant.example: OTHER\\alice is someone else
+    other = [{**e, "targetDomain": "OTHER"} for e in auth_events()] + [
+        {**_ev(4624, 50, subjectUser="alice@other-tenant.example", subjectDomain="OTHER"), "id": 999}
+    ]
+    later = [{**e, "ts": e["ts"] + 10 * 86_400_000} for e in auth_events()]
+    for events in (other, later):
+        kinds = sorted(c.get("kind") or "mail" for c in C.build_chains(mails, events)["chains"])
+        assert kinds == ["authentication", "mail"], kinds

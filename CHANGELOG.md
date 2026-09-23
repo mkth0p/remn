@@ -24,6 +24,9 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 - An import cut short by a closed or crashed tab no longer leaves rows that count twice: the
   next start removes them and the evidence says the import stopped; leaving the page while an
   import runs asks first.
+- A password-guessing campaign against the person a phish reached joins that person's chain,
+  whichever spelling the logs use for the account, before the rules run as after: the linked
+  lab reads to its five planted chains either way.
 - A report and a case that hold: times in UTC, a verdict over the whole case, confidence that
   falls when a file was not read in full or the rules are behind, a valid STIX export, AI
   triage that proposes rather than decides, bundles that carry their rules, and search that
