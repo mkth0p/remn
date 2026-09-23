@@ -1,9 +1,26 @@
 # Changelog
 
-Versions follow semantic versioning; the number lives in `backend/api/views/health.py`
+Versions follow semantic versioning; the number lives in `backend/forensic/build.py`
 and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
+
+- A public instance that can take real cases: bounded decompression (bz2, xz, zip members),
+  message size, YAML aliases, JSON bodies and heavy requests in flight (overall, per client,
+  per IPv6 /64); cleanup when a client disconnects; logs without evidence text, rotated; every
+  archive member listed as read, skipped or failed; the build commit and its source link in
+  health, in every parse and in the app; a notice before the first upload that says where the
+  file goes and what the server keeps. See `docs/security.md` and the review in
+  `docs/reviews/2026-09-22-browser-only-analysis.md`.
+- Evidence read as it is: collections over 32 MiB, Velociraptor results, raw 8-bit mail
+  headers, the Sysmon PE description, command lines and script blocks up to 64 KiB, artifact
+  times that mean activity, Microsoft 365 IPv6 addresses, culture dates, Graph pages, Outlook
+  inbox rules, MFA prompts that are not failures, and mail authentication that believes only
+  the receiver (trusted ARC sealers are a case setting).
+- A report and a case that hold: times in UTC, a verdict over the whole case, confidence that
+  falls when a file was not read in full or the rules are behind, a valid STIX export, AI
+  triage that proposes rather than decides, bundles that carry their rules, and search that
+  agrees with the SQL engine.
 
 - Optional Records Continuity honeypot: isolated Unix-socket service, signed ARG
   reference trail, consented exercise, bounded private telemetry/replay and REMN

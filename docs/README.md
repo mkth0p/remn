@@ -15,4 +15,4 @@ rest as needed.
 - [Validation and test data](validation.md) — the test suites, the public corpora and the measured rates, the synthetic lab
 - [Security model](security.md) — where evidence lives, what leaves the machine, the hardening in place, evidence text and the model
 
-Other files: [CONTRIBUTING](../CONTRIBUTING.md), [SECURITY](../SECURITY.md), [CHANGELOG](../CHANGELOG.md), [third-party notices](../THIRD_PARTY_NOTICES.md), [project review, September 2026](reviews/2026-09-05-project-review.md).
+Other files: [CONTRIBUTING](../CONTRIBUTING.md), [SECURITY](../SECURITY.md), [CHANGELOG](../CHANGELOG.md), [third-party notices](../THIRD_PARTY_NOTICES.md), [project review, September 2026](reviews/2026-09-05-project-review.md), [browser-only analysis, September 2026](reviews/2026-09-22-browser-only-analysis.md).
