@@ -40,6 +40,8 @@ export function ReportView() {
   const [iocs, setIocs] = useState<Ioc[]>([])
   const [iocCounts, setIocCounts] = useState<{ total: number; checked: number }>({ total: 0, checked: 0 })
   const [issue, setIssue] = useState<ReportIssue>({ waivers: {} })
+  // the preview is drawn during render, which must not read the clock: it shows when the page opened
+  const [previewAt] = useState(() => Date.now())
   const [rulesState, setRulesState] = useState<{ lastRun: number | null; evidenceAfter: number; errors: number } | undefined>(undefined)
   const [notes, setNotes] = useState<CaseNote[]>([])
   const [summary, setSummary] = useState<string>('')
@@ -142,10 +144,11 @@ export function ReportView() {
     }
   }
 
-  const html = () =>
+  // the report made now (download, print, a tab), or at a given time (the preview, drawn during render)
+  const html = (generatedAt?: number) =>
     buildReportHtml({
       kase,
-      generatedAt: Date.now(),
+      generatedAt,
       settings,
       summary,
       summaryBy,
@@ -367,7 +370,7 @@ export function ReportView() {
         <div className="panel">
           <div className="panel-h">preview</div>
           <div className="panel-b">
-            <iframe title="report preview" sandbox="" srcDoc={html()} style={{ width: '100%', height: 560, background: '#fff', border: '1px solid var(--line-2)', borderRadius: 4 }} />
+            <iframe title="report preview" sandbox="" srcDoc={html(previewAt)} style={{ width: '100%', height: 560, background: '#fff', border: '1px solid var(--line-2)', borderRadius: 4 }} />
           </div>
         </div>
       </div>

@@ -24,7 +24,8 @@ import { defang, escapeHtml, fmtBytes, fmtNum, fmtUtc as fmtTs, renderMarkdown }
 
 export interface ReportData {
   kase: Case
-  generatedAt: number
+  /** when the report was made; now when left out */
+  generatedAt?: number
   settings: ReportSettings
   summary: string
   /** who wrote the executive summary last, when known */
@@ -966,7 +967,7 @@ export function buildReportHtml(d: ReportData): string {
   const num = (i: number) => String(i + 1).padStart(2, '0')
   const font =
     d.fontData && /^[A-Za-z0-9+/=]+$/.test(d.fontData) ? `@font-face{font-family:'Gulax';src:url(data:font/woff2;base64,${d.fontData}) format('woff2');font-weight:400;font-style:normal}` : ''
-  const generated = new Date(d.generatedAt).toISOString().replace('T', ' ').slice(0, 19) + 'Z'
+  const generated = new Date(d.generatedAt ?? Date.now()).toISOString().replace('T', ' ').slice(0, 19) + 'Z'
   const seen = profile.filter((b) => b.state !== 'none')
   const confirmedBadges = profile.filter((b) => b.state === 'confirmed')
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>REMN report · ${h(kase.name)}</title><style>${font}${CSS}</style></head><body>
