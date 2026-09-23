@@ -35,6 +35,8 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   on another host asks first until it knows what an upload there means.
 - A demo case: the synthetic lab as the app reads it, with its findings and five chains,
   opens from the Dashboard in the visitor's browser without uploading anything.
+- A golden corpus: what the parsers make of the synthetic lab is frozen row by row, so a parser
+  change that alters rows fails with the rows it changed.
 - A report and a case that hold: times in UTC, a verdict over the whole case, confidence that
   falls when a file was not read in full or the rules are behind, a valid STIX export, AI
   triage that proposes rather than decides, bundles that carry their rules, and search that
