@@ -200,6 +200,7 @@ class EvtxSource:
         include_raw: bool = True,
         max_member: int = MAX_MEMBER_BYTES,
         deadline: float | None = None,
+        seen: set[int] | None = None,
     ) -> None:
         self.name = name
         self.path = path
@@ -211,6 +212,9 @@ class EvtxSource:
         self.stats = evtx_parser.Stats()
         # one entry per archive member: parsed (with its count and hash), skipped or error, with the reason
         self.files: list[dict[str, Any]] = []
+        # the keys of the cloud records read so far, for every file of this upload (a package
+        # passes its own set, shared by all its members)
+        self.seen_records: set[int] = set() if seen is None else seen
         head = (data or b"")[:512] if data is not None else _read_head(path)
         self.format = detect_evtx_format(name, head)
 
@@ -239,14 +243,15 @@ class EvtxSource:
                 continue
             tmp_path, sha = member_to_tempfile(member, self.tmp_dir, suffix)
             try:
-                before = self.stats.count
+                before, dup_before = self.stats.count, self.stats.duplicates
                 if fmt == "evtx":
                     yield from self._iter_one(tmp_path, member.name)
                 else:
                     yield from self._iter_m365(tmp_path, None, fmt, member.name)
-                self.files.append(
-                    {"name": member.name, "size": member.size, "sha256": sha, "count": self.stats.count - before, "format": fmt, "status": "parsed"}
-                )
+                entry = {"name": member.name, "size": member.size, "sha256": sha, "count": self.stats.count - before, "format": fmt, "status": "parsed"}
+                if self.stats.duplicates > dup_before:
+                    entry["duplicates"] = self.stats.duplicates - dup_before
+                self.files.append(entry)
             finally:
                 try:
                     os.unlink(tmp_path)
@@ -255,7 +260,7 @@ class EvtxSource:
 
     def _iter_m365(self, path: str | None, data: bytes | None, fmt: str, source_file: str) -> Iterator[dict[str, Any]]:
         try:
-            for row in m365.iter_records(path, data, fmt, stats=self.stats, include_raw=self.include_raw):
+            for row in m365.iter_records(path, data, fmt, stats=self.stats, include_raw=self.include_raw, seen=self.seen_records):
                 row["sourceFile"] = source_file
                 yield row
         except Exception as exc:  # noqa: BLE001

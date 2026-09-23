@@ -273,3 +273,121 @@ def test_mfa_interrupts_are_not_failures(store):
             )
     fired = _fired(store, rows)
     assert "m365-signin-password-spray" not in fired and "m365-signin-mfa-failed-then-success" not in fired
+
+
+def test_a_record_exported_twice_is_kept_once(exports, tmp_path):
+    """Search-UnifiedAuditLog's large-set pages repeat records, and time slices overlap: the same
+    AuditData.Id read again, in the same file or another member of the upload, is one record."""
+    import zipfile
+
+    recs = make_m365.ual_records()
+    doubled = tmp_path / "ual_pages.json"
+    doubled.write_text(json.dumps(recs + recs[:5]), encoding="utf-8")
+    rows, src = _rows(str(doubled))
+    assert len(rows) == len(recs) and src.stats.duplicates == 5 and src.stats.to_dict()["duplicates"] == 5
+
+    z = tmp_path / "slices.zip"
+    with zipfile.ZipFile(z, "w") as zf:
+        zf.write(exports["ual_csv"], "slice-1/ual.csv")
+        zf.write(exports["ual_json"], "slice-2/ual.json")
+        zf.write(exports["entra_json"], "entra/a.json")
+        zf.write(exports["entra_json"], "entra/b.json")
+    src = EvtxSource(z.name, str(z), None, str(tmp_path))
+    rows = list(src)
+    assert len(rows) == len(recs) + len(make_m365.entra_signins())
+    assert len({r["recordKey"] for r in rows}) == len(rows)
+    dup = {f["name"]: f.get("duplicates") for f in src.files}
+    assert dup == {"slice-1/ual.csv": None, "slice-2/ual.json": len(recs), "entra/a.json": None, "entra/b.json": len(make_m365.entra_signins())}
+
+
+def test_a_record_without_a_guid_is_never_dropped():
+    same = {"CreationTime": "2026-09-01T10:00:00", "Operation": "FileDownloaded", "Workload": "SharePoint", "UserId": "a@contoso.com", "Id": "not-a-guid"}
+    data = (json.dumps(same) + "\n" + json.dumps(same) + "\n").encode()
+    rows = list(m365.iter_records(None, data, "m365-ual-json"))
+    assert len(rows) == 2 and rows[0]["recordKey"] is None
+    assert m365.record_key("ual", "{A1B2C3D4-0000-1111-2222-333344445555}") == "ual:a1b2c3d4-0000-1111-2222-333344445555"
+
+
+def test_a_record_already_in_the_case_is_not_written_again(exports, store):
+    rows, _ = _rows(exports["ual_json"])
+    first = EventWriter(store, 1)
+    for r in rows:
+        first.add(r)
+    first.flush()
+    again, _ = _rows(exports["ual_csv"])
+    second = EventWriter(store, 2)
+    for r in again:
+        second.add(r)
+    second.flush()
+    assert first.count == len(rows) and second.count == 0 and second.duplicates == len(rows)
+    n = store.cursor().execute('SELECT count(*), count(DISTINCT "recordKey") FROM events').fetchone()
+    assert n == (len(rows), len(rows))
+    # the indicators of the records not written are not counted a second time
+    ip = store.cursor().execute("SELECT sum(count) FROM iocs WHERE kind = 'ip' AND value = ?", [make_m365.RU_IP]).fetchone()[0]
+    assert ip == sum(1 for r in rows if r["ipAddress"] == make_m365.RU_IP)
+
+
+def test_the_messages_a_record_read_or_deleted_are_named():
+    """MailItemsAccessed names each item it read, SoftDelete each item it removed, by Internet
+    message id: kept, so the mailbox answers which messages they were."""
+    read = m365.ual_row(
+        {
+            "CreationTime": "2026-09-01T10:00:00",
+            "Operation": "MailItemsAccessed",
+            "Workload": "Exchange",
+            "UserId": "alice@contoso.com",
+            "OperationProperties": [{"Name": "MailAccessType", "Value": "Bind"}],
+            "Folders": [
+                {"Path": "\\Inbox", "FolderItems": [{"InternetMessageId": "<a@x>"}, {"InternetMessageId": "<b@x>"}]},
+                {"Path": "\\Sent Items", "FolderItems": [{"InternetMessageId": "<a@x>"}, {"Id": "no-message-id"}]},
+            ],
+        }
+    )
+    assert read["data"]["InternetMessageId"] == "<a@x>, <b@x>" and read["data"]["FolderItemCount"] == 4
+    gone = m365.ual_row(
+        {
+            "CreationTime": "2026-09-01T10:05:00",
+            "Operation": "SoftDelete",
+            "Workload": "Exchange",
+            "UserId": "alice@contoso.com",
+            "AffectedItems": [{"InternetMessageId": f"<m{i}@x>", "Subject": "s"} for i in range(m365.MAX_MESSAGE_IDS + 3)],
+        }
+    )
+    ids = gone["data"]["InternetMessageId"].split(", ")
+    assert len(ids) == m365.MAX_MESSAGE_IDS and ids[0] == "<m0@x>" and gone["data"]["InternetMessageId.total"] == m365.MAX_MESSAGE_IDS + 3
+
+
+def test_a_sign_in_keeps_what_ties_it_to_its_token():
+    """Session and token ids join a sign-in to the audit records its token made
+    (AppAccessContext.AADSessionId, .UniqueTokenId); protocol and transfer method show device-code use."""
+    g = {
+        **make_m365.entra_signins()[0],
+        "sessionId": "0f1e2d3c-0000-1111-2222-333344445555",
+        "uniqueTokenIdentifier": "AbCdEfGh123",
+        "authenticationProtocol": "deviceCode",
+        "originalTransferMethod": "deviceCodeFlow",
+        "incomingTokenType": "primaryRefreshToken",
+        "autonomousSystemNumber": 12345,
+        "authenticationDetails": [
+            {"authenticationMethod": "Password", "succeeded": True},
+            {"authenticationMethod": "Mobile app notification", "succeeded": False},
+        ],
+        "appliedConditionalAccessPolicies": [{"displayName": "Require MFA", "result": "success"}, {"displayName": "Block legacy", "result": "notApplied"}],
+    }
+    row = m365.entra_row(g)
+    d = row["data"]
+    assert d["sessionId"] == g["sessionId"] and d["uniqueTokenIdentifier"] == "AbCdEfGh123" and d["incomingTokenType"] == "primaryRefreshToken"
+    assert d["authenticationProtocol"] == "deviceCode" and d["autonomousSystemNumber"] == 12345 and d["id"] == g["id"]
+    assert d["authenticationMethods"] == "Password" and d["appliedConditionalAccessPolicies"] == "Require MFA=success"
+    assert "[device code]" in row["summary"] and row["recordKey"] == "entra:" + g["id"]
+    # the portal's CSV columns land on the same names
+    portal = m365.entra_row(
+        {
+            "Date (UTC)": "2026-09-01T10:00:00Z",
+            "Username": "a@contoso.com",
+            "Session ID": "s-1",
+            "Unique token identifier": "t-1",
+            "Authentication Protocol": "deviceCode",
+        }
+    )
+    assert portal["data"]["sessionId"] == "s-1" and portal["data"]["uniqueTokenIdentifier"] == "t-1" and "[device code]" in portal["summary"]

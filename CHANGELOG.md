@@ -17,6 +17,10 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   times that mean activity, Microsoft 365 IPv6 addresses, culture dates, Graph pages, Outlook
   inbox rules, MFA prompts that are not failures, and mail authentication that believes only
   the receiver (trusted ARC sealers are a case setting).
+- Microsoft 365 records once and joined: a UAL record or Graph sign-in exported twice (large-set
+  pages, overlapping slices, an earlier export) is added once and the repeat is counted; sign-ins
+  keep their session, token, protocol, method and conditional-access fields; the messages
+  MailItemsAccessed read, or a delete moved, are named and open in the mailbox evidence.
 - A report and a case that hold: times in UTC, a verdict over the whole case, confidence that
   falls when a file was not read in full or the rules are behind, a valid STIX export, AI
   triage that proposes rather than decides, bundles that carry their rules, and search that

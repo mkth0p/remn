@@ -467,6 +467,8 @@ class Stats:
     def __init__(self) -> None:
         self.count = 0
         self.errors = 0
+        # records dropped because the same record (one key) was already read: cloud exports only
+        self.duplicates = 0
         self.first_ts: int | None = None
         self.last_ts: int | None = None
         self.event_ids: Counter[int] = Counter()
@@ -505,6 +507,7 @@ class Stats:
             "providers": dict(self.providers.most_common(200)),
             "computers": dict(self.computers.most_common(200)),
             "levels": dict(self.levels),
+            **({"duplicates": self.duplicates} if self.duplicates else {}),
         }
 
 

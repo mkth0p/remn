@@ -62,3 +62,18 @@ it('marks a truncated stream as incomplete while retaining emitted records', asy
   expect(await getDb().evidence.get(id)).toMatchObject({ status: 'error', count: 1 })
   expect(await getDb().events.count()).toBe(1)
 })
+it('adds a cloud record the case already holds only once, and counts it once', async () => {
+  const signIn = (key: string, ip: string) => ({ type: 'event', ts: 1, provider: 'Microsoft Entra ID Sign-in', operation: 'SignIn', ipAddress: ip, recordKey: key })
+  const first = await run([signIn('entra:1', '198.51.100.1'), signIn('entra:2', '198.51.100.2')])
+  // another export, not the same file: the whole-file duplicate check lets it through
+  await getDb().evidence.update(first, { sha256Client: 'b'.repeat(64), sha256Server: 'b'.repeat(64) })
+  const again = await run([signIn('entra:2', '198.51.100.2'), signIn('entra:3', '198.51.100.3'), { type: 'event', ts: 2, eventId: 4624, ipAddress: '198.51.100.2' }])
+  const db = getDb()
+  expect((await db.events.toArray()).map((r) => r.recordKey ?? r.eventId).sort()).toEqual([4624, 'entra:1', 'entra:2', 'entra:3'])
+  // the record already held is no row of the new evidence, and says so, and the stream is not called incomplete
+  expect(await db.evidence.get(again)).toMatchObject({ status: 'done', count: 2, stats: { duplicates: 1 } })
+  expect(mocks.post).toHaveBeenCalledWith(expect.objectContaining({ type: 'done', count: 2, duplicates: 1, error: null }))
+  // the skipped record adds nothing to the facets: the address is counted for the rows written
+  const ip = (await db.facets.toArray()).find((f) => f.field === 'ipAddress' && f.value === '198.51.100.2')
+  expect(ip?.count).toBe(2)
+})

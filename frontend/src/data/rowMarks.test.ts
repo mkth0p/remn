@@ -115,9 +115,8 @@ it('reads provenance out of a mail row using its own fields', () => {
   expect(provenance).toMatchObject({ messageId: '<a@b.example>', ts: 1_700_000_000_000, sourceFile: 'inbox.mbox', channel: null })
 })
 
-it('an existing version-3 case opens on version 4 without losing a row', async () => {
-  // The upgrade adds a table and touches no existing store, so it must need no upgrade function
-  // and must not rewrite anything. This opens a real v3 database and then the current schema.
+it('an existing version-3 case opens on the current version without losing a row', async () => {
+  // The upgrades add a table and an index and rewrite no row, so they need no upgrade function. This opens a real v3 database and then the current schema.
   const { default: Dexie } = await import('dexie')
   const name = `upgrade-${Math.random()}`
   const old = new Dexie(name)
@@ -137,12 +136,21 @@ it('an existing version-3 case opens on version 4 without losing a row', async (
   const upgraded = new RemnDB(name)
   setDb(upgraded)
   await upgraded.open()
-  expect(upgraded.verno).toBe(4)
+  expect(upgraded.verno).toBe(5)
   // nothing was rewritten or lost
   expect((await upgraded.events.where('caseId').equals(1).toArray()).map((e) => e.id)).toEqual([1])
   expect((await upgraded.kv.get('chains-1'))?.value).toEqual({ chains: [] })
   // and the new table is usable straight away
   await markRows(1, 'events', [event(1)], { verdict: 'relevant', addTags: ['carried over'] })
   expect((await rowMarkSummary(1)).total).toBe(1)
+  // the record-key index holds the keyed rows added since, and none of the rows from before
+  await upgraded.events.add({ ...event(2), recordKey: 'ual:1' })
+  expect(
+    await upgraded.events
+      .where('[caseId+recordKey]')
+      .anyOf([[1, 'ual:1']])
+      .primaryKeys(),
+  ).toEqual([2])
+  expect(await upgraded.events.where('[caseId+recordKey]').between([1, ''], [1, '\uffff']).count()).toBe(1)
   await upgraded.delete()
 })

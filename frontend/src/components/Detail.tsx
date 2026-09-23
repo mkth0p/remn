@@ -8,6 +8,7 @@ import { fmtBytes, fmtTs, tzLabel } from '../util/format'
 import { IconAi, IconChevronDown, IconClose, IconPivot } from './Icons'
 import { Badge, CopyButton, Dot, Flag, JsonView, KV, Risk, Sev, Tabs } from './ui'
 import { AddToTimeline } from './AddToTimeline'
+import { namedMessageIds } from '../data/namedMessages'
 
 const SEV_ORDER = ['critical', 'high', 'medium', 'low', 'info']
 
@@ -59,7 +60,9 @@ export function EventDetail({ row: initial, onClose }: { row: EventRow; onClose:
   const kase = useStore((s) => s.currentCase)
   const setAiPrompt = useStore((s) => s.setAiPrompt)
   const setView = useStore((s) => s.setView)
+  const setMailsFilter = useStore((s) => s.setMailsFilter)
   const pivot = usePivot()
+  const named = namedMessageIds(row)
   useEffect(() => {
     setRow(initial)
     // server-stored rows arrive without data/raw: fetch the full record
@@ -132,6 +135,23 @@ export function EventDetail({ row: initial, onClose }: { row: EventRow; onClose:
           {row.ipAddress && (
             <button className="btn xs" onClick={() => pivot(String(row.ipAddress), 'originIp', 'mails')}>
               mails from {String(row.ipAddress)}
+            </button>
+          )}
+          {named.ids.length > 0 && (
+            <button
+              className="btn xs"
+              title={
+                named.total > named.ids.length
+                  ? `the record names ${named.total} messages; the first ${named.ids.length} were kept`
+                  : 'the messages of the mailbox evidence with these Internet message ids'
+              }
+              onClick={() => {
+                setMailsFilter({ conditions: [{ field: 'messageId', op: 'in', value: named.ids }] })
+                setView('mails')
+              }}
+            >
+              <IconPivot /> the {named.ids.length}
+              {named.total > named.ids.length ? ` of ${named.total}` : ''} message(s) it names, in the mailbox
             </button>
           )}
         </div>
@@ -242,6 +262,7 @@ export function MailDetail({
   const setView = useStore((s) => s.setView)
   const setEntity = useStore((s) => s.setEntity)
   const setFocus = useStore((s) => s.setFocus)
+  const setEventsFilter = useStore((s) => s.setEventsFilter)
   const pivot = usePivot()
   useEffect(() => {
     let alive = true
@@ -487,7 +508,21 @@ export function MailDetail({
           <div className="k">folder</div>
           <div className="v">{row.folder || '—'}</div>
           <div className="k">message-id</div>
-          <div className="v">{row.messageId ?? '—'}</div>
+          <div className="v">
+            {row.messageId ?? '—'}{' '}
+            {row.messageId && (
+              <button
+                className="btn xs"
+                title="Microsoft 365 audit records (MailItemsAccessed, deletes, moves) that name this message"
+                onClick={() => {
+                  setEventsFilter({ conditions: [{ field: 'data.InternetMessageId', op: 'contains', value: row.messageId! }] })
+                  setView('events')
+                }}
+              >
+                <IconPivot /> audit records naming it
+              </button>
+            )}
+          </div>
           {row.xMailer && (
             <>
               <div className="k">mailer</div>

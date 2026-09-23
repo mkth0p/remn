@@ -31,6 +31,7 @@ Row conventions (shared with the EVTX parser so rules can mix both):
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import ipaddress
 import itertools
@@ -324,12 +325,36 @@ def flatten_audit(a: dict[str, Any]) -> dict[str, Any]:
         elif k == "Folders" and isinstance(v, list):
             data["Folders"] = "; ".join(str(f.get("Path")) for f in v if isinstance(f, dict) and f.get("Path"))[:2000]
             data["FolderItemCount"] = sum(len(f.get("FolderItems") or []) for f in v if isinstance(f, dict))
+            _message_ids(data, (it for f in v if isinstance(f, dict) for it in (f.get("FolderItems") or [])))
+        elif k == "AffectedItems" and isinstance(v, list):
+            data["AffectedItems"] = _scalar(v)
+            _message_ids(data, v)
         elif isinstance(v, dict):
             for k2, v2 in v.items():
                 data[f"{k}.{k2}"] = _scalar(v2)
         else:
             data[k] = _scalar(v)
     return data
+
+
+MAX_MESSAGE_IDS = 1000
+
+
+def _message_ids(data: dict[str, Any], items: Iterable[Any]) -> None:
+    """The Internet message ids of the items a record read (MailItemsAccessed FolderItems) or
+    deleted and moved (AffectedItems), as data.InternetMessageId, the way the mailbox stores
+    messageId: it answers "which messages did the attacker read" against the mailbox itself.
+    Beyond MAX_MESSAGE_IDS the list stops and data["InternetMessageId.total"] says how many
+    there were."""
+    ids = [str(it["InternetMessageId"]).strip() for it in items if isinstance(it, dict) and it.get("InternetMessageId")]
+    ids = list(dict.fromkeys(i for i in ids if i))
+    if not ids:
+        return
+    have = [i for i in str(data.get("InternetMessageId") or "").split(", ") if i]
+    ids = list(dict.fromkeys(have + ids))
+    data["InternetMessageId"] = ", ".join(ids[:MAX_MESSAGE_IDS])
+    if len(ids) > MAX_MESSAGE_IDS:
+        data["InternetMessageId.total"] = len(ids)
 
 
 def _clean_json_string(v: Any) -> Any:
@@ -357,6 +382,18 @@ def _first(d: dict[str, Any], *keys: str) -> Any:
 # ---------------------------------------------------------------------------
 # Unified Audit Log rows
 # ---------------------------------------------------------------------------
+_GUID_RE = re.compile(r"^[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}$")
+
+
+def record_key(prefix: str, value: Any) -> str | None:
+    """A record's own identity, the same whichever export or file it came in: the UAL
+    AuditData.Id, the Graph sign-in id. Two rows with one key are one record exported twice
+    (overlapping time slices, a re-run export), so only the first is kept. A value that is not
+    a GUID is no identity and gives no key: a row without a key is never dropped."""
+    v = str(value or "").strip().strip("{}")
+    return f"{prefix}:{v.lower()}" if _GUID_RE.match(v) else None
+
+
 def ual_row(a: dict[str, Any], record_type: Any = None) -> dict[str, Any]:
     op = str(a.get("Operation") or "")
     workload = str(a.get("Workload") or "")
@@ -399,6 +436,7 @@ def ual_row(a: dict[str, Any], record_type: Any = None) -> dict[str, Any]:
         "ipAddress": ip,
         "status": str(result) if result not in (None, "") else None,
         "workstation": (str(_first(a, "ClientInfoString", "UserAgent") or "")[:200] or None),
+        "recordKey": record_key("ual", a.get("Id")),
         "data": data,
     }
     row["summary"] = _ual_summary(op, user, ip, data, obj, target, result)
@@ -502,7 +540,44 @@ _PORTAL_MAP = {
     "country": "country",
     "city": "city",
     "state": "state",
+    "id": "id",
+    "session id": "sessionId",
+    "unique token identifier": "uniqueTokenIdentifier",
+    "authentication protocol": "authenticationProtocol",
+    "original transfer method": "originalTransferMethod",
+    "incoming token type": "incomingTokenType",
+    "token issuer type": "tokenIssuerType",
+    "cross tenant access type": "crossTenantAccessType",
+    "autonomous system number": "autonomousSystemNumber",
+    "ip address (seen by resource)": "ipAddressFromResourceProvider",
+    "resource id": "resourceId",
+    "resource tenant id": "resourceTenantId",
+    "home tenant id": "homeTenantId",
+    "multifactor authentication auth method": "authenticationMethods",
 }
+
+
+def _auth_methods(g: dict[str, Any]) -> Any:
+    """The methods that succeeded (Graph authenticationDetails), or the portal's MFA method."""
+    details = g.get("authenticationDetails")
+    if isinstance(details, list):
+        done = [
+            str(d.get("authenticationMethod")) for d in details if isinstance(d, dict) and d.get("authenticationMethod") and d.get("succeeded") is not False
+        ]
+        return ", ".join(dict.fromkeys(done)) or None
+    return g.get("authenticationMethods")
+
+
+def _ca_policies(v: Any) -> str | None:
+    """Conditional access policies that applied, as "name=result" (notApplied and notEnabled left out)."""
+    if not isinstance(v, list):
+        return None
+    out = [
+        f"{p.get('displayName') or p.get('id')}={p.get('result')}"
+        for p in v
+        if isinstance(p, dict) and str(p.get("result") or "").lower() not in ("notapplied", "notenabled", "")
+    ]
+    return "; ".join(out)[:2000] or None
 
 
 def entra_row(o: dict[str, Any], day_first: bool | None = None) -> dict[str, Any]:
@@ -572,11 +647,30 @@ def entra_row(o: dict[str, Any], day_first: bool | None = None) -> dict[str, Any
         "mfaResult": g.get("mfaResult"),
         "tokenIssuerType": g.get("tokenIssuerType"),
         "signInEventTypes": _scalar(g.get("signInEventTypes")),
+        # what ties a sign-in to the audit records its token made (AppAccessContext.AADSessionId,
+        # AppAccessContext.UniqueTokenId) and shows device-code and token-replay use
+        "id": g.get("id"),
+        "requestId": g.get("requestId"),
+        "userId": g.get("userId"),
+        "sessionId": g.get("sessionId"),
+        "uniqueTokenIdentifier": g.get("uniqueTokenIdentifier"),
+        "authenticationProtocol": g.get("authenticationProtocol"),
+        "originalTransferMethod": g.get("originalTransferMethod"),
+        "incomingTokenType": g.get("incomingTokenType"),
+        "crossTenantAccessType": g.get("crossTenantAccessType"),
+        "autonomousSystemNumber": g.get("autonomousSystemNumber"),
+        "ipAddressFromResourceProvider": g.get("ipAddressFromResourceProvider"),
+        "resourceId": g.get("resourceId"),
+        "resourceTenantId": g.get("resourceTenantId"),
+        "homeTenantId": g.get("homeTenantId"),
+        "authenticationMethods": _auth_methods(g),
+        "appliedConditionalAccessPolicies": _ca_policies(g.get("appliedConditionalAccessPolicies")),
     }
     data = {k: _scalar(v) for k, v in data.items() if v not in (None, "")}
-    risk_txt = ""
+    device_code = str(g.get("authenticationProtocol") or "").lower() == "devicecode" or str(g.get("originalTransferMethod") or "").lower() == "devicecodeflow"
+    risk_txt = " [device code]" if device_code else ""
     if (risk_signin and str(risk_signin).lower() not in ("none", "hidden")) or (g.get("riskState") and str(g.get("riskState")).lower() not in ("none",)):
-        risk_txt = f" risk={risk_signin or risk_agg or ''}/{g.get('riskState') or ''}"
+        risk_txt += f" risk={risk_signin or risk_agg or ''}/{g.get('riskState') or ''}"
     summary = (
         f"Sign-in {'ok' if success else 'FAILED (' + str(err) + ')'}: {user or '?'} from {ip or '?'}"
         f"{' (' + str(country) + ')' if country else ''} via {g.get('clientAppUsed') or '?'} to {g.get('appDisplayName') or '?'}{risk_txt}"
@@ -604,6 +698,7 @@ def entra_row(o: dict[str, Any], day_first: bool | None = None) -> dict[str, Any
         "failureReason": failure,
         "workstation": (str(g.get("userAgent") or "")[:200] or None),
         "objectName": g.get("appDisplayName"),
+        "recordKey": record_key("entra", g.get("id")),
         "data": data,
         "summary": summary[:500],
     }
@@ -689,8 +784,42 @@ def _audit_from_row(obj: dict[str, Any]) -> tuple[dict[str, Any] | None, Any]:
     return None, None
 
 
-def iter_records(path: str | None, data: bytes | None, fmt: str, stats: Any = None, include_raw: bool = True) -> Iterator[dict[str, Any]]:
-    """Yield event rows from a UAL / Entra export in the given format (see FORMATS)."""
+def _key_hash(key: str) -> int:
+    return int.from_bytes(hashlib.blake2b(key.encode(), digest_size=8).digest(), "big")
+
+
+def iter_records(
+    path: str | None, data: bytes | None, fmt: str, stats: Any = None, include_raw: bool = True, seen: set[int] | None = None
+) -> Iterator[dict[str, Any]]:
+    """Yield event rows from a UAL / Entra export in the given format (see FORMATS). A record
+    whose key (record_key) is already in ``seen`` is the same record exported again: it is
+    counted in ``stats.duplicates`` and not yielded: Search-UnifiedAuditLog's ReturnLargeSet
+    pages repeat records within one file, and overlapping time slices repeat them across files.
+    Pass one set for every file of an upload so an archive of slices gives each record once."""
+    seen = set() if seen is None else seen
+    for row in _iter_rows(path, data, fmt, stats, include_raw):
+        key = row.get("recordKey")
+        if key:
+            h = _key_hash(key)
+            if h in seen:
+                if stats is not None:
+                    stats.duplicates = getattr(stats, "duplicates", 0) + 1
+                continue
+            seen.add(h)
+        if stats is not None:
+            _count(row, stats)
+        yield row
+
+
+def _count(row: dict[str, Any], stats: Any) -> None:
+    try:
+        stats.add(row)
+    except Exception:  # noqa: BLE001
+        stats.count += 1
+
+
+def _iter_rows(path: str | None, data: bytes | None, fmt: str, stats: Any, include_raw: bool) -> Iterator[dict[str, Any]]:
+    # rows are counted by the caller once it knows they are kept; errors are counted here
     fh = _open_text(path, data)
     try:
         if fmt == "m365-ual-csv":
@@ -731,11 +860,6 @@ def iter_records(path: str | None, data: bytes | None, fmt: str, stats: Any = No
 def _finish(row: dict[str, Any], source: dict[str, Any], stats: Any, include_raw: bool) -> dict[str, Any]:
     if include_raw:
         row["raw"] = json.dumps(source, ensure_ascii=False, separators=(",", ":"))[:200_000]
-    if stats is not None:
-        try:
-            stats.add(row)
-        except Exception:  # noqa: BLE001
-            stats.count += 1
     return row
 
 

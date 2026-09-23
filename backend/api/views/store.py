@@ -34,6 +34,14 @@ from services.store.writers import EventWriter, MailWriter
 log = logging.getLogger(__name__)
 
 
+def _already_in_case(stats: dict[str, Any], writer: EventWriter) -> int:
+    """Records the case already held (an earlier export of the same audit or sign-in records)
+    were not written: they count with the repeats of this upload, not as rows added."""
+    if writer.duplicates:
+        stats["duplicates"] = int(stats.get("duplicates") or 0) + writer.duplicates
+    return writer.duplicates
+
+
 def _json(request: HttpRequest) -> dict[str, Any]:
     try:
         return json.loads(request.body or b"{}")
@@ -169,6 +177,7 @@ def ingest(request: HttpRequest, key: str):
                     ew.flush()
                     pmw.flush()
                 stats = package.stats()
+                count -= _already_in_case(stats, ew)
                 fmt = package.format
                 findings = hayabusa.resolve_refs(st, evidence_id, package.findings)
                 engine_summaries = package.engine_summaries
@@ -185,6 +194,7 @@ def ingest(request: HttpRequest, key: str):
                 w.flush()
                 stats = src.stats.to_dict()
                 stats["files"] = src.files
+                count -= _already_in_case(stats, w)
                 fmt = src.format
                 if hayabusa.available():
                     job.update(phase="engines")

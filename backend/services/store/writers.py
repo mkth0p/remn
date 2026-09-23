@@ -134,6 +134,10 @@ class EventWriter:
         self.batch: list[dict[str, Any]] = []
         self.iocs = IocBatch(evidence_id)
         self.count = 0
+        # rows not written because the case already holds the same record (same recordKey)
+        self.duplicates = 0
+        # rows with a record key keep their indicators until the batch knows it is writing them
+        self.keyed: list[dict[str, Any]] = []
 
     def add(self, row: dict[str, Any]) -> None:
         # Keep the row sparse: the Arrow batch builder only materialises columns that are present.
@@ -150,11 +154,24 @@ class EventWriter:
             out["id"] = preserved_id(self.store, "events", row.get("id"))
         out["evidenceId"] = self.evidence_id
         self.batch.append(out)
-        event_iocs(row, self.iocs)
+        if row.get("recordKey"):
+            self.keyed.append(row)
+        else:
+            event_iocs(row, self.iocs)
         if len(self.batch) >= BATCH:
             self.flush()
 
     def flush(self) -> None:
+        if self.keyed:
+            have = self.store.existing_record_keys(list({r["recordKey"] for r in self.keyed}))
+            if have:
+                kept = [r for r in self.batch if r.get("recordKey") not in have]
+                self.duplicates += len(self.batch) - len(kept)
+                self.batch = kept
+            for row in self.keyed:
+                if row["recordKey"] not in have:
+                    event_iocs(row, self.iocs)
+            self.keyed = []
         if self.batch:
             if not self.preserve_ids:
                 start = self.store.reserve_ids("events", len(self.batch))

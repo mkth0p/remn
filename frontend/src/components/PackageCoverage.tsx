@@ -82,7 +82,14 @@ export function PackageCoverage({ stats, archive = false }: { stats: Record<stri
                     {m.note ? ' (partial)' : ''}
                   </Badge>
                 </td>
-                <td>{Number(m.count ?? 0)}</td>
+                <td>
+                  {Number(m.count ?? 0)}
+                  {Number(m.duplicates ?? 0) > 0 && (
+                    <div className="small muted" title="records already read (same record id), in this upload or earlier evidence, not added again">
+                      +{fmtNum(Number(m.duplicates))} repeated
+                    </div>
+                  )}
+                </td>
                 <td>{fmtBytes(Number(m.size ?? 0))}</td>
                 <td>
                   {String(m.format ?? '')}

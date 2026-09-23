@@ -322,10 +322,31 @@ async function ingest(req: IngestRequest): Promise<void> {
   const engineSummaries: Record<string, unknown>[] = []
   const refIndex = new Map<string, number>()
   const wantRefs = () => Array.isArray(st.meta?.engines) && (st.meta!.engines as unknown[]).length > 0
+  // cloud records the case already holds (an earlier export of the same audit or sign-in log)
+  let duplicates = 0
   const flushEvents = async () => {
     if (!batch.length) return
-    const rows = batch as EventRow[]
+    let rows = batch as EventRow[]
     batch = []
+    const keyed = rows.filter((r) => r.recordKey)
+    if (keyed.length) {
+      const held = new Set(
+        (
+          await db.events
+            .where('[caseId+recordKey]')
+            .anyOf(keyed.map((r) => [caseId, r.recordKey!]))
+            .keys()
+        ).map((k) => (k as unknown as [number, string])[1]),
+      )
+      if (held.size) {
+        const before = rows.length
+        rows = rows.filter((r) => !r.recordKey || !held.has(r.recordKey))
+        duplicates += before - rows.length
+      }
+      // counted now that the row is known to be written, so a record skipped adds no facet or indicator
+      for (const r of rows) if (r.recordKey) accumulateEvent(caseId, r as unknown as Record<string, unknown>, fc, ic)
+      if (!rows.length) return
+    }
     if (wantRefs()) {
       const ids = (await db.events.bulkAdd(rows, { allKeys: true })) as number[]
       rows.forEach((row, i) => {
@@ -415,7 +436,7 @@ async function ingest(req: IngestRequest): Promise<void> {
       batchType = type
     }
     if (type === 'event') {
-      accumulateEvent(caseId, row, fc, ic)
+      if (!row.recordKey) accumulateEvent(caseId, row, fc, ic)
       batch.push(row)
       if (batch.length >= BATCH) await flushEvents()
     } else if (type === 'mail') {
@@ -435,10 +456,13 @@ async function ingest(req: IngestRequest): Promise<void> {
     if (!st.done) throw new Error('Ingestion stream ended before its completion record; imported rows may be partial')
     // the server counts the rows it sent; a stream that lost some on the way is not a complete import
     const emitted = Number(st.done.emitted)
-    const received = inserted + batch.length
+    const received = inserted + duplicates + batch.length
     if (Number.isFinite(emitted) && emitted !== received && !st.errorMsg) st.errorMsg = `the server sent ${emitted} rows and ${received} arrived; the import is incomplete`
     if (batchType === 'event') await flushEvents()
     else await flushMails()
+    const parsed = (st.done?.stats as Record<string, unknown> | undefined) ?? undefined
+    // the repeats the server dropped in this upload and the records the case already held, as one count
+    const stats = duplicates && parsed ? { ...parsed, duplicates: Number(parsed.duplicates ?? 0) + duplicates } : parsed
     post({ type: 'progress', rows: inserted })
     post({ type: 'log', level: 'info', text: 'writing facets and indicators…' })
     await flushFacets(caseId, 'events', fc)
@@ -451,7 +475,7 @@ async function ingest(req: IngestRequest): Promise<void> {
       error: st.errorMsg ?? undefined,
       count: inserted,
       // the engine's own account of its run sits with the parser statistics, where the evidence detail shows it
-      stats: engineSummaries.length ? { ...((st.done?.stats as Record<string, unknown>) ?? {}), engines: engineSummaries } : ((st.done?.stats as Record<string, unknown>) ?? undefined),
+      stats: engineSummaries.length ? { ...(stats ?? {}), engines: engineSummaries } : stats,
       sha256Server: serverHash || undefined,
       integrity,
       progress: 1,
@@ -460,7 +484,7 @@ async function ingest(req: IngestRequest): Promise<void> {
       // resolved here, where the index is; stored by the main thread, which owns the case
       post({ type: 'findings', engine: String(engineFindings[0].engine ?? 'hayabusa'), findings: resolveEngineRefs(engineFindings, refIndex), summaries: engineSummaries })
     }
-    post({ type: 'done', count: inserted, stats: st.done?.stats ?? null, sha256, sha256Server: serverHash, integrity, error: st.errorMsg })
+    post({ type: 'done', count: inserted, duplicates: Number(stats?.duplicates ?? 0), stats: stats ?? null, sha256, sha256Server: serverHash, integrity, error: st.errorMsg })
   } catch (e) {
     const msg = (e as Error).message || String(e)
     try {

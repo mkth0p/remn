@@ -57,6 +57,9 @@ EVENT_COLUMNS: list[tuple[str, tuple[str, Any]]] = [
     ("sourceIndex", _L),
     ("memberIndex", _I),
     ("parserVersion", _S),
+    # a cloud record's own identity (UAL AuditData.Id, Graph sign-in id): a record already in
+    # the case is not added again from a later export
+    ("recordKey", _S),
     ("recordId", _L),
     ("ts", _L),
     ("tsIso", _S),
@@ -558,6 +561,14 @@ class CaseStore:
             finally:
                 con.unregister("_batch")
         return len(rows)
+
+    def existing_record_keys(self, keys: list[str]) -> set[str]:
+        """The keys of ``keys`` some event of the case already carries."""
+        if not keys:
+            return set()
+        with self.lock:
+            rows = self._con.execute('SELECT DISTINCT "recordKey" FROM events WHERE "recordKey" IN (SELECT unnest(?::VARCHAR[]))', [keys]).fetchall()
+        return {r[0] for r in rows}
 
     def upsert_evidence(self, ev: dict[str, Any]) -> None:
         with self.lock:

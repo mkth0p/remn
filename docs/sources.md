@@ -63,6 +63,27 @@ Rows carry `provider`, `channel` (the workload), `category` (`M365 Exchange`,
 (Parameters, ModifiedProperties and OperationProperties flattened; Entra
 `data.country`, `data.clientAppUsed`, `data.riskState`, …).
 
+A record is in the case once. Search-UnifiedAuditLog's large-set pages repeat records,
+and exports cut into time slices overlap, so a UAL record whose `AuditData.Id` was already
+read, and a Graph sign-in whose `id` was, is not added again: not from the same file, not
+from another file of the upload, not from evidence added earlier. The evidence detail and
+the archive or package member list say how many repeats were left out. A record without a
+GUID for an id is never dropped.
+
+Sign-ins keep what ties them to the token and session they gave: `data.sessionId` and
+`data.uniqueTokenIdentifier` (the audit records the token made carry them as
+`data.AppAccessContext.AADSessionId` and `data.AppAccessContext.UniqueTokenId`),
+`authenticationProtocol` and `originalTransferMethod` (a device-code sign-in says
+`[device code]` in its summary), `incomingTokenType`, `authenticationMethods`,
+`appliedConditionalAccessPolicies` (as `name=result`), `autonomousSystemNumber` and
+`ipAddressFromResourceProvider`, from the Graph JSON or the portal CSV alike.
+
+MailItemsAccessed names each message it read, and a delete or move each message it
+touched: `data.InternetMessageId` keeps those ids (the first 1,000; beyond that
+`data["InternetMessageId.total"]` gives the number), written the way the mailbox stores
+`messageId`. An audit record opens the messages it names in the mailbox evidence, and a
+message opens the audit records that name it.
+
 `rules/m365/bec.yaml` ships 28 rules for this data: inbox rules that forward or hide
 mail, mailbox and transport-rule forwarding, delegate permissions, MailItemsAccessed
 bursts and delegate syncs, OAuth consent, privileged role assignment, MFA and

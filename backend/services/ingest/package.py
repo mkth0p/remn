@@ -113,6 +113,8 @@ class PackageSource:
         # findings are collected rather than streamed, so consumers that only want rows are not
         # handed something that is not one.
         self.engines: list[str] = []
+        # keys of the cloud audit and sign-in records read so far, across every member
+        self.seen_records: set[int] = set()
         self.evtx_held: dict[str, tuple[dict[str, Any], str]] = {}
         self.findings: list[dict[str, Any]] = []
         self.engine_summaries: list[dict[str, Any]] = []
@@ -126,6 +128,7 @@ class PackageSource:
             "errors": sum(f["status"] == "error" for f in self.files),
             "unsupported": sum(f["status"] == "unsupported" for f in self.files),
             "skipped": sum(f["status"] == "skipped" for f in self.files),
+            "duplicates": sum(int(f.get("duplicates") or 0) for f in self.files),
             "inventoryComplete": self.inventory_complete,
             "context": self.context,
             "reconciliation": reconcile(self.files, self.expectations) + self.nested_reconciliation,
@@ -608,7 +611,7 @@ class PackageSource:
                     decode_started = time.monotonic()
                     rows = (("event", r) for r in collection.native_records(kind, tmp_path, member.name, self.context, self.tmp_dir))
                 elif head.startswith(b"ElfFile\x00") or low.endswith(".evtx") or m365.detect_format(member.name, head):
-                    source = EvtxSource(member.name, tmp_path, None, self.tmp_dir, self.include_raw)
+                    source = EvtxSource(member.name, tmp_path, None, self.tmp_dir, self.include_raw, seen=self.seen_records)
                     entry["format"] = source.format
                     rows = (("event", r) for r in source)
                 elif collection.supported(member.name) or (
@@ -636,6 +639,9 @@ class PackageSource:
                     self.evtx_held[tmp_path] = (entry, member.name)
                     self.budget["deferredBytes"] += size
                     tmp_path = None
+                if isinstance(source, EvtxSource) and source.stats.duplicates:
+                    # a repeat is not a compromise in reading the member, so it is no note
+                    entry["duplicates"] = source.stats.duplicates
                 if source is not None and source.stats.errors:
                     raise ValueError(f"parser reported {source.stats.errors} error(s); any emitted rows are partial")
                 entry["status"] = "parsed"

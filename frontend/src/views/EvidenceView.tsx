@@ -144,7 +144,15 @@ export function EvidenceView() {
               {fmtTs(detail.addedAt)} {detail.analyst ? `by ${detail.analyst}` : ''}
             </div>
             <div className="k">rows</div>
-            <div className="v">{fmtNum(detail.count)}</div>
+            <div className="v">
+              {fmtNum(detail.count)}
+              {Number(detail.stats?.duplicates ?? 0) > 0 && (
+                <span className="small muted">
+                  {' '}
+                  · {fmtNum(Number(detail.stats!.duplicates))} repeated record(s) not added: the same audit or sign-in record (by its id) was already read, in this file or in earlier evidence
+                </span>
+              )}
+            </div>
             <div className="k">store</div>
             <div className="v">{isServer ? `server (DuckDB ${kase.serverKey?.slice(0, 8)}…)` : 'browser (IndexedDB)'}</div>
           </div>

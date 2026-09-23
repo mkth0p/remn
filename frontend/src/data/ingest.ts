@@ -281,7 +281,11 @@ export async function ingestToBrowser(file: File, kase: Case, kind: 'evtx' | 'ma
         case 'done': {
           const integ = m.integrity as string
           s.upsertJob({ id: jobId, phase: m.error ? 'error' : 'done', rows: Number(m.count), progress: 1, error: m.error ? String(m.error) : undefined })
-          log(m.error ? 'warn' : 'ok', `[${file.name}] ${m.count} rows stored - integrity ${integ}${m.error ? ' - server error: ' + m.error : ''}`)
+          const dup = Number(m.duplicates ?? 0)
+          log(
+            m.error ? 'warn' : 'ok',
+            `[${file.name}] ${m.count} rows stored${dup ? `, ${dup} repeated record(s) not added again` : ''} - integrity ${integ}${m.error ? ' - server error: ' + m.error : ''}`,
+          )
           if (integ === 'mismatch') toast('err', `${file.name}: server hash differs from the browser hash!`, 0)
           else toast(m.error ? 'warn' : 'ok', `${file.name}: ${m.count} rows ingested`)
           worker.terminate()

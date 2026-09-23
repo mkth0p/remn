@@ -99,6 +99,8 @@ export interface EventRow {
   sourceIndex?: number
   memberIndex?: number
   parserVersion?: string
+  /** a cloud record's own identity (UAL AuditData.Id, Graph sign-in id): the case holds it once */
+  recordKey?: string
   id?: number
   caseId: number
   evidenceId: number
@@ -472,6 +474,12 @@ export class RemnDB extends Dexie {
     // upgrade function and without rewriting a single row.
     this.version(4).stores({
       rowMarks: '++id, caseId, [caseId+source+rowId], [caseId+source], [caseId+verdict], evidenceId, *tags',
+    })
+    // One index more on events, for the record keys of cloud audit and sign-in rows. A row
+    // without a key (every event log row) is not in it, so the upgrade adds nothing for those.
+    this.version(5).stores({
+      events:
+        '++id, caseId, evidenceId, ts, eventId, [caseId+id], [caseId+artifactType], [caseId+ts], [caseId+eventId], [caseId+evidenceId], [caseId+recordKey], computer, targetUser, subjectUser, ipAddress, logonType, channel, provider, category',
     })
   }
 }
