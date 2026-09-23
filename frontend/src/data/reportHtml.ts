@@ -60,6 +60,11 @@ export interface ReportData {
   unprintedConfirmed?: { severity: Severity; findings: Finding[] }[]
   /** the state of the last rule run, when known: the report's confidence depends on it */
   rules?: { lastRun: number | null; evidenceAfter: number; errors: number }
+  /**
+   * Whether the report was issued as final (every preflight check passed or waived with a reason)
+   * or is a draft, and what is open or waived; see data/reportPreflight.ts.
+   */
+  issue?: { status: 'draft' | 'final'; finalAt?: number; open: { label: string; detail: string }[]; waived: { label: string; reason: string }[] }
   /** indicators in the case, and how many were actually checked against a reputation service */
   iocsTotal?: number
   iocsChecked?: number
@@ -587,6 +592,8 @@ code,.mono{font-family:var(--mono);font-size:10.5px}
 .cover h1{font-size:26px;font-weight:600;letter-spacing:-.01em;margin:18px 0 4px;line-height:1.15}
 .cover .meta{font-size:11.5px;color:var(--ink-2)}
 .hero{display:grid;grid-template-columns:168px 1fr;gap:22px;align-items:center;margin:20px 0 6px;padding:16px 18px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2)}
+.issue{display:inline-block;margin-top:4px;padding:1px 8px;border-radius:3px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;font-size:10px}.issue.draft{border:1.5px solid var(--medium);color:var(--medium)}.issue.final{border:1.5px solid var(--accent);color:var(--accent)}
+.cover.draft{position:relative}.cover.draft::after{content:'DRAFT';position:absolute;top:38%;left:50%;transform:translate(-50%,-50%) rotate(-24deg);font-size:120px;font-weight:800;letter-spacing:.1em;color:var(--medium);opacity:.09;pointer-events:none}
 .seal{position:relative;width:168px;height:168px}
 .seal svg{position:absolute;inset:0;width:100%;height:100%}
 .seal svg polygon{fill:var(--surface);stroke:var(--ink-3);stroke-width:3}
@@ -760,7 +767,12 @@ function method(d: ReportData, v: Verdict, conf: Confidence): string {
       ? `${aiTexts} text${aiTexts === 1 ? '' : 's'} in this report ${aiTexts === 1 ? 'was' : 'were'} drafted by the analyst model and are labelled as such; decisions are the analyst's`
       : 'no text in this report was drafted by a model',
   ]
+  const issue = d.issue
   const limits = [
+    ...(issue?.status === 'draft'
+      ? [`This is a draft. Open before it can be final: ${issue.open.map((c) => `${c.label.toLowerCase()} (${c.detail})`).join('; ') || 'the analyst has not issued it'}.`]
+      : []),
+    ...(issue?.waived ?? []).map((w) => `Issued with an open check: ${w.label.toLowerCase()}. The analyst's reason: ${w.reason}`),
     'Times are UTC. Rules and timelines describe what the evidence records; the absence of a finding is not evidence of absence.',
     'Collection snapshots record when an artefact was collected, not when it was created or run.',
     ...(d.coverageWarnings ?? []).map((w) => `Chain analysis incomplete: ${w}`),
@@ -959,8 +971,8 @@ export function buildReportHtml(d: ReportData): string {
   const confirmedBadges = profile.filter((b) => b.state === 'confirmed')
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>REMN report · ${h(kase.name)}</title><style>${font}${CSS}</style></head><body>
 <div class="cover-page">
-<div class="cover">
-<div class="brand"><div class="l"><span class="wordmark">REMN</span><span class="tag">forensic analysis report</span></div><div class="r">${generated}<br>${kase.analyst ? `analyst ${h(kase.analyst)}` : 'analyst not set'}</div></div>
+<div class="cover${d.issue?.status === 'draft' ? ' draft' : ''}">
+<div class="brand"><div class="l"><span class="wordmark">REMN</span><span class="tag">forensic analysis report</span></div><div class="r">${generated}<br>${kase.analyst ? `analyst ${h(kase.analyst)}` : 'analyst not set'}${d.issue ? `<br><span class="issue ${d.issue.status}">${d.issue.status === 'final' && d.issue.finalAt ? `final · issued ${h(new Date(d.issue.finalAt).toISOString().replace('T', ' ').slice(0, 19))}Z` : 'draft · not issued'}</span>` : ''}</div></div>
 <h1>${h(kase.name)}</h1>
 <div class="meta">All times UTC · findings from ${h(settings.minSeverity)} severity up${settings.onlyReviewed ? ', reviewed items only' : ''}${settings.includeFp ? ', false positives included' : ''}</div>
 <div class="hero">${seal(verdict)}<div class="bottom"><div class="k">bottom line</div><div class="line">${line ? md(line) : `<p>${h(verdict.detail)}</p>`}</div>${line ? `<div class="det">${h(verdict.detail)}</div>` : ''}<div class="conf ${confidence.level}"><b>confidence ${confidence.level}</b>${h(confidence.reasons.slice(0, 3).join(' · '))}</div></div></div>

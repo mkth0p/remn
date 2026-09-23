@@ -366,3 +366,16 @@ it('prints an undated timeline entry without inventing a time for it', () => {
   expect(html).toContain('no event time')
   expect(html).not.toContain('2026-08-29')
 })
+
+it('says draft on the cover and lists what is open, and prints the waivers of a final report', () => {
+  const draft = buildReportHtml(data({ issue: { status: 'draft', open: [{ label: 'Every item has a decision', detail: '3 item(s) without a decision' }], waived: [] } }))
+  expect(draft).toContain('draft · not issued')
+  expect(draft).toContain('class="cover draft"')
+  expect(draft).toContain('This is a draft. Open before it can be final: every item has a decision (3 item(s) without a decision)')
+  const final = buildReportHtml(
+    data({ issue: { status: 'final', finalAt: Date.UTC(2026, 8, 23, 10, 0, 0), open: [], waived: [{ label: 'Every item has a decision', reason: 'low noise left for later' }] } }),
+  )
+  expect(final).toContain('final · issued 2026-09-23 10:00:00Z')
+  expect(final).not.toContain('cover draft')
+  expect(final).toContain('The analyst&#39;s reason: low noise left for later')
+})

@@ -17,6 +17,7 @@ import { buildCampaignGraph } from '../data/chainGraph'
 import { IconAi, IconCheck, IconDownload } from '../components/Icons'
 import { reportRelationships, type RelationshipReview } from '../data/relationshipReviews'
 import { findingsStaleness } from '../data/findingsState'
+import { aiDecided, issueStatus, loadReportIssue, preflightChecks, saveReportIssue, type ReportIssue } from '../data/reportPreflight'
 
 const ORDER = ['critical', 'high', 'medium', 'low', 'info']
 
@@ -38,6 +39,7 @@ export function ReportView() {
   const [settings, setSettings] = useState<ReportSettings | null>(null)
   const [iocs, setIocs] = useState<Ioc[]>([])
   const [iocCounts, setIocCounts] = useState<{ total: number; checked: number }>({ total: 0, checked: 0 })
+  const [issue, setIssue] = useState<ReportIssue>({ waivers: {} })
   const [rulesState, setRulesState] = useState<{ lastRun: number | null; evidenceAfter: number; errors: number } | undefined>(undefined)
   const [notes, setNotes] = useState<CaseNote[]>([])
   const [summary, setSummary] = useState<string>('')
@@ -67,6 +69,7 @@ export function ReportView() {
     Promise.all([getSource(kase).listIocs({ limit: 1 }), getSource(kase).listIocs({ unchecked: true, limit: 1 })])
       .then(([all, unchecked]) => setIocCounts({ total: all.total, checked: Math.max(0, all.total - unchecked.total) }))
       .catch(() => setIocCounts({ total: 0, checked: 0 }))
+    loadReportIssue(kase.id).then(setIssue)
     findingsStaleness(kase.id)
       .then((s) => setRulesState({ lastRun: s.lastRun, evidenceAfter: s.evidenceAfter, errors: s.errors.length }))
       .catch(() => setRulesState(undefined))
@@ -113,6 +116,13 @@ export function ReportView() {
   const analystNotes = notes.filter((n) => n.kind === 'note').sort((a, b) => a.createdAt - b.createdAt)
   // same unit as the Review page: incidents without a decision plus chains without a verdict
   const undecided = buildIncidents(findings, { chains }).filter((i) => (i.kind === 'chain' && i.chain ? !reviews[i.chain.id]?.verdict : i.status === 'new')).length
+  const hiddenConfirmed = unprintedConfirmed(findings, chains, reviews, selection)
+  const checks = preflightChecks({ evidence, rules: rulesState, undecided, aiDecided: aiDecided(findings), unprintedConfirmed: hiddenConfirmed.length })
+  const status = issueStatus(checks, issue)
+  const updateIssue = (next: ReportIssue) => {
+    setIssue(next)
+    void saveReportIssue(kase.id!, next)
+  }
 
   const generateSummary = async () => {
     if (useStore.getState().aiStatus.reachable !== true) return toast('err', 'the analyst model is not reachable (see the AI section in Settings)')
@@ -161,7 +171,8 @@ export function ReportView() {
       tasks,
       notes: analystNotes,
       undecided,
-      unprintedConfirmed: unprintedConfirmed(findings, chains, reviews, selection),
+      unprintedConfirmed: hiddenConfirmed,
+      issue: { status: status.status, finalAt: status.finalAt, open: status.open, waived: status.waived },
       rules: rulesState,
       iocsTotal: iocCounts.total,
       iocsChecked: iocCounts.checked,
@@ -238,6 +249,49 @@ export function ReportView() {
             </button>
           </div>
         )}
+        <div className="panel">
+          <div className="panel-h">
+            preflight · the report is <b style={{ color: status.status === 'final' ? 'var(--ok)' : 'var(--warn)' }}>{status.status === 'final' ? 'final' : 'a draft'}</b>
+            <span className="spacer" />
+            {status.status === 'final' ? (
+              <button className="btn xs" onClick={() => updateIssue({ ...issue, finalAt: undefined })}>
+                back to draft
+              </button>
+            ) : (
+              <button
+                className="btn xs primary"
+                disabled={status.open.length > 0}
+                title={status.open.length ? 'every open check needs to pass or be waived with a reason' : 'print the report as final, with the waivers listed'}
+                onClick={() => updateIssue({ ...issue, finalAt: Date.now() })}
+              >
+                issue as final
+              </button>
+            )}
+          </div>
+          <div className="panel-b col" style={{ gap: 6 }}>
+            {checks.map((c) => (
+              <div key={c.id} className="row small" style={{ gap: 8, alignItems: 'flex-start' }}>
+                <Badge sev={c.ok ? 'ok' : issue.waivers[c.id]?.trim() ? 'medium' : 'high'}>{c.ok ? 'ok' : issue.waivers[c.id]?.trim() ? 'waived' : 'open'}</Badge>
+                <div className="col" style={{ gap: 2, flex: 1 }}>
+                  <span>
+                    {c.label} <span className="muted">· {c.detail}</span>
+                  </span>
+                  {!c.ok && (
+                    <input
+                      className="input small"
+                      placeholder="waive: the reason, printed in the report"
+                      defaultValue={issue.waivers[c.id] ?? ''}
+                      onBlur={(e) => updateIssue({ ...issue, waivers: { ...issue.waivers, [c.id]: e.target.value } })}
+                    />
+                  )}
+                </div>
+              </div>
+            ))}
+            <div className="hint">
+              A draft says so on its cover. Final needs every check to pass or to be waived with a reason; a new open check (evidence added, a rule run that failed) returns it to draft.
+            </div>
+          </div>
+        </div>
         <div className="grid-2">
           <div className="panel">
             <div className="panel-h">executive summary</div>

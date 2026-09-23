@@ -510,6 +510,8 @@ export const CASE_KV_KEYS = (caseId: number) =>
     'rule-context',
     // facet fields whose distinct values passed what one ingest counts
     'facets-capped',
+    // the analyst's waivers and the time the report was issued as final
+    'report-final',
   ].map((p) => `${p}-${caseId}`)
 
 /** kv keys of one case that carry an extra suffix after the case id (one record per hypothesis). */

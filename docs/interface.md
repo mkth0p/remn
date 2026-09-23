@@ -195,6 +195,14 @@ tab" shows it as its own page for the browser's print-to-PDF. Printing runs from
 that runs no script but keeps the app's origin, which the browser requires before the
 page may call print on it.
 
+Before it is issued, the Report page runs a preflight: the rules ran on every file,
+every file was read completely and has a verified digest, every item has a decision, the
+decisions taken from the model's proposals were checked, and every confirmed item is
+printed. The report is a draft, and its cover says so, until each check passes or is
+waived with a reason; "issue as final" then prints it as final with the time, and the
+waivers appear in "Where it stops". A new open check (evidence added, a rule run that
+failed) returns it to draft.
+
 The printed report (`frontend/src/data/reportHtml.ts`) is one self-contained HTML file in
 REMN's own look, laid out for A4 and print-to-PDF. Every time in it is UTC, whatever the
 display setting. Its verdict is about the case, not about what prints: a confirmed item
