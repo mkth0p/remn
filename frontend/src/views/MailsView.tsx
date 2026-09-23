@@ -9,7 +9,7 @@ import type { MailRow } from '../db/schema'
 import type { Condition, Filter } from '../rules/filter'
 import { toggleFacetValue } from '../data/facetToggle'
 import { useStore } from '../state/store'
-import { fmtTs } from '../util/format'
+import { fmtTs, tzLabel } from '../util/format'
 import { exportCsv, exportJson } from '../util/export'
 import { BaselineButton } from '../components/BaselineButton'
 import { RescoreButton } from '../components/RescoreButton'
@@ -218,7 +218,7 @@ export function MailsView() {
   )
   const columns: Column<MailRow>[] = useMemo(
     () => [
-      { key: 'date', label: 'date (UTC)', width: 138, render: (r) => fmtTs(r.date) },
+      { key: 'date', label: `date (${tzLabel()})`, width: 138, render: (r) => fmtTs(r.date) },
       {
         key: 'risk',
         label: 'risk',

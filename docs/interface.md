@@ -37,7 +37,15 @@ everything derived from it, as described on the [storage page](storage.md).
 Events and Mails share one query bar (search, time range, conditions, business hours,
 regex, saved searches, and a plain-language "ask" that the model turns into a filter)
 and a histogram of the current result set above the table; clicking a bar narrows the
-time range to that bucket.
+time range to that bucket. The Mails search covers the sender, the recipients, the
+subject, the links, the attachment names and hashes and the full body, which the browser
+store keeps apart from the mail row. Values picked in one facet are alternatives (any of
+them); picking one again removes it. A facet lists its 500 most frequent values, and its
+search box reaches every stored value; a field with more distinct values than one import
+counts says so. Times follow the display setting and the column headers say which zone
+they show; the time range is always entered in UTC. An entry added to the case timeline
+from a row that has no event time (a collection snapshot) says "no event time" rather
+than taking the time of the click.
 
 Selecting a mail opens a bottom pane: the message (text, or HTML in a sandbox), headers,
 hops, URLs, attachments, a Related tab (findings on the mail and the recipients' host and

@@ -27,6 +27,11 @@ function formatTime(ms: number | null | undefined, local: boolean, opts: { ms?: 
   return out + (local ? '' : 'Z')
 }
 
+/** The zone the screen shows times in, for column headers: "UTC", or "local" when the analyst chose it. */
+export function tzLabel(): string {
+  return useLocalTime ? 'local' : 'UTC'
+}
+
 /** A time as the analyst chose to see it on screen: UTC by default, local time when set. */
 export function fmtTs(ms: number | null | undefined, opts: { ms?: boolean; date?: boolean } = {}): string {
   return formatTime(ms, useLocalTime, opts)

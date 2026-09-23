@@ -60,21 +60,28 @@ const EVENT_FACETS = [
   'serviceName',
 ]
 const MAIL_FACETS = ['fromDomain', 'fromAddr', 'fromNameNorm', 'folder', 'originIp', 'flags', 'sourceFormat', 'attExt', 'riskBand']
-const FACET_CAP = 4000
+// distinct values counted per field and ingest; past it the field is recorded as capped, and the
+// panel says so, rather than drop late values (an attacker IP first seen late in a log) unseen
+const FACET_CAP = 25_000
 const BATCH = 2000
 
 class FacetCounter {
   counts = new Map<string, Map<string, number>>()
+  capped = new Set<string>()
   add(field: string, value: unknown): void {
     if (value == null || value === '') return
     const vals = Array.isArray(value) ? value : [value]
     let m = this.counts.get(field)
     if (!m) this.counts.set(field, (m = new Map()))
     for (const v of vals) {
-      const s = String(v).slice(0, 200)
+      // long enough for any path or name these fields hold: a cut value would build a filter that matches nothing
+      const s = String(v).slice(0, 1024)
       const cur = m.get(s)
       if (cur === undefined) {
-        if (m.size >= FACET_CAP) continue
+        if (m.size >= FACET_CAP) {
+          this.capped.add(field)
+          continue
+        }
         m.set(s, 1)
       } else m.set(s, cur + 1)
     }
@@ -129,6 +136,11 @@ async function flushFacets(caseId: number, source: 'events' | 'mails', fc: Facet
       else puts.push({ caseId, source, field, value, count })
     }
     await db.facets.bulkPut(puts)
+  }
+  if (fc.capped.size) {
+    const key = `facets-capped-${caseId}`
+    const prev = ((await db.kv.get(key))?.value as string[] | undefined) ?? []
+    await db.kv.put({ key, value: Array.from(new Set([...prev, ...[...fc.capped].map((f) => `${source}:${f}`)])) })
   }
 }
 

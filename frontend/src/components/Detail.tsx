@@ -4,7 +4,7 @@ import { getDb, type EventRow, type Finding, type MailBody, type MailRow } from 
 import { getSource } from '../data/source'
 import type { Condition, Filter } from '../rules/filter'
 import { useStore } from '../state/store'
-import { fmtBytes, fmtTs } from '../util/format'
+import { fmtBytes, fmtTs, tzLabel } from '../util/format'
 import { IconAi, IconChevronDown, IconClose, IconPivot } from './Icons'
 import { Badge, CopyButton, Dot, Flag, JsonView, KV, Risk, Sev, Tabs } from './ui'
 import { AddToTimeline } from './AddToTimeline'
@@ -101,6 +101,7 @@ export function EventDetail({ row: initial, onClose }: { row: EventRow; onClose:
         <>
           <AddToTimeline
             ts={initial.ts}
+            observedAt={(initial as { observedAt?: number | null }).observedAt}
             text={String(initial.summary ?? `event ${initial.eventId ?? initial.operation ?? ''}`)}
             link={{ source: 'events', id: initial.id!, label: `#${initial.id}` }}
           />
@@ -797,7 +798,7 @@ export function MailDetail({
               <table className="table compact">
                 <thead>
                   <tr>
-                    <th>time (UTC)</th>
+                    <th>time ({tzLabel()})</th>
                     <th>Δ</th>
                     <th>id</th>
                     <th>computer / ip</th>

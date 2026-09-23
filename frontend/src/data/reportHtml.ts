@@ -902,7 +902,7 @@ export function buildReportHtml(d: ReportData): string {
       id: 'timeline',
       title: 'Case timeline',
       count: d.timeline.length,
-      body: `<ul class="tl">${d.timeline.map((t) => `<li class="${h(t.severity ?? 'info')}"><div class="t">${fmtTs(t.ts)}${t.link ? ` · ${h(`${t.link.source} ${t.link.label ?? t.link.id}`)}` : ''}</div><div>${h(t.text)}</div></li>`).join('')}</ul>`,
+      body: `<ul class="tl">${d.timeline.map((t) => `<li class="${h(t.severity ?? 'info')}"><div class="t">${t.untimed ? 'no event time' : fmtTs(t.ts)}${t.link ? ` · ${h(`${t.link.source} ${t.link.label ?? t.link.id}`)}` : ''}</div><div>${h(t.text)}</div></li>`).join('')}</ul>`,
     })
   if (settings.includeTasks && d.tasks.length)
     sections.push({

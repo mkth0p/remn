@@ -3,7 +3,7 @@ import { getSource, type DataSource } from '../data/source'
 import { getDb, type EventRow, type Finding, type MailRow } from '../db/schema'
 import type { Filter } from '../rules/filter'
 import { useStore, type EntityRef } from '../state/store'
-import { fmtNum, fmtTs } from '../util/format'
+import { fmtNum, fmtTs, tzLabel } from '../util/format'
 import { Badge, Dot, Flyout, Sev, Tabs } from './ui'
 import { IconAi, IconGlobe, IconHost, IconMail, IconUser } from './Icons'
 
@@ -437,7 +437,7 @@ export function EntityPanel() {
         <table className="table compact">
           <thead>
             <tr>
-              <th>time (UTC)</th>
+              <th>time ({tzLabel()})</th>
               <th>id</th>
               <th>computer</th>
               <th>ip</th>
@@ -476,7 +476,7 @@ export function EntityPanel() {
         <table className="table compact">
           <thead>
             <tr>
-              <th>date (UTC)</th>
+              <th>date ({tzLabel()})</th>
               <th>risk</th>
               <th>from</th>
               <th>subject</th>

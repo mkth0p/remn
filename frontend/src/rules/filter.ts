@@ -406,7 +406,26 @@ const TEXT_FIELDS_EVENTS = [
   'targetFilename',
   'targetObject',
 ]
-const TEXT_FIELDS_MAILS = ['subject', 'fromName', 'fromAddr', 'fromDomain', 'originIp', 'textPreview', 'messageId', 'folder', 'flags', 'returnPath']
+// recipients, links and attachments too: the pivot counts a mail by its attachment hash or a URL,
+// and "open in Mails" must then show it
+const TEXT_FIELDS_MAILS = [
+  'subject',
+  'fromName',
+  'fromAddr',
+  'fromDomain',
+  'originIp',
+  'textPreview',
+  'messageId',
+  'folder',
+  'flags',
+  'returnPath',
+  'to',
+  'cc',
+  'bcc',
+  'replyTo',
+  'urls',
+  'attachments',
+]
 
 export function toMs(v: string | number | null | undefined): number | null {
   if (v == null || v === '') return null
@@ -489,7 +508,18 @@ export function compileFilter(f: Filter | null | undefined, opts: { tsField?: st
       for (const fld of textFields) {
         const v = row[fld]
         if (v == null) continue
-        const s = Array.isArray(v) ? v.join(' ') : String(v)
+        // a list of addresses, links or attachments holds objects: search the values inside them
+        const s = Array.isArray(v)
+          ? v
+              .map((x) =>
+                x && typeof x === 'object'
+                  ? Object.values(x)
+                      .filter((y) => typeof y === 'string')
+                      .join(' ')
+                  : String(x),
+              )
+              .join(' ')
+          : String(v)
         if (s.toLowerCase().includes(text)) {
           hit = true
           break

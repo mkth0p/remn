@@ -63,7 +63,8 @@ export interface DataSource {
   countMails(filter: Filter): Promise<number>
   aggregateMails(filter: Filter, field: string, limit: number): Promise<Aggregation>
   timelineMails(filter: Filter, bucket: local.Bucket): Promise<{ t: number; count: number }[]>
-  facets(source: 'events' | 'mails', field: string, limit: number): Promise<FacetItem[]>
+  /** the most frequent values of a field, or those containing q when it is given */
+  facets(source: 'events' | 'mails', field: string, limit: number, q?: string): Promise<FacetItem[]>
   getEvent(id: number): Promise<EventRow | null>
   getMail(id: number): Promise<{ row: MailRow; body: MailBody | null } | null>
   pivot(value: string): Promise<local.PivotResult>
@@ -110,8 +111,8 @@ class BrowserSource implements DataSource {
   timelineMails(filter: Filter, bucket: local.Bucket) {
     return local.timelineMails(this.id, filter, bucket, this.settings)
   }
-  async facets(source: 'events' | 'mails', field: string, limit: number) {
-    return (await local.getFacets(this.id, source, field, limit)).map((f) => ({ value: f.value, count: f.count }))
+  async facets(source: 'events' | 'mails', field: string, limit: number, q?: string) {
+    return (await local.getFacets(this.id, source, field, limit, q)).map((f) => ({ value: f.value, count: f.count }))
   }
   async getEvent(id: number) {
     const r = await getDb().events.get(id)

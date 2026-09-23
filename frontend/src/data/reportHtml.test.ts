@@ -360,3 +360,9 @@ describe('what the report claims about the case', () => {
     }
   })
 })
+
+it('prints an undated timeline entry without inventing a time for it', () => {
+  const html = buildReportHtml(data({ timeline: [{ caseId: 1, kind: 'timeline', text: 'Run key: updater.exe', ts: 1_788_000_000_000, untimed: true, createdAt: 0, updatedAt: 0 }] }))
+  expect(html).toContain('no event time')
+  expect(html).not.toContain('2026-08-29')
+})

@@ -549,6 +549,11 @@ export default function App() {
                 <span className="value accent">{fmtNum(pivotRes.events.count)}</span>
               </div>
               <div className="small dim">{pivotRes.events.first ? `${fmtTs(pivotRes.events.first)} → ${fmtTs(pivotRes.events.last)}` : ''}</div>
+              {pivotRes.events.scannedOf && (
+                <div className="small" style={{ color: 'var(--warn)' }}>
+                  counted over the first {fmtNum(pivotRes.events.scannedOf.scanned)} of {fmtNum(pivotRes.events.scannedOf.total)} events: open Events for all of them
+                </div>
+              )}
               <div className="small mono" style={{ marginTop: 6 }}>
                 {Object.entries(pivotRes.events.byEventId)
                   .sort((a, b) => b[1] - a[1])

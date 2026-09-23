@@ -15,7 +15,7 @@ import { buildIncidents, chainMembership, effectiveSeverity, sevCounts, type Inc
 import { loadChains, type Chain } from '../data/chains'
 import { chainSeverity, loadChainReviews, type ChainReview } from '../data/review'
 import { toast, useStore } from '../state/store'
-import { classNames, fmtNum, fmtTs } from '../util/format'
+import { classNames, fmtNum, fmtTs, tzLabel } from '../util/format'
 import { exportCsv, exportJson } from '../util/export'
 import { attackHref } from '../util/safe'
 
@@ -383,7 +383,7 @@ export function FindingsView() {
     },
     { key: 'source', label: 'source', width: 70 },
     { key: 'count', label: 'rows', width: 64, render: (r) => fmtNum(r.count) },
-    { key: 'ts', label: 'first seen (UTC)', width: 150, render: (r) => fmtTs(r.ts) },
+    { key: 'ts', label: `first seen (${tzLabel()})`, width: 150, render: (r) => fmtTs(r.ts) },
     { key: 'status', label: 'status', width: 110, render: (r) => <StatusBadge s={r.status} /> },
   ]
   const incidentColumns: Column<Incident>[] = [
@@ -426,8 +426,8 @@ export function FindingsView() {
       ),
     },
     { key: 'rules', label: 'rules', width: 56, render: (r) => fmtNum(r.rules.length) },
-    { key: 'ts', label: 'first seen (UTC)', width: 150, render: (r) => fmtTs(r.ts) },
-    { key: 'tsEnd', label: 'last (UTC)', width: 150, render: (r) => (r.tsEnd && r.tsEnd !== r.ts ? fmtTs(r.tsEnd) : '') },
+    { key: 'ts', label: `first seen (${tzLabel()})`, width: 150, render: (r) => fmtTs(r.ts) },
+    { key: 'tsEnd', label: `last (${tzLabel()})`, width: 150, render: (r) => (r.tsEnd && r.tsEnd !== r.ts ? fmtTs(r.tsEnd) : '') },
     { key: 'status', label: 'status', width: 110, render: (r) => <StatusBadge s={r.status} /> },
   ]
 

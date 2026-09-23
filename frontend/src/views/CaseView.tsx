@@ -163,7 +163,7 @@ export function CaseView() {
             )}
             {timeline.map((n) => (
               <div key={n.id} className="step" style={{ cursor: 'default', gridTemplateColumns: '150px 14px 1fr auto' }}>
-                <span className="t">{fmtTs(n.ts)}</span>
+                <span className="t">{n.untimed ? <span title={`collected ${fmtTs(n.ts)}`}>no event time</span> : fmtTs(n.ts)}</span>
                 <Dot sev={n.severity ?? 'info'} />
                 <span>
                   {editing?.id === n.id ? (

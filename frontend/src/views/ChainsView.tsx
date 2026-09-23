@@ -5,7 +5,7 @@ import { buildChains, EVENT_CAP, chainCoverageWarnings, loadChains, type Chain, 
 import { toast, useStore } from '../state/store'
 import { AddToTimeline } from '../components/AddToTimeline'
 import { ChainGraph } from '../components/ChainGraph'
-import { fmtNum, fmtTs } from '../util/format'
+import { fmtNum, fmtTs, tzLabel } from '../util/format'
 
 type StepKind = 'mail' | 'm365' | 'host'
 const stepKind = (s: ChainStep): StepKind => (s.kind === 'mail' ? 'mail' : s.origin === 'm365' ? 'm365' : 'host')
@@ -536,7 +536,7 @@ export function ChainsView() {
                       <table className="table compact">
                         <thead>
                           <tr>
-                            <th>date (UTC)</th>
+                            <th>date ({tzLabel()})</th>
                             <th>risk</th>
                             <th>from</th>
                             <th>subject</th>

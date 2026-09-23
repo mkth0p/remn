@@ -2,7 +2,7 @@
  * Read queries over IndexedDB used by the views and by the AI tools.
  */
 import Dexie from 'dexie'
-import { getDb, type EventRow, type Facet, type MailRow } from '../db/schema'
+import { getDb, type EventRow, type Facet, type MailBody, type MailRow } from '../db/schema'
 import { compileFilter, extractEventIds, getPath, type Filter, type SettingsLike } from '../rules/filter'
 
 export interface SearchResult<T> {
@@ -27,6 +27,19 @@ function sortRows<T extends Record<string, unknown>>(rows: T[], field: string, d
   })
 }
 
+/**
+ * The row ids a filter pins (an `id in [...]` or `id eq` condition under AND logic), or null. Opening
+ * a finding filters on its rows this way: they are fetched by primary key, not found by reading
+ * every row of the case and testing each against the list.
+ */
+function pinnedIds(filter: Filter): number[] | null {
+  if (filter.logic === 'or') return null
+  const c = (filter.conditions ?? []).find((x) => x.field === 'id' && (x.op === 'in' || x.op === 'eq'))
+  if (!c) return null
+  const ids = (Array.isArray(c.value) ? c.value : [c.value]).map(Number).filter((n) => Number.isInteger(n))
+  return ids.length ? ids : null
+}
+
 export async function searchEvents(caseId: number, filter: Filter, opts: { limit?: number; settings?: SettingsLike; signal?: AbortSignal; cap?: number } = {}): Promise<SearchResult<EventRow>> {
   const db = getDb()
   // how many matches a sort other than the index's own reads at most (lowered by the tests)
@@ -37,6 +50,13 @@ export async function searchEvents(caseId: number, filter: Filter, opts: { limit
   const ids = extractEventIds(filter.conditions, filter.logic)
   let rows: EventRow[]
   let truncated: boolean
+  const pinned = pinnedIds(filter)
+  if (pinned) {
+    rows = (await db.events.bulkGet(pinned)).filter((r): r is EventRow => !!r && r.caseId === caseId && pred(r as Record<string, unknown>))
+    sortRows(rows as Record<string, unknown>[], sort.field, sort.dir)
+    truncated = rows.length > limit
+    return { rows: rows.slice(0, limit), truncated }
+  }
   if (ids && ids.length && ids.length <= 50) {
     const keys = ids.map((id) => [caseId, id] as [number, number])
     // The event-ID index gives rows in ingestion order. Sorting the first 20,000 of them showed a
@@ -210,11 +230,44 @@ export async function timelineEvents(caseId: number, filter: Filter, bucket: Buc
 }
 
 // ---- mails -----------------------------------------------------------------
+/**
+ * The browser store keeps a mail's full body apart from its row (the mailBodies table), so a
+ * predicate over the row sees only the 400-character preview. Free text and bodyText conditions are
+ * resolved against the bodies first: a bodyText condition becomes the set of mail ids it matches,
+ * and free text also matches a mail whose body holds it. Before this, the search box that says
+ * "body" searched the preview only, and a bodyText condition never matched.
+ */
+async function mailPredicate(caseId: number, filter: Filter, settings?: SettingsLike) {
+  const db = getDb()
+  const conds = filter.conditions ?? []
+  const needsBodies = conds.some((c) => c.field === 'bodyText') || !!filter.text?.trim()
+  if (!needsBodies) return compileFilter(filter, { source: 'mails', settings })
+  const bodies = await db.mailBodies.where('caseId').equals(caseId).toArray()
+  const bodyOf = (b: MailBody) => b.bodyText ?? b.visibleText ?? ''
+  const resolved = conds.map((c) => {
+    if (c.field !== 'bodyText') return c
+    const one = compileFilter({ conditions: [c] }, { source: 'mails', settings })
+    return { field: 'id', op: 'in' as const, value: bodies.filter((b) => one({ bodyText: bodyOf(b) })).map((b) => b.mailId) }
+  })
+  const pred = compileFilter({ ...filter, conditions: resolved }, { source: 'mails', settings })
+  const text = filter.text?.trim().toLowerCase()
+  if (!text) return pred
+  const inBody = new Set(bodies.filter((b) => bodyOf(b).toLowerCase().includes(text)).map((b) => b.mailId))
+  const rest = compileFilter({ ...filter, conditions: resolved, text: '' }, { source: 'mails', settings })
+  return Object.assign((r: Record<string, unknown>) => pred(r) || (inBody.has(r.id as number) && rest(r)), { from: pred.from, to: pred.to, tsField: pred.tsField })
+}
+
 export async function searchMails(caseId: number, filter: Filter, opts: { limit?: number; settings?: SettingsLike } = {}): Promise<SearchResult<MailRow>> {
   const db = getDb()
   const limit = Math.min(opts.limit ?? 2000, HARD_CAP)
-  const pred = compileFilter(filter, { source: 'mails', settings: opts.settings })
+  const pred = await mailPredicate(caseId, filter, opts.settings)
   const sort = filter.sort ?? { field: 'date', dir: 'desc' }
+  const pinned = pinnedIds(filter)
+  if (pinned) {
+    const hit = (await db.mails.bulkGet(pinned)).filter((r): r is MailRow => !!r && r.caseId === caseId && pred(r as Record<string, unknown>))
+    sortRows(hit as unknown as Record<string, unknown>[], sort.field, sort.dir)
+    return { rows: hit.slice(0, limit), truncated: hit.length > limit }
+  }
   const from = pred.from ?? Dexie.minKey
   const to = pred.to ?? Dexie.maxKey
   let coll = db.mails.where('[caseId+date]').between([caseId, from], [caseId, to], true, true)
@@ -239,7 +292,7 @@ export async function searchMails(caseId: number, filter: Filter, opts: { limit?
 
 export async function countMails(caseId: number, filter: Filter, settings?: SettingsLike): Promise<number> {
   const db = getDb()
-  const pred = compileFilter(filter, { source: 'mails', settings })
+  const pred = await mailPredicate(caseId, filter, settings)
   return db.mails
     .where('caseId')
     .equals(caseId)
@@ -296,16 +349,30 @@ export async function timelineMails(caseId: number, filter: Filter, bucket: Buck
 }
 
 // ---- facets / pivots ----------------------------------------------------------
-export async function getFacets(caseId: number, source: 'events' | 'mails', field: string, limit = 50): Promise<Facet[]> {
+export async function getFacets(caseId: number, source: 'events' | 'mails', field: string, limit = 50, q = ''): Promise<Facet[]> {
   const db = getDb()
-  const rows = await db.facets.where('[caseId+source+field]').equals([caseId, source, field]).toArray()
+  const needle = q.trim().toLowerCase()
+  // a search reaches every stored value, not only the most frequent ones already loaded
+  const rows = await db.facets
+    .where('[caseId+source+field]')
+    .equals([caseId, source, field])
+    .filter((f) => !needle || f.value.toLowerCase().includes(needle))
+    .toArray()
   rows.sort((a, b) => b.count - a.count)
   return rows.slice(0, limit)
 }
 
 export interface PivotResult {
   value: string
-  events: { count: number; first: number | null; last: number | null; byEventId: Record<string, number>; fields: Record<string, number> }
+  events: {
+    count: number
+    first: number | null
+    last: number | null
+    byEventId: Record<string, number>
+    fields: Record<string, number>
+    /** the scan stopped here: counts are over the first this-many events of the case */
+    scannedOf?: { scanned: number; total: number }
+  }
   mails: { count: number; first: number | null; last: number | null; fields: Record<string, number> }
 }
 
@@ -339,11 +406,14 @@ export async function pivot(caseId: number, value: string, maxScan = 400000): Pr
     'objectName',
   ]
   let scanned = 0
+  // A pivot over millions of rows stops at maxScan and says so, rather than keep walking without
+  // counting and report partial numbers as the whole.
   await db.events
     .where('caseId')
     .equals(caseId)
+    .until(() => scanned >= maxScan)
     .each((r) => {
-      if (scanned++ > maxScan) return
+      scanned++
       let hit = false
       for (const f of EV_FIELDS) {
         const v = r[f]
@@ -365,6 +435,7 @@ export async function pivot(caseId: number, value: string, maxScan = 400000): Pr
         res.events.last = res.events.last == null ? r.ts : Math.max(res.events.last, r.ts)
       }
     })
+  if (scanned >= maxScan) res.events.scannedOf = { scanned, total: await db.events.where('caseId').equals(caseId).count() }
   const M_FIELDS = ['fromAddr', 'fromName', 'fromDomain', 'subject', 'originIp', 'returnPath', 'messageId', 'textPreview']
   await db.mails
     .where('caseId')

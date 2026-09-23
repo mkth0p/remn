@@ -97,7 +97,9 @@ export function TimelineView() {
         .filter((f) => f.ts != null && f.status !== 'false_positive')
         .toArray(),
       listNotes(caseId, 'timeline').catch(() => [] as CaseNote[]),
-    ]).then(([ev, ml, fd, notes]) => {
+    ]).then(([ev, ml, fd, allNotes]) => {
+      // an entry with no event time has no place on a time axis
+      const notes = allNotes.filter((n) => !n.untimed)
       if (!alive) return
       const t = tokens()
       const allT = [...ev.map((b) => b.t), ...ml.map((b) => b.t), ...fd.map((f) => f.ts as number), ...notes.map((n) => n.ts)]

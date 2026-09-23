@@ -416,6 +416,8 @@ export interface CaseNote {
   text: string
   /** event time for timeline entries; creation time otherwise */
   ts: number
+  /** a timeline entry added from a row with no event time (a collected artefact): ts only orders it */
+  untimed?: boolean
   createdAt: number
   updatedAt: number
   done?: boolean
@@ -506,6 +508,8 @@ export const CASE_KV_KEYS = (caseId: number) =>
     'relationship-stories',
     // the rule choices in force when the case was exported (packs, disabled rules), for the record
     'rule-context',
+    // facet fields whose distinct values passed what one ingest counts
+    'facets-capped',
   ].map((p) => `${p}-${caseId}`)
 
 /** kv keys of one case that carry an extra suffix after the case id (one record per hypothesis). */

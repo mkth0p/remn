@@ -43,7 +43,7 @@ import {
 import { getDb, type Evidence, type Finding, type Severity } from '../db/schema'
 import { buildIncidents, type Incident } from '../rules/incidents'
 import { toast, useStore } from '../state/store'
-import { classNames, fmtNum, fmtTs } from '../util/format'
+import { classNames, fmtNum, fmtTs, tzLabel } from '../util/format'
 
 type Status = 'new' | 'reviewed' | 'escalated' | 'false_positive'
 const STATUS_LABEL: Record<Status, string> = { new: 'not reviewed', reviewed: 'reviewed', escalated: 'confirmed', false_positive: 'false positive' }
@@ -84,7 +84,7 @@ function Facts({ findings, said, onUnlink }: { findings: Finding[]; said: Record
           <th>severity</th>
           <th>finding</th>
           <th>findings · rows</th>
-          <th>when (UTC)</th>
+          <th>when ({tzLabel()})</th>
           <th>what matched</th>
           <th>status</th>
           {onUnlink && <th></th>}
