@@ -12,7 +12,8 @@ from __future__ import annotations
 
 import json
 import logging
-from collections import Counter
+import re
+from collections import Counter, OrderedDict
 from collections.abc import Iterator
 from typing import Any
 
@@ -208,7 +209,9 @@ FIELD_MAP: dict[str, str] = {
     "Filter": "wmiFilter",
     "Query": "wmiQuery",
     "Name": "name",
-    "Type": "type",
+    # Sysmon 25 "Image is replaced" / "Image is locked for access". Not "type": the ingest stream
+    # marks every row with type=event, which overwrote it, so no rule on it could ever match.
+    "Type": "typeName",
     "Contents": "contents",
     "Archived": "archived",
     "IsExecutable": "isExecutable",
@@ -314,6 +317,43 @@ def _str(value: Any, limit: int = 4000) -> str | None:
     if not s or s == "-":
         return None
     return s if len(s) <= limit else s[:limit] + "…"
+
+
+# The rights an object-access event lists (4656, 4663, 5145 ...) arrive as message codes.
+# Windows renders them as names in the event viewer, and rules are written against the names
+# ("AccessList contains WriteData"), so the names are appended to the codes: both spellings match.
+_ACCESS_NAMES = {
+    "1537": "DELETE",
+    "1538": "READ_CONTROL",
+    "1539": "WRITE_DAC",
+    "1540": "WRITE_OWNER",
+    "1541": "SYNCHRONIZE",
+    "1542": "ACCESS_SYS_SEC",
+    "4416": "ReadData (or ListDirectory)",
+    "4417": "WriteData (or AddFile)",
+    "4418": "AppendData (or AddSubdirectory or CreatePipeInstance)",
+    "4419": "ReadEA",
+    "4420": "WriteEA",
+    "4421": "Execute/Traverse",
+    "4422": "DeleteChild",
+    "4423": "ReadAttributes",
+    "4424": "WriteAttributes",
+    "4432": "Query key value",
+    "4433": "Set key value",
+    "4434": "Create sub-key",
+    "4435": "Enumerate sub-keys",
+    "4436": "Notify about changes to keys",
+    "4437": "Create Link",
+}
+_ACCESS_CODE_RE = re.compile(r"%%(\d+)")
+
+
+def render_access_list(value: str | None) -> str | None:
+    """'%%4416 %%4417' -> the codes, then a line with their names."""
+    if not value or "%%" not in value:
+        return value
+    names = [_ACCESS_NAMES[c] for c in _ACCESS_CODE_RE.findall(value) if c in _ACCESS_NAMES]
+    return f"{value}\n{' '.join(names)}" if names else value
 
 
 def _int(value: Any) -> int | None:
@@ -422,6 +462,8 @@ def flatten(event: dict[str, Any], record: dict[str, Any] | None = None, include
         row[key] = _str(v, LONG_LIMIT if key in _LONG_FIELDS else 4000)
 
     # Event-specific fix-ups
+    if row.get("accessList"):
+        row["accessList"] = render_access_list(row["accessList"])
     if event_id in _GROUP_EVENTS and row.get("targetUser"):
         row["groupName"] = row["targetUser"]
         row["groupDomain"] = row.get("targetDomain")
@@ -511,6 +553,54 @@ class Stats:
         }
 
 
+class Lineage:
+    """Fills in what an older log leaves out about a process's parent, from the parent's own event
+    in the same log: the parent's account on a Sysmon 1 written before Sysmon had ParentUser, and
+    the parent's image on a 4688 written before Windows logged ParentProcessName. Rules on "a
+    SYSTEM child of a service account" or "a child of WmiPrvSE" then work on those logs. What was
+    filled in is named in the row's `enriched` field; the record itself (raw) is unchanged."""
+
+    MAX = 200_000
+
+    def __init__(self) -> None:
+        self.users: OrderedDict[str, str] = OrderedDict()
+        self.images: OrderedDict[tuple[str, str], tuple[str, int]] = OrderedDict()
+
+    def _keep(self, table: OrderedDict, key: Any, value: Any) -> None:
+        table[key] = value
+        table.move_to_end(key)
+        if len(table) > self.MAX:
+            table.popitem(last=False)
+
+    def apply(self, row: dict[str, Any]) -> None:
+        eid = row.get("eventId")
+        data = row.get("data") if isinstance(row.get("data"), dict) else None
+        if eid == 1 and data is not None and "sysmon" in str(row.get("provider") or "").lower():
+            guid = str(row.get("processGuid") or "").lower()
+            if guid and data.get("User"):
+                self._keep(self.users, guid, str(data["User"]))
+            parent = str(row.get("parentProcessGuid") or "").lower()
+            if not data.get("ParentUser") and parent in self.users:
+                data["ParentUser"] = self.users[parent]
+                row["enriched"] = _enriched(row, "data.ParentUser from the parent's process creation event")
+        elif eid == 4688 and str(row.get("channel") or "") == "Security":
+            computer = str(row.get("computer") or "").lower()
+            pid = str(row.get("newProcessId") or "").lower()
+            if pid and row.get("processName"):
+                self._keep(self.images, (computer, pid), (str(row["processName"]), int(row.get("ts") or 0)))
+            creator = str(row.get("callerProcessId") or "").lower()
+            if not row.get("parentProcessName") and creator:
+                hit = self.images.get((computer, creator))
+                # the latest creation of that process id before this one, within a week (ids are reused)
+                if hit and 0 <= int(row.get("ts") or 0) - hit[1] <= 7 * 86_400_000:
+                    row["parentProcessName"] = hit[0]
+                    row["enriched"] = _enriched(row, "parentProcessName from the 4688 that created the parent process id")
+
+
+def _enriched(row: dict[str, Any], note: str) -> str:
+    return f"{row['enriched']}; {note}" if row.get("enriched") else note
+
+
 def iter_events(path_or_file: Any, include_raw: bool = True, stats: Stats | None = None, number_of_threads: int = 0) -> Iterator[dict[str, Any]]:
     """
     Yield flattened rows from an EVTX file path (str/Path) or file-like object.
@@ -523,6 +613,7 @@ def iter_events(path_or_file: Any, include_raw: bool = True, stats: Stats | None
     except TypeError:
         parser = PyEvtxParser(path_or_file, number_of_threads)
     iterator = parser.records_json()
+    lineage = Lineage()
     while True:
         try:
             rec = next(iterator)
@@ -548,6 +639,7 @@ def iter_events(path_or_file: Any, include_raw: bool = True, stats: Stats | None
                 stats.errors += 1
             log.debug("flatten failed: %s", exc)
             continue
+        lineage.apply(row)
         if stats is not None:
             stats.add(row)
         yield row

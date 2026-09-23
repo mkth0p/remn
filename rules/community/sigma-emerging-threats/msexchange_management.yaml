@@ -18,7 +18,7 @@ where:
   eventId|in:
   - 6
   - 8
-  dataList|contains_any:
+  message|contains_any:
   - 'Cmdlet failed. Cmdlet Get-App, '
   - 'Task Get-App throwing unhandled exception: System.InvalidCastException:'
 sigma:

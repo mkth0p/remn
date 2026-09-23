@@ -65,6 +65,18 @@ describe('matchCondition', () => {
 })
 
 describe('ipInCidr', () => {
+  it('compares a whole IPv6 prefix, with or without a zone id', () => {
+    expect(ipInCidr('fe80::80ac:4126:fa58:1b81%10', 'fe80::/10')).toBe(true)
+    expect(ipInCidr('febf::1', 'fe80::/10')).toBe(true)
+    expect(ipInCidr('fec0::1', 'fe80::/10')).toBe(false)
+    // the first 16 bits agree; the prefix does not
+    expect(ipInCidr('2001:db9::1', '2001:db8::/32')).toBe(false)
+    expect(ipInCidr('2001:db8:ffff::1', '2001:db8::/32')).toBe(true)
+    expect(ipInCidr('0:0:0:0:0:0:0:1', '::1')).toBe(true)
+    expect(ipInCidr('::2', '::1/128')).toBe(false)
+    expect(ipInCidr('10.0.0.1', 'fe80::/10')).toBe(false)
+    expect(ipInCidr('not:an:address:zz::', 'fe80::/10')).toBe(false)
+  })
   it('matches v4 ranges and exact ips', () => {
     expect(ipInCidr('192.168.1.10', '192.168.0.0/16')).toBe(true)
     expect(ipInCidr('172.32.0.1', '172.16.0.0/12')).toBe(false)

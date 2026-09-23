@@ -337,13 +337,11 @@ where:
       - \services.exe
       - \TiWorker.exe
     - parentImage|exists: false
-    - parentProcessName|exists: false
-    - parentImage|in:
-      - '-'
-      - ''
-    - parentProcessName|in:
-      - '-'
-      - ''
+      parentProcessName|exists: false
+    - data.ParentImage: '-'
+    - parentImage: ''
+      parentProcessName: ''
+    - data.ParentProcessName: '-'
 sigma:
   id: 01d2e2a1-5f09-44f7-9fc1-24faa7479b6d
   status: test
@@ -2351,7 +2349,7 @@ where:
         - :\Program Files\Citrix\HDX\bin\icast.exe
         - :\Program Files\Citrix\System32\icast.exe
       - image|exists: false
-      - processName|exists: false
+        processName|exists: false
 sigma:
   id: 0a98a10c-685d-4ab0-bddc-b6bdd1d48458
   status: test
@@ -3848,7 +3846,7 @@ where:
       - :\Windows\System32\wininit.exe
       - :\Windows\System32\winlogon.exe
     - image|exists: false
-    - processName|exists: false
+      processName|exists: false
 sigma:
   id: 1012f107-b8f1-4271-af30-5aed2de89b39
   status: test
@@ -5656,13 +5654,11 @@ where:
         - :\Windows\Temp\
         - :\Windows\WinSxS\
       - parentImage|exists: false
-      - parentProcessName|exists: false
-      - parentImage|in:
-        - ''
-        - '-'
-      - parentProcessName|in:
-        - ''
-        - '-'
+        parentProcessName|exists: false
+      - data.ParentImage: '-'
+      - parentImage: ''
+        parentProcessName: ''
+      - data.ParentProcessName: '-'
   - not:
       any_of:
       - any_of:
@@ -27045,13 +27041,14 @@ where:
   - not:
       any_of:
       - image|exists: false
-      - processName|exists: false
-      - image|in:
-        - '-'
-        - ''
-      - processName|in:
-        - '-'
-        - ''
+        processName|exists: false
+      - data.Image: '-'
+      - image: ''
+        processName: ''
+      - data.ProcessName: '-'
+      - data.NewProcessName: '-'
+      - data.Process Name: '-'
+      - data.TargetProcessName: '-'
       - image|in:
         - MemCompression
         - Registry
@@ -30459,9 +30456,9 @@ where:
       - image|endswith: :\Windows\System32\conhost.exe
       - processName|endswith: :\Windows\System32\conhost.exe
       - image|exists: false
-      - processName|exists: false
+        processName|exists: false
       - image: ''
-      - processName: ''
+        processName: ''
   - not:
       provider: SystemTraceProvider-Process
 sigma:
@@ -32290,7 +32287,7 @@ where:
       - chrome_updater.exe
       - chrome_installer.exe
     - image|exists: false
-    - processName|exists: false
+      processName|exists: false
 sigma:
   id: 84b1ecf9-6eff-4004-bafb-bae5c0e251b2
   status: test
@@ -34927,13 +34924,11 @@ where:
         - \powershell.exe
         - \pwsh.exe
       - parentImage|exists: false
-      - parentProcessName|exists: false
-      - parentImage|in:
-        - ''
-        - '-'
-      - parentProcessName|in:
-        - ''
-        - '-'
+        parentProcessName|exists: false
+      - data.ParentImage: '-'
+      - parentImage: ''
+        parentProcessName: ''
+      - data.ParentProcessName: '-'
   - not:
       any_of:
       - parentImage|endswith: :\Program Files\Microsoft Monitoring Agent\Agent\MonitoringHost.exe
@@ -36751,13 +36746,11 @@ where:
       - parentImage|endswith: \MsMpEng.exe
       - parentProcessName|endswith: \MsMpEng.exe
     - parentImage|exists: false
-    - parentProcessName|exists: false
-    - parentImage|in:
-      - ''
-      - '-'
-    - parentProcessName|in:
-      - ''
-      - '-'
+      parentProcessName|exists: false
+    - data.ParentImage: '-'
+    - parentImage: ''
+      parentProcessName: ''
+    - data.ParentProcessName: '-'
 sigma:
   id: 96036718-71cc-4027-a538-d1587e0006a7
   status: test
@@ -38504,14 +38497,12 @@ where:
         any_of:
         - parentImage: C:\Windows\System32\winlogon.exe
         - parentProcessName: C:\Windows\System32\winlogon.exe
-        - parentImage|in:
-          - ''
-          - '-'
-        - parentProcessName|in:
-          - ''
-          - '-'
+        - data.ParentImage: '-'
+        - parentImage: ''
+          parentProcessName: ''
+        - data.ParentProcessName: '-'
         - parentImage|exists: false
-        - parentProcessName|exists: false
+          parentProcessName|exists: false
 sigma:
   id: 9cfc00b6-bfb7-49ce-9781-ef78503154bb
   status: experimental
@@ -44758,7 +44749,7 @@ where:
     - originalFileName: explorer.exe
     - commandLine: C:\Windows\Explorer.EXE
     - image|exists: false
-    - processName|exists: false
+      processName|exists: false
 sigma:
   id: b655a06a-31c0-477a-95c2-3726b83d649d
   status: test
@@ -47429,14 +47420,15 @@ where:
       - processName|contains: :\Windows\Temp\
       - image|contains: :\$Extend\$Deleted\
       - processName|contains: :\$Extend\$Deleted\
-      - image|in:
-        - '-'
-        - ''
-      - processName|in:
-        - '-'
-        - ''
+      - data.Image: '-'
+      - image: ''
+        processName: ''
+      - data.ProcessName: '-'
+      - data.NewProcessName: '-'
+      - data.Process Name: '-'
+      - data.TargetProcessName: '-'
       - image|exists: false
-      - processName|exists: false
+        processName|exists: false
   - not:
       any_of:
       - parentImage|contains: :\ProgramData\Avira\
@@ -51966,7 +51958,7 @@ where:
         - \win32calc.exe
         - \notepad.exe
       - image|exists: false
-      - processName|exists: false
+        processName|exists: false
 sigma:
   id: cbec226f-63d9-4eca-9f52-dfb6652f24df
   status: test

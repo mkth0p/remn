@@ -19,7 +19,7 @@ references:
 where:
   channel: Windows PowerShell
   eventId: 400
-  dataList|contains_all:
+  message|contains_all:
   - HostName=ConsoleHost
   - ' -bxor '
 sigma:
@@ -53,9 +53,9 @@ where:
   all_of:
   - channel: Windows PowerShell
     eventId: 400
-  - dataList|contains: HostApplication=
+  - message|contains: HostApplication=
   - not:
-      dataList|re:
+      message|re:
       - HostApplication=.:/Windows/System32/WindowsPowerShell/v1\.0/powershell
       - HostApplication=.:/Windows/SysWOW64/WindowsPowerShell/v1\.0/powershell
       - HostApplication=.:\\Windows\\System32\\sdiagnhost\.exe
@@ -65,8 +65,8 @@ where:
       - HostApplication=powershell
   - not:
       any_of:
-      - dataList|contains: Citrix\ConfigSync\ConfigSync.ps1
-      - dataList|contains: HostApplication=C:\Hexnode\Hexnode Agent\Current\HexnodeAgent.exe
+      - message|contains: Citrix\ConfigSync\ConfigSync.ps1
+      - message|contains: HostApplication=C:\Hexnode\Hexnode Agent\Current\HexnodeAgent.exe
 sigma:
   id: d7326048-328b-4d5e-98af-86e84b17c765
   status: test

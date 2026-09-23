@@ -29,6 +29,8 @@ if "pandas" not in sys.modules and importlib.util.find_spec("pandas") is None:
     sys.modules["pandas"] = None  # type: ignore[assignment]
 import pyarrow as pa
 
+from services.parsers.evtx_parser import FIELD_MAP
+
 log = logging.getLogger(__name__)
 
 KEY_RE = re.compile(r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$")
@@ -222,7 +224,17 @@ EVENT_COLUMNS: list[tuple[str, tuple[str, Any]]] = [
     ("message", _S),
     ("data", _S),
     ("raw", _S),
+    # what the parser filled in from another event (evtx_parser.Lineage)
+    ("enriched", _S),
 ]
+# Every other field the EVTX parser puts on a row. A field without a column was dropped when the
+# row was written, and the rules reading it (accessList, objectClass, startModule ... 65 converted
+# Sigma rules) then gave other answers here than in the browser: a condition on it never matched,
+# and one under `not` always did.
+_PARSER_ONLY = sorted(set(FIELD_MAP.values()) - {n for n, _ in EVENT_COLUMNS} - {"dataList"})
+EVENT_COLUMNS += [(n, _S) for n in _PARSER_ONLY]
+# where the parser took each of those fields from, to fill them in on stores written before they had a column
+PARSER_SOURCES: dict[str, list[str]] = {n: [k for k, v in FIELD_MAP.items() if v == n] for n in _PARSER_ONLY}
 EVENT_INT = {n for n, t in EVENT_COLUMNS if t in (_I, _L)}
 
 MAIL_COLUMNS: list[tuple[str, tuple[str, Any]]] = [
@@ -511,6 +523,10 @@ class CaseStore:
                 for n, typ in cols:
                     if n not in have:
                         self._con.execute(f"ALTER TABLE {t} ADD COLUMN {q(n)} {typ[0]}")
+                        if t == "events" and n in PARSER_SOURCES:
+                            # rows written before the column existed: the same value from the EventData
+                            src = ", ".join(f"nullif(trim(json_extract_string(data, '$.\"{k}\"')), '-')" for k in PARSER_SOURCES[n])
+                            self._con.execute(f"UPDATE events SET {q(n)} = coalesce({src}) WHERE data IS NOT NULL")
             for ddl in INDEXES:
                 try:
                     self._con.execute(ddl)

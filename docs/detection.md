@@ -137,7 +137,11 @@ converts one `.yml` or a `.zip` through `POST /api/rules/convert/sigma` and
 `POST /api/rules/convert/sublime` and stores the result as custom rules. Sigma: Windows
 log sources map to channel and event id (Sysmon 1 and Security 4688 for
 `process_creation`, …), fields map to the parser's flattened columns (`Image` matches
-both Sysmon and 4688), unmapped EventData fields are reachable as `data.<Field>`, globs
+both Sysmon and 4688, and "Image has no value" means neither has one), the `Data` list of
+classic events (MSSQL, MsiInstaller, Windows PowerShell 800) is read from `message`, a
+comparison with `-`, the Windows placeholder for "no value", is made against the EventData
+value (the parser leaves the column empty for `-`), unmapped EventData fields are reachable
+as `data.<Field>`, globs
 become the right operator or an anchored regex, `1 of x*` and `all of them` become
 `any_of` and `all_of`. Sublime: the structural subset of MQL translates (sender, subject
 and header comparisons, `strings.*` and `regex.*` matchers,
@@ -284,6 +288,19 @@ rows, mails), runs every bundled rule on the SQL engine and records the rows and
 keys under `tests/fixtures/parity/`; `frontend/src/rules/parity.test.ts` runs the
 browser engine on the same rows and fails on any difference. Regenerate the fixture after
 changing an engine or a rule, and review the diff.
+
+The server store keeps every field the parser writes on a row (a guard test checks the
+parser's field map against the store's columns; a store written before a column existed
+gets it filled from the stored EventData when it is opened), and both engines compare IPv6
+ranges from the case settings by prefix. Before this, 65 converted rules read a field the
+store had dropped and gave other answers on the server than in the browser. Run over all
+278 EVTX-ATTACK-SAMPLES files with every default and hunting rule, the two engines now
+give the same findings (see `docs/reviews/2026-09-23-evtx-attack-samples.md`).
+
+The community packs in the repository were converted before three converter fixes (`Data`,
+`-`, empty checks on aliased fields) and Sysmon 25's `Type` moving to `typeName`;
+`tools/migrate_community_packs.py` applied the same changes to them in place, and a test
+fails if a pack still needs it. A new import makes it unnecessary.
 
 ## When a rule finds nothing
 

@@ -20,7 +20,7 @@ where:
   channel: Application
   provider: Application Error
   eventId: 1000
-  dataList|contains_all:
+  message|contains_all:
   - lsass.exe
   - WLDAP32.dll
 sigma:
@@ -120,7 +120,7 @@ where:
   channel: Application
   eventId: 1033
   provider: MsiInstaller
-  dataList|contains: test pkg
+  message|contains: test pkg
 sigma:
   id: 7dbb86de-a0cc-494c-8aa8-b2996c9ef3c8
   status: test
@@ -264,7 +264,7 @@ where:
   channel: Application
   provider: Windows Server Update Services
   eventId: 7053
-  dataList|contains_all:
+  message|contains_all:
   - System.InvalidCastException
   - System.Windows.Data.ObjectDataProvider
   - Unable to cast object of type

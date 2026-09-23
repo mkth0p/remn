@@ -181,6 +181,32 @@ def _ipv4_int_sql(expr: str) -> str:
     )
 
 
+def _ipv6_hex_sql(expr: str) -> str:
+    """An IPv6 address as its 32 hex digits (zone id dropped, '::' expanded); NULL for anything else."""
+    a = f"lower(regexp_replace({expr}, '%.*$', ''))"
+    head = f"list_filter(string_split(split_part({a}, '::', 1), ':'), g -> g <> '')"
+    tail = f"list_filter(string_split(split_part({a}, '::', 2), ':'), g -> g <> '')"
+
+    def pad(groups: str) -> str:
+        return f"array_to_string(list_transform({groups}, g -> lpad(g, 4, '0')), '')"
+
+    return (
+        f"(CASE WHEN regexp_full_match({a}, '[0-9a-f:]+') AND contains({a}, ':') "
+        f"THEN {pad(head)} || repeat('0', 4 * (8 - len({head}) - len({tail}))) || {pad(tail)} END)"
+    )
+
+
+def _ipv6_prefix_regex(net: ipaddress.IPv6Network) -> str:
+    """The expanded hex forms inside an IPv6 network, as an anchored regex (fe80::/10 -> ^fe[89ab])."""
+    digits = f"{int(net.network_address):032x}"
+    full, rest = divmod(net.prefixlen, 4)
+    pattern = "^" + digits[:full]
+    if rest:
+        lo = int(digits[full], 16) & (0xF << (4 - rest)) & 0xF
+        pattern += "[" + "".join(f"{n:x}" for n in range(lo, lo + (1 << (4 - rest)))) + "]"
+    return pattern
+
+
 def resolve(field_name: str, ctx: Ctx) -> Expr:
     """Map a DSL field to a SQL expression in the current table context."""
     f = field_name.strip()
@@ -441,6 +467,7 @@ def _setting_condition(sql: str, low: str, name: str, ctx: Ctx) -> str:
     if name in ("internal_ips", "internalIps"):
         ranges: list[tuple[int, int]] = []
         exact: list[str] = []
+        v6: list[str] = []
         for item in items:
             it = item.strip().lower()
             try:
@@ -451,11 +478,15 @@ def _setting_condition(sql: str, low: str, name: str, ctx: Ctx) -> str:
             if net.version == 4:
                 ranges.append((int(net.network_address), int(net.broadcast_address)))
             else:
-                exact.append(it)
+                # an IPv6 network used to be compared as text ("fe80::/10"), which no address equals
+                v6.append(_ipv6_prefix_regex(net))
         parts = []
         if ranges:
             ipint = _ipv4_int_sql(f"CAST({sql} AS VARCHAR)")
             parts.append("(" + " OR ".join(f"{ipint} BETWEEN {ctx.p(lo)} AND {ctx.p(hi)}" for lo, hi in ranges) + ")")
+        if v6:
+            hex6 = _ipv6_hex_sql(f"CAST({sql} AS VARCHAR)")
+            parts.append("(" + " OR ".join(f"regexp_matches({hex6}, {ctx.p(p)})" for p in v6) + ")")
         if exact:
             parts.append(f"{low} IN ({', '.join(ctx.p(x) for x in exact)})")
         return "(" + " OR ".join(parts) + ")"

@@ -3,7 +3,7 @@
  * Rule worker: runs the YAML rules against IndexedDB and stores findings.
  */
 import { getDb, type MailRow } from '../db/schema'
-import { compileCond, ruleApplicable, ruleEventIds, ruleFields, runRule, type PresentSelectors, type Rule, type RuleDiag } from '../rules/engine'
+import { compileCond, ruleApplicable, ruleEventIds, ruleFields, ruleReadFields, runRule, type PresentSelectors, type Rule, type RuleDiag } from '../rules/engine'
 import type { Row, SettingsLike } from '../rules/filter'
 import { replaceFindings } from '../data/findingReviews'
 
@@ -117,7 +117,7 @@ async function run(req: RunRequest): Promise<void> {
   for (const rule of rules) {
     const k = subsetKey(rule)
     if (k === null) continue
-    const need = keepFor(ruleFields(rule.where))
+    const need = keepFor(ruleReadFields(rule))
     const cur = keepByKey.get(k) ?? { raw: false, data: false }
     keepByKey.set(k, { raw: cur.raw || need.raw, data: cur.data || need.data })
   }
@@ -170,7 +170,9 @@ async function run(req: RunRequest): Promise<void> {
         rows = await subset(key, ruleEventIds(rule.where), pred)
         if (rule.then?.where) {
           const thenPred = compileCond(rule.then.where, settings)
-          const pre = await fetchEvents(caseId, ruleEventIds(rule.then.where), thenPred, { raw: false, data: false })
+          const thenFields = ruleFields(rule.then.where)
+          for (const f of rule.then.join ?? []) thenFields.add(f)
+          const pre = await fetchEvents(caseId, ruleEventIds(rule.then.where), thenPred, keepFor(thenFields))
           thenRows = () => pre
         }
       } else {

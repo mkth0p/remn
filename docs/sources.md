@@ -17,8 +17,15 @@ every event is tagged with its source file. Records are flattened into the event
 the standard fields (time, event id, channel, provider, computer, level) and the
 event-specific ones under their own names (`targetUser`, `subjectUser`, `ipAddress`,
 `logonType`, `processName`, `commandLine`, `serviceName`, `taskName`, …), with every
-EventData field also reachable as `data.<Name>`. Security, System, PowerShell, Sysmon
-and Defender logs are the ones the bundled rules target. On the machine under
+EventData field also reachable as `data.<Name>`. Access rights in object-access events
+(4656, 4663, 5145 …) keep their codes and are followed by their names (`%%4417` then
+`WriteData (or AddFile)`), as the event viewer shows them, so rules written against either
+spelling match. Where an older log leaves out what a newer one records about a parent
+process, the parser fills it in from the parent's own event in the same log: `ParentUser`
+on a Sysmon 1 from before Sysmon logged it, the parent's image on a 4688 from before
+Windows logged it; the row's `enriched` field says what was filled in, and the raw record
+is unchanged. Security, System, PowerShell, Sysmon and Defender logs are the ones the
+bundled rules target. On the machine under
 investigation, `wevtutil epl Security C:\evidence\Security.evtx` (as administrator)
 exports a channel.
 

@@ -3861,7 +3861,7 @@ where:
       - :\Windows\System32\wevtutil.exe
       - :\Windows\SysWOW64\wevtutil.exe
     - image|exists: false
-    - processName|exists: false
+      processName|exists: false
 sigma:
   id: 6d1058a4-407e-4f3a-a144-1968c11dc5c3
   status: test

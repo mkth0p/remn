@@ -1362,7 +1362,7 @@ where:
       - \{
       - '}\'
     - image|exists: false
-    - processName|exists: false
+      processName|exists: false
     - image: C:\Windows\System32\drvinst.exe
     - processName: C:\Windows\System32\drvinst.exe
     - image|in:

@@ -68,5 +68,8 @@
     "taskscheduler.yaml": 1,
     "windefend.yaml": 1
   },
-  "generator": "tools/import_community_rules.py"
+  "generator": "tools/import_community_rules.py",
+  "postprocessed": [
+    "migrate_community_packs 2026-09-23: Data -> message, '-' in EventData, alias empty checks, Sysmon 25 Type"
+  ]
 }

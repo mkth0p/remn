@@ -18,7 +18,7 @@ where:
   all_of:
   - channel|contains: sysmon
     eventId: 25
-  - type: Image is replaced
+  - typeName: Image is replaced
   - not:
       image|contains_any:
       - :\Program Files (x86)

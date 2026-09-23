@@ -596,10 +596,13 @@ where:
   eventId: 4624
   logonType: 3
   targetUser: ANONYMOUS LOGON
-  workstation: '-'
   ipAddress|in:
   - 127.0.0.1
   - ::1
+  any_of:
+  - data.WorkstationName: '-'
+  - data.ClientName: '-'
+  - data.Workstation: '-'
 sigma:
   id: 16f5d8ca-44bd-47c8-acbe-6fc95a16c12f
   status: test
@@ -1201,9 +1204,9 @@ where:
   - all_of:
     - eventId: 4738
     - not:
-        sidHistory|in:
-        - '-'
-        - '%%1793'
+        any_of:
+        - data.SidHistory: '-'
+        - sidHistory: '%%1793'
     - not:
         sidHistory|exists: false
 sigma:
@@ -1321,9 +1324,8 @@ where:
   - eventId: 4738
     not:
       any_of:
-      - allowedToDelegateTo|in:
-        - ''
-        - '-'
+      - data.AllowedToDelegateTo: '-'
+      - allowedToDelegateTo: ''
       - allowedToDelegateTo|exists: false
   - eventId: 5136
     attributeName: msDS-AllowedToDelegateTo

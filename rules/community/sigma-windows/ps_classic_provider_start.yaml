@@ -15,9 +15,9 @@ references:
 where:
   channel: Windows PowerShell
   eventId: 600
-  dataList|contains: Set-MpPreference
+  message|contains: Set-MpPreference
   any_of:
-  - dataList|contains_any:
+  - message|contains_any:
     - -dbaf $true
     - -dbaf 1
     - -dbm $true
@@ -62,7 +62,7 @@ where:
     - -dsnf 1
     - -dss $true
     - -dss 1
-  - dataList|contains_any:
+  - message|contains_any:
     - HighThreatDefaultAction Allow
     - htdefac Allow
     - LowThreatDefaultAction Allow

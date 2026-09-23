@@ -572,6 +572,16 @@ export function ruleFields(cond: RuleCond | undefined, acc: Set<string> = new Se
   return acc
 }
 
+/** Every field a rule reads: its conditions, and what it groups, counts and reports on. The rule
+ * worker keeps a row's heavy columns (raw, data) only for the fields named here, and a rule
+ * grouping or counting by data.X used to get rows without data because only `where` was read. */
+export function ruleReadFields(rule: Rule): Set<string> {
+  const out = ruleFields(rule.where)
+  for (const cond of [rule.exclude, rule.any_in_group]) if (cond) ruleFields(cond, out)
+  for (const f of [...(rule.group_by ?? []), ...(rule.entities ?? []), ...(rule.distinct ? [rule.distinct] : [])]) out.add(f)
+  return out
+}
+
 export function validateRule(r: unknown): { ok: true; rule: Rule } | { ok: false; error: string } {
   if (!r || typeof r !== 'object') return { ok: false, error: 'rule must be a mapping' }
   const rule = r as Rule

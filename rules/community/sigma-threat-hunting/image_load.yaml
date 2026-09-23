@@ -142,18 +142,18 @@ where:
   - data.Description|in:
     - '-'
     - ''
-    company|in:
-    - '-'
-    - ''
-    product|in:
-    - '-'
-    - ''
-    originalFileName|in:
-    - '-'
-    - ''
-    fileVersion|in:
-    - '-'
-    - ''
+    any_of:
+    - data.Company: '-'
+    - company: ''
+    any_of_2:
+    - data.Product: '-'
+    - product: ''
+    any_of_3:
+    - data.OriginalFileName: '-'
+    - originalFileName: ''
+    any_of_4:
+    - data.FileVersion: '-'
+    - fileVersion: ''
   - data.Description|exists: false
     company|exists: false
     product|exists: false

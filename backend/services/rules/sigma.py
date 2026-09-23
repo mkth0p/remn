@@ -282,7 +282,7 @@ def compile_field(raw_field: str, value: Any, aliases: dict[str, list[str]], war
         warnings.append(f"{name}: |cased ignored (REMN matches case-insensitively)")
     # "'|all': [...]" (a modifier with no field) is a keyword search over the whole event
     keywords = name == ""
-    targets = ["raw"] if keywords else (aliases.get(name) or [SPECIAL_FIELDS.get(name) or FIELD_MAP.get(name) or f"data.{name}"])
+    targets = ["raw"] if keywords else (aliases.get(name) or [SPECIAL_FIELDS.get(name) or _parser_field(name) or f"data.{name}"])
     all_mode = "all" in mods
     values = value if isinstance(value, list) else [value]
 
@@ -334,6 +334,14 @@ def compile_field(raw_field: str, value: Any, aliases: dict[str, list[str]], war
         vals = [int(v) if isinstance(v, bool) else v for v in values]
         return _spread(targets, "in" if len(vals) > 1 else "eq", vals if len(vals) > 1 else vals[0])
     strs = [str(v) for v in values]
+    # Windows writes "-" for "no value", and the parser stores no value for it, so a column never
+    # equals "-". The EventData keeps the "-": compare there (IpAddress: '-', WorkstationName: '-').
+    if "-" in strs and not all_mode and not keywords and not any(t.startswith(("data.", "raw")) for t in targets):
+        keys = [name] if len(targets) == 1 and name in FIELD_MAP else [k for t in targets for k in PARSER_SOURCES.get(t, [])]
+        if keys:
+            rest = [v for v in values if str(v) != "-"]
+            dash = _any_of([{f"data.{k}": "-"} for k in keys])
+            return _any_of([dash, compile_field(raw_field, rest if len(rest) > 1 else rest[0], aliases, warnings)]) if rest else dash
     parsed = [_plain_string(s) for s in strs]
     if all_mode:
         return {"all_of": [_spread(targets, op, v) for op, v in parsed]}
@@ -349,10 +357,31 @@ def compile_field(raw_field: str, value: Any, aliases: dict[str, list[str]], war
     return _any_of([_spread(targets, op, v) for op, v in parsed])
 
 
+# row column -> the EventData keys the parser fills it from
+PARSER_SOURCES: dict[str, list[str]] = {}
+for _k, _v in FIELD_MAP.items():
+    PARSER_SOURCES.setdefault(_v, []).append(_k)
+
+
+def _parser_field(name: str) -> str | None:
+    """The row column the parser writes a Sigma field to. The parser writes the Data list of
+    classic events (MSSQL, MsiInstaller, Windows PowerShell 800) to `message`."""
+    field = FIELD_MAP.get(name)
+    return "message" if field == "dataList" else field
+
+
 def _spread(targets: list[str], op: str, value: Any) -> dict[str, Any]:
-    """One Sigma field can map to several REMN columns (Image -> image | processName): OR them."""
+    """One Sigma field can map to several REMN columns (Image -> image | processName): OR them.
+    Except for "has no value": the field has none only when none of its columns has one, and a
+    Sysmon row never has processName, so OR-ing "processName is empty" made the check always true."""
     if len(targets) == 1:
         return _cond(targets[0], op, value)
+    if (op == "exists" and value is False) or (op == "eq" and value in ("", None)):
+        return _all_of([_cond(t, op, value) for t in targets])
+    if op == "in" and isinstance(value, list) and "" in value:
+        rest = [v for v in value if v != ""]
+        empty = _all_of([_cond(t, "eq", "") for t in targets])
+        return _any_of([empty, _spread(targets, "in" if len(rest) > 1 else "eq", rest if len(rest) > 1 else rest[0])]) if rest else empty
     return _any_of([_cond(t, op, value) for t in targets])
 
 

@@ -3448,13 +3448,11 @@ where:
         - trusted
         - Valid
       - signed|exists: false
-      - signed|in:
-        - ''
-        - '-'
+      - data.Signed: '-'
+      - signed: ''
       - signatureStatus|exists: false
-      - signatureStatus|in:
-        - ''
-        - '-'
+      - data.SignatureStatus: '-'
+      - signatureStatus: ''
       - image|in:
         - C:\Windows\SysWOW64\rundll32.exe
         - C:\Windows\System32\rundll32.exe

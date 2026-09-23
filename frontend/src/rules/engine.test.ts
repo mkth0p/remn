@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { compileCond, parseDuration, parseThreshold, ruleApplicable, ruleChannels, ruleEventIds, ruleFields, runRule, validateRule, type Rule, type RuleDiag } from './engine'
+import { compileCond, parseDuration, parseThreshold, ruleApplicable, ruleChannels, ruleEventIds, ruleFields, ruleReadFields, runRule, validateRule, type Rule, type RuleDiag } from './engine'
 
 const T0 = Date.UTC(2026, 8, 1, 22, 0, 0)
 let id = 1
@@ -211,4 +211,19 @@ describe('list operators match whole elements, as the SQL engine does', () => {
     expect(compileCond({ 'flags|contains': 'macro' })({ flags: ['att_office_macro'] })).toBe(true)
     expect(compileCond({ 'subject|contains_any': ['invoice'] })({ subject: 'Your invoice is ready' })).toBe(true)
   })
+})
+
+it('names every field a rule reads, not only its conditions, so the worker keeps data for them', () => {
+  const rule = {
+    id: 'r',
+    title: 't',
+    severity: 'high',
+    source: 'events',
+    where: { eventId: 4625 },
+    exclude: { 'data.SubStatus': '0xc0000064' },
+    group_by: ['data.IpAddress'],
+    distinct: 'data.TargetUserName',
+    entities: ['computer'],
+  } as unknown as Rule
+  expect([...ruleReadFields(rule)].sort()).toEqual(['computer', 'data.IpAddress', 'data.SubStatus', 'data.TargetUserName', 'eventId'])
 })
