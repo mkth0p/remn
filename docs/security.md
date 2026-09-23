@@ -220,6 +220,11 @@ application container has what the deception archive already had:
   Evidence in transit therefore never reaches physical disk and cannot survive a restart.
 - **No capabilities and no privilege escalation**, running as an unprivileged user, with process
   and memory ceilings so a decompression bomb cannot take the host with it.
+- **It does not serve the app.** Caddy serves the frontend build from its own image (the
+  Dockerfile's `static` stage) and passes only `/api/*` to the parser, so a parser taken over
+  cannot hand later visitors a page of its own, and a parser kept busy does not delay the page.
+  The page gets the same headers from Caddy as from Django (a test holds them equal), and
+  `deploy/update.sh` validates the new proxy image and Caddyfile before it replaces anything.
 
 Verified rather than asserted: from inside the running container the effective capability set is
 empty, the root filesystem refuses writes, the staging area reports as tmpfs, and connections to a

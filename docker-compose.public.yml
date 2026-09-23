@@ -6,6 +6,7 @@
 # reachable, so that Caddy can obtain and renew its certificate. The application container is not
 # published at all; Caddy reaches it on the compose network.
 #
+# Caddy serves the app from its own image and passes /api/* to the parser (deploy/Caddyfile).
 # What the server does here: parse evidence and return rows, run rules and correlation, serve the
 # rule packs and the prompt bundle for the analyst's own model. What it refuses: server stores,
 # jobs, reputation lookups, server-side models. A file larger than 32 MiB reaches the parser as a
@@ -68,7 +69,15 @@ services:
     restart: unless-stopped
 
   caddy:
-    image: caddy:2-alpine
+    # Caddy with the frontend build in it (the Dockerfile's static stage): it serves the app itself
+    # and sends only /api/* to the parser, so a parser taken over or kept busy has no say in the
+    # page visitors run. Built from the same commit as the parser, which the app checks.
+    build:
+      context: .
+      target: static
+      args:
+        REMN_BUILD_ID: ${REMN_BUILD_ID:-}
+    image: remn-static
     # Caddy sits on both: the internet for certificates and visitors, the internal network to
     # reach the parser. It is the only thing here that can talk to either.
     networks:

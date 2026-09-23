@@ -81,6 +81,21 @@ jobs:
           for i in $(seq 1 20); do curl -fs -H "X-Forensic-Client: 1" http://127.0.0.1:8000/api/health > /dev/null && break; sleep 2; done
           curl -fs -H "X-Forensic-Client: 1" http://127.0.0.1:8000/api/health | head -c 200; echo
           docker rm -f remn
+      # the public profile's proxy image: it serves the app with the page headers and sends /api/* on
+      - name: Public proxy serves the app
+        run: |
+          docker build -t remn-static:ci --target static .
+          docker run -d --name proxy -e REMN_DOMAIN=:8080 -p 127.0.0.1:8080:8080 -v "$PWD/deploy:/etc/caddy/site:ro" remn-static:ci \
+            caddy run --config /etc/caddy/site/Caddyfile --adapter caddyfile
+          for i in $(seq 1 20); do curl -fs http://127.0.0.1:8080/ > /dev/null && break; sleep 1; done
+          curl -fsI http://127.0.0.1:8080/cases/1 | tee /dev/stderr | grep -qi "^content-security-policy: default-src 'self'"
+          curl -fsI http://127.0.0.1:8080/cases/1 | grep -qi "^cache-control: no-store"
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/robots.txt)" = 404
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/favicon.ico)" = 200
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8080/cases/1)" = 405
+          # no parser behind it here: the API path reaches the proxy's upstream, not a file
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/health)" = 502
+          docker rm -f proxy
       - name: Archive isolation and routing
         run: |
           docker tag remn:ci remn:latest
