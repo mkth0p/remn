@@ -12,7 +12,10 @@ temporary location, streams the rows back, and keeps nothing. This is the defaul
 the mode for evidence that may not be persisted on a shared machine: nothing about the
 case exists outside that browser profile. It is comfortable up to a few hundred megabytes
 of evidence; beyond that, queries and rule runs slow down and the server store is the
-better fit. In both modes the browser keeps the case itself, its findings, notes, chains,
+better fit. Searches, counts, aggregations, timelines and the global pivot run in query
+workers, a few at a time, so the page stays responsive while they scan; a query whose
+answer is no longer wanted (the filter changed, the view or panel closed, a new pivot) is
+stopped where it stands rather than left to finish. In both modes the browser keeps the case itself, its findings, notes, chains,
 decisions and AI sessions, so a case can be exported as a bundle and imported elsewhere.
 When evidence is first added, the app asks the browser to keep the site's storage
 (`navigator.storage.persist()`); without that grant a browser short of space may clear a

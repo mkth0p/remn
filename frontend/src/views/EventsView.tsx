@@ -110,10 +110,12 @@ export function EventsView() {
   useEffect(() => {
     if (!ds) return
     let alive = true
+    // a filter changed before its results came is a query nobody waits for: it is stopped
+    const ac = new AbortController()
     setLoading(true)
     setError(null)
     const t0 = Date.now()
-    ds.searchEvents(filter, LIMIT)
+    ds.searchEvents(filter, LIMIT, ac.signal)
       .then((r) => {
         if (!alive) return
         setRows(r.rows)
@@ -124,11 +126,12 @@ export function EventsView() {
       .catch((e) => alive && setError((e as Error).message))
       .finally(() => alive && setLoading(false))
     setTotal(null)
-    ds.countEvents(filter)
+    ds.countEvents(filter, ac.signal)
       .then((n) => alive && setTotal(n))
       .catch(() => undefined)
     return () => {
       alive = false
+      ac.abort()
     }
   }, [ds, filter, version])
 

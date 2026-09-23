@@ -86,11 +86,12 @@ export function TimelineView() {
     if (!chart.current) chart.current = echarts.init(ref.current, undefined, { renderer: 'canvas' })
     const c = chart.current
     let alive = true
+    const ac = new AbortController()
     const ds = getSource(kase)
     const caseId = kase.id
     Promise.all([
-      ds.timelineEvents(useFilters ? eventsFilter : {}, bucket).catch(() => []),
-      ds.timelineMails(useFilters ? mailsFilter : {}, bucket).catch(() => []),
+      ds.timelineEvents(useFilters ? eventsFilter : {}, bucket, ac.signal).catch(() => []),
+      ds.timelineMails(useFilters ? mailsFilter : {}, bucket, ac.signal).catch(() => []),
       getDb()
         .findings.where('caseId')
         .equals(caseId)
@@ -253,6 +254,7 @@ export function TimelineView() {
     window.addEventListener('resize', onResize)
     return () => {
       alive = false
+      ac.abort()
       c.off('brushEnd', onBrush as never)
       window.removeEventListener('resize', onResize)
     }

@@ -39,6 +39,10 @@ test('a public browser-only instance says where evidence goes and reads the link
   await expect(page.locator('tr').filter({ hasText: 'verified' })).toHaveCount(FILES.length, { timeout: 600_000 })
   await expect(page.locator('.nav-item', { hasText: 'Events' })).toContainText('14,000')
   await expect(page.locator('.nav-item', { hasText: 'Mails' })).toContainText('1,000')
+  // the Events page searches and counts in a query worker, off the page's thread
+  await page.locator('.nav-item', { hasText: 'Events' }).click()
+  await expect(page.getByText('14,000 matches')).toBeVisible({ timeout: 60_000 })
+  await expect(page.getByText(/showing the first 3,000 rows/)).toBeVisible()
 
   // the rules run once the last file is in; chains built before that carry no findings
   await expect(page.getByText(/finding\(s\) from \d+ rule\(s\)/).first()).toBeVisible({ timeout: 300_000 })

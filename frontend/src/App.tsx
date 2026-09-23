@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ApiError, getHealth, getMeta, onAuthError, setApiToken } from './api/client'
 import { defaultSettings, getDb, newServerKey, type Case } from './db/schema'
 import { toast, useStore, type View } from './state/store'
@@ -10,6 +10,7 @@ import { getTransport } from './ai/transport'
 import { deployment } from './data/deployment'
 import { setCaseInternalDomains } from './rules/incidents'
 import { repairInterruptedImports } from './data/interruptedImports'
+import { isAbort } from './data/queryClient'
 import {
   IconAi,
   IconDashboard,
@@ -108,6 +109,7 @@ export default function App() {
   const [newCase, setNewCase] = useState<{ name: string; storage: 'browser' | 'server' } | null>(null)
   const [global, setGlobal] = useState('')
   const [pivotRes, setPivotRes] = useState<PivotResult | null>(null)
+  const pivotAbort = useRef<AbortController | null>(null)
   const [ready, setReady] = useState(false)
   const [pendingKind, setPendingKind] = useState<'evtx' | 'mail' | 'package'>('mail')
   const [migrating, setMigrating] = useState<string | null>(null)
@@ -271,10 +273,13 @@ export default function App() {
   }
   const runPivot = async () => {
     if (!kase?.id || !global.trim()) return
+    // a new pivot replaces the one still counting
+    pivotAbort.current?.abort()
+    const ac = (pivotAbort.current = new AbortController())
     try {
-      setPivotRes(await getSource(kase).pivot(global.trim()))
+      setPivotRes(await getSource(kase).pivot(global.trim(), ac.signal))
     } catch (e) {
-      toast('err', `pivot failed: ${(e as Error).message}`)
+      if (!isAbort(e)) toast('err', `pivot failed: ${(e as Error).message}`)
     }
   }
   const goto = (v: View) => {

@@ -128,9 +128,11 @@ export function MailsView() {
   useEffect(() => {
     if (!ds) return
     let alive = true
+    // a filter changed before its results came is a query nobody waits for: it is stopped
+    const ac = new AbortController()
     setLoading(true)
     setError(null)
-    ds.searchMails(filter, LIMIT)
+    ds.searchMails(filter, LIMIT, ac.signal)
       .then((r) => {
         if (!alive) return
         setRows(r.rows)
@@ -139,11 +141,12 @@ export function MailsView() {
       .catch((e) => alive && setError((e as Error).message))
       .finally(() => alive && setLoading(false))
     setTotal(null)
-    ds.countMails(filter)
+    ds.countMails(filter, ac.signal)
       .then((n) => alive && setTotal(n))
       .catch(() => undefined)
     return () => {
       alive = false
+      ac.abort()
     }
   }, [ds, filter, version, rulesVersion])
   const selectedId = selected?.id

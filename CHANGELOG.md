@@ -29,6 +29,8 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   lab reads to its five planted chains either way.
 - The public profile serves the app from Caddy's own image and sends only `/api/*` to the
   parser, and an update validates the new proxy before it replaces the running one.
+- Browser-store searches, counts, timelines and pivots run in query workers and stop when
+  their answer is no longer wanted, so a large case no longer freezes the page.
 - A report and a case that hold: times in UTC, a verdict over the whole case, confidence that
   falls when a file was not read in full or the rules are behind, a valid STIX export, AI
   triage that proposes rather than decides, bundles that carry their rules, and search that

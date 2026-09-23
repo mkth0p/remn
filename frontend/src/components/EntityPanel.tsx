@@ -149,6 +149,8 @@ export function EntityPanel() {
   useEffect(() => {
     if (!entity || !ds || !kase?.id) return
     let alive = true
+    // another entity opened, or the panel closed: its queries stop
+    const ac = new AbortController()
     setBusy(true)
     setTab('timeline')
     setEvents([])
@@ -161,13 +163,13 @@ export function EntityPanel() {
       const [ev, ml, fs] = await Promise.all([
         ef
           ? ds
-              .searchEvents(ef, 300)
+              .searchEvents(ef, 300, ac.signal)
               .then((r) => r.rows)
               .catch(() => [])
           : Promise.resolve([]),
         mf
           ? ds
-              .searchMails(mf, 300)
+              .searchMails(mf, 300, ac.signal)
               .then((r) => r.rows)
               .catch(() => [])
           : Promise.resolve([]),
@@ -187,7 +189,7 @@ export function EntityPanel() {
       setMails(ml)
       setFindings(fs)
       setBusy(false)
-      const [ce, cm] = await Promise.all([ef ? ds.countEvents(ef).catch(() => null) : Promise.resolve(null), mf ? ds.countMails(mf).catch(() => null) : Promise.resolve(null)])
+      const [ce, cm] = await Promise.all([ef ? ds.countEvents(ef, ac.signal).catch(() => null) : Promise.resolve(null), mf ? ds.countMails(mf, ac.signal).catch(() => null) : Promise.resolve(null)])
       if (!alive) return
       setCounts({ events: ce, mails: cm })
       if (ef) {
@@ -196,7 +198,7 @@ export function EntityPanel() {
           fields.map(async (field) => ({
             field,
             groups: await ds
-              .aggregateEvents(ef, field, 6)
+              .aggregateEvents(ef, field, 6, ac.signal)
               .then((a) => a.groups.map((g) => ({ key: String(g.value), count: g.count })))
               .catch(() => []),
           })),
@@ -206,6 +208,7 @@ export function EntityPanel() {
     })()
     return () => {
       alive = false
+      ac.abort()
     }
   }, [entity, ds, kase?.id, ef, mf])
 
