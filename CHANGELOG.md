@@ -37,6 +37,15 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   opens from the Dashboard in the visitor's browser without uploading anything.
 - A golden corpus: what the parsers make of the synthetic lab is frozen row by row, so a parser
   change that alters rows fails with the rows it changed.
+- The two rule engines agree on real attack logs: the server store keeps every field the
+  parser writes (65 converted rules read one it used to drop), both engines compare IPv6
+  ranges by prefix, access rights are named after their codes, an older log gets its
+  parent's user or image from the parent's own event, and the converted Sigma rules read
+  classic `Data`, `-` placeholders and aliased empty checks as their authors meant.
+- Core Windows rules that could not fire now do: four process rules read Sysmon's `image`,
+  the BITS rule no longer excludes every record, credential dumping covers PowerShell and
+  other script hosts, service keys are no longer Run-key persistence but a rule of their
+  own, process access by a LOLBin has a rule, and the print spooler DLL tricks are caught.
 - A report and a case that hold: times in UTC, a verdict over the whole case, confidence that
   falls when a file was not read in full or the rules are behind, a valid STIX export, AI
   triage that proposes rather than decides, bundles that carry their rules, and search that

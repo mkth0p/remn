@@ -73,6 +73,7 @@
   "win-pass-the-hash-hint": "no_selector_match",
   "win-password-reset-by-other": "not_applicable",
   "win-password-spraying": "below_threshold",
+  "win-process-access-hollowing": "not_applicable",
   "win-process-from-suspicious-path": "no_selector_match",
   "win-psexec-pattern": "no_selector_match",
   "win-rdp-bruteforce-rdpcorets": "not_applicable",
@@ -81,8 +82,10 @@
   "win-remote-thread-injection": "not_applicable",
   "win-scheduled-task-created": "not_applicable",
   "win-scheduled-task-suspicious-content": "not_applicable",
+  "win-service-registry-suspicious": "not_applicable",
   "win-shadow-copy-deletion": "no_selector_match",
   "win-special-privileges-non-admin": "not_applicable",
+  "win-spooler-driver-dll": "no_selector_match",
   "win-suspicious-dns-sysmon": "no_selector_match",
   "win-time-changed": "no_selector_match",
   "win-unsigned-driver-loaded": "not_applicable",
@@ -236,7 +239,8 @@
    "win-logon-outside-business-hours|2"
   ],
   "win-lolbin-suspicious-commandline": [
-   "win-lolbin-suspicious-commandline|83"
+   "win-lolbin-suspicious-commandline|83",
+   "win-lolbin-suspicious-commandline|87"
   ],
   "win-office-spawns-shell": [
    "win-office-spawns-shell|84"
@@ -390,6 +394,7 @@
   "win-password-spraying",
   "win-powershell-encoded-command",
   "win-powershell-suspicious-scriptblock",
+  "win-process-access-hollowing",
   "win-process-from-suspicious-path",
   "win-psexec-pattern",
   "win-rdp-bruteforce-rdpcorets",
@@ -402,8 +407,10 @@
   "win-scheduled-task-suspicious-content",
   "win-service-installed-any",
   "win-service-installed-suspicious",
+  "win-service-registry-suspicious",
   "win-shadow-copy-deletion",
   "win-special-privileges-non-admin",
+  "win-spooler-driver-dll",
   "win-suspicious-dns-sysmon",
   "win-sysmon-network-lolbin",
   "win-time-changed",

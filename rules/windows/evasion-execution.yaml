@@ -97,7 +97,10 @@ where:
   any_of:
     - { eventId: 4688 }
     - { eventId: 1, provider|contains: Sysmon }
-  processName|contains: [powershell.exe, pwsh.exe, powershell_ise.exe]
+  # 4688 names the image processName, Sysmon 1 names it image: read both
+  any_of_2:
+    - { processName|contains: [powershell.exe, pwsh.exe, powershell_ise.exe] }
+    - { image|contains: [powershell.exe, pwsh.exe, powershell_ise.exe] }
   commandLine|contains: [-enc, "-e ", "-ec ", "-encodedcommand", "-w hidden", "-windowstyle hidden", "-nop", "-noprofile", "-noni", "-noninteractive", "-ep bypass", "-exec bypass", "-executionpolicy bypass", "iex", "invoke-expression", "downloadstring", "downloadfile", "net.webclient", "invoke-webrequest", "frombase64string", "bitstransfer", "http://", "https://"]
 ---
 id: win-lolbin-suspicious-commandline
@@ -111,17 +114,28 @@ where:
   any_of:
     - { eventId: 4688 }
     - { eventId: 1, provider|contains: Sysmon }
+  # every alternative twice: processName for 4688, image for Sysmon 1
   any_of_2:
     - { processName|endswith: certutil.exe, commandLine|contains: [-urlcache, -decode, -encode, -decodehex, -verifyctl, "http", "split", "-f "] }
+    - { image|endswith: certutil.exe, commandLine|contains: [-urlcache, -decode, -encode, -decodehex, -verifyctl, "http", "split", "-f "] }
     - { processName|endswith: bitsadmin.exe, commandLine|contains: [/transfer, /addfile, /create, /setnotifycmdline, /resume, "http"] }
+    - { image|endswith: bitsadmin.exe, commandLine|contains: [/transfer, /addfile, /create, /setnotifycmdline, /resume, "http"] }
     - { processName|endswith: mshta.exe, commandLine|contains: ["javascript:", "vbscript:", "http", ".hta", "about:"] }
+    - { image|endswith: mshta.exe, commandLine|contains: ["javascript:", "vbscript:", "http", ".hta", "about:"] }
     - { processName|endswith: regsvr32.exe, commandLine|contains: [scrobj.dll, /i:http, /u /n, "http", ".sct", "/s /i"] }
+    - { image|endswith: regsvr32.exe, commandLine|contains: [scrobj.dll, /i:http, /u /n, "http", ".sct", "/s /i"] }
     - { processName|endswith: rundll32.exe, commandLine|contains: ["javascript:", "shell32.dll,Control_RunDLL", "url.dll,", "advpack.dll", "zipfldr.dll", "pcwutl.dll", "comsvcs.dll", "MiniDump", "\\temp\\", "\\appdata\\", "\\users\\public\\", "http", ".txt", ".dat", ".png", ".jpg"] }
+    - { image|endswith: rundll32.exe, commandLine|contains: ["javascript:", "shell32.dll,Control_RunDLL", "url.dll,", "advpack.dll", "zipfldr.dll", "pcwutl.dll", "comsvcs.dll", "MiniDump", "\\temp\\", "\\appdata\\", "\\users\\public\\", "http", ".txt", ".dat", ".png", ".jpg"] }
     - { processName|endswith: wmic.exe, commandLine|contains: [process call create, "/node:", "shadowcopy delete", "os get", "/format:", "http", "antivirusproduct", "product get"] }
+    - { image|endswith: wmic.exe, commandLine|contains: [process call create, "/node:", "shadowcopy delete", "os get", "/format:", "http", "antivirusproduct", "product get"] }
     - { processName|endswith: msiexec.exe, commandLine|contains: ["http", "/q", "/quiet", "\\temp\\", "\\appdata\\", ".png", ".jpg", ".txt"] }
+    - { image|endswith: msiexec.exe, commandLine|contains: ["http", "/q", "/quiet", "\\temp\\", "\\appdata\\", ".png", ".jpg", ".txt"] }
     - { processName|endswith: [cscript.exe, wscript.exe], commandLine|contains: ["\\temp\\", "\\appdata\\", "\\users\\public\\", "\\downloads\\", "//e:", "/e:", ".js", ".jse", ".vbs", ".vbe", ".wsf", "http"] }
+    - { image|endswith: [cscript.exe, wscript.exe], commandLine|contains: ["\\temp\\", "\\appdata\\", "\\users\\public\\", "\\downloads\\", "//e:", "/e:", ".js", ".jse", ".vbs", ".vbe", ".wsf", "http"] }
     - { processName|endswith: [curl.exe, wget.exe], commandLine|contains: ["http", "-o ", "-O ", "--output"] }
+    - { image|endswith: [curl.exe, wget.exe], commandLine|contains: ["http", "-o ", "-O ", "--output"] }
     - { processName|endswith: [forfiles.exe, pcalua.exe, installutil.exe, msbuild.exe, cmstp.exe, odbcconf.exe, regasm.exe, regsvcs.exe, ieexec.exe, presentationhost.exe, xwizard.exe, control.exe, wuauclt.exe, mavinject.exe, msconfig.exe, ftp.exe, esentutl.exe, expand.exe, extrac32.exe, findstr.exe, makecab.exe, print.exe, replace.exe, sc.exe, scriptrunner.exe, syncappvpublishingserver.exe, vbc.exe, csc.exe, jsc.exe, dnscmd.exe, diskshadow.exe, wsl.exe, bash.exe, hh.exe, at.exe, atbroker.exe, bginfo.exe, cdb.exe, dfsvc.exe, dxcap.exe, gpscript.exe, ie4uinit.exe, infdefaultinstall.exe, mmc.exe, msdt.exe, ttdinject.exe, tttracer.exe, wab.exe, winrm.vbs, pubprn.vbs, slmgr.vbs, manage-bde.wsf, launch-vsdevshell.ps1] , commandLine|contains: ["http", "\\temp\\", "\\appdata\\", "\\users\\public\\", "/c ", "-c ", "/p:", "/u ", ".sct", ".dll", "javascript"] }
+    - { image|endswith: [forfiles.exe, pcalua.exe, installutil.exe, msbuild.exe, cmstp.exe, odbcconf.exe, regasm.exe, regsvcs.exe, ieexec.exe, presentationhost.exe, xwizard.exe, control.exe, wuauclt.exe, mavinject.exe, msconfig.exe, ftp.exe, esentutl.exe, expand.exe, extrac32.exe, findstr.exe, makecab.exe, print.exe, replace.exe, sc.exe, scriptrunner.exe, syncappvpublishingserver.exe, vbc.exe, csc.exe, jsc.exe, dnscmd.exe, diskshadow.exe, wsl.exe, bash.exe, hh.exe, at.exe, atbroker.exe, bginfo.exe, cdb.exe, dfsvc.exe, dxcap.exe, gpscript.exe, ie4uinit.exe, infdefaultinstall.exe, mmc.exe, msdt.exe, ttdinject.exe, tttracer.exe, wab.exe, winrm.vbs, pubprn.vbs, slmgr.vbs, manage-bde.wsf, launch-vsdevshell.ps1] , commandLine|contains: ["http", "\\temp\\", "\\appdata\\", "\\users\\public\\", "/c ", "-c ", "/p:", "/u ", ".sct", ".dll", "javascript"] }
 ---
 id: win-office-spawns-shell
 title: Office / PDF reader spawned a shell or script host
@@ -137,7 +151,10 @@ where:
   any_of_2:
     - parentProcessName|contains: [winword.exe, excel.exe, powerpnt.exe, outlook.exe, onenote.exe, msaccess.exe, mspub.exe, visio.exe, acrord32.exe, acrobat.exe, foxit, sumatrapdf.exe, wordpad.exe, notepad.exe, teams.exe, thunderbird.exe, eqnedt32.exe, fltldr.exe]
     - parentImage|contains: [winword.exe, excel.exe, powerpnt.exe, outlook.exe, onenote.exe, msaccess.exe, mspub.exe, visio.exe, acrord32.exe, acrobat.exe, foxit, sumatrapdf.exe, wordpad.exe, teams.exe, thunderbird.exe, eqnedt32.exe, fltldr.exe]
-  processName|contains: [cmd.exe, powershell.exe, pwsh.exe, wscript.exe, cscript.exe, mshta.exe, rundll32.exe, regsvr32.exe, certutil.exe, msiexec.exe, bitsadmin.exe, curl.exe, wmic.exe, schtasks.exe, control.exe, explorer.exe, conhost.exe, forfiles.exe, msbuild.exe, installutil.exe, regasm.exe, odbcconf.exe, hh.exe, bash.exe, wsl.exe, python, node.exe, java.exe, javaw.exe]
+  # the child: processName on 4688, image on Sysmon 1
+  any_of_3:
+    - { processName|contains: [cmd.exe, powershell.exe, pwsh.exe, wscript.exe, cscript.exe, mshta.exe, rundll32.exe, regsvr32.exe, certutil.exe, msiexec.exe, bitsadmin.exe, curl.exe, wmic.exe, schtasks.exe, control.exe, explorer.exe, conhost.exe, forfiles.exe, msbuild.exe, installutil.exe, regasm.exe, odbcconf.exe, hh.exe, bash.exe, wsl.exe, python, node.exe, java.exe, javaw.exe] }
+    - { image|contains: [cmd.exe, powershell.exe, pwsh.exe, wscript.exe, cscript.exe, mshta.exe, rundll32.exe, regsvr32.exe, certutil.exe, msiexec.exe, bitsadmin.exe, curl.exe, wmic.exe, schtasks.exe, control.exe, explorer.exe, conhost.exe, forfiles.exe, msbuild.exe, installutil.exe, regasm.exe, odbcconf.exe, hh.exe, bash.exe, wsl.exe, python, node.exe, java.exe, javaw.exe] }
 ---
 id: win-process-from-suspicious-path
 title: Process executed from a temp / download / public folder
@@ -150,8 +167,10 @@ where:
   any_of:
     - { eventId: 4688 }
     - { eventId: 1, provider|contains: Sysmon }
-  processName|contains: ["\\temp\\", "\\tmp\\", "\\downloads\\", "\\users\\public\\", "\\programdata\\", "$recycle.bin", "\\perflogs\\", "\\windows\\tasks\\", "\\windows\\debug\\", "\\windows\\fonts\\", "\\windows\\help\\", "\\appdata\\roaming\\", "\\appdata\\local\\", "\\music\\", "\\videos\\", "\\pictures\\"]
-  processName|not_contains: ["\\appdata\\local\\microsoft\\", "\\appdata\\local\\programs\\", "\\appdata\\local\\google\\", "\\appdata\\local\\mozilla\\", "\\appdata\\local\\slack\\", "\\appdata\\local\\discord\\", "\\appdata\\local\\zoom\\", "\\appdata\\local\\teams\\", "\\appdata\\local\\webex\\", "\\appdata\\local\\1password\\", "\\appdata\\local\\brave", "\\appdata\\local\\vivaldi", "\\appdata\\local\\ollama", "\\appdata\\local\\anthropic", "\\appdata\\local\\claude", "\\programdata\\microsoft\\", "\\programdata\\package cache\\", "\\programdata\\chocolatey\\", "\\programdata\\lenovo\\", "\\programdata\\dell\\", "\\programdata\\hp\\", "\\programdata\\intel\\", "\\programdata\\nvidia", "\\programdata\\adobe\\", "\\programdata\\oracle\\", "\\programdata\\docker", "\\appdata\\local\\temp\\pip-", "\\appdata\\local\\temp\\chocolatey", "\\appdata\\local\\temp\\is-", "\\appdata\\local\\temp\\7z", "\\appdata\\local\\temp\\rar", "\\appdata\\local\\temp\\{", "\\appdata\\local\\temp\\msi", "\\appdata\\local\\temp\\nvidia", "\\appdata\\local\\temp\\lenovo", "\\appdata\\local\\temp\\dell", "\\appdata\\local\\temp\\hp", "\\appdata\\local\\temp\\squirrel", "\\appdata\\local\\squirreltemp"]
+  # the image path: processName on 4688, image on Sysmon 1
+  any_of_2:
+    - { processName|contains: ["\\temp\\", "\\tmp\\", "\\downloads\\", "\\users\\public\\", "\\programdata\\", "$recycle.bin", "\\perflogs\\", "\\windows\\tasks\\", "\\windows\\debug\\", "\\windows\\fonts\\", "\\windows\\help\\", "\\appdata\\roaming\\", "\\appdata\\local\\", "\\music\\", "\\videos\\", "\\pictures\\"], processName|not_contains: ["\\appdata\\local\\microsoft\\", "\\appdata\\local\\programs\\", "\\appdata\\local\\google\\", "\\appdata\\local\\mozilla\\", "\\appdata\\local\\slack\\", "\\appdata\\local\\discord\\", "\\appdata\\local\\zoom\\", "\\appdata\\local\\teams\\", "\\appdata\\local\\webex\\", "\\appdata\\local\\1password\\", "\\appdata\\local\\brave", "\\appdata\\local\\vivaldi", "\\appdata\\local\\ollama", "\\appdata\\local\\anthropic", "\\appdata\\local\\claude", "\\programdata\\microsoft\\", "\\programdata\\package cache\\", "\\programdata\\chocolatey\\", "\\programdata\\lenovo\\", "\\programdata\\dell\\", "\\programdata\\hp\\", "\\programdata\\intel\\", "\\programdata\\nvidia", "\\programdata\\adobe\\", "\\programdata\\oracle\\", "\\programdata\\docker", "\\appdata\\local\\temp\\pip-", "\\appdata\\local\\temp\\chocolatey", "\\appdata\\local\\temp\\is-", "\\appdata\\local\\temp\\7z", "\\appdata\\local\\temp\\rar", "\\appdata\\local\\temp\\{", "\\appdata\\local\\temp\\msi", "\\appdata\\local\\temp\\nvidia", "\\appdata\\local\\temp\\lenovo", "\\appdata\\local\\temp\\dell", "\\appdata\\local\\temp\\hp", "\\appdata\\local\\temp\\squirrel", "\\appdata\\local\\squirreltemp"] }
+    - { image|contains: ["\\temp\\", "\\tmp\\", "\\downloads\\", "\\users\\public\\", "\\programdata\\", "$recycle.bin", "\\perflogs\\", "\\windows\\tasks\\", "\\windows\\debug\\", "\\windows\\fonts\\", "\\windows\\help\\", "\\appdata\\roaming\\", "\\appdata\\local\\", "\\music\\", "\\videos\\", "\\pictures\\"], image|not_contains: ["\\appdata\\local\\microsoft\\", "\\appdata\\local\\programs\\", "\\appdata\\local\\google\\", "\\appdata\\local\\mozilla\\", "\\appdata\\local\\slack\\", "\\appdata\\local\\discord\\", "\\appdata\\local\\zoom\\", "\\appdata\\local\\teams\\", "\\appdata\\local\\webex\\", "\\appdata\\local\\1password\\", "\\appdata\\local\\brave", "\\appdata\\local\\vivaldi", "\\appdata\\local\\ollama", "\\appdata\\local\\anthropic", "\\appdata\\local\\claude", "\\programdata\\microsoft\\", "\\programdata\\package cache\\", "\\programdata\\chocolatey\\", "\\programdata\\lenovo\\", "\\programdata\\dell\\", "\\programdata\\hp\\", "\\programdata\\intel\\", "\\programdata\\nvidia", "\\programdata\\adobe\\", "\\programdata\\oracle\\", "\\programdata\\docker", "\\appdata\\local\\temp\\pip-", "\\appdata\\local\\temp\\chocolatey", "\\appdata\\local\\temp\\is-", "\\appdata\\local\\temp\\7z", "\\appdata\\local\\temp\\rar", "\\appdata\\local\\temp\\{", "\\appdata\\local\\temp\\msi", "\\appdata\\local\\temp\\nvidia", "\\appdata\\local\\temp\\lenovo", "\\appdata\\local\\temp\\dell", "\\appdata\\local\\temp\\hp", "\\appdata\\local\\temp\\squirrel", "\\appdata\\local\\squirreltemp"] }
 ---
 id: win-credential-dumping
 title: Credential dumping indicators (LSASS access, ntds.dit, SAM)
@@ -162,7 +181,7 @@ attack: [T1003.001, T1003.002, T1003.003]
 tags: [credential-access]
 where:
   any_of:
-    - { eventId: 10, provider|contains: Sysmon, targetImage|endswith: lsass.exe, grantedAccess|in: ["0x1010", "0x1410", "0x1438", "0x143a", "0x1fffff", "0x1f0fff", "0x1f1fff", "0x1f2fff", "0x1f3fff", "0x40", "0x1400", "0x1000", "0x1FFFFF", "0x1F0FFF", "0x1F1FFF"], sourceImage|not_contains: ["\\windows\\system32\\", "\\program files\\", "\\program files (x86)\\", "msmpeng", "csrss", "wininit", "wmiprvse", "taskmgr", "procexp", "vmtoolsd", "sysmon"] }
+    - { eventId: 10, provider|contains: Sysmon, targetImage|endswith: lsass.exe, grantedAccess|in: ["0x1010", "0x1410", "0x1438", "0x143a", "0x1fffff", "0x1f0fff", "0x1f1fff", "0x1f2fff", "0x1f3fff", "0x40", "0x1400", "0x1000", "0x1FFFFF", "0x1F0FFF", "0x1F1FFF"], sourceImage|not_contains: ["\\program files\\", "\\program files (x86)\\", "msmpeng", "csrss", "wininit", "wmiprvse", "taskmgr", "procexp", "vmtoolsd", "sysmon"], not: { sourceImage|contains: "\\windows\\system32\\", sourceImage|not_endswith: ["\\powershell.exe", "\\pwsh.exe", "\\rundll32.exe", "\\regsvr32.exe", "\\mshta.exe", "\\wscript.exe", "\\cscript.exe", "\\cmd.exe", "\\msbuild.exe"] } }
     - { eventId|in: [4688, 1], commandLine|contains: ["sekurlsa", "lsadump", "mimikatz", "procdump", "-ma lsass", "comsvcs.dll, MiniDump", "comsvcs.dll MiniDump", "rundll32.exe comsvcs", "ntdsutil", "ifm", "create full", "reg save hklm\\sam", "reg save hklm\\system", "reg save hklm\\security", "reg.exe save", "vssadmin create shadow", "wmic shadowcopy", "diskshadow", "esentutl /y", "esentutl.exe /y", "ntds.dit", "sam.hive", "system.hive", "lsass.dmp", "lsass.exe", "dumpert", "nanodump", "pypykatz", "lazagne", "sharpdump", "handlekatz", "dumpsec", "secretsdump", "invoke-mimikatz", "pwdump", "gsecdump", "wce.exe", "fgdump", "cachedump", "vaultcmd /list", "cmdkey /list", "rubeus", "kekeo"] }
     - { eventId|in: [325, 327], provider|contains: ESENT, any_of: [ { message|contains: ntds.dit }, { data|contains: ntds.dit }, { raw|contains: ntds.dit } ] }
     - { eventId: 4663, objectName|contains: ["\\config\\sam", "\\config\\security", "\\config\\system", "ntds.dit"], processName|not_contains: [lsass.exe, services.exe, svchost.exe] }
@@ -213,18 +232,26 @@ where:
 ---
 id: win-bits-download
 title: BITS transfer from an external URL
-description: Bits-Client 59/60 job transferring from http(s) - living-off-the-land download.
+description: A BITS job downloading from a host that is not a known software vendor (Bits-Client 59/60), a job copying a local or network file (the bitsadmin /addfile persistence trick), or a job created by a process that does not use BITS (notepad, a script host, a LOLBin, a program in a user-writable folder).
 severity: medium
 source: events
 attack: [T1197, T1105]
 tags: [execution, download]
 where:
-  eventId|in: [59, 60, 3]
   provider|contains: Bits-Client
   any_of:
-    - url|contains: ["http://", "https://"]
-    - raw|contains: ["http://", "https://"]
-  raw|not_contains: [windowsupdate.com, microsoft.com, windows.com, msedge, office.com, office.net, mozilla, google.com, gvt1.com, adobe.com, nvidia.com, intel.com, lenovo.com, dell.com, hp.com, apple.com, steampowered, epicgames, discord, slack, zoom.us, teams.microsoft, digicert, verisign, symantec, mcafee, sophos, kaspersky, eset, avast, avg, bitdefender, trendmicro, crowdstrike, sentinelone, cylance, carbonblack, ollama]
+    # the allow-list is applied to the URL: every record's raw names schemas.microsoft.com, so an
+    # allow-list on raw excluded every event and the rule never fired
+    - eventId|in: [59, 60]
+      url|contains: ["http://", "https://"]
+      url|not_contains: [windowsupdate.com, microsoft.com, windows.com, msedge, office.com, office.net, mozilla, google.com, gvt1.com, adobe.com, nvidia.com, intel.com, lenovo.com, dell.com, hp.com, apple.com, steampowered, epicgames, discord, slack, zoom.us, teams.microsoft, digicert, verisign, symantec, mcafee, sophos, kaspersky, eset, avast, avg, bitdefender, trendmicro, crowdstrike, sentinelone, cylance, carbonblack, ollama, live.com, akamaized.net, onenote.net, msn.com, bing.com, skype.com, onedrive, sharepoint.com]
+    - eventId|in: [59, 60]
+      url|exists: true
+      url|not_startswith: ["http://", "https://"]
+    - eventId: 3
+      any_of:
+        - data.processPath|endswith: ["\\notepad.exe", "\\desktopimgdownldr.exe", "\\rundll32.exe", "\\regsvr32.exe", "\\mshta.exe", "\\wscript.exe", "\\cscript.exe", "\\cmd.exe", "\\powershell.exe", "\\pwsh.exe", "\\certutil.exe", "\\explorer.exe"]
+        - data.processPath|contains: ["\\users\\public\\", "\\appdata\\", "\\temp\\", "\\programdata\\", "\\downloads\\"]
 ---
 id: win-applocker-codeintegrity-block
 title: AppLocker / Code Integrity / SmartScreen block
@@ -273,8 +300,8 @@ where:
   destinationPort|nin: [53, 5985, 5986, 135, 445, 389, 636, 88]
 ---
 id: win-remote-thread-injection
-title: Remote thread / process access injection (Sysmon 8 / 10)
-description: CreateRemoteThread into another process, or process access with full rights from an unusual source.
+title: Remote thread injection or process tampering (Sysmon 8 / 25)
+description: CreateRemoteThread into another process from an unusual source (Sysmon 8), or process tampering (Sysmon 25). Process access (Sysmon 10) has its own rule, win-process-access-hollowing, and LSASS access the credential-dumping rule.
 severity: high
 source: events
 attack: [T1055]
@@ -284,6 +311,21 @@ where:
   any_of:
     - { eventId: 8, sourceImage|not_contains: ["\\windows\\system32\\csrss.exe", "\\windows\\system32\\wininit.exe", "\\windows\\system32\\services.exe", "\\windows\\system32\\svchost.exe", "\\windows\\system32\\lsass.exe", "\\program files\\", "\\program files (x86)\\", "msmpeng", "vmtoolsd", "sysmon"] }
     - { eventId: 25 }
+---
+id: win-process-access-hollowing
+title: Process opened with full rights by a binary that has no reason to (Sysmon 10)
+description: rundll32, regsvr32, mshta, a script host, conhost or the print spooler opening another process with full access, the handle process hollowing and injection need (TrickBot's rundll32 into wermgr, shellcode run from conhost or spoolsv). A process also gets such a handle to a child it starts, so a script host starting a program shows here too; LSASS is left to the credential-dumping rule.
+severity: medium
+source: events
+attack: [T1055, T1055.012]
+tags: [defense-evasion, injection]
+entities: [computer, sourceImage, targetImage, grantedAccess]
+where:
+  eventId: 10
+  provider|contains: Sysmon
+  sourceImage|endswith: ["\\rundll32.exe", "\\regsvr32.exe", "\\mshta.exe", "\\wscript.exe", "\\cscript.exe", "\\conhost.exe", "\\spoolsv.exe"]
+  grantedAccess|in: ["0x1fffff", "0x1f3fff", "0x1f0fff", "0x1f1fff", "0x1f2fff", "0x143a", "0x1FFFFF", "0x1F3FFF", "0x1F0FFF", "0x1F1FFF", "0x1F2FFF", "0x143A"]
+  targetImage|not_endswith: ["\\lsass.exe", "\\conhost.exe", "\\werfault.exe", "\\csrss.exe", "\\splwow64.exe", "\\printisolationhost.exe"]
 ---
 id: win-unsigned-driver-loaded
 title: Unsigned or suspicious driver loaded (Sysmon 6)

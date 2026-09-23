@@ -167,7 +167,7 @@ where:
 ---
 id: win-registry-run-key
 title: Run / RunOnce registry persistence (Sysmon 13 / 4657)
-description: Value written under a Run, RunOnce, Winlogon, Services or Image File Execution Options key.
+description: Value written under a Run, RunOnce, Winlogon, Image File Execution Options, AppInit, print monitor, LSA package or similar autostart key. Service keys have their own rule, win-service-registry-suspicious.
 severity: high
 source: events
 attack: [T1547.001, T1546.012]
@@ -177,8 +177,40 @@ where:
     - { eventId: 13, provider|contains: Sysmon }
     - { eventId: 4657 }
   any_of_2:
-    - targetObject|contains: ["\\CurrentVersion\\Run", "\\CurrentVersion\\RunOnce", "\\Winlogon\\Shell", "\\Winlogon\\Userinit", "\\Image File Execution Options\\", "\\CurrentVersion\\Explorer\\Shell Folders", "\\Policies\\Explorer\\Run", "\\Windows\\CurrentVersion\\Policies\\", "\\AppInit_DLLs", "\\Services\\", "\\Print\\Monitors\\", "\\SilentProcessExit\\", "\\Terminal Server\\WinStations\\RDP-Tcp\\", "\\Lsa\\Security Packages", "\\Lsa\\Notification Packages", "\\WDigest\\UseLogonCredential", "\\DisableAntiSpyware", "\\DisableRealtimeMonitoring"]
+    - targetObject|contains: ["\\CurrentVersion\\Run", "\\CurrentVersion\\RunOnce", "\\Winlogon\\Shell", "\\Winlogon\\Userinit", "\\Image File Execution Options\\", "\\CurrentVersion\\Explorer\\Shell Folders", "\\Policies\\Explorer\\Run", "\\Windows\\CurrentVersion\\Policies\\", "\\AppInit_DLLs", "\\Print\\Monitors\\", "\\SilentProcessExit\\", "\\Terminal Server\\WinStations\\RDP-Tcp\\", "\\Lsa\\Security Packages", "\\Lsa\\Notification Packages", "\\WDigest\\UseLogonCredential", "\\DisableAntiSpyware", "\\DisableRealtimeMonitoring"]
     - objectName|contains: ["\\CurrentVersion\\Run", "\\CurrentVersion\\RunOnce", "\\Winlogon\\", "\\Image File Execution Options\\", "\\WDigest", "\\Lsa\\"]
+---
+id: win-service-registry-suspicious
+title: Service binary set to a suspicious command in the registry (Sysmon 13 / 4657)
+description: A service's ImagePath or ServiceDll written to point at a user-writable folder, a shell or script host, a named pipe (Meterpreter getsystem), or an executable dropped straight into the Windows folder (PsExec and its renamed copies). The registry view of win-service-installed-suspicious, for hosts that log Sysmon but not the System channel. Any write under a Services key used to count as Run-key persistence, which included the Background Activity Moderator updating its own state.
+severity: high
+source: events
+attack: [T1543.003, T1569.002]
+tags: [persistence, lateral-movement, registry]
+entities: [computer, targetObject, details, image]
+where:
+  any_of:
+    - { eventId: 13, provider|contains: Sysmon, targetObject|contains: "\\Services\\", targetObject|endswith: ["\\ImagePath", "\\ServiceDll", "\\FailureCommand"] }
+    - { eventId: 4657, objectName|contains: "\\Services\\", data.ObjectValueName|in: [ImagePath, ServiceDll, FailureCommand] }
+  any_of_2:
+    - details|contains: ["\\temp\\", "\\tmp\\", "\\appdata\\", "\\users\\public\\", "\\programdata\\", "\\downloads\\", "\\perflogs\\", "\\windows\\tasks\\", "cmd.exe", "cmd /c", "%comspec%", "powershell", "pwsh", "mshta", "rundll32", "regsvr32", "wscript", "cscript", "\\\\.\\pipe\\", "PSEXESVC", "PAExec"]
+    - details|re: "(?i)^\"?(c:\\\\windows|%systemroot%|\\\\systemroot)\\\\[^\\\\]+\\.exe"
+    - data.NewValue|contains: ["\\temp\\", "\\appdata\\", "\\users\\public\\", "\\programdata\\", "cmd.exe", "%comspec%", "powershell", "rundll32", "\\\\.\\pipe\\", "PSEXESVC"]
+---
+id: win-spooler-driver-dll
+title: Print spooler loads or is pointed at a DLL from its driver folder (SpoolFool, CVE-2020-1030, PrintNightmare)
+description: spoolsv.exe loads an unsigned DLL from spool\\drivers (Sysmon 7), a process other than spoolsv or a system installer writes a DLL there (Sysmon 11), or a printer's SpoolDirectory or CopyFiles Module is set to a path under spool\\drivers (Sysmon 13). The spooler then loads the attacker's DLL as SYSTEM. The upstream Sigma rule for the load is informational and was not converted; unsigned, it is high here.
+severity: high
+source: events
+attack: [T1068, T1574]
+tags: [privilege-escalation, spooler]
+entities: [computer, image, imageLoaded, targetFilename, targetObject, details]
+where:
+  provider|contains: Sysmon
+  any_of:
+    - { eventId: 7, image|endswith: "\\spoolsv.exe", imageLoaded|contains: "\\spool\\drivers\\", signed|in: ["false", "False"] }
+    - { eventId: 11, targetFilename|contains: "\\spool\\drivers\\", targetFilename|endswith: .dll, image|not_endswith: ["\\spoolsv.exe", "\\TrustedInstaller.exe", "\\tiworker.exe", "\\drvinst.exe", "\\printisolationhost.exe"] }
+    - { eventId: 13, targetObject|contains: "\\Print\\Printers\\", targetObject|endswith: ["\\SpoolDirectory", "\\Module"], details|contains: "\\spool\\drivers\\" }
 ---
 id: win-new-firewall-rule
 title: Firewall rules added for an application, or all rules deleted
