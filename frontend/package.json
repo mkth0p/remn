@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint src vite.config.ts",
     "format": "prettier --write src",
-    "format:check": "prettier --check src"
+    "format:check": "prettier --check src",
+    "demo:bundle": "npm run build && REMN_WRITE_DEMO=1 playwright test e2e/demo-bundle.spec.ts --project browser-only -g 'writes the demo case' && npm run build"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.0",

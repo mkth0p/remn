@@ -10,9 +10,9 @@ export default defineConfig({
   globalSetup: './e2e/global-setup.ts',
   use: { trace: 'retain-on-failure' },
   projects: [
-    { name: 'full', testIgnore: /browser-only\.spec\.ts/, use: { baseURL: 'http://127.0.0.1:8317' } },
+    { name: 'full', testIgnore: /(browser-only|demo-bundle)\.spec\.ts/, use: { baseURL: 'http://127.0.0.1:8317' } },
     // what remn.tech runs; *.localhost reaches 127.0.0.1 but the page sees another host
-    { name: 'browser-only', testMatch: /browser-only\.spec\.ts/, use: { baseURL: 'http://remn.localhost:8318' } },
+    { name: 'browser-only', testMatch: /(browser-only|demo-bundle)\.spec\.ts/, use: { baseURL: 'http://remn.localhost:8318' } },
   ],
   webServer: [
     {

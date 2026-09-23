@@ -63,6 +63,15 @@ makes no request to the visitor's localhost on its own, and that the linked lab'
 pack reads to its ground truth (14,000 events, 1,000 mails, the five planted chains).
 It runs in CI and is required by the release workflow before packaging.
 
+The demo case behind "open the demo case" on the Dashboard is that same quick-start pack,
+read by the built app in the public configuration, its rules run and its chains built, then
+exported as a case bundle: `frontend/public/demo/northstar-lab.remn.ndjson.gz`. Opening it
+restores the bundle in the visitor's browser, so nothing is uploaded or parsed. A unit test
+verifies the committed bundle (its checksum, 14,000 events, 1,000 mails, five critical
+chains) and the regression opens it and checks that no request uploads anything.
+Regenerate it after a parser, rule or chain change with `npm run demo:bundle` in
+`frontend/`, which writes it through the same browser path.
+
 What the harness does not cover: Windows event detection has no public ground truth
 with labelled attacks that fits a drop-in; the EVTX-ATTACK-SAMPLES archive below is the
 closest, and endpoint protection quarantined it on the development machine. Microsoft

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { estimateStorage, getDb, type Evidence, type Finding } from '../db/schema'
-import { useStore } from '../state/store'
+import { toast, useStore } from '../state/store'
 import { fmtBytes, fmtNum, fmtTs } from '../util/format'
 import { Badge, Kpi, SevBar } from '../components/ui'
 import { IconEvents, IconEvidence, IconFindings, IconMail } from '../components/Icons'
@@ -9,6 +9,7 @@ import { requestIngest, refreshCounts } from '../data/ingest'
 import { getSource } from '../data/source'
 import { Jobs } from '../components/ConsolePanel'
 import { deployment } from '../data/deployment'
+import { openDemoCase } from '../data/demoCase'
 
 interface Summary {
   counts?: { events?: number; mails?: number; iocs?: number }
@@ -101,6 +102,7 @@ export function Dashboard() {
             <div className="panel-h">add evidence</div>
             <div className="panel-b col">
               <Dropzone onFiles={(files) => requestIngest(files, kase)} />
+              {!counts.events && !counts.mails && <DemoCaseButton />}
               <Jobs />
               <div className="hint">
                 {isServer ? `Files are hashed in the browser, uploaded in chunks to the REMN server (${dep.host}) and parsed into a DuckDB case store there.` : `${dep.parsing} ${dep.storage}`}
@@ -190,6 +192,32 @@ export function Dashboard() {
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+/** A first look without evidence of one's own: the synthetic lab, already read, restored in this browser. */
+function DemoCaseButton() {
+  const [busy, setBusy] = useState<string | null>(null)
+  const open = () => {
+    setBusy('Opening…')
+    openDemoCase(setBusy)
+      .then((c) => {
+        const s = useStore.getState()
+        s.setCurrentCase(c)
+        s.bumpCases()
+        s.setView('chains')
+        toast('ok', `${c.name}: synthetic evidence, restored in this browser; nothing was uploaded`)
+      })
+      .catch((e: Error) => toast('err', e.message, 0))
+      .finally(() => setBusy(null))
+  }
+  return (
+    <div className="row small" style={{ gap: 8 }}>
+      <button className="btn sm" onClick={open} disabled={!!busy}>
+        open the demo case
+      </button>
+      <span className="muted">{busy ?? 'a synthetic phishing-to-compromise lab, already read; nothing is uploaded'}</span>
     </div>
   )
 }

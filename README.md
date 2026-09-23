@@ -47,8 +47,9 @@ cd frontend && npm ci && npm run build && cd ..
 .venv\Scripts\python.exe backend\run.py
 ```
 
-Open http://127.0.0.1:8000, create a case, drop files. A synthetic lab with linked
-mail, Windows and Microsoft 365 activity comes with the repository:
+Open http://127.0.0.1:8000, create a case, drop files, or press "open the demo case" to
+see the synthetic lab already read. That lab, with linked mail, Windows and Microsoft 365
+activity, comes with the repository:
 
 ```
 .venv\Scripts\python.exe samples\synthetic\make_linked_lab.py --out samples\generated\lab
