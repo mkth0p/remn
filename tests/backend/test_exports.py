@@ -79,13 +79,16 @@ def test_amcache_shimcache_and_recmd_outputs_reach_image_and_registry_fields(tmp
     assert row["artifactType"] == "amcache" and row["image"] == "C:\\Users\\jdoe\\Downloads\\upd.exe"
     assert row["hashes"] == "SHA1=" + "a" * 40 and row["ts"] == timestamp_utc("2026-09-01 10:00:00")
 
-    shimcache = (b"ControlSet,CacheEntryPosition,Path,LastModifiedTimeUTC,Executed,Duplicate,SourceFile\n" b"1,0,C:\\Users\\Public\\svc.exe,2026-08-30 12:00:00,Yes,False,SYSTEM\n")
+    shimcache = (
+        b"ControlSet,CacheEntryPosition,Path,LastModifiedTimeUTC,Executed,Duplicate,SourceFile\n"
+        b"1,0,C:\\Users\\Public\\svc.exe,2026-08-30 12:00:00,Yes,False,SYSTEM\n"
+    )
     row = parse(tmp_path, shimcache, "ProgramExecution/20260905_AppCompatCache.csv")[0]
     assert row["artifactType"] == "shimcache" and row["image"] == "C:\\Users\\Public\\svc.exe" and row["data"]["Executed"] == "Yes"
 
     recmd = (
         b"HivePath,HiveType,Description,Category,KeyPath,ValueName,ValueType,ValueData,ValueData2,ValueData3,Comment,Recursive,Deleted,LastWriteTimestamp,PluginDetailFile\n"
-        b"C:\\Windows\\System32\\config\\SOFTWARE,Software,Run keys,Autoruns,Microsoft\\Windows\\CurrentVersion\\Run,Dropper,RegSz,\"\"\"C:\\Users\\Public\\svc.exe\"\" -k\",,,,,False,2026-08-30 12:00:00,\n"
+        b'C:\\Windows\\System32\\config\\SOFTWARE,Software,Run keys,Autoruns,Microsoft\\Windows\\CurrentVersion\\Run,Dropper,RegSz,"""C:\\Users\\Public\\svc.exe"" -k",,,,,False,2026-08-30 12:00:00,\n'
     )
     row = parse(tmp_path, recmd, "Registry/20260905_RECmd_Batch_Kroll_Output.csv")[0]
     assert row["artifactType"] == "registry" and row["targetObject"] == "Microsoft\\Windows\\CurrentVersion\\Run"
@@ -117,16 +120,40 @@ def test_a_velociraptor_collector_zip_yields_results_and_triage_rows(tmp_path):
         # Velociraptor writes one object per line, so a real result file has many lines
         z.writestr(
             "results/Windows.System.Services.json",
-            json.dumps({"Name": "SyncHelper", "DisplayName": "Sync Helper", "PathName": "C:\\Users\\Public\\svc.exe -k", "StartMode": "Auto", "State": "Running"})
+            json.dumps(
+                {"Name": "SyncHelper", "DisplayName": "Sync Helper", "PathName": "C:\\Users\\Public\\svc.exe -k", "StartMode": "Auto", "State": "Running"}
+            )
             + "\n"
-            + json.dumps({"Name": "Spooler", "DisplayName": "Print Spooler", "PathName": "C:\\Windows\\System32\\spoolsv.exe", "StartMode": "Auto", "State": "Running"})
+            + json.dumps(
+                {"Name": "Spooler", "DisplayName": "Print Spooler", "PathName": "C:\\Windows\\System32\\spoolsv.exe", "StartMode": "Auto", "State": "Running"}
+            )
             + "\n",
         )
         z.writestr(
             "results/Windows.EventLogs.Evtx.json",
-            json.dumps({"System": {"Provider": {"Name": "Microsoft-Windows-Security-Auditing"}, "EventID": {"Value": 4688}, "TimeCreated": {"SystemTime": "2026-08-19T01:35:00Z"}, "Channel": "Security", "Computer": "WS01", "EventRecordID": 7}, "EventData": {"NewProcessName": "C:\\Users\\jdoe\\Downloads\\upd.exe", "SubjectUserName": "jdoe"}, "Message": "A new process has been created"}) + "\n",
+            json.dumps(
+                {
+                    "System": {
+                        "Provider": {"Name": "Microsoft-Windows-Security-Auditing"},
+                        "EventID": {"Value": 4688},
+                        "TimeCreated": {"SystemTime": "2026-08-19T01:35:00Z"},
+                        "Channel": "Security",
+                        "Computer": "WS01",
+                        "EventRecordID": 7,
+                    },
+                    "EventData": {"NewProcessName": "C:\\Users\\jdoe\\Downloads\\upd.exe", "SubjectUserName": "jdoe"},
+                    "Message": "A new process has been created",
+                }
+            )
+            + "\n",
         )
-        z.writestr("results/Windows.Network.Netstat.json", json.dumps({"Pid": 4242, "Name": "upd.exe", "Status": "ESTAB", "Laddr": {"IP": "10.0.0.5", "Port": 51000}, "Raddr": {"IP": "198.51.100.7", "Port": 443}}) + "\n")
+        z.writestr(
+            "results/Windows.Network.Netstat.json",
+            json.dumps(
+                {"Pid": 4242, "Name": "upd.exe", "Status": "ESTAB", "Laddr": {"IP": "10.0.0.5", "Port": 51000}, "Raddr": {"IP": "198.51.100.7", "Port": 443}}
+            )
+            + "\n",
+        )
 
     source = PackageSource("Collection-WS01.zip", None, out.getvalue(), str(tmp_path), ParseContext(analyze_attachments=False))
     rows = list(source)
@@ -151,7 +178,13 @@ def test_an_orc_archive_is_read_through_its_csv_manifests(tmp_path):
 
     getthis = (
         "ComputerName,VolumeID,ParentFRN,FRN,FullName,SampleName,SizeInBytes,MD5,SHA1,FindMatch,ContentType,CreationDate,LastModificationDate,LastAccessDate,LastAttrChangeDate,FileNameCreationDate,FileNameLastModificationDate,FileNameLastAccessDate,FileNameLastAttrModificationDate,AttrType,AttrName,AttrID,SnapshotID,SHA256,SSDeep,YaraRules\n"
-        "WS01,0x1,0x5,0x26,\\Users\\jdoe\\Downloads\\upd.exe,0000000000000026_upd.exe_data,12345," + "b" * 32 + "," + "a" * 40 + ",Name=*.exe,data,08/30/2026 12:00:00.000,09/02/2026 08:00:00.000,09/02/2026 08:00:00.000,09/02/2026 08:00:00.000,,,,,$DATA,,0,,{}" + "c" * 64 + ",,\n"
+        "WS01,0x1,0x5,0x26,\\Users\\jdoe\\Downloads\\upd.exe,0000000000000026_upd.exe_data,12345,"
+        + "b" * 32
+        + ","
+        + "a" * 40
+        + ",Name=*.exe,data,08/30/2026 12:00:00.000,09/02/2026 08:00:00.000,09/02/2026 08:00:00.000,09/02/2026 08:00:00.000,,,,,$DATA,,0,,{}"
+        + "c" * 64
+        + ",,\n"
     ).format("")
     ntfsinfo = (
         "ComputerName,VolumeID,FullName,File,ParentName,Extension,Attributes,SizeInBytes,CreationDate,LastModificationDate,LastAccessDate,LastAttrChangeDate,USN,FRN,ParentFRN,RecordInUse,MD5,SHA1,SHA256\n"
@@ -170,7 +203,11 @@ def test_an_orc_archive_is_read_through_its_csv_manifests(tmp_path):
     rows = list(source)
     files = [r for r in rows if r.get("artifactType") == "file"]
 
-    assert {f["name"] for f in source.files} >= {"ORC_WS01_20260905_General.7z!/GetThis.csv", "ORC_WS01_20260905_General.7z!/NTFSInfo_C.csv", "JobStatistics.csv"}
+    assert {f["name"] for f in source.files} >= {
+        "ORC_WS01_20260905_General.7z!/GetThis.csv",
+        "ORC_WS01_20260905_General.7z!/NTFSInfo_C.csv",
+        "JobStatistics.csv",
+    }
     sample = next(r for r in files if "upd.exe" in str(r.get("path")))
     assert sample["hashes"] == "SHA256=" + "c" * 64 + ",SHA1=" + "a" * 40 + ",MD5=" + "b" * 32
     assert sample["ts"] == timestamp_utc("09/02/2026 08:00:00.000") and sample["recordKind"] == "event"

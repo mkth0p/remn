@@ -297,7 +297,9 @@ def _scalar(value: Any) -> Any:
 # block, a task definition, a WMI consumer. Cut at 4,000 characters, an indicator placed after
 # the cut escaped every rule, and padding a command is trivial. Other columns keep the short cut;
 # every value stays whole in data.
-_LONG_FIELDS = frozenset({"commandLine", "parentCommandLine", "scriptBlockText", "taskContent", "payload", "contextInfo", "details", "wmiConsumer", "destination"})
+_LONG_FIELDS = frozenset(
+    {"commandLine", "parentCommandLine", "scriptBlockText", "taskContent", "payload", "contextInfo", "details", "wmiConsumer", "destination"}
+)
 LONG_LIMIT = 65_536
 
 

@@ -69,29 +69,108 @@ def test_the_worker_reads_the_collection_as_one_target(collection, tmp_path):
 
 
 def test_records_become_rows_the_rules_can_read():
-    service = triage.to_row("services", "service", {"_type": "windows/service", "ts": "2026-09-09T10:00:00+00:00", "name": "SyncHelper", "displayname": "Sync Helper", "imagepath": "C:\\Users\\Public\\svc.exe", "imagepath_args": "-k", "objectname": "LocalSystem", "start": "Auto Start (2)"}, 0, {"host": "WS01"})
+    service = triage.to_row(
+        "services",
+        "service",
+        {
+            "_type": "windows/service",
+            "ts": "2026-09-09T10:00:00+00:00",
+            "name": "SyncHelper",
+            "displayname": "Sync Helper",
+            "imagepath": "C:\\Users\\Public\\svc.exe",
+            "imagepath_args": "-k",
+            "objectname": "LocalSystem",
+            "start": "Auto Start (2)",
+        },
+        0,
+        {"host": "WS01"},
+    )
     assert service["artifactType"] == "service" and service["serviceName"] == "SyncHelper"
     assert service["serviceFile"] == "C:\\Users\\Public\\svc.exe -k" and service["image"] == "C:\\Users\\Public\\svc.exe"
     assert service["recordKind"] == "event" and service["ts"] == 1788948000000
 
-    run = triage.to_row("runkeys", "autorun", {"_type": "windows/registry/run", "name": "Dropper", "command": '"C:\\Users\\Public\\svc.exe" -k', "key": "HKLM\\...\\Run", "username": "jdoe"}, 0, {})
+    run = triage.to_row(
+        "runkeys",
+        "autorun",
+        {"_type": "windows/registry/run", "name": "Dropper", "command": '"C:\\Users\\Public\\svc.exe" -k', "key": "HKLM\\...\\Run", "username": "jdoe"},
+        0,
+        {},
+    )
     assert run["image"] == '"C:\\Users\\Public\\svc.exe" -k' and run["targetObject"] == "HKLM\\...\\Run" and run["targetUser"] == "jdoe"
 
-    action = triage.to_row("tasks", "task", {"_type": "filesystem/windows/task/action", "action_type": "Exec", "uri": "\\Updater", "command": "C:\\Users\\jdoe\\AppData\\Roaming\\upd.exe", "arguments": "/silent"}, 0, {})
+    action = triage.to_row(
+        "tasks",
+        "task",
+        {
+            "_type": "filesystem/windows/task/action",
+            "action_type": "Exec",
+            "uri": "\\Updater",
+            "command": "C:\\Users\\jdoe\\AppData\\Roaming\\upd.exe",
+            "arguments": "/silent",
+        },
+        0,
+        {},
+    )
     assert action["taskName"] == "\\Updater" and action["commandLine"] == "C:\\Users\\jdoe\\AppData\\Roaming\\upd.exe /silent"
     assert triage.to_row("tasks", "task", {"_type": "filesystem/windows/task/trigger", "uri": "\\Updater"}, 0, {}) is None
 
-    detection = triage.to_row("defender.mplog", "defender", {"_type": "windows/defender/mplog/detectionadd", "ts": "2026-08-19T01:34:27.500000+00:00", "detection": "Trojan:Win32/Synthetic.A!ml file:C:\\Users\\jdoe\\Downloads\\invoice.pdf.exe"}, 0, {})
+    detection = triage.to_row(
+        "defender.mplog",
+        "defender",
+        {
+            "_type": "windows/defender/mplog/detectionadd",
+            "ts": "2026-08-19T01:34:27.500000+00:00",
+            "detection": "Trojan:Win32/Synthetic.A!ml file:C:\\Users\\jdoe\\Downloads\\invoice.pdf.exe",
+        },
+        0,
+        {},
+    )
     assert detection["threatName"] == "Trojan:Win32/Synthetic.A!ml"
     assert detection["message"].startswith("detectionadd Trojan:Win32/Synthetic.A!ml")
 
-    scan = triage.to_row("defender.mplog", "defender", {"_type": "windows/defender/mplog/resourcescan", "ts": "2026-08-19T01:34:26.112000+00:00", "resource_path": "C:\\Users\\jdoe\\Downloads\\invoice.pdf.exe", "threats": ["Trojan:Win32/Synthetic.A!ml"]}, 1, {})
+    scan = triage.to_row(
+        "defender.mplog",
+        "defender",
+        {
+            "_type": "windows/defender/mplog/resourcescan",
+            "ts": "2026-08-19T01:34:26.112000+00:00",
+            "resource_path": "C:\\Users\\jdoe\\Downloads\\invoice.pdf.exe",
+            "threats": ["Trojan:Win32/Synthetic.A!ml"],
+        },
+        1,
+        {},
+    )
     assert scan["threatName"] == "Trojan:Win32/Synthetic.A!ml" and scan["path"] == "C:\\Users\\jdoe\\Downloads\\invoice.pdf.exe"
 
-    amcache = triage.to_row("amcache.application_files", "amcache", {"_type": "windows/appcompat/InventoryApplicationFile", "path": "C:\\Users\\jdoe\\Downloads\\upd.exe", "digest": {"md5": None, "sha1": "a" * 40, "sha256": None}, "publisher": "Contoso", "mtime_regf": "2026-09-01T10:00:00+00:00"}, 0, {})
+    amcache = triage.to_row(
+        "amcache.application_files",
+        "amcache",
+        {
+            "_type": "windows/appcompat/InventoryApplicationFile",
+            "path": "C:\\Users\\jdoe\\Downloads\\upd.exe",
+            "digest": {"md5": None, "sha1": "a" * 40, "sha256": None},
+            "publisher": "Contoso",
+            "mtime_regf": "2026-09-01T10:00:00+00:00",
+        },
+        0,
+        {},
+    )
     assert amcache["image"] == "C:\\Users\\jdoe\\Downloads\\upd.exe" and amcache["hashes"] == "SHA1=" + "a" * 40 and amcache["company"] == "Contoso"
 
-    history = triage.to_row("browser.history", "browser-history", {"_type": "browser/history", "ts": "2026-09-02T08:00:00+00:00", "url": "http://198.51.100.7/stage.bin", "title": "stage", "browser": "edge", "username": "jdoe"}, 0, {})
+    history = triage.to_row(
+        "browser.history",
+        "browser-history",
+        {
+            "_type": "browser/history",
+            "ts": "2026-09-02T08:00:00+00:00",
+            "url": "http://198.51.100.7/stage.bin",
+            "title": "stage",
+            "browser": "edge",
+            "username": "jdoe",
+        },
+        0,
+        {},
+    )
     assert history["url"] == "http://198.51.100.7/stage.bin" and history["recordKind"] == "event"
 
 
@@ -132,7 +211,11 @@ def test_the_persistence_rules_fire_on_triage_rows(collection, tmp_path):
     from services.store.rules import run_rules
     from services.store.writers import EventWriter
 
-    rules = {d["id"]: d for d in yaml.safe_load_all((Path(__file__).resolve().parents[2] / "rules" / "collection" / "host-artifacts.yaml").read_text(encoding="utf-8")) if isinstance(d, dict)}
+    rules = {
+        d["id"]: d
+        for d in yaml.safe_load_all((Path(__file__).resolve().parents[2] / "rules" / "collection" / "host-artifacts.yaml").read_text(encoding="utf-8"))
+        if isinstance(d, dict)
+    }
     registry = StoreRegistry()
     registry.configure(tmp_path / "cases")
     try:
@@ -183,24 +266,46 @@ def test_artifact_times_mean_what_the_timeline_says():
     amcache = triage.to_row(
         "amcache.files",
         "amcache",
-        {"_type": "windows/appcompat/InventoryApplicationFile", "path": "C:\\Users\\jdoe\\AppData\\Local\\Temp\\drop.exe", "link_date": "2011-02-03T00:00:00+00:00", "mtime_regf": "2026-09-01T09:00:00+00:00"},
+        {
+            "_type": "windows/appcompat/InventoryApplicationFile",
+            "path": "C:\\Users\\jdoe\\AppData\\Local\\Temp\\drop.exe",
+            "link_date": "2011-02-03T00:00:00+00:00",
+            "mtime_regf": "2026-09-01T09:00:00+00:00",
+        },
         0,
         {},
     )
     assert amcache["recordKind"] == "event" and amcache["ts"] == triage.timestamp("2026-09-01T09:00:00+00:00")
-    shim = triage.to_row("shimcache", "shimcache", {"_type": "windows/shimcache", "path": "C:\\Temp\\drop.exe", "last_modified": "2011-02-03T00:00:00+00:00"}, 0, {})
+    shim = triage.to_row(
+        "shimcache", "shimcache", {"_type": "windows/shimcache", "path": "C:\\Temp\\drop.exe", "last_modified": "2011-02-03T00:00:00+00:00"}, 0, {}
+    )
     assert shim["recordKind"] == "observation" and shim["ts"] is None
-    history = triage.to_row("powershell.history", "powershell-history", {"_type": "powershell/history", "command": "Invoke-Mimikatz", "order": 3, "mtime": "2026-09-20T08:00:00+00:00"}, 0, {})
+    history = triage.to_row(
+        "powershell.history",
+        "powershell-history",
+        {"_type": "powershell/history", "command": "Invoke-Mimikatz", "order": 3, "mtime": "2026-09-20T08:00:00+00:00"},
+        0,
+        {},
+    )
     assert history["recordKind"] == "observation" and history["ts"] is None and history["order"] == 3
 
 
 def test_ez_exports_keep_the_same_meanings():
     from services.parsers import collection
 
-    shim = collection.normalize({"Path": "C:\\Temp\\drop.exe", "LastModifiedTimeUTC": "2019-03-02 08:00:00", "CacheEntryPosition": "4"}, "AppCompatCache.csv", 0, {})
+    shim = collection.normalize(
+        {"Path": "C:\\Temp\\drop.exe", "LastModifiedTimeUTC": "2019-03-02 08:00:00", "CacheEntryPosition": "4"}, "AppCompatCache.csv", 0, {}
+    )
     assert shim["artifactType"] == "shimcache" and shim["recordKind"] == "observation" and shim["ts"] is None
     lnk = collection.normalize(
-        {"SourceFile": "C:\\Users\\jdoe\\Recent\\q3.lnk", "SourceCreated": "2026-09-01 10:00:00", "SourceModified": "2026-09-02 11:00:00", "TargetModified": "2015-06-01 00:00:00", "LocalPath": "C:\\Users\\jdoe\\q3.xlsx", "TargetIDAbsolutePath": "My Computer\\C:\\Users\\jdoe\\q3.xlsx"},
+        {
+            "SourceFile": "C:\\Users\\jdoe\\Recent\\q3.lnk",
+            "SourceCreated": "2026-09-01 10:00:00",
+            "SourceModified": "2026-09-02 11:00:00",
+            "TargetModified": "2015-06-01 00:00:00",
+            "LocalPath": "C:\\Users\\jdoe\\q3.xlsx",
+            "TargetIDAbsolutePath": "My Computer\\C:\\Users\\jdoe\\q3.xlsx",
+        },
         "LECmd_Output.csv",
         0,
         {},

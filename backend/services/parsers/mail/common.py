@@ -537,7 +537,9 @@ def build_row(
         flags.add("credential_phishing_pattern")
     # One of the organisation's own domains in From, and either the receiver failed it, or the only
     # pass is for some other domain (authenticated as evil.example while claiming contoso.com).
-    other_domain_pass = (auth_hdr.get("spf") == "pass" and "spf_domain_unaligned" in flags) or (auth_hdr.get("dkim") == "pass" and "dkim_domain_unaligned" in flags)
+    other_domain_pass = (auth_hdr.get("spf") == "pass" and "spf_domain_unaligned" in flags) or (
+        auth_hdr.get("dkim") == "pass" and "dkim_domain_unaligned" in flags
+    )
     if (
         look.get("internal")
         and not receiver_passed

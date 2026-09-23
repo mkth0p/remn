@@ -497,12 +497,35 @@ DEFENDER_KEEP_WHOLE = re.compile(
 # Cheap substring gate in front of the precise test. The same bytes used to take a branch that ran
 # at 45 MiB/s and this one runs at 1.6, which on a public instance is an amplifier by itself.
 DEFENDER_TERMS = (
-    "threat", "detect", "quarantin", "remediat", "cleaned", "removed", "blocked", "exclusion",
-    "lowfi", "malware", "trojan", "backdoor", "ransom", "hacktool", "riskware", "pua:", "unwanted",
-    "tamper", "time protection", "scan result", "scan finished", "scan started",
+    "threat",
+    "detect",
+    "quarantin",
+    "remediat",
+    "cleaned",
+    "removed",
+    "blocked",
+    "exclusion",
+    "lowfi",
+    "malware",
+    "trojan",
+    "backdoor",
+    "ransom",
+    "hacktool",
+    "riskware",
+    "pua:",
+    "unwanted",
+    "tamper",
+    "time protection",
+    "scan result",
+    "scan finished",
+    "scan started",
     # switching protection off is the move an attacker makes before the rest, so it is evidence
-    "removedefinitions", "disableantispyware", "disablerealtime", "disablebehavior",
-    "disableioav", "disablescriptscanning",
+    "removedefinitions",
+    "disableantispyware",
+    "disablerealtime",
+    "disablebehavior",
+    "disableioav",
+    "disablescriptscanning",
 )
 
 
@@ -811,7 +834,20 @@ def normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, Any
         row["targetObject"] = get("Key", "KeyPath", "RegistryKey", "Entry Location")
     if kind == "program":
         row["path"] = row.get("path") or get("RootDirPath")
-    if kind in ("amcache", "shimcache", "userassist", "bam", "shellbag", "sru", "activity", "browser-history", "browser-download", "powershell-history", "registry", "file"):
+    if kind in (
+        "amcache",
+        "shimcache",
+        "userassist",
+        "bam",
+        "shellbag",
+        "sru",
+        "activity",
+        "browser-history",
+        "browser-download",
+        "powershell-history",
+        "registry",
+        "file",
+    ):
         candidate = get("FullPath", "Path", "AbsolutePath", "LocalPath", "TargetIDAbsolutePath", "FullName", "ExeInfo", "ImagePath", "FilePath")
         if kind == "file" and not candidate and get("ParentPath") and get("FileName"):
             candidate = get("ParentPath").rstrip("\\") + "\\" + get("FileName")
@@ -830,8 +866,20 @@ def normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, Any
         # A link file's own times are when the user opened the target (SourceModified: last opened);
         # TargetModified is the target file's time, not an action of the user's, so it comes after.
         when = get(
-            "LastRun", "Timestamp", "TimeStamp", "FileKeyLastWriteTimestamp", "LastWriteTimestamp", "LastWriteTime",
-            "SourceModified", "SourceCreated", "TargetModified", "Created0x10", "LastModificationDate", "LinkDate", "LastVisitedTime", "VisitTime",
+            "LastRun",
+            "Timestamp",
+            "TimeStamp",
+            "FileKeyLastWriteTimestamp",
+            "LastWriteTimestamp",
+            "LastWriteTime",
+            "SourceModified",
+            "SourceCreated",
+            "TargetModified",
+            "Created0x10",
+            "LastModificationDate",
+            "LinkDate",
+            "LastVisitedTime",
+            "VisitTime",
         )
         # A registry last-write time stays metadata, as it does for hives decoded natively. ShimCache
         # holds the file's own modification time and PowerShell history no time per line, so neither

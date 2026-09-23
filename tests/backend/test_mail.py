@@ -637,7 +637,13 @@ def test_raw_8bit_header_bytes_do_not_end_the_mailbox():
     from django.test import Client
 
     def msg(subject: bytes, i: int) -> bytes:
-        return b"From a@example.com Mon Jan  1 00:00:00 2024\nFrom: a@example.com\nTo: b@example.org\nSubject: " + subject + b"\nMessage-ID: <" + str(i).encode() + b"@x>\nDate: Mon, 1 Jan 2024 00:00:00 +0000\nContent-Disposition: attachment; filename=\"r\xe9sum\xe9.pdf\"\n\nbody\n\n"
+        return (
+            b"From a@example.com Mon Jan  1 00:00:00 2024\nFrom: a@example.com\nTo: b@example.org\nSubject: "
+            + subject
+            + b"\nMessage-ID: <"
+            + str(i).encode()
+            + b'@x>\nDate: Mon, 1 Jan 2024 00:00:00 +0000\nContent-Disposition: attachment; filename="r\xe9sum\xe9.pdf"\n\nbody\n\n'
+        )
 
     mbox = msg(b"first", 1) + msg(b"caf\xe9 invoice \xff", 2) + msg(b"third", 3)
     resp = Client().post("/api/ingest/mail", {"file": SimpleUploadedFile("box.mbox", mbox)}, HTTP_X_FORENSIC_CLIENT="1")

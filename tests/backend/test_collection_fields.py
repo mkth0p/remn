@@ -25,10 +25,7 @@ def test_a_french_schtasks_export_reaches_the_persistence_fields(tmp_path):
     under "Tâche à exécuter", which no rule could see, so 434 tasks were invisible to every
     persistence rule."""
     header = "Nom de l'hôte,Nom de la tâche,Prochaine exécution,Statut,Auteur,Tâche à exécuter,Démarrer dans,Exécuter en tant qu'utilisateur"
-    body = (
-        header + "\n"
-        'WS01,\\Updater,N/A,Prêt,Contoso,"""C:\\Users\\jdoe\\AppData\\Roaming\\upd.exe"" /silent",N/A,WS01\\jdoe\n'
-    ).encode("cp1252")
+    body = (header + '\nWS01,\\Updater,N/A,Prêt,Contoso,"""C:\\Users\\jdoe\\AppData\\Roaming\\upd.exe"" /silent",N/A,WS01\\jdoe\n').encode("cp1252")
 
     rows, notes = parse(tmp_path, body, "Scheduled Tasks/ScheduledTasks.csv")
 
@@ -43,7 +40,7 @@ def test_a_french_schtasks_export_reaches_the_persistence_fields(tmp_path):
 
 def test_an_english_schtasks_export_reaches_the_same_fields(tmp_path):
     header = "HostName,TaskName,Next Run Time,Status,Logon Mode,Last Run Time,Last Result,Author,Task To Run,Start In,Run As User"
-    body = (header + "\n" "WS01,\\Backup,N/A,Ready,Interactive,N/A,0,SYSTEM,C:\\Windows\\system32\\wbadmin.exe start backup,N/A,SYSTEM\n").encode()
+    body = (header + "\nWS01,\\Backup,N/A,Ready,Interactive,N/A,0,SYSTEM,C:\\Windows\\system32\\wbadmin.exe start backup,N/A,SYSTEM\n").encode()
 
     rows, _ = parse(tmp_path, body, "Scheduled Tasks/ScheduledTasks.csv")
 
@@ -59,7 +56,7 @@ def test_reg_query_output_becomes_one_row_per_autostart_value(tmp_path):
         "\n"
         "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run\n"
         "    SecurityHealth    REG_EXPAND_SZ    %windir%\\system32\\SecurityHealthSystray.exe\n"
-        "    Dropper    REG_SZ    \"C:\\Users\\Public\\svc.exe\" -k\n"
+        '    Dropper    REG_SZ    "C:\\Users\\Public\\svc.exe" -k\n'
         "    Description    REG_SZ    @%SystemRoot%\\system32\\shell32.dll,-4161\n"
         "    Enabled    REG_DWORD    0x1\n"
         "\n"
@@ -109,7 +106,7 @@ def test_a_prefetch_entry_names_the_executable_it_ran():
 
 
 def test_an_installed_program_has_a_path(tmp_path):
-    body = (b"Name,Vendor,Version,InstallLocation,InstallSource\n" b"Helper,,1.0,C:\\Users\\jdoe\\AppData\\Local\\Helper\\,C:\\Users\\jdoe\\Downloads\\\n")
+    body = b"Name,Vendor,Version,InstallLocation,InstallSource\nHelper,,1.0,C:\\Users\\jdoe\\AppData\\Local\\Helper\\,C:\\Users\\jdoe\\Downloads\\\n"
     rows, _ = parse(tmp_path, body, "Installed Programs/InstalledPrograms.csv")
 
     assert rows[0]["artifactType"] == "program"

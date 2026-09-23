@@ -46,7 +46,7 @@ DETECTION = {
     "Provider": "Microsoft-Windows-Security-Auditing",
 }
 
-FAKE_ENGINE = r'''
+FAKE_ENGINE = r"""
 import os, shutil, sys, time
 args = sys.argv[1:]
 output = args[args.index("-o") + 1]
@@ -56,7 +56,7 @@ if "-d" in args:
     assert any(n.lower().endswith(".evtx") for n in os.listdir(target)), os.listdir(target)
 shutil.copyfile(os.environ["FAKE_HAYABUSA_OUTPUT"], output)
 time.sleep(float(os.environ.get("FAKE_HAYABUSA_SLEEP", "0")))
-'''
+"""
 
 
 @pytest.fixture
@@ -69,7 +69,9 @@ def engine(tmp_path, monkeypatch):
     monkeypatch.setenv("FAKE_HAYABUSA_OUTPUT", str(fixture))
     monkeypatch.setattr(hayabusa, "binary", lambda: sys.executable)
     monkeypatch.setattr(hayabusa, "rules_dir", lambda: str(tmp_path))
-    monkeypatch.setattr(hayabusa, "command", lambda target, output: [sys.executable, str(script), "-o", output, "-f" if os.path.isfile(target) else "-d", target])
+    monkeypatch.setattr(
+        hayabusa, "command", lambda target, output: [sys.executable, str(script), "-o", output, "-f" if os.path.isfile(target) else "-d", target]
+    )
     return fixture
 
 
@@ -78,7 +80,15 @@ def evtx_bytes() -> bytes:
         path = Path(tmp) / "Security.evtx"
         with EvtxWriter(path) as writer:
             writer.add(
-                event_node(1, STAMP, "Microsoft-Windows-Security-Auditing", "Security", "WS01", 4688, {"NewProcessName": "C:\\Users\\jdoe\\Downloads\\upd.exe", "SubjectUserName": "jdoe"}),
+                event_node(
+                    1,
+                    STAMP,
+                    "Microsoft-Windows-Security-Auditing",
+                    "Security",
+                    "WS01",
+                    4688,
+                    {"NewProcessName": "C:\\Users\\jdoe\\Downloads\\upd.exe", "SubjectUserName": "jdoe"},
+                ),
                 int(datetime.fromisoformat(STAMP).timestamp() * 1000),
             )
         return path.read_bytes()
@@ -132,7 +142,9 @@ def test_an_evtx_ingest_stream_carries_the_engine_findings(engine, tmp_path):
     findings = [line for line in lines if line["type"] == "finding"]
     summaries = [line for line in lines if line["type"] == "engine"]
     assert events and findings and summaries
-    assert findings[0]["refKeys"] == [f"{events[0]['computer']}|{events[0]['channel']}|{events[0]['recordId']}"], "the key the browser will resolve is the identity the row carries"
+    assert findings[0]["refKeys"] == [f"{events[0]['computer']}|{events[0]['channel']}|{events[0]['recordId']}"], (
+        "the key the browser will resolve is the identity the row carries"
+    )
     assert summaries[0]["engine"] == "hayabusa" and summaries[0]["status"] == "parsed"
     assert lines[-1]["type"] == "done"
 

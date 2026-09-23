@@ -340,7 +340,16 @@ class PackageSource:
             for function, row in run:
                 entry = entries.get(function)
                 if entry is None:
-                    entry = {"name": f"triage!/{function}", "size": 0, "memberIndex": -1, "status": "pending", "count": 0, "format": triage.VERSION, "sha256": self.package_id or None, "artifactType": row.get("artifactType")}
+                    entry = {
+                        "name": f"triage!/{function}",
+                        "size": 0,
+                        "memberIndex": -1,
+                        "status": "pending",
+                        "count": 0,
+                        "format": triage.VERSION,
+                        "sha256": self.package_id or None,
+                        "artifactType": row.get("artifactType"),
+                    }
                     entries[function] = entry
                     self.files.append(entry)
                 yield from self._emit(entry, entry["name"], -1, [("event", row)])
@@ -351,7 +360,15 @@ class PackageSource:
         for function, info in run.summary.items():
             entry = entries.get(function)
             if entry is None:
-                entry = {"name": f"triage!/{function}", "size": 0, "memberIndex": -1, "status": "pending", "count": 0, "format": triage.VERSION, "sha256": self.package_id or None}
+                entry = {
+                    "name": f"triage!/{function}",
+                    "size": 0,
+                    "memberIndex": -1,
+                    "status": "pending",
+                    "count": 0,
+                    "format": triage.VERSION,
+                    "sha256": self.package_id or None,
+                }
                 self.files.append(entry)
             entry["status"] = info.get("status", "parsed")
             if info.get("reason"):
@@ -603,7 +620,9 @@ class PackageSource:
                     entry["format"] = collection.VERSION
                     source = None
                     parse_name = member.name if collection.category(member.name) else f"WdSupportLogs/{member.name}"
-                    rows = (("event", collection.normalize(r, parse_name, i, self.context)) for i, r in enumerate(collection.records(tmp_path, parse_name, notes)))
+                    rows = (
+                        ("event", collection.normalize(r, parse_name, i, self.context)) for i, r in enumerate(collection.records(tmp_path, parse_name, notes))
+                    )
                 elif low.endswith((".eml", ".msg", ".mbox", ".mbx", ".pst", ".ost")) or looks_like_mail(head):
                     source = MailSource(member.name, tmp_path, None, self.ctx, self.tmp_dir)
                     entry["format"] = source.format

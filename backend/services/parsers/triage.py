@@ -98,7 +98,11 @@ def _threat(*values: Any) -> str | None:
 def _hashes(digest: Any) -> str | None:
     if not isinstance(digest, dict):
         return None
-    parts = [f"{algo.upper()}={str(value).lower()}" for algo, value in (("sha256", digest.get("sha256")), ("sha1", digest.get("sha1")), ("md5", digest.get("md5"))) if value]
+    parts = [
+        f"{algo.upper()}={str(value).lower()}"
+        for algo, value in (("sha256", digest.get("sha256")), ("sha1", digest.get("sha1")), ("md5", digest.get("md5")))
+        if value
+    ]
     return ",".join(parts) or None
 
 
@@ -156,7 +160,9 @@ def to_row(function: str, artifact: str, rec: dict[str, Any], index: int, contex
         return None  # triggers and the other action types describe the task above, not a separate fact
     elif kind in ("windows/appcompat/InventoryApplicationFile", "windows/appcompat/file"):
         path = _text(rec.get("path"))
-        row.update(image=path, path=path, name=_text(rec.get("name")), company=_text(_first(rec, "publisher", "company_name")), hashes=_hashes(rec.get("digest")))
+        row.update(
+            image=path, path=path, name=_text(rec.get("name")), company=_text(_first(rec, "publisher", "company_name")), hashes=_hashes(rec.get("digest"))
+        )
         # When the entry was written, which is when Windows first saw the file. link_date is the PE
         # compile time, set by whoever built the binary: a dropper built in 2011 and run in 2026
         # was placed in 2011. It stays in data.
@@ -191,7 +197,9 @@ def to_row(function: str, artifact: str, rec: dict[str, Any], index: int, contex
         elif leaf == "exclusion" and rec.get("type"):
             message = f"exclusion {rec.get('type')}: {rec.get('value')}"
         elif leaf == "rtp_log":
-            message = f"RTP log: path exclusions {_text(rec.get('path_exclusions')) or 'none'}; process exclusions {_text(rec.get('process_exclusions')) or 'none'}"
+            message = (
+                f"RTP log: path exclusions {_text(rec.get('path_exclusions')) or 'none'}; process exclusions {_text(rec.get('process_exclusions')) or 'none'}"
+            )
         elif leaf == "resourcescan":
             message = f"resource scan of {path or '?'}: {_text(rec.get('threats')) or 'no threat'}"
         elif leaf == "threataction":
@@ -229,7 +237,17 @@ def to_row(function: str, artifact: str, rec: dict[str, Any], index: int, contex
         row["ts"] = timestamp(ts)
     if row["ts"] is not None:
         row["recordKind"] = "event"
-    label = row.get("threatName") or row.get("taskName") or row.get("serviceName") or row.get("image") or row.get("path") or row.get("url") or row.get("commandLine") or row.get("name") or kind
+    label = (
+        row.get("threatName")
+        or row.get("taskName")
+        or row.get("serviceName")
+        or row.get("image")
+        or row.get("path")
+        or row.get("url")
+        or row.get("commandLine")
+        or row.get("name")
+        or kind
+    )
     row["summary"] = f"{artifact}: {label}"[:2000]
     if row.get("message") and artifact == "defender":
         row["summary"] = f"defender: {row['message']}"[:2000]

@@ -32,7 +32,7 @@ def test_a_service_export_with_merged_columns_is_recovered_not_discarded(tmp_pat
     five short. This cost a real collection every one of its 292 service rows."""
     body = (
         f"{HEADER}\n"
-        'svc-clean,True,Auto,A clean row,C:\\Windows\\a.exe,101\n'
+        "svc-clean,True,Auto,A clean row,C:\\Windows\\a.exe,101\n"
         "svc-merged,\"'True','Auto'\",Two columns in one cell,C:\\Windows\\b.exe,102\n"
         "svc-merged-3,\"'True','Auto','Three in one'\",C:\\Windows\\c.exe,103\n"
     ).encode()
@@ -51,11 +51,7 @@ def test_a_service_export_with_merged_columns_is_recovered_not_discarded(tmp_pat
 def test_a_row_that_cannot_be_repaired_is_kept_and_marked(tmp_path):
     """A stray quote in a description swallows a delimiter and no rule puts it back. The row is
     still evidence, so it is kept, and the mismatch is stated rather than implied."""
-    body = (
-        f"{HEADER}\n"
-        "svc-long,True,Auto,Name,C:\\a.exe,101,surplus,more\n"
-        "svc-short,True\n"
-    ).encode()
+    body = (f"{HEADER}\nsvc-long,True,Auto,Name,C:\\a.exe,101,surplus,more\nsvc-short,True\n").encode()
     rows, notes = parse(tmp_path, body)
 
     assert len(rows) == 2
@@ -68,7 +64,7 @@ def test_a_row_that_cannot_be_repaired_is_kept_and_marked(tmp_path):
 def test_a_well_formed_export_is_not_touched_by_the_repair(tmp_path):
     """The repair only runs on a short row and only survives if it reproduces the header exactly,
     so a cell that genuinely holds a quoted list stays one cell."""
-    body = (f"{HEADER}\n" "svc,True,Auto,\"'a','b'\",C:\\a.exe,101\n").encode()
+    body = (f"{HEADER}\nsvc,True,Auto,\"'a','b'\",C:\\a.exe,101\n").encode()
     rows, notes = parse(tmp_path, body)
 
     assert notes == {}
@@ -282,7 +278,7 @@ def test_a_repaired_row_says_so_on_the_row(tmp_path):
     carries no member with it, so it has to say for itself that it was reassembled."""
     from services.parsers import collection
 
-    body = (f"{HEADER}\n" "svc,\"'True','Auto'\",Merged,C:\a.exe,7\n").encode()
+    body = (f"{HEADER}\nsvc,\"'True','Auto'\",Merged,C:\a.exe,7\n").encode()
     rows, notes = parse(tmp_path, body)
 
     assert notes["repairedRows"] == 1
@@ -292,7 +288,7 @@ def test_a_repaired_row_says_so_on_the_row(tmp_path):
 def test_a_row_short_for_two_different_reasons_is_not_confidently_repaired(tmp_path):
     """Reaching the header width by combining several splits is a coincidence, not a repair, and a
     confident wrong answer is worse than an admitted damaged row."""
-    body = (f"{HEADER}\n" "svc,\"'True','Auto'\",\"'x','y'\",7\n").encode()
+    body = (f"{HEADER}\nsvc,\"'True','Auto'\",\"'x','y'\",7\n").encode()
     rows, notes = parse(tmp_path, body)
 
     assert notes.get("repairedRows") is None
@@ -320,7 +316,7 @@ def test_a_parser_marker_never_overwrites_a_column_the_export_really_has(tmp_pat
     from services.parsers import collection
 
     header = f"Name,{collection.SPILL_KEY}"
-    body = (f"{header}\n" "svc,mine,surplus\n").encode()
+    body = (f"{header}\nsvc,mine,surplus\n").encode()
     rows, _ = parse(tmp_path, body)
 
     assert rows[0][collection.SPILL_KEY] == "mine", "the export's own column survives"

@@ -49,8 +49,12 @@ def fire(store, rule_id, rows):
 
 def test_defender_detections_group_by_threat_name(store):
     rows = [
-        observation("defender", message="Threat Name:Trojan:Win32/Synthetic.A!ml", threatName="Trojan:Win32/Synthetic.A!ml", sourceFile="WdSupportLogs/MPLog.log"),
-        observation("defender", message="Threat Name:Trojan:Win32/Synthetic.A!ml", threatName="Trojan:Win32/Synthetic.A!ml", sourceFile="WdSupportLogs/MPLog.log"),
+        observation(
+            "defender", message="Threat Name:Trojan:Win32/Synthetic.A!ml", threatName="Trojan:Win32/Synthetic.A!ml", sourceFile="WdSupportLogs/MPLog.log"
+        ),
+        observation(
+            "defender", message="Threat Name:Trojan:Win32/Synthetic.A!ml", threatName="Trojan:Win32/Synthetic.A!ml", sourceFile="WdSupportLogs/MPLog.log"
+        ),
         observation("defender", message="Threat Name:PUA:Win32/Presenoker", threatName="PUA:Win32/Presenoker", sourceFile="WdSupportLogs/MPLog.log"),
         observation("defender", message="Engine version: 1.1.24050.5", sourceFile="WdSupportLogs/MPLog.log"),
     ]
@@ -65,7 +69,9 @@ def test_defender_detections_group_by_threat_name(store):
 def test_pua_detections_are_their_own_finding(store):
     rows = [
         observation("defender", message="Threat Name:PUA:Win32/Presenoker", threatName="PUA:Win32/Presenoker", sourceFile="WdSupportLogs/MPLog.log"),
-        observation("defender", message="Threat Name:Trojan:Win32/Synthetic.A!ml", threatName="Trojan:Win32/Synthetic.A!ml", sourceFile="WdSupportLogs/MPLog.log"),
+        observation(
+            "defender", message="Threat Name:Trojan:Win32/Synthetic.A!ml", threatName="Trojan:Win32/Synthetic.A!ml", sourceFile="WdSupportLogs/MPLog.log"
+        ),
     ]
     found = fire(store, "collection-defender-pua", rows)
 
@@ -138,7 +144,7 @@ def test_programs_installed_in_user_locations(store):
 
 def test_persistence_through_a_script_host(store):
     rows = [
-        observation("autorun", name="Loader", image='powershell.exe -w hidden -enc AAAA', targetObject="HKCU\\...\\Run"),
+        observation("autorun", name="Loader", image="powershell.exe -w hidden -enc AAAA", targetObject="HKCU\\...\\Run"),
         observation("task", taskName="\\Sync", commandLine="C:\\Windows\\system32\\wscript.exe //B C:\\Users\\Public\\s.vbs"),
         observation("task", taskName="\\Backup", commandLine="C:\\Windows\\system32\\wbadmin.exe start backup"),
         observation("autorun", name="Desc", image=None, targetObject="HKLM\\...\\Run"),
@@ -151,7 +157,9 @@ def test_persistence_through_a_script_host(store):
 def test_the_existing_persistence_rule_now_reaches_tasks_and_reg_autoruns(store):
     """These two shapes produced rows before, but with image and commandLine empty."""
     rows = [
-        observation("task", taskName="\\Updater", commandLine='"C:\\Users\\jdoe\\AppData\\Roaming\\upd.exe" /silent', image="C:\\Users\\jdoe\\AppData\\Roaming\\upd.exe"),
+        observation(
+            "task", taskName="\\Updater", commandLine='"C:\\Users\\jdoe\\AppData\\Roaming\\upd.exe" /silent', image="C:\\Users\\jdoe\\AppData\\Roaming\\upd.exe"
+        ),
         observation("autorun", name="Dropper", image='"C:\\Users\\Public\\svc.exe" -k', targetObject="HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"),
         observation("autorun", name="SecurityHealth", image="%windir%\\system32\\SecurityHealthSystray.exe", targetObject="HKLM\\...\\Run"),
     ]
