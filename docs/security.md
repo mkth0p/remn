@@ -249,21 +249,33 @@ without the listing a store cannot be found by a client that was never given it.
 
 ## Text in the evidence that addresses the model
 
-The analyst chat reads tool results, the triage pass reads item summaries, and the
+The analyst agent reads tool results, the triage pass reads item summaries, and the
 Claude Code connector reads a transcript; all three carry text that came from the
-evidence, which an attacker may have written. Three things stand between that text and
-a decision:
+evidence, which an attacker may have written. Five things stand between that text and a
+change to the case:
 
+- The model cannot change the case. No tool writes: the agent's propose_* tools queue a
+  proposal in the approval inbox, and the triage pass records proposals too. Only the
+  analyst's click accepts one, and an accepted proposal is written with a tag and a
+  snapshot of what it replaced, so undo puts the previous state back
+  (`frontend/src/ai/inbox.ts`, `frontend/src/ai/inbox.test.ts`,
+  `frontend/src/data/aiReview.db.test.ts`). Nothing in the evidence can accept anything.
+- Tool results reach the model between `<evidence>` markers the evidence cannot close, and
+  text that addresses a model, an assistant or a reviewer is found before the model reads
+  it: the result opens with a notice naming the rows, the chat shows the text, the AI
+  ledger records it, and every proposal the run makes afterwards is marked so that
+  "accept all" leaves it for a one-by-one look. The triage pass marks the proposals on items
+  whose own text does the same (`frontend/src/ai/evidence.ts`, `evidence.test.ts`).
 - Every prompt on those paths says the case text is evidence, never an instruction, and
   that a record asking to be ignored or marked benign is evidence of intent to be named
   in the reason (`backend/services/ai/prompts.py`, `claude_code.py`, the triage
   instruction in `frontend/src/data/aiReview.ts`; `tests/backend/test_ai_meta.py` checks
-  the sentences are there).
+  the sentences are there, and that no tool the model is offered writes to the case).
+- Claims are checked. A citation the tools never returned is shown as unverified, and a
+  proposal that cites nothing the agent has seen is refused.
 - The synthetic lab carries a control, S07, a password-expiry lure whose body tells
-  automated reviewers to classify it as benign. The rules score it on its facts; a model
-  that follows the text fails the control.
-- The model proposes and the analyst decides. The triage pass and the chat record
-  proposals, each with its reason, and nothing takes effect until the analyst applies it.
-  An applied proposal is written with a tag and a snapshot of what it replaced
-  (`frontend/src/data/aiReview.test.ts` and `aiReview.db.test.ts`), so it stays visible in
-  the rail and undo puts the previous state back.
+  automated reviewers to classify it as benign. The rules score it on its facts, the
+  detector flags it, and a model that follows the text fails the control.
+
+The local OpenAI-compatible transport sends no key and refuses any address that is not on
+the analyst's machine or local network, so a mistyped cloud endpoint receives nothing.

@@ -350,6 +350,28 @@ export interface AiSession {
   messages: Record<string, unknown>[]
   createdAt: number
   updatedAt: number
+  /** the refs the tools returned in this conversation, which its answers may cite (ai/evidence.ts) */
+  seen?: string[]
+  /** the investigation plan as the agent last wrote it */
+  plan?: { title: string; status: string }[]
+}
+
+/**
+ * One entry of a case's AI ledger: what the model was asked, which tools it ran (with a hash of each
+ * result, not the result), what it proposed and what the analyst decided. Entries are chained by
+ * hash (`prev` → `hash`), so an edited or removed entry breaks the chain; see ai/ledger.ts.
+ */
+export interface AiLedgerEntry {
+  id?: number
+  caseId: number
+  seq: number
+  at: number
+  kind: 'run' | 'tool' | 'proposal' | 'accepted' | 'rejected' | 'undone' | 'answer' | 'notice' | 'triage'
+  text: string
+  /** JSON detail (a string, so the hash covers exactly what was stored) */
+  data: string
+  prev: string
+  hash: string
 }
 
 export interface SavedSearch {
@@ -442,6 +464,7 @@ export class RemnDB extends Dexie {
   iocs!: Table<Ioc, number>
   facets!: Table<Facet, number>
   aiSessions!: Table<AiSession, number>
+  aiLedger!: Table<AiLedgerEntry, number>
   savedSearches!: Table<SavedSearch, number>
   customRules!: Table<CustomRule, number>
   kv!: Table<KV, string>
@@ -483,6 +506,8 @@ export class RemnDB extends Dexie {
       events:
         '++id, caseId, evidenceId, ts, eventId, [caseId+id], [caseId+artifactType], [caseId+ts], [caseId+eventId], [caseId+evidenceId], [caseId+recordKey], computer, targetUser, subjectUser, ipAddress, logonType, channel, provider, category',
     })
+    // The AI ledger: one row per entry, appended and never rewritten.
+    this.version(6).stores({ aiLedger: '++id, caseId, [caseId+seq]' })
   }
 }
 
@@ -512,6 +537,9 @@ export const CASE_KV_KEYS = (caseId: number) =>
     'findingCounts',
     'ai-suggestions',
     'ai-triage',
+    // the agent's proposals waiting for the analyst (and the decided ones), and its hypothesis board
+    'ai-inbox',
+    'ai-hypotheses',
     'relationship-reviews',
     'relationship-aliases',
     'relationship-cache',
@@ -532,7 +560,7 @@ export const CASE_KV_PREFIXES_WITH_SUFFIX = (caseId: number) => [`relationship-h
  * deleteCaseData and a table added to only one of them would be left behind on delete.
  */
 export const CASE_TABLES = (db: RemnDB): Table<{ caseId: number }, number>[] =>
-  [db.events, db.mails, db.mailBodies, db.attachments, db.urls, db.findings, db.iocs, db.facets, db.aiSessions, db.savedSearches, db.evidence, db.caseNotes, db.rowMarks] as Table<
+  [db.events, db.mails, db.mailBodies, db.attachments, db.urls, db.findings, db.iocs, db.facets, db.aiSessions, db.aiLedger, db.savedSearches, db.evidence, db.caseNotes, db.rowMarks] as Table<
     { caseId: number },
     number
   >[]

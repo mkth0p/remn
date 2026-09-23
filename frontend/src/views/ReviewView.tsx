@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { runAgent } from '../ai/chat'
+import { transportLabel } from '../ai/transport'
 import { AddToTimeline } from '../components/AddToTimeline'
 import { entityKind } from '../components/EntityPanel'
 import { IconAi, IconArrowLeft, IconCheck, IconReport, IconStop } from '../components/Icons'
@@ -369,7 +370,7 @@ export function ReviewView() {
             `${fmtTs(s.ts)} (+${Math.round(s.offsetMin)} min) [${s.kind === 'mail' ? 'mail' : s.origin}] ${s.title}${s.artifacts.length ? ' | ties: ' + s.artifacts.join('; ') : ''}${s.findings.length ? ' | findings: ' + s.findings.map((f) => f.title).join('; ') : ''}`,
         )
       const prompt = `Write the narrative of this attack chain for an incident report: 4 to 7 sentences, past tense, factual, no speculation beyond what the steps show, name the recipient, the seed mail, what tied the activity to it, and the impact. End with one sentence on what to verify or contain.\n\nRecipient: ${c.identityLabel}\nSeed ${c.seed.source ?? 'mails'}: "${c.seed.subject}" from ${c.seed.fromAddr} at ${fmtTs(c.seed.ts)} (risk ${c.seed.risk}; findings: ${c.seed.findings.map((f) => f.title).join(', ') || 'none'})\nScore ${c.score} (${c.severity}), ${c.steps.length} steps over ${fmtTs(c.start)} to ${fmtTs(c.end)}, ${c.artifactLinks} artifact link(s)\nSteps:\n${steps.join('\n')}`
-      const msgs = await runAgent([{ role: 'user', content: prompt }], kase, { mode: 'report', tools: false, think: false, maxIterations: 1 })
+      const msgs = await runAgent([{ role: 'user', content: prompt }], kase, { mode: 'narrative', tools: false, think: false, maxIterations: 1 })
       const text = msgs
         .filter((m) => m.role === 'assistant')
         .map((m) => m.content)
@@ -509,10 +510,15 @@ export function ReviewView() {
       <div className="row" style={{ gap: 8, alignItems: 'baseline' }}>
         <b>the model proposes</b>
         <span className="small muted">
-          {s.by === 'chat' ? 'from the AI analyst chat' : 'asked from this page'}
+          {s.by === 'chat' ? 'from the AI analyst' : 'asked from this page'}
           {s.model ? ` · ${s.model}` : ''} · {fmtTs(s.at)}
           {s.target.startsWith('finding:') ? ` · on finding #${s.target.slice(8)}` : ''}
         </span>
+        {s.exposed && (
+          <Badge sev="medium" title="the model had read evidence text addressed to a model (asking to mark it benign, skip it…) before it proposed this: check it before applying">
+            read text aimed at AI
+          </Badge>
+        )}
       </div>
       <div className="row wrap" style={{ gap: 10 }}>
         {s.decision && <Badge sev={DECISION_SEV[s.decision]}>{DECISION_LABEL[s.decision] ?? s.decision}</Badge>}
@@ -830,7 +836,7 @@ export function ReviewView() {
                     useStore
                       .getState()
                       .setAiPrompt(
-                        `Assess this incident for the report and record your proposal with suggest_review. "${inc.title}" (${inc.severity}), findings: ${inc.findings.map((f) => `#${f.id} ${f.severity} ${f.title}`).join('; ')}. Entities: ${JSON.stringify(inc.entities)}. Referenced ${inc.source} rows: ${inc.refs.slice(0, 20).join(', ')}.`,
+                        `Assess this incident for the report: read its findings and rows with get_finding, then queue your proposal with propose_decision, citing the rows. "${inc.title}" (${inc.severity}), findings: ${inc.findings.map((f) => `finding:${f.id} ${f.severity} ${f.title}`).join('; ')}. Entities: ${JSON.stringify(inc.entities)}.`,
                       )
                     setView('ai')
                   }}
@@ -1023,8 +1029,8 @@ export function ReviewView() {
               {modelName} ·{' '}
               {aiCfg.transport === 'claude'
                 ? 'Claude Code on the server machine: the items (findings, entities, chain steps) leave for Anthropic'
-                : aiCfg.transport === 'browser'
-                  ? 'your local Ollama: nothing leaves this machine'
+                : transportLabel(aiCfg).local
+                  ? `your local model (${transportLabel(aiCfg).where}): nothing leaves this machine`
                   : "the server's Ollama"}{' '}
               · {aiCfg.transport === 'claude' ? 8 : 4} items per call
             </div>

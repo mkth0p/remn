@@ -136,7 +136,7 @@ it('an existing version-3 case opens on the current version without losing a row
   const upgraded = new RemnDB(name)
   setDb(upgraded)
   await upgraded.open()
-  expect(upgraded.verno).toBe(5)
+  expect(upgraded.verno).toBe(6)
   // nothing was rewritten or lost
   expect((await upgraded.events.where('caseId').equals(1).toArray()).map((e) => e.id)).toEqual([1])
   expect((await upgraded.kv.get('chains-1'))?.value).toEqual({ chains: [] })
@@ -152,5 +152,8 @@ it('an existing version-3 case opens on the current version without losing a row
       .primaryKeys(),
   ).toEqual([2])
   expect(await upgraded.events.where('[caseId+recordKey]').between([1, ''], [1, '\uffff']).count()).toBe(1)
+  // version 6: the AI ledger table, empty and ready
+  await upgraded.aiLedger.add({ caseId: 1, seq: 1, at: 1, kind: 'run', text: 'q', data: '', prev: '0', hash: 'h' })
+  expect(await upgraded.aiLedger.where('[caseId+seq]').equals([1, 1]).count()).toBe(1)
   await upgraded.delete()
 })

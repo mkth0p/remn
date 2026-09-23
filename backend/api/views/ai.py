@@ -31,7 +31,10 @@ def _clean_messages(raw: Any) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     if not isinstance(raw, list):
         return out
-    for m in raw[:MAX_MESSAGES]:
+    # a conversation longer than the cap keeps its first message (the question) and the newest ones
+    if len(raw) > MAX_MESSAGES:
+        raw = raw[:1] + raw[-(MAX_MESSAGES - 1) :]
+    for m in raw:
         if not isinstance(m, dict):
             continue
         role = str(m.get("role") or "user")
@@ -55,6 +58,15 @@ def _clean_messages(raw: Any) -> list[dict[str, Any]]:
     return out
 
 
+def _tools_for(body: dict[str, Any]) -> list[dict[str, Any]]:
+    """The tools the page offers for this case (it drops mail tools without mail, sql outside a server store...)."""
+    names = body.get("toolNames")
+    if not isinstance(names, list):
+        return TOOLS
+    wanted = {str(n) for n in names}
+    return [t for t in TOOLS if t["function"]["name"] in wanted]
+
+
 @require_GET
 def ai_meta(request: HttpRequest):
     """Prompts, tool schemas and defaults for the browser-direct Ollama transport.
@@ -64,15 +76,7 @@ def ai_meta(request: HttpRequest):
 
     resp = JsonResponse(
         {
-            "prompts": {
-                "analyst": prompts.SYSTEM_ANALYST,
-                "query": prompts.SYSTEM_QUERY,
-                "explain": prompts.SYSTEM_EXPLAIN,
-                "rule": prompts.SYSTEM_RULE,
-                "report": prompts.SYSTEM_REPORT,
-                "triage": prompts.SYSTEM_TRIAGE,
-                "free": "",
-            },
+            "prompts": {**prompts.SYSTEM_BY_MODE, "query": prompts.SYSTEM_QUERY},
             "tools": TOOLS,
             "querySchema": QUERY_SCHEMA,
             "schemaDoc": SCHEMA_DOC,
@@ -138,7 +142,7 @@ def query(request: HttpRequest):
 
 @require_POST
 def chat(request: HttpRequest):
-    """One model turn, streamed as SSE. Body: {messages, mode, tools(bool), think(bool), model, options, context}."""
+    """One model turn, streamed as SSE. Body: {messages, mode, tools(bool), toolNames, think(bool), model, options, context}."""
     try:
         body = json.loads(request.body or b"{}")
     except ValueError:
@@ -163,7 +167,7 @@ def chat(request: HttpRequest):
     def gen() -> Iterator[bytes]:
         try:
             for chunk in svc.chat_stream(
-                messages, model=model, tools=TOOLS if use_tools else None, think=think if isinstance(think, bool) else None, options=options
+                messages, model=model, tools=_tools_for(body) if use_tools else None, think=think if isinstance(think, bool) else None, options=options
             ):
                 yield _sse(chunk)
         except Exception as exc:  # noqa: BLE001
@@ -190,7 +194,7 @@ def claude_status(request: HttpRequest):
 
 @require_POST
 def claude_chat(request: HttpRequest):
-    """One model turn through Claude Code, streamed as SSE. Body: {messages, mode, tools(bool), model, context}."""
+    """One model turn through Claude Code, streamed as SSE. Body: {messages, mode, tools(bool), toolNames, model, context}."""
     try:
         body = json.loads(request.body or b"{}")
     except ValueError:
@@ -209,7 +213,7 @@ def claude_chat(request: HttpRequest):
 
     def gen() -> Iterator[bytes]:
         try:
-            for chunk in claude_code.chat_stream(messages, system, model=model, tools=TOOLS if use_tools else None):
+            for chunk in claude_code.chat_stream(messages, system, model=model, tools=_tools_for(body) if use_tools else None):
                 yield _sse(chunk)
         except Exception as exc:  # noqa: BLE001
             log.warning("claude chat failed: %s", exc)

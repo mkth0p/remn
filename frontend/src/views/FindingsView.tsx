@@ -102,6 +102,15 @@ export function FindingsView() {
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set())
   const [tab, setTab] = useState<'findings' | 'attack'>('findings')
   const [selected, setSelected] = useState<Finding | null>(null)
+  // a finding cited in an AI answer opens here
+  const focusFinding = useStore((s) => s.focusFinding)
+  useEffect(() => {
+    if (focusFinding == null) return
+    getDb()
+      .findings.get(focusFinding)
+      .then((f) => f && setSelected(f))
+    useStore.getState().setFocusFinding(null)
+  }, [focusFinding])
   const [incident, setIncident] = useState<Incident | null>(null)
   const [parent, setParent] = useState<Incident | null>(null)
   const [flyTab, setFlyTab] = useState<'overview' | 'table' | 'json'>('overview')

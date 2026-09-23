@@ -192,3 +192,49 @@ it('carries the rules its findings came from, the rule choices and the hypothesi
   expect((await db.kv.get(`rule-context-${newId}`))?.value).toMatchObject({ packOverrides: { sublime: false } })
   expect((await db.kv.get(`relationship-hypothesis-${newId}-abc`))?.value).toEqual({ status: 'accepted' })
 })
+
+it('carries the AI inbox, the hypothesis board and the AI ledger, with row refs renumbered and the ledger still whole', async () => {
+  const { propose } = await import('../ai/inbox')
+  const { recordHypothesis } = await import('../ai/hypotheses')
+  const { appendLedger, verifyLedger } = await import('../ai/ledger')
+  await propose(1, {
+    kind: 'row_mark',
+    title: 'mark',
+    reason: 'burst',
+    citations: [
+      { source: 'events', id: 80 },
+      { source: 'chains', id: 'chain-alice@example.com-70' },
+    ],
+    mark: { source: 'events', refs: [80], verdict: 'relevant', tags: ['spray'] },
+    by: 'agent',
+  })
+  await propose(1, {
+    kind: 'decision',
+    title: 'fp',
+    reason: 'r',
+    citations: [{ source: 'findings', id: 90 }],
+    target: 'finding:90',
+    decision: { decision: 'false_positive', unlink: [90] },
+    by: 'agent',
+  })
+  await recordHypothesis(1, { statement: 'phish then logon', support: [{ source: 'mails', id: 70 }], against: [{ source: 'events', id: 80 }] }, 'ai')
+  await appendLedger(1, 'run', 'q', { model: 'm' })
+  await appendLedger(1, 'tool', 'get_event', { refs: 1 })
+
+  const id = await restoreCaseBundle(await backup())
+  const event = (await db.events.where('caseId').equals(id).toArray())[0]
+  const mail = (await db.mails.where('caseId').equals(id).toArray())[0]
+  const finding = (await db.findings.where('caseId').equals(id).toArray())[0]
+  const inbox = ((await db.kv.get(`ai-inbox-${id}`))?.value as { items: Record<string, unknown>[] }).items
+  expect(inbox[0]).toMatchObject({
+    citations: [
+      { source: 'events', id: event.id },
+      { source: 'chains', id: 'chain-alice@example.com-140' },
+    ],
+    mark: { refs: [event.id] },
+  })
+  expect(inbox[1]).toMatchObject({ target: `finding:${finding.id}`, citations: [{ source: 'findings', id: finding.id }], decision: { unlink: [finding.id] } })
+  const board = ((await db.kv.get(`ai-hypotheses-${id}`))?.value as { items: Record<string, unknown>[] }).items
+  expect(board[0]).toMatchObject({ id: 'h1', support: [{ source: 'mails', id: mail.id }], against: [{ source: 'events', id: event.id }] })
+  expect(await verifyLedger(id)).toMatchObject({ entries: 4, intact: true }) // two proposals, the run, the tool call
+})

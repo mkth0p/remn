@@ -3,7 +3,7 @@ import { API_HEADERS, readNdjsonBody } from '../api/client'
 import { CASE_KV_KEYS, CASE_KV_PREFIXES_WITH_SUFFIX, deleteCase, getDb, newServerKey, type Case } from '../db/schema'
 import { caseRows, importServerBatch, type TransferRow } from './caseTransfer'
 
-const TABLES = ['evidence', 'events', 'mails', 'mailBodies', 'attachments', 'urls', 'findings', 'iocs', 'facets', 'aiSessions', 'savedSearches', 'caseNotes', 'customRules', 'rowMarks']
+const TABLES = ['evidence', 'events', 'mails', 'mailBodies', 'attachments', 'urls', 'findings', 'iocs', 'facets', 'aiSessions', 'aiLedger', 'savedSearches', 'caseNotes', 'customRules', 'rowMarks']
 type Sink = { write: (text: string) => Promise<unknown> }
 type RecordLine = { table: string; row: TransferRow }
 

@@ -5,6 +5,26 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- The AI analyst is an investigator: it plans, runs up to 40 rounds of tools on its own
+  (24 by default), keeps a hypothesis board, runs seven playbooks from one click (phishing
+  to compromise, password guessing, lateral movement, persistence, Microsoft 365 account
+  takeover, ransomware precursors, credential theft), and answers with citations checked
+  against the rows its tools returned, as chips that open them. New tools read exact
+  counts, a finding with its rows, process trees, logon sessions, indicators, case notes,
+  field values, the rule library, and test a draft rule on the case without saving it.
+  Everything it would change (review decisions, notes and timeline entries, row marks,
+  rules, the executive summary) waits in an approval inbox until the analyst accepts it,
+  and an accepted proposal can be undone. Every run, tool call, proposal and decision goes
+  to a hash-chained AI ledger that travels with the case, and the report says how AI was
+  used. Evidence text addressed to a model is flagged before the model reads it and marks
+  what the run proposes afterwards. A long investigation keeps the question and its newest
+  turns, compacting older results, where the transports used to drop the newest messages.
+  LM Studio, llama.cpp, vLLM and Jan work as local model servers through their
+  OpenAI-compatible API, and only local addresses are accepted. A chain decision word on
+  an incident ("confirmed") is now applied as its meaning (escalated) instead of
+  "reviewed"; chain narratives and relationship reviews get their own prompts; a drafted
+  executive summary records that a model wrote it and when; the model's regular
+  expressions run off the page's thread with a time limit. See `docs/ai.md`.
 - A public instance that can take real cases: bounded decompression (bz2, xz, zip members),
   message size, YAML aliases, JSON bodies and heavy requests in flight (overall, per client,
   per IPv6 /64); cleanup when a client disconnects; logs without evidence text, rotated; every

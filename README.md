@@ -28,8 +28,10 @@ server for gigabyte cases.
   model propose decisions, each applied or dismissed by the analyst.
 - **Report** as one self-contained HTML file, printable to PDF, with chain of custody,
   narratives, graphs and the decisions that shaped it.
-- **Ask** a local model (Ollama) or Claude through a Claude Code sign-in; it works
-  through tools over the case data and cites record ids.
+- **Investigate with an agent** on a local model (Ollama, LM Studio, llama.cpp, vLLM,
+  Jan) or Claude through a Claude Code sign-in: it plans, runs playbooks through read-only
+  tools, keeps a hypothesis board and cites the rows it read, checked; every change it
+  proposes waits for the analyst's approval, and a hash-chained ledger records its work.
 
 | | |
 | --- | --- |
@@ -37,8 +39,9 @@ server for gigabyte cases.
 
 ## Quick start
 
-Requires Python 3.13, Node 22, and optionally [Ollama](https://ollama.com) for the AI
-features.
+Requires Python 3.13, Node 22, and optionally a local model for the AI features:
+[Ollama](https://ollama.com), or LM Studio, a llama.cpp server, vLLM or Jan through their
+OpenAI-compatible API.
 
 ```
 python -m venv .venv
@@ -69,7 +72,7 @@ For development, run the API with `manage.py runserver` and the frontend with
 - [Detection](docs/detection.md) — rule DSL, community packs, mail risk scoring, engine parity
 - [Attack chains](docs/chains.md) — how chains are built and scored
 - [Interface](docs/interface.md) — the pages, the review workflow, the report
-- [AI analyst](docs/ai.md) — transports, tools, triage
+- [AI analyst](docs/ai.md) — the investigating agent, playbooks, approval inbox, AI ledger, transports
 - [Validation and test data](docs/validation.md) — public corpora, measured rates, test suites
 - [Optional archive honeypot](docs/honeypot.md) — isolated decoy, reference trail, private replay and REMN package export
 - [Security model](docs/security.md) — what leaves the machine, what is stored where

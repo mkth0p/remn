@@ -137,7 +137,7 @@ export async function reviewStory(kase: Case, packet: AdvicePacket, fingerprint:
   let messages
   try {
     messages = await runAgent([{ role: 'user', content: prompt }], kase, {
-      mode: 'triage',
+      mode: 'json',
       tools: false,
       think: false,
       maxIterations: 1,

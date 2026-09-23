@@ -10,6 +10,7 @@ import { getSource } from '../data/source'
 import { Jobs } from '../components/ConsolePanel'
 import { deployment } from '../data/deployment'
 import { openDemoCase } from '../data/demoCase'
+import { transportLabel } from '../ai/transport'
 
 interface Summary {
   counts?: { events?: number; mails?: number; iocs?: number }
@@ -167,7 +168,7 @@ export function Dashboard() {
               </span>
             </div>
             <div className="small muted">
-              {aiCfg.transport === 'browser' ? `browser-direct · ${aiCfg.ollamaUrl}` : 'via REMN server'}
+              {transportLabel(aiCfg).where}
               {aiStatus.reachable ? ` · ${aiStatus.models ?? 0} model(s)` : aiStatus.error ? ` · ${aiStatus.error.slice(0, 120)}` : ''}
             </div>
             {aiStatus.reachable === null && dep.tier !== 'this-machine' && (

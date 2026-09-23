@@ -71,6 +71,52 @@ export interface ReportData {
   iocsChecked?: number
   /** base64 woff2 of the display face for the wordmark, when it could be loaded */
   fontData?: string
+  /** what the case's AI ledger records (ai/ledger.ts summariseLedger), when a model was used */
+  ai?: AiUsage
+}
+
+/** The model's part in the case, as the report prints it. */
+export interface AiUsage {
+  runs: number
+  toolCalls: number
+  proposals: number
+  accepted: number
+  rejected: number
+  undone: number
+  notices: number
+  models: string[]
+  transports: string[]
+  first: number | null
+  last: number | null
+  byProposalKind: Record<string, { proposed: number; accepted: number; rejected: number }>
+  check: { entries: number; intact: boolean; brokenAt?: number; head: string | null }
+}
+
+const TRANSPORT_WORDS: Record<string, string> = {
+  browser: 'Ollama on the analyst’s machine',
+  openai: 'a local OpenAI-compatible model server',
+  server: 'the REMN server’s Ollama',
+  claude: 'Claude Code (Anthropic)',
+}
+
+function aiSection(a: AiUsage): string {
+  const kinds = Object.entries(a.byProposalKind)
+  const where = a.transports.map((t) => TRANSPORT_WORDS[t] ?? t)
+  return (
+    `<p class="intro">A language model assisted this investigation: it read the case through read-only tools and proposed; every change it proposed took effect only when the analyst accepted it. ` +
+    `Each run, tool call, proposal and decision is recorded in the case's AI ledger, chained by hash.</p>` +
+    `<div class="settings">${n(a.runs)} run${a.runs === 1 ? '' : 's'} · ${n(a.toolCalls)} tool call${a.toolCalls === 1 ? '' : 's'} · ${a.first && a.last ? `${fmtTs(a.first)} to ${fmtTs(a.last)}` : ''}` +
+    `${a.models.length ? ` · model${a.models.length === 1 ? '' : 's'}: ${h(a.models.join(', '))}` : ''}${where.length ? ` · through ${h(where.join(', '))}` : ''}</div>` +
+    (kinds.length
+      ? table(
+          ['proposed', 'count', 'accepted', 'rejected'],
+          kinds.map(([k, v]) => [h(k.replace('_', ' ')), n(v.proposed), n(v.accepted), n(v.rejected)]),
+        )
+      : '<div class="empty">The model proposed no change to the case.</div>') +
+    `<div class="settings">${n(a.accepted)} accepted, ${n(a.rejected)} rejected${a.undone ? `, ${n(a.undone)} undone after acceptance` : ''}` +
+    `${a.notices ? ` · ${n(a.notices)} time${a.notices === 1 ? '' : 's'} the evidence held text addressed to a model (flagged to the analyst)` : ''}</div>` +
+    `<div class="settings">ledger: ${n(a.check.entries)} entries, ${a.check.intact ? `chain intact, head <code>${h((a.check.head ?? '').slice(0, 16))}</code>` : `<b>chain broken at entry ${n(a.check.brokenAt ?? 0)}</b>: an entry was changed or removed after it was written`}</div>`
+  )
 }
 
 const ORDER = ['critical', 'high', 'medium', 'low', 'info'] as const
@@ -957,6 +1003,7 @@ export function buildReportHtml(d: ReportData): string {
         )}`
       : '<div class="empty">No finding passes the severity floor.</div>',
   })
+  if (d.ai && d.ai.runs) sections.push({ id: 'ai', title: 'How AI was used', body: aiSection(d.ai) })
   sections.push({ id: 'method', title: 'Method and limits', body: method(d, verdict, confidence) })
   sections.push({
     id: 'settings',

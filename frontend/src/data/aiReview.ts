@@ -1,4 +1,7 @@
 import { runAgent } from '../ai/chat'
+import { loadInbox, propose, updateInbox, type Proposal } from '../ai/inbox'
+import { findInstructions } from '../ai/evidence'
+import { appendLedger } from '../ai/ledger'
 import { getDb, type Case, type Finding, type Severity } from '../db/schema'
 import { useStore } from '../state/store'
 import { fmtTs } from '../util/format'
@@ -16,12 +19,15 @@ import {
   type ReviewItem,
   type Verdict,
 } from './review'
-import { effectiveSeverity, type Incident } from '../rules/incidents'
+import { buildIncidents, effectiveSeverity, type Incident } from '../rules/incidents'
+import { loadChains } from './chains'
+import { reviewQueue } from './review'
 
 /**
- * The model's part in the review: proposals it records from the chat (suggest_review tool), and the
- * triage pass that decides a whole queue. Both produce the same decision shape; a suggestion waits
- * for the analyst, a triage decision is written and can be undone from the log.
+ * The model's part in the review: decisions it proposes from the analyst page (propose_decision)
+ * and from the triage pass over a whole queue. Both are proposals in the approval inbox
+ * (ai/inbox.ts); the Review page shows the pending ones on their items as "suggestions", and only
+ * the analyst's acceptance writes a decision, which keeps what it replaced for undo.
  */
 
 export type Decision = 'reviewed' | 'escalated' | 'false_positive' | 'confirmed' | 'benign' | 'unsure'
@@ -103,22 +109,73 @@ export interface Suggestion {
   at: number
   by: 'chat' | 'triage'
   model?: string
+  /** the inbox proposal behind it */
+  proposalId?: string
+  /** the model had read text addressed to a model before proposing it */
+  exposed?: boolean
 }
 
+const LEGACY_KEY = (caseId: number) => `ai-suggestions-${caseId}`
+
+function toProposal(s: Suggestion): Omit<Proposal, 'id' | 'status' | 'createdAt'> {
+  return {
+    kind: 'decision',
+    title: `${s.decision ?? 'decision'}${s.severity ? ` · ${s.severity}` : ''} on ${s.target}`,
+    reason: s.reason,
+    citations: [],
+    target: s.target,
+    decision: { decision: s.decision, severity: s.severity, include: s.include, unlink: s.unlink, narrative: s.narrative, note: s.note },
+    by: s.by === 'triage' ? 'triage' : 'chat',
+    model: s.model,
+    exposed: s.exposed,
+  }
+}
+
+function toSuggestion(p: Proposal): Suggestion {
+  const d = p.decision ?? {}
+  return {
+    target: p.target!,
+    severity: d.severity,
+    decision: d.decision,
+    include: d.include,
+    unlink: d.unlink,
+    narrative: d.narrative,
+    note: d.note,
+    reason: p.reason,
+    at: p.createdAt,
+    by: p.by === 'triage' ? 'triage' : 'chat',
+    model: p.model,
+    proposalId: p.id,
+    exposed: p.exposed,
+  }
+}
+
+/** Suggestions recorded before the inbox existed move into it once. */
+async function migrateLegacy(caseId: number): Promise<void> {
+  const db = getDb()
+  const legacy = (await db.kv.get(LEGACY_KEY(caseId)))?.value as Record<string, Suggestion> | undefined
+  if (!legacy) return
+  for (const s of Object.values(legacy)) if (s?.target) await propose(caseId, toProposal(s))
+  await db.kv.delete(LEGACY_KEY(caseId))
+}
+
+/** The pending decision proposals, newest per target, as the Review page shows them. */
 export async function loadSuggestions(caseId: number): Promise<Record<string, Suggestion>> {
-  return ((await getDb().kv.get(`ai-suggestions-${caseId}`))?.value as Record<string, Suggestion> | undefined) ?? {}
+  await migrateLegacy(caseId)
+  const out: Record<string, Suggestion> = {}
+  for (const p of await loadInbox(caseId)) if (p.kind === 'decision' && p.status === 'pending' && p.target) out[p.target] = toSuggestion(p)
+  return out
 }
 export async function saveSuggestion(caseId: number, s: Suggestion): Promise<Record<string, Suggestion>> {
-  const all = await loadSuggestions(caseId)
-  all[s.target] = s
-  await getDb().kv.put({ key: `ai-suggestions-${caseId}`, value: all })
-  return all
+  await propose(caseId, toProposal(s))
+  return loadSuggestions(caseId)
 }
+/** The analyst dismissed the suggestions on a target: their proposals are rejected. */
 export async function removeSuggestion(caseId: number, target: string): Promise<Record<string, Suggestion>> {
-  const all = await loadSuggestions(caseId)
-  delete all[target]
-  await getDb().kv.put({ key: `ai-suggestions-${caseId}`, value: all })
-  return all
+  const { rejectProposals } = await import('../ai/inbox')
+  const ids = (await loadInbox(caseId)).filter((p) => p.kind === 'decision' && p.status === 'pending' && p.target === target).map((p) => p.id)
+  await rejectProposals(caseId, ids)
+  return loadSuggestions(caseId)
 }
 
 /** The suggestions that concern one review item: its own target, or any of its findings. */
@@ -495,7 +552,7 @@ export async function runTriage(
       const last = [...msgs].reverse().find((m) => m.role === 'assistant')
       text = last?.content ?? ''
       if (!last || text.startsWith('⚠')) throw new Error(text.replace(/^⚠\s*/, '') || 'the model returned nothing')
-      if (!last.stats || !run.model) run.model = String((last.stats as Record<string, unknown> | undefined)?.model ?? run.model)
+      if (last.model) run.model = last.model
     } catch (e) {
       if ((e as Error).name === 'AbortError') {
         run.errors.push(`stopped during batch ${b + 1} of ${batches.length}`)
@@ -528,6 +585,8 @@ export async function runTriage(
           at: Date.now(),
           by: 'triage',
           model: run.model || undefined,
+          // the item's own text addresses a model: accept-all leaves this one for a look
+          exposed: findInstructions(describeItem(it, currentReviews)).length > 0 || undefined,
         })
         run.entries.push({
           id: it.id,
@@ -546,6 +605,15 @@ export async function runTriage(
     }
   }
   opts.onProgress?.({ done: items.length, total: items.length, batch: batches.length, batches: batches.length })
+  await appendLedger(caseId, 'triage', `triage of ${items.length} item(s): ${run.entries.length} ${opts.apply ? 'decided' : 'proposed'}`, {
+    model: run.model || undefined,
+    transport: run.transport,
+    asked: items.length,
+    answered: run.entries.length,
+    rejected: run.rejected.length,
+    errors: run.errors.length,
+    apply: opts.apply,
+  })
   if (opts.apply && opts.draftSummary && !opts.signal?.aborted && run.entries.length) {
     try {
       await opts.draftSummary()
@@ -558,19 +626,81 @@ export async function runTriage(
   return run
 }
 
-/** Apply a recorded suggestion as a decision (the analyst accepted it). */
+/** The decision a proposal carries, in the item kind's own words (a chain's "confirmed" is an incident's "escalated"). */
+export function proposalDecision(it: ReviewItem, raw: Decision | undefined): Decision {
+  return normaliseDecision(raw, it.kind) ?? (it.kind === 'chain' ? 'unsure' : 'reviewed')
+}
+
+/** Apply a recorded suggestion as a decision (the analyst accepted it on the Review page). */
 export async function applySuggestion(caseId: number, it: ReviewItem, s: Suggestion, reviews: Record<string, ChainReview>): Promise<TriageEntry | null> {
-  const allowed = it.kind === 'chain' ? CHAIN_DECISIONS : INCIDENT_DECISIONS
-  const decision: Decision = s.decision && allowed.includes(s.decision) ? s.decision : it.kind === 'chain' ? 'unsure' : 'reviewed'
   const memberIds = new Set((it.incident?.findings ?? []).map((f) => f.id))
   const entry = await applyDecision(
     caseId,
     it,
-    { id: it.id, decision, severity: s.severity, include: s.include, unlink: (s.unlink ?? []).filter((id) => memberIds.has(id)), reason: s.reason, narrative: s.narrative, note: s.note },
+    {
+      id: it.id,
+      decision: proposalDecision(it, s.decision),
+      severity: s.severity,
+      include: s.include,
+      unlink: (s.unlink ?? []).filter((id) => memberIds.has(id)),
+      reason: s.reason,
+      narrative: s.narrative,
+      note: s.note,
+    },
     reviews,
   )
-  await removeSuggestion(caseId, s.target)
+  // the proposal shown is accepted with what it replaced; the others pending on the same target are settled by it
+  const pending = (await loadInbox(caseId)).filter((p) => p.kind === 'decision' && p.status === 'pending' && p.target === s.target)
+  const acceptedId = s.proposalId ?? pending[pending.length - 1]?.id
+  await updateInbox(caseId, (all) => {
+    for (const p of all)
+      if (pending.some((x) => x.id === p.id)) {
+        p.status = p.id === acceptedId ? 'accepted' : 'superseded'
+        p.decidedAt = Date.now()
+        if (p.id === acceptedId) p.applied = { entry }
+      }
+  })
+  const accepted = pending.find((p) => p.id === acceptedId)
+  if (accepted) await appendLedger(caseId, 'accepted', `decision: ${accepted.title}`, { id: accepted.id, kind: 'decision', via: 'review' })
   return entry
+}
+
+/** The review item a target names: the chain, the incident, or the incident that holds the finding. */
+export async function reviewItemFor(caseId: number, target: string): Promise<{ item: ReviewItem; reviews: Record<string, ChainReview> } | null> {
+  const [findings, chainRes, reviews] = await Promise.all([getDb().findings.where('caseId').equals(caseId).toArray(), loadChains(caseId), loadChainReviews(caseId)])
+  const chains = chainRes?.chains ?? []
+  const incidents = buildIncidents(findings, { chains, severityOf: (c) => chainSeverity(c, reviews[c.id]) })
+  const queue = reviewQueue(incidents, chains, reviews)
+  let item: ReviewItem | undefined
+  if (target.startsWith('finding:')) {
+    const id = Number(target.slice(8))
+    item = queue.find((it) => it.incident?.findings.some((f) => f.id === id))
+  } else item = queue.find((it) => it.id === target)
+  return item ? { item, reviews } : null
+}
+
+/** Accept a decision proposal from the inbox: find its item and write the decision. */
+export async function applyProposedDecision(caseId: number, p: Proposal): Promise<TriageEntry> {
+  const found = await reviewItemFor(caseId, p.target ?? '')
+  if (!found) throw new Error(`${p.target} is no longer in the review queue (the rules were run again or the chain changed)`)
+  const { item, reviews } = found
+  const d = p.decision ?? {}
+  const memberIds = new Set((item.incident?.findings ?? []).map((f) => f.id))
+  return applyDecision(
+    caseId,
+    item,
+    {
+      id: item.id,
+      decision: proposalDecision(item, d.decision),
+      severity: d.severity,
+      include: d.include,
+      unlink: (d.unlink ?? []).filter((id) => memberIds.has(id)),
+      reason: p.reason,
+      narrative: d.narrative,
+      note: d.note,
+    },
+    reviews,
+  )
 }
 
 export const fmtWhen = (t: number) => fmtTs(t)

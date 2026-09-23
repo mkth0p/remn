@@ -8,7 +8,7 @@ import { removeCase } from '../data/caseState'
 import { migrateCaseToServer } from '../data/migrate'
 import { getSource } from '../data/source'
 import { API_HEADERS } from '../api/client'
-import { CLAUDE_MODELS, fetchClaudeStatus, getTransport, type ClaudeStatus, type ModelInfo } from '../ai/transport'
+import { CLAUDE_MODELS, fetchClaudeStatus, getTransport, isLocalModelUrl, OPENAI_PRESETS, type ClaudeStatus, type ModelInfo } from '../ai/transport'
 import { suggestTrustedSenders, type TrustedSuggestion } from '../data/trusted'
 import { Modal } from '../components/ui'
 
@@ -33,6 +33,7 @@ export function SettingsView() {
   const [aiModels, setAiModels] = useState<ModelInfo[]>([])
   const [aiTesting, setAiTesting] = useState(false)
   const [urlDraft, setUrlDraft] = useState(aiCfg.ollamaUrl)
+  const [openaiDraft, setOpenaiDraft] = useState(aiCfg.openaiUrl)
   const [suggesting, setSuggesting] = useState(false)
   const [suggestions, setSuggestions] = useState<TrustedSuggestion[] | null>(null)
   const [picked, setPicked] = useState<Set<string>>(new Set())
@@ -150,6 +151,7 @@ export function SettingsView() {
     const db = getDb()
     if (patch.transport !== undefined) await db.kv.put({ key: 'aiTransport', value: patch.transport })
     if (patch.ollamaUrl !== undefined) await db.kv.put({ key: 'aiOllamaUrl', value: patch.ollamaUrl })
+    if (patch.openaiUrl !== undefined) await db.kv.put({ key: 'aiOpenaiUrl', value: patch.openaiUrl })
     if (patch.model !== undefined) await db.kv.put({ key: 'aiModel', value: patch.model })
     if (patch.numCtx !== undefined) await db.kv.put({ key: 'aiNumCtx', value: patch.numCtx })
     if (patch.claudeModel !== undefined) await db.kv.put({ key: 'aiClaudeModel', value: patch.claudeModel })
@@ -164,7 +166,9 @@ export function SettingsView() {
         setAiModels(await t.listModels().catch(() => []))
         toast(
           'ok',
-          t.kind === 'claude' ? 'Claude Code is installed and signed in on the server machine' : `Ollama reachable (${t.kind === 'browser' ? t.endpoint : 'via server'}) - ${r.models ?? 0} model(s)`,
+          t.kind === 'claude'
+            ? 'Claude Code is installed and signed in on the server machine'
+            : `${t.kind === 'openai' ? 'Model server' : 'Ollama'} reachable (${t.kind === 'server' ? 'via server' : t.endpoint}) - ${r.models ?? 0} model(s)`,
         )
       } else {
         toast('err', r.error ?? 'unreachable', 0)
@@ -269,8 +273,18 @@ export function SettingsView() {
                     <span className="muted small">— this page calls YOUR local Ollama. Prompts and evidence excerpts never reach the REMN server. Each analyst uses their own machine's models.</span>
                   </span>
                 </label>
+                <label className="checkbox">
+                  <input type="radio" name="aitransport" checked={aiCfg.transport === 'openai'} onChange={() => saveAi({ transport: 'openai' })} />{' '}
+                  <span>
+                    <b>Local OpenAI-compatible server</b>{' '}
+                    <span className="muted small">
+                      — this page calls LM Studio, a llama.cpp server, vLLM or Jan on your machine or local network (<code>/v1/chat/completions</code>). Nothing reaches the REMN server; no API key is
+                      sent, and cloud endpoints are refused.
+                    </span>
+                  </span>
+                </label>
                 {browserOnly ? (
-                  <div className="hint">This server runs in browser-only mode: it has no model of its own. The page talks to the Ollama on your machine.</div>
+                  <div className="hint">This server runs in browser-only mode: it has no model of its own. The page talks to the model server on your machine.</div>
                 ) : (
                   <>
                     <label className="checkbox">
@@ -333,6 +347,37 @@ export function SettingsView() {
                   </div>
                 </label>
               )}
+              {aiCfg.transport === 'openai' && (
+                <div className="col" style={{ gap: 6 }}>
+                  <label className="field">
+                    <span>model server URL, ending in /v1 (as seen from this browser)</span>
+                    <input
+                      className="input mono"
+                      value={openaiDraft}
+                      onChange={(e) => setOpenaiDraft(e.target.value)}
+                      onBlur={() => saveAi({ openaiUrl: openaiDraft.trim().replace(/\/+$/, '') || 'http://localhost:1234/v1' })}
+                      placeholder="http://localhost:1234/v1"
+                    />
+                  </label>
+                  {!isLocalModelUrl(openaiDraft) && <div className="hint">✗ not a local address: REMN only sends evidence to a model server on this machine or your local network.</div>}
+                  <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
+                    {OPENAI_PRESETS.map((p) => (
+                      <button
+                        key={p.name}
+                        className={`btn xs ${aiCfg.openaiUrl === p.url ? 'primary' : ''}`}
+                        title={p.hint}
+                        onClick={() => {
+                          setOpenaiDraft(p.url)
+                          void saveAi({ openaiUrl: p.url })
+                        }}
+                      >
+                        {p.name}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="hint">{OPENAI_PRESETS.find((p) => p.url === aiCfg.openaiUrl)?.hint ?? "Start the server with tool calling on, and let it accept this page's origin (CORS)."}</div>
+                </div>
+              )}
               {aiCfg.transport !== 'claude' && (
                 <div className="row">
                   <label className="field" style={{ flex: 1 }}>
@@ -345,7 +390,7 @@ export function SettingsView() {
                     </datalist>
                   </label>
                   <label className="field">
-                    <span>context window (num_ctx)</span>
+                    <span>{aiCfg.transport === 'openai' ? 'context window (the size loaded in the server)' : 'context window (num_ctx)'}</span>
                     <input
                       type="number"
                       className="input mono"

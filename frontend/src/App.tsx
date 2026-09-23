@@ -6,7 +6,7 @@ import { detectKind, ingestFiles, refreshCounts, requestIngest } from './data/in
 import { migrateCaseToServer } from './data/migrate'
 import { getSource } from './data/source'
 import { setLocalTime } from './util/format'
-import { getTransport } from './ai/transport'
+import { getTransport, transportLabel } from './ai/transport'
 import { deployment } from './data/deployment'
 import { setCaseInternalDomains } from './rules/incidents'
 import { repairInterruptedImports } from './data/interruptedImports'
@@ -126,17 +126,25 @@ export default function App() {
       if (lt?.value) setLocalTime(true)
       const th = await db.kv.get('storeThresholdMb')
       if (typeof th?.value === 'number') setThreshold(th.value)
-      const [tp, ou, om, onc, ocm] = await Promise.all([db.kv.get('aiTransport'), db.kv.get('aiOllamaUrl'), db.kv.get('aiModel'), db.kv.get('aiNumCtx'), db.kv.get('aiClaudeModel')])
+      const [tp, ou, om, onc, ocm, oau] = await Promise.all([
+        db.kv.get('aiTransport'),
+        db.kv.get('aiOllamaUrl'),
+        db.kv.get('aiModel'),
+        db.kv.get('aiNumCtx'),
+        db.kv.get('aiClaudeModel'),
+        db.kv.get('aiOpenaiUrl'),
+      ])
       useStore.getState().setAiConfig({
-        transport: tp?.value === 'server' ? 'server' : tp?.value === 'claude' ? 'claude' : 'browser',
+        transport: tp?.value === 'server' ? 'server' : tp?.value === 'claude' ? 'claude' : tp?.value === 'openai' ? 'openai' : 'browser',
         claudeModel: typeof ocm?.value === 'string' && ocm.value ? ocm.value : 'sonnet',
         ollamaUrl: typeof ou?.value === 'string' && ou.value ? ou.value : 'http://localhost:11434',
+        openaiUrl: typeof oau?.value === 'string' && oau.value ? oau.value : 'http://localhost:1234/v1',
         model: typeof om?.value === 'string' ? om.value : '',
         numCtx: typeof onc?.value === 'number' ? onc.value : null,
       })
       // A page served from another host reaches the visitor's own model on localhost. That request is
       // made when the analyst opens the AI analyst, not on every page load of every visitor.
-      if (deployment(null).tier === 'this-machine' || useStore.getState().aiConfig.transport !== 'browser')
+      if (deployment(null).tier === 'this-machine' || !['browser', 'openai'].includes(useStore.getState().aiConfig.transport))
         getTransport()
           .ping()
           .then((r) => useStore.getState().setAiStatus({ reachable: r.reachable, error: r.error, models: r.models, checkedAt: Date.now() }))
@@ -168,7 +176,7 @@ export default function App() {
       getHealth()
         .then((h) => {
           setHealth(h)
-          if (h.mode === 'browser-only' && useStore.getState().aiConfig.transport !== 'browser') {
+          if (h.mode === 'browser-only' && !['browser', 'openai'].includes(useStore.getState().aiConfig.transport)) {
             // the server-side transports do not exist here; the page talks to the analyst's own model
             useStore.getState().setAiConfig({ ...useStore.getState().aiConfig, transport: 'browser' })
             db.kv.put({ key: 'aiTransport', value: 'browser' }).catch(() => undefined)
@@ -184,7 +192,7 @@ export default function App() {
           // once the analyst has asked for it (an earlier check) or where the model sits next to the page
           if (
             useStore.getState().aiStatus.reachable === false ||
-            (useStore.getState().aiStatus.reachable === null && (dep.tier === 'this-machine' || useStore.getState().aiConfig.transport !== 'browser'))
+            (useStore.getState().aiStatus.reachable === null && (dep.tier === 'this-machine' || !transportLabel(useStore.getState().aiConfig).local))
           ) {
             getTransport()
               .ping()
@@ -374,9 +382,9 @@ export default function App() {
               parsing on {dep.host}
             </div>
           )}
-          <div title={aiCfg.transport === 'browser' ? `browser-direct: ${aiCfg.ollamaUrl}` : aiCfg.transport === 'claude' ? 'Claude Code on the server machine' : 'via REMN server'}>
+          <div title={transportLabel(aiCfg).where}>
             <span className={`status-dot ${aiStatus.reachable ? 'ok' : aiStatus.reachable === null ? '' : 'bad'}`} />
-            {aiCfg.transport === 'claude' ? 'claude' : 'ollama'}{' '}
+            {transportLabel(aiCfg).short}{' '}
             {aiStatus.reachable ? (aiCfg.transport === 'claude' ? 'ready' : 'online') : aiStatus.reachable === null ? '…' : aiCfg.transport === 'claude' ? 'unavailable' : 'offline'}{' '}
             <span className="dim">[{aiCfg.transport}]</span>
           </div>

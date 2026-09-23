@@ -6,7 +6,7 @@
 import { apiGet } from '../api/client'
 
 export interface AiMeta {
-  prompts: Record<'analyst' | 'query' | 'explain' | 'rule' | 'report' | 'triage' | 'free', string>
+  prompts: Record<'analyst' | 'query' | 'explain' | 'rule' | 'report' | 'triage' | 'narrative' | 'json' | 'free', string>
   tools: Record<string, unknown>[]
   querySchema: Record<string, unknown>
   schemaDoc: string
@@ -59,12 +59,17 @@ export function composeSystem(mode: string, context: Record<string, unknown>, me
   if (ctx.caseSettings) extra.push('Case settings: ' + pyJson(ctx.caseSettings).slice(0, 3000))
   if (ctx.now) extra.push(`Current time (UTC): ${ctx.now}`)
   if (ctx.networkAllowed !== undefined && ctx.networkAllowed !== null) {
-    extra.push('External reputation lookups are ' + (ctx.networkAllowed ? 'ENABLED' : 'DISABLED (lookup_ioc will return a notice)'))
+    extra.push('External reputation lookups are ' + (ctx.networkAllowed ? 'ENABLED' : 'DISABLED: lookup_ioc is not available'))
   }
   if (ctx.storage === 'server') {
     extra.push('This case is stored server-side in DuckDB: the `sql` tool is available and preferred for aggregations, joins and window functions.\n' + meta.schemaDoc)
   } else {
     extra.push('This case is stored in the browser: the `sql` tool is NOT available; use the search/aggregate tools.')
   }
+  const steps = ctx.steps as { used?: number; budget?: number } | undefined
+  if (steps && typeof steps === 'object' && steps.budget) extra.push(`Step budget: ${steps.used ?? 0} of ${steps.budget} tool rounds used. Keep a round for your answer.`)
+  if (ctx.memory) extra.push('Working memory kept by REMN (your plan and hypotheses so far):\n' + String(ctx.memory).slice(0, 6000))
+  if (typeof ctx.omitted === 'number' && Number.isInteger(ctx.omitted) && ctx.omitted > 0)
+    extra.push(`${ctx.omitted} earlier message(s) of this conversation were left out to fit the model's context; the refs they returned stay citable.`)
   return (system + '\n\n' + extra.join('\n')).trim()
 }

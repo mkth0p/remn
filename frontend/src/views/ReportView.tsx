@@ -11,7 +11,8 @@ import { downloadBlob, exportCaseBundle, importCaseBundle } from '../util/export
 import { Badge, Spinner } from '../components/ui'
 import { Dropzone } from '../components/Dropzone'
 import { renderGraphPng } from '../components/ChainGraph'
-import { buildReportHtml, loadReportFont } from '../data/reportHtml'
+import { buildReportHtml, loadReportFont, type AiUsage } from '../data/reportHtml'
+import { summariseLedger } from '../ai/ledger'
 import { draftExecutiveSummary } from '../data/reportSummary'
 import { buildCampaignGraph } from '../data/chainGraph'
 import { IconAi, IconCheck, IconDownload } from '../components/Icons'
@@ -39,6 +40,7 @@ export function ReportView() {
   const [settings, setSettings] = useState<ReportSettings | null>(null)
   const [iocs, setIocs] = useState<Ioc[]>([])
   const [iocCounts, setIocCounts] = useState<{ total: number; checked: number }>({ total: 0, checked: 0 })
+  const [aiUsage, setAiUsage] = useState<AiUsage | undefined>(undefined)
   const [issue, setIssue] = useState<ReportIssue>({ waivers: {} })
   // the preview is drawn during render, which must not read the clock: it shows when the page opened
   const [previewAt] = useState(() => Date.now())
@@ -72,6 +74,9 @@ export function ReportView() {
       .then(([all, unchecked]) => setIocCounts({ total: all.total, checked: Math.max(0, all.total - unchecked.total) }))
       .catch(() => setIocCounts({ total: 0, checked: 0 }))
     loadReportIssue(kase.id).then(setIssue)
+    summariseLedger(kase.id)
+      .then(setAiUsage)
+      .catch(() => setAiUsage(undefined))
     findingsStaleness(kase.id)
       .then((s) => setRulesState({ lastRun: s.lastRun, evidenceAfter: s.evidenceAfter, errors: s.errors.length }))
       .catch(() => setRulesState(undefined))
@@ -130,13 +135,10 @@ export function ReportView() {
     if (useStore.getState().aiStatus.reachable !== true) return toast('err', 'the analyst model is not reachable (see the AI section in Settings)')
     setBusy(true)
     try {
+      // draftExecutiveSummary records who wrote it and when with the text
       setSummary(await draftExecutiveSummary(kase))
       setSummaryBy('ai')
       setSummaryAt(Date.now())
-      await getDb().kv.bulkPut([
-        { key: `report-summary-by-${kase.id}`, value: 'ai' },
-        { key: `report-summary-at-${kase.id}`, value: Date.now() },
-      ])
     } catch (e) {
       toast('err', (e as Error).message)
     } finally {
@@ -180,6 +182,7 @@ export function ReportView() {
       iocsTotal: iocCounts.total,
       iocsChecked: iocCounts.checked,
       fontData,
+      ai: aiUsage,
     })
   /** The report in its own tab: the browser's own print-to-PDF, or to keep it open next to the case. */
   const openReport = () => {

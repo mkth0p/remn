@@ -1,4 +1,6 @@
 import { runAgent } from '../ai/chat'
+import { appendLedger } from '../ai/ledger'
+import { sha256Hex } from '../util/export'
 import { getDb, type Case } from '../db/schema'
 import { buildIncidents } from '../rules/incidents'
 import { loadChains } from './chains'
@@ -46,6 +48,12 @@ export async function draftExecutiveSummary(kase: Case, opts: { signal?: AbortSi
   const last = [...msgs].reverse().find((m) => m.role === 'assistant')
   const text = (last?.content ?? '').trim()
   if (!text || text.startsWith('⚠')) throw new Error(text.replace(/^⚠\s*/, '') || 'the model returned nothing')
-  await db.kv.put({ key: `report-summary-${caseId}`, value: text })
+  // who wrote it and when travel with the text: the report says a model drafted it, and when
+  await db.kv.bulkPut([
+    { key: `report-summary-${caseId}`, value: text },
+    { key: `report-summary-by-${caseId}`, value: 'ai' },
+    { key: `report-summary-at-${caseId}`, value: Date.now() },
+  ])
+  await appendLedger(caseId, 'answer', 'executive summary drafted', { model: last?.model, chars: text.length, sha256: await sha256Hex(text), kind: 'summary' }).catch(() => undefined)
   return text
 }

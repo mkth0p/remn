@@ -2,7 +2,7 @@ import yaml from 'js-yaml'
 import { getDb, type Case } from '../db/schema'
 import { validateRule, type Rule, type RuleDiag } from '../rules/engine'
 import { log, toast, useStore } from '../state/store'
-import type { RunRequest } from '../workers/rules.worker'
+import type { DryFinding, RunRequest } from '../workers/rules.worker'
 import type { SettingsLike } from '../rules/filter'
 import { enabledPackIds, getPackRules } from './packs'
 import { replaceFindings } from './findingReviews'
@@ -201,6 +201,59 @@ export async function runRules(kase: Case, rules: Rule[], onProgress?: (done: nu
       worker.terminate()
       resolve({ total: 0, byRule: {}, errors: [e.message], diagnostics: [] })
     }
+    worker.postMessage(req)
+  })
+}
+
+export interface DryRunResult {
+  findings: number
+  errors: string[]
+  diagnostics: RuleDiag[]
+  sample: DryFinding[]
+}
+
+/**
+ * Run one rule on a case without storing anything (the AI's test_rule and propose_rule): the
+ * browser store in a rules worker in dry-run mode, a server store through its rule job, which
+ * never writes findings itself.
+ */
+export async function dryRunRule(kase: Case, rule: Rule, signal?: AbortSignal): Promise<DryRunResult> {
+  if (kase.storage === 'server' && kase.serverKey) {
+    const { getSource } = await import('./source')
+    const r = await getSource(kase).runRules([rule])
+    const sample = r.findings.slice(0, 50).map((f) => ({
+      ruleId: String(f.ruleId ?? rule.id),
+      title: String(f.title ?? ''),
+      severity: String(f.severity ?? ''),
+      key: String(f.key ?? ''),
+      ts: typeof f.ts === 'number' ? f.ts : null,
+      count: Number(f.count ?? 0),
+      refs: ((f.refs as number[] | undefined) ?? []).slice(0, 10),
+      entities: (f.entities as Record<string, string> | undefined) ?? {},
+    }))
+    return { findings: r.findings.length, errors: r.errors, diagnostics: r.diagnostics ?? [], sample }
+  }
+  const worker = new Worker(new URL('../workers/rules.worker.ts', import.meta.url), { type: 'module' })
+  const req: RunRequest = { cmd: 'run', caseId: kase.id!, rules: [rule], settings: settingsForRules(kase), dryRun: true }
+  const errors: string[] = []
+  return new Promise((resolve, reject) => {
+    const stop = () => {
+      worker.terminate()
+      reject(new DOMException('stopped', 'AbortError'))
+    }
+    signal?.addEventListener('abort', stop, { once: true })
+    const end = (r: DryRunResult) => {
+      signal?.removeEventListener('abort', stop)
+      worker.terminate()
+      resolve(r)
+    }
+    worker.onmessage = (ev: MessageEvent<Record<string, unknown>>) => {
+      const m = ev.data
+      if (m.type === 'rule-error') errors.push(String(m.error))
+      else if (m.type === 'done') end({ findings: Number(m.total), errors, diagnostics: (m.diagnostics as RuleDiag[]) ?? [], sample: (m.findings as DryFinding[]) ?? [] })
+      else if (m.type === 'error') end({ findings: 0, errors: [String(m.error)], diagnostics: [], sample: [] })
+    }
+    worker.onerror = (e) => end({ findings: 0, errors: [e.message], diagnostics: [], sample: [] })
     worker.postMessage(req)
   })
 }

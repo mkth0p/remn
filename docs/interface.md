@@ -137,6 +137,18 @@ flagged, with identifiers derived from the content (an export imported twice is 
 objects), an identity for the case and a TLP:AMBER marking. On a browser-only server the
 page offers no lookups, which the server refuses; it says so and offers the exports.
 
+## AI analyst
+
+The AI analyst page runs the agent described on the [AI page](ai.md): a question or a
+playbook card starts an investigation that the model plans and carries out through
+read-only tools, with the step budget, "answer now" and "stop" in the toolbar. The chat
+shows each round as its tool calls and results (the results on demand), and the answer
+with its citations as chips that open the row, or struck through when no tool returned
+them. The side panel has four tabs: the plan with the step count and the context used;
+the inbox, where every change the agent proposes waits to be accepted (one by one, edited,
+or all at once), rejected, or undone after acceptance; the hypothesis board; and the AI
+ledger with a check of its hash chain. Past investigations are listed on the left.
+
 ## Review
 
 The Review page is where a case gets cleared. It walks the analyst through every attack
@@ -162,9 +174,10 @@ with the case bundle.
 The model can take part in three ways. "Ask the model to decide" on a card asks for a
 proposal on that item (decision, severity, in or out of the report, findings to unlink,
 reason, and the narrative or note) and shows it as a box the analyst applies or
-dismisses. In the AI analyst chat the model records the same kind of proposal with the
-`suggest_review` tool, on a finding or a chain, after looking at a chain with
-`get_chain`; proposals show on the Review page next to their item.
+dismisses. On the AI analyst page the agent queues the same kind of proposal with the
+`propose_decision` tool, on a finding or a chain, citing the rows it read; decision
+proposals show on the Review page next to their item and in the approval inbox of the AI
+page, and accepting one in either place settles it in both.
 
 "Triage with the model" sends the whole queue (undecided items by default, or
 everything) in batches of four (Ollama) or eight (Claude Code) and records a proposal for
@@ -218,7 +231,9 @@ Then come numbered sections: the executive summary, the evidence with its hashes
 attack chains (with narrative, step table and the findings linked to them, at the chosen
 detail level), the other incidents with their notes and member findings at the effective
 severity, the indicators, the case timeline, the tasks, the notes, the findings in time
-order and the case settings.
+order, "How AI was used" when a model took part (runs, models and where they ran, tool
+calls, what it proposed and what became of it, whether the AI ledger's hash chain holds)
+and the case settings.
 
 Chains are cards with a severity pill, the verdict, a score meter split into its parts,
 the narrative in an accent block, the swimlane picture, the step table with a lane mark
