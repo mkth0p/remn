@@ -20,7 +20,6 @@ import {
 } from '../data/aiReview'
 import { loadChains, type Chain } from '../data/chains'
 import { computeConfidence, computeVerdict, groupByRule, threatProfile, type ReportData } from '../data/reportHtml'
-import { draftExecutiveSummary } from '../data/reportSummary'
 import {
   applyChainVerdict,
   chainIncluded,
@@ -178,7 +177,6 @@ export function ReviewView() {
   const [showRun, setShowRun] = useState(false)
   const [askTriage, setAskTriage] = useState(false)
   const [triageDecided, setTriageDecided] = useState(false)
-  const [triageSummary, setTriageSummary] = useState(true)
   const [triage, setTriage] = useState<TriageProgress | null>(null)
   const triageAbort = useRef<AbortController | null>(null)
   const [suggesting, setSuggesting] = useState(false)
@@ -417,12 +415,16 @@ export function ReviewView() {
     triageAbort.current = controller
     setTriage({ done: 0, total: items.length, batch: 0, batches: 0 })
     try {
+      // The model proposes; the analyst decides. Text in the evidence (a mail subject becomes an
+      // incident title) can steer a model, and a pass that wrote its answers straight away could
+      // take a critical incident out of the report with nobody looking. Each proposal waits on its
+      // item, with its reason, for the analyst to apply or dismiss.
       const run = await runTriage(kase, items, reviews, {
-        apply: true,
+        apply: false,
         signal: controller.signal,
         onProgress: setTriage,
-        draftSummary: triageSummary ? () => draftExecutiveSummary(kase, { signal: controller.signal }) : undefined,
       })
+      setSuggestions(await loadSuggestions(kase.id!))
       setLastRun(run)
       setShowRun(true)
       setReviews(await loadChainReviews(kase.id!))
@@ -1011,9 +1013,9 @@ export function ReviewView() {
         >
           <div className="col" style={{ gap: 10 }}>
             <div>
-              The model decides on every item in the queue: chains get a verdict and a report narrative, incidents a decision and a note, both a severity, whether the report carries them, and a
-              reason. Chains may also have findings unlinked when they do not belong. Narratives and notes the analyst wrote are kept. Every decision is written straight away, tagged "AI", listed
-              afterwards with its reason, and can be undone one by one or all at once.
+              The model proposes a decision on every item in the queue: a verdict or decision, a severity, whether the report carries it, and a reason. Nothing is written. Each proposal waits on its
+              item, tagged "AI", until you apply or dismiss it. Text in the evidence can try to steer a model, so a proposal to lower a severity or leave an item out of the report deserves a second
+              look.
             </div>
             <div className="small muted">
               {modelName} ·{' '}
@@ -1025,7 +1027,6 @@ export function ReviewView() {
               · {aiCfg.transport === 'claude' ? 8 : 4} items per call
             </div>
             <Toggle on={triageDecided} onChange={setTriageDecided} label={`re-triage the ${done} item${done === 1 ? '' : 's'} already decided too`} />
-            <Toggle on={triageSummary} onChange={setTriageSummary} label="draft the executive summary when done (one more call)" />
             <div>
               <b>{fmtNum(triageDecided ? queue.length : undecided)}</b> item{(triageDecided ? queue.length : undecided) === 1 ? '' : 's'} will be sent.
             </div>
@@ -1038,7 +1039,8 @@ export function ReviewView() {
           wide
           title={
             <span>
-              AI triage · {lastRun.entries.filter((e) => !e.undone).length} decision{lastRun.entries.filter((e) => !e.undone).length === 1 ? '' : 's'}{' '}
+              AI triage · {lastRun.entries.filter((e) => !e.undone).length} {lastRun.proposed ? 'proposal' : 'decision'}
+              {lastRun.entries.filter((e) => !e.undone).length === 1 ? '' : 's'}{' '}
               <span className="muted small">
                 · {fmtTs(lastRun.at)}
                 {lastRun.model ? ` · ${lastRun.model}` : ''}
@@ -1048,9 +1050,13 @@ export function ReviewView() {
           onClose={() => setShowRun(false)}
           footer={
             <>
-              <button className="btn ghost sm" disabled={lastRun.entries.every((e) => e.undone)} onClick={undoAll}>
-                undo all
-              </button>
+              {lastRun.proposed ? (
+                <span className="small muted">nothing was written: apply or dismiss each proposal on its item</span>
+              ) : (
+                <button className="btn ghost sm" disabled={lastRun.entries.every((e) => e.undone)} onClick={undoAll}>
+                  undo all
+                </button>
+              )}
               <span className="spacer" />
               <button className="btn primary sm" onClick={() => setShowRun(false)}>
                 close
@@ -1138,7 +1144,9 @@ export function ReviewView() {
                       {e.wrote && !e.undone ? <span className="muted"> · {e.wrote} written</span> : null}
                     </td>
                     <td className="nowrap">
-                      {e.undone ? (
+                      {lastRun.proposed ? (
+                        <span className="small muted">proposed</span>
+                      ) : e.undone ? (
                         <span className="small muted">undone</span>
                       ) : (
                         <button className="btn link small" onClick={() => undo(e)}>

@@ -10,9 +10,7 @@ export function PackageCoverage({ stats }: { stats: Record<string, unknown> }) {
   // A member that was repaired, filtered or truncated still parsed, so it carries a note rather
   // than an error status. Without it here, the one view an analyst uses to review a large package
   // is the one view that hides what the parser had to compromise on.
-  const filtered = members.filter(
-    (m) => (!issuesOnly || !!m.note || !['parsed', 'metadata'].includes(String(m.status))) && String(m.name).toLowerCase().includes(query.toLowerCase()),
-  )
+  const filtered = members.filter((m) => (!issuesOnly || !!m.note || !['parsed', 'metadata'].includes(String(m.status))) && String(m.name).toLowerCase().includes(query.toLowerCase()))
   const checks = (Array.isArray(stats.reconciliation) ? stats.reconciliation : []) as { name: string; status: string; expected?: number; actual?: number; reason?: string }[]
   return (
     <section className="col" style={{ gap: 10 }}>

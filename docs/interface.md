@@ -150,15 +150,15 @@ dismisses. In the AI analyst chat the model records the same kind of proposal wi
 `get_chain`; proposals show on the Review page next to their item.
 
 "Triage with the model" sends the whole queue (undecided items by default, or
-everything) in batches of four (Ollama) or eight (Claude Code) and writes each decision
-straight away, tagged "AI" in the rail and on the card with the model's reason. The same
-pass writes the text the report prints: a narrative for each chain and a note for each
-incident. A text the analyst wrote is kept; one the model drafted earlier is replaced,
-and editing it makes it the analyst's. When the switch in the triage dialog is on, the
-pass ends by drafting the executive summary from the reviewed chains and incidents. A
-popup then lists every decision (item, decision, severity before and after, in or out of
-the report, unlinked findings, reason) with undo per line or for the whole run, and
-"last AI triage" reopens it.
+everything) in batches of four (Ollama) or eight (Claude Code) and records a proposal for
+each item: a decision, a severity, whether the report carries it, a narrative or a note,
+and a reason. Nothing is written. Each proposal waits on its item, tagged "AI", until the
+analyst applies or dismisses it, exactly like a proposal from the chat. A popup lists the
+proposals of the pass (item, decision, severity before and after, in or out of the
+report, reason). Text in the evidence can try to steer a model, and a pass that wrote its
+answers straight away could take a critical incident out of the report with nobody
+looking; a proposal to lower a severity or leave an item out deserves a second look. The
+executive summary is drafted from the Report page.
 
 The triage prompt is `SYSTEM_TRIAGE` in `backend/services/ai/prompts.py`. The reply is a
 JSON array checked item by item: unknown ids, wrong words and unlink ids that are not

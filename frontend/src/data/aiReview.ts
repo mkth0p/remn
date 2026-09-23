@@ -320,6 +320,8 @@ export interface TriageRun {
   rejected: string[]
   /** the executive summary was drafted at the end of the pass */
   summaryDrafted?: boolean
+  /** the pass only proposed: nothing was written, each entry is a suggestion on its item */
+  proposed?: boolean
 }
 
 export async function loadTriageRun(caseId: number): Promise<TriageRun | null> {
@@ -467,7 +469,16 @@ export async function runTriage(
   const size = Math.max(1, opts.batch ?? batchSize())
   const batches: ReviewItem[][] = []
   for (let i = 0; i < items.length; i += size) batches.push(items.slice(i, i + size))
-  const run: TriageRun = { at: Date.now(), model: opts.model ?? '', transport: useStore.getState().aiConfig.transport, asked: items.length, entries: [], errors: [], rejected: [] }
+  const run: TriageRun = {
+    at: Date.now(),
+    model: opts.model ?? '',
+    transport: useStore.getState().aiConfig.transport,
+    asked: items.length,
+    entries: [],
+    errors: [],
+    rejected: [],
+    proposed: !opts.apply,
+  }
   let currentReviews = reviews
   for (let b = 0; b < batches.length; b++) {
     if (opts.signal?.aborted) {

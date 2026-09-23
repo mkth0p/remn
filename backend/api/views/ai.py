@@ -77,7 +77,9 @@ def ai_meta(request: HttpRequest):
             "querySchema": QUERY_SCHEMA,
             "schemaDoc": SCHEMA_DOC,
             "numCtx": settings.OLLAMA_NUM_CTX,
-            "defaultModel": settings.OLLAMA_MODEL,
+            # the operator's model tag means nothing to a visitor's own Ollama; the page uses the
+            # first model the visitor has installed instead
+            "defaultModel": "" if settings.FORENSIC_BROWSER_ONLY else settings.OLLAMA_MODEL,
             "limits": {"maxMessages": MAX_MESSAGES, "maxMessageChars": MAX_MESSAGE_CHARS},
             "version": prompts.prompts_version(),
         }

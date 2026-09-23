@@ -24,6 +24,8 @@ services:
     image: remn
     environment:
       FORENSIC_BROWSER_ONLY: "1"
+      # tells visitors what this compose file guarantees: RAM-only staging, no route off the host
+      FORENSIC_PROFILE: public
       FORENSIC_TRUST_PROXY: "1"
       FORENSIC_RATE_LIMIT_PER_MIN: ${REMN_RATE_LIMIT:-60}
       FORENSIC_MAX_UPLOAD_MB: ${REMN_MAX_UPLOAD_MB:-512}

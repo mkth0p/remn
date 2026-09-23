@@ -104,12 +104,32 @@ function corsHint(base: string): string {
   const local = /^https?:\/\/(localhost|127\.0\.0\.1)(:|$)/.test(origin)
   let hint = `Cannot reach Ollama at ${base}. Is it running on THIS machine?`
   if (!local) {
-    hint += ` REMN is served from ${origin}, so your local Ollama must allow that origin: run "setx OLLAMA_ORIGINS ${origin}" (Windows) or export OLLAMA_ORIGINS=${origin}, then restart Ollama. Safari blocks HTTPS→localhost entirely - use the server transport there.`
+    const serverTransport = useStore.getState().health?.mode !== 'browser-only'
+    hint +=
+      ` REMN is served from ${origin}, so your local Ollama must allow that origin, then be restarted:` +
+      ` Windows: setx OLLAMA_ORIGINS "${origin}";` +
+      ` macOS app: launchctl setenv OLLAMA_ORIGINS "${origin}" (the menu-bar app does not read shell exports);` +
+      ` Linux service: add Environment="OLLAMA_ORIGINS=${origin}" with systemctl edit ollama.` +
+      ` Allow the browser's local-network prompt if it shows one, and turn off shields or ad blockers that block localhost for this site.` +
+      ` Only localhost addresses are reachable from this page.` +
+      (serverTransport
+        ? ' Safari blocks HTTPS→localhost entirely - use the server transport there.'
+        : ' Safari blocks HTTPS→localhost entirely - use Chrome, Edge or Firefox, or run REMN on your own machine.')
   }
   return hint
 }
 
 class BrowserOllamaTransport implements AiTransport {
+  /** With no model chosen and none offered by the server, the first one this Ollama has installed. */
+  private async firstInstalledModel(): Promise<string> {
+    try {
+      const models = await this.listModels()
+      return models[0]?.name ?? ''
+    } catch {
+      return ''
+    }
+  }
+
   readonly kind = 'browser' as const
   readonly endpoint: string
   private base: string
@@ -150,7 +170,7 @@ class BrowserOllamaTransport implements AiTransport {
       return
     }
     const cfg = useStore.getState().aiConfig
-    const model = p.model || cfg.model || meta.defaultModel
+    const model = p.model || cfg.model || meta.defaultModel || (await this.firstInstalledModel())
     const wire = this.wireMessages(p.messages, meta)
     const system = composeSystem(p.mode, p.context, meta)
     if (system) {
@@ -239,7 +259,7 @@ class BrowserOllamaTransport implements AiTransport {
   async queryJson(question: string, context: Record<string, unknown>, model?: string) {
     const meta = await fetchAiMeta()
     const cfg = useStore.getState().aiConfig
-    const useModel = model || cfg.model || meta.defaultModel
+    const useModel = model || cfg.model || meta.defaultModel || (await this.firstInstalledModel())
     // mirror backend/api/views/ai.py query() context lines
     const lines = [`Reference time (now, UTC): ${context.now ?? 'unknown'}`]
     if (context.businessHours) lines.push(`Business hours: ${pyLike(context.businessHours)}`)

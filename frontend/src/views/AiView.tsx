@@ -91,6 +91,15 @@ export function AiView() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model, aiCfg.transport, aiCfg.ollamaUrl, aiCfg.model])
+  // the model is checked when the analyst comes here, not by every page load (App skips it for a
+  // page served from another host, which would otherwise probe every visitor's localhost)
+  useEffect(() => {
+    if (useStore.getState().aiStatus.reachable === null)
+      getTransport()
+        .ping()
+        .then((r) => setAiStatus({ reachable: r.reachable, error: r.error, models: r.models, checkedAt: Date.now() }))
+        .catch(() => undefined)
+  }, [setAiStatus])
   if (!kase) return null
   const reachable = aiStatus.reachable === true
   const retryPing = () =>
@@ -151,7 +160,7 @@ export function AiView() {
               : aiCfg.transport === 'claude'
                 ? "Claude Code: the REMN server runs the claude command line on its machine; prompts, tool results (evidence excerpts) and answers go to Anthropic under that machine's Claude account. The server keeps nothing."
                 : 'Server proxy: prompts and tool results transit through the REMN server to its Ollama (nothing is persisted there).'}{' '}
-            Nothing else leaves the machine except opt-in reputation lookups.
+            {health?.mode === 'browser-only' ? 'This server makes no lookups and runs no model of its own.' : 'Nothing else leaves the machine except opt-in reputation lookups.'}
           </div>
         </div>
         <div className="right chat">

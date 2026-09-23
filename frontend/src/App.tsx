@@ -7,6 +7,7 @@ import { migrateCaseToServer } from './data/migrate'
 import { getSource } from './data/source'
 import { setLocalTime } from './util/format'
 import { getTransport } from './ai/transport'
+import { deployment } from './data/deployment'
 import {
   IconAi,
   IconDashboard,
@@ -28,6 +29,7 @@ import {
 } from './components/Icons'
 import { ConsolePanel, Toasts } from './components/ConsolePanel'
 import { TokenGate } from './components/TokenGate'
+import { DataNotice } from './components/DataNotice'
 import { EntityPanel } from './components/EntityPanel'
 import { Modal, Progress, ThemeToggle } from './components/ui'
 import { Dashboard } from './views/Dashboard'
@@ -128,9 +130,12 @@ export default function App() {
         model: typeof om?.value === 'string' ? om.value : '',
         numCtx: typeof onc?.value === 'number' ? onc.value : null,
       })
-      getTransport()
-        .ping()
-        .then((r) => useStore.getState().setAiStatus({ reachable: r.reachable, error: r.error, models: r.models, checkedAt: Date.now() }))
+      // A page served from another host reaches the visitor's own model on localhost. That request is
+      // made when the analyst opens the AI analyst, not on every page load of every visitor.
+      if (deployment(null).tier === 'this-machine' || useStore.getState().aiConfig.transport !== 'browser')
+        getTransport()
+          .ping()
+          .then((r) => useStore.getState().setAiStatus({ reachable: r.reachable, error: r.error, models: r.models, checkedAt: Date.now() }))
       // one transaction, so two boots in flight (React runs effects twice in development) create one default case
       const all = await db.transaction('rw', db.cases, db.kv, async () => {
         if ((await db.cases.count()) === 0) {
@@ -158,8 +163,15 @@ export default function App() {
             db.kv.get('storeThresholdMb').then((k) => {
               if (typeof k?.value !== 'number') setThreshold(h.store!.thresholdMb)
             })
-          // the model went unreachable (the server was down, Ollama restarted): check again with every poll until it is back
-          if (useStore.getState().aiStatus.reachable !== true) {
+          const dep = deployment(h)
+          if (dep.tier === 'this-machine') useStore.getState().setDataNotice('acknowledged')
+          else db.kv.get('dataNotice').then((k) => useStore.getState().setDataNotice(k?.value === `${dep.host}|${dep.tier}` ? 'acknowledged' : 'required'))
+          // the model went unreachable (the server was down, Ollama restarted): check again with every poll until it is back,
+          // once the analyst has asked for it (an earlier check) or where the model sits next to the page
+          if (
+            useStore.getState().aiStatus.reachable === false ||
+            (useStore.getState().aiStatus.reachable === null && (dep.tier === 'this-machine' || useStore.getState().aiConfig.transport !== 'browser'))
+          ) {
             getTransport()
               .ping()
               .then((r) => useStore.getState().setAiStatus({ reachable: r.reachable, error: r.error, models: r.models, checkedAt: Date.now() }))
@@ -274,6 +286,15 @@ export default function App() {
   const isServer = kase.storage === 'server'
   const browserOnly = health?.mode === 'browser-only'
   const canConvert = !isServer && !browserOnly
+  const dep = deployment(health)
+  const acknowledgeNotice = async () => {
+    if (!pending) return
+    await getDb().kv.put({ key: 'dataNotice', value: `${dep.host}|${dep.tier}` })
+    useStore.getState().setDataNotice('acknowledged')
+    const { files, kindOverride } = pending
+    setPending(null)
+    requestIngest(files, kase, kindOverride, true)
+  }
   const bigTotal = pending ? pending.files.reduce((s, f) => s + f.size, 0) : 0
   return (
     <div className={collapsed ? 'app sidebar-collapsed' : 'app'}>
@@ -304,19 +325,32 @@ export default function App() {
           ))}
         </nav>
         <div className="sidebar-footer">
-          <div>
-            <span className={`status-dot ${health ? 'ok' : 'bad'}`} />
-            server {health ? `v${health.version}` : 'offline'}
+          <div title={health ? `server ${dep.build || '?'} · page ${dep.pageBuild || '?'}${dep.mismatch ? ' - built from different commits' : ''}` : undefined}>
+            <span className={`status-dot ${health ? (dep.mismatch ? 'warn' : 'ok') : 'bad'}`} />
+            server{' '}
+            {health ? (
+              <a href={dep.source} target="_blank" rel="noreferrer noopener" className="mono">
+                {dep.build || 'build unknown'}
+              </a>
+            ) : (
+              'offline'
+            )}
           </div>
+          {health && dep.tier !== 'this-machine' && (
+            <div title={dep.parsing}>
+              <span className="status-dot" />
+              parsing on {dep.host}
+            </div>
+          )}
           <div title={aiCfg.transport === 'browser' ? `browser-direct: ${aiCfg.ollamaUrl}` : aiCfg.transport === 'claude' ? 'Claude Code on the server machine' : 'via REMN server'}>
             <span className={`status-dot ${aiStatus.reachable ? 'ok' : aiStatus.reachable === null ? '' : 'bad'}`} />
             {aiCfg.transport === 'claude' ? 'claude' : 'ollama'}{' '}
             {aiStatus.reachable ? (aiCfg.transport === 'claude' ? 'ready' : 'online') : aiStatus.reachable === null ? '…' : aiCfg.transport === 'claude' ? 'unavailable' : 'offline'}{' '}
             <span className="dim">[{aiCfg.transport}]</span>
           </div>
-          <div>
-            <span className={`status-dot ${kase.settings.networkAllowed ? 'bad' : 'ok'}`} />
-            egress {kase.settings.networkAllowed ? 'allowed' : 'blocked'}
+          <div title="reputation lookups for this case (Settings); evidence parsing is shown above">
+            <span className={`status-dot ${!browserOnly && kase.settings.networkAllowed ? 'bad' : 'ok'}`} />
+            lookups {browserOnly ? 'none on this server' : kase.settings.networkAllowed ? 'on' : 'off'}
           </div>
           <div>
             <span className={`status-dot ${isServer ? 'ok' : ''}`} />
@@ -412,7 +446,11 @@ export default function App() {
             <label className="checkbox">
               <input type="radio" name="storage" checked={newCase.storage === 'browser'} onChange={() => setNewCase({ ...newCase, storage: 'browser' })} />{' '}
               <span>
-                <b>Browser store</b> <span className="muted small">— everything stays in this browser (IndexedDB). Portable, zero server state, best under ~{threshold} MB per file.</span>
+                <b>Browser store</b>{' '}
+                <span className="muted small">
+                  — the case is stored in this browser (IndexedDB); {dep.tier === 'this-machine' ? 'files are parsed on this machine' : `each file is uploaded to ${dep.host} to be parsed`}. Best under
+                  ~{threshold} MB per file.
+                </span>
               </span>
             </label>
             {!browserOnly && (
@@ -436,24 +474,32 @@ export default function App() {
       )}
       {pending && (
         <Modal
-          title={pending.reason === 'big' ? 'Large evidence' : 'Archive contents'}
+          title={pending.reason === 'notice' ? `Before you add evidence to ${dep.host}` : pending.reason === 'big' ? 'Large evidence' : 'Archive contents'}
           onClose={() => !migrating && setPending(null)}
           footer={
             <>
               <button className="btn" disabled={!!migrating} onClick={() => setPending(null)}>
                 cancel
               </button>
+              {pending.reason === 'notice' && (
+                <button className="btn primary" autoFocus onClick={acknowledgeNotice}>
+                  I understand, add the evidence
+                </button>
+              )}
               {pending.reason === 'big' && canConvert && (
                 <button className="btn" disabled={!!migrating} onClick={() => proceedPending(false)}>
                   ingest in the browser anyway
                 </button>
               )}
-              <button className="btn primary" disabled={!!migrating} onClick={() => proceedPending(pending.reason === 'big' && canConvert)}>
-                {pending.reason === 'big' && canConvert ? 'convert case to server store and ingest' : 'ingest'}
-              </button>
+              {pending.reason !== 'notice' && (
+                <button className="btn primary" disabled={!!migrating} onClick={() => proceedPending(pending.reason === 'big' && canConvert)}>
+                  {pending.reason === 'big' && canConvert ? 'convert case to server store and ingest' : 'ingest'}
+                </button>
+              )}
             </>
           }
         >
+          {pending.reason === 'notice' && <DataNotice dep={dep} />}
           <div className="col" style={{ gap: 6 }}>
             {pending.files.slice(0, 8).map((f) => (
               <div key={f.name} className="row small mono">
@@ -476,7 +522,7 @@ export default function App() {
               {fmtBytes(bigTotal)} is above the {threshold} MB browser threshold. This server keeps nothing, so the rows go into this browser, which gets slow past a few hundred MB.
             </div>
           )}
-          {pending.files.some((f) => /(\.zip|\.tar|\.tgz|\.gz|\.bz2|\.xz)$/i.test(f.name)) && !pending.kindOverride && (
+          {pending.reason !== 'notice' && pending.files.some((f) => /(\.zip|\.tar|\.tgz|\.gz|\.bz2|\.xz)$/i.test(f.name)) && !pending.kindOverride && (
             <label className="field">
               <span>what is inside the archive(s)?</span>
               <select className="select" value={pendingKind} onChange={(e) => setPendingKind(e.target.value as 'evtx' | 'mail' | 'package')}>

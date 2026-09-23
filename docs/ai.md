@@ -16,9 +16,15 @@ Settings → AI chooses one of three ways to reach a model.
 **Browser-direct Ollama** is the default. The analyst's page calls the analyst's own
 Ollama at `http://localhost:11434`; prompts, tool results and evidence excerpts never
 reach the REMN server, and each analyst uses the models on their own machine. When REMN
-is served from another host, Ollama must allow that origin once
-(`setx OLLAMA_ORIGINS "https://remn.example.com"`, then restart Ollama); Safari blocks
-an HTTPS page from calling localhost, so a Safari user takes the next transport.
+is served from another host, Ollama must allow that origin once, then be restarted:
+`setx OLLAMA_ORIGINS "https://remn.example.com"` on Windows, `launchctl setenv
+OLLAMA_ORIGINS "https://remn.example.com"` for the macOS app (it does not read shell
+exports), an `Environment=` line through `systemctl edit ollama` on Linux. Safari blocks an
+HTTPS page from calling localhost, so a Safari user takes the next transport, or on a
+browser-only instance, where there is none, another browser or a local REMN. A page served
+from another host checks the model when the analyst opens the AI analyst, not on every page
+load, and a browser-only server offers no default model: the page uses the model chosen in
+Settings, or the first one the analyst's Ollama has installed.
 
 **Server proxy.** The REMN server relays to the Ollama configured in its `.env`
 (`OLLAMA_HOST`, `OLLAMA_MODEL`, `OLLAMA_NUM_CTX`); nothing is persisted on the server.

@@ -291,6 +291,17 @@ textarea {
 .status-dot.bad {
   background: var(--danger);
 }
+.status-dot.warn {
+  background: var(--warn);
+}
+.sidebar-footer a {
+  color: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.plain-list li + li {
+  margin-top: 4px;
+}
 .topbar {
   display: flex;
   align-items: center;

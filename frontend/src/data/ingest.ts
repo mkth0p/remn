@@ -43,8 +43,27 @@ export function thresholdBytes(): number {
  * Entry point used by the drop zones. Large files dropped in a browser-stored
  * case are held back for the analyst's decision (convert the case or ingest anyway).
  */
-export function requestIngest(files: File[], kase: Case, kindOverride?: 'evtx' | 'mail' | 'package'): void {
+export function requestIngest(files: File[], kase: Case, kindOverride?: 'evtx' | 'mail' | 'package', noticeRead = false): void {
+  // A browser-store case sends each file to the parser, which refuses anything over its upload
+  // limit. Say so before a file is hashed and uploaded, rather than failing twice after the wait.
+  const health = useStore.getState().health
+  // browser-only mode caps chunked uploads at the single-request limit; a full server stages up to maxChunkedGb
+  const limitMb = health?.mode === 'browser-only' ? health.limits?.maxUploadMb : health?.limits?.maxChunkedGb ? health.limits.maxChunkedGb * 1024 : undefined
+  if (kase.storage !== 'server' && limitMb) {
+    const over = files.filter((f) => f.size > limitMb * 1024 * 1024)
+    for (const f of over)
+      toast(
+        'err',
+        `${f.name} is ${Math.round(f.size / 1024 / 1024)} MB, above this server's ${limitMb} MB limit per file. Split it (for example one mailbox folder or one event log per file), or run REMN on your own machine.`,
+        0,
+      )
+    files = files.filter((f) => !over.includes(f))
+  }
   if (!files.length) return
+  if (!noticeRead && useStore.getState().dataNotice === 'required') {
+    useStore.getState().setPendingIngest({ files, kindOverride, reason: 'notice' })
+    return
+  }
   const big = kase.storage !== 'server' && files.some((f) => f.size > thresholdBytes())
   const archives = files.filter(isArchive)
   if (big || (archives.length && !kindOverride)) {

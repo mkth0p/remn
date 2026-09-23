@@ -57,6 +57,10 @@ FORENSIC_TRUST_PROXY = _env_bool("FORENSIC_TRUST_PROXY", False)
 # Requests a minute per client address (per /64 for IPv6) on the heavy paths (parsing,
 # correlation, conversion, lookups, models, store writes). 0 turns the budget off.
 FORENSIC_RATE_LIMIT_PER_MIN = _env_int("FORENSIC_RATE_LIMIT_PER_MIN", 0)
+# What the deployment around this process guarantees, for the notice a visitor reads before their
+# first upload. docker-compose.public.yml sets "public": staging on a RAM-backed tmpfs, no network
+# route off the host. Empty claims nothing beyond what the code itself does.
+FORENSIC_PROFILE = os.environ.get("FORENSIC_PROFILE", "").strip().lower()
 # Worker threads of backend/run.py (waitress); run.py sets it from --threads.
 FORENSIC_THREADS = _env_int("FORENSIC_THREADS", 8)
 # Heavy requests (parses, correlation, conversion) in flight at once, overall and per client

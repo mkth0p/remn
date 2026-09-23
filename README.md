@@ -25,7 +25,7 @@ server for gigabyte cases.
 - **Correlate** a suspicious mail with what the recipient's accounts and machines did
   afterwards: scored attack chains with a swimlane graph.
 - **Review** every chain and incident in order, rescore, annotate, unlink, and let a
-  model propose or take decisions with a logged, undoable triage pass.
+  model propose decisions, each applied or dismissed by the analyst.
 - **Report** as one self-contained HTML file, printable to PDF, with chain of custody,
   narratives, graphs and the decisions that shaped it.
 - **Ask** a local model (Ollama) or Claude through a Claude Code sign-in; it works

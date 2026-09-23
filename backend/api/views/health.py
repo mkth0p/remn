@@ -42,7 +42,9 @@ def health(request):
             "inMemoryMb": settings.FORENSIC_IN_MEMORY_MB,
             "maxChunkedGb": settings.FORENSIC_MAX_CHUNKED_GB,
             "chunkMb": settings.FORENSIC_CHUNK_MB,
+            "uploadMaxAgeS": settings.FORENSIC_UPLOAD_MAX_AGE_S,
         },
+        "profile": settings.FORENSIC_PROFILE or None,
         "store": {"thresholdMb": settings.FORENSIC_STORE_THRESHOLD_MB, "casesDir": str(settings.CASES_DIR)},
         "ollama": {**ai, "capabilities": caps, "numCtx": settings.OLLAMA_NUM_CTX},
         "optional": {

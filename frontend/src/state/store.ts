@@ -80,8 +80,11 @@ interface State {
   bumpRules: () => void
   storeThresholdMb: number
   setStoreThresholdMb: (mb: number) => void
-  pendingIngest: { files: File[]; kindOverride?: 'evtx' | 'mail' | 'package'; reason: 'big' | 'archive' } | null
+  pendingIngest: { files: File[]; kindOverride?: 'evtx' | 'mail' | 'package'; reason: 'big' | 'archive' | 'notice' } | null
   setPendingIngest: (p: State['pendingIngest']) => void
+  /** whether this browser has read where its evidence goes on this host (shown before the first upload to a remote parser) */
+  dataNotice: 'unknown' | 'required' | 'acknowledged'
+  setDataNotice: (v: State['dataNotice']) => void
   aiConfig: { transport: 'browser' | 'server' | 'claude'; ollamaUrl: string; model: string; numCtx: number | null; claudeModel: string }
   setAiConfig: (patch: Partial<State['aiConfig']>) => void
   aiStatus: { reachable: boolean | null; error?: string; models?: number; checkedAt: number }
@@ -145,6 +148,8 @@ export const useStore = create<State>((set) => ({
   setStoreThresholdMb: (storeThresholdMb) => set({ storeThresholdMb }),
   pendingIngest: null,
   setPendingIngest: (pendingIngest) => set({ pendingIngest }),
+  dataNotice: 'unknown',
+  setDataNotice: (dataNotice) => set({ dataNotice }),
   aiConfig: { transport: 'browser', ollamaUrl: 'http://localhost:11434', model: '', numCtx: null, claudeModel: 'sonnet' },
   setAiConfig: (patch) => set((s) => ({ aiConfig: { ...s.aiConfig, ...patch } })),
   aiStatus: { reachable: null, checkedAt: 0 },

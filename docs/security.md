@@ -196,8 +196,13 @@ never with the exception's text, which is often a piece of the input, and never 
 member or attachment name. `docker-compose.public.yml` rotates the log (three files of 10 MB)
 rather than keeping it for the life of the container.
 
-None of this makes a public instance a place for real evidence. It bounds the exposure of the
-files people do send.
+This is what lets a public instance take real evidence: the exposure of a file is bounded to one
+parse, and nothing of it is kept. Before the first upload to a parser on another machine, the app
+shows a notice that says where the file goes, what the server keeps and which build it runs, with a
+link to that exact source. The notice states only what the server declares: the RAM-only staging
+and the absence of a route off the host are claimed only when health reports the `public` profile
+that `docker-compose.public.yml` sets. Evidence that may not leave the analyst's machine belongs in
+a local instance, where the same notice says the file is parsed on this machine.
 
 ### The parser's isolation
 
@@ -252,7 +257,8 @@ a decision:
 - The synthetic lab carries a control, S07, a password-expiry lure whose body tells
   automated reviewers to classify it as benign. The rules score it on its facts; a model
   that follows the text fails the control.
-- Whatever the model decides is written with a tag, a reason and a snapshot of what it
-  replaced (`frontend/src/data/aiReview.test.ts` and `aiReview.db.test.ts`), so a
-  steered decision is visible in the rail, in the log popup and in the report, and undo
-  puts the previous state back.
+- The model proposes and the analyst decides. The triage pass and the chat record
+  proposals, each with its reason, and nothing takes effect until the analyst applies it.
+  An applied proposal is written with a tag and a snapshot of what it replaced
+  (`frontend/src/data/aiReview.test.ts` and `aiReview.db.test.ts`), so it stays visible in
+  the rail and undo puts the previous state back.

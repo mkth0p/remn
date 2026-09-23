@@ -8,6 +8,7 @@ import { Dropzone } from '../components/Dropzone'
 import { requestIngest, refreshCounts } from '../data/ingest'
 import { getSource } from '../data/source'
 import { Jobs } from '../components/ConsolePanel'
+import { deployment } from '../data/deployment'
 
 interface Summary {
   counts?: { events?: number; mails?: number; iocs?: number }
@@ -50,6 +51,7 @@ export function Dashboard() {
   for (const f of findings) bySev[f.severity] = (bySev[f.severity] ?? 0) + 1
   const range = summary?.eventsTimeRange
   const isServer = kase.storage === 'server'
+  const dep = deployment(health)
   return (
     <div className="view">
       <div className="view-header">
@@ -101,9 +103,7 @@ export function Dashboard() {
               <Dropzone onFiles={(files) => requestIngest(files, kase)} />
               <Jobs />
               <div className="hint">
-                {isServer
-                  ? 'Files are hashed in the browser, uploaded in chunks to the local server and parsed into a DuckDB case store on this machine. Nothing leaves the host.'
-                  : "Files are hashed (SHA-256) in the browser, parsed by the local server and stored only in this browser's IndexedDB. The server keeps nothing."}
+                {isServer ? `Files are hashed in the browser, uploaded in chunks to the REMN server (${dep.host}) and parsed into a DuckDB case store there.` : `${dep.parsing} ${dep.storage}`}
               </div>
             </div>
           </div>
@@ -150,13 +150,24 @@ export function Dashboard() {
             <div className="stat">
               <span className="label">local AI</span>
               <span className="value" style={{ fontSize: 16 }}>
-                {aiStatus.reachable ? aiCfg.model || health?.ollama.defaultModel || 'ready' : aiStatus.reachable === null ? 'checking…' : 'Ollama unreachable'}
+                {aiStatus.reachable
+                  ? aiCfg.model || health?.ollama.defaultModel || 'ready'
+                  : aiStatus.reachable === null
+                    ? dep.tier === 'this-machine'
+                      ? 'checking…'
+                      : 'not checked'
+                    : 'Ollama unreachable'}
               </span>
             </div>
             <div className="small muted">
               {aiCfg.transport === 'browser' ? `browser-direct · ${aiCfg.ollamaUrl}` : 'via REMN server'}
               {aiStatus.reachable ? ` · ${aiStatus.models ?? 0} model(s)` : aiStatus.error ? ` · ${aiStatus.error.slice(0, 120)}` : ''}
             </div>
+            {aiStatus.reachable === null && dep.tier !== 'this-machine' && (
+              <button className="btn xs" onClick={() => setView('ai')}>
+                open the AI analyst to connect your local model
+              </button>
+            )}
           </div>
           <div className="card">
             <div className="stat">

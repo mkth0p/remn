@@ -154,12 +154,20 @@ export interface Health {
   ok: boolean
   name: string
   version: string
+  /** version+commit of the server, in every mode */
+  build?: string
+  /** where the exact source of that build can be read */
+  source?: string
+  /** coarse formats the parser reads, reported in browser-only mode instead of the native libraries */
+  formats?: { pst?: boolean }
   stateless: boolean
   /** browser-only: the server parses and returns rows and keeps nothing; no server store, lookups or server-side models */
   mode?: 'full' | 'browser-only'
   python?: string
   platform?: string
-  limits: { maxUploadMb: number; inMemoryMb: number; maxChunkedGb?: number; chunkMb?: number }
+  limits: { maxUploadMb: number; inMemoryMb: number; maxChunkedGb?: number; chunkMb?: number; uploadMaxAgeS?: number }
+  /** what the deployment guarantees: "public" = docker-compose.public.yml (RAM-only staging, no route off the host) */
+  profile?: string | null
   store?: { thresholdMb: number; casesDir: string }
   ollama: {
     reachable: boolean
@@ -171,7 +179,7 @@ export interface Health {
     error?: string
     numCtx?: number
   }
-  optional: { pst: boolean; yara: boolean; yaraRules: number; claudeCode?: boolean; hayabusa?: boolean }
+  optional: { pst?: boolean; yara?: boolean; yaraRules?: number; claudeCode?: boolean; hayabusa?: boolean }
   /** external detection engines this server runs on every event log it ingests */
   engines?: string[]
   providers: ProviderInfo[]
