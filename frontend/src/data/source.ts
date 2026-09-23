@@ -25,6 +25,8 @@ export interface Aggregation {
 export interface SearchResult<T> {
   rows: T[]
   truncated: boolean
+  /** the sort ran over this many matching rows, taken in time order, not over every match */
+  sampledFrom?: number
 }
 export interface FacetItem {
   value: string

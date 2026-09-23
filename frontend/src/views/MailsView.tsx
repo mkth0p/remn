@@ -7,6 +7,7 @@ import { MailDetail } from '../components/Detail'
 import { getSource } from '../data/source'
 import type { MailRow } from '../db/schema'
 import type { Condition, Filter } from '../rules/filter'
+import { toggleFacetValue } from '../data/facetToggle'
 import { useStore } from '../state/store'
 import { fmtTs } from '../util/format'
 import { exportCsv, exportJson } from '../util/export'
@@ -204,7 +205,9 @@ export function MailsView() {
           if (exists) return { ...prev, conditions: conds.filter((c) => c.field !== 'risk') }
           return { ...prev, conditions: [...conds.filter((c) => c.field !== 'risk'), cond, ...(hiCond && !negate ? [hiCond] : [])] }
         }
-        const op = field === 'flags' ? (negate ? 'not_contains' : 'contains') : negate ? 'ne' : 'eq'
+        if (field !== 'flags') return { ...prev, conditions: toggleFacetValue(conds, f, value, negate) }
+        // flags are several per mail: picking two means "has both", one condition per flag
+        const op = negate ? 'not_contains' : 'contains'
         cond = { field: f, op, value }
         const idx = conds.findIndex((c) => c.field === f && c.op === op && String(c.value).toLowerCase() === value.toLowerCase())
         if (idx >= 0) return { ...prev, conditions: conds.filter((_, i) => i !== idx) }

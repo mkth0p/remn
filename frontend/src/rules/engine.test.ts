@@ -198,3 +198,17 @@ describe('applicability', () => {
     expect(ruleApplicable({ ...rule({ 'risk|gte': 80 }), source: 'mails' }, { eventIds: new Set(), channels: [] })).toEqual({ ok: true })
   })
 })
+
+describe('list operators match whole elements, as the SQL engine does', () => {
+  it('does not read a review-level flag as the strong flag it starts with', () => {
+    const pred = compileCond({ 'flags|contains_any': ['att_html_smuggling', 'att_nested_html_smuggling'] })
+    expect(pred({ flags: ['att_html_smuggling_possible', 'att_html_file_download'] })).toBe(false)
+    expect(pred({ flags: ['att_html_smuggling'] })).toBe(true)
+    expect(compileCond({ 'flags|contains_all': ['a', 'b'] })({ flags: ['ab', 'bc'] })).toBe(false)
+    expect(compileCond({ 'flags|not_contains': ['spf_fail'] })({ flags: ['spf_fail_soft'] })).toBe(true)
+  })
+  it('keeps the substring match of a single-value contains, like the SQL engine', () => {
+    expect(compileCond({ 'flags|contains': 'macro' })({ flags: ['att_office_macro'] })).toBe(true)
+    expect(compileCond({ 'subject|contains_any': ['invoice'] })({ subject: 'Your invoice is ready' })).toBe(true)
+  })
+})

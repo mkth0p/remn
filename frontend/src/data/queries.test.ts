@@ -159,3 +159,22 @@ describe('collection snapshots without an event time', () => {
     expect(await countEvents(1, ranged)).toBe(1)
   })
 })
+
+describe('sorting past the read cap', () => {
+  it('shows the true newest rows of an event ID even when the matches exceed the cap', async () => {
+    const db = new RemnDB('test-queries-cap')
+    setDb(db)
+    // ingestion order is oldest last for half the rows: the event-ID index walks them in id order
+    const rows: EventRow[] = []
+    for (let i = 0; i < 90; i++) rows.push({ caseId: 7, evidenceId: 1, ts: T0 + (i < 45 ? 1_000_000 + i : i) * 60_000, eventId: 4624 } as EventRow)
+    await db.events.bulkAdd(rows)
+    const newest = Math.max(...rows.map((r) => r.ts!))
+    const r = await searchEvents(7, { conditions: [{ field: 'eventId', op: 'eq', value: 4624 }] }, { limit: 5, cap: 30 })
+    expect(r.rows[0].ts).toBe(newest)
+    expect(r.sampledFrom).toBeUndefined()
+    // a sort on another column over more matches than the cap says it is a sample
+    const s = await searchEvents(7, { conditions: [{ field: 'eventId', op: 'eq', value: 4624 }], sort: { field: 'computer', dir: 'desc' } }, { limit: 5, cap: 30 })
+    expect(s.sampledFrom).toBe(30)
+    await db.delete()
+  })
+})

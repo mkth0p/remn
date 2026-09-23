@@ -10,6 +10,7 @@ import { EventDetail } from '../components/Detail'
 import { getSource } from '../data/source'
 import type { EventRow, RowMark } from '../db/schema'
 import type { Condition, Filter } from '../rules/filter'
+import { toggleFacetValue } from '../data/facetToggle'
 import { useStore } from '../state/store'
 import { fmtTs } from '../util/format'
 import { exportCsv, exportJson } from '../util/export'
@@ -90,6 +91,7 @@ export function EventsView() {
   const jobs = useStore((s) => s.jobs)
   const [rows, setRows] = useState<EventRow[]>([])
   const [truncated, setTruncated] = useState(false)
+  const [sampledFrom, setSampledFrom] = useState<number | undefined>(undefined)
   const [total, setTotal] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -116,6 +118,7 @@ export function EventsView() {
         if (!alive) return
         setRows(r.rows)
         setTruncated(r.truncated)
+        setSampledFrom(r.sampledFrom)
         useStore.getState().log('info', `events: ${r.rows.length}${r.truncated ? '+' : ''} rows in ${Date.now() - t0} ms (${ds.kind})`)
       })
       .catch((e) => alive && setError((e as Error).message))
@@ -174,16 +177,7 @@ export function EventsView() {
       setFilter((prev: Filter) => {
         const conds = prev.conditions ?? []
         const num = /^-?\d+$/.test(value) && ['eventId', 'logonType'].includes(field) ? Number(value) : value
-        const op = negate ? 'ne' : 'eq'
-        const idx = conds.findIndex((c) => c.field === field && c.op === op && String(c.value).toLowerCase() === value.toLowerCase())
-        if (idx >= 0) return { ...prev, conditions: conds.filter((_, i) => i !== idx) }
-        const same = conds.find((c) => c.field === field && c.op === op)
-        if (same && !negate) {
-          const vals = Array.isArray(same.value) ? same.value : [same.value]
-          const next: Condition = { field, op: 'in', value: [...vals, num] }
-          return { ...prev, conditions: conds.map((c) => (c === same ? next : c)) }
-        }
-        return { ...prev, conditions: [...conds, { field, op, value: num }] }
+        return { ...prev, conditions: toggleFacetValue(conds, field, num, negate) }
       })
     },
     [setFilter],
@@ -297,7 +291,12 @@ export function EventsView() {
           />
           {(truncated || error) && (
             <div className="row small dim" style={{ padding: '3px 16px', gap: 12, borderBottom: '1px solid var(--line)' }}>
-              {truncated && <span className="mono">showing the first {LIMIT.toLocaleString('en-US')} rows - narrow the filter or change the sort</span>}
+              {truncated && !sampledFrom && <span className="mono">showing the first {LIMIT.toLocaleString('en-US')} rows - narrow the filter or change the sort</span>}
+              {sampledFrom && (
+                <span className="mono" style={{ color: 'var(--warn)' }}>
+                  sorted among the first {sampledFrom.toLocaleString('en-US')} matches in time order, not all of them - narrow the filter or the time range for an exact sort
+                </span>
+              )}
               {error && <span style={{ color: 'var(--danger)' }}>{error}</span>}
             </div>
           )}

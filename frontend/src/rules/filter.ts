@@ -297,16 +297,26 @@ export function matchCondition(row: Row, c: Condition, settings?: SettingsLike):
     case 'nin':
       if (actual == null) return true
       return !actStr.some((a) => wantStr.includes(a)) && !actArr.some((a) => typeof a === 'number' && wantArr.includes(a))
+    // On a list (flags, recipients) the SQL engine matches whole elements for contains_any,
+    // contains_all, not_contains and a contains of several values; only a contains of one value also
+    // matches inside an element. The browser engine, the only one a browser-only server has, now does
+    // the same: by substring, att_html_smuggling_possible matched att_html_smuggling and raised a
+    // critical finding on a review-level flag.
     case 'contains':
     case 'contains_any':
       if (actual == null) return false
-      if (Array.isArray(actual)) return actStr.some((a) => wantStr.some((w) => a === w || a.includes(w)))
+      if (Array.isArray(actual)) {
+        if (op === 'contains' && wantStr.length === 1) return actStr.some((a) => a === wantStr[0] || a.includes(wantStr[0]))
+        return actStr.some((a) => wantStr.includes(a))
+      }
       return wantStr.some((w) => actStr.some((a) => a.includes(w)))
     case 'contains_all':
       if (actual == null) return false
-      return wantStr.every((w) => actStr.some((a) => a === w || a.includes(w)))
+      if (Array.isArray(actual)) return wantStr.every((w) => actStr.includes(w))
+      return wantStr.every((w) => actStr.some((a) => a.includes(w)))
     case 'not_contains':
       if (actual == null) return true
+      if (Array.isArray(actual)) return !actStr.some((a) => wantStr.includes(a))
       return !wantStr.some((w) => actStr.some((a) => a.includes(w)))
     case 'startswith':
       return actStr.some((a) => wantStr.some((w) => a.startsWith(w)))

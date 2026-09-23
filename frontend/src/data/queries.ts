@@ -8,6 +8,8 @@ import { compileFilter, extractEventIds, getPath, type Filter, type SettingsLike
 export interface SearchResult<T> {
   rows: T[]
   truncated: boolean
+  /** the sort ran over this many matching rows, taken in time order, not over every match */
+  sampledFrom?: number
 }
 
 const HARD_CAP = 20000
@@ -25,28 +27,38 @@ function sortRows<T extends Record<string, unknown>>(rows: T[], field: string, d
   })
 }
 
-export async function searchEvents(caseId: number, filter: Filter, opts: { limit?: number; settings?: SettingsLike; signal?: AbortSignal } = {}): Promise<SearchResult<EventRow>> {
+export async function searchEvents(caseId: number, filter: Filter, opts: { limit?: number; settings?: SettingsLike; signal?: AbortSignal; cap?: number } = {}): Promise<SearchResult<EventRow>> {
   const db = getDb()
-  const limit = Math.min(opts.limit ?? 2000, HARD_CAP)
+  // how many matches a sort other than the index's own reads at most (lowered by the tests)
+  const cap = opts.cap ?? HARD_CAP
+  const limit = Math.min(opts.limit ?? 2000, cap)
   const pred = compileFilter(filter, { source: 'events', settings: opts.settings })
   const sort = filter.sort ?? { field: 'ts', dir: 'desc' }
   const ids = extractEventIds(filter.conditions, filter.logic)
   let rows: EventRow[]
   let truncated: boolean
   if (ids && ids.length && ids.length <= 50) {
-    rows = await db.events
-      .where('[caseId+eventId]')
-      .anyOf(ids.map((id) => [caseId, id] as [number, number]))
-      .filter((r) => pred(r as Record<string, unknown>))
-      .limit(HARD_CAP)
-      .toArray()
-    truncated = rows.length >= HARD_CAP
-    sortRows(rows as Record<string, unknown>[], sort.field, sort.dir)
-    if (rows.length > limit) {
-      rows = rows.slice(0, limit)
-      truncated = true
+    const keys = ids.map((id) => [caseId, id] as [number, number])
+    // The event-ID index gives rows in ingestion order. Sorting the first 20,000 of them showed a
+    // "newest" that was not the newest once a log held more. When every match fits, all are read and
+    // sorted; when not, a time sort walks the time index instead, which yields the true order.
+    const matching = await db.events.where('[caseId+eventId]').anyOf(keys).count()
+    if (matching <= cap || sort.field !== 'ts') {
+      rows = await db.events
+        .where('[caseId+eventId]')
+        .anyOf(keys)
+        .filter((r) => pred(r as Record<string, unknown>))
+        .limit(cap)
+        .toArray()
+      const sampled = matching > cap
+      truncated = rows.length >= cap
+      sortRows(rows as Record<string, unknown>[], sort.field, sort.dir)
+      if (rows.length > limit) {
+        rows = rows.slice(0, limit)
+        truncated = true
+      }
+      return { rows, truncated, ...(sampled ? { sampledFrom: cap } : {}) }
     }
-    return { rows, truncated }
   }
   const from = pred.from ?? Dexie.minKey
   const to = pred.to ?? Dexie.maxKey
@@ -64,16 +76,18 @@ export async function searchEvents(caseId: number, filter: Filter, opts: { limit
   }
   rows = await coll
     .filter((r) => pred(r as Record<string, unknown>))
-    .limit(HARD_CAP)
+    .limit(cap)
     .toArray()
-  rows = rows.concat((await undatedEvents(caseId, pred, HARD_CAP - rows.length)) as typeof rows)
-  truncated = rows.length >= HARD_CAP
+  rows = rows.concat((await undatedEvents(caseId, pred, cap - rows.length)) as typeof rows)
+  truncated = rows.length >= cap
+  // sorting by a column other than time reads at most cap matches first: say so when it did
+  const sampled = truncated
   sortRows(rows as Record<string, unknown>[], sort.field, sort.dir)
   if (rows.length > limit) {
     rows = rows.slice(0, limit)
     truncated = true
   }
-  return { rows, truncated }
+  return { rows, truncated, ...(sampled ? { sampledFrom: cap } : {}) }
 }
 
 /**
