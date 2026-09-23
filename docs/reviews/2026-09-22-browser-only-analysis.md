@@ -49,7 +49,18 @@
 >   - the archive member manifest in the UI;
 >   - an end-to-end test of the public configuration.
 >
-> Not yet done: the demo case, and the remaining unverified timeline defects (`timeline-hunting#D4` to `#D9`).
+> Phase 1, as of 2026-09-23 (same branch, not yet deployed):
+> - **Reports:** a preflight keeps a report a draft until each check passes or is waived with a printed reason.
+> - **Microsoft 365 (3a):** UAL records and Graph sign-ins deduplicated on their ids, within an upload and across the case; sign-in session, token, protocol, method and conditional-access fields kept; MailItemsAccessed and delete message ids linked to the mailbox.
+> - **Ingest journal:** an import cut short by a closed tab is found by its free Web Lock at the next start, its partial rows removed.
+> - **Identity in chains:** an authentication campaign joins the phished person's chain whatever the account spelling, so the lab reads to five chains before and after the rule run.
+> - **Static split (6a):** Caddy serves the app from its own image, the parser answers `/api/*` only, and an update validates the proxy first. Not run against a real Caddy on the development machine; the CI job serves the image and checks headers and routing.
+> - **Query worker (timeline-hunting#D7):** browser-store queries run in workers and stop when no longer wanted.
+> - **Demo case:** written by the browser path from the lab, restored without an upload.
+> - **Golden corpus:** the lab's parsed rows frozen row by row. EVTX-ATTACK-SAMPLES in CI is still to do.
+> - Found on the way: a file dropped before `/api/health` answered skipped the notice; fixed.
+>
+> Still open: EVTX-ATTACK-SAMPLES in CI, the remaining unverified timeline defects (`timeline-hunting#D4` to `#D9`), and the rest of Phase 1 (1a-1d, 2a-2c, 3b, 4a-4b).
 
 ## 0. How this was done
 
