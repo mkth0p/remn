@@ -391,3 +391,49 @@ def test_a_sign_in_keeps_what_ties_it_to_its_token():
         }
     )
     assert portal["data"]["sessionId"] == "s-1" and portal["data"]["uniqueTokenIdentifier"] == "t-1" and "[device code]" in portal["summary"]
+
+
+def _graph_record(operation: str, audit: dict, **top) -> dict:
+    """An auditLogRecord as the Graph audit log query returns it (Microsoft-Extractor-Suite Get-UALGraph)."""
+    return {
+        "id": str(uuid.uuid4()),
+        "createdDateTime": "2026-09-01T10:00:00Z",
+        "auditLogRecordType": "exchangeAdmin",
+        "operation": operation,
+        "service": "Exchange",
+        "userPrincipalName": "alice@contoso.com",
+        "clientIp": "203.0.113.7",
+        "auditData": audit,
+        **top,
+    }
+
+
+def test_graph_audit_log_query_records_are_read(tmp_path):
+    # The Graph API writes the record under auditData (lowercase a); such a file was detected as a
+    # UAL export and then gave no row at all.
+    full = _graph_record(
+        "Set-Mailbox",
+        {
+            "CreationTime": "2026-09-01T10:00:00",
+            "Id": str(uuid.uuid4()),
+            "Operation": "Set-Mailbox",
+            "Workload": "Exchange",
+            "UserId": "alice@contoso.com",
+            "ClientIP": "203.0.113.7",
+            "ObjectId": "alice@contoso.com",
+            "Parameters": [{"Name": "ForwardingSmtpAddress", "Value": "smtp:drop@evil.example"}],
+        },
+    )
+    # a record whose auditData omits what the envelope already says
+    sparse = _graph_record(
+        "New-InboxRule", {"Id": str(uuid.uuid4()), "Parameters": [{"Name": "Name", "Value": "."}, {"Name": "DeleteMessage", "Value": "True"}]}
+    )
+    for name, data in (("graph.json", json.dumps([full, sparse])), ("graph.jsonl", json.dumps(full) + "\n" + json.dumps(sparse) + "\n")):
+        f = tmp_path / name
+        f.write_text(data, encoding="utf-8")
+        assert m365.detect_format(f.name, f.read_bytes()[:4096]) == "m365-ual-json"
+        rows = list(m365.iter_records(str(f), None, "m365-ual-json"))
+        assert [r["operation"] for r in rows] == ["Set-Mailbox", "New-InboxRule"], name
+        assert rows[0]["data"]["ForwardingSmtpAddress"] == "smtp:drop@evil.example"
+        assert all(r["subjectUser"] == "alice@contoso.com" and r["ipAddress"] == "203.0.113.7" and r["ts"] for r in rows)
+        assert rows[1]["channel"] == "Exchange" and rows[1]["data"]["DeleteMessage"] == "True"

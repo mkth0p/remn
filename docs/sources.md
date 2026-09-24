@@ -60,7 +60,9 @@ events table:
 
 - the Unified Audit Log as CSV (Purview export, Invictus Microsoft-Extractor-Suite,
   Office-365-Extractor: any CSV with an `AuditData` column) or JSON (an array or NDJSON
-  of AuditData objects, Untitled Goose Tool output);
+  of AuditData objects, Untitled Goose Tool output, or the records of the Graph audit log
+  query, whose record sits under `auditData`, as Microsoft-Extractor-Suite's `Get-UALGraph`
+  writes them);
 - Entra ID sign-ins as Graph JSON (`Get-EntraSignInLogs`, Goose) or the portal's CSV
   export; a `.zip` of a whole acquisition folder is walked.
 

@@ -129,6 +129,10 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   Verdicts are now ranked malicious, suspicious, clean.
 - Reputation lookups honour their deadline: calls still queued when it passes are cancelled
   and reported with the verdict `timeout`, instead of running on after the answer was sent.
+- Fixed: Unified Audit Log records from the Graph audit log query (Microsoft-Extractor-Suite
+  `Get-UALGraph`), which carry the record under `auditData`, were recognised and then gave no
+  row. They are read, and a record that omits its time, operation, user, IP or workload takes
+  them from the Graph envelope.
 
 ## 0.1.1 (2026-09-07)
 
