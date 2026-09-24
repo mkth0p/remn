@@ -180,3 +180,14 @@ describe('case-sensitive operators', () => {
     expect(matchCondition({ subject: null }, { field: 'subject', op: 'contains_cs', value: 'x' })).toBe(false)
   })
 })
+
+describe('what converted Sigma rules rely on', () => {
+  it('honours a leading inline flag group and case-sensitive lists', () => {
+    expect(matchCondition({ commandLine: 'begin\nend' }, { field: 'commandLine', op: 're', value: '(?s)begin.end' })).toBe(true)
+    expect(matchCondition({ commandLine: 'begin\nend' }, { field: 'commandLine', op: 're', value: 'begin.end' })).toBe(false)
+    const enc = { field: 'commandLine', op: 'contains_cs' as const, value: ['SQBFAFgA', 'kARQBYA'] }
+    expect(matchCondition({ commandLine: '-enc eABTAFEAQgBGAEEARgBnAEEA' }, enc)).toBe(false)
+    expect(matchCondition({ commandLine: '-enc SQBFAFgAIAAoAE4AZQB3AA==' }, enc)).toBe(true)
+    expect(matchCondition({ commandLine: '-enc sqbfafgaiaaoae4azqb3aa==' }, enc)).toBe(false)
+  })
+})

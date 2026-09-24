@@ -137,6 +137,15 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   2026) revoked `T1562.x`, `T1070.001` and `T1656` for `T1685` to `T1690` and `T1684.x`, and 22
   core rules still carried the old ones. Fixed with it: the report's defense-evasion badge knew
   only the old ids, so the 137 SigmaHQ rules tagged `T1685` lit no badge.
+- Fixed: the Sigma converter, used for the SigmaHQ packs and for rules imported in the Rules
+  view, turned `|neq` into its opposite and ignored `|cased` and the regex flags `m` and `s`.
+  They now keep their meaning. A rule with a modifier outside the Sigma 2.1 list, or with
+  `fieldref`, `expand` or a time-part modifier, is skipped instead of converted without it.
+  `base64`, `base64offset`, `utf16`, `utf16le`, `utf16be` and `wide` are translated into the
+  strings the encoded value can appear as, and IPv6 CIDRs of one address or of a first-group
+  prefix (`fe80::/10`) into text conditions. The SigmaHQ packs, re-imported at the same
+  upstream commit, gain 28 rules; no existing rule changes. The `smbserver-connectivity` log
+  source maps to its channel, so the one new rule on it can fire.
 
 ## 0.1.1 (2026-09-07)
 

