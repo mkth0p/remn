@@ -18,12 +18,12 @@
     "paths": [
       "rules-emerging-threats"
     ],
-    "fetched": "2026-09-05"
+    "fetched": "2026-09-24"
   },
   "counts": {
     "upstream": 323,
-    "converted": 318,
-    "skipped": 5,
+    "converted": 320,
+    "skipped": 3,
     "warnings": 0
   },
   "skipReasons": [
@@ -33,14 +33,6 @@
     ],
     [
       "level informational",
-      1
-    ],
-    [
-      "IPv6 cidr ::1/128",
-      1
-    ],
-    [
-      "modifier |wide on CommandLine",
       1
     ]
   ],
@@ -58,18 +50,16 @@
     "printservice_admin.yaml": 1,
     "printservice_operational.yaml": 1,
     "process_access.yaml": 2,
-    "process_creation.yaml": 173,
+    "process_creation.yaml": 174,
     "ps_script.yaml": 4,
     "registry_add.yaml": 2,
     "registry_event.yaml": 8,
     "registry_set.yaml": 15,
     "security.yaml": 17,
+    "smbclient_connectivity.yaml": 1,
     "system.yaml": 11,
     "taskscheduler.yaml": 1,
     "windefend.yaml": 1
   },
-  "generator": "tools/import_community_rules.py",
-  "postprocessed": [
-    "migrate_community_packs 2026-09-23: Data -> message, '-' in EventData, alias empty checks, Sysmon 25 Type"
-  ]
+  "generator": "tools/import_community_rules.py"
 }

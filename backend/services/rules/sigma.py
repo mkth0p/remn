@@ -14,13 +14,21 @@ close enough that a faithful translation exists for the large structural subset:
 * condition expressions         -> any_of / all_of / not trees (1 of x*, all of them, ...)
 
 What is NOT translated (the rule is reported as skipped, never silently weakened):
-base64 / base64offset / utf16 / wide / fieldref / expand modifiers, aggregation expressions
-(``| count() > 5``), ``N of`` with 1 < N < all, non-Windows products, CIDR prefixes that are not
-/8, /16, /24 or /32, and correlation rules.
+fieldref / expand and the time-part modifiers (minute ... year), any modifier outside the
+Sigma 2.1 appendix, aggregation expressions (``| count() > 5``), ``N of`` with 1 < N < all,
+non-Windows products, IPv6 CIDRs other than one address or a prefix on the first group,
+encodings of values with wildcards, and correlation rules.
+
+Encodings (base64, base64offset, utf16 / wide) are expanded into the literal strings the
+encoded value can appear as, matched case-sensitively; ``neq`` becomes a negated equality;
+``cased`` selects the case-sensitive operators; the regex flags ``m`` and ``s`` travel as an
+inline flag group, which both engines honour.
 """
 from __future__ import annotations
 
+import base64
 import fnmatch
+import ipaddress
 import re
 from typing import Any
 
@@ -113,6 +121,7 @@ SERVICE_MAP: dict[str, dict[str, Any]] = {
     "applocker": {"channel|contains": "applocker"},
     "smbclient-security": {"channel|contains": "smbclient/security"},
     "smbclient-connectivity": {"channel|contains": "smbclient/connectivity"},
+    "smbserver-connectivity": {"channel|contains": "smbserver/connectivity"},
     "openssh": {"channel|contains": "openssh"},
     "shell-core": {"channel|contains": "shell-core"},
     "appxdeployment-server": {"channel|contains": "appxdeployment-server"},
@@ -139,9 +148,18 @@ SERVICE_MAP: dict[str, dict[str, Any]] = {
     "eventlog": {"channel|in": ["Security", "System", "Application"]},
 }
 
-UNSUPPORTED_MODIFIERS = {"base64", "base64offset", "utf16", "utf16le", "utf16be", "wide", "fieldref", "expand", "exists_ref"}
+# Every modifier of the Sigma 2.1 appendix. Anything else (a typo, a later spec) is refused:
+# a modifier that is ignored changes what the rule means.
+KNOWN_MODIFIERS = {
+    "all", "startswith", "endswith", "contains", "exists", "cased", "neq", "windash", "re", "i", "m", "s",
+    "base64", "base64offset", "utf16le", "utf16be", "utf16", "wide", "lt", "lte", "gt", "gte",
+    "minute", "hour", "day", "week", "month", "year", "cidr", "expand", "fieldref",
+}
+UNSUPPORTED_MODIFIERS = {"fieldref", "expand", "minute", "hour", "day", "week", "month", "year"}
+TEXT_ENCODINGS = {"utf16le": "utf-16-le", "wide": "utf-16-le", "utf16be": "utf-16-be", "utf16": "utf-16"}
 STRING_MODIFIERS = {"contains", "startswith", "endswith"}
 NUMERIC_MODIFIERS = {"gt", "gte", "lt", "lte"}
+CASED_OPS = {"contains": "contains_cs", "startswith": "startswith_cs", "endswith": "endswith_cs"}
 
 
 class Unsupported(Exception):
@@ -239,10 +257,76 @@ def _octet_range_regex(lo: int, hi: int) -> str:
     return "(?:" + "|".join(parts) + ")"
 
 
-def _cidr_prefix(cidr: str) -> tuple[str, str]:
+def _cidr6(cidr: str) -> tuple[str, Any]:
+    """
+    An IPv6 CIDR as text conditions: one address in its written forms, or a prefix within the
+    first group when that group has four digits whatever the notation (fe80::/10, fc00::/7).
+    """
+    try:
+        net = ipaddress.IPv6Network(cidr, strict=False)
+    except ValueError as exc:
+        raise Unsupported(f"IPv6 cidr {cidr}") from exc
+    if net.prefixlen == 128:
+        a = net.network_address
+        return "in", sorted({a.compressed, a.exploded, ":".join(f"{int(g, 16):x}" for g in a.exploded.split(":"))})
+    first = int(net.network_address) >> 112
+    if net.prefixlen > 16 or first < 0x1000:
+        raise Unsupported(f"IPv6 cidr {cidr}")
+    h = f"{first:04x}"
+    full, part = divmod(net.prefixlen, 4)
+    rx = h[:full]
+    if part:
+        base = int(h[full], 16) & (0xF << (4 - part)) & 0xF
+        rx += "[" + "".join(f"{base + k:x}" for k in range(1 << (4 - part))) + "]"
+        full += 1
+    return "re", "^" + rx + "[0-9a-f]" * (4 - full) + ":"
+
+
+def _encoded_values(values: list[Any], mods: list[str]) -> list[list[str]] | None:
+    """
+    base64 / base64offset / utf16* / wide, applied in the rule's order: for each value, the
+    literal strings it can appear as once encoded (base64offset gives the three alignments,
+    trimmed of the characters that depend on the neighbouring bytes). None without encodings.
+    """
+    chain = [m for m in mods if m in TEXT_ENCODINGS or m in ("base64", "base64offset")]
+    if not chain:
+        return None
+    texts = [m for m in chain if m in TEXT_ENCODINGS]
+    # the one meaningful shape: an optional text encoding, then a single base64 step
+    if len(texts) > 1 or chain[-1] not in ("base64", "base64offset") or len(chain) - len(texts) != 1:
+        raise Unsupported(f"encoding modifiers in this order: |{'|'.join(chain)}")
+    text_enc = TEXT_ENCODINGS[texts[0]] if texts else "utf-8"
+    out: list[list[str]] = []
+    for v in values:
+        text = str(v)
+        if _has_wildcard(text):
+            raise Unsupported("wildcard in a base64-encoded value")
+        data = _unescape(text).encode(text_enc)
+        if chain[-1] == "base64":
+            variants = [base64.b64encode(data).decode()]
+        else:
+            starts, ends = (0, 2, 3), (None, -3, -2)
+            variants = [base64.b64encode(b"\0" * i + data)[starts[i] : ends[(len(data) + i) % 3]].decode() for i in range(3)]
+        if any(len(x) < 4 for x in variants):
+            raise Unsupported(f"value too short to search encoded: {text!r}")
+        out.append(sorted(set(variants)))
+    return out
+
+
+def _with_flags(pattern: str, flags: str) -> str:
+    """Prefix a regex with an inline flag group, merged with one it already starts with."""
+    if not flags:
+        return pattern
+    m = re.match(r"^\(\?([a-zA-Z]+)\)", pattern)
+    if m:
+        return "(?" + "".join(sorted(set(m.group(1) + flags))) + ")" + pattern[m.end() :]
+    return f"(?{flags}){pattern}"
+
+
+def _cidr_prefix(cidr: str) -> tuple[str, Any]:
     net, _, bits = cidr.partition("/")
     if ":" in net:
-        raise Unsupported(f"IPv6 cidr {cidr}")
+        return _cidr6(cidr)
     parts = net.split(".")
     if len(parts) != 4:
         raise Unsupported(f"cidr {cidr}")
@@ -276,15 +360,31 @@ def compile_field(raw_field: str, value: Any, aliases: dict[str, list[str]], war
     name, *mods = raw_field.split("|")
     mods = [m for m in mods if m]
     for m in mods:
+        if m not in KNOWN_MODIFIERS:
+            raise Unsupported(f"unknown modifier |{m} on {name}")
         if m in UNSUPPORTED_MODIFIERS:
             raise Unsupported(f"modifier |{m} on {name}")
-    if "cased" in mods:
-        warnings.append(f"{name}: |cased ignored (REMN matches case-insensitively)")
+    if any(f in mods for f in ("i", "m", "s")) and "re" not in mods:
+        raise Unsupported(f"regex flag without |re on {name}")
+    all_mode = "all" in mods
+    values = value if isinstance(value, list) else [value]
+    if "neq" in mods:
+        # not equal: the negation of the same field without neq, per value (a list is any of them, |all every one)
+        rest = "|".join([name] + [m for m in mods if m not in ("neq", "all")])
+        parts = [{"not": compile_field(rest, v, aliases, warnings)} for v in values]
+        return parts[0] if len(parts) == 1 else ({"all_of": parts} if all_mode else {"any_of": parts})
     # "'|all': [...]" (a modifier with no field) is a keyword search over the whole event
     keywords = name == ""
     targets = ["raw"] if keywords else (aliases.get(name) or [SPECIAL_FIELDS.get(name) or _parser_field(name) or f"data.{name}"])
-    all_mode = "all" in mods
-    values = value if isinstance(value, list) else [value]
+    encoded = _encoded_values(values, mods)
+    if encoded is not None:
+        # encoded text is case-sensitive: the _cs operators match it exactly
+        smod = next((m for m in mods if m in STRING_MODIFIERS), None)
+        op = CASED_OPS.get(smod or "", "eq")
+        groups = [_spread(targets, "in" if op == "eq" and len(g) > 1 else op, g if len(g) > 1 else g[0]) for g in encoded]
+        return {"all_of": groups} if all_mode and len(groups) > 1 else _any_of(groups)
+    if "cased" in mods and not any(m in STRING_MODIFIERS or m in ("re", "windash") for m in mods):
+        warnings.append(f"{name}: |cased equality matched case-insensitively (REMN has no case-sensitive eq)")
 
     # numeric comparisons
     num = next((m for m in mods if m in NUMERIC_MODIFIERS), None)
@@ -297,7 +397,9 @@ def compile_field(raw_field: str, value: Any, aliases: dict[str, list[str]], war
     if "cidr" in mods:
         return _any_of([_spread(targets, *_cidr_prefix(str(v))) for v in values])
     if "re" in mods:
-        pats = [str(v) for v in values]
+        # i / m / s as an inline group; REMN regexes are case-insensitive already
+        flags = "".join(f for f in ("m", "s") if f in mods)
+        pats = [_with_flags(str(v), flags) for v in values]
         if all_mode:
             return {"all_of": [_spread(targets, "re", p) for p in pats]}
         return _spread(targets, "re", pats if len(pats) > 1 else pats[0])
@@ -322,6 +424,11 @@ def compile_field(raw_field: str, value: Any, aliases: dict[str, list[str]], war
                 return {"all_of": [_spread(targets, "re", p) for p in pats]}
             return _spread(targets, "re", pats if len(pats) > 1 else pats[0])
         strs = [_unescape(s) for s in strs]
+        if "cased" in mods:
+            op = CASED_OPS[smod]
+            if all_mode:
+                return {"all_of": [_spread(targets, op, s) for s in strs]}
+            return _spread(targets, op, strs if len(strs) > 1 else strs[0])
         if all_mode:
             if smod == "contains":
                 return _spread(targets, "contains_all", strs)

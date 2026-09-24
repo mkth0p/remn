@@ -117,19 +117,24 @@ converted to the rule language so both engines run them without a converter roun
 
 | pack | upstream | rules | default |
 |---|---|---|---|
-| `sigma-windows` | SigmaHQ `rules/` (Windows, stable and test) | 2,374 of 2,410 | on |
-| `sigma-emerging-threats` | SigmaHQ `rules-emerging-threats/` (Windows) | 319 of 323 | on |
-| `sigma-threat-hunting` | SigmaHQ `rules-threat-hunting/` (Windows) | 116 of 128 | off (noisy by design) |
+| `sigma-windows` | SigmaHQ `rules/` (Windows, stable and test) | 2,387 of 2,410 | on |
+| `sigma-emerging-threats` | SigmaHQ `rules-emerging-threats/` (Windows) | 320 of 323 | on |
+| `sigma-threat-hunting` | SigmaHQ `rules-threat-hunting/` (Windows) | 117 of 128 | off (noisy by design) |
 | `sublime` | sublime-security `detection-rules/` | 189 of 1,227 | on |
 
 Each pack directory holds the rules grouped by log source (`process_creation.yaml`,
 `registry_set.yaml`, …) or by Sublime rule family, a `pack.json` manifest with the
 upstream repository, the exact commit, the licence and the counts, the upstream
 `LICENSE` verbatim, and `skipped.json` naming every upstream rule that was not converted
-and why. A rule is skipped rather than weakened: base64, utf16 and fieldref modifiers,
-IPv6 CIDRs, `file_access` sources, Sublime ML classifiers, `file.explode`, link
-analysis, and so on. The SigmaHQ rules are redistributed under the Detection Rule
-License 1.1, the Sublime rules under MIT.
+and why. A rule is skipped rather than weakened: `fieldref`, `expand` and the time-part
+modifiers, any modifier outside the Sigma 2.1 list, `file_access` sources, Sublime ML
+classifiers, `file.explode`, link analysis, and so on. What translates exactly is
+translated: `base64`, `base64offset` and `utf16`/`wide` values become the literal strings
+the encoded value can appear as (all three alignments), matched case-sensitively; `neq`
+becomes a negated equality; `cased` selects the case-sensitive operators; the regex flags
+`m` and `s` travel as an inline group; IPv6 CIDRs translate when they name one address or
+a prefix within the first group (`::1/128`, `fe80::/10`, `fc00::/7`). The SigmaHQ rules are
+redistributed under the Detection Rule License 1.1, the Sublime rules under MIT.
 
 The Rules page lists the packs with a toggle each. `/api/meta` only carries the
 manifests; a pack's rules are fetched once per session from

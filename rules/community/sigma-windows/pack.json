@@ -18,19 +18,15 @@
     "paths": [
       "rules"
     ],
-    "fetched": "2026-09-05"
+    "fetched": "2026-09-24"
   },
   "counts": {
     "upstream": 2410,
-    "converted": 2364,
-    "skipped": 46,
+    "converted": 2387,
+    "skipped": 23,
     "warnings": 1
   },
   "skipReasons": [
-    [
-      "IPv6 cidr ::1/128",
-      17
-    ],
     [
       "level informational",
       10
@@ -40,19 +36,7 @@
       7
     ],
     [
-      "modifier |base64offset on CommandLine",
-      4
-    ],
-    [
-      "modifier |base64offset on ServiceFileName",
-      1
-    ],
-    [
       "modifier |fieldref on SubjectUserName",
-      1
-    ],
-    [
-      "modifier |base64offset on ImagePath",
       1
     ],
     [
@@ -68,11 +52,11 @@
       1
     ],
     [
-      "modifier |fieldref on User",
+      "IPv6 cidr 2603:1006::/40",
       1
     ],
     [
-      "modifier |base64offset on Destination",
+      "modifier |fieldref on User",
       1
     ]
   ],
@@ -104,14 +88,14 @@
     "lsa_server.yaml": 1,
     "microsoft_servicebus_client.yaml": 1,
     "msexchange_management.yaml": 7,
-    "network_connection.yaml": 38,
+    "network_connection.yaml": 50,
     "ntlm.yaml": 3,
     "openssh.yaml": 1,
     "other.yaml": 1,
     "pipe_created.yaml": 16,
     "powershell_classic.yaml": 3,
     "process_access.yaml": 23,
-    "process_creation.yaml": 1179,
+    "process_creation.yaml": 1183,
     "process_tampering.yaml": 1,
     "ps_classic_provider_start.yaml": 1,
     "ps_classic_start.yaml": 9,
@@ -122,22 +106,20 @@
     "registry_delete.yaml": 10,
     "registry_event.yaml": 32,
     "registry_set.yaml": 203,
-    "security.yaml": 136,
+    "security.yaml": 140,
     "security_mitigations.yaml": 2,
     "shell_core.yaml": 1,
     "smbclient_security.yaml": 1,
+    "smbserver_connectivity.yaml": 1,
     "sysmon.yaml": 4,
     "sysmon_error.yaml": 1,
     "sysmon_status.yaml": 1,
-    "system.yaml": 61,
+    "system.yaml": 62,
     "taskscheduler.yaml": 3,
     "terminalservices_localsessionmanager.yaml": 1,
     "windefend.yaml": 15,
     "wmi.yaml": 2,
-    "wmi_event.yaml": 2
+    "wmi_event.yaml": 3
   },
-  "generator": "tools/import_community_rules.py",
-  "postprocessed": [
-    "migrate_community_packs 2026-09-23: Data -> message, '-' in EventData, alias empty checks, Sysmon 25 Type"
-  ]
+  "generator": "tools/import_community_rules.py"
 }
