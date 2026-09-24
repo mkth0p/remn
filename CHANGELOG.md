@@ -124,6 +124,9 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   network; `REMN_HOSTS='*'` switches the host check off. `docker-compose.open.yml` is the
   behind-a-proxy configuration in one file (full build, no checks, port 8300 on loopback),
   with `deploy/apache-remn.conf` as the matching virtual host.
+- Fixed: a mail tied to both a malicious and a suspicious indicator was marked `suspicious`
+  in server cases, because the worst verdict was the alphabetical maximum of the labels.
+  Verdicts are now ranked malicious, suspicious, clean.
 
 ## 0.1.1 (2026-09-07)
 
