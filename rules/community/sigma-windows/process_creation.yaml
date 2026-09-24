@@ -339,9 +339,9 @@ where:
     - parentImage|exists: false
       parentProcessName|exists: false
     - data.ParentImage: '-'
+    - data.ParentProcessName: '-'
     - parentImage: ''
       parentProcessName: ''
-    - data.ParentProcessName: '-'
 sigma:
   id: 01d2e2a1-5f09-44f7-9fc1-24faa7479b6d
   status: test
@@ -5656,9 +5656,9 @@ where:
       - parentImage|exists: false
         parentProcessName|exists: false
       - data.ParentImage: '-'
+      - data.ParentProcessName: '-'
       - parentImage: ''
         parentProcessName: ''
-      - data.ParentProcessName: '-'
   - not:
       any_of:
       - any_of:
@@ -27178,12 +27178,12 @@ where:
       - image|exists: false
         processName|exists: false
       - data.Image: '-'
-      - image: ''
-        processName: ''
       - data.ProcessName: '-'
       - data.NewProcessName: '-'
       - data.Process Name: '-'
       - data.TargetProcessName: '-'
+      - image: ''
+        processName: ''
       - image|in:
         - MemCompression
         - Registry
@@ -35147,9 +35147,9 @@ where:
       - parentImage|exists: false
         parentProcessName|exists: false
       - data.ParentImage: '-'
+      - data.ParentProcessName: '-'
       - parentImage: ''
         parentProcessName: ''
-      - data.ParentProcessName: '-'
   - not:
       any_of:
       - parentImage|endswith: :\Program Files\Microsoft Monitoring Agent\Agent\MonitoringHost.exe
@@ -36969,9 +36969,9 @@ where:
     - parentImage|exists: false
       parentProcessName|exists: false
     - data.ParentImage: '-'
+    - data.ParentProcessName: '-'
     - parentImage: ''
       parentProcessName: ''
-    - data.ParentProcessName: '-'
 sigma:
   id: 96036718-71cc-4027-a538-d1587e0006a7
   status: test
@@ -38719,9 +38719,9 @@ where:
         - parentImage: C:\Windows\System32\winlogon.exe
         - parentProcessName: C:\Windows\System32\winlogon.exe
         - data.ParentImage: '-'
+        - data.ParentProcessName: '-'
         - parentImage: ''
           parentProcessName: ''
-        - data.ParentProcessName: '-'
         - parentImage|exists: false
           parentProcessName|exists: false
 sigma:
@@ -47642,12 +47642,12 @@ where:
       - image|contains: :\$Extend\$Deleted\
       - processName|contains: :\$Extend\$Deleted\
       - data.Image: '-'
-      - image: ''
-        processName: ''
       - data.ProcessName: '-'
       - data.NewProcessName: '-'
       - data.Process Name: '-'
       - data.TargetProcessName: '-'
+      - image: ''
+        processName: ''
       - image|exists: false
         processName|exists: false
   - not:

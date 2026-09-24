@@ -16,7 +16,7 @@ tags:
 references:
 - https://www.splunk.com/en_us/blog/security/msix-weaponization-threat-detection-splunk.html
 where:
-  channel|contains: appxdeployment-server
+  channel|contains: appxdeploymentserver/operational
   eventId: 854
 sigma:
   id: 289dfa9e-e378-4a56-a9d4-7ed5ee218029

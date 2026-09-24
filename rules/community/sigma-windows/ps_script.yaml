@@ -22,7 +22,9 @@ tags:
 references:
 - https://www.akamai.com/blog/security-research/abusing-bad-successor-for-privilege-escalation-in-active-directory
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - New-ADServiceAccount
@@ -56,7 +58,9 @@ references:
 - https://twitter.com/nas_bench/status/1537919885031772161
 - https://lolbas-project.github.io/lolbas/Binaries/Msdt/
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - Invoke-TroubleshootingPack
@@ -97,7 +101,9 @@ references:
 - https://github.com/PowerShellMafia/PowerSploit/blob/1980f403ee78234eae4d93b50890d02f827a099f/CodeExecution/Invoke-Shellcode.ps1
 - https://thedfirreport.com/2021/08/29/cobalt-strike-a-defenders-guide/
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   any_of:
   - scriptBlockText|contains_all:
@@ -152,7 +158,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1546.013/T1546.013.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains: Add-Content $profile
   scriptBlockText|contains_any:
@@ -195,7 +203,9 @@ references:
 - https://www.powershellgallery.com/packages/DSInternals
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1003.006/T1003.006.md#atomic-test-2---run-dsinternals-get-adreplaccount
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - Get-ADReplAccount
@@ -229,7 +239,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1036.003/T1036.003.md
 - https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/start-process?view=powershell-7.6
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - 'Start-Process '
@@ -268,7 +280,9 @@ references:
 - https://github.com/S3cur3Th1sSh1t/Creds/blob/eac23d67f7f90c7fc8e3130587d86158c22aa398/PowershellScripts/jaws-enum.ps1
 - https://www.absolomb.com/2018-01-26-Windows-Privilege-Escalation-Guide/
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - 'Get-WmiObject '
@@ -309,7 +323,9 @@ tags:
 references:
 - https://github.com/SigmaHQ/sigma/issues/1009
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|re: cmd.{0,5}(?:/c|/r)(?:\s|)"set\s[a-zA-Z]{3,6}.*(?:\{\d\}){1,}\\"\s+?-f(?:.*\)){1,}.*"
 sigma:
@@ -345,7 +361,9 @@ references:
 - https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.eventing.reader.eventlogsession.clearlog?view=windowsdesktop-9.0&viewFallbackFrom=dotnet-plat-ext-5.0#System_Diagnostics_Eventing_Reader_EventLogSession_ClearLog_System_String_
 - https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.eventlog.clear
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   any_of:
   - scriptBlockText|contains_any:
@@ -390,7 +408,9 @@ references:
 - https://4sysops.com/archives/use-powershell-to-download-a-file-with-http-https-and-ftp/
 - https://blog.jourdant.me/post/3-ways-to-download-files-with-powershell
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - '[System.Net.WebRequest]::create'
@@ -436,7 +456,9 @@ tags:
 references:
 - https://medium.com/palantir/tampering-with-windows-event-tracing-background-offense-and-defense-4be7ac62ac63
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   any_of:
   - scriptBlockText|contains: 'Remove-EtwTraceProvider '
@@ -474,7 +496,9 @@ references:
 - https://learn.microsoft.com/en-us/powershell/module/defender/set-mppreference?view=windowsserver2022-ps
 - https://bidouillesecurity.com/disable-windows-defender-in-powershell/
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   any_of:
   - scriptBlockText|contains: Set-MpPreference
@@ -563,7 +587,9 @@ references:
 - https://www.virustotal.com/gui/file/af1c82237b6e5a3a7cdbad82cc498d298c67845d92971bada450023d1335e267/content
 where:
   all_of:
-  - channel|contains: powershell/operational
+  - channel|contains_any:
+    - powershell/operational
+    - powershellcore/operational
     eventId: 4104
   - scriptBlockText|contains: 'Add-WindowsCapability '
   - scriptBlockText|contains: -Name OpenSSH.
@@ -596,7 +622,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1083/T1083.md
 - https://www.mandiant.com/resources/tactics-techniques-procedures-associated-with-maze-ransomware-incidents
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - foreach
@@ -636,7 +664,9 @@ tags:
 references:
 - https://twitter.com/cyb3rops/status/1063072865992523776
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - OiCAAAAYInlM
@@ -671,7 +701,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1110.001/T1110.001.md#atomic-test-2---brute-force-credentials-of-single-active-directory-domain-user-via-ldap-against-domain-controller-ntlm-or-kerberos
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - System.DirectoryServices.Protocols.LdapDirectoryIdentifier
@@ -705,7 +737,9 @@ tags:
 references:
 - https://www.elastic.co/guide/en/security/current/potential-invoke-mimikatz-powershell-script.html#potential-invoke-mimikatz-powershell-script
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   any_of:
   - scriptBlockText|contains_all:
@@ -743,7 +777,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1573/T1573.md#atomic-test-1---openssl-c2
 - https://medium.com/walmartglobaltech/openssl-server-reverse-shell-from-windows-client-aee2dbfa0926
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - System.Net.Security.SslStream
@@ -779,7 +815,9 @@ tags:
 references:
 - https://github.com/danielbohannon/Invoke-Obfuscation/blob/f20e7f843edd0a3a7716736e9eddfa423395dd26/Out-ObfuscatedStringCommand.ps1#L873-L888
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   any_of:
   - scriptBlockText|re: \$PSHome\[\s*\d{1,3}\s*\]\s*\+\s*\$PSHome\[
@@ -818,7 +856,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1021.002/T1021.002.md#atomic-test-2---map-admin-share-powershell
 - https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/new-psdrive?view=powershell-7.2
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - New-PSDrive
@@ -857,7 +897,9 @@ references:
 - https://github.com/hlldz/Phant0m/blob/30c2935d8cf4aafda17ee2fab7cd0c4aa9a607c2/old/Invoke-Phant0m.ps1
 - https://gist.github.com/MHaggis/0dbe00ad401daa7137c81c99c268cfb7
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - System.Reflection.Assembly.Load($
@@ -898,7 +940,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1018/T1018.md#atomic-test-15---enumerate-domain-computers-within-active-directory-using-directorysearcher
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - 'New-Object '
@@ -935,7 +979,9 @@ tags:
 references:
 - https://github.com/SigmaHQ/sigma/issues/1009
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - new-object
@@ -972,7 +1018,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1003.002/T1003.002.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - Import-Module "$Env:Temp\
@@ -1023,7 +1071,9 @@ references:
 - https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/set-service?view=powershell-7.2
 where:
   all_of:
-  - channel|contains: powershell/operational
+  - channel|contains_any:
+    - powershell/operational
+    - powershellcore/operational
     eventId: 4104
   - scriptBlockText|contains_any:
     - '-SecurityDescriptorSddl '
@@ -1072,7 +1122,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1574.012/T1574.012.md#atomic-test-3---registry-free-process-scope-cor_profiler
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - $env:COR_ENABLE_PROFILING
@@ -1107,7 +1159,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1136.001/T1136.001.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains: New-LocalUser
 sigma:
@@ -1140,7 +1194,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1518/T1518.md
 - https://github.com/harleyQu1nn/AggressorScripts
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - get-itemProperty
@@ -1175,7 +1231,9 @@ tags:
 references:
 - https://gist.github.com/hook-s3c/7363a856c3cdbadeb71085147f042c1a
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   any_of:
   - scriptBlockText|contains_all:
@@ -1220,7 +1278,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1114.001/T1114.001.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - Get-Inbox.ps1
@@ -1257,7 +1317,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1553.005/T1553.005.md#atomic-test-1---mount-iso-image
 - https://learn.microsoft.com/en-us/powershell/module/storage/mount-diskimage?view=windowsserver2022-ps
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - 'Mount-DiskImage '
@@ -1298,7 +1360,9 @@ references:
 - https://www.nextron-systems.com/2025/07/29/detecting-the-most-popular-mitre-persistence-method-registry-run-keys-startup-folder/
 - https://detect.fyi/hunting-fileless-malware-in-the-windows-registry-1339ccde00ad
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - CreateObject
@@ -1331,7 +1395,9 @@ tags:
 references:
 - https://github.com/HarmJ0y/DAMP
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - win32_Trustee
@@ -1372,7 +1438,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1564.003/T1564.003.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - powershell
@@ -1415,7 +1483,9 @@ references:
 - https://m0chan.github.io/2019/07/31/How-To-Attack-Kerberos-101.html
 - https://github.com/GhostPack/Rubeus
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - 'asreproast '
@@ -1462,7 +1532,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1218/T1218.md
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1056.001/src/Get-Keystrokes.ps1
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   any_of:
   - scriptBlockText|contains: Get-Keystrokes
@@ -1496,7 +1568,9 @@ tags:
 references:
 - https://www.blackhillsinfosec.com/windows-event-logs-for-red-teams/
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - Write-EventLog
@@ -1532,7 +1606,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1053.005/T1053.005.md#atomic-test-4---powershell-cmdlet-scheduled-task
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1053.005/T1053.005.md#atomic-test-6---wmi-invoke-cimmethod-scheduled-task
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   any_of:
   - scriptBlockText|contains_any:
@@ -1584,7 +1660,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1018/T1018.md
 - https://github.com/redcanaryco/atomic-red-team/blob/02cb591f75064ffe1e0df9ac3ed5972a2e491c97/atomics/T1087.002/T1087.002.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains: 'Get-AdComputer '
   scriptBlockText|contains_any:
@@ -1620,7 +1698,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1137.006/T1137.006.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - 'new-object '
@@ -1656,7 +1736,9 @@ references:
 - https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/set-acl?view=powershell-5.1
 where:
   all_of:
-  - channel|contains: powershell/operational
+  - channel|contains_any:
+    - powershell/operational
+    - powershellcore/operational
     eventId: 4104
   - scriptBlockText|contains_all:
     - 'Set-Acl '
@@ -1702,7 +1784,9 @@ references:
 - https://learn.microsoft.com/en-us/dotnet/api/system.type.gettypefromclsid?view=net-7.0
 - https://speakerdeck.com/heirhabarov/hunting-for-powershell-abuse?slide=57
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains: '[Type]::GetTypeFromCLSID('
   scriptBlockText|contains_any:
@@ -1751,7 +1835,9 @@ references:
 - https://www.group-ib.com/resources/threat-research/silence_2.0.going_global.pdf
 where:
   all_of:
-  - channel|contains: powershell/operational
+  - channel|contains_any:
+    - powershell/operational
+    - powershellcore/operational
     eventId: 4104
   - scriptBlockText|contains_all:
     - System.Diagnostics.Process
@@ -1795,7 +1881,9 @@ tags:
 references:
 - https://github.com/Shellntel/scripts/
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - Invoke-SMBAutoBrute
@@ -1830,7 +1918,9 @@ references:
 - https://learn.microsoft.com/en-us/dotnet/api/system.net.webclient.downloadstring?view=net-8.0
 - https://learn.microsoft.com/en-us/dotnet/api/system.net.webclient.downloadfile?view=net-8.0
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains: System.Net.WebClient
   scriptBlockText|contains_any:
@@ -1867,7 +1957,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1033/T1033.md#atomic-test-4---user-discovery-with-env-vars-powershell-script
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1033/T1033.md#atomic-test-5---getcurrent-user-with-powershell-script
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - '[System.Environment]::UserName'
@@ -1901,7 +1993,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1553.004/T1553.004.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   any_of:
   - scriptBlockText|contains_all:
@@ -1939,7 +2033,9 @@ references:
 - https://learn.microsoft.com/en-us/virtualization/hyper-v-on-windows/quick-start/enable-hyper-v
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1564.006/T1564.006.md#atomic-test-3---create-and-start-hyper-v-virtual-machine
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - New-VM
@@ -1974,7 +2070,9 @@ references:
 - https://twitter.com/NathanMcNulty/status/1569497348841287681
 - https://learn.microsoft.com/en-us/powershell/module/dnsclient/add-dnsclientnrptrule?view=windowsserver2022-ps
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - Add-DnsClientNrptRule
@@ -2012,7 +2110,9 @@ references:
 - http://woshub.com/manage-windows-firewall-powershell/
 - https://www.elastic.co/guide/en/security/current/windows-firewall-disabled-via-powershell.html
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - 'Set-NetFirewallProfile '
@@ -2052,7 +2152,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1531/T1531.md#atomic-test-3---remove-account-from-domain-admin-group
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - Remove-ADGroupMember
@@ -2087,7 +2189,9 @@ references:
 - https://peterjson.medium.com/reproducing-the-proxyshell-pwn2own-exploit-49743a4ea9a1
 - https://m365internals.com/2022/10/07/hunting-in-on-premises-exchange-server-logs/
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - New-MailboxExportRequest
@@ -2121,7 +2225,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1048.003/T1048.003.md#atomic-test-2---exfiltration-over-alternative-protocol---icmp
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - New-Object
@@ -2158,7 +2264,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1098/T1098.md#atomic-test-1---admin-account-manipulate
 - https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.localaccounts/?view=powershell-5.1
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - Disable-LocalUser
@@ -2197,7 +2305,9 @@ references:
 - https://speakerdeck.com/heirhabarov/hunting-for-powershell-abuse?slide=41
 - https://learn.microsoft.com/en-us/dotnet/api/microsoft.hpc.scheduler.store.cx509enrollmentwebclassfactoryclass?view=hpc-sdk-5.1.6115
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - X509Enrollment.CBinaryConverter
@@ -2231,7 +2341,9 @@ references:
 - https://learn.microsoft.com/en-us/windows/win32/projfs/enabling-windows-projected-file-system
 - https://learn.microsoft.com/en-us/windows/wsl/install-on-server
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - Enable-WindowsOptionalFeature
@@ -2273,7 +2385,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1553.005/T1553.005.md#atomic-test-3---remove-the-zoneidentifier-alternate-data-stream
 - https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/unblock-file?view=powershell-7.2
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - 'Unblock-File '
@@ -2309,7 +2423,9 @@ references:
 - https://www.cisa.gov/news-events/cybersecurity-advisories/aa24-241a
 - https://gist.github.com/MHaggis/7e67b659af9148fa593cf2402edebb41
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   any_of:
   - scriptBlockText|contains: Install-WindowsFeature WindowsPowerShellWebAccess
@@ -2345,7 +2461,9 @@ tags:
 references:
 - https://twitter.com/DissectMalware/status/1062879286749773824
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - Remove-Module
@@ -2378,7 +2496,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1555/T1555.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - vaultcmd
@@ -2417,7 +2537,9 @@ references:
 - https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies?view=powershell-7.4
 - https://adsecurity.org/?p=2604
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains: Set-ExecutionPolicy
   scriptBlockText|contains_any:
@@ -2457,7 +2579,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1556.002/T1556.002.md#atomic-test-1---install-and-register-password-filter-dll
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|re: (Copy-Item|cpi) .{2,128} -Destination .{1,32}\\Windows\\(System32|SysWOW64)
 sigma:
@@ -2489,7 +2613,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1070.005/T1070.005.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - Remove-SmbShare
@@ -2531,7 +2657,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1059.001/T1059.001.md#atomic-test-8---powershell-xml-requests
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - New-Object
@@ -2571,7 +2699,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1006/T1006.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - New-Object
@@ -2607,7 +2737,9 @@ tags:
 references:
 - https://github.com/SigmaHQ/sigma/issues/1009
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|re: cmd.{0,5}(?:/c|/r).+clip(?:\.exe)?.{0,4}&&.+clipboard]::\(\s\\"\{\d\}.+-f.+"
 sigma:
@@ -2640,7 +2772,9 @@ tags:
 references:
 - https://github.com/SigmaHQ/sigma/issues/1009
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|re: cmd.{0,5}(?:/c|/r).+powershell.+(?:\$?\{?input\}?|noexit).+"
 sigma:
@@ -2675,7 +2809,9 @@ references:
 - https://learn.microsoft.com/en-us/previous-versions/windows/desktop/ms766431(v=vs.85)
 - https://www.trendmicro.com/en_id/research/22/e/uncovering-a-kingminer-botnet-attack-using-trend-micro-managed-x.html
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - New-Object
@@ -2712,7 +2848,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1021.006/T1021.006.md#atomic-test-2---invoke-command
 - https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/invoke-command?view=powershell-7.4
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - 'invoke-command '
@@ -2745,7 +2883,9 @@ references:
 - https://twitter.com/malmoeb/status/1570814999370801158
 where:
   all_of:
-  - channel|contains: powershell/operational
+  - channel|contains_any:
+    - powershell/operational
+    - powershellcore/operational
     eventId: 4104
   - scriptBlockText|contains_any:
     - ls
@@ -2784,7 +2924,9 @@ tags:
 references:
 - https://github.com/FortyNorthSecurity/WMImplant
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - WMImplant
@@ -2836,7 +2978,9 @@ tags:
 references:
 - https://github.com/MichaelGrafnetter/DSInternals/blob/39ee8a69bbdc1cfd12c9afdd7513b4788c4895d4/Src/DSInternals.PowerShell/DSInternals.psd1
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - Add-ADDBSidHistory
@@ -2929,7 +3073,9 @@ tags:
 references:
 - https://web.archive.org/web/20220205033028/https://twitter.com/PythonResponder/status/1385064506049630211
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains: Get-Process lsass
 sigma:
@@ -2966,7 +3112,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1547.004/T1547.004.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains: CurrentVersion\Winlogon
   scriptBlockText|contains_any:
@@ -3015,7 +3163,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/4d6c4e8e23d465af7a2388620cfe3f8c76e16cf0/atomics/T1082/T1082.md
 - https://grep.app/search?q=winpwn&filter[repo][0]=redcanaryco/atomic-red-team
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - Offline_Winpwn
@@ -3052,7 +3202,9 @@ tags:
 references:
 - https://github.com/SigmaHQ/sigma/issues/1009
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|re: (?i)(set).*&&\s?set.*(environment|invoke|\$\{?input).*&&.*"
 sigma:
@@ -3085,7 +3237,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1069.002/T1069.002.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   any_of:
   - scriptBlockText|contains: get-ADPrincipalGroupMembership
@@ -3149,7 +3303,9 @@ references:
 - https://github.com/The-Viper-One/Invoke-PowerDPAPI/
 - https://github.com/Arno0x/DNSExfiltrator/
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - Add-Exfiltration
@@ -3365,7 +3521,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1546.015/T1546.015.md#atomic-test-2---powershell-execute-com-object
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - ::GetTypeFromCLSID(
@@ -3397,7 +3555,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1018/T1018.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - 'Get-AdGroup '
@@ -3433,7 +3593,9 @@ references:
 - https://web.archive.org/web/20220614030603/http://www.powertheshell.com/ntfsstreams/
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1564.004/T1564.004.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - set-content
@@ -3469,7 +3631,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1553.005/T1553.005.md#atomic-test-2---mount-an-iso-image-and-run-executable-from-the-iso
 - https://learn.microsoft.com/en-us/powershell/module/storage/mount-diskimage?view=windowsserver2022-ps
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - 'Mount-DiskImage '
@@ -3508,7 +3672,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1518.001/T1518.001.md#atomic-test-2---security-software-discovery---powershell
 where:
   all_of:
-  - channel|contains: powershell/operational
+  - channel|contains_any:
+    - powershell/operational
+    - powershellcore/operational
     eventId: 4104
   - scriptBlockText|contains_any:
     - get-process | ?
@@ -3561,7 +3727,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1218.007/T1218.007.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - 'Invoke-CimMethod '
@@ -3600,7 +3768,9 @@ references:
 - https://o365blog.com/aadinternals/
 - https://github.com/Gerenios/AADInternals
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - Add-AADInt
@@ -3663,7 +3833,9 @@ references:
 - https://twitter.com/Alh4zr3d/status/1580925761996828672
 - https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/set-service?view=powershell-7.2
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - 'Set-Service '
@@ -3707,7 +3879,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1574.011/T1574.011.md#atomic-test-1---service-registry-permissions-weakness
 - https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/get-acl?view=powershell-7.4
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - get-acl
@@ -3741,7 +3915,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1069.002/T1069.002.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains: get-smbshare
 sigma:
@@ -3776,7 +3952,9 @@ references:
 - https://www.virustotal.com/gui/file/720a7ee9f2178c70501d7e3f4bcc28a4f456e200486dbd401b25af6da3b4da62/content
 - https://learn.microsoft.com/en-us/dotnet/api/system.windows.input.keyboard.iskeydown?view=windowsdesktop-7.0
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains: '[Windows.Input.Keyboard]::IsKeyDown([System.Windows.Input.Key]::'
 sigma:
@@ -3808,7 +3986,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1069.002/T1069.002.md#atomic-test-11---get-aduser-enumeration-using-useraccountcontrol-flags-as-rep-roasting
 - https://shellgeek.com/useraccountcontrol-flags-to-manipulate-properties/
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - Get-ADUser
@@ -3845,7 +4025,9 @@ tags:
 references:
 - https://github.com/1337Rin/Swag-PSO
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - 'Set-Alias '
@@ -3892,7 +4074,9 @@ references:
 - https://learn.microsoft.com/en-us/windows/msix/package/unsigned-package
 - https://twitter.com/WindowsDocs/status/1620078135080325122
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - 'Add-AppPackage '
@@ -3925,7 +4109,9 @@ references:
 - https://www.pwndefend.com/2021/02/15/retrieving-passwords-from-veeam-backup-servers/
 - https://labs.withsecure.com/publications/fin7-target-veeam-servers
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - '[Credentials]'
@@ -3961,7 +4147,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1021.006/T1021.006.md#atomic-test-1---enable-windows-remote-management
 - https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/enable-psremoting?view=powershell-7.2
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains: 'Enable-PSRemoting '
 sigma:
@@ -3994,7 +4182,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/5b67c9b141fa3918017f8fa44f2f88f0b1ecb9e1/atomics/T1562.001/T1562.001.md
 - https://learn.microsoft.com/en-us/powershell/module/dism/disable-windowsoptionalfeature?view=windowsserver2022-ps
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - Disable-WindowsOptionalFeature
@@ -4033,7 +4223,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1555/T1555.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   any_of:
   - scriptBlockText|contains_any:
@@ -4082,7 +4274,9 @@ tags:
 references:
 - https://www.akamai.com/blog/security-research/abusing-bad-successor-for-privilege-escalation-in-active-directory
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - .Put("msDS-ManagedAccountPrecededByLink
@@ -4116,7 +4310,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1546.003/T1546.003.md
 - https://github.com/EmpireProject/Empire/blob/08cbd274bef78243d7a8ed6443b8364acd1fc48b/data/module_source/persistence/Persistence.psm1#L545
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   any_of:
   - scriptBlockText|contains_all:
@@ -4160,7 +4356,9 @@ references:
 - https://twitter.com/cyb3rops/status/1617108657166061568?s=20
 - https://www.ired.team/offensive-security-experiments/active-directory-kerberos-abuse/active-directory-enumeration-with-ad-module-without-rsat-or-admin-privileges
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   any_of:
   - scriptBlockText|contains_all:
@@ -4196,7 +4394,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1059.001/T1059.001.md#atomic-test-10---powershell-invoke-downloadcradle
 - https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/new-pssession?view=powershell-7.4
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - New-PSSession
@@ -4231,7 +4431,9 @@ tags:
 references:
 - https://github.com/SigmaHQ/sigma/issues/1009
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - '&&'
@@ -4271,7 +4473,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1564.004/T1564.004.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - Start-Process
@@ -4309,7 +4513,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1558.003/T1558.003.md#atomic-test-4---request-a-single-ticket-via-powershell
 - https://learn.microsoft.com/en-us/dotnet/api/system.identitymodel.tokens.kerberosrequestorsecuritytoken?view=netframework-4.8.1
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - System.IdentityModel.Tokens.KerberosRequestorSecurityToken
@@ -4343,7 +4549,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1119/T1119.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - 'Get-Service '
@@ -4381,7 +4589,9 @@ references:
 - https://learn.microsoft.com/en-us/powershell/module/pki/export-pfxcertificate?view=windowsserver2022-ps
 - https://www.splunk.com/en_us/blog/security/breaking-the-chain-defending-against-certificate-services-abuse.html
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - Export-PfxCertificate
@@ -4419,7 +4629,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1571/T1571.md#atomic-test-1---testing-usage-of-uncommonly-used-port-with-powershell
 - https://learn.microsoft.com/en-us/powershell/module/nettcpip/test-netconnection?view=windowsserver2022-ps
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - Test-NetConnection
@@ -4456,7 +4668,9 @@ tags:
 references:
 - https://techcommunity.microsoft.com/t5/core-infrastructure-and-security/windows-10-controlled-folder-access-event-search/ba-p/2326088
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains: Remove-MpPreference
   scriptBlockText|contains_any:
@@ -4492,7 +4706,9 @@ references:
 - Internal Research
 - https://github.com/HackTricks-wiki/hacktricks/blob/e4c7b21b8f36c97c35b7c622732b38a189ce18f7/src/windows-hardening/windows-local-privilege-escalation/privilege-escalation-with-autorun-binaries.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   any_of:
   - scriptBlockText|contains_all:
@@ -4570,7 +4786,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1057/T1057.md#atomic-test-3---process-discovery---get-process
 - https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/get-process?view=powershell-7.4
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains: Get-Process
 sigma:
@@ -4602,7 +4820,9 @@ tags:
 references:
 - https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/get-wmiobject?view=powershell-5.1&viewFallbackFrom=powershell-7
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - Win32_ShadowCopy
@@ -4635,7 +4855,9 @@ tags:
 references:
 - https://github.com/JoelGMSec/PSAsyncShell
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains: PSAsyncShell
 sigma:
@@ -4666,7 +4888,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1120/T1120.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains: Win32_PnPEntity
 sigma:
@@ -4700,7 +4924,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1136.002/T1136.002.md#atomic-test-3---create-a-new-domain-account-using-powershell
 - https://learn.microsoft.com/en-us/dotnet/api/system.directoryservices.accountmanagement?view=net-8.0
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains: System.DirectoryServices.AccountManagement
 sigma:
@@ -4735,7 +4961,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1059.003/T1059.003.md#atomic-test-1---create-and-execute-batch-script
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains: Start-Process
   scriptBlockText|contains_any:
@@ -4769,7 +4997,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/40b77d63808dd4f4eafb83949805636735a1fd15/atomics/T1484.001/T1484.001.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains: \SOFTWARE\Policies\Microsoft\Windows\System
   scriptBlockText|contains_any:
@@ -4810,7 +5040,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1074.001/T1074.001.md
 - https://www.cisa.gov/news-events/cybersecurity-advisories/aa23-347a
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|re:
   - Compress\-Archive\ \-Path.*\-DestinationPath\ \$env:TEMP
@@ -4844,7 +5076,9 @@ tags:
 references:
 - https://adsecurity.org/?p=2921
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains: PS ATTACK!!!
 sigma:
@@ -4877,7 +5111,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1201/T1201.md#atomic-test-9---enumerate-active-directory-password-policy-with-get-addefaultdomainpasswordpolicy
 - https://learn.microsoft.com/en-us/powershell/module/activedirectory/get-addefaultdomainpasswordpolicy?view=windowsserver2022-ps
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains: Get-AdDefaultDomainPasswordPolicy
 sigma:
@@ -4907,7 +5143,9 @@ tags:
 references:
 - https://github.com/Arno0x/PowerShellScripts/blob/a6b7d5490fbf0b20f91195838f3a11156724b4f7/proxyTunnel.ps1
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - '[System.Net.HttpWebRequest]'
@@ -4942,7 +5180,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1552.001/T1552.001.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - ls
@@ -4981,7 +5221,9 @@ references:
 - https://www.shellhacks.com/clear-history-powershell/
 - https://community.sophos.com/sophos-labs/b/blog/posts/powershell-command-history-forensics
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   any_of:
   - scriptBlockText|contains: Clear-History
@@ -5022,7 +5264,9 @@ references:
 - https://github.com/sense-of-security/ADRecon/blob/11881a24e9c8b207f31b56846809ce1fb189bcc9/ADRecon.ps1
 - https://bi-zone.medium.com/from-pentest-to-apt-attack-cybercriminal-group-fin7-disguises-its-malware-as-an-ethical-hackers-c23c9a75e319
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - Function Get-ADRExcelComOb
@@ -5060,7 +5304,9 @@ references:
 - https://www.elastic.co/guide/en/security/current/volume-shadow-copy-deletion-via-powershell.html
 where:
   all_of:
-  - channel|contains: powershell/operational
+  - channel|contains_any:
+    - powershell/operational
+    - powershellcore/operational
     eventId: 4104
   - scriptBlockText|contains_any:
     - Get-WmiObject
@@ -5104,7 +5350,9 @@ references:
 - https://www.elastic.co/guide/en/security/current/windows-defender-exclusions-added-via-powershell.html
 where:
   all_of:
-  - channel|contains: powershell/operational
+  - channel|contains_any:
+    - powershell/operational
+    - powershellcore/operational
     eventId: 4104
   - scriptBlockText|contains_any:
     - ' -ExclusionPath '
@@ -5143,7 +5391,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1119/T1119.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - .doc
@@ -5188,7 +5438,9 @@ references:
 - http://blog.talosintelligence.com/2022/09/lazarus-three-rats.html
 - https://www.microsoft.com/en-us/security/blog/2022/10/18/defenders-beware-a-case-for-post-ransomware-investigations/
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - 'Get-ADUser '
@@ -5229,7 +5481,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1491.001/T1491.001.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   any_of:
   - scriptBlockText|contains_all:
@@ -5268,7 +5522,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1070.006/T1070.006.md
 - https://www.offensive-security.com/metasploit-unleashed/timestomp/
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - .CreationTime =
@@ -5307,7 +5563,9 @@ references:
 - https://twitter.com/JohnLaTwC/status/850381440629981184
 - https://t.co/ezOTGy1a1G
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains: PromptForCredential
 sigma:
@@ -5341,7 +5599,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1218/T1218.md
 - https://github.com/redcanaryco/AtomicTestHarnesses/blob/7e1e4da116801e3d6fcc6bedb207064577e40572/TestHarnesses/T1218_SignedBinaryProxyExecution/InvokeRemoteFXvGPUDisablementCommand.ps1
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|startswith: function Get-VMRemoteFXPhysicalVideoAdapter {
 sigma:
@@ -5371,7 +5631,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/74438b0237d141ee9c99747976447dc884cb1a39/atomics/T1505.005/T1505.005.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - 'Set-Acl '
@@ -5404,7 +5666,9 @@ tags:
 references:
 - https://learn.microsoft.com/en-us/powershell/module/storage/get-storagediagnosticinfo?view=windowsserver2022-ps
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - Get-StorageDiagnosticInfo
@@ -5443,7 +5707,9 @@ references:
 - https://pentestlab.blog/2022/03/21/unconstrained-delegation/
 - https://learn.microsoft.com/en-us/powershell/module/activedirectory/get-adcomputer?view=windowsserver2022-ps
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|re:
   - \-Properties.*TrustedForDelegation
@@ -5482,7 +5748,9 @@ references:
 - https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/invoke-webrequest?view=powershell-7.4
 where:
   all_of:
-  - channel|contains: powershell/operational
+  - channel|contains_any:
+    - powershell/operational
+    - powershellcore/operational
     eventId: 4104
   - scriptBlockText|contains_any:
     - Invoke-RestMethod
@@ -5526,7 +5794,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1071.001/T1071.001.md#t1071001---web-protocols
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - Invoke-WebRequest
@@ -5563,7 +5833,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1113/T1113.md#atomic-test-6---windows-screen-capture-copyfromscreen
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains: .CopyFromScreen
 sigma:
@@ -5595,7 +5867,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1048/T1048.md#atomic-test-3---dnsexfiltration-doh
 - https://github.com/Arno0x/DNSExfiltrator
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   any_of:
   - scriptBlockText|contains: Invoke-DNSExfiltrator
@@ -5637,7 +5911,9 @@ references:
 - https://techgenix.com/malicious-powershell-scripts-evade-detection/
 where:
   all_of:
-  - channel|contains: powershell/operational
+  - channel|contains_any:
+    - powershell/operational
+    - powershellcore/operational
     eventId: 4104
   - scriptBlockText|contains_any:
     - Get-WmiObject
@@ -5679,7 +5955,9 @@ references:
 - https://github.com/0xsyr0/Awesome-Cybersecurity-Handbooks/blob/7b8935fe4c82cb64d61343de1a8b2e38dd968534/handbooks/10_post_exploitation.md
 - https://github.com/forgottentq/powershell/blob/9e616363d497143dc955c4fdce68e5c18d28a6cb/captureWindows-Endpoint.ps1#L13
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains: Start-NetEventSession
 sigma:
@@ -5711,7 +5989,9 @@ references:
 - https://www.microsoft.com/en-us/security/blog/2022/10/18/defenders-beware-a-case-for-post-ransomware-investigations/
 - https://www.cisa.gov/uscert/sites/default/files/publications/aa22-320a_joint_csa_iranian_government-sponsored_apt_actors_compromise_federal%20network_deploy_crypto%20miner_credential_harvester.pdf
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - 'Get-ADComputer '
@@ -5751,7 +6031,9 @@ tags:
 references:
 - https://github.com/SigmaHQ/sigma/issues/1009
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|re: (?i)echo.*clip.*&&.*(Clipboard|i`?n`?v`?o`?k`?e`?)
 sigma:
@@ -5785,7 +6067,9 @@ references:
 - https://thedfirreport.com/2020/10/08/ryuks-return
 - https://adsecurity.org/?p=2277
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - Export-PowerViewCSV
@@ -5868,7 +6152,9 @@ tags:
 references:
 - https://speakerdeck.com/heirhabarov/hunting-for-powershell-abuse?slide=50
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains: '[Reflection.Assembly]::load'
 sigma:
@@ -5899,7 +6185,9 @@ tags:
 references:
 - https://lolbas-project.github.io/lolbas/Binaries/Syncappvpublishingserver/
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains: SyncAppvPublishingServer.exe
 sigma:
@@ -5931,7 +6219,9 @@ tags:
 references:
 - https://speakerdeck.com/heirhabarov/hunting-for-powershell-abuse?slide=43
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - FromBase64String
@@ -5966,7 +6256,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1217/T1217.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - Get-ChildItem
@@ -6005,7 +6297,9 @@ references:
 - https://www.mdsec.co.uk/2018/06/exploring-powershell-amsi-and-logging-evasion/
 - https://twitter.com/cyb3rops/status/1588574518057979905?s=20&t=A7hh93ONM7ni1Rj1jO5OaA
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - '[Ref].Assembly.GetType'
@@ -6037,7 +6331,9 @@ tags:
 references:
 - https://learn.microsoft.com/en-us/previous-versions/windows/desktop/legacy/aa394225(v=vs.85)
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains: Win32_NTEventlogFile
   scriptBlockText|contains_any:
@@ -6076,7 +6372,9 @@ references:
 - https://github.com/gtworek/PSBits/blob/e97cbbb173b31cbc4d37244d3412de0a114dacfb/NoDLP/bin2wav.ps1
 where:
   all_of:
-  - channel|contains: powershell/operational
+  - channel|contains_any:
+    - powershell/operational
+    - powershellcore/operational
     eventId: 4104
   - scriptBlockText|contains_all:
     - '[System.Math]::'
@@ -6123,7 +6421,9 @@ references:
 - https://learn.microsoft.com/en-us/windows/win32/adsi/adsi-winnt-provider
 where:
   all_of:
-  - channel|contains: powershell/operational
+  - channel|contains_any:
+    - powershell/operational
+    - powershellcore/operational
     eventId: 4104
   - scriptBlockText|contains: '[ADSI]'
   - scriptBlockText|contains_any:
@@ -6161,7 +6461,9 @@ tags:
 references:
 - https://github.com/SigmaHQ/sigma/issues/1009
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|re: (?i)&&set.*(\{\d\}){2,}\\"\s+?-f.*&&.*cmd.*/c
 sigma:
@@ -6194,7 +6496,9 @@ tags:
 references:
 - https://github.com/SigmaHQ/sigma/issues/1009
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - set
@@ -6233,7 +6537,9 @@ tags:
 references:
 - https://github.com/SigmaHQ/sigma/issues/1009
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - rundll32.exe
@@ -6270,7 +6576,9 @@ tags:
 references:
 - Internal Research
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - -Alias
@@ -6303,7 +6611,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1615/T1615.md
 - https://learn.microsoft.com/en-us/powershell/module/grouppolicy/get-gpo?view=windowsserver2022-ps
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains: Get-GPO
 sigma:
@@ -6334,7 +6644,9 @@ references:
 - Internal Research
 where:
   all_of:
-  - channel|contains: powershell/operational
+  - channel|contains_any:
+    - powershell/operational
+    - powershellcore/operational
     eventId: 4104
   - scriptBlockText|contains_any:
     - ' -enc '
@@ -6375,7 +6687,9 @@ tags:
 references:
 - https://github.com/411Hall/JAWS/blob/233f142fcb1488172aa74228a666f6b3c5c48f1d/jaws-enum.ps1
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - Win32_QuickFixEngineering
@@ -6407,7 +6721,9 @@ tags:
 references:
 - https://adsecurity.org/?p=2921
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - AdjustTokenPrivileges
@@ -6457,7 +6773,9 @@ tags:
 references:
 - https://github.com/samratashok/nishang
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - Add-ConstrainedDelegationBackdoor
@@ -6560,7 +6878,9 @@ tags:
 references:
 - https://github.com/r00t-3xp10it/hacking-material-books/blob/43cb1e1932c16ff1f58b755bc9ab6b096046853f/obfuscation/simple_obfuscation.md#amsi-bypass-using-null-bits-satoshi
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - if(0){{{0}}}' -f $(0 -as [char]) +
@@ -6595,7 +6915,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1069.001/T1069.001.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   any_of:
   - scriptBlockText|contains_any:
@@ -6636,7 +6958,9 @@ references:
 - https://www.fortypoundhead.com/showcontent.asp?artid=24022
 - https://labs.withsecure.com/publications/fin7-target-veeam-servers
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - 'Get-content '
@@ -6672,7 +6996,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1555.003/T1555.003.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - Copy-Item

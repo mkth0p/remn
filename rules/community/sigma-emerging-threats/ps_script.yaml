@@ -15,7 +15,9 @@ tags:
 references:
 - https://www.sysaid.com/blog/service-desk/on-premise-software-security-vulnerability-notification
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - \SysAidServer\tomcat\webapps
@@ -52,7 +54,9 @@ tags:
 references:
 - https://labs.withsecure.com/publications/fin7-target-veeam-servers
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - IO.Compression.DeflateStream
@@ -90,7 +94,9 @@ tags:
 references:
 - https://labs.withsecure.com/publications/fin7-target-veeam-servers
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - $env:APPDATA
@@ -126,7 +132,9 @@ tags:
 references:
 - https://www.sysaid.com/blog/service-desk/on-premise-software-security-vulnerability-notification
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - cleanLL

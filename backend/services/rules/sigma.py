@@ -48,7 +48,8 @@ SPECIAL_FIELDS: dict[str, str] = {
 
 # Sysmon channel / PowerShell channels are matched by a distinctive token (case-insensitive contains)
 _SYSMON = {"channel|contains": "sysmon"}
-_PS_OPERATIONAL = {"channel|contains": "powershell/operational"}
+# Windows PowerShell 5.1 and PowerShell 7 (PowerShellCore/Operational), as SigmaHQ's own regression config reads it
+_PS_OPERATIONAL = {"channel|contains_any": ["powershell/operational", "powershellcore/operational"]}
 _PS_CLASSIC = {"channel": "Windows PowerShell"}
 
 
@@ -110,7 +111,8 @@ SERVICE_MAP: dict[str, dict[str, Any]] = {
     "bits-client": {"channel|contains": "bits-client"},
     "dns-server": {"channel|contains": "dns server"},
     "dns-server-analytic": {"channel|contains": "dns-server/analytical"},
-    "dns-client": {"channel|contains": "dns-client"},
+    # the channel is Microsoft-Windows-DNS-Client/Operational; SigmaHQ's config names it by its display name
+    "dns-client": {"channel|contains_any": ["dns-client", "dns client events"]},
     "ntlm": {"channel|contains": "ntlm"},
     "firewall-as": {"channel|contains": "firewall with advanced security"},
     "printservice-admin": {"channel|contains": "printservice/admin"},
@@ -124,7 +126,8 @@ SERVICE_MAP: dict[str, dict[str, Any]] = {
     "smbserver-connectivity": {"channel|contains": "smbserver/connectivity"},
     "openssh": {"channel|contains": "openssh"},
     "shell-core": {"channel|contains": "shell-core"},
-    "appxdeployment-server": {"channel|contains": "appxdeployment-server"},
+    # the provider is AppXDeployment-Server, the channel Microsoft-Windows-AppXDeploymentServer/Operational
+    "appxdeployment-server": {"channel|contains": "appxdeploymentserver/operational"},
     "appxpackaging-om": {"channel|contains": "appxpackaging"},
     "capi2": {"channel|contains": "capi2"},
     "certificateservicesclient-lifecycle-system": {"channel|contains": "certificateservicesclient-lifecycle-system"},
@@ -436,9 +439,11 @@ def compile_field(raw_field: str, value: Any, aliases: dict[str, list[str]], war
         op = "contains_any" if (smod == "contains" and len(strs) > 1) else smod
         return _spread(targets, op, strs if len(strs) > 1 else strs[0])
 
-    # bare values: numbers / booleans are equality, strings decide by their wildcards
-    if all(isinstance(v, (int, float, bool)) and not isinstance(v, bool) or isinstance(v, bool) for v in values):
-        vals = [int(v) if isinstance(v, bool) else v for v in values]
+    # bare values: numbers / booleans are equality, strings decide by their wildcards. Windows
+    # writes a boolean as the text "true" or "false" (Sysmon's Signed, Initiated; the AppX
+    # deployment's HasFullTrust), which the engines compare without case
+    if all(isinstance(v, (int, float, bool)) for v in values):
+        vals = [str(v).lower() if isinstance(v, bool) else v for v in values]
         return _spread(targets, "in" if len(vals) > 1 else "eq", vals if len(vals) > 1 else vals[0])
     strs = [str(v) for v in values]
     # Windows writes "-" for "no value", and the parser stores no value for it, so a column never

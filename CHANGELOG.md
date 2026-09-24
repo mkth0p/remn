@@ -168,6 +168,15 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   Event Hub or storage account records, the sign-in under `properties`) are read. Such a file
   was taken for an event log and failed; a record of another category, such as `AuditLogs`,
   is counted as not read.
+- Fixed: SigmaHQ rules that could never fire. The 10 AppX deployment rules read a channel
+  named after the provider (`appxdeployment-server`), where Windows writes
+  `Microsoft-Windows-AppXDeploymentServer/Operational`; the 4 rules that compare a field with
+  `true` compared it with `1`, where Windows writes "true" (Sysmon's `Signed` and
+  `Initiated`, the AppX `HasFullTrust`). The 212 PowerShell rules now read PowerShell 7's
+  `PowerShellCore/Operational` as well as Windows PowerShell's log, and the 6 DNS client
+  rules also match the channel's display name. Each log source now maps to the channel
+  SigmaHQ's own regression tests use (`tests/thor.yml`); measuring the rules on their SigmaHQ
+  samples found the gaps.
 
 ## 0.1.1 (2026-09-07)
 

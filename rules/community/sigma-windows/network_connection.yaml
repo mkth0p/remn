@@ -1824,7 +1824,7 @@ references:
 where:
   channel|contains: sysmon
   eventId: 3
-  initiated: 1
+  initiated: 'true'
   destinationPort: 9389
   not:
     any_of:

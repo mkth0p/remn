@@ -4038,7 +4038,7 @@ where:
         - C:\Windows\SysWOW64\
         - C:\Program Files\
         - C:\Program Files (x86)\
-      - signed: 1
+      - signed: 'true'
         signatureStatus: Valid
         data.Description|endswith: C Runtime Library
   - not:

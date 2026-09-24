@@ -217,7 +217,8 @@ def test_keywords_and_powershell_category():
     rule = sigma.convert_text(PS_KEYWORDS)[0]
     assert rule["ok"]
     w = rule["rule"]["where"]
-    assert w["channel|contains"] == "powershell/operational" and w["eventId"] == 4104
+    # Windows PowerShell and PowerShell 7
+    assert w["channel|contains_any"] == ["powershell/operational", "powershellcore/operational"] and w["eventId"] == 4104
     assert w["raw|contains_any"] == ["Invoke-Mimikatz", "DumpCreds"]
     assert rule["rule"]["severity"] == "critical" and rule["rule"]["id"] == "sigma-mimikatz-keywords-in-powershell"
 
@@ -381,3 +382,62 @@ level: medium
     w.flush()
     found = R.run_rule(store, res["rule"], {})
     assert sorted(r for f in found for r in f["refs"]) == [1]
+
+
+def test_channels_are_those_sigmahq_tests_its_rules_on(store):
+    """The channel of each service as SigmaHQ's regression config (tests/thor.yml) names it."""
+    w = EventWriter(store, 1)
+    for eid, channel in (
+        (854, "Microsoft-Windows-AppXDeploymentServer/Operational"),
+        (854, "Microsoft-Windows-AppXDeployment/Operational"),
+        (4104, "PowerShellCore/Operational"),
+        (4104, "Microsoft-Windows-PowerShell/Operational"),
+        (3008, "Microsoft-Windows-DNS-Client/Operational"),
+    ):
+        w.add(_ev(eventId=eid, channel=channel))
+    w.flush()
+
+    def refs(logsource: str, eid: int) -> list[int]:
+        res = sigma.convert_text(f"title: t\nlogsource: {{product: windows, {logsource}}}\ndetection:\n  s:\n    EventID: {eid}\n  condition: s\nlevel: low\n")[
+            0
+        ]
+        assert res["ok"] and not res["warnings"], res
+        return sorted(r for f in R.run_rule(store, res["rule"], {}) for r in f["refs"])
+
+    # the provider is AppXDeployment-Server; the channel has no hyphen, and the client's is another log
+    assert refs("service: appxdeployment-server", 854) == [1]
+    assert refs("category: ps_script", 4104) == [3, 4]
+    assert refs("service: dns-client", 3008) == [5]
+
+
+def test_a_boolean_matches_the_text_windows_writes(store):
+    res = sigma.convert_text(
+        """
+title: Signed DLL, outbound connection, full trust package
+logsource: {product: windows, service: sysmon}
+detection:
+  image_load:
+    EventID: 7
+    Signed: true
+  connection:
+    EventID: 3
+    Initiated: true
+  package:
+    HasFullTrust: true
+  condition: image_load or connection or package
+level: low
+"""
+    )[0]
+    assert res["ok"], res
+    sysmon = "Microsoft-Windows-Sysmon/Operational"
+    w = EventWriter(store, 1)
+    # as the parser reads them: Sysmon's text "true", a typed boolean in the EventData
+    w.add(_ev(eventId=7, channel=sysmon, signed="true", data={"Signed": "true"}))
+    w.add(_ev(eventId=7, channel=sysmon, signed="false", data={"Signed": "false"}))
+    w.add(_ev(eventId=3, channel=sysmon, initiated="True", data={"Initiated": True}))
+    w.add(_ev(eventId=3, channel=sysmon, initiated="False", data={"Initiated": False}))
+    w.add(_ev(eventId=400, channel=sysmon, data={"HasFullTrust": True}))
+    w.add(_ev(eventId=400, channel=sysmon, data={"HasFullTrust": False}))
+    w.flush()
+    found = R.run_rule(store, res["rule"], {})
+    assert sorted(r for f in found for r in f["refs"]) == [1, 3, 5]

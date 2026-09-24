@@ -136,7 +136,7 @@ references:
 where:
   channel|contains: sysmon
   eventId: 7
-  signed: 1
+  signed: 'true'
   signatureStatus: Valid
   any_of:
   - data.Description|in:

@@ -24,7 +24,9 @@ references:
 - https://learn.microsoft.com/it-it/powershell/module/exchangepowershell/set-inboxrule?view=exchange-ps
 where:
   all_of:
-  - channel|contains: powershell/operational
+  - channel|contains_any:
+    - powershell/operational
+    - powershellcore/operational
     eventId: 4104
   - scriptBlockText|contains_any:
     - New-InboxRule
@@ -65,7 +67,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1012/T1012.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|re: (Get-Item|gci|Get-ChildItem).{1,64}-Path.{1,64}\\(currentcontrolset\\services|CurrentVersion\\Policies\\Explorer\\Run|CurrentVersion\\Run|CurrentVersion\\ShellServiceObjectDelayLoad|CurrentVersion\\Windows\winlogon)\\
 sigma:
@@ -103,7 +107,9 @@ references:
 - https://github.com/PwC-IR/Business-Email-Compromise-Guide/blob/fe29ce06aef842efe4eb448c26bbe822bf5b895d/PwC-Business_Email_Compromise-Guide.pdf
 where:
   all_of:
-  - channel|contains: powershell/operational
+  - channel|contains_any:
+    - powershell/operational
+    - powershellcore/operational
     eventId: 4104
   - scriptBlockText|contains_any:
     - New-InboxRule
@@ -146,7 +152,9 @@ tags:
 references:
 - https://speakerdeck.com/heirhabarov/hunting-for-powershell-abuse
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - Advapi32.dll
@@ -186,7 +194,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/02cb591f75064ffe1e0df9ac3ed5972a2e491c97/atomics/T1070.008/T1070.008.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains: \Comms\Unistore\data
 sigma:
@@ -220,7 +230,9 @@ tags:
 references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1560/T1560.md
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains: Compress-Archive
 sigma:
@@ -254,7 +266,9 @@ references:
 - https://learn.microsoft.com/en-us/powershell/module/smbshare/new-smbmapping?view=windowsserver2022-ps
 - https://www.trustedsec.com/blog/making-smb-accessible-with-ntlmquic/
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_all:
   - New-SmbMapping
@@ -291,7 +305,9 @@ references:
 - https://malware.news/t/the-rhysida-ransomware-activity-analysis-and-ties-to-vice-society/72170
 - https://cybersecuritynews.com/rhysida-ransomware-attacking-windows/
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|re: New\-NetFirewallRule.*\-Action.*Allow
 sigma:
@@ -327,7 +343,9 @@ references:
 - https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/send-mailmessage?view=powershell-7.4
 - https://www.ietf.org/rfc/rfc2821.txt
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|re: Send\-MailMessage.*\-Attachments
 sigma:
@@ -361,7 +379,9 @@ tags:
 references:
 - https://speakerdeck.com/heirhabarov/hunting-for-powershell-abuse
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - AddSecurityPackage
@@ -432,7 +452,9 @@ references:
 - https://github.com/redcanaryco/atomic-red-team/blob/f339e7da7d05f6057fdfcdd3742bfcf365fee2a9/atomics/T1070.004/T1070.004.md
 - https://docs.microsoft.com/en-us/powershell/module/microsoft.powershell.management/Remove-Item?view=powershell-5.1&viewFallbackFrom=powershell-7
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   scriptBlockText|contains_any:
   - 'Remove-Item -Path '
@@ -473,7 +495,9 @@ tags:
 references:
 - https://github.com/danielbohannon/Invoke-Obfuscation
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4104
   any_of:
   - scriptBlockText|re: \w+`(\w+|-|.)`[\w+|\s]

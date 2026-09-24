@@ -17,7 +17,9 @@ references:
 - https://learn.microsoft.com/en-us/powershell/module/netsecurity/get-netfirewallrule?view=windowsserver2022-ps
 - https://learn.microsoft.com/en-us/powershell/module/netsecurity/show-netfirewallrule?view=windowsserver2022-ps
 where:
-  channel|contains: powershell/operational
+  channel|contains_any:
+  - powershell/operational
+  - powershellcore/operational
   eventId: 4103
   any_of:
   - payload|contains_any:
