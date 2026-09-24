@@ -100,6 +100,8 @@ jobs:
       - name: Archive isolation and routing
         run: |
           docker tag remn:ci remn:latest
+          # the public compose file names its proxy image remn-static; it was built above as remn-static:ci
+          docker tag remn-static:ci remn-static:latest
           docker build -t remn-archive honeypot
           python3 tools/validate_honeypot.py
       # pip is not in the runtime image, but Trivy records the libraries pip vendors (msgpack, setuptools, ...)

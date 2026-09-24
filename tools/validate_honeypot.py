@@ -53,9 +53,12 @@ def main():
         caddy_path.write_text(caddy)
         # Work from the resolved configuration so inherited ports cannot accidentally remain.
         proxy["ports"] = [{"target": 8080, "published": str(port), "host_ip": "127.0.0.1", "protocol": "tcp"}]
-        for volume in proxy["volumes"]:
-            if volume["target"] == "/etc/caddy/Caddyfile":
-                volume["source"] = str(caddy_path)
+        # The overlay runs Caddyfile.honeypot from the deploy directory mounted at /etc/caddy/site.
+        # The local copy is mounted beside it and run instead; if that layout moves, stop here
+        # rather than start the production configuration (TLS on 80/443, nothing on 8080).
+        assert proxy["command"][:4] == ["caddy", "run", "--config", "/etc/caddy/site/Caddyfile.honeypot"], proxy["command"]
+        proxy["volumes"].append({"type": "bind", "source": str(caddy_path), "target": "/etc/caddy/local/Caddyfile", "read_only": True})
+        proxy["command"] = ["caddy", "run", "--config", "/etc/caddy/local/Caddyfile", "--adapter", "caddyfile"]
         for service in config["services"].values():
             service.pop("build", None)
             service["restart"] = "no"
