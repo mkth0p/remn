@@ -133,6 +133,10 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   `Get-UALGraph`), which carry the record under `auditData`, were recognised and then gave no
   row. They are read, and a record that omits its time, operation, user, IP or workload takes
   them from the Graph envelope.
+- REMN's own rules use ATT&CK v19 technique ids, as the SigmaHQ packs already did: v19 (April
+  2026) revoked `T1562.x`, `T1070.001` and `T1656` for `T1685` to `T1690` and `T1684.x`, and 22
+  core rules still carried the old ones. Fixed with it: the report's defense-evasion badge knew
+  only the old ids, so the 137 SigmaHQ rules tagged `T1685` lit no badge.
 
 ## 0.1.1 (2026-09-07)
 

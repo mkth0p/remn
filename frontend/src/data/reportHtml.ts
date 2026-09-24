@@ -295,10 +295,12 @@ export const BADGES: BadgeDef[] = [
   { id: 'persistence', code: 'PE', label: 'Persistence', tech: ['T1543', 'T1547', 'T1053', 'T1136', 'T1098', 'T1505', 'T1137', 'T1546'], tags: ['persistence', 'account'] },
   { id: 'privilege', code: 'PR', label: 'Privilege escalation', tech: ['T1548', 'T1134', 'T1068', 'T1484'], tags: ['privilege'] },
   {
+    // ATT&CK v19 split Defense Evasion into Stealth (TA0005) and Defense Impairment (TA0112) and
+    // moved Impair Defenses (T1562) and event-log clearing to T1685-T1690; the badge reads both
     id: 'defense-evasion',
     code: 'DE',
     label: 'Defense evasion',
-    tech: ['T1562', 'T1070', 'T1027', 'T1218', 'T1036', 'T1112', 'T1197', 'T1553'],
+    tech: ['T1562', 'T1070', 'T1027', 'T1218', 'T1036', 'T1112', 'T1197', 'T1553', 'T1685', 'T1686', 'T1688', 'T1689', 'T1690'],
     tags: ['defense-evasion', 'log-tampering', 'defender', 'blocked'],
   },
   { id: 'credential', code: 'CA', label: 'Credential access', tech: ['T1003', 'T1110', 'T1555', 'T1558', 'T1556', 'T1187', 'T1552'], tags: ['credential', 'brute-force', 'authentication'] },

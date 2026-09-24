@@ -248,6 +248,16 @@ describe('report html', () => {
     expect(html).toContain('class="hex none"')
   })
 
+  it('counts ATT&CK v19 technique ids toward the defense-evasion badge', () => {
+    // v19 moved Impair Defenses and event-log clearing to T1685-T1690: the SigmaHQ rules carry
+    // those ids, and a finding tagged only T1685 lit no badge
+    const d = data()
+    const tamper = f({ ruleId: 'sigma-defender-tamper', severity: 'high', source: 'events', refs: [99], attack: ['T1685'] })
+    const de = threatProfile({ ...d, findings: [...d.findings, tamper] }).find((b) => b.def.id === 'defense-evasion')!
+    expect(de.state).toBe('observed')
+    expect(de.techniques).toEqual(['T1685'])
+  })
+
   it('groups findings by rule with counts, spans and the values matched, and quotes the bottom line', () => {
     const rows = [1, 2, 3].map((i) =>
       f({ ruleId: 'win-new-firewall-rule', severity: 'medium', source: 'events', refs: [i], ts: i * 60_000, entities: { computer: 'WS-1', applicationPath: `c:\\app${i}.exe` } }),

@@ -13,7 +13,7 @@ description: >-
   svchost with other services, so a WerFault there cannot be attributed to it and is not counted.
 severity: high
 source: events
-attack: [T1562.002]
+attack: [T1685.001]
 tags: [defense-evasion, log-tampering, process-lineage]
 entities: [computer, commandLine, parentCommandLine, serviceName]
 where:
@@ -123,7 +123,7 @@ description: >-
   extension; no benign use of a CLSID here is known.
 severity: high
 source: events
-attack: [T1059.007, T1059.005, T1562.001]
+attack: [T1059.007, T1059.005, T1685]
 tags: [execution, defense-evasion, script-host, process-lineage]
 entities: [computer, image, processName, commandLine, user]
 where:

@@ -207,7 +207,7 @@ id: m365-conditional-access-change
 title: Conditional access policy changed or deleted
 severity: high
 source: events
-attack: [T1562.007]
+attack: [T1686.001]
 tags: [m365, entra, defense-evasion]
 where:
   operation|in: ["Update conditional access policy.", "Delete conditional access policy.", "Add conditional access policy.", "Update policy.", "Delete policy."]
@@ -218,7 +218,7 @@ title: Mailbox or organisation auditing disabled
 description: Set-Mailbox AuditEnabled false, Set-AdminAuditLogConfig UnifiedAuditLogIngestionEnabled false, Set-OrganizationConfig AuditDisabled true - anti-forensics.
 severity: critical
 source: events
-attack: [T1562.008]
+attack: [T1685.002]
 tags: [m365, exchange, defense-evasion]
 where:
   any_of:
@@ -235,7 +235,7 @@ title: IMAP / POP / SMTP AUTH enabled on a mailbox
 description: Set-CASMailbox enabling ImapEnabled, PopEnabled or SmtpClientAuthenticationDisabled=false re-opens legacy authentication that bypasses MFA.
 severity: high
 source: events
-attack: [T1562.001]
+attack: [T1685]
 tags: [m365, exchange, legacy-auth]
 where:
   operation: Set-CASMailbox
@@ -250,7 +250,7 @@ title: Junk mail configuration changed (safe senders / blocked senders)
 description: Set-MailboxJunkEmailConfiguration adding TrustedSendersAndDomains lets the attacker's domain bypass the junk filter.
 severity: medium
 source: events
-attack: [T1562.001]
+attack: [T1685]
 tags: [m365, exchange, evasion]
 where:
   operation: Set-MailboxJunkEmailConfiguration

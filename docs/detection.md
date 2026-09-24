@@ -86,7 +86,11 @@ cradles and credential dumping on the Windows side; display-name spoofing, looka
 domains, macro, PDF and HTML-smuggling attachments, the BEC lexicon, forged headers,
 score bands and the sender-baseline rules on the mail side; and the 28 business email
 compromise rules over Microsoft 365 and Entra rows listed on the [data sources
-page](sources.md). Every rule carries MITRE ATT&CK technique ids.
+page](sources.md). Every rule carries MITRE ATT&CK technique ids, as of ATT&CK v19 (April
+2026), which split Defense Evasion into Stealth and Defense Impairment and moved Impair
+Defenses and event-log clearing to T1685 to T1690 (`T1562.001` is now `T1685`, `T1070.001` is
+`T1685.005`, `T1656` is `T1684.001`); the SigmaHQ packs carry the same ids. The report's
+threat profile counts both the old and the new ids under defense evasion.
 
 The Windows set was extended against EVTX-ATTACK-SAMPLES, a public library of one attack
 technique per log (see `docs/reviews/2026-09-23-evtx-attack-samples.md`). The techniques

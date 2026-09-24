@@ -5,7 +5,7 @@ description: The same display name (normalised) appears with two or more distinc
 severity: low
 confidence: low
 source: mails
-attack: [T1566.002, T1656]
+attack: [T1566.002, T1684.001]
 tags: [spoofing, display-name]
 where:
   fromNameNorm|exists: true
@@ -27,7 +27,7 @@ description: The display name matches a VIP (Settings) but the sender domain is 
 severity: medium
 confidence: low
 source: mails
-attack: [T1566.002, T1656]
+attack: [T1566.002, T1684.001]
 tags: [spoofing, bec, vip]
 where:
   fromNameNorm|in_setting: vip_names

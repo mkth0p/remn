@@ -27,7 +27,7 @@ title: Event Log service crashed right after a remote client opened its pipe
 description: A remote client connects to the \eventlog named pipe over SMB (Sysmon 18 with image System, the kernel serving an SMB client) and within a minute WerFault starts under the svchost that hosts the Event Log service (the LocalServiceNetworkRestricted group, or "-s EventLog" on split service hosts). Malformed requests to the EventLog RPC interface crash the service so that nothing is logged until it restarts (the technique published by byt3bl33d3r); the service restarts by itself, so the crash is often the only trace. Benign cause is a genuine crash of that service host while a log collector or an administrator's Event Viewer happens to be reading the logs remotely, which is rare.
 severity: high
 source: events
-attack: [T1562.002]
+attack: [T1685.001]
 tags: [defense-evasion, eventlog, correlation]
 entities: [computer]
 where:
