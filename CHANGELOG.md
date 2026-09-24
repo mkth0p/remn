@@ -155,7 +155,8 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   in another order; the open panel, with its form, stayed at its place in the list and showed
   whichever link moved there. It now stays with its link.
 - The report says what the evidence cannot show, first under "Where it stops": records
-  missing from an event log's numbering, write times that run backwards, chunks that fail
+  missing from an event log's numbering, write times that step back where no clock change or
+  restart explains it, clocks set back, chunks that fail
   the EVTX checksum (a record changed after Windows wrote it), record numbers in none of the
   files of one log, logs that start after the first finding, Unified Audit Log exports cut
   at 5,000 or 50,000 records, throttled MailItemsAccessed, and Entra sign-ins that start

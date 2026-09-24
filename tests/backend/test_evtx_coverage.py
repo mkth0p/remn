@@ -86,8 +86,31 @@ def test_holes_and_backward_steps_are_found_in_a_written_file(tmp_path):
     assert seq["file"] == "Security.evtx" and seq["channel"] == "Security" and seq["computer"] == "WS01"
     assert (seq["first"], seq["last"]) == (1, 15)
     assert seq["holes"] == [[6, 8]] and seq["missing"] == 3
-    assert seq["backwards"] == 1 and seq["backwardsAt"] == [13] and seq["backwardsMaxMs"] == 3 * 3_600_000
+    assert seq["backwards"] == 1 and seq["backwardsMaxMs"] == 3 * 3_600_000
+    # the step keeps both write times, for the clock changes and restarts of the case to explain
+    assert seq["steps"] == [[13, stamps[8], stamps[9]]]
+    assert seq["computerNames"] == ["WS01"]
     assert seq["checksums"] == {"chunks": 1, "fileHeader": True, "dirty": False}
+
+
+def test_clock_changes_and_log_service_starts_are_listed(tmp_path):
+    path = tmp_path / "System.evtx"
+    with EvtxWriter(path) as w:
+        events = [
+            ("EventLog", 6005, {}),
+            # set back an hour: listed
+            ("Microsoft-Windows-Kernel-General", 1, {"NewTime": iso(T0 - 3_600_000), "OldTime": iso(T0 + 1000), "Reason": "2"}),
+            # the time service's fraction of a second: not
+            ("Microsoft-Windows-Kernel-General", 1, {"NewTime": iso(T0 + 2400), "OldTime": iso(T0 + 2000), "Reason": "3"}),
+            # another provider's event 1: not a clock change
+            ("Microsoft-Windows-Power-Troubleshooter", 1, {"NewTime": iso(T0), "OldTime": iso(T0 + 9_000_000)}),
+        ]
+        for i, (provider, eid, data) in enumerate(events):
+            w.add(event_node(w.count + 1, iso(T0 + i * 1000), provider, "System", "WS01", eid, data), T0 + i * 1000)
+    _rows, stats = read(path, "System.evtx")
+    (seq,) = stats["sequences"]
+    assert seq["logStarts"] == [{"computer": "WS01", "ts": T0}]
+    assert seq["clockChanges"] == [{"computer": "WS01", "old": T0 + 1000, "new": T0 - 3_600_000}]
 
 
 def test_a_complete_file_reports_no_gap(tmp_path):

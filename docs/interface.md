@@ -221,7 +221,9 @@ failed) returns it to draft.
 
 "Where it stops" begins with what the evidence cannot show (`frontend/src/data/evidenceGaps.ts`),
 each statement checkable against the evidence: records missing from an event log's
-numbering, write times that run backwards, chunks that fail their checksum, record numbers
+numbering, write times that step back where no clock change or restart explains it (a
+record put in later), clocks set back (the times either side do not give the order of
+events), chunks that fail their checksum, record numbers
 in none of the files of one log (a missing archive), logs that start after the first
 finding (overwritten or not collected), Unified Audit Log exports of exactly 5,000 or
 50,000 records (cut at a service limit), MailItemsAccessed throttled for a mailbox (item

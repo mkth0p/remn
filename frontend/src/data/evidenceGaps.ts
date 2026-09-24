@@ -3,7 +3,9 @@
  * themselves and from what the case holds. Each statement is checkable against the evidence:
  *
  * - holes in an EVTX file's own record numbering (records deleted, or in a part that could not be
- *   read), and write times that run backwards (a clock change, or records added later);
+ *   read), and write times that step back where no clock change or restart explains it (records
+ *   added later);
+ * - clocks set back, recorded or seen in several logs at once (times that do not give the order);
  * - chunks that fail the EVTX checksum (records changed after Windows wrote them, or damaged);
  * - record numbers in none of the files read between two files of one log (a missing archive);
  * - logs that start after the first finding (overwritten, or not collected);
@@ -35,15 +37,22 @@ export interface FileSequenceStats {
   holeCount?: number
   firstTs?: number | null
   lastTs?: number | null
+  /** every computer name in the file, most frequent first (a machine renamed during setup logs under both) */
+  computerNames?: string[]
   backwards?: number
   backwardsMaxMs?: number
-  backwardsAt?: number[]
+  /** [record id, write time of the record before it, its own write time], the first 50 */
+  steps?: [number, number, number][]
+  /** the clock set (Kernel-General 1, Security 4616), by more than a second */
+  clockChanges?: { computer?: string | null; old: number; new: number }[]
+  /** the event log service started (System 6005) */
+  logStarts?: { computer?: string | null; ts: number }[]
   /** too fragmented to follow every hole: the counts are a floor */
   overflow?: boolean
   checksums?: { chunks: number; fileHeader: boolean; dirty: boolean; badHeader?: number[]; badHeaderCount?: number; badData?: number[]; badDataCount?: number } | null
 }
 
-export type GapKind = 'record-holes' | 'time-backwards' | 'checksum' | 'missing-between-files' | 'log-starts-late' | 'export-cap' | 'mail-throttled' | 'signins-start-late'
+export type GapKind = 'record-holes' | 'time-backwards' | 'clock-set-back' | 'checksum' | 'missing-between-files' | 'log-starts-late' | 'export-cap' | 'mail-throttled' | 'signins-start-late'
 
 export interface GapStatement {
   kind: GapKind
@@ -71,6 +80,16 @@ const EXPORT_CAPS = [5000, 50000]
 const ENTRA_CHANNEL = 'Entra SignIn'
 /** a log that starts within this of the first finding is not said to start after it */
 const LATE_MS = 3_600_000
+/** a record within this of a clock change or log service start may be on either side of it */
+const MARK_TOLERANCE_MS = 5_000
+/** records buffered across a restart or a clock change are written within this of it */
+const BUFFER_MS = 10 * 60_000
+/** a step back shorter than this in one log alone is write order, not a record put in later */
+const STEP_REPORT_MS = 60_000
+/** logs of one computer that step back together: its clock was set back */
+const CLOCK_LOGS = 3
+/** a clock set back by less than this does not blur the order of events that matters */
+const SET_BACK_REPORT_MS = 5 * 60_000
 
 const plural = (n: number, one: string, many = `${one}s`) => (n === 1 ? one : many)
 
@@ -121,16 +140,6 @@ function fileStatements(s: Located): GapStatement[] {
       ...at,
     })
   }
-  if (s.backwards) {
-    out.push({
-      kind: 'time-backwards',
-      severity: 'medium',
-      text:
-        `${where(s)}: write times run backwards ${fmtNum(s.backwards)} ${plural(s.backwards, 'time')} between consecutive records ` +
-        `(the largest step ${fmtDuration(s.backwardsMaxMs)}${s.backwardsAt?.length ? `, first at record ${fmtNum(s.backwardsAt[0])}` : ''}): a clock change, or records added later.`,
-      ...at,
-    })
-  }
   const c = s.checksums
   if (c) {
     const bad = c.badDataCount ?? c.badData?.length ?? 0
@@ -149,6 +158,135 @@ function fileStatements(s: Located): GapStatement[] {
         text: `${s.file}: ${[badHeader ? `${fmtNum(badHeader)} chunk ${plural(badHeader, 'header')}` : '', c.fileHeader === false ? 'the file header' : ''].filter(Boolean).join(' and ')} fail${badHeader + (c.fileHeader === false ? 1 : 0) === 1 ? 's' : ''} its checksum: the file's structure was changed after it was written.`,
         ...at,
       })
+  }
+  return out
+}
+
+interface Step {
+  seq: Located
+  rid: number
+  from: number
+  to: number
+}
+
+const lower = (v: string | null | undefined) => (v ?? '').toLowerCase()
+const namesOf = (s: FileSequenceStats) => new Set((s.computerNames?.length ? s.computerNames : [s.computer]).map(lower).filter(Boolean))
+
+/**
+ * Whether a step back in write time follows from the computer's clock or its log service, from
+ * the clock changes and log service starts recorded in any of the case's logs:
+ * - the clock set back from old to new: the record before was written by the old clock, this
+ *   one by the new;
+ * - the clock set forward from old to new: this record was made just before, and written just
+ *   after it;
+ * - the event log service started: this record was made while Windows started (or stopped, the
+ *   time before) and written once the service ran.
+ */
+function explained(step: Step, clock: Map<string, { old: number; new: number }[]>, starts: Map<string, number[]>): boolean {
+  const { from, to } = step
+  for (const name of namesOf(step.seq)) {
+    for (const c of clock.get(name) ?? []) {
+      if (c.new < c.old && from <= c.old + MARK_TOLERANCE_MS && to >= c.new - MARK_TOLERANCE_MS) return true
+      if (c.new > c.old && to >= c.old - BUFFER_MS && to <= c.old + MARK_TOLERANCE_MS && from >= c.new - MARK_TOLERANCE_MS && from <= c.new + BUFFER_MS) return true
+    }
+    for (const t of starts.get(name) ?? []) if (to <= t + MARK_TOLERANCE_MS && from >= t - MARK_TOLERANCE_MS && from <= t + BUFFER_MS) return true
+  }
+  return false
+}
+
+/**
+ * Write times that step back. Those a clock change or a log service start explains are how Windows
+ * logs; steps that several logs of one computer take at the same moment are its clock set back,
+ * though no log collected says so; a step that one log takes alone is a record put in later, or a
+ * clock change in a log not collected. Recorded clocks set back by minutes or more are named too:
+ * the times of the events either side of them do not give their order.
+ */
+function timeStatements(seqs: Located[]): GapStatement[] {
+  const clock = new Map<string, { old: number; new: number }[]>()
+  const starts = new Map<string, number[]>()
+  for (const s of seqs) {
+    for (const c of s.clockChanges ?? []) clock.set(lower(c.computer), [...(clock.get(lower(c.computer)) ?? []), c])
+    for (const l of s.logStarts ?? []) starts.set(lower(l.computer), [...(starts.get(lower(l.computer)) ?? []), l.ts])
+  }
+  const out: GapStatement[] = []
+  const setBacks: { computer: string; from: number; to: number; logs?: number }[] = []
+  // the same change is recorded in System (Kernel-General 1) and Security (4616): once per computer and moment
+  const byComputer = new Map<string, { computer: string; old: number; new: number }[]>()
+  for (const s of seqs)
+    for (const c of s.clockChanges ?? []) {
+      if (c.old - c.new < SET_BACK_REPORT_MS) continue
+      const key = lower(c.computer)
+      const seen = byComputer.get(key) ?? []
+      if (!seen.some((x) => Math.abs(x.old - c.old) <= MARK_TOLERANCE_MS && Math.abs(x.new - c.new) <= MARK_TOLERANCE_MS))
+        seen.push({ computer: c.computer ?? s.computer ?? 'a computer', old: c.old, new: c.new })
+      byComputer.set(key, seen)
+    }
+  for (const list of byComputer.values()) for (const c of list) setBacks.push({ computer: c.computer, from: c.old, to: c.new })
+
+  // a machine renamed during setup logs under each of its names, all in the same files: one machine
+  const machine = new Map<string, string>()
+  const find = (name: string): string => {
+    const up = machine.get(name)
+    if (up == null || up === name) return name
+    const root = find(up)
+    machine.set(name, root)
+    return root
+  }
+  for (const s of seqs) {
+    if ((s.channels ?? 1) > 1) continue
+    const [first, ...rest] = namesOf(s)
+    for (const name of rest) machine.set(find(name), find(first))
+  }
+  const alone: Step[] = []
+  const pending = new Map<string, Step[]>()
+  for (const s of seqs) {
+    for (const [rid, from, to] of s.steps ?? []) {
+      const step = { seq: s, rid, from, to }
+      if (explained(step, clock, starts)) continue
+      // one log of one machine; a file forwarded from several channels stands alone
+      if (!s.computer || (s.channels ?? 1) > 1) {
+        alone.push(step)
+        continue
+      }
+      const key = find(lower(s.computer))
+      pending.set(key, [...(pending.get(key) ?? []), step])
+    }
+  }
+  for (const steps of pending.values()) {
+    steps.sort((a, b) => a.from - b.from)
+    for (let i = 0; i < steps.length;) {
+      let j = i
+      while (j + 1 < steps.length && steps[j + 1].from - steps[i].from <= BUFFER_MS) j++
+      const group = steps.slice(i, j + 1)
+      const logs = new Set(group.map((g) => `${g.seq.evidenceId}\u0000${g.seq.file}`)).size
+      if (logs >= CLOCK_LOGS) setBacks.push({ computer: group[0].seq.computer!, from: Math.max(...group.map((g) => g.from)), to: Math.min(...group.map((g) => g.to)), logs })
+      else alone.push(...group)
+      i = j + 1
+    }
+  }
+  for (const b of setBacks.sort((x, y) => x.from - y.from))
+    out.push({
+      kind: 'clock-set-back',
+      severity: 'low',
+      text: b.logs
+        ? `On ${b.computer}, ${fmtNum(b.logs)} logs step back together at ${fmtUtc(b.from)}, by up to ${fmtDuration(b.from - b.to)}: its clock was set back, and no log collected records the change. Events stamped between ${fmtUtc(b.to)} and ${fmtUtc(b.from)} may have happened before or after it, so their times do not give their order.`
+        : `The clock of ${b.computer} was set back ${fmtDuration(b.from - b.to)} at ${fmtUtc(b.from)}, to ${fmtUtc(b.to)}: events stamped between those two times may have happened before or after the change, so their times do not give their order.`,
+    })
+
+  const perFile = new Map<Located, Step[]>()
+  for (const step of alone) if (step.from - step.to >= STEP_REPORT_MS) perFile.set(step.seq, [...(perFile.get(step.seq) ?? []), step])
+  for (const [s, steps] of perFile) {
+    const largest = steps.reduce((a, b) => (b.from - b.to > a.from - a.to ? b : a))
+    const unread = Math.max(0, (s.backwards ?? 0) - (s.steps?.length ?? 0))
+    out.push({
+      kind: 'time-backwards',
+      severity: 'medium',
+      text:
+        `${where(s)}: write times step back ${fmtNum(steps.length)} ${plural(steps.length, 'time')} between consecutive records with no clock change or log service start in the evidence to explain ${steps.length === 1 ? 'it' : 'them'} ` +
+        `(the largest ${fmtDuration(largest.from - largest.to)}, at record ${fmtNum(largest.rid)}${unread ? `; ${fmtNum(unread)} more steps were not examined` : ''}). ` +
+        'A record was put in later, or the clock changed where no log collected records it (System and Security record clock changes).',
+      evidenceId: s.evidenceId,
+    })
   }
   return out
 }
@@ -243,7 +381,7 @@ const ORDER = { high: 0, medium: 1, low: 2 }
 /** Everything the evidence cannot show, most serious first. */
 export function evidenceGaps(input: GapInput): GapStatement[] {
   const seqs = fileSequences(input.evidence)
-  const out = [...seqs.flatMap(fileStatements), ...betweenFiles(seqs), ...exportCaps(input.evidence)]
+  const out = [...seqs.flatMap(fileStatements), ...timeStatements(seqs), ...betweenFiles(seqs), ...exportCaps(input.evidence)]
   const start = input.incidentStart
   if (start != null) {
     out.push(...startsLate(seqs, start))

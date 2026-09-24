@@ -586,13 +586,19 @@ class FileSequence:
     time, which the file assigns itself, rather than the EventRecordID and TimeCreated inside the
     event, which a forwarded log copies from the machine that wrote them. A hole in the ids is
     records that are no longer in the file (deleted, or in a chunk that could not be read). A write
-    time earlier than the record before it is a clock change or a record put in later.
+    time earlier than the record before it is a clock set back, events buffered while Windows
+    started and written once the log service ran, or a record put in later: each step keeps both
+    times, for the case's clock changes and log service starts to tell them apart.
     """
 
     # covered id ranges followed before a file is too fragmented to follow
     MAX_SPANS = 100_000
     # holes and backward steps listed in the stats; the counts stay exact
     LISTED = 50
+    # computer names listed (a machine renamed during setup logs under both)
+    NAMES = 20
+    # clock changes and event log service starts listed
+    MARKS = 500
     # EvtxECmd's default: a step back of more than a second
     BACKWARD_MS = 1000
 
@@ -610,7 +616,12 @@ class FileSequence:
         self.prev_written: int | None = None
         self.backwards = 0
         self.backwards_max = 0
-        self.backwards_at: list[int] = []
+        # [record id, write time of the record before, its own write time]
+        self.steps: list[list[int]] = []
+        # what explains a step: the clock set (Kernel-General 1, Security 4616) and the event log
+        # service started (System 6005), when records buffered meanwhile are written
+        self.clock_changes: list[dict[str, Any]] = []
+        self.log_starts: list[dict[str, Any]] = []
         self.checksums: dict[str, Any] | None = None
 
     def add(self, record_id: Any, written: int | None, row: dict[str, Any] | None = None) -> None:
@@ -624,6 +635,8 @@ class FileSequence:
             if ts is not None:
                 self.first_ts = ts if self.first_ts is None else min(self.first_ts, ts)
                 self.last_ts = ts if self.last_ts is None else max(self.last_ts, ts)
+            if row.get("eventId") in (1, 4616, 6005):
+                self._mark(row)
         if not isinstance(record_id, int) or isinstance(record_id, bool) or record_id < 1:
             return
         if self.prev_id is not None and record_id == self.prev_id + 1 and written is not None and self.prev_written is not None:
@@ -631,10 +644,30 @@ class FileSequence:
             if step > self.BACKWARD_MS:
                 self.backwards += 1
                 self.backwards_max = max(self.backwards_max, step)
-                if len(self.backwards_at) < self.LISTED:
-                    self.backwards_at.append(record_id)
+                if len(self.steps) < self.LISTED:
+                    self.steps.append([record_id, self.prev_written, written])
         self.prev_id, self.prev_written = record_id, written
         self._cover(record_id)
+
+    def _mark(self, row: dict[str, Any]) -> None:
+        eid, provider = row.get("eventId"), row.get("provider")
+        if eid == 6005 and provider == "EventLog":
+            if row.get("ts") is not None and len(self.log_starts) < self.MARKS:
+                self.log_starts.append({"computer": row.get("computer"), "ts": row["ts"]})
+            return
+        if eid == 1 and provider == "Microsoft-Windows-Kernel-General":
+            data = row.get("data") or {}
+            old, new = data.get("OldTime"), data.get("NewTime")
+        elif eid == 4616 and provider == "Microsoft-Windows-Security-Auditing":
+            old, new = row.get("previousTime"), row.get("newTime")
+        else:
+            return
+        old_ms, new_ms = parse_timestamp(old)[0], parse_timestamp(new)[0]
+        # the time service corrects the clock by fractions of a second all day
+        if old_ms is None or new_ms is None or abs(new_ms - old_ms) <= self.BACKWARD_MS:
+            return
+        if len(self.clock_changes) < self.MARKS:
+            self.clock_changes.append({"computer": row.get("computer"), "old": old_ms, "new": new_ms})
 
     def _cover(self, rid: int) -> None:
         spans = self.spans
@@ -673,6 +706,7 @@ class FileSequence:
         if self.computers:
             out["computer"] = self.computers.most_common(1)[0][0]
             out["computers"] = len(self.computers)
+            out["computerNames"] = [c for c, _ in self.computers.most_common(self.NAMES)]
         if self.spans:
             out.update(first=self.spans[0][0], last=self.spans[-1][1])
             out["missing"] = sum(b - a + 1 for a, b in holes)
@@ -681,7 +715,11 @@ class FileSequence:
                 out["holeCount"] = len(holes)
         out.update(firstTs=self.first_ts, lastTs=self.last_ts)
         if self.backwards:
-            out.update(backwards=self.backwards, backwardsMaxMs=self.backwards_max, backwardsAt=self.backwards_at)
+            out.update(backwards=self.backwards, backwardsMaxMs=self.backwards_max, steps=self.steps)
+        if self.clock_changes:
+            out["clockChanges"] = self.clock_changes
+        if self.log_starts:
+            out["logStarts"] = self.log_starts
         if self.overflow:
             # too fragmented to follow every hole: the ones listed and counted are a floor
             out["overflow"] = True

@@ -36,9 +36,17 @@ Each file also says what it cannot show about itself, in its parser statistics
   that is missing between two others is a record no longer in the file: deleted, or in a
   part that could not be read. The header id is used rather than the event's
   EventRecordID, which a forwarded log copies from the machine that wrote the event.
-- **Write times that run backwards** by more than a second between consecutive records
-  (EvtxECmd's `--tdt` default): a clock change, or records added later. A zero write time
-  (1601-01-01), which filtered exports write, counts as none.
+- **Write times that step back** by more than a second between consecutive records
+  (EvtxECmd's `--tdt` default), each with both times, and the clock changes (Kernel-General
+  1, Security 4616) and event log service starts (System 6005) the file holds. Most steps
+  are how Windows logs: records made while it starts are written once the log service runs,
+  and a clock set back makes every log step back at once. The report explains a step by a
+  clock change or service start on the same machine in any file of the case, and takes a
+  step that three or more logs of one machine make at the same moment for its clock; a step
+  that one log makes alone, by a minute or more, is named as a record put in later or a
+  clock change no log collected records. On the seven machines of `evtx-baseline` (6.6
+  million records) that leaves no such step, and eight clocks set back by hours during
+  setup. A zero write time (1601-01-01), which filtered exports write, counts as none.
 - **Chunks that fail their checksum.** The file header, each chunk header and each chunk's
   records carry a CRC32. The parser reads a changed record without complaint, so the check
   is what says it was changed after Windows wrote it. None of the 2,239 files of

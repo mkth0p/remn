@@ -45,7 +45,10 @@ describe('what the evidence cannot show', () => {
               ],
               backwards: 2,
               backwardsMaxMs: 2 * H + 14 * 60_000,
-              backwardsAt: [4200, 4700],
+              steps: [
+                [4200, T0 + 3 * H, T0 + 3 * H - (2 * H + 14 * 60_000)],
+                [4700, T0 + 5 * H, T0 + 5 * H - 5 * 60_000],
+              ],
             }),
           ],
         }),
@@ -56,7 +59,92 @@ describe('what the evidence cannot show', () => {
     expect(gaps[0].text).toBe(
       'Security on DC01 (Security.evtx): 1,210 records missing from its numbering, in 3 gaps between record 1 and 5,000 (the largest: 3,000–4,199). Records deleted from the log, or in a part that could not be read.',
     )
-    expect(gaps[1].text).toContain('write times run backwards 2 times between consecutive records (the largest step 2h 14m, first at record 4,200)')
+    expect(gaps[1].text).toBe(
+      'Security on DC01 (Security.evtx): write times step back 2 times between consecutive records with no clock change or log service start in the evidence to explain them (the largest 2h 14m, at record 4,200). A record was put in later, or the clock changed where no log collected records it (System and Security record clock changes).',
+    )
+  })
+
+  describe('write times that step back', () => {
+    const MIN = 60_000
+    const system = (over: Partial<FileSequenceStats>) => seq({ file: 'System.evtx', channel: 'System', ...over })
+    const kinds = (sequences: FileSequenceStats[]) => evidenceGaps({ evidence: [ev(1, 'logs.zip', { sequences })] }).map((g) => g.kind)
+
+    it('are explained by the clock set back, recorded in another log of the same computer', () => {
+      const setBack = { computer: 'DC01', old: T0 + 8 * H, new: T0 }
+      const gaps = evidenceGaps({
+        evidence: [
+          ev(1, 'logs.zip', {
+            sequences: [
+              // the last record before the change, by the old clock, then the first after it, by the new
+              seq({ backwards: 1, backwardsMaxMs: 7 * H, steps: [[50, T0 + 8 * H - MIN, T0 + H - MIN]] }),
+              system({ clockChanges: [setBack] }),
+            ],
+          }),
+        ],
+      })
+      expect(gaps.map((g) => g.kind)).toEqual(['clock-set-back'])
+      expect(gaps[0].text).toBe(
+        'The clock of DC01 was set back 8h 0m at 2026-09-08 18:00:00Z, to 2026-09-08 10:00:00Z: events stamped between those two times may have happened before or after the change, so their times do not give their order.',
+      )
+    })
+
+    it('are explained by records made just before the clock was set forward and written after', () => {
+      const forward = { computer: 'DC01', old: T0, new: T0 + 2 * H }
+      expect(kinds([seq({ backwards: 1, steps: [[9, T0 + 2 * H + 1000, T0 - 500]] }), system({ clockChanges: [forward] })])).toEqual([])
+      // made an hour before it: not buffered across the change
+      expect(kinds([seq({ backwards: 1, steps: [[9, T0 + 2 * H + 1000, T0 - H]] }), system({ clockChanges: [forward] })])).toEqual(['time-backwards'])
+    })
+
+    it('are explained by records made while Windows started and written once the log service ran', () => {
+      const started = { computer: 'DC01', ts: T0 }
+      expect(kinds([system({ backwards: 1, steps: [[3, T0 + 2000, T0 - 25 * MIN]], logStarts: [started] })])).toEqual([])
+      // a step a day after the start is not the start's doing
+      expect(kinds([system({ backwards: 1, steps: [[3, T0 + 24 * H, T0 + 20 * H]], logStarts: [started] })])).toEqual(['time-backwards'])
+    })
+
+    it('are not explained by another computer’s clock, and are by a renamed computer’s', () => {
+      const setBack = { computer: 'WIN-SETUP', old: T0 + 8 * H, new: T0 }
+      const step = { backwards: 1, steps: [[50, T0 + 8 * H - MIN, T0 + H]] as [number, number, number][] }
+      expect(kinds([seq(step), system({ computer: 'WIN-SETUP', clockChanges: [setBack] })])).toEqual(['time-backwards', 'clock-set-back'])
+      expect(kinds([seq({ ...step, computerNames: ['DC01', 'WIN-SETUP'] }), system({ computer: 'WIN-SETUP', clockChanges: [setBack] })])).toEqual(['clock-set-back'])
+    })
+
+    it('taken by several logs of one computer at once are its clock, set back where no log recorded it', () => {
+      const at = T0 + 11 * H
+      const logs = ['Application', 'Microsoft-Windows-AppLocker/EXE and DLL', 'Microsoft-Windows-AppXDeployment/Operational'].map((channel, i) =>
+        seq({ file: `${channel}.evtx`, channel, backwards: 1, steps: [[10 + i, at + i * MIN, at - 7 * H + i * 5 * MIN]] }),
+      )
+      const gaps = evidenceGaps({ evidence: [ev(1, 'logs.zip', { sequences: logs })] })
+      expect(gaps.map((g) => [g.kind, g.severity])).toEqual([['clock-set-back', 'low']])
+      expect(gaps[0].text).toBe(
+        'On DC01, 3 logs step back together at 2026-09-08 21:02:00Z, by up to 7h 2m: its clock was set back, and no log collected records the change. Events stamped between 2026-09-08 14:00:00Z and 2026-09-08 21:02:00Z may have happened before or after it, so their times do not give their order.',
+      )
+      // two logs are not enough to tell the clock from a record put in later
+      expect(kinds(logs.slice(0, 2))).toEqual(['time-backwards', 'time-backwards'])
+    })
+
+    it('of a machine renamed during setup are its one clock, whichever name each log knows it by most', () => {
+      const at = T0 + 11 * H
+      const names = ['WIN-OQ6R0RVA4NF', 'WinDevEval', 'WinDev2310Eval']
+      const logs = names.map((computer, i) =>
+        seq({
+          file: `log${i}.evtx`,
+          channel: `Channel-${i}`,
+          computer,
+          computerNames: [computer, ...names.filter((n) => n !== computer)],
+          computers: 3,
+          backwards: 1,
+          steps: [[5, at + i * MIN, at - 7 * H]],
+        }),
+      )
+      const gaps = evidenceGaps({ evidence: [ev(1, 'logs.zip', { sequences: logs })] })
+      expect(gaps).toHaveLength(1)
+      expect(gaps[0].text).toMatch(/^On WIN-OQ6R0RVA4NF, 3 logs step back together/)
+    })
+
+    it('by under a minute in one log are write order, and small clock corrections are not named', () => {
+      expect(kinds([seq({ backwards: 1, steps: [[266, T0 + 1040, T0]] }), system({ clockChanges: [{ computer: 'DC01', old: T0 + 2 * MIN, new: T0 }] })])).toEqual([])
+    })
   })
 
   it('names a file forwarded from several machines by the file, and says when the holes are a floor', () => {
@@ -188,7 +276,7 @@ describe('what the evidence cannot show', () => {
 
   it('lists the most serious first', () => {
     const gaps = evidenceGaps({
-      evidence: [ev(1, 'Security.evtx', { sequences: [seq({ backwards: 1, backwardsMaxMs: 5000, backwardsAt: [7], missing: 3, holeCount: 1, holes: [[4, 6]] })] })],
+      evidence: [ev(1, 'Security.evtx', { sequences: [seq({ backwards: 1, backwardsMaxMs: 5 * 60_000, steps: [[7, T0 + H, T0 + H - 5 * 60_000]], missing: 3, holeCount: 1, holes: [[4, 6]] })] })],
       throttled: [{ user: 'a@example.test', ts: T0 }],
     })
     expect(gaps.map((g) => g.severity)).toEqual(['high', 'high', 'medium'])
