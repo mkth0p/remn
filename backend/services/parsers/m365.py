@@ -765,11 +765,23 @@ def _iter_json_objects(fh: io.TextIOBase, stats: Any = None) -> Iterator[Any]:
                 yield obj
 
 
+# Graph audit log query records (auditLogRecord, Microsoft-Extractor-Suite Get-UALGraph) carry
+# these in their envelope; an AuditData that omits one takes it from there
+_GRAPH_ENVELOPE = (
+    ("CreationTime", "createdDateTime"),
+    ("Operation", "operation"),
+    ("UserId", "userPrincipalName"),
+    ("ClientIP", "clientIp"),
+    ("Workload", "service"),
+)
+
+
 def _audit_from_row(obj: dict[str, Any]) -> tuple[dict[str, Any] | None, Any]:
-    """Accept a bare AuditData object or an export row carrying AuditData as a JSON string/object."""
+    """Accept a bare AuditData object, an export row carrying AuditData as a JSON string/object,
+    or a Graph auditLogRecord, whose record is under auditData."""
     ad = obj.get("AuditData")
     if ad is None:
-        ad = obj.get("auditdata") or obj.get("Auditdata")
+        ad = obj.get("auditdata") or obj.get("Auditdata") or obj.get("auditData")
     if isinstance(ad, str):
         try:
             ad = json.loads(ad)
@@ -778,6 +790,9 @@ def _audit_from_row(obj: dict[str, Any]) -> tuple[dict[str, Any] | None, Any]:
     if isinstance(ad, dict):
         if "CreationTime" not in ad and (obj.get("CreationDate") or obj.get("CreationTime")):
             ad = {**ad, "CreationTime": obj.get("CreationDate") or obj.get("CreationTime")}
+        missing = {k: obj[top] for k, top in _GRAPH_ENVELOPE if not ad.get(k) and obj.get(top)}
+        if missing:
+            ad = {**ad, **missing}
         return ad, obj.get("RecordType") or ad.get("RecordType")
     if "Operation" in obj or "Workload" in obj:
         return obj, obj.get("RecordType")
