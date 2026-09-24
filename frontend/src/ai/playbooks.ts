@@ -100,7 +100,7 @@ export const PLAYBOOKS: Playbook[] = [
     title: 'Ransomware precursors',
     summary: 'Shadow copy deletion, backup and Defender tampering, log clearing, discovery and staging.',
     needs: 'events',
-    attack: ['T1490', 'T1562.001', 'T1070.001', 'T1087', 'T1567'],
+    attack: ['T1490', 'T1685', 'T1685.005', 'T1087', 'T1567'],
     goal: 'Find the preparations that come before ransomware or extortion, and how far they got.',
     steps: [
       'Recovery inhibition: vssadmin, wmic shadowcopy, wbadmin, bcdedit',

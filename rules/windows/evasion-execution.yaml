@@ -3,7 +3,7 @@ title: Security audit log cleared (1102)
 description: The Security log was cleared. Almost always anti-forensics when it is not a planned maintenance.
 severity: critical
 source: events
-attack: [T1070.001]
+attack: [T1685.005]
 tags: [defense-evasion, log-tampering]
 where:
   eventId: 1102
@@ -13,7 +13,7 @@ title: Event log cleared (104)
 description: A System/Application/other log was cleared (Eventlog 104).
 severity: high
 source: events
-attack: [T1070.001]
+attack: [T1685.005]
 tags: [defense-evasion, log-tampering]
 where:
   eventId: 104
@@ -24,7 +24,7 @@ title: Event log service stopped or logging shut down
 description: 1100 (logging service shut down) or 6006. Both are written at every clean shutdown, so the finding says when the system started again within thirty minutes (a shutdown sequence, not tampering); a stop with no restart after it is the one to read. The stop and its pair within fifteen minutes are one finding.
 severity: medium
 source: events
-attack: [T1562.002]
+attack: [T1685.001]
 tags: [defense-evasion, log-tampering]
 entities: [computer]
 where:
@@ -45,7 +45,7 @@ title: Audit policy changed (4719)
 description: System audit policy modified - can reduce visibility (disable success/failure auditing).
 severity: medium
 source: events
-attack: [T1562.002]
+attack: [T1685.001]
 tags: [defense-evasion, policy]
 where:
   eventId: 4719
@@ -55,7 +55,7 @@ title: Windows Defender protection disabled or configuration changed
 description: Defender 5001/5010/5012 (protection disabled), 5007 (configuration/exclusion change) or 5013 (tamper protection blocked a change).
 severity: high
 source: events
-attack: [T1562.001]
+attack: [T1685]
 tags: [defense-evasion, defender]
 where:
   provider|contains: Defender
@@ -79,7 +79,7 @@ title: Suspicious PowerShell script block (4104)
 description: Script block logging contains download cradles, encoded commands, AMSI bypass, credential dumping or offensive tooling keywords.
 severity: high
 source: events
-attack: [T1059.001, T1027, T1562.001]
+attack: [T1059.001, T1027, T1685]
 tags: [execution, powershell]
 where:
   eventId: 4104

@@ -112,7 +112,7 @@ title: Defender exclusions listed in a support log
 description: Path, process or extension exclusions were in effect when the log was written. An exclusion is a common way for unwanted software to keep itself out of scanning; compare the entries on the following rows with the intended deployment baseline. One finding per log that lists them.
 source: events
 severity: medium
-attack: [T1562.001]
+attack: [T1685]
 where:
   artifactType: defender
   message|re: '(?i)^(path|process|ext|extension|temp|file) exclusions'

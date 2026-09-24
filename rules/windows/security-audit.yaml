@@ -213,7 +213,7 @@ description: >-
   scripts, PsLogList and old log collectors; accounts listed as service accounts in the settings are excluded.
 severity: medium
 source: events
-attack: [T1562.002, T1070.001, T1021.002]
+attack: [T1685.001, T1685.005, T1021.002]
 tags: [defense-evasion, share]
 entities: [computer, subjectUser, ipAddress, relativeTargetName]
 where:

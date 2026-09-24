@@ -91,7 +91,7 @@ title: PowerShell Constrained Language lockdown removed (__PSLockdownPolicy)
 description: The system environment variable __PSLockdownPolicy was deleted or set to a value other than 4. With the value 4 every PowerShell session on the host runs in Constrained Language Mode, which blocks the .NET, COM and Add-Type calls most offensive PowerShell needs; removing it gives the attacker full language mode back for every new session. Setting it to 4 (turning the lockdown on) is not reported. Known benign causes are an administrator removing the variable while troubleshooting or after moving enforcement to AppLocker or WDAC, and a Group Policy Preferences environment item being withdrawn (then the writer is svchost.exe).
 severity: high
 source: events
-attack: [T1562.001, T1112]
+attack: [T1685, T1112]
 tags: [defense-evasion, powershell, registry]
 entities: [computer, image, targetObject, details, processName]
 where:

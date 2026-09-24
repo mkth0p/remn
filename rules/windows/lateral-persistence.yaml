@@ -217,7 +217,7 @@ title: Firewall rules added for an application, or all rules deleted
 description: 2004 (rule added), 2033 (all rules deleted) or 4946/4948 - attackers open ports for C2/RDP or wipe the firewall. One finding per application within six hours, since an installer adds its rules in a burst; the rule names are listed on the finding.
 severity: medium
 source: events
-attack: [T1562.004]
+attack: [T1686]
 tags: [defense-evasion, firewall]
 entities: [computer, applicationPath, ruleName]
 where:
@@ -233,7 +233,7 @@ title: RDP enabled / hardening changed via registry
 description: fDenyTSConnections or UserAuthentication changed (Sysmon 13 / 4657), or Remote Desktop Users group changed.
 severity: medium
 source: events
-attack: [T1021.001, T1562]
+attack: [T1021.001, T1685]
 tags: [persistence, rdp]
 where:
   any_of:
