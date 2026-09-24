@@ -42,9 +42,12 @@
 			X-Frame-Options "DENY"
 		}
 		# a path that names no file is a view of the app and gets the page; a path that names a
-		# file that is not there (robots.txt) is a 404, never the page
+		# file that is not there (robots.txt, a script of an earlier build) is a 404, never the
+		# page. try_files takes no matcher (it would try a file named "@view"), so it sits in a route.
 		@view not path_regexp \.[^/]*$
-		try_files @view {path} /index.html
+		route @view {
+			try_files {path} /index.html
+		}
 		# built assets carry a content hash in their name and never change; the page is fetched
 		# fresh, so a new build reaches visitors on their next load
 		header /assets/* Cache-Control "public, max-age=31536000, immutable"

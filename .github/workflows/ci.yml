@@ -91,6 +91,7 @@ jobs:
           curl -fsI http://127.0.0.1:8080/cases/1 | tee /dev/stderr | grep -qi "^content-security-policy: default-src 'self'"
           curl -fsI http://127.0.0.1:8080/cases/1 | grep -qi "^cache-control: no-store"
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/robots.txt)" = 404
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/assets/missing.js)" = 404
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/favicon.ico)" = 200
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8080/cases/1)" = 405
           # no parser behind it here: the API path reaches the proxy's upstream, not a file

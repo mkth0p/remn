@@ -146,6 +146,10 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   prefix (`fe80::/10`) into text conditions. The SigmaHQ packs, re-imported at the same
   upstream commit, gain 28 rules; no existing rule changes. The `smbserver-connectivity` log
   source maps to its channel, so the one new rule on it can fire.
+- Fixed: behind the public profile's Caddy, a path naming a file that is not there got the app
+  page. `robots.txt` answered 200 with the page, and a missing script under `/assets/`, such as
+  a chunk of an earlier build, came back as the page with a one-year immutable cache header.
+  Those are 404s now; a path that names no file still gets the page. CI checks both.
 
 ## 0.1.1 (2026-09-07)
 
