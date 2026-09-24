@@ -187,8 +187,19 @@ function LinkList({
 }) {
   return (
     <>
-      {edges.slice(0, limit).map((edge, i) => (
-        <LinkItem key={`${keyPrefix}-${i}`} edge={edge} nodes={nodes} aliases={aliases} reviews={reviews} onSave={onSave} onExplore={onExplore} onOpen={onOpen} />
+      {/* keyed by the link, not its place: a rebuild (a saved review, new findings) can reorder
+          the links, and a place key would hand an open link and its unsaved form to another one */}
+      {edges.slice(0, limit).map((edge) => (
+        <LinkItem
+          key={`${keyPrefix}-${JSON.stringify([edge.source, edge.target, edge.relation])}`}
+          edge={edge}
+          nodes={nodes}
+          aliases={aliases}
+          reviews={reviews}
+          onSave={onSave}
+          onExplore={onExplore}
+          onOpen={onOpen}
+        />
       ))}
       {edges.length > limit && (
         <span className="small muted">

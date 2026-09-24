@@ -11,6 +11,20 @@ vi.mock('../data/source', () => ({ getSource: () => ({ kind: 'browser', getEvent
 // the ECharts renderer needs a canvas; the view only has to hand it the story graph
 vi.mock('../components/ChainGraph', () => ({ ChainGraph: () => 'story graph placeholder' }))
 vi.mock('../ai/chat', () => ({ runAgent: vi.fn() }))
+// a rebuild can list a story's links in another order (new findings or marks reorder its records)
+const builds = vi.hoisted(() => ({ count: 0, reverse: false }))
+vi.mock('../data/relationshipStories', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../data/relationshipStories')>()
+  return {
+    ...mod,
+    buildStories: (...args: Parameters<typeof mod.buildStories>) => {
+      const built = mod.buildStories(...args)
+      builds.count++
+      if (builds.reverse) for (const s of built.stories) s.edges.reverse()
+      return built
+    },
+  }
+})
 
 import { RelationshipsView } from './RelationshipsView'
 import { runAgent } from '../ai/chat'
@@ -96,6 +110,7 @@ const phishing: Finding = {
 
 let db: RemnDB
 beforeEach(async () => {
+  builds.reverse = false
   db = new RemnDB(`relationships-${Math.random()}`)
   setDb(db)
   useStore.setState({ currentCase: kase, view: 'relationships', rulesVersion: 0, entity: null, aiPrompt: null })
@@ -225,6 +240,33 @@ describe('RelationshipsView', () => {
       fireEvent.click(document.querySelector('table.table.compact tbody tr')!)
       await waitFor(() => expect(screen.getByRole('img', { name: 'Connections around the selected entity' })).toBeTruthy(), WAIT)
       expect(document.querySelector('.segmented button.active')?.textContent).toBe('Explore')
+    },
+    TEST_TIMEOUT,
+  )
+
+  it(
+    'keeps an open link and its saved review with that link when the rebuild after the save reorders the story',
+    async () => {
+      await loadStory()
+      fireEvent.click(screen.getByRole('button', { name: 'Links' }))
+      await waitFor(() => expect(screen.getByText('attachment digest', { exact: true })).toBeTruthy(), WAIT)
+      const summaries = () => Array.from(document.querySelectorAll('details.card > summary strong')).map((s) => s.textContent)
+      const order = summaries()
+      const link = screen.getByText('attachment digest', { exact: true }).closest('details')!
+      link.open = true
+      fireEvent(link, new Event('toggle'))
+      await waitFor(() => expect(link.querySelector('select[aria-label="Relationship decision"]')).toBeTruthy(), WAIT)
+      fireEvent.change(link.querySelector('select[aria-label="Relationship decision"]')!, { target: { value: 'accepted' } })
+      builds.reverse = true
+      fireEvent.click(Array.from(link.querySelectorAll('button')).find((b) => b.textContent === 'Save relationship review')!)
+      // the saved review rebuilds the stories, which now list the links the other way round
+      await waitFor(() => expect(summaries()).toEqual([...order].reverse()), WAIT)
+      await waitFor(() => {
+        const open = Array.from(document.querySelectorAll<HTMLDetailsElement>('details.card')).filter((d) => d.open)
+        expect(open.map((d) => d.querySelector('summary strong')?.textContent)).toEqual(['attachment digest'])
+        expect(open[0].querySelector('[role=status]')?.textContent).toBe('Saved')
+        expect(open[0].querySelector<HTMLSelectElement>('select[aria-label="Relationship decision"]')?.value).toBe('accepted')
+      }, WAIT)
     },
     TEST_TIMEOUT,
   )

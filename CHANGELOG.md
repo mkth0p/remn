@@ -150,6 +150,10 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   page. `robots.txt` answered 200 with the page, and a missing script under `/assets/`, such as
   a chunk of an earlier build, came back as the page with a one-year immutable cache header.
   Those are 404s now; a path that names no file still gets the page. CI checks both.
+- Fixed: in Relationships, an open link could turn into another link under the analyst's hands.
+  Saving a review, or new findings, rebuilds the stories, and a rebuild can list a story's links
+  in another order; the open panel, with its form, stayed at its place in the list and showed
+  whichever link moved there. It now stays with its link.
 
 ## 0.1.1 (2026-09-07)
 
