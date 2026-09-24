@@ -58,5 +58,14 @@ test('the demo case opens in the browser, with nothing uploaded', async ({ page 
   await expect(page.locator('.nav-item', { hasText: 'Mails' })).toContainText('1,000')
   // restored with its chains built and its findings attached
   await expect(chainLine(page)).toContainText('5 chain(s) · 5 critical', { timeout: 60_000 })
+  // its report: every printed finding and text read back against the rows it cites, and holding
+  await page.getByText('Report', { exact: true }).first().click()
+  const claims = page.locator('.row.small').filter({ hasText: 'What the report says holds against the rows it cites' })
+  await expect(claims).toContainText(/\d+ finding\(s\) and \d+ text\(s\) read back against their rows/, { timeout: 60_000 })
+  await expect(claims.locator('.badge').first()).toHaveText('ok')
+  await expect(page.getByTestId('unverified-claims')).toHaveCount(0)
+  const preview = page.frameLocator('iframe[title="report preview"]')
+  await expect(preview.locator('.claim.verified').first()).toBeVisible()
+  await expect(preview.locator('.claim.unsupported, .claim.contradicted')).toHaveCount(0)
   expect(sent).toEqual([])
 })

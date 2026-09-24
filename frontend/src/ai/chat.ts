@@ -8,6 +8,8 @@ import { citationsIn, SeenSet, type Suspect } from './evidence'
 import { boardMemory, loadBoard } from './hypotheses'
 import { appendLedger } from './ledger'
 import { caseShape, runTool, toolNamesFor, type PlanStep } from './tools'
+import { checkCitedSentences } from '../data/claims'
+import { getSource } from '../data/source'
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
@@ -38,8 +40,8 @@ export interface ChatMessage {
   draft?: boolean
   confidence?: string
   openQuestions?: string[]
-  /** assistant: citations in the answer, checked against what the tools returned */
-  cites?: { verified: number; unverified: string[] }
+  /** assistant: citations in the answer, checked against what the tools returned, and the sentences citing rows read against those rows */
+  cites?: { verified: number; unverified: string[]; sentences?: number; unsupported?: { sentence: string; reason: string }[] }
 }
 
 export type AgentMode = 'analyst' | 'explain' | 'rule' | 'report' | 'triage' | 'narrative' | 'json' | 'free'
@@ -175,6 +177,16 @@ export async function runAgent(messages: ChatMessage[], kase: Case, opts: AgentO
   const turns = agent ? budget + 1 : budget
   /** an answer that cites nothing although the tools returned rows goes back once, while a turn is left for it */
   const sendBack = (answer: string, iter: number) => !!agent && seen.size > 0 && iter < turns - 1 && !citationsIn(answer, seen).some((c) => c.verified) && citeRetries++ < 1
+  /** An answer's citations: whether the tools returned them, and each sentence citing rows read against those rows (data/claims.ts). */
+  const answerCites = async (answer: string): Promise<NonNullable<ChatMessage['cites']>> => {
+    const cites = citationsIn(answer, seen)
+    const rows = await checkCitedSentences(answer, getSource(kase)).catch(() => null)
+    return {
+      verified: cites.filter((c) => c.verified).length,
+      unverified: cites.filter((c) => !c.verified).map((c) => c.key),
+      ...(rows ? { sentences: rows.sentences, unsupported: rows.unsupported } : {}),
+    }
+  }
   for (let iter = 0; iter < turns; iter++) {
     if (agent && !wrapping && (iter >= budget || agent.wrapUp?.())) {
       wrapping = true
@@ -257,15 +269,15 @@ export async function runAgent(messages: ChatMessage[], kase: Case, opts: AgentO
         continue
       }
       if (agent) {
-        const cites = citationsIn(content, seen)
         assistant.final = true
-        assistant.cites = { verified: cites.filter((c) => c.verified).length, unverified: cites.filter((c) => !c.verified).map((c) => c.key) }
+        assistant.cites = await answerCites(content)
         await appendLedger(caseId, 'answer', content.slice(0, 200), {
           model: model || undefined,
           chars: content.length,
           sha256: await sha256Hex(content),
           cites: assistant.cites.verified,
           unverified: assistant.cites.unverified.slice(0, 20),
+          unsupported: assistant.cites.unsupported?.length,
         }).catch(() => undefined)
       }
       push(assistant)
@@ -333,14 +345,14 @@ export async function runAgent(messages: ChatMessage[], kase: Case, opts: AgentO
           run.toolCalls++
           opts.onToolResult?.(c.name, msg.content, msg.ms ?? 0)
           push(msg)
-          const cites = citationsIn(out.final.answer, seen)
-          const verified = { verified: cites.filter((x) => x.verified).length, unverified: cites.filter((x) => !x.verified).map((x) => x.key) }
+          const verified = await answerCites(out.final.answer)
           await appendLedger(caseId, 'answer', out.final.answer.slice(0, 200), {
             model: model || undefined,
             chars: out.final.answer.length,
             sha256: await sha256Hex(out.final.answer),
             cites: verified.verified,
             unverified: verified.unverified.slice(0, 20),
+            unsupported: verified.unsupported?.length,
           }).catch(() => undefined)
           push({
             role: 'assistant',

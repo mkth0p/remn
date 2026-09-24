@@ -23,6 +23,8 @@ export interface PreflightInput {
   /** decided findings whose decision the analyst took from the model's proposal */
   aiDecided: number
   unprintedConfirmed: number
+  /** the printed claims read back against their rows (data/claims.ts); left out while the check runs */
+  claims?: { checked: number; unsupported: number; contradicted: number; texts: number; textsUnsupported: number }
 }
 
 export function preflightChecks(p: PreflightInput): PreflightCheck[] {
@@ -70,7 +72,24 @@ export function preflightChecks(p: PreflightInput): PreflightCheck[] {
       ok: !p.unprintedConfirmed,
       detail: p.unprintedConfirmed ? `${p.unprintedConfirmed} confirmed item(s) below the severity floor or left out` : 'the report carries every confirmed item',
     },
+    claimsCheck(p.claims),
   ]
+}
+
+function claimsCheck(c: PreflightInput['claims']): PreflightCheck {
+  const label = 'What the report says holds against the rows it cites'
+  if (!c) return { id: 'claims', label, ok: false, detail: 'the printed findings and texts are still being checked against their rows' }
+  const problems = [
+    c.contradicted ? `${c.contradicted} finding(s) contradicted by their rows` : '',
+    c.unsupported ? `${c.unsupported} finding(s) whose rows are not all in the case` : '',
+    c.textsUnsupported ? `${c.textsUnsupported} text(s) naming values their rows do not hold` : '',
+  ].filter(Boolean)
+  return {
+    id: 'claims',
+    label,
+    ok: !problems.length,
+    detail: problems.length ? problems.join('; ') : `${c.checked} finding(s) and ${c.texts} text(s) read back against their rows`,
+  }
 }
 
 export interface ReportIssue {

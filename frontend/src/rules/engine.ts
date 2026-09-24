@@ -181,7 +181,7 @@ function entitiesOf(row: Row, fields: string[]): Record<string, string> {
   return out
 }
 
-function timePred(rule: Rule, settings: SettingsLike | undefined, tsField: string): Pred | null {
+export function timePred(rule: Rule, settings: SettingsLike | undefined, tsField: string): Pred | null {
   const t = rule.time
   if (!t || (!t.outside_business_hours && !t.weekend && !t.hours)) return null
   const bh = settings?.businessHours ?? { start: 8, end: 19, tz: 'UTC' }

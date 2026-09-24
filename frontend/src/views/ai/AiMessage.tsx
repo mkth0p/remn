@@ -86,10 +86,18 @@ export function AiMessage({ m, seen, showTools }: { m: ChatMessage; seen: SeenSe
               </div>
             ) : null}
             {m.cites && (
-              <div className={`ai-cite-check ${m.cites.unverified.length ? 'bad' : m.cites.verified ? 'ok' : 'none'}`}>
+              <div className={`ai-cite-check ${m.cites.unverified.length || m.cites.unsupported?.length ? 'bad' : m.cites.verified ? 'ok' : 'none'}`}>
                 {m.cites.verified} citation(s) checked against what the tools returned
                 {m.cites.unverified.length ? ` · ${m.cites.unverified.length} unverified: ${m.cites.unverified.slice(0, 6).join(', ')}` : ''}
                 {!m.cites.verified && !m.cites.unverified.length ? ' · the answer cites no rows' : ''}
+                {m.cites.sentences
+                  ? ` · ${m.cites.sentences} sentence(s) read against the rows they cite${m.cites.unsupported?.length ? `, ${m.cites.unsupported.length} naming what those rows do not hold` : ''}`
+                  : ''}
+                {m.cites.unsupported?.map((u, i) => (
+                  <div key={i} className="small">
+                    “{u.sentence}”: {u.reason}
+                  </div>
+                ))}
               </div>
             )}
           </div>

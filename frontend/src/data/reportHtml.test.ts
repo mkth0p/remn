@@ -378,6 +378,31 @@ describe('what the report claims about the case', () => {
     expect(plain).not.toContain('never seen to')
   })
 
+  it('says under each rule whether its rows bear it out, where they are, and lists what does not hold', () => {
+    const d = data()
+    const byRule = (r: string) => d.findings.find((x) => x.ruleId === r)!.id!
+    const rec = { file: 'box.mbox', record: 'message 8', key: 'k' }
+    const claims = {
+      findings: {
+        [byRule('mail-credential-phishing')]: { status: 'verified' as const, cited: 1, checked: 1, reasons: [], records: [rec] },
+        [byRule('other')]: { status: 'contradicted' as const, cited: 1, checked: 1, reasons: ['box.mbox message 9 no longer matches the rule'], records: [] },
+      },
+      texts: [
+        { key: 'summary', what: 'the executive summary', check: { status: 'unsupported' as const, named: ['198.51.100.9'], reasons: ['it names 198.51.100.9, which no row of the evidence holds'] } },
+      ],
+    }
+    const html = buildReportHtml({ ...d, claims })
+    expect(html).toContain('<span class="sub claim verified" title="">rows checked · box.mbox message 8</span>')
+    expect(html).toContain('<span class="sub claim contradicted" title="box.mbox message 9 no longer matches the rule">rows disagree</span>')
+    expect(html).toContain('<div class="cap claim unsupported">Checked against its rows: it names 198.51.100.9, which no row of the evidence holds.</div>')
+    expect(html).toContain(
+      'each printed finding was read back against the rows it cites (the first 50 of each): 1 verified, 0 unsupported, 1 contradicted; 1 text (chain narratives, incident notes, the summary) checked for the addresses, accounts and hashes it names, 0 holding',
+    )
+    const limits = html.slice(html.indexOf('<h4>Where it stops</h4>'))
+    expect(limits).toContain('<li>The finding &quot;other&quot; (other) is contradicted by its rows: box.mbox message 9 no longer matches the rule.</li>')
+    expect(limits).toContain('<li>The executive summary is unsupported: it names 198.51.100.9, which no row of the evidence holds.</li>')
+  })
+
   it('says indicators were checked only when a lookup ran', () => {
     const on = data({ kase: { ...kase, settings: { ...kase.settings, networkAllowed: true } } })
     expect(buildReportHtml(on)).toContain('No indicator was checked against a reputation service')

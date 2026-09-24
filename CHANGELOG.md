@@ -196,6 +196,21 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   2,998 event rules detect a recorded attack of what they look for (REMN's own Windows
   rules: 112 of 133), all 457 SigmaHQ rules with a regression sample fire on
   it, and 167 fire on the clean machines. See `docs/reviews/2026-09-24-measured-rules.md`.
+- What the report says about rows is read back against the rows before it prints. Each
+  printed finding's rows (the first 50) must still be in the case, match its rule as the
+  rule is now, hold the values it names and begin at its time; a chain narrative or an
+  incident note must name only addresses, accounts and hashes its own rows hold; the
+  executive summary only values the evidence holds. Each rule's line in the report says "rows
+  checked", "rows missing" or "rows disagree" and names its first row by its place in its own
+  file (an event log's record number with its computer and channel, a mailbox's message
+  number, a cloud record's id), which stays the same when evidence is removed and added again
+  or the case is imported elsewhere, where REMN's row ids do not. A claim that does not hold
+  is listed under "Where it stops" and on the Report page, and a new preflight check keeps
+  the report a draft until they all hold or the analyst waives it. The 129 findings of the
+  demo case all hold, and a tampered copy of its rows does not. The AI analyst's answers are
+  read the same way: each sentence that cites rows is checked against those rows, not only
+  against what the tools returned, and one that names what they do not hold is listed under
+  the answer.
 
 ## 0.1.1 (2026-09-07)
 

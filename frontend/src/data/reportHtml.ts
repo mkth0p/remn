@@ -9,6 +9,7 @@ import { packageCoverageIssues } from './packageCoverage'
 import { defang, escapeHtml, fmtBytes, fmtNum, fmtUtc as fmtTs, renderMarkdown } from '../util/format'
 import type { GapStatement } from './evidenceGaps'
 import { isLead, type MeasureReading } from './ruleMeasures'
+import { CHECKED_ROWS, type ClaimCheck, type ReportClaims } from './claims'
 
 /**
  * The printed report: one self-contained HTML file laid out for A4 and the browser's print-to-PDF.
@@ -81,6 +82,8 @@ export interface ReportData {
   measures?: Record<string, MeasureReading>
   /** what the rules were measured on, in a sentence */
   measuredOn?: string
+  /** the printed findings and texts checked against the rows they cite (data/claims.ts) */
+  claims?: ReportClaims
 }
 
 /** The model's part in the case, as the report prints it. */
@@ -424,7 +427,7 @@ function chainCard(c: Chain, d: ReportData): string {
       : `${f.offsetMin >= 0 ? '+' : ''}${Math.round(f.offsetMin)} min`
   const when = (f: FoldedStep) => (f.n > 1 && f.tsEnd !== f.ts ? `${fmtTs(f.ts)}<span class="sub">to ${fmtTs(f.tsEnd)}</span>` : fmtTs(f.ts))
   const narrative = r?.narrative
-    ? `<div class="narr">${md(r.narrative)}</div>${r.narrativeBy === 'ai' ? '<div class="cap ai">narrative drafted by the model during triage</div>' : ''}`
+    ? `<div class="narr">${md(r.narrative)}</div>${r.narrativeBy === 'ai' ? '<div class="cap ai">narrative drafted by the model during triage</div>' : ''}${textNote(`chain:${c.id}`, d.claims)}`
     : `<div class="narr"><p>${h(c.summary)}</p></div>`
   const sev = chainSeverity(c, r)
   return `<div class="card chain ${h(sev)}">
@@ -448,7 +451,7 @@ ${table(
   }),
 )}
 ${left || hidden ? `<div class="cap">${left ? `${left} more step row(s) not printed (open the chain in REMN for the full list)` : ''}${left && hidden ? ' · ' : ''}${hidden ? `${hidden} routine step(s) not printed at the “${h(d.settings.chainDetail)}” detail level` : ''}.</div>` : ''}
-${members.length ? `<div class="cap" style="margin-top:8px">${members.length} finding(s) linked to this chain, decided with it</div>${groupedFindings(members, {}, d.measures)}` : ''}
+${members.length ? `<div class="cap" style="margin-top:8px">${members.length} finding(s) linked to this chain, decided with it</div>${groupedFindings(members, {}, d.measures, d.claims)}` : ''}
 ${r?.by === 'ai' && r.aiReason ? `<div class="cap ai">Triage note (model): ${h(r.aiReason)}</div>` : ''}
 </div>`
 }
@@ -471,6 +474,8 @@ interface RuleGroup {
   /** the distinct matched values that are not already said by the incident */
   values: string[]
   escalations: string[]
+  /** the findings of the group */
+  ids: number[]
 }
 
 /** One line per rule: ninety firewall rows print as one row with a count and a span, and the distinct values they matched. */
@@ -492,9 +497,11 @@ export function groupByRule(findings: Finding[], said: Record<string, string> = 
         statuses: {},
         values: [],
         escalations: [],
+        ids: [],
       }
       groups.set(f.ruleId, g)
     }
+    if (f.id != null) g.ids.push(f.id)
     g.findings++
     g.rows += f.count
     if (rank(effectiveSeverity(f)) > rank(g.severity)) g.severity = effectiveSeverity(f)
@@ -525,13 +532,34 @@ function measureMark(m: MeasureReading | undefined): string {
   return ''
 }
 
-function groupedFindings(findings: Finding[], said: Record<string, string>, measures: Record<string, MeasureReading> = {}): string {
+const CLAIM_WORD: Record<ClaimCheck['status'], string> = { verified: 'rows checked', unsupported: 'rows missing', contradicted: 'rows disagree' }
+
+/** Whether a rule's findings hold against the rows they cite, and where the first of those rows is in its file. */
+function claimNote(ids: number[], claims?: ReportClaims): string {
+  if (!claims) return ''
+  const cs = ids.map((id) => claims.findings[id]).filter((c): c is ClaimCheck => !!c)
+  if (!cs.length) return ''
+  const worst = cs.find((c) => c.status === 'contradicted') ?? cs.find((c) => c.status === 'unsupported') ?? cs[0]
+  const rec = cs.find((c) => c.records.length)?.records[0]
+  const cited = cs.reduce((t, c) => t + c.cited, 0)
+  const where = rec ? ` · ${h(rec.file)} ${h(rec.record)}${cited > 1 ? ` <span class="dim">and ${n(cited - 1)} more</span>` : ''}` : ''
+  return `<span class="sub claim ${worst.status}" title="${h(worst.reasons.join(' '))}">${CLAIM_WORD[worst.status]}${where}</span>`
+}
+
+/** A text's check, under the text, when it names something its rows do not hold. */
+function textNote(key: string, claims?: ReportClaims): string {
+  const t = claims?.texts.find((x) => x.key === key)
+  if (!t || t.check.status === 'verified') return ''
+  return `<div class="cap claim ${t.check.status}">Checked against its rows: ${h(t.check.reasons.join(' '))}.</div>`
+}
+
+function groupedFindings(findings: Finding[], said: Record<string, string>, measures: Record<string, MeasureReading> = {}, claims?: ReportClaims): string {
   const groups = groupByRule(findings, said)
   return table(
     ['severity', 'finding', 'findings · rows', 'when (UTC)', 'ATT&amp;CK', 'what matched'],
     groups.map((g) => [
       pill(g.severity) + (g.severity !== g.ruleSeverity ? `<span class="sub">rule: ${h(g.ruleSeverity)}</span>` : ''),
-      `${h(g.title)}<span class="sub"><code>${h(g.ruleId)}</code>${measureMark(measures[g.ruleId])}${g.escalations.length ? ' · ' + h(g.escalations.slice(0, 2).join(' · ')) : ''}</span>`,
+      `${h(g.title)}<span class="sub"><code>${h(g.ruleId)}</code>${measureMark(measures[g.ruleId])}${g.escalations.length ? ' · ' + h(g.escalations.slice(0, 2).join(' · ')) : ''}</span>${claimNote(g.ids, claims)}`,
       `<span class="nowrap">${n(g.findings)} · ${n(g.rows)}</span>`,
       `<span class="nowrap">${span(g.first, g.last)}</span>`,
       g.attack
@@ -548,7 +576,7 @@ function groupedFindings(findings: Finding[], said: Record<string, string>, meas
   )
 }
 
-function incidentCard(i: Incident, measures: Record<string, MeasureReading> = {}): string {
+function incidentCard(i: Incident, measures: Record<string, MeasureReading> = {}, claims?: ReportClaims): string {
   const decidedByAi = i.lead.decidedBy === 'ai'
   return `<div class="card inc ${h(i.severity)}">
 <div class="card-head">${pill(i.severity)}<h3>${h(i.title)}</h3><span class="stamp st-${h(i.status)}">${h(STATUS_WORD[i.status] ?? i.status)}</span></div>
@@ -561,9 +589,9 @@ function incidentCard(i: Incident, measures: Record<string, MeasureReading> = {}
           .join('')
       : ''
   }</div>
-${i.lead.notes ? `<div class="note">${md(i.lead.notes)}</div>${i.lead.notesBy === 'ai' ? '<div class="cap ai">note drafted by the model during triage</div>' : ''}` : ''}
+${i.lead.notes ? `<div class="note">${md(i.lead.notes)}</div>${i.lead.notesBy === 'ai' ? '<div class="cap ai">note drafted by the model during triage</div>' : ''}` : ''}${textNote(`incident:${i.lead.id ?? i.title}`, claims)}
 ${decidedByAi && i.lead.aiReason ? `<div class="cap ai">Triage note (model): ${h(i.lead.aiReason)}</div>` : ''}
-${groupedFindings(i.findings, i.entities, measures)}
+${groupedFindings(i.findings, i.entities, measures, claims)}
 </div>`
 }
 
@@ -743,7 +771,7 @@ span.warn{color:var(--medium);font-weight:600}.ribbon.ok i{background:var(--acce
 .narr p{margin:0 0 6px}.narr p:last-child{margin:0}
 .narr strong{color:var(--ink)}
 .cap{font-size:10px;color:var(--ink-3);margin-top:4px}
-.cap.ai{color:var(--violet)}
+.cap.ai{color:var(--violet)}.claim.unsupported{color:var(--medium)}.claim.contradicted{color:var(--critical);font-weight:600}
 .note{background:var(--surface-2);padding:8px 12px;border-radius:6px;margin:6px 0 8px;font-size:12px}
 .note p{margin:0 0 6px}.note p:last-child{margin:0}
 figure{margin:8px 0 10px;break-inside:avoid}
@@ -832,9 +860,29 @@ function method(d: ReportData, v: Verdict, conf: Confidence): string {
     const m = d.measures?.[f.ruleId]
     return !!m && isLead(m)
   }).length
+  // the printed findings and texts, read back against the rows they cite
+  const checked = d.findings.map((f) => (f.id != null ? d.claims?.findings[f.id] : undefined)).filter((c): c is ClaimCheck => !!c)
+  const claimCount = (s: ClaimCheck['status']) => checked.filter((c) => c.status === s).length
+  const texts = d.claims?.texts ?? []
+  const byId = new Map(d.findings.filter((f) => f.id != null).map((f) => [f.id!, f]))
+  const claimLimits = [
+    ...Object.entries(d.claims?.findings ?? {})
+      .filter(([id, c]) => c.status !== 'verified' && byId.has(Number(id)))
+      .sort((a, b) => (a[1].status === 'contradicted' ? 0 : 1) - (b[1].status === 'contradicted' ? 0 : 1))
+      .map(([id, c]) => {
+        const f = byId.get(Number(id))!
+        return `The finding "${f.title}" (${f.ruleId}) is ${c.status === 'contradicted' ? 'contradicted by its rows' : 'unsupported'}: ${c.reasons.join('; ')}.`
+      }),
+    ...texts.filter((t) => t.check.status !== 'verified').map((t) => `${t.what[0].toUpperCase()}${t.what.slice(1)} is unsupported: ${t.check.reasons.join('; ')}.`),
+  ]
   const sources = [
     `${n(d.evidence.length)} evidence file${d.evidence.length === 1 ? '' : 's'} (${h(kinds.join(', ') || 'none')}), ${n(rowsTotal)} rows parsed`,
     `${n(rulesFired)} rule${rulesFired === 1 ? '' : 's'} produced the printed findings${engine ? `; ${n(engine)} finding${engine === 1 ? '' : 's'} came from an external detection engine` : ''}`,
+    ...(checked.length
+      ? [
+          `each printed finding was read back against the rows it cites (the first ${n(CHECKED_ROWS)} of each): ${n(claimCount('verified'))} verified, ${n(claimCount('unsupported'))} unsupported, ${n(claimCount('contradicted'))} contradicted${texts.length ? `; ${n(texts.length)} text${texts.length === 1 ? '' : 's'} (chain narratives, incident notes, the summary) checked for the addresses, accounts and hashes ${texts.length === 1 ? 'it names' : 'they name'}, ${n(texts.filter((t) => t.check.status === 'verified').length)} holding` : ''}`,
+        ]
+      : []),
     ...(readings.length
       ? [
           `of those rules, ${n(detects)} fire${detects === 1 ? 's' : ''} on recorded attacks of what ${detects === 1 ? 'it looks' : 'they look'} for and ${n(leads)} ${leads === 1 ? 'was' : 'were'} never seen to (their findings are marked lead)${d.measuredOn ? `. ${h(d.measuredOn)}` : ''}`,
@@ -853,6 +901,8 @@ function method(d: ReportData, v: Verdict, conf: Confidence): string {
       : []),
     ...(issue?.waived ?? []).map((w) => `Issued with an open check: ${w.label.toLowerCase()}. The analyst's reason: ${w.reason}`),
     ...(d.gaps ?? []).map((g) => g.text),
+    ...claimLimits.slice(0, 12),
+    ...(claimLimits.length > 12 ? [`${n(claimLimits.length - 12)} more claims are not verified; the Report page lists them.`] : []),
     ...(leadFindings
       ? [
           `${n(leadFindings)} printed finding${leadFindings === 1 ? ' comes from a rule' : 's come from rules'} never seen to detect what ${leadFindings === 1 ? 'it looks' : 'they look'} for on recorded attacks (marked lead): each says where to look, and stands on the rows it cites and the analyst's decision.`,
@@ -893,7 +943,7 @@ export function buildReportHtml(d: ReportData): string {
     sections.push({
       id: 'summary',
       title: 'Executive summary',
-      body: `<div class="narr">${md(d.summary)}</div>${d.summaryBy === 'ai' ? '<div class="cap ai">drafted by the analyst model from the reviewed items; the decisions it rests on are the analyst\'s</div>' : ''}${
+      body: `<div class="narr">${md(d.summary)}</div>${d.summaryBy === 'ai' ? '<div class="cap ai">drafted by the analyst model from the reviewed items; the decisions it rests on are the analyst\'s</div>' : ''}${textNote('summary', d.claims)}${
         d.summaryAt && d.findings.some((f) => f.createdAt > d.summaryAt!)
           ? '<div class="cap">written before the findings last changed: the numbers and ids in it may describe an earlier state of the case</div>'
           : ''
@@ -923,7 +973,7 @@ export function buildReportHtml(d: ReportData): string {
     id: 'incidents',
     title: 'Incidents',
     count: d.incidents.length,
-    body: `<p class="intro">Findings on the same mail, or about the same user, host or IP within six hours, are one incident. Each table groups the incident's findings by rule: one line per rule with the count, the span and the values it matched.</p>${d.incidents.length ? d.incidents.map((i) => incidentCard(i, d.measures)).join('\n') : '<div class="empty">No incident outside the attack chains passes the severity floor.</div>'}`,
+    body: `<p class="intro">Findings on the same mail, or about the same user, host or IP within six hours, are one incident. Each table groups the incident's findings by rule: one line per rule with the count, the span and the values it matched.</p>${d.incidents.length ? d.incidents.map((i) => incidentCard(i, d.measures, d.claims)).join('\n') : '<div class="empty">No incident outside the attack chains passes the severity floor.</div>'}`,
   })
   if (settings.includeEvidence) {
     const packages = d.evidence.filter((e) => e.kind === 'package')
@@ -1025,7 +1075,7 @@ export function buildReportHtml(d: ReportData): string {
           ['severity', 'rule', 'findings · rows', 'when (UTC)', 'status', 'what matched'],
           groups.map((g) => [
             pill(g.severity),
-            `${h(g.title)}<span class="sub"><code>${h(g.ruleId)}</code>${measureMark(d.measures?.[g.ruleId])}${g.attack.length ? ' · ' + h(g.attack.slice(0, 4).join(' ')) : ''}</span>`,
+            `${h(g.title)}<span class="sub"><code>${h(g.ruleId)}</code>${measureMark(d.measures?.[g.ruleId])}${g.attack.length ? ' · ' + h(g.attack.slice(0, 4).join(' ')) : ''}</span>${claimNote(g.ids, d.claims)}`,
             `<span class="nowrap">${n(g.findings)} · ${n(g.rows)}</span>`,
             `<span class="nowrap">${span(g.first, g.last)}</span>`,
             Object.entries(g.statuses)

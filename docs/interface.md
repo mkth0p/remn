@@ -219,8 +219,8 @@ page may call print on it.
 
 Before it is issued, the Report page runs a preflight: the rules ran on every file,
 every file was read completely and has a verified digest, every item has a decision, the
-decisions taken from the model's proposals were checked, and every confirmed item is
-printed. The report is a draft, and its cover says so, until each check passes or is
+decisions taken from the model's proposals were checked, every confirmed item is
+printed, and what the report says holds against the rows it cites. The report is a draft, and its cover says so, until each check passes or is
 waived with a reason; "issue as final" then prints it as final with the time, and the
 waivers appear in "Where it stops". A new open check (evidence added, a rule run that
 failed) returns it to draft.
@@ -236,6 +236,27 @@ finding (overwritten or not collected), Unified Audit Log exports of exactly 5,0
 reads not recorded for 24 hours), and Entra sign-ins that start after the first finding
 (Entra keeps them 7 or 30 days). The first finding is the earliest one of medium severity
 or above that is not a false positive.
+
+What the report says about rows is read back against the rows before it prints
+(`frontend/src/data/claims.ts`), through the case's data source, so a browser case and a
+server case are checked alike:
+
+- each printed finding: the rows it cites (the first 50) are still in the case, match its
+  rule as the rule is now, hold the values it names and begin at its time;
+- each chain narrative and incident note: the addresses, accounts and hashes it names are in
+  that chain's or incident's own rows;
+- the executive summary: the addresses and hashes it names are somewhere in the evidence.
+
+A claim is verified, unsupported (a row it cites is gone, or a value it names is in none of
+its rows) or contradicted (its rows say otherwise). Each rule's line in the report reads "rows
+checked", "rows missing" or "rows disagree" and names its first row by its place in its own
+file (`frontend/src/data/recordKeys.ts`): an event log's record number with the computer and
+channel, a mailbox's message number, a cloud record's own id, under the file whose SHA-256
+the evidence table prints. REMN's row ids change when evidence is removed and added again or a
+bundle is imported into another browser; these references do not, and a reader can check them
+in any tool. A text that names what its rows do not hold says so under it, every claim that
+does not hold is listed under "Where it stops" and on the Report page, and the preflight keeps
+the report a draft until they all hold or the analyst waives the check with a reason.
 
 The printed report (`frontend/src/data/reportHtml.ts`) is one self-contained HTML file in
 REMN's own look, laid out for A4 and print-to-PDF. Every time in it is UTC, whatever the

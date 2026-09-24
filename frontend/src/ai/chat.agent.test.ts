@@ -61,7 +61,7 @@ describe('an investigation', () => {
     expect(tools.map((m) => m.tool_name)).toEqual(['update_plan', 'search_events', 'search_events'])
     expect(tools[2].content).toContain('same call as step 1')
     const final = msgs[msgs.length - 1]
-    expect(final).toMatchObject({ role: 'assistant', final: true, model: 'scripted:1b', cites: { verified: 2, unverified: ['ev:77'] } })
+    expect(final).toMatchObject({ role: 'assistant', final: true, model: 'scripted:1b', cites: { verified: 2, unverified: ['ev:77'], sentences: 1, unsupported: [] } })
     expect(seen.toJSON().sort()).toEqual(['ev:1', 'ev:2'])
     expect(runs.at(-1)).toMatchObject({ plan: [{ title: 'failures', status: 'doing' }], toolCalls: 3, contextTokens: 1234 })
     // the case tools only: no mail tools in an events-only case, the propose tools because it is an investigation
@@ -75,6 +75,17 @@ describe('an investigation', () => {
     const ledger = await loadLedger(1)
     expect(ledger.map((e) => e.kind)).toEqual(['run', 'tool', 'tool', 'answer'])
     expect((await verifyLedger(1)).intact).toBe(true)
+  })
+
+  it('reads each sentence against the rows it cites, whatever the tools returned', async () => {
+    script.push({ calls: [search] }, { text: 'Failures for admin from 10.0.0.5 [ev:1]. Then 10.0.0.9 logged on [ev:2].' })
+    const msgs = await runAgent([{ role: 'user', content: 'what failed?' }], kase, { mode: 'analyst', tools: true, maxIterations: 4, agent: { seen: new SeenSet() } })
+    expect(msgs[msgs.length - 1]).toMatchObject({
+      final: true,
+      cites: { verified: 2, unverified: [], sentences: 2, unsupported: [{ sentence: 'Then 10.0.0.9 logged on .', reason: 'it names 10.0.0.9, which none of its 1 row holds' }] },
+    })
+    const answer = (await loadLedger(1)).find((e) => e.kind === 'answer')
+    expect(JSON.parse(String(answer?.data))).toMatchObject({ cites: 2, unsupported: 1 })
   })
 
   it('asks for the answer without tools when the step budget is used up', async () => {

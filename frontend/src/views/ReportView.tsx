@@ -20,8 +20,10 @@ import { reportRelationships, type RelationshipReview } from '../data/relationsh
 import { findingsStaleness } from '../data/findingsState'
 import { aiDecided, issueStatus, loadReportIssue, preflightChecks, saveReportIssue, type ReportIssue } from '../data/reportPreflight'
 import { loadEvidenceGaps, type GapStatement } from '../data/evidenceGaps'
-import { loadRules } from '../data/rules'
+import { loadRules, settingsForRules } from '../data/rules'
 import { measuredOn, readMeasure, type MeasureReading } from '../data/ruleMeasures'
+import { loadReportClaims, type ReportClaims } from '../data/claims'
+import type { Rule } from '../rules/engine'
 
 const ORDER = ['critical', 'high', 'medium', 'low', 'info']
 
@@ -52,6 +54,10 @@ export function ReportView() {
   const [gaps, setGaps] = useState<GapStatement[]>([])
   /** how far each rule's finding can be taken as a detection */
   const [measures, setMeasures] = useState<Record<string, MeasureReading>>({})
+  /** the rules as they are now, to check each printed finding's rows against */
+  const [ruleMap, setRuleMap] = useState<Map<string, Rule>>(new Map())
+  /** the printed findings and texts read back against the rows they cite */
+  const [claims, setClaims] = useState<ReportClaims | undefined>(undefined)
   const measureSources = useStore((s) => s.meta?.measures)
   const [notes, setNotes] = useState<CaseNote[]>([])
   const [summary, setSummary] = useState<string>('')
@@ -86,7 +92,10 @@ export function ReportView() {
       .then(setGaps)
       .catch(() => setGaps([]))
     loadRules(kase.id)
-      .then((rs) => setMeasures(Object.fromEntries(rs.map((r) => [r.rule.id, readMeasure(r.measured, r.origin)]))))
+      .then((rs) => {
+        setMeasures(Object.fromEntries(rs.map((r) => [r.rule.id, readMeasure(r.measured, r.origin)])))
+        setRuleMap(new Map(rs.filter((r) => !r.error).map((r) => [r.rule.id, r.rule])))
+      })
       .catch(() => setMeasures({}))
     summariseLedger(kase.id)
       .then(setAiUsage)
@@ -125,6 +134,32 @@ export function ReportView() {
     }
     setGraphs(out)
   }, [selection.chains, settings?.includeGraphs])
+  // what the report will print, read back against the rows it cites (after the summary settles)
+  useEffect(() => {
+    if (!kase?.id || !settings) return
+    let alive = true
+    setClaims(undefined)
+    const printed = buildIncidents(selection.findings, { chains: selection.chains, severityOf: (c) => chainSeverity(c, reviews[c.id]) }).filter((i) => i.kind !== 'chain')
+    const timer = setTimeout(() => {
+      loadReportClaims({
+        source: getSource(kase),
+        findings: selection.findings,
+        rules: ruleMap,
+        settings: settingsForRules(kase),
+        evidence,
+        chains: selection.chains,
+        narratives: Object.fromEntries(Object.entries(reviews).map(([id, r]) => [id, r.narrative])),
+        incidents: printed,
+        summary,
+      })
+        .then((c) => alive && setClaims(c))
+        .catch(() => alive && setClaims(undefined))
+    }, 400)
+    return () => {
+      alive = false
+      clearTimeout(timer)
+    }
+  }, [kase, settings, selection, reviews, ruleMap, evidence, summary])
   if (!kase || !settings) return null
   const shown = selection.findings
   // findings linked to a printed chain are printed with it, not as incidents
@@ -138,7 +173,22 @@ export function ReportView() {
   // same unit as the Review page: incidents without a decision plus chains without a verdict
   const undecided = buildIncidents(findings, { chains }).filter((i) => (i.kind === 'chain' && i.chain ? !reviews[i.chain.id]?.verdict : i.status === 'new')).length
   const hiddenConfirmed = unprintedConfirmed(findings, chains, reviews, selection)
-  const checks = preflightChecks({ evidence, rules: rulesState, undecided, aiDecided: aiDecided(findings), unprintedConfirmed: hiddenConfirmed.length })
+  const printedChecks = shown.map((f) => (f.id != null ? claims?.findings[f.id] : undefined)).filter((c) => !!c)
+  const claimSummary = claims && {
+    checked: printedChecks.length,
+    unsupported: printedChecks.filter((c) => c.status === 'unsupported').length,
+    contradicted: printedChecks.filter((c) => c.status === 'contradicted').length,
+    texts: claims.texts.length,
+    textsUnsupported: claims.texts.filter((t) => t.check.status !== 'verified').length,
+  }
+  const unverified = [
+    ...shown.flatMap((f) => {
+      const c = f.id != null ? claims?.findings[f.id] : undefined
+      return c && c.status !== 'verified' ? [{ what: `${f.title} (${f.ruleId})`, status: c.status, reasons: c.reasons }] : []
+    }),
+    ...(claims?.texts ?? []).filter((t) => t.check.status !== 'verified').map((t) => ({ what: t.what, status: t.check.status, reasons: t.check.reasons })),
+  ]
+  const checks = preflightChecks({ evidence, rules: rulesState, undecided, aiDecided: aiDecided(findings), unprintedConfirmed: hiddenConfirmed.length, claims: claimSummary })
   const status = issueStatus(checks, issue)
   const updateIssue = (next: ReportIssue) => {
     setIssue(next)
@@ -200,6 +250,7 @@ export function ReportView() {
       gaps,
       measures,
       measuredOn: measuredOn(measureSources),
+      claims,
     })
   /** The report in its own tab: the browser's own print-to-PDF, or to keep it open next to the case. */
   const openReport = () => {
@@ -310,6 +361,17 @@ export function ReportView() {
                 </div>
               </div>
             ))}
+            {unverified.length > 0 && (
+              <div className="col small" style={{ gap: 2 }} data-testid="unverified-claims">
+                <span className="muted">Not borne out by the rows they cite ({fmtNum(unverified.length)}):</span>
+                {unverified.slice(0, 20).map((u, i) => (
+                  <span key={`${u.what}-${i}`}>
+                    <Badge sev={u.status === 'contradicted' ? 'high' : 'medium'}>{u.status}</Badge> {u.what}: <span className="muted">{u.reasons.join('; ')}</span>
+                  </span>
+                ))}
+                {unverified.length > 20 && <span className="muted">and {fmtNum(unverified.length - 20)} more</span>}
+              </div>
+            )}
             <div className="hint">
               A draft says so on its cover. Final needs every check to pass or to be waived with a reason; a new open check (evidence added, a rule run that failed) returns it to draft.
             </div>
