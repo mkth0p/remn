@@ -17,7 +17,8 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 KINDS = ("url", "domain", "ip", "hash")
-VERDICTS = ("malicious", "suspicious", "clean", "unknown", "error", "not_configured")
+# "timeout": the batch deadline passed before this lookup ran or answered
+VERDICTS = ("malicious", "suspicious", "clean", "unknown", "error", "not_configured", "timeout")
 
 
 @dataclass
@@ -195,17 +196,28 @@ class Registry:
         results: list[dict[str, Any]] = []
         if not jobs:
             return results
-        start = time.monotonic()
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {pool.submit(self.lookup_one, p, k, v): (p, k, v) for p, k, v in jobs}
-            for fut in as_completed(futures, timeout=deadline + 5):
+        # Not a `with` block: leaving it waits for every queued lookup, so the deadline only
+        # stopped the collection of results while the calls went on. Queued lookups are now
+        # cancelled at the deadline and reported as "timeout"; a call already in flight ends
+        # on its own provider timeout, in the background.
+        pool = ThreadPoolExecutor(max_workers=max_workers)
+        futures = {pool.submit(self.lookup_one, p, k, v): (p, k, v) for p, k, v in jobs}
+        answered: set[Any] = set()
+        try:
+            for fut in as_completed(futures, timeout=deadline):
                 p, k, v = futures[fut]
+                answered.add(fut)
                 try:
                     results.append(fut.result().to_dict())
                 except Exception as exc:  # noqa: BLE001
                     results.append(Verdict(p.name, k, v, "error", details={"error": str(exc)[:200]}).to_dict())
-                if time.monotonic() - start > deadline:
-                    break
+        except TimeoutError:
+            pass
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
+        for fut, (p, k, v) in futures.items():
+            if fut not in answered:
+                results.append(Verdict(p.name, k, v, "timeout", details={"error": f"no answer within the {deadline:g} s deadline"}).to_dict())
         return results
 
 
@@ -214,7 +226,7 @@ registry = Registry()
 
 def summarize(verdicts: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Fold per-provider verdicts into one overall verdict per (kind, value)."""
-    rank = {"malicious": 4, "suspicious": 3, "clean": 1, "unknown": 0, "error": 0, "not_configured": 0}
+    rank = {"malicious": 4, "suspicious": 3, "clean": 1, "unknown": 0, "error": 0, "not_configured": 0, "timeout": 0}
     out: dict[str, dict[str, Any]] = {}
     for v in verdicts:
         key = f"{v['kind']}:{v['value']}"
