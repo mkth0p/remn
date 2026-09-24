@@ -10,9 +10,13 @@ Row shape (all keys optional except recordId/eventId/ts):
 
 from __future__ import annotations
 
+import bisect
 import json
 import logging
+import os
 import re
+import struct
+import zlib
 from collections import Counter, OrderedDict
 from collections.abc import Iterator
 from typing import Any
@@ -390,7 +394,7 @@ def flatten(event: dict[str, Any], record: dict[str, Any] | None = None, include
     system_time = time_created.get("SystemTime") if isinstance(time_created, dict) else time_created
     ts, ts_iso = parse_timestamp(system_time)
     if ts is None and record is not None:
-        ts, ts_iso = parse_timestamp(record.get("timestamp"))
+        ts, ts_iso = parse_timestamp(header_time(record))
     execution = _scalar(system.get("Execution")) or {}
     security = _scalar(system.get("Security")) or {}
     correlation = _scalar(system.get("Correlation")) or {}
@@ -505,12 +509,196 @@ def flatten(event: dict[str, Any], record: dict[str, Any] | None = None, include
     return row
 
 
+def header_time(record: dict[str, Any] | None) -> str | None:
+    """The record header's write time as pyevtx-rs gives it ('2019-04-27T15:57:27.0876132Z UTC'),
+    without the trailing ' UTC' that parse_timestamp does not read. None for the zero FILETIME
+    (1601-01-01), which filtered exports write in place of a time."""
+    value = (record or {}).get("timestamp")
+    if isinstance(value, str) and value.endswith(" UTC"):
+        value = value[:-4]
+    if isinstance(value, str) and value.startswith("1601-01-01T00:00:00"):
+        return None
+    return value
+
+
+EVTX_CHUNK = 65536
+
+
+def chunk_checksums(src: Any) -> dict[str, Any] | None:
+    """
+    The CRC32 checks the EVTX format defines: the file header over its first 120 bytes, each
+    chunk header over bytes 0-120 and 128-512, and each chunk's records from byte 512 to its
+    free-space offset. A chunk that fails was changed after Windows wrote it, or damaged; the
+    parser reads its records all the same, so this is where that is said. None when src is not
+    an EVTX file that can be read a second time. A stream is left where it was.
+    """
+    if isinstance(src, (str, os.PathLike)):
+        fh, start = open(src, "rb"), None  # noqa: SIM115 - closed in finally
+    elif hasattr(src, "seek") and hasattr(src, "read"):
+        fh, start = src, src.tell()
+        src.seek(0)
+    else:
+        return None
+    try:
+        head = fh.read(4096)
+        if len(head) < 128 or head[:8] != b"ElfFile\x00":
+            return None
+        out: dict[str, Any] = {
+            "chunks": 0,
+            "fileHeader": zlib.crc32(head[:120]) == struct.unpack_from("<I", head, 124)[0],
+            # written while Windows still had the log open (a live copy): not a fault
+            "dirty": bool(struct.unpack_from("<I", head, 120)[0] & 1),
+        }
+        bad_header: list[int] = []
+        bad_data: list[int] = []
+        index = 0
+        while True:
+            chunk = fh.read(EVTX_CHUNK)
+            if len(chunk) < EVTX_CHUNK:
+                break
+            if chunk[:8] == b"ElfChnk\x00":
+                out["chunks"] += 1
+                if zlib.crc32(chunk[:120] + chunk[128:512]) != struct.unpack_from("<I", chunk, 124)[0]:
+                    bad_header.append(index)
+                free = struct.unpack_from("<I", chunk, 48)[0]
+                if not 512 <= free <= EVTX_CHUNK or zlib.crc32(chunk[512:free]) != struct.unpack_from("<I", chunk, 52)[0]:
+                    bad_data.append(index)
+            index += 1
+        if bad_header:
+            out["badHeader"] = bad_header[:50]
+            out["badHeaderCount"] = len(bad_header)
+        if bad_data:
+            out["badData"] = bad_data[:50]
+            out["badDataCount"] = len(bad_data)
+        return out
+    except OSError:
+        return None
+    finally:
+        if start is None:
+            fh.close()
+        else:
+            fh.seek(start)
+
+
+class FileSequence:
+    """
+    One EVTX file's records in the order the file numbers them: the record header's id and write
+    time, which the file assigns itself, rather than the EventRecordID and TimeCreated inside the
+    event, which a forwarded log copies from the machine that wrote them. A hole in the ids is
+    records that are no longer in the file (deleted, or in a chunk that could not be read). A write
+    time earlier than the record before it is a clock change or a record put in later.
+    """
+
+    # covered id ranges followed before a file is too fragmented to follow
+    MAX_SPANS = 100_000
+    # holes and backward steps listed in the stats; the counts stay exact
+    LISTED = 50
+    # EvtxECmd's default: a step back of more than a second
+    BACKWARD_MS = 1000
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.count = 0
+        # sorted, disjoint [first, last] ranges of the ids read
+        self.spans: list[list[int]] = []
+        self.overflow = False
+        self.channels: Counter[str] = Counter()
+        self.computers: Counter[str] = Counter()
+        self.first_ts: int | None = None
+        self.last_ts: int | None = None
+        self.prev_id: int | None = None
+        self.prev_written: int | None = None
+        self.backwards = 0
+        self.backwards_max = 0
+        self.backwards_at: list[int] = []
+        self.checksums: dict[str, Any] | None = None
+
+    def add(self, record_id: Any, written: int | None, row: dict[str, Any] | None = None) -> None:
+        self.count += 1
+        if row is not None:
+            if row.get("channel"):
+                self.channels[row["channel"]] += 1
+            if row.get("computer"):
+                self.computers[row["computer"]] += 1
+            ts = row.get("ts")
+            if ts is not None:
+                self.first_ts = ts if self.first_ts is None else min(self.first_ts, ts)
+                self.last_ts = ts if self.last_ts is None else max(self.last_ts, ts)
+        if not isinstance(record_id, int) or isinstance(record_id, bool) or record_id < 1:
+            return
+        if self.prev_id is not None and record_id == self.prev_id + 1 and written is not None and self.prev_written is not None:
+            step = self.prev_written - written
+            if step > self.BACKWARD_MS:
+                self.backwards += 1
+                self.backwards_max = max(self.backwards_max, step)
+                if len(self.backwards_at) < self.LISTED:
+                    self.backwards_at.append(record_id)
+        self.prev_id, self.prev_written = record_id, written
+        self._cover(record_id)
+
+    def _cover(self, rid: int) -> None:
+        spans = self.spans
+        if spans and spans[-1][1] + 1 == rid:
+            spans[-1][1] = rid
+            return
+        if self.overflow:
+            return
+        # the first span that starts after rid
+        i = bisect.bisect_right(spans, rid, key=lambda s: s[0])
+        if i and spans[i - 1][1] >= rid:
+            return
+        joins_prev = i > 0 and spans[i - 1][1] + 1 == rid
+        joins_next = i < len(spans) and spans[i][0] - 1 == rid
+        if joins_prev and joins_next:
+            spans[i - 1][1] = spans[i][1]
+            del spans[i]
+        elif joins_prev:
+            spans[i - 1][1] = rid
+        elif joins_next:
+            spans[i][0] = rid
+        else:
+            spans.insert(i, [rid, rid])
+            if len(spans) > self.MAX_SPANS:
+                self.overflow = True
+
+    def holes(self) -> list[tuple[int, int]]:
+        return [(a[1] + 1, b[0] - 1) for a, b in zip(self.spans, self.spans[1:], strict=False)]
+
+    def to_dict(self) -> dict[str, Any]:
+        holes = self.holes()
+        out: dict[str, Any] = {"file": self.name, "count": self.count}
+        if self.channels:
+            out["channel"] = self.channels.most_common(1)[0][0]
+            out["channels"] = len(self.channels)
+        if self.computers:
+            out["computer"] = self.computers.most_common(1)[0][0]
+            out["computers"] = len(self.computers)
+        if self.spans:
+            out.update(first=self.spans[0][0], last=self.spans[-1][1])
+            out["missing"] = sum(b - a + 1 for a, b in holes)
+            if holes:
+                out["holes"] = [list(h) for h in holes[: self.LISTED]]
+                out["holeCount"] = len(holes)
+        out.update(firstTs=self.first_ts, lastTs=self.last_ts)
+        if self.backwards:
+            out.update(backwards=self.backwards, backwardsMaxMs=self.backwards_max, backwardsAt=self.backwards_at)
+        if self.overflow:
+            # too fragmented to follow every hole: the ones listed and counted are a floor
+            out["overflow"] = True
+        if self.checksums is not None:
+            out["checksums"] = self.checksums
+        return out
+
+
 class Stats:
     def __init__(self) -> None:
         self.count = 0
         self.errors = 0
         # records dropped because the same record (one key) was already read: cloud exports only
         self.duplicates = 0
+        # one per EVTX file read: its record numbering and chunk checksums, for the statement of
+        # what the evidence cannot show
+        self.sequences: list[FileSequence] = []
         self.first_ts: int | None = None
         self.last_ts: int | None = None
         self.event_ids: Counter[int] = Counter()
@@ -550,7 +738,17 @@ class Stats:
             "computers": dict(self.computers.most_common(200)),
             "levels": dict(self.levels),
             **({"duplicates": self.duplicates} if self.duplicates else {}),
+            **self.coverage(),
         }
+
+    def begin_file(self, name: str) -> FileSequence:
+        seq = FileSequence(name)
+        self.sequences.append(seq)
+        return seq
+
+    def coverage(self) -> dict[str, Any]:
+        """The EVTX files' record numbering and checksums, when any EVTX file was read."""
+        return {"sequences": [s.to_dict() for s in self.sequences[:500]]} if self.sequences else {}
 
 
 class Lineage:
@@ -601,13 +799,19 @@ def _enriched(row: dict[str, Any], note: str) -> str:
     return f"{row['enriched']}; {note}" if row.get("enriched") else note
 
 
-def iter_events(path_or_file: Any, include_raw: bool = True, stats: Stats | None = None, number_of_threads: int = 0) -> Iterator[dict[str, Any]]:
+def iter_events(
+    path_or_file: Any, include_raw: bool = True, stats: Stats | None = None, number_of_threads: int = 0, source_file: str | None = None
+) -> Iterator[dict[str, Any]]:
     """
     Yield flattened rows from an EVTX file path (str/Path) or file-like object.
-    Invalid records are counted in ``stats.errors`` and skipped.
+    Invalid records are counted in ``stats.errors`` and skipped. With ``stats``, the file's record
+    numbering and chunk checksums are kept in ``stats.sequences`` under ``source_file``.
     """
     from evtx import PyEvtxParser
 
+    seq = stats.begin_file(source_file or "") if stats is not None else None
+    if seq is not None:
+        seq.checksums = chunk_checksums(path_or_file)
     try:
         parser = PyEvtxParser(path_or_file, number_of_threads=number_of_threads, indent=False)
     except TypeError:
@@ -637,8 +841,13 @@ def iter_events(path_or_file: Any, include_raw: bool = True, stats: Stats | None
         except Exception as exc:  # noqa: BLE001
             if stats is not None:
                 stats.errors += 1
+            # the record is in the file even though its content could not be read
+            if seq is not None and isinstance(rec, dict):
+                seq.add(rec.get("event_record_id"), parse_timestamp(header_time(rec))[0])
             log.debug("flatten failed: %s", exc)
             continue
+        if seq is not None:
+            seq.add(rec.get("event_record_id"), parse_timestamp(header_time(rec))[0], row)
         lineage.apply(row)
         if stats is not None:
             stats.add(row)

@@ -7,6 +7,7 @@ import type { RelationshipReview } from './relationshipReviews'
 import { packageCoverageIssues } from './packageCoverage'
 // every time in the report is UTC, whatever the analyst's display setting
 import { defang, escapeHtml, fmtBytes, fmtNum, fmtUtc as fmtTs, renderMarkdown } from '../util/format'
+import type { GapStatement } from './evidenceGaps'
 
 /**
  * The printed report: one self-contained HTML file laid out for A4 and the browser's print-to-PDF.
@@ -73,6 +74,8 @@ export interface ReportData {
   fontData?: string
   /** what the case's AI ledger records (ai/ledger.ts summariseLedger), when a model was used */
   ai?: AiUsage
+  /** what the evidence cannot show (data/evidenceGaps.ts), printed first under "Where it stops" */
+  gaps?: GapStatement[]
 }
 
 /** The model's part in the case, as the report prints it. */
@@ -822,6 +825,7 @@ function method(d: ReportData, v: Verdict, conf: Confidence): string {
       ? [`This is a draft. Open before it can be final: ${issue.open.map((c) => `${c.label.toLowerCase()} (${c.detail})`).join('; ') || 'the analyst has not issued it'}.`]
       : []),
     ...(issue?.waived ?? []).map((w) => `Issued with an open check: ${w.label.toLowerCase()}. The analyst's reason: ${w.reason}`),
+    ...(d.gaps ?? []).map((g) => g.text),
     'Times are UTC. Rules and timelines describe what the evidence records; the absence of a finding is not evidence of absence.',
     'Collection snapshots record when an artefact was collected, not when it was created or run.',
     ...(d.coverageWarnings ?? []).map((w) => `Chain analysis incomplete: ${w}`),

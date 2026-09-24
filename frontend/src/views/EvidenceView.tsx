@@ -11,6 +11,7 @@ import { IconTrash } from '../components/Icons'
 import { PackageCoverage } from '../components/PackageCoverage'
 import { coverageMembers } from '../data/packageCoverage'
 import { packageCoverageIssues } from '../data/packageCoverage'
+import { evidenceGaps } from '../data/evidenceGaps'
 
 export function EvidenceView() {
   const kase = useStore((s) => s.currentCase)
@@ -95,6 +96,11 @@ export function EvidenceView() {
                 <td>
                   <Badge sev={e.status === 'done' ? 'ok' : e.status === 'error' ? 'critical' : 'medium'}>{e.status}</Badge>
                   {packageCoverageIssues(e).length > 0 && <Badge sev="medium">partial coverage</Badge>}
+                  {evidenceGaps({ evidence: [e] }).some((g) => g.severity === 'high') && (
+                    <Badge sev="high" title="the file records gaps in itself: see its detail">
+                      gaps
+                    </Badge>
+                  )}
                   {e.error && (
                     <span className="small" style={{ color: 'var(--danger)', marginLeft: 6 }}>
                       {e.error.slice(0, 60)}
@@ -167,6 +173,7 @@ export function EvidenceView() {
               }}
             />
           </label>
+          <FileGaps evidence={detail} />
           {detail.kind === 'package' && detail.stats && <PackageCoverage stats={detail.stats} />}
           {detail.kind !== 'package' && coverageMembers(detail.stats).length > 0 && <PackageCoverage stats={detail.stats!} archive />}
           {detail.stats && (
@@ -197,6 +204,22 @@ export function EvidenceView() {
           )}
         </Modal>
       )}
+    </div>
+  )
+}
+
+/** What the file records about gaps in itself: holes in its record numbering, times that run backwards, failed checksums, an export cut at a service limit. */
+function FileGaps({ evidence }: { evidence: Evidence }) {
+  const gaps = evidenceGaps({ evidence: [evidence] })
+  if (!gaps.length) return null
+  return (
+    <div className="col" style={{ gap: 4 }}>
+      <div className="small dim">what this file cannot show</div>
+      {gaps.map((g, i) => (
+        <div key={i} className="small">
+          <Badge sev={g.severity === 'high' ? 'high' : 'medium'}>{g.kind.replace(/-/g, ' ')}</Badge> {g.text}
+        </div>
+      ))}
     </div>
   )
 }

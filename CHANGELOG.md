@@ -154,6 +154,15 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   Saving a review, or new findings, rebuilds the stories, and a rebuild can list a story's links
   in another order; the open panel, with its form, stayed at its place in the list and showed
   whichever link moved there. It now stays with its link.
+- The report says what the evidence cannot show, first under "Where it stops": records
+  missing from an event log's numbering, write times that run backwards, chunks that fail
+  the EVTX checksum (a record changed after Windows wrote it), record numbers in none of the
+  files of one log, logs that start after the first finding, Unified Audit Log exports cut
+  at 5,000 or 50,000 records, throttled MailItemsAccessed, and Entra sign-ins that start
+  after the first finding. The parser records each file's numbering and checksums; the
+  Evidence page marks a file with such a gap and lists what it cannot show.
+- Fixed: an event with no TimeCreated took no time from its record header, because the
+  header's time ends in " UTC", which the time parser did not read.
 
 ## 0.1.1 (2026-09-07)
 

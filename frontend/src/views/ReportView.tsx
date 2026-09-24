@@ -19,6 +19,7 @@ import { IconAi, IconCheck, IconDownload } from '../components/Icons'
 import { reportRelationships, type RelationshipReview } from '../data/relationshipReviews'
 import { findingsStaleness } from '../data/findingsState'
 import { aiDecided, issueStatus, loadReportIssue, preflightChecks, saveReportIssue, type ReportIssue } from '../data/reportPreflight'
+import { loadEvidenceGaps, type GapStatement } from '../data/evidenceGaps'
 
 const ORDER = ['critical', 'high', 'medium', 'low', 'info']
 
@@ -45,6 +46,8 @@ export function ReportView() {
   // the preview is drawn during render, which must not read the clock: it shows when the page opened
   const [previewAt] = useState(() => Date.now())
   const [rulesState, setRulesState] = useState<{ lastRun: number | null; evidenceAfter: number; errors: number } | undefined>(undefined)
+  /** what the evidence cannot show, for "Where it stops" */
+  const [gaps, setGaps] = useState<GapStatement[]>([])
   const [notes, setNotes] = useState<CaseNote[]>([])
   const [summary, setSummary] = useState<string>('')
   /** who wrote the summary last: the model's draft is labelled in the report until the analyst edits it */
@@ -74,6 +77,9 @@ export function ReportView() {
       .then(([all, unchecked]) => setIocCounts({ total: all.total, checked: Math.max(0, all.total - unchecked.total) }))
       .catch(() => setIocCounts({ total: 0, checked: 0 }))
     loadReportIssue(kase.id).then(setIssue)
+    loadEvidenceGaps(kase.id, getSource(kase))
+      .then(setGaps)
+      .catch(() => setGaps([]))
     summariseLedger(kase.id)
       .then(setAiUsage)
       .catch(() => setAiUsage(undefined))
@@ -183,6 +189,7 @@ export function ReportView() {
       iocsChecked: iocCounts.checked,
       fontData,
       ai: aiUsage,
+      gaps,
     })
   /** The report in its own tab: the browser's own print-to-PDF, or to keep it open next to the case. */
   const openReport = () => {

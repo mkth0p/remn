@@ -345,6 +345,21 @@ describe('what the report claims about the case', () => {
     expect(computeConfidence(data({ iocsChecked: 1, rules: { lastRun: null, evidenceAfter: 0, errors: 0 } })).reasons).toContain('the rules have not run on this case')
   })
 
+  it('says first under Where it stops what the evidence cannot show, escaped', () => {
+    const html = buildReportHtml(
+      data({
+        gaps: [
+          { kind: 'record-holes', severity: 'high', text: 'Security on DC01 (<b>x</b>.evtx): 3 records missing from its numbering.', evidenceId: 1 },
+          { kind: 'mail-throttled', severity: 'high', text: 'MailItemsAccessed for a@example.test was throttled.' },
+        ],
+      }),
+    )
+    const limits = html.slice(html.indexOf('<h4>Where it stops</h4>'))
+    expect(limits).toContain('<li>Security on DC01 (&lt;b&gt;x&lt;/b&gt;.evtx): 3 records missing from its numbering.</li>')
+    expect(limits.indexOf('records missing')).toBeLessThan(limits.indexOf('Times are UTC'))
+    expect(limits).toContain('MailItemsAccessed for a@example.test was throttled.')
+  })
+
   it('says indicators were checked only when a lookup ran', () => {
     const on = data({ kase: { ...kase, settings: { ...kase.settings, networkAllowed: true } } })
     expect(buildReportHtml(on)).toContain('No indicator was checked against a reputation service')

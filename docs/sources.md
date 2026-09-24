@@ -29,6 +29,24 @@ bundled rules target. On the machine under
 investigation, `wevtutil epl Security C:\evidence\Security.evtx` (as administrator)
 exports a channel.
 
+Each file also says what it cannot show about itself, in its parser statistics
+(`sequences`, one entry per file, archive or package member):
+
+- **Holes in its numbering.** The record header's id is the file's own sequence, so an id
+  that is missing between two others is a record no longer in the file: deleted, or in a
+  part that could not be read. The header id is used rather than the event's
+  EventRecordID, which a forwarded log copies from the machine that wrote the event.
+- **Write times that run backwards** by more than a second between consecutive records
+  (EvtxECmd's `--tdt` default): a clock change, or records added later. A zero write time
+  (1601-01-01), which filtered exports write, counts as none.
+- **Chunks that fail their checksum.** The file header, each chunk header and each chunk's
+  records carry a CRC32. The parser reads a changed record without complaint, so the check
+  is what says it was changed after Windows wrote it. None of the 2,239 files of
+  NextronSystems' `evtx-baseline`, 707 of them copied from running machines, fails it.
+
+The Evidence page and the report turn these into sentences; see "Where it stops" on the
+[interface page](interface.md#report).
+
 ## Mailboxes
 
 Accepted: `.pst` and `.ost` (with `libpff-python` installed), `.mbox`, `.eml`, `.msg`,

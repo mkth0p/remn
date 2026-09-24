@@ -31,6 +31,9 @@ The Evidence page is the drop zone and the chain of custody: every file with its
 size, row count, SHA-256 computed in the browser, integrity state and the time it was
 added. "Verify" re-hashes a copy of the file and compares. Removing a file deletes
 everything derived from it, as described on the [storage page](storage.md).
+A file that records a gap in itself (records missing from its numbering, a chunk that
+fails its checksum, an audit log export cut at a service limit) carries a "gaps" badge,
+and its detail lists what it cannot show.
 
 ## Events and Mails
 
@@ -215,6 +218,16 @@ printed. The report is a draft, and its cover says so, until each check passes o
 waived with a reason; "issue as final" then prints it as final with the time, and the
 waivers appear in "Where it stops". A new open check (evidence added, a rule run that
 failed) returns it to draft.
+
+"Where it stops" begins with what the evidence cannot show (`frontend/src/data/evidenceGaps.ts`),
+each statement checkable against the evidence: records missing from an event log's
+numbering, write times that run backwards, chunks that fail their checksum, record numbers
+in none of the files of one log (a missing archive), logs that start after the first
+finding (overwritten or not collected), Unified Audit Log exports of exactly 5,000 or
+50,000 records (cut at a service limit), MailItemsAccessed throttled for a mailbox (item
+reads not recorded for 24 hours), and Entra sign-ins that start after the first finding
+(Entra keeps them 7 or 30 days). The first finding is the earliest one of medium severity
+or above that is not a false positive.
 
 The printed report (`frontend/src/data/reportHtml.ts`) is one self-contained HTML file in
 REMN's own look, laid out for A4 and print-to-PDF. Every time in it is UTC, whatever the

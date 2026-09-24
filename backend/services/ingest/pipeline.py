@@ -270,7 +270,7 @@ class EvtxSource:
 
     def _iter_one(self, src: Any, source_file: str) -> Iterator[dict[str, Any]]:
         try:
-            for row in evtx_parser.iter_events(src, include_raw=self.include_raw, stats=self.stats):
+            for row in evtx_parser.iter_events(src, include_raw=self.include_raw, stats=self.stats, source_file=source_file):
                 row["sourceFile"] = source_file
                 yield row
         except Exception as exc:  # noqa: BLE001

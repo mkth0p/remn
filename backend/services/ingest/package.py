@@ -642,6 +642,9 @@ class PackageSource:
                 if isinstance(source, EvtxSource) and source.stats.duplicates:
                     # a repeat is not a compromise in reading the member, so it is no note
                     entry["duplicates"] = source.stats.duplicates
+                if isinstance(source, EvtxSource):
+                    # the member's record numbering and chunk checksums, for what the evidence cannot show
+                    entry.update(source.stats.coverage())
                 if source is not None and source.stats.errors:
                     raise ValueError(f"parser reported {source.stats.errors} error(s); any emitted rows are partial")
                 entry["status"] = "parsed"
