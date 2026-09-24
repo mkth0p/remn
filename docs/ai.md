@@ -37,9 +37,13 @@ Jan, `:11434/v1` Ollama's own OpenAI endpoint). The server must accept the page'
 allows it by default and needs `--jinja` for tool calls, and vLLM needs
 `--enable-auto-tool-choice` with the model's `--tool-call-parser`. No API key is sent, and
 only loopback, private-range addresses and local names (`.local`, `.lan`, a single label)
-are accepted: a cloud endpoint is refused before anything is sent. A server whose chat
-template has no tools gets the turn again without them. The context window is what the
-server loaded; set it under "context window" so the agent budgets for it.
+are accepted: a cloud endpoint is refused before anything is sent. A public instance in
+browser-only mode narrows that further: its content security policy lets the page reach
+`localhost` and `127.0.0.1` only, so from such a site the model server has to run on the
+visitor's own machine; a server elsewhere on the local network works with a REMN you run
+yourself. A server whose chat template has no tools gets the turn again without them. The
+context window is what the server loaded; set it under "context window" so the agent
+budgets for it.
 
 **Server proxy.** The REMN server relays to the Ollama configured in its `.env`
 (`OLLAMA_HOST`, `OLLAMA_MODEL`, `OLLAMA_NUM_CTX`); nothing is persisted on the server.
