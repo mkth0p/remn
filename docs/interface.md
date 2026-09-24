@@ -93,7 +93,10 @@ source views keep the per-rule detail. Severity tiles show the change since the 
 and the flyouts carry About, Investigation (entity pages, referenced rows), Insights
 (prevalence of the entities in the case, related chains, false-positive history of the
 rule) and Notes. The ATT&CK tab counts techniques observed against the enabled rules that
-map to them.
+map to them. A finding of a rule never seen to detect what it looks for on a recorded attack
+is marked "lead" in the list, and the flyout says what the rule's measure shows: the
+recorded attacks it fires on, and how often it fires on the logs of clean machines (see
+[measured rules](detection.md#measured-rules)).
 
 Findings with a saved review severity override show an asterisk and the original rule
 severity in their detail, and the incident uses the review severity too. "Reset to rule
@@ -132,7 +135,10 @@ IPs and hosts they share, and lists the shared ones.
 
 The Rules page lists the bundled rules, the community packs with a toggle each, and the
 custom rules, with an editor, the import buttons, and after a run the reason every
-silent rule found nothing. The Indicators page lists the IPs, domains, URLs and hashes
+silent rule found nothing. Its "measured" column gives each rule's measure (detects, lead,
+misses its sample, fires on clean machines, changed, needs settings) with the sentences
+behind it on hover, and a filter lists the leads, the rules that miss their own test sample
+or those that fire on clean machines. The Indicators page lists the IPs, domains, URLs and hashes
 extracted from the evidence with their counts and, when external lookups are enabled
 for the case, their reputation; it exports STIX 2.1 and CSV. The STIX bundle carries every
 value as a cyber-observable and makes an indicator only of the values a reputation check
@@ -249,6 +255,11 @@ severity, the indicators, the case timeline, the tasks, the notes, the findings 
 order, "How AI was used" when a model took part (runs, models and where they ran, tool
 calls, what it proposed and what became of it, whether the AI ledger's hash chain holds)
 and the case settings.
+
+Each rule's line in the report is marked "lead" when the rule was never seen to detect what
+it looks for, and notes when it also fires on clean machines; the method says how many of the
+rules behind the printed findings detect recorded attacks, and "Where it stops" counts the
+findings that come from leads.
 
 Chains are cards with a severity pill, the verdict, a score meter split into its parts,
 the narrative in an accent block, the swimlane picture, the step table with a lane mark

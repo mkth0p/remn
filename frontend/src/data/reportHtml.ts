@@ -8,6 +8,7 @@ import { packageCoverageIssues } from './packageCoverage'
 // every time in the report is UTC, whatever the analyst's display setting
 import { defang, escapeHtml, fmtBytes, fmtNum, fmtUtc as fmtTs, renderMarkdown } from '../util/format'
 import type { GapStatement } from './evidenceGaps'
+import { isLead, type MeasureReading } from './ruleMeasures'
 
 /**
  * The printed report: one self-contained HTML file laid out for A4 and the browser's print-to-PDF.
@@ -76,6 +77,10 @@ export interface ReportData {
   ai?: AiUsage
   /** what the evidence cannot show (data/evidenceGaps.ts), printed first under "Where it stops" */
   gaps?: GapStatement[]
+  /** each rule's measure (data/ruleMeasures.ts): a finding of a rule never seen to detect what it looks for is marked a lead */
+  measures?: Record<string, MeasureReading>
+  /** what the rules were measured on, in a sentence */
+  measuredOn?: string
 }
 
 /** The model's part in the case, as the report prints it. */
@@ -443,7 +448,7 @@ ${table(
   }),
 )}
 ${left || hidden ? `<div class="cap">${left ? `${left} more step row(s) not printed (open the chain in REMN for the full list)` : ''}${left && hidden ? ' · ' : ''}${hidden ? `${hidden} routine step(s) not printed at the “${h(d.settings.chainDetail)}” detail level` : ''}.</div>` : ''}
-${members.length ? `<div class="cap" style="margin-top:8px">${members.length} finding(s) linked to this chain, decided with it</div>${groupedFindings(members, {})}` : ''}
+${members.length ? `<div class="cap" style="margin-top:8px">${members.length} finding(s) linked to this chain, decided with it</div>${groupedFindings(members, {}, d.measures)}` : ''}
 ${r?.by === 'ai' && r.aiReason ? `<div class="cap ai">Triage note (model): ${h(r.aiReason)}</div>` : ''}
 </div>`
 }
@@ -511,13 +516,22 @@ export function groupByRule(findings: Finding[], said: Record<string, string> = 
 }
 
 const MAX_VALUES = 6
-function groupedFindings(findings: Finding[], said: Record<string, string>): string {
+
+/** After a rule's id: whether it was ever seen to detect what it looks for, and whether benign activity matches it. */
+function measureMark(m: MeasureReading | undefined): string {
+  if (!m) return ''
+  if (isLead(m)) return ' · <b class="lead">lead</b>'
+  if (m.noisy) return ' · <span class="dim">also fires on clean machines</span>'
+  return ''
+}
+
+function groupedFindings(findings: Finding[], said: Record<string, string>, measures: Record<string, MeasureReading> = {}): string {
   const groups = groupByRule(findings, said)
   return table(
     ['severity', 'finding', 'findings · rows', 'when (UTC)', 'ATT&amp;CK', 'what matched'],
     groups.map((g) => [
       pill(g.severity) + (g.severity !== g.ruleSeverity ? `<span class="sub">rule: ${h(g.ruleSeverity)}</span>` : ''),
-      `${h(g.title)}<span class="sub"><code>${h(g.ruleId)}</code>${g.escalations.length ? ' · ' + h(g.escalations.slice(0, 2).join(' · ')) : ''}</span>`,
+      `${h(g.title)}<span class="sub"><code>${h(g.ruleId)}</code>${measureMark(measures[g.ruleId])}${g.escalations.length ? ' · ' + h(g.escalations.slice(0, 2).join(' · ')) : ''}</span>`,
       `<span class="nowrap">${n(g.findings)} · ${n(g.rows)}</span>`,
       `<span class="nowrap">${span(g.first, g.last)}</span>`,
       g.attack
@@ -534,7 +548,7 @@ function groupedFindings(findings: Finding[], said: Record<string, string>): str
   )
 }
 
-function incidentCard(i: Incident): string {
+function incidentCard(i: Incident, measures: Record<string, MeasureReading> = {}): string {
   const decidedByAi = i.lead.decidedBy === 'ai'
   return `<div class="card inc ${h(i.severity)}">
 <div class="card-head">${pill(i.severity)}<h3>${h(i.title)}</h3><span class="stamp st-${h(i.status)}">${h(STATUS_WORD[i.status] ?? i.status)}</span></div>
@@ -549,7 +563,7 @@ function incidentCard(i: Incident): string {
   }</div>
 ${i.lead.notes ? `<div class="note">${md(i.lead.notes)}</div>${i.lead.notesBy === 'ai' ? '<div class="cap ai">note drafted by the model during triage</div>' : ''}` : ''}
 ${decidedByAi && i.lead.aiReason ? `<div class="cap ai">Triage note (model): ${h(i.lead.aiReason)}</div>` : ''}
-${groupedFindings(i.findings, i.entities)}
+${groupedFindings(i.findings, i.entities, measures)}
 </div>`
 }
 
@@ -633,7 +647,7 @@ body{font:12px/1.5 var(--sans);color:var(--ink);background:var(--surface);margin
 @media print{body{padding:0}.no-print{display:none}.cover-page{break-after:page}}
 a{color:var(--accent);text-decoration:none}
 code,.mono{font-family:var(--mono);font-size:10.5px}
-.muted{color:var(--ink-2)}.dim{color:var(--ink-3)}
+.muted{color:var(--ink-2)}.dim{color:var(--ink-3)}.lead{font-weight:600;color:var(--ink-2);text-transform:uppercase;letter-spacing:.04em;font-size:9px}
 /* cover */
 .cover-page{position:relative}
 .brand{display:flex;align-items:baseline;justify-content:space-between;border-bottom:2px solid var(--ink);padding-bottom:10px}
@@ -810,9 +824,22 @@ function method(d: ReportData, v: Verdict, conf: Confidence): string {
     d.incidents.filter((i) => i.lead.notesBy === 'ai' || i.lead.decidedBy === 'ai').length +
     (d.summaryBy === 'ai' ? 1 : 0)
   const issues = d.evidence.filter((e) => e.kind === 'package').flatMap((e) => packageCoverageIssues(e))
+  const printedRules = [...new Set(d.findings.map((f) => f.ruleId))]
+  const readings = printedRules.map((r) => d.measures?.[r]).filter((m): m is MeasureReading => !!m?.label)
+  const detects = readings.filter((m) => m.verdict === 'detects').length
+  const leads = readings.filter(isLead).length
+  const leadFindings = d.findings.filter((f) => {
+    const m = d.measures?.[f.ruleId]
+    return !!m && isLead(m)
+  }).length
   const sources = [
     `${n(d.evidence.length)} evidence file${d.evidence.length === 1 ? '' : 's'} (${h(kinds.join(', ') || 'none')}), ${n(rowsTotal)} rows parsed`,
     `${n(rulesFired)} rule${rulesFired === 1 ? '' : 's'} produced the printed findings${engine ? `; ${n(engine)} finding${engine === 1 ? '' : 's'} came from an external detection engine` : ''}`,
+    ...(readings.length
+      ? [
+          `of those rules, ${n(detects)} fire${detects === 1 ? 's' : ''} on recorded attacks of what ${detects === 1 ? 'it looks' : 'they look'} for and ${n(leads)} ${leads === 1 ? 'was' : 'were'} never seen to (their findings are marked lead)${d.measuredOn ? `. ${h(d.measuredOn)}` : ''}`,
+        ]
+      : []),
     `findings below ${h(d.settings.minSeverity)} severity are not printed${d.settings.onlyReviewed ? '; only reviewed items are printed' : ''}${d.settings.includeFp ? '; false positives are printed' : '; false positives are not printed'}`,
     `${v.confirmed} confirmed, ${v.reviewed} reviewed or unsure, ${v.falsePositives} false positive${v.falsePositives === 1 ? '' : 's'}, ${d.undecided} undecided`,
     aiTexts
@@ -826,6 +853,11 @@ function method(d: ReportData, v: Verdict, conf: Confidence): string {
       : []),
     ...(issue?.waived ?? []).map((w) => `Issued with an open check: ${w.label.toLowerCase()}. The analyst's reason: ${w.reason}`),
     ...(d.gaps ?? []).map((g) => g.text),
+    ...(leadFindings
+      ? [
+          `${n(leadFindings)} printed finding${leadFindings === 1 ? ' comes from a rule' : 's come from rules'} never seen to detect what ${leadFindings === 1 ? 'it looks' : 'they look'} for on recorded attacks (marked lead): each says where to look, and stands on the rows it cites and the analyst's decision.`,
+        ]
+      : []),
     'Times are UTC. Rules and timelines describe what the evidence records; the absence of a finding is not evidence of absence.',
     'Collection snapshots record when an artefact was collected, not when it was created or run.',
     ...(d.coverageWarnings ?? []).map((w) => `Chain analysis incomplete: ${w}`),
@@ -891,7 +923,7 @@ export function buildReportHtml(d: ReportData): string {
     id: 'incidents',
     title: 'Incidents',
     count: d.incidents.length,
-    body: `<p class="intro">Findings on the same mail, or about the same user, host or IP within six hours, are one incident. Each table groups the incident's findings by rule: one line per rule with the count, the span and the values it matched.</p>${d.incidents.length ? d.incidents.map(incidentCard).join('\n') : '<div class="empty">No incident outside the attack chains passes the severity floor.</div>'}`,
+    body: `<p class="intro">Findings on the same mail, or about the same user, host or IP within six hours, are one incident. Each table groups the incident's findings by rule: one line per rule with the count, the span and the values it matched.</p>${d.incidents.length ? d.incidents.map((i) => incidentCard(i, d.measures)).join('\n') : '<div class="empty">No incident outside the attack chains passes the severity floor.</div>'}`,
   })
   if (settings.includeEvidence) {
     const packages = d.evidence.filter((e) => e.kind === 'package')
@@ -993,7 +1025,7 @@ export function buildReportHtml(d: ReportData): string {
           ['severity', 'rule', 'findings · rows', 'when (UTC)', 'status', 'what matched'],
           groups.map((g) => [
             pill(g.severity),
-            `${h(g.title)}<span class="sub"><code>${h(g.ruleId)}</code>${g.attack.length ? ' · ' + h(g.attack.slice(0, 4).join(' ')) : ''}</span>`,
+            `${h(g.title)}<span class="sub"><code>${h(g.ruleId)}</code>${measureMark(d.measures?.[g.ruleId])}${g.attack.length ? ' · ' + h(g.attack.slice(0, 4).join(' ')) : ''}</span>`,
             `<span class="nowrap">${n(g.findings)} · ${n(g.rows)}</span>`,
             `<span class="nowrap">${span(g.first, g.last)}</span>`,
             Object.entries(g.statuses)

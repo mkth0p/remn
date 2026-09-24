@@ -182,6 +182,20 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   failed: the format was told from the first 512 bytes, and such a record names its Operation
   past them. The first 64 KB are read, alone, in an archive or in a package. 13 of Splunk
   attack_data's Office 365 datasets were unreadable for it.
+- Every event rule is measured on recorded attacks and on the logs of clean machines, and the
+  pages say what the measure shows. `tools/measure_rules.py` runs the rules on the SigmaHQ
+  regression samples, EVTX-ATTACK-SAMPLES and Splunk attack_data's Office 365 and Entra ID
+  datasets, and on the seven Windows machines of NextronSystems' evtx-baseline, and writes
+  `rules/measures.json`, which the server attaches to the rule it was taken on (a rule changed
+  since is shown as changed). A rule that fires on a recording of what it looks for detects
+  it; one never seen to is a lead, and its findings are marked "lead" in the findings list,
+  the finding panel and the report. The Rules page has a "measured" column and filters the
+  leads, the rules that miss their own SigmaHQ sample and those that fire on clean machines;
+  the finding panel says what the rule's measure shows; the report's method says how many of
+  the rules behind its findings detect recorded attacks. At this commit 830 of the
+  2,998 event rules detect a recorded attack of what they look for (REMN's own Windows
+  rules: 112 of 133), all 457 SigmaHQ rules with a regression sample fire on
+  it, and 167 fire on the clean machines. See `docs/reviews/2026-09-24-measured-rules.md`.
 
 ## 0.1.1 (2026-09-07)
 

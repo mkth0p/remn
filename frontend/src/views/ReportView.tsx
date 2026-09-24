@@ -20,6 +20,8 @@ import { reportRelationships, type RelationshipReview } from '../data/relationsh
 import { findingsStaleness } from '../data/findingsState'
 import { aiDecided, issueStatus, loadReportIssue, preflightChecks, saveReportIssue, type ReportIssue } from '../data/reportPreflight'
 import { loadEvidenceGaps, type GapStatement } from '../data/evidenceGaps'
+import { loadRules } from '../data/rules'
+import { measuredOn, readMeasure, type MeasureReading } from '../data/ruleMeasures'
 
 const ORDER = ['critical', 'high', 'medium', 'low', 'info']
 
@@ -48,6 +50,9 @@ export function ReportView() {
   const [rulesState, setRulesState] = useState<{ lastRun: number | null; evidenceAfter: number; errors: number } | undefined>(undefined)
   /** what the evidence cannot show, for "Where it stops" */
   const [gaps, setGaps] = useState<GapStatement[]>([])
+  /** how far each rule's finding can be taken as a detection */
+  const [measures, setMeasures] = useState<Record<string, MeasureReading>>({})
+  const measureSources = useStore((s) => s.meta?.measures)
   const [notes, setNotes] = useState<CaseNote[]>([])
   const [summary, setSummary] = useState<string>('')
   /** who wrote the summary last: the model's draft is labelled in the report until the analyst edits it */
@@ -80,6 +85,9 @@ export function ReportView() {
     loadEvidenceGaps(kase.id, getSource(kase))
       .then(setGaps)
       .catch(() => setGaps([]))
+    loadRules(kase.id)
+      .then((rs) => setMeasures(Object.fromEntries(rs.map((r) => [r.rule.id, readMeasure(r.measured, r.origin)]))))
+      .catch(() => setMeasures({}))
     summariseLedger(kase.id)
       .then(setAiUsage)
       .catch(() => setAiUsage(undefined))
@@ -190,6 +198,8 @@ export function ReportView() {
       fontData,
       ai: aiUsage,
       gaps,
+      measures,
+      measuredOn: measuredOn(measureSources),
     })
   /** The report in its own tab: the browser's own print-to-PDF, or to keep it open next to the case. */
   const openReport = () => {

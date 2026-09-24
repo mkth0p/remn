@@ -5,6 +5,7 @@ import { buildIncidents } from '../rules/incidents'
 import { DEFAULT_REPORT } from './review'
 import { bottomLine, buildReportHtml, computeConfidence, computeVerdict, foldSteps, groupByRule, MAX_MOMENTS, MAX_STEP_ROWS, moments, threatProfile, type ReportData } from './reportHtml'
 import { setLocalTime } from '../util/format'
+import { readMeasure } from './ruleMeasures'
 import type { ChainStep } from './chains'
 
 let seq = 1
@@ -358,6 +359,23 @@ describe('what the report claims about the case', () => {
     expect(limits).toContain('<li>Security on DC01 (&lt;b&gt;x&lt;/b&gt;.evtx): 3 records missing from its numbering.</li>')
     expect(limits.indexOf('records missing')).toBeLessThan(limits.indexOf('Times are UTC'))
     expect(limits).toContain('MailItemsAccessed for a@example.test was throttled.')
+  })
+
+  it('marks the findings of a rule never seen to detect what it looks for, and says so in its method', () => {
+    const measures = {
+      'mail-credential-phishing': readMeasure({ own: true, of: 2, hits: 2, fires: 2 }, 'bundled'),
+      other: readMeasure({ of: 3, fires: 1, clean: { findings: 4, events: 4, machines: 1, scope: 10_000, of: 7 } }, 'bundled'),
+    }
+    const html = buildReportHtml(data({ measures, measuredOn: 'Measured on 2026-09-24 on <recordings>.' }))
+    expect(html).toContain('<code>other</code> · <b class="lead">lead</b>')
+    expect(html).not.toContain('<code>mail-credential-phishing</code> · <b class="lead">')
+    expect(html).toContain('of those rules, 1 fires on recorded attacks of what it looks for and 1 was never seen to (their findings are marked lead). Measured on 2026-09-24 on &lt;recordings&gt;.')
+    const limits = html.slice(html.indexOf('<h4>Where it stops</h4>'))
+    expect(limits).toContain('<li>1 printed finding comes from a rule never seen to detect what it looks for on recorded attacks (marked lead)')
+    // without measures, nothing is said about them
+    const plain = buildReportHtml(data())
+    expect(plain).not.toContain('class="lead"')
+    expect(plain).not.toContain('never seen to')
   })
 
   it('says indicators were checked only when a lookup ran', () => {

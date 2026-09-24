@@ -3,6 +3,8 @@
  * the server (cookie-less CSRF protection). Works in the main thread and in
  * web workers.
  */
+import type { MeasureSources, RuleMeasure } from '../data/ruleMeasures'
+
 export const API_HEADERS: Record<string, string> = { 'X-Forensic-Client': 'remn' }
 
 /** Set the shared access token for remote deployments (FORENSIC_AUTH_TOKEN on the server). Mutated in place so every module (and worker) sharing this instance picks it up. */
@@ -204,8 +206,10 @@ export interface Meta {
   mailWeights?: Record<string, number>
   mailStrongFlags?: string[]
   dangerousExtensions: Record<string, string>
-  rules: { file: string; yaml: string; rule?: Record<string, unknown>; error?: string }[]
+  rules: { file: string; yaml: string; rule?: Record<string, unknown>; error?: string; measured?: RuleMeasure }[]
   packs?: PackInfo[]
+  /** what the rules were measured on (rules/measures.json), when they were */
+  measures?: MeasureSources | null
 }
 /** Manifest of a community rule pack (rules/community/<id>/pack.json). */
 export interface PackInfo {
@@ -224,7 +228,7 @@ export interface PackInfo {
 }
 export interface PackRules {
   pack: PackInfo
-  rules: { file: string; rule?: Record<string, unknown>; error?: string; yaml?: string }[]
+  rules: { file: string; rule?: Record<string, unknown>; error?: string; yaml?: string; measured?: RuleMeasure }[]
 }
 export const getHealth = () => apiGet<Health>('/api/health')
 export const getMeta = () => apiGet<Meta>('/api/meta')

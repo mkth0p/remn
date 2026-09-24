@@ -5,6 +5,7 @@ import { log, toast, useStore } from '../state/store'
 import type { DryFinding, RunRequest } from '../workers/rules.worker'
 import type { SettingsLike } from '../rules/filter'
 import { enabledPackIds, getPackRules } from './packs'
+import type { RuleMeasure } from './ruleMeasures'
 import { replaceFindings } from './findingReviews'
 
 export interface LoadedRule {
@@ -16,6 +17,8 @@ export interface LoadedRule {
   pack?: string
   error?: string
   enabled: boolean
+  /** how the rule fared on recorded attacks and clean machines, when this rule was measured */
+  measured?: RuleMeasure
 }
 
 export function parseRuleYaml(text: string): { rules: Rule[]; errors: string[] } {
@@ -48,7 +51,7 @@ export async function loadRules(caseId: number | null, strict = false): Promise<
       continue
     }
     const v = validateRule(r.rule)
-    if (v.ok) out.push({ rule: v.rule, yaml: r.yaml, file: r.file, origin: 'bundled', enabled: !disabled.has(v.rule.id) })
+    if (v.ok) out.push({ rule: v.rule, yaml: r.yaml, file: r.file, origin: 'bundled', enabled: !disabled.has(v.rule.id), measured: r.measured })
     else out.push({ rule: { id: r.file, title: r.file, severity: 'info', source: 'events' }, yaml: r.yaml, file: r.file, origin: 'bundled', error: v.error, enabled: false })
   }
   // community packs (SigmaHQ, Sublime): fetched on demand, only the enabled ones
@@ -78,7 +81,7 @@ export async function loadRules(caseId: number | null, strict = false): Promise<
         continue
       }
       const v = validateRule(r.rule)
-      if (v.ok) out.push({ rule: v.rule, yaml: '', file: r.file, origin: 'pack', pack: p.id, enabled: !disabled.has(v.rule.id) })
+      if (v.ok) out.push({ rule: v.rule, yaml: '', file: r.file, origin: 'pack', pack: p.id, enabled: !disabled.has(v.rule.id), measured: r.measured })
       else out.push({ rule: { id: r.file, title: r.file, severity: 'info', source: p.source }, yaml: '', file: r.file, origin: 'pack', pack: p.id, error: v.error, enabled: false })
     }
   }

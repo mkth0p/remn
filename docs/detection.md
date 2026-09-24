@@ -180,6 +180,61 @@ negated predicates, `profile.by_sender()` through the sender-baseline columns,
 settings, `$tranco_10k` through the bundled list; `$tranco_1m` is approximated with the
 10,000 list, which only makes those rules fire more often, never less).
 
+## Measured rules
+
+A finding is only as good as the rule behind it, so every event rule, the core ones and the
+packs', is measured on recorded attacks and on the logs of clean machines, and the pages say
+what the measure shows. `tools/measure_rules.py` runs the rules on the SQL engine and writes
+`rules/measures.json`; the server attaches each measure to the rule it was taken on. A measure
+carries a hash of the rule's logic (everything but its title, description, severity,
+techniques and other metadata, `backend/services/rules/measures.py`), so a rule changed since
+it was measured is shown as changed rather than with a measure that is not its own.
+
+Recorded attacks, at the versions measured:
+
+- the SigmaHQ regression samples (SigmaHQ/sigma at `272daf82`, the commit the packs were
+  converted from): 459 recordings, each made by a rule's author for that rule;
+- EVTX-ATTACK-SAMPLES (`4ceed2f`): 278 recordings, with the rules reviewed as
+  identifying each (`tests/fixtures/evtx-attack-samples/expected.json`);
+- the Office 365 and Entra ID datasets of Splunk attack_data (`7a5e9d5`): 67
+  recordings, each labelled with its ATT&CK technique. 25 more are Entra directory
+  audit logs, other Azure Monitor records and Splunk search exports, which REMN does not read.
+
+Clean machines: the seven Windows installations of NextronSystems/evtx-baseline `v0.8.4`
+(6.6 million events, 91% of them Sysmon), which SigmaHQ runs its own rules against for false
+positives.
+
+A recording is of what a rule looks for when it is the rule's own sample, a file reviewed as
+identifying it, or one the rule can read (it holds the event ids, channels and fields the rule
+needs) labelled with one of its techniques (the same ATT&CK v19 id, its parent or a
+sub-technique). The measure of a rule says whether it fires on its own SigmaHQ sample, on
+how many of the recordings of what it looks for it fires, and, on the clean machines, how many
+findings it raised, how many events they cover, on how many machines, out of how many events
+it reads (those of its channels and event ids with a value in every field its conditions
+need, so a Microsoft 365 rule reads no Windows event). The pages read it as:
+
+- **detects**: it fires on at least one recording of what it looks for;
+- **lead**: it never did, or no recording of it was available. Its finding says where to
+  look, not what happened, and the findings list, the finding panel and the report mark it;
+- **misses its sample**: a SigmaHQ rule that does not fire on the sample its author recorded,
+  so, as converted, it may not match what it looks for;
+- **fires on clean machines**: benign activity matches it too; the finding panel gives the
+  share of the events it reads that it matched;
+- **changed** or **needs settings**: not measured in its current form, or it cannot run
+  without a case setting a recording does not have (expected countries, internal domains).
+
+Mail rules are calibrated on mail corpora instead (below).
+
+At this commit, 830 of the 2,998 event rules fire on a recording of what they look
+for and 2,168 are leads; 457 of the 457 SigmaHQ rules with a sample fire on it; on the
+clean machines 167 of the 2,785 rules whose log sources they have fired at least once.
+Measuring found SigmaHQ rules that could never fire (the AppX deployment channel, comparisons
+with true) and PowerShell rules blind to PowerShell 7's log, since fixed in the converter.
+
+**Re-measuring** takes the downloads listed in the tool's docstring (about 9 GB unpacked) and
+about an hour on four cores; re-run it after changing a rule or re-importing a pack. A backend
+test warns while a rule has changed since it was measured.
+
 ## Mail risk scoring
 
 The 0 to 100 risk score on every mail is an investigation priority, not a probability of

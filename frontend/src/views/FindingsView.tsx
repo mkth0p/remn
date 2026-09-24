@@ -7,6 +7,7 @@ import { Badge, Dot, Flyout, JsonView, Kpi, Progress, Sev, SevBar, Tabs } from '
 import { IconArrowLeft, IconCircle, IconFindings, IconInfo, IconPlay, IconSearch, IconTarget } from '../components/Icons'
 import { RescoreButton } from '../components/RescoreButton'
 import { loadRules, type LoadedRule } from '../data/rules'
+import { isLead, measuredOn, readMeasure, type MeasureReading } from '../data/ruleMeasures'
 import { findingsStaleness, runEnabledRules, type Staleness } from '../data/findingsState'
 import { resetFindingSeverityOverrides } from '../data/findingReviews'
 import { getSource } from '../data/source'
@@ -74,6 +75,19 @@ function SeverityOverrideNotice({ findings, busy, onReset, chain = false }: { fi
  * user / host / IP within a few hours, is one line. Flat and grouped views keep the per-rule
  * detail. The banner above the queue says when the findings are behind the evidence.
  */
+/** A finding of a rule never seen to detect what it looks for (data/ruleMeasures.ts). */
+function LeadBadge({ reading }: { reading?: MeasureReading }) {
+  if (!reading || !isLead(reading)) return null
+  return (
+    <>
+      {' '}
+      <Badge sev="outline" title={reading.attacks}>
+        lead
+      </Badge>
+    </>
+  )
+}
+
 export function FindingsView() {
   const kase = useStore((s) => s.currentCase)
   const rulesVersion = useStore((s) => s.rulesVersion)
@@ -177,6 +191,9 @@ export function FindingsView() {
   const shownRows = useMemo(() => (group === 'incident' ? [...new Map(incidents.flatMap((i) => i.findings).map((f) => [f.id, f])).values()] : rows), [group, incidents, rows])
   const allIncidents = useMemo(() => buildIncidents(active, incidentOpts), [active, incidentOpts])
   const membership = useMemo(() => chainMembership(all, chains), [all, chains])
+  // how far each rule's finding can be taken as a detection (rules/measures.json)
+  const measures = useStore((s) => s.meta?.measures)
+  const readings = useMemo(() => new Map<string, MeasureReading>(rules.map((r) => [r.rule.id, readMeasure(r.measured, r.origin)])), [rules])
   const counts = useMemo(() => (group === 'incident' ? sevCounts(allIncidents) : sevCounts(active)), [active, allIncidents, group])
   // Open details must follow a reset or rule refresh, including replacement row IDs.
   useEffect(() => {
@@ -363,6 +380,7 @@ export function FindingsView() {
               </Badge>
             </>
           ) : null}
+          <LeadBadge reading={readings.get(r.ruleId)} />
         </span>
       ),
     },
@@ -448,6 +466,7 @@ export function FindingsView() {
       <td className="sans">
         {f.title}
         {f.escalation ? <span className="muted"> · {f.escalation}</span> : null}
+        <LeadBadge reading={readings.get(f.ruleId)} />
         {f.severityOverride && (
           <div>
             <OverrideLabel finding={f} />
@@ -724,6 +743,7 @@ export function FindingsView() {
                         {g.label}
                       </span>
                       {group === 'ruleId' && <span className="mono small muted">{g.key}</span>}
+                      {group === 'ruleId' && <LeadBadge reading={readings.get(g.key)} />}
                       <span className="count">{fmtNum(g.items.length)}</span>
                       <span style={{ width: 120 }}>
                         <SevBar counts={sevCounts(g.items)} />
@@ -988,6 +1008,17 @@ export function FindingsView() {
                           this rule reported an error in the last run; the finding may be from an earlier run
                         </div>
                       )}
+                      {(() => {
+                        const m = readings.get(selected.ruleId)
+                        if (!m?.label) return null
+                        return (
+                          <div className="small" data-measure={m.verdict}>
+                            {m.verdict === 'detects' ? <strong>Measured. </strong> : isLead(m) ? <strong>A lead, not a detection. </strong> : null}
+                            {m.attacks} {m.clean}
+                            {measures && <div className="muted">{measuredOn(measures)}</div>}
+                          </div>
+                        )
+                      })()}
                     </div>
                     <div className="section">
                       <h3>Investigation</h3>
