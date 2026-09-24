@@ -676,9 +676,12 @@ class CaseStore:
                 UPDATE mails SET "reputationOriginIp" = r.verdict
                 FROM ioc_reputation r WHERE r.kind = 'ip' AND r.value = lower(mails."originIp") AND r.verdict IN ('malicious', 'suspicious', 'clean')
             """)
+            # Verdicts are ranked as numbers: max() over the labels themselves is alphabetical,
+            # which put 'suspicious' above 'malicious' on a mail that has both.
             con.execute("""
                 UPDATE mails SET "reputationWorst" = sub.worst FROM (
-                    SELECT m.id, max(CASE r.verdict WHEN 'malicious' THEN 'malicious' WHEN 'suspicious' THEN 'suspicious' ELSE 'clean' END) AS worst
+                    SELECT m.id, CASE max(CASE r.verdict WHEN 'malicious' THEN 3 WHEN 'suspicious' THEN 2 ELSE 1 END)
+                        WHEN 3 THEN 'malicious' WHEN 2 THEN 'suspicious' ELSE 'clean' END AS worst
                     FROM mails m
                     JOIN ioc_reputation r ON (
                         (r.kind = 'ip' AND r.value = lower(m."originIp"))
