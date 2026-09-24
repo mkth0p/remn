@@ -127,6 +127,8 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 - Fixed: a mail tied to both a malicious and a suspicious indicator was marked `suspicious`
   in server cases, because the worst verdict was the alphabetical maximum of the labels.
   Verdicts are now ranked malicious, suspicious, clean.
+- Reputation lookups honour their deadline: calls still queued when it passes are cancelled
+  and reported with the verdict `timeout`, instead of running on after the answer was sent.
 
 ## 0.1.1 (2026-09-07)
 
