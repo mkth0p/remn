@@ -81,6 +81,12 @@ def detect_mail_format(name: str, head: bytes) -> str:
     return "eml"
 
 
+# how much of a file the format is told from: a Unified Audit Log record whose keys are in
+# alphabetical order (as Splunk and some exporters write them) names its Operation well past the
+# first kilobyte
+SNIFF_BYTES = 64 * 1024
+
+
 def detect_evtx_format(name: str, head: bytes) -> str:
     arc = detect_archive(name, head)
     if arc:
@@ -215,7 +221,7 @@ class EvtxSource:
         # the keys of the cloud records read so far, for every file of this upload (a package
         # passes its own set, shared by all its members)
         self.seen_records: set[int] = set() if seen is None else seen
-        head = (data or b"")[:512] if data is not None else _read_head(path)
+        head = (data or b"")[:SNIFF_BYTES] if data is not None else _read_head(path, SNIFF_BYTES)
         self.format = detect_evtx_format(name, head)
 
     def __iter__(self) -> Iterator[dict[str, Any]]:
@@ -232,7 +238,7 @@ class EvtxSource:
                 suffix, fmt = ".evtx", "evtx"
             elif low.endswith((".csv", ".json", ".jsonl", ".ndjson")):
                 with member.open() as fh:
-                    head = fh.read(512)
+                    head = fh.read(SNIFF_BYTES)
                 fmt = m365.detect_format(member.name, head) or ""
                 if not fmt:
                     skip_record(self.files, member.name, member.size, "not a recognised Microsoft 365 or Entra export")

@@ -16,7 +16,7 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from services.analysis import hayabusa
-from services.ingest.pipeline import EvtxSource, MailSource, Member, detect_archive, looks_like_mail
+from services.ingest.pipeline import SNIFF_BYTES, EvtxSource, MailSource, Member, detect_archive, looks_like_mail
 from services.ingest.reconcile import reconcile
 from services.parsers import collection, m365, native, triage
 from services.parsers.mail.common import ParseContext
@@ -501,7 +501,7 @@ class PackageSource:
                 if size != member.size:
                     raise ValueError("member size does not match archive metadata")
                 with open(tmp_path, "rb") as fh:
-                    head = fh.read(4096)
+                    head = fh.read(SNIFF_BYTES)
                 low = member.name.lower()
                 if detect_archive(member.name, head) or head.startswith(b"MSCF"):
                     if self.depth >= 3:

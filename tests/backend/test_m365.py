@@ -473,3 +473,41 @@ def test_azure_monitor_sign_in_exports_are_read(tmp_path):
     assert rows[0]["recordKey"] == f"entra:{spray['id']}"
     # the audit record is not a sign-in: it is not read, and the file says so
     assert source.stats.errors == 1
+
+
+def test_a_record_with_its_keys_in_alphabetical_order_is_read(tmp_path):
+    # Splunk's add-on and some exporters write the Management Activity record with its keys sorted:
+    # Operation comes after Actor, ClientIP, ModifiedProperties..., past the head the format was
+    # told from, and such a file was read as an event log and failed.
+    rec = {
+        "Actor": [{"ID": "alice@contoso.com", "Type": 5}, {"ID": "10032001A2B3C4D5", "Type": 3}],
+        "ActorContextId": str(uuid.uuid4()),
+        "ClientIP": "203.0.113.7",
+        "CreationTime": "2026-09-01T10:00:00",
+        "Id": str(uuid.uuid4()),
+        "ModifiedProperties": [{"Name": f"Property{i}", "NewValue": "x" * 40, "OldValue": ""} for i in range(8)],
+        "ObjectId": "alice@contoso.com",
+        "Operation": "Set-Mailbox",
+        "OrganizationId": str(uuid.uuid4()),
+        "Parameters": [{"Name": "ForwardingSmtpAddress", "Value": "smtp:drop@evil.example"}],
+        "RecordType": 1,
+        "ResultStatus": "True",
+        "UserId": "alice@contoso.com",
+        "Workload": "Exchange",
+    }
+    line = json.dumps(rec, sort_keys=True)
+    assert line.index('"Operation"') > 512
+    f = tmp_path / "o365.json"
+    f.write_text(line + "\n", encoding="utf-8")
+    source = EvtxSource(f.name, str(f), None, str(tmp_path))
+    rows = list(source)
+    assert source.format == "m365-ual-json" and source.stats.errors == 0
+    assert [(r["operation"], r["ipAddress"]) for r in rows] == [("Set-Mailbox", "203.0.113.7")]
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("audit/o365.json", line + "\n")
+    zipped = EvtxSource("audit.zip", None, buf.getvalue(), str(tmp_path))
+    assert [r["operation"] for r in zipped] == ["Set-Mailbox"]

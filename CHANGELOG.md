@@ -177,6 +177,11 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   rules also match the channel's display name. Each log source now maps to the channel
   SigmaHQ's own regression tests use (`tests/thor.yml`); measuring the rules on their SigmaHQ
   samples found the gaps.
+- Fixed: a Unified Audit Log export whose records have their keys in alphabetical order, as
+  Splunk's Microsoft 365 add-on and some exporters write them, was taken for an event log and
+  failed: the format was told from the first 512 bytes, and such a record names its Operation
+  past them. The first 64 KB are read, alone, in an archive or in a package. 13 of Splunk
+  attack_data's Office 365 datasets were unreadable for it.
 
 ## 0.1.1 (2026-09-07)
 
