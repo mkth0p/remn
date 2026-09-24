@@ -437,3 +437,39 @@ def test_graph_audit_log_query_records_are_read(tmp_path):
         assert rows[0]["data"]["ForwardingSmtpAddress"] == "smtp:drop@evil.example"
         assert all(r["subjectUser"] == "alice@contoso.com" and r["ipAddress"] == "203.0.113.7" and r["ts"] for r in rows)
         assert rows[1]["channel"] == "Exchange" and rows[1]["data"]["DeleteMessage"] == "True"
+
+
+def test_azure_monitor_sign_in_exports_are_read(tmp_path):
+    # Entra's diagnostic settings (Log Analytics, Event Hub, storage account) write each sign-in
+    # under "properties" of an Azure Monitor record; such a file was read as an event log and failed.
+    def record(category: str, props: dict, time: str = "2026-09-01T10:00:00.1234567Z") -> str:
+        return json.dumps(
+            {"time": time, "operationName": "Sign-in activity", "category": category, "callerIpAddress": props.get("ipAddress"), "properties": props}
+        )
+
+    spray = {
+        "id": str(uuid.uuid4()),
+        "createdDateTime": "2026-09-01T10:00:05Z",
+        "userPrincipalName": "alice@contoso.com",
+        "appDisplayName": "Azure Active Directory PowerShell",
+        "ipAddress": "35.93.126.71",
+        "status": {"errorCode": 50126, "failureReason": "Invalid username or password."},
+    }
+    background = {"id": str(uuid.uuid4()), "userPrincipalName": "bob@contoso.com", "ipAddress": "10.1.2.3", "status": {"errorCode": 0}}
+    audit = {"id": str(uuid.uuid4()), "activityDisplayName": "Add member to role"}
+    f = tmp_path / "signins.log"
+    f.write_text(
+        "\n\n" + "\n".join([record("SignInLogs", spray), record("NonInteractiveUserSignInLogs", background), record("AuditLogs", audit)]) + "\n",
+        encoding="utf-8",
+    )
+    assert m365.detect_format(f.name, f.read_bytes()[:512]) == "entra-signin-json"
+    source = EvtxSource(f.name, str(f), None, str(tmp_path))
+    rows = list(source)
+    assert source.format == "entra-signin-json"
+    assert [(r["user"], r["ipAddress"], r["status"]) for r in rows] == [("alice@contoso.com", "35.93.126.71", "50126"), ("bob@contoso.com", "10.1.2.3", "0")]
+    assert rows[0]["tsIso"] == "2026-09-01T10:00:05.000Z" and rows[0]["objectName"] == "Azure Active Directory PowerShell"
+    # the envelope's time stands in when the sign-in has none
+    assert rows[1]["tsIso"] == "2026-09-01T10:00:00.123Z"
+    assert rows[0]["recordKey"] == f"entra:{spray['id']}"
+    # the audit record is not a sign-in: it is not read, and the file says so
+    assert source.stats.errors == 1

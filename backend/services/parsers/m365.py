@@ -97,6 +97,10 @@ def detect_format(name: str, head: bytes) -> str | None:
             return "m365-ual-json"
         if '"userprincipalname"' in low or '"appdisplayname"' in low or '"conditionalaccessstatus"' in low or '"clientappused"' in low:
             return "entra-signin-json"
+        # Azure Monitor diagnostic records (Log Analytics, Event Hub, storage account): the
+        # sign-in is under "properties", past the head
+        if any(f'"category": "{c}"' in low or f'"category":"{c}"' in low for c in _SIGNIN_CATEGORIES):
+            return "entra-signin-json"
         return None
     header = low.split("\n", 1)[0]
     if "auditdata" in header:
@@ -580,6 +584,28 @@ def _ca_policies(v: Any) -> str | None:
     return "; ".join(out)[:2000] or None
 
 
+# Azure Monitor diagnostic categories whose records carry a sign-in in "properties"
+_SIGNIN_CATEGORIES = ("signinlogs", "noninteractiveusersigninlogs", "serviceprincipalsigninlogs", "managedidentitysigninlogs")
+
+
+def _signin_of(obj: Any) -> dict[str, Any] | None:
+    """The sign-in an exported object holds: a Graph or portal sign-in as it is, or the
+    "properties" of an Azure Monitor diagnostic record of a sign-in category. None for another
+    diagnostic category, or for something that is not an object."""
+    if not isinstance(obj, dict):
+        return None
+    category = str(obj.get("category") or "").lower()
+    if not category or not isinstance(obj.get("properties"), dict):
+        return obj
+    if category not in _SIGNIN_CATEGORIES:
+        return None
+    props = dict(obj["properties"])
+    # the envelope's time, when the sign-in itself has none
+    if not props.get("createdDateTime") and obj.get("time"):
+        props["createdDateTime"] = obj["time"]
+    return props
+
+
 def entra_row(o: dict[str, Any], day_first: bool | None = None) -> dict[str, Any]:
     g = dict(o)
     # portal CSV headers -> Graph names
@@ -856,7 +882,13 @@ def _iter_rows(path: str | None, data: bytes | None, fmt: str, stats: Any, inclu
                 yield _finish(ual_row(ad, rtype), ad, stats, include_raw)
         elif fmt == "entra-signin-json":
             for obj in _iter_json_objects(fh, stats):
-                yield _finish(entra_row(obj), obj, stats, include_raw)
+                signin = _signin_of(obj)
+                if signin is None:
+                    # another diagnostic category (AuditLogs, RiskyUsers, ...): not a sign-in, not read
+                    if stats is not None:
+                        stats.errors += 1
+                    continue
+                yield _finish(entra_row(signin), obj, stats, include_raw)
         elif fmt == "entra-signin-csv":
             reader = csv.DictReader(fh)
             # the date order is decided from the file's own dates before any row is read

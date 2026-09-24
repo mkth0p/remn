@@ -81,8 +81,12 @@ events table:
   of AuditData objects, Untitled Goose Tool output, or the records of the Graph audit log
   query, whose record sits under `auditData`, as Microsoft-Extractor-Suite's `Get-UALGraph`
   writes them);
-- Entra ID sign-ins as Graph JSON (`Get-EntraSignInLogs`, Goose) or the portal's CSV
-  export; a `.zip` of a whole acquisition folder is walked.
+- Entra ID sign-ins as Graph JSON (`Get-EntraSignInLogs`, Goose), the portal's CSV
+  export, or the Azure Monitor records Entra's diagnostic settings write to Log Analytics,
+  an Event Hub or a storage account (the sign-in under `properties`, categories
+  `SignInLogs`, `NonInteractiveUserSignInLogs`, `ServicePrincipalSignInLogs` and
+  `ManagedIdentitySignInLogs`; a record of another category, such as `AuditLogs`, is
+  counted as not read); a `.zip` of a whole acquisition folder is walked.
 
 Rows carry `provider`, `channel` (the workload), `category` (`M365 Exchange`,
 `M365 Entra`, `Entra sign-in`, …), `operation`, `subjectUser` and `targetUser`,

@@ -163,6 +163,10 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   Evidence page marks a file with such a gap and lists what it cannot show.
 - Fixed: an event with no TimeCreated took no time from its record header, because the
   header's time ends in " UTC", which the time parser did not read.
+- Entra sign-ins exported through Azure Monitor (the diagnostic settings' Log Analytics,
+  Event Hub or storage account records, the sign-in under `properties`) are read. Such a file
+  was taken for an event log and failed; a record of another category, such as `AuditLogs`,
+  is counted as not read.
 
 ## 0.1.1 (2026-09-07)
 
