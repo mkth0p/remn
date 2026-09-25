@@ -5,6 +5,15 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- The Graph page is back: it left with the Chains page when Stories replaced it, while the
+  report kept printing the same graphs. It lists the chains, draws one chain as a swimlane or
+  all chains against the senders, domains, IPs and hosts they share, and opens a clicked step's
+  rows. The graphs read better in the app and the report: nodes carry a ring and a soft shadow,
+  labels sit on their own background and take turns above and below when neighbours crowd,
+  only the ties to the mail are named on an edge, and the all-chains graph is three columns
+  (attacker side, people, machines and IPs) instead of a circle, folding each chain's unshared
+  entities into one node when a column runs long. Both carry a legend drawn with the graph's
+  own shapes and colours.
 - REMN's own rules raise 200 high and critical findings on the seven clean machines of
   evtx-baseline instead of 895, and detect every recording they detected before (342 recordings,
   435 rule detections, up from 340 and 433). A rule a busy machine matches over and over raises
