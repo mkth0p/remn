@@ -5,9 +5,36 @@ so what did its recipient's accounts and machines do next? REMN links a suspicio
 to the later activity of its recipient across the three sources of a case, scores the
 result, and treats the chain and the findings on its steps as one item for review and
 for the report. This page describes how a chain is built, how it is scored, how it
-relates to findings, and where it is stored.
+relates to findings, and where it is stored. Chains are no longer a page of their own: a
+story build builds them from the same rows, and each is a part of its person's
+[story](stories.md) (its steps are that story's "phishing chain" steps) and an item of the
+Review page.
 
-## How a chain is built
+## Authentication campaigns from one source
+
+Chains also work without mail. Windows Security 4625/4624 events or Entra sign-ins can
+form an authentication campaign: at least ten failures within thirty minutes for the
+same qualified account, source IP and destination. Failures alone score 50 (medium).
+A successful login after the tenth failure in that window scores 75 (high); it warrants
+investigation and does not establish that the attacker succeeded. Sporadic mistakes,
+different tenants, source IPs and destination hosts are kept separate. Event seeds open
+the event itself and retain their source in findings, reports and case backups.
+
+A campaign against the person a mail-led chain is about, starting in that chain's window,
+joins that chain instead of standing as a second one, whatever spelling the logs use for
+the account: `NORTHSTAR\daniel.roy` in the Security log and the mail to
+`daniel.roy@northstar.example` are one person when the NetBIOS name is the first label of
+the recipient's domain (or of an internal domain), or when the case shows the two side by
+side; `OTHER\daniel.roy`, tied by the case to another organisation, is not. The campaign's
+steps replace the routine logon steps they cover, the chain is scored again, and the chain
+says which campaign it took in. This happens whether or not a rule has flagged the
+failures yet, so the chains read the same before and after a rule run. A campaign fully
+represented by a chain of another account is not duplicated.
+
+This first event-led pattern detects repeated attempts against one account. Distributed
+password spraying across many accounts or IPs needs a separate grouping pattern.
+
+## How a mail-led chain is built
 
 A *seed* is a mail above the risk threshold (45 by default) or carrying a medium or
 higher finding. Its recipients are normalised to an identity: `alice@contoso.com`,
@@ -29,20 +56,25 @@ names, Defender detections, persistence and log-clearing events.
 
 Steps that name the mail's URL domains, attachment names or sender are *artifact links*,
 the strongest tie between the mail and what followed. Links to the organisation's own
-domains are not artifacts. Bursts collapse into one step, findings of the last rule run
+domains (the internal domains of the case settings, and the domains of the mail's own
+recipients, so a case with no internal domain set is read the same) are not artifacts. Bursts collapse into one step, findings of the last rule run
 attach to the steps they reference, and one chain is kept per identity per day with the
-other seeds listed as related.
+other seeds listed as related. Deduplication uses the recipient's full address, so two
+organisations' accounts named Alice retain separate chains. A bare alias on the same event
+cannot bypass a qualified foreign account, and each event contributes only once.
 
 Server-store cases are correlated inside DuckDB; browser-store cases post the relevant
 rows to the local API (`POST /api/chains/build`). A build considers at most 50,000
-events inside the window on either path; when that cap is reached the Chains page says
-so next to the build statistics, and a narrower window or a higher seed threshold brings
-the count back under it. `services/analysis/chains.py` is pure
-functions over plain rows, tested on the synthetic scenarios.
+events inside the window on either path; when that cap is reached the build says so
+next to its statistics. `services/analysis/chains.py` is pure
+functions over plain rows, tested on the synthetic scenarios. Authentication selection has
+its own 50,000-event budget. Seed, reply, event and output-chain limits are recorded in the
+saved result, shown persistently on the Review page and included in exported reports. A result with
+any limit warning is incomplete; an absent chain is not evidence of absent activity.
 
 ## The score
 
-Chain scores are bounded and explained, and the Chains page shows the parts under the
+Chain scores are bounded and explained, and the Review page shows the parts under the
 chain header:
 
 | part | range |
@@ -76,10 +108,10 @@ leaves the chain, goes back into the queue on its own and keeps its own decision
 
 ## Where chains live
 
-The Chains page shows the last built snapshot, stored with the case, so a rebuild is
-explicit. Rebuilding with no seed left replaces the snapshot with an empty one. Removing
-evidence deletes the snapshot along with everything else derived from the removed rows
-(see [Storage modes](storage.md)).
+The review and the report read the last built snapshot, stored with the case and written
+by each story build, so a rebuild is explicit. Rebuilding with no seed left replaces the
+snapshot with an empty one. Removing evidence deletes the snapshot along with everything
+else derived from the removed rows (see [Storage modes](storage.md)).
 
-The Chains page reads chains as stories and draws them as swimlane graphs; the [interface
-page](interface.md) describes both views.
+The Stories page reads each chain within its person's story; the report draws chains as
+swimlane graphs; the [interface page](interface.md) describes both.

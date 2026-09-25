@@ -12,6 +12,24 @@
       "runtimeExecutable": ".venv\\Scripts\\python.exe",
       "runtimeArgs": ["backend/manage.py", "runserver", "127.0.0.1:8000", "--noreload"],
       "port": 8000
+    },
+    {
+      "name": "backend-posix",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": ["backend/manage.py", "runserver", "127.0.0.1:8000", "--noreload"],
+      "port": 8000
+    },
+    {
+      "name": "remn",
+      "runtimeExecutable": ".venv\\Scripts\\python.exe",
+      "runtimeArgs": ["backend/run.py", "--port", "8010"],
+      "port": 8010
+    },
+    {
+      "name": "remn-posix",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": ["backend/run.py", "--port", "8010"],
+      "port": 8010
     }
   ]
 }

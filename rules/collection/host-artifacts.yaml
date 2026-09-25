@@ -1,0 +1,169 @@
+id: collection-persistence-user-path
+title: Collected persistence configuration launches from a user-writable location
+description: A service, autorun or task references a temporary or user profile location. Check the binary and authorized deployment; observation does not establish when persistence was created.
+source: events
+severity: high
+attack: [T1543.003, T1547.001, T1053.005]
+entities: [computer, serviceName, taskName, name, image, serviceFile, commandLine]
+where:
+  artifactType|in: [service, autorun, task]
+  any_of:
+    - image|contains: ['\temp\', '\appdata\', '\users\public\', '\downloads\']
+    - serviceFile|contains: ['\temp\', '\appdata\', '\users\public\', '\downloads\']
+    - commandLine|contains: ['\temp\', '\appdata\', '\users\public\', '\downloads\']
+---
+id: collection-encoded-execution
+title: Encoded or download-and-execute command in collected artifacts
+description: Encoded PowerShell or explicit download/execution primitives in a process or persistence configuration. Review the complete command and its source.
+source: events
+severity: high
+attack: [T1059.001, T1027]
+entities: [computer, processName, serviceName, taskName, name, commandLine]
+where:
+  artifactType|in: [process, service, task, autorun]
+  any_of:
+    - commandLine|contains: [' -enc ', ' -encodedcommand ', 'downloadstring(', 'frombase64string(', 'invoke-expression']
+    - serviceFile|contains: [' -enc ', ' -encodedcommand ', 'downloadstring(', 'frombase64string(']
+---
+id: collection-script-host-connection
+title: Collected script interpreter with a network endpoint
+description: A script interpreter is explicitly recorded with a destination address. This is a triage lead; check whether the destination and execution were expected.
+source: events
+severity: medium
+attack: [T1059]
+where:
+  artifactType: connection
+  destinationIp|exists: true
+  image|contains: [powershell.exe, pwsh.exe, wscript.exe, cscript.exe, mshta.exe]
+---
+id: collection-remote-service
+title: Remote execution service present in collection
+description: A collected service name resembles a common remote administration or execution service. Legitimate administration can produce the same artifact.
+source: events
+severity: medium
+attack: [T1569.002]
+entities: [computer, serviceName, serviceFile]
+where:
+  artifactType: service
+  serviceName|contains: [PSEXESVC, PAExec, RemComSvc, csexecsvc]
+---
+id: collection-defender-alert-text
+title: Defender support log contains a threat or protection alert
+description: A collected Defender log line explicitly mentions a threat detection or disabled protection. One finding per log file and host, the matched lines listed on it. Read surrounding evidence; text is not a verified Defender verdict.
+source: events
+severity: medium
+entities: [computer, sourceFile]
+group_by: [computer, sourceFile]
+threshold: ">= 1"
+distinct: message
+where:
+  artifactType: defender
+  threatName|exists: false
+  message|contains:
+    - 'threat detected'
+    - 'malware detected'
+    - 'real-time protection disabled'
+    - 'realtime protection disabled'
+    - 'tamper'
+    - 'disablerealtimemonitoring'
+    - 'disableantispyware'
+    - 'disablebehaviormonitoring'
+    - 'disableioavprotection'
+    - 'removedefinitions'
+---
+id: collection-prefetch-script-execution
+title: Prefetch records execution of a script host or administration utility
+description: Prefetch execution evidence for an interpreter or remote administration utility. Review run times and referenced files; these tools also have legitimate uses.
+source: events
+severity: low
+attack: [T1059]
+entities: [computer, processName, image]
+where:
+  artifactType: prefetch
+  processName|contains: [powershell.exe, pwsh.exe, mshta.exe, wscript.exe, cscript.exe, psexec.exe]
+---
+id: collection-defender-detection
+title: Defender recorded a threat detection
+description: A Defender support log names a threat. One finding per threat name; the rows carry the lines around each detection, which is where the file path, the process and the action taken are recorded. A support log records what the engine reported and is not a verified verdict.
+source: events
+severity: high
+attack: [T1204]
+where:
+  artifactType: defender
+  threatName|exists: true
+  threatName|not_startswith: 'PUA:'
+group_by: [threatName]
+threshold: '>= 1'
+---
+id: collection-defender-pua
+title: Defender recorded a potentially unwanted application
+description: A PUA detection names software Defender classifies as unwanted rather than malicious, such as bundlers, adware, miners and remote-access tools. In an unwanted-software case this is usually where to start. One finding per name.
+source: events
+severity: medium
+attack: [T1204.002]
+where:
+  artifactType: defender
+  threatName|startswith: 'PUA:'
+group_by: [threatName]
+threshold: '>= 1'
+---
+id: collection-defender-exclusions
+title: Defender exclusions listed in a support log
+description: Path, process or extension exclusions were in effect when the log was written. An exclusion is a common way for unwanted software to keep itself out of scanning; compare the entries on the following rows with the intended deployment baseline. One finding per log that lists them.
+source: events
+severity: medium
+attack: [T1685]
+where:
+  artifactType: defender
+  message|re: '(?i)^(path|process|ext|extension|temp|file) exclusions'
+group_by: [sourceFile]
+threshold: '>= 1'
+---
+id: collection-service-unquoted-path
+title: Service binary path with spaces is not quoted
+description: An unquoted service path containing spaces lets a file planted higher up the path run in the service's place. Check who can write to the intermediate directories. Vendors ship this misconfiguration too, so it is a lead rather than a verdict.
+source: events
+severity: low
+attack: [T1574.009]
+entities: [computer, serviceName, serviceFile]
+where:
+  artifactType: service
+  serviceFile|not_startswith: '"'
+  serviceFile|re: '(?i)^[a-z]:\\[^"]* [^"]*\.exe'
+---
+id: collection-execution-user-path
+title: Executable ran from, or sat in, a temporary or user profile location
+description: Prefetch, UserAssist, BAM or a process snapshot records execution, and Amcache or ShimCache records the file's presence, in a location an unprivileged user can write to. ShimCache on Windows 10 and later does not show that the file ran. Installers and updaters do this too; weigh the name, the run count and what else ran around the same time. One finding per executable and host, with the run count and the span.
+source: events
+severity: medium
+attack: [T1204.002]
+entities: [computer, processName, image]
+group_by: [computer, image]
+threshold: ">= 1"
+where:
+  artifactType|in: [process, prefetch, amcache, shimcache, userassist, bam]
+  image|contains: ['\temp\', '\appdata\', '\users\public\', '\downloads\']
+---
+id: collection-program-user-location
+title: Installed program lives in a user-writable location
+description: An installed program whose location or install source is a temporary or user profile directory was not deployed by an administrator. Common for per-user software; in an unwanted-software case, check the vendor and the install date against the timeline.
+source: events
+severity: low
+attack: [T1204.002]
+entities: [computer, name, company, path]
+where:
+  artifactType: program
+  path|contains: ['\temp\', '\appdata\', '\users\public\', '\downloads\']
+---
+id: collection-persistence-script-host
+title: Persistence entry launches a script host or system utility
+description: A service, autorun or scheduled task starts through PowerShell, a script engine, mshta, rundll32 or regsvr32. Windows schedules some of these itself; the finding is a triage lead for the command that follows the host, not a verdict on the host.
+source: events
+severity: low
+attack: [T1059, T1218]
+entities: [computer, serviceName, taskName, name, image, commandLine]
+where:
+  artifactType|in: [service, autorun, task]
+  any_of:
+    - image|contains: [powershell.exe, pwsh.exe, wscript.exe, cscript.exe, mshta.exe, regsvr32.exe]
+    - commandLine|contains: [powershell.exe, pwsh.exe, wscript.exe, cscript.exe, mshta.exe, regsvr32.exe]

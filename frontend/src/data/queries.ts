@@ -2,12 +2,14 @@
  * Read queries over IndexedDB used by the views and by the AI tools.
  */
 import Dexie from 'dexie'
-import { getDb, type EventRow, type Facet, type MailRow } from '../db/schema'
+import { getDb, type EventRow, type Facet, type MailBody, type MailRow } from '../db/schema'
 import { compileFilter, extractEventIds, getPath, type Filter, type SettingsLike } from '../rules/filter'
 
 export interface SearchResult<T> {
   rows: T[]
   truncated: boolean
+  /** the sort ran over this many matching rows, taken in time order, not over every match */
+  sampledFrom?: number
 }
 
 const HARD_CAP = 20000
@@ -25,28 +27,58 @@ function sortRows<T extends Record<string, unknown>>(rows: T[], field: string, d
   })
 }
 
-export async function searchEvents(caseId: number, filter: Filter, opts: { limit?: number; settings?: SettingsLike; signal?: AbortSignal } = {}): Promise<SearchResult<EventRow>> {
+/**
+ * The row ids a filter pins (an `id in [...]` or `id eq` condition under AND logic), or null. Opening
+ * a finding filters on its rows this way: they are fetched by primary key, not found by reading
+ * every row of the case and testing each against the list.
+ */
+function pinnedIds(filter: Filter): number[] | null {
+  if (filter.logic === 'or') return null
+  const c = (filter.conditions ?? []).find((x) => x.field === 'id' && (x.op === 'in' || x.op === 'eq'))
+  if (!c) return null
+  const ids = (Array.isArray(c.value) ? c.value : [c.value]).map(Number).filter((n) => Number.isInteger(n))
+  return ids.length ? ids : null
+}
+
+export async function searchEvents(caseId: number, filter: Filter, opts: { limit?: number; settings?: SettingsLike; signal?: AbortSignal; cap?: number } = {}): Promise<SearchResult<EventRow>> {
   const db = getDb()
-  const limit = Math.min(opts.limit ?? 2000, HARD_CAP)
+  // how many matches a sort other than the index's own reads at most (lowered by the tests)
+  const cap = opts.cap ?? HARD_CAP
+  const limit = Math.min(opts.limit ?? 2000, cap)
   const pred = compileFilter(filter, { source: 'events', settings: opts.settings })
   const sort = filter.sort ?? { field: 'ts', dir: 'desc' }
   const ids = extractEventIds(filter.conditions, filter.logic)
   let rows: EventRow[]
   let truncated: boolean
-  if (ids && ids.length && ids.length <= 50) {
-    rows = await db.events
-      .where('[caseId+eventId]')
-      .anyOf(ids.map((id) => [caseId, id] as [number, number]))
-      .filter((r) => pred(r as Record<string, unknown>))
-      .limit(HARD_CAP)
-      .toArray()
-    truncated = rows.length >= HARD_CAP
+  const pinned = pinnedIds(filter)
+  if (pinned) {
+    rows = (await db.events.bulkGet(pinned)).filter((r): r is EventRow => !!r && r.caseId === caseId && pred(r as Record<string, unknown>))
     sortRows(rows as Record<string, unknown>[], sort.field, sort.dir)
-    if (rows.length > limit) {
-      rows = rows.slice(0, limit)
-      truncated = true
+    truncated = rows.length > limit
+    return { rows: rows.slice(0, limit), truncated }
+  }
+  if (ids && ids.length && ids.length <= 50) {
+    const keys = ids.map((id) => [caseId, id] as [number, number])
+    // The event-ID index gives rows in ingestion order. Sorting the first 20,000 of them showed a
+    // "newest" that was not the newest once a log held more. When every match fits, all are read and
+    // sorted; when not, a time sort walks the time index instead, which yields the true order.
+    const matching = await db.events.where('[caseId+eventId]').anyOf(keys).count()
+    if (matching <= cap || sort.field !== 'ts') {
+      rows = await db.events
+        .where('[caseId+eventId]')
+        .anyOf(keys)
+        .filter((r) => pred(r as Record<string, unknown>))
+        .limit(cap)
+        .toArray()
+      const sampled = matching > cap
+      truncated = rows.length >= cap
+      sortRows(rows as Record<string, unknown>[], sort.field, sort.dir)
+      if (rows.length > limit) {
+        rows = rows.slice(0, limit)
+        truncated = true
+      }
+      return { rows, truncated, ...(sampled ? { sampledFrom: cap } : {}) }
     }
-    return { rows, truncated }
   }
   const from = pred.from ?? Dexie.minKey
   const to = pred.to ?? Dexie.maxKey
@@ -58,19 +90,42 @@ export async function searchEvents(caseId: number, filter: Filter, opts: { limit
       .limit(limit + 1)
       .toArray()
     truncated = rows.length > limit
-    return { rows: rows.slice(0, limit), truncated }
+    rows = rows.slice(0, limit)
+    const undated = await undatedEvents(caseId, pred, limit)
+    return { rows: rows.concat(undated as typeof rows), truncated }
   }
   rows = await coll
     .filter((r) => pred(r as Record<string, unknown>))
-    .limit(HARD_CAP)
+    .limit(cap)
     .toArray()
-  truncated = rows.length >= HARD_CAP
+  rows = rows.concat((await undatedEvents(caseId, pred, cap - rows.length)) as typeof rows)
+  truncated = rows.length >= cap
+  // sorting by a column other than time reads at most cap matches first: say so when it did
+  const sampled = truncated
   sortRows(rows as Record<string, unknown>[], sort.field, sort.dir)
   if (rows.length > limit) {
     rows = rows.slice(0, limit)
     truncated = true
   }
-  return { rows, truncated }
+  return { rows, truncated, ...(sampled ? { sampledFrom: cap } : {}) }
+}
+
+/**
+ * Collection snapshots (autoruns, services, installed programs) have no event time, and Dexie
+ * omits rows with a null key from the [caseId+ts] index, so they are invisible to every read
+ * that walks it. They are still counted in the case totals, so without this they read as missing
+ * evidence. Only meaningful when no time range is set: an undated row cannot be inside one.
+ */
+function undatedEventCollection(caseId: number, pred: (r: Record<string, unknown>) => boolean) {
+  return getDb()
+    .events.where('caseId')
+    .equals(caseId)
+    .filter((r) => (r as { ts?: number | null }).ts == null && pred(r as Record<string, unknown>))
+}
+
+async function undatedEvents(caseId: number, pred: { from?: number | null; to?: number | null } & ((r: Record<string, unknown>) => boolean), limit: number) {
+  if (pred.from != null || pred.to != null || limit <= 0) return []
+  return undatedEventCollection(caseId, pred).limit(limit).toArray()
 }
 
 export async function countEvents(caseId: number, filter: Filter, settings?: SettingsLike): Promise<number> {
@@ -88,8 +143,9 @@ export async function countEvents(caseId: number, filter: Filter, settings?: Set
   const from = pred.from ?? Dexie.minKey
   const to = pred.to ?? Dexie.maxKey
   const coll = db.events.where('[caseId+ts]').between([caseId, from], [caseId, to], true, true)
-  if (!hasConds) return coll.count()
-  return coll.filter((r) => pred(r as Record<string, unknown>)).count()
+  const dated = hasConds ? await coll.filter((r) => pred(r as Record<string, unknown>)).count() : await coll.count()
+  if (pred.from != null || pred.to != null) return dated
+  return dated + (await undatedEventCollection(caseId, pred).count())
 }
 
 export interface AggGroup {
@@ -119,6 +175,7 @@ async function eachEvent(caseId: number, filter: Filter, settings: SettingsLike 
     const from = pred.from ?? Dexie.minKey
     const to = pred.to ?? Dexie.maxKey
     await db.events.where('[caseId+ts]').between([caseId, from], [caseId, to], true, true).each(visit)
+    if (pred.from == null && pred.to == null) await undatedEventCollection(caseId, pred).each(visit)
   }
   return n
 }
@@ -173,11 +230,44 @@ export async function timelineEvents(caseId: number, filter: Filter, bucket: Buc
 }
 
 // ---- mails -----------------------------------------------------------------
+/**
+ * The browser store keeps a mail's full body apart from its row (the mailBodies table), so a
+ * predicate over the row sees only the 400-character preview. Free text and bodyText conditions are
+ * resolved against the bodies first: a bodyText condition becomes the set of mail ids it matches,
+ * and free text also matches a mail whose body holds it. Before this, the search box that says
+ * "body" searched the preview only, and a bodyText condition never matched.
+ */
+async function mailPredicate(caseId: number, filter: Filter, settings?: SettingsLike) {
+  const db = getDb()
+  const conds = filter.conditions ?? []
+  const needsBodies = conds.some((c) => c.field === 'bodyText') || !!filter.text?.trim()
+  if (!needsBodies) return compileFilter(filter, { source: 'mails', settings })
+  const bodies = await db.mailBodies.where('caseId').equals(caseId).toArray()
+  const bodyOf = (b: MailBody) => b.bodyText ?? b.visibleText ?? ''
+  const resolved = conds.map((c) => {
+    if (c.field !== 'bodyText') return c
+    const one = compileFilter({ conditions: [c] }, { source: 'mails', settings })
+    return { field: 'id', op: 'in' as const, value: bodies.filter((b) => one({ bodyText: bodyOf(b) })).map((b) => b.mailId) }
+  })
+  const pred = compileFilter({ ...filter, conditions: resolved }, { source: 'mails', settings })
+  const text = filter.text?.trim().toLowerCase()
+  if (!text) return pred
+  const inBody = new Set(bodies.filter((b) => bodyOf(b).toLowerCase().includes(text)).map((b) => b.mailId))
+  const rest = compileFilter({ ...filter, conditions: resolved, text: '' }, { source: 'mails', settings })
+  return Object.assign((r: Record<string, unknown>) => pred(r) || (inBody.has(r.id as number) && rest(r)), { from: pred.from, to: pred.to, tsField: pred.tsField })
+}
+
 export async function searchMails(caseId: number, filter: Filter, opts: { limit?: number; settings?: SettingsLike } = {}): Promise<SearchResult<MailRow>> {
   const db = getDb()
   const limit = Math.min(opts.limit ?? 2000, HARD_CAP)
-  const pred = compileFilter(filter, { source: 'mails', settings: opts.settings })
+  const pred = await mailPredicate(caseId, filter, opts.settings)
   const sort = filter.sort ?? { field: 'date', dir: 'desc' }
+  const pinned = pinnedIds(filter)
+  if (pinned) {
+    const hit = (await db.mails.bulkGet(pinned)).filter((r): r is MailRow => !!r && r.caseId === caseId && pred(r as Record<string, unknown>))
+    sortRows(hit as unknown as Record<string, unknown>[], sort.field, sort.dir)
+    return { rows: hit.slice(0, limit), truncated: hit.length > limit }
+  }
   const from = pred.from ?? Dexie.minKey
   const to = pred.to ?? Dexie.maxKey
   let coll = db.mails.where('[caseId+date]').between([caseId, from], [caseId, to], true, true)
@@ -202,7 +292,7 @@ export async function searchMails(caseId: number, filter: Filter, opts: { limit?
 
 export async function countMails(caseId: number, filter: Filter, settings?: SettingsLike): Promise<number> {
   const db = getDb()
-  const pred = compileFilter(filter, { source: 'mails', settings })
+  const pred = await mailPredicate(caseId, filter, settings)
   return db.mails
     .where('caseId')
     .equals(caseId)
@@ -259,16 +349,30 @@ export async function timelineMails(caseId: number, filter: Filter, bucket: Buck
 }
 
 // ---- facets / pivots ----------------------------------------------------------
-export async function getFacets(caseId: number, source: 'events' | 'mails', field: string, limit = 50): Promise<Facet[]> {
+export async function getFacets(caseId: number, source: 'events' | 'mails', field: string, limit = 50, q = ''): Promise<Facet[]> {
   const db = getDb()
-  const rows = await db.facets.where('[caseId+source+field]').equals([caseId, source, field]).toArray()
+  const needle = q.trim().toLowerCase()
+  // a search reaches every stored value, not only the most frequent ones already loaded
+  const rows = await db.facets
+    .where('[caseId+source+field]')
+    .equals([caseId, source, field])
+    .filter((f) => !needle || f.value.toLowerCase().includes(needle))
+    .toArray()
   rows.sort((a, b) => b.count - a.count)
   return rows.slice(0, limit)
 }
 
 export interface PivotResult {
   value: string
-  events: { count: number; first: number | null; last: number | null; byEventId: Record<string, number>; fields: Record<string, number> }
+  events: {
+    count: number
+    first: number | null
+    last: number | null
+    byEventId: Record<string, number>
+    fields: Record<string, number>
+    /** the scan stopped here: counts are over the first this-many events of the case */
+    scannedOf?: { scanned: number; total: number }
+  }
   mails: { count: number; first: number | null; last: number | null; fields: Record<string, number> }
 }
 
@@ -302,11 +406,14 @@ export async function pivot(caseId: number, value: string, maxScan = 400000): Pr
     'objectName',
   ]
   let scanned = 0
+  // A pivot over millions of rows stops at maxScan and says so, rather than keep walking without
+  // counting and report partial numbers as the whole.
   await db.events
     .where('caseId')
     .equals(caseId)
+    .until(() => scanned >= maxScan)
     .each((r) => {
-      if (scanned++ > maxScan) return
+      scanned++
       let hit = false
       for (const f of EV_FIELDS) {
         const v = r[f]
@@ -328,6 +435,7 @@ export async function pivot(caseId: number, value: string, maxScan = 400000): Pr
         res.events.last = res.events.last == null ? r.ts : Math.max(res.events.last, r.ts)
       }
     })
+  if (scanned >= maxScan) res.events.scannedOf = { scanned, total: await db.events.where('caseId').equals(caseId).count() }
   const M_FIELDS = ['fromAddr', 'fromName', 'fromDomain', 'subject', 'originIp', 'returnPath', 'messageId', 'textPreview']
   await db.mails
     .where('caseId')
@@ -379,8 +487,18 @@ export async function caseSummary(caseId: number): Promise<Record<string, unknow
   const evRange = { first: null as number | null, last: null as number | null }
   const mailRange = { first: null as number | null, last: null as number | null }
   for (const e of evidence) {
-    const s = e.stats as { firstTs?: number; lastTs?: number } | undefined
+    const s = e.stats as { firstTs?: number; lastTs?: number; eventRange?: { firstTs?: number; lastTs?: number }; mailRange?: { firstTs?: number; lastTs?: number } } | undefined
     if (!s) continue
+    if (e.kind === 'package') {
+      for (const [range, target] of [
+        [s.eventRange, evRange],
+        [s.mailRange, mailRange],
+      ] as const) {
+        if (range?.firstTs != null) target.first = target.first == null ? range.firstTs : Math.min(target.first, range.firstTs)
+        if (range?.lastTs != null) target.last = target.last == null ? range.lastTs : Math.max(target.last, range.lastTs)
+      }
+      continue
+    }
     const tgt = e.kind === 'evtx' ? evRange : mailRange
     if (s.firstTs != null) tgt.first = tgt.first == null ? s.firstTs : Math.min(tgt.first, s.firstTs)
     if (s.lastTs != null) tgt.last = tgt.last == null ? s.lastTs : Math.max(tgt.last, s.lastTs)

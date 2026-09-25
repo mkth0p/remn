@@ -3,7 +3,7 @@
  * Rule worker: runs the YAML rules against IndexedDB and stores findings.
  */
 import { getDb, type MailRow } from '../db/schema'
-import { compileCond, ruleApplicable, ruleEventIds, ruleFields, runRule, type PresentSelectors, type Rule, type RuleDiag } from '../rules/engine'
+import { compileCond, ruleApplicable, ruleEventIds, ruleFields, ruleReadFields, runRule, type PresentSelectors, type Rule, type RuleDiag } from '../rules/engine'
 import type { Row, SettingsLike } from '../rules/filter'
 import { replaceFindings } from '../data/findingReviews'
 
@@ -12,6 +12,20 @@ export interface RunRequest {
   caseId: number
   rules: Rule[]
   settings: SettingsLike
+  /** try the rules without storing anything: the findings come back in the 'done' message (the AI's test_rule) */
+  dryRun?: boolean
+}
+
+/** A finding a dry run returns, cut down to what a caller shows. */
+export interface DryFinding {
+  ruleId: string
+  title: string
+  severity: string
+  key: string
+  ts: number | null
+  count: number
+  refs: number[]
+  entities: Record<string, string>
 }
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope
@@ -109,6 +123,23 @@ async function run(req: RunRequest): Promise<void> {
   let total = 0
   const byRule: Record<string, number> = {}
   const diagnostics: RuleDiag[] = []
+  const dry: DryFinding[] = []
+  // a dry run stores nothing; its findings go back to the caller
+  const store = async (ruleId: string, found: Record<string, unknown>[]): Promise<number> => {
+    if (!req.dryRun) return replaceFindings(caseId, [ruleId], found)
+    for (const f of found.slice(0, Math.max(0, 50 - dry.length)))
+      dry.push({
+        ruleId,
+        title: String(f.title ?? ''),
+        severity: String(f.severity ?? ''),
+        key: String(f.key ?? ''),
+        ts: typeof f.ts === 'number' ? f.ts : null,
+        count: Number(f.count ?? 0),
+        refs: ((f.refs as number[] | undefined) ?? []).slice(0, 10),
+        entities: (f.entities as Record<string, string> | undefined) ?? {},
+      })
+    return found.length
+  }
   // Rules that read the same event subset (same pinned eventIds) run back to back and share one
   // IndexedDB read: with the community packs, ~1,500 process-creation rules would otherwise each
   // re-read every Sysmon 1 / 4688 row. Heavy columns (raw XML, EventData) are kept only when a
@@ -117,7 +148,7 @@ async function run(req: RunRequest): Promise<void> {
   for (const rule of rules) {
     const k = subsetKey(rule)
     if (k === null) continue
-    const need = keepFor(ruleFields(rule.where))
+    const need = keepFor(ruleReadFields(rule))
     const cur = keepByKey.get(k) ?? { raw: false, data: false }
     keepByKey.set(k, { raw: cur.raw || need.raw, data: cur.data || need.data })
   }
@@ -155,7 +186,7 @@ async function run(req: RunRequest): Promise<void> {
       if (present && rule.source === 'events') {
         const app = ruleApplicable(rule, present)
         if (!app.ok) {
-          await replaceFindings(caseId, [rule.id], [])
+          await store(rule.id, [])
           byRule[rule.id] = 0
           diagnostics.push({ ruleId: rule.id, reason: 'not_applicable', detail: app.detail, matched: 0, afterExclude: 0, afterTime: 0 })
           post({ type: 'progress', index: i + 1, total: rules.length, ruleId: rule.id, findings: 0, ms: Date.now() - t0, rows: 0 })
@@ -170,7 +201,9 @@ async function run(req: RunRequest): Promise<void> {
         rows = await subset(key, ruleEventIds(rule.where), pred)
         if (rule.then?.where) {
           const thenPred = compileCond(rule.then.where, settings)
-          const pre = await fetchEvents(caseId, ruleEventIds(rule.then.where), thenPred, { raw: false, data: false })
+          const thenFields = ruleFields(rule.then.where)
+          for (const f of rule.then.join ?? []) thenFields.add(f)
+          const pre = await fetchEvents(caseId, ruleEventIds(rule.then.where), thenPred, keepFor(thenFields))
           thenRows = () => pre
         }
       } else {
@@ -182,9 +215,8 @@ async function run(req: RunRequest): Promise<void> {
         }
       }
       const found = runRule(rule, { rows, settings, thenRows: thenRows ? () => thenRows!() : undefined, onDiag: (d) => diagnostics.push(d) })
-      const count = await replaceFindings(
-        caseId,
-        [rule.id],
+      const count = await store(
+        rule.id,
         found.map((f) => ({ ...f })),
       )
       byRule[rule.id] = count
@@ -197,7 +229,7 @@ async function run(req: RunRequest): Promise<void> {
   mailCache = null
   joinedCache = null
   cache.clear()
-  post({ type: 'done', total, byRule, diagnostics })
+  post({ type: 'done', total, byRule, diagnostics, ...(req.dryRun ? { findings: dry } : {}) })
 }
 
 ctx.onmessage = async (ev: MessageEvent<RunRequest>) => {

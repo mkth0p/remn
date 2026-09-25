@@ -13,7 +13,7 @@ class ApiConfig(AppConfig):
 
     def ready(self) -> None:
         # Wire the Django-independent services with the settings.
-        from api.views.upload import cleanup_stale
+        from api.views.upload import cleanup_stale, start_sweeper
         from services.analysis.attachments import yara_scan
         from services.reputation.base import registry
         from services.store.casestore import registry as store_registry
@@ -24,6 +24,9 @@ class ApiConfig(AppConfig):
             removed_uploads = cleanup_stale()
             if removed_uploads:
                 log.info("removed %d stale chunked upload file(s)", removed_uploads)
+            # and again on a timer, so an abandoned upload does not wait for the next restart
+            if start_sweeper():
+                log.info("staged evidence swept every %ds, removed after %ds", settings.FORENSIC_UPLOAD_SWEEP_S, settings.FORENSIC_UPLOAD_MAX_AGE_S)
         except Exception as exc:  # noqa: BLE001
             log.warning("upload cleanup failed: %s", exc)
         registry.configure(

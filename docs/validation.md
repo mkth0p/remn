@@ -29,7 +29,8 @@ without the fixture being regenerated.
 (ignored by git), runs the mail scoring over them with default case settings and prints
 the band distribution with recall on the phishing sets and the false-positive rate on the
 legitimate ones. Numbers from 2026-09-06, defaults only, no sender baseline, no internal
-domains configured, so they are a floor:
+domains configured. These measurements describe those datasets and settings, not a floor
+or a prediction for another mailbox:
 
 | corpus | kind | mails | high or above | medium or above |
 |---|---|---|---|---|
@@ -43,16 +44,66 @@ moved the right way: the receiving gateway's own spam verdict (Exchange SCL 5 or
 SFV:SPM or BLK) counts as a strong indicator (Phishing Pot went from 38% to 63% at high),
 and a form posting to another domain no longer counts on its own while a password field
 still does (hard_ham went from 46% to 14% at high). The remaining hard_ham "medium" band
-is 2003-era commercial mail without any authentication headers; on a modern mailbox
-those mails carry DKIM and a List-Id and score lower.
+is 2003-era commercial mail without authentication headers. Modern authentication and
+sender history can change these scores; their effect needs measurement on the target mailbox.
 
-What the harness does not cover: Windows event detection has no public ground truth
-with labelled attacks that fits a drop-in; the EVTX-ATTACK-SAMPLES archive below is the
-closest, and endpoint protection quarantined it on the development machine. Microsoft
+An independent modern synthetic holdout (`tools/calibrate_mail.py --holdout`) covers six
+legitimate supplier, IT, document-sharing and renewal messages and three credential-stealing
+attachments from an authenticated supplier. CI checks mail-score false positives and rule-pack
+false positives separately, and requires all three malicious controls to remain high. It is
+kept separate from the calibration fixtures. This is a regression check, not measured accuracy
+on real modern mail; use a reviewed manifest of your own samples for that measurement.
+
+The browser regression starts the production Python server with built assets and exercises
+upload, hashing/ingestion workers, detection, analyst review, streamed export and restore.
+A second server runs the configuration of a public instance (browser-only mode, the public
+profile) behind a host name that is not loopback: the test checks the closed paths, that the
+pages name the host that parses evidence, the notice before the first upload, that the page
+makes no request to the visitor's localhost on its own, and that the linked lab's quick-start
+pack reads to its ground truth (14,000 events, 1,000 mails, the five planted chains).
+It runs in CI and is required by the release workflow before packaging.
+
+The demo case behind "open the demo case" on the Dashboard is that same quick-start pack,
+read by the built app in the public configuration, its rules run and its chains built, then
+exported as a case bundle: `frontend/public/demo/northstar-lab.remn.ndjson.gz`. Opening it
+restores the bundle in the visitor's browser, so nothing is uploaded or parsed. A unit test
+verifies the committed bundle (its checksum, 14,000 events, 1,000 mails, five critical
+chains) and the regression opens it and checks that no request uploads anything.
+Regenerate it after a parser, rule or chain change with `npm run demo:bundle` in
+`frontend/`, which writes it through the same browser path.
+
+Windows event detection is measured on EVTX-ATTACK-SAMPLES, 278 public logs of one attack
+technique each (commit 4ceed2f): every sample was judged for whether an enabled rule
+identifies the attack it records, and the gaps were closed with parser, engine and rule
+fixes (`docs/reviews/2026-09-23-evtx-attack-samples.md`). `tools/evtx_attack_samples.py`
+parses the library, runs the rules and fails when a rule listed for a sample in
+`tests/fixtures/evtx-attack-samples/expected.json` stops firing on it; the
+`attack-samples` CI job runs it, then `frontend/src/rules/attackSamples.test.ts` runs the
+browser engine on the same rows and fails on any finding the SQL engine does not share.
+It runs in CI because endpoint protection tends to quarantine the library on a
+workstation. Every event rule is also measured on that library, the SigmaHQ regression samples,
+EVTX-to-MITRE-Attack, the Microsoft 365, Entra and Windows datasets of Splunk attack_data and the
+clean machines of evtx-baseline (`tools/measure_rules.py`, [Measured rules](detection.md#measured-rules)),
+and a weekly CI job fails when a rule stops detecting a recording or a high or critical rule raises
+more findings on a clean machine. Microsoft
 365 detection was checked for parsing only: the Invictus IR Unified Audit Log set,
 9,608 records of real business email compromise, loads, and its inbox-rule and
 mailbox-permission rules fire. Re-run with
 `.venv/Scripts/python.exe tools/validate_public.py --phishpot` after any scoring change.
+
+## The golden corpus
+
+The quick-start pack of the synthetic lab below is generated byte for byte the same on every
+run, so what the server's parsers make of it is frozen in
+`tests/fixtures/golden/lab-quick-start.json.gz`: for each of its eight files, the digest of
+the input, the number of rows, a digest over all of them and a short digest of every row,
+each written as canonical JSON (sorted keys, no spaces). `tests/backend/test_golden_corpus.py`
+regenerates the lab, parses it as an upload is parsed and compares; a parser change that
+alters rows fails with the file, how many rows differ and the first of them, and a changed
+generator is reported as such rather than blamed on a parser. When the change is intended,
+review it and freeze it with `tools/golden_corpus.py --write`. The corpus is also the answer a
+later parser, such as the planned in-browser one, has to agree with row by row. Public attack
+samples are checked separately, by detection rather than by rows (see above).
 
 ## The synthetic lab
 
@@ -92,6 +143,7 @@ timings), `ai_repro.py` (replay of a model turn).
 |---|---|---|---|
 | EVTX-ATTACK-SAMPLES | about 200 small .evtx files, one attack technique each, GPL-3.0 | the zip, or any .evtx | github.com/sbousseaden/EVTX-ATTACK-SAMPLES |
 | EVTX-to-MITRE-Attack | 270+ samples, Security, Sysmon, PowerShell | the repository zip | github.com/mdecrevoisier/EVTX-to-MITRE-Attack |
+| Splunk attack_data, Windows | about 750 attack-range recordings (Sysmon, Security, PowerShell), labelled with ATT&CK techniques, as XmlWinEventLog; Git LFS files | the `.log` files (event records as XML) | github.com/splunk/attack_data |
 | hayabusa-sample-evtx | the two sets above plus DeepBlueCLI samples | the repository zip | github.com/Yamato-Security/hayabusa-sample-evtx |
 | omerbenamram/evtx samples | security_big_sample.evtx, sysmon.evtx | the files | github.com/omerbenamram/evtx |
 | Invictus IR O365 dataset | 9,608 Unified Audit Log records from real BEC cases, CC BY 4.0 | `auditrecords.csv` after extracting the 7z | github.com/invictus-ir/o365_dataset |

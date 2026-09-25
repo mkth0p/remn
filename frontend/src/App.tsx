@@ -1,12 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ApiError, getHealth, getMeta, onAuthError, setApiToken } from './api/client'
 import { defaultSettings, getDb, newServerKey, type Case } from './db/schema'
 import { toast, useStore, type View } from './state/store'
-import { detectKind, ingestFile, refreshCounts, requestIngest } from './data/ingest'
+import { detectKind, ingestFiles, refreshCounts, requestIngest } from './data/ingest'
 import { migrateCaseToServer } from './data/migrate'
 import { getSource } from './data/source'
 import { setLocalTime } from './util/format'
-import { getTransport } from './ai/transport'
+import { getTransport, transportLabel } from './ai/transport'
+import { deployment } from './data/deployment'
+import { setCaseInternalDomains } from './rules/incidents'
+import { repairInterruptedImports } from './data/interruptedImports'
+import { isAbort } from './data/queryClient'
 import {
   IconAi,
   IconDashboard,
@@ -28,6 +32,7 @@ import {
 } from './components/Icons'
 import { ConsolePanel, Toasts } from './components/ConsolePanel'
 import { TokenGate } from './components/TokenGate'
+import { DataNotice } from './components/DataNotice'
 import { EntityPanel } from './components/EntityPanel'
 import { Modal, Progress, ThemeToggle } from './components/ui'
 import { Dashboard } from './views/Dashboard'
@@ -35,7 +40,7 @@ import { EvidenceView } from './views/EvidenceView'
 import { EventsView } from './views/EventsView'
 import { MailsView } from './views/MailsView'
 import { FindingsView } from './views/FindingsView'
-import { ChainsView } from './views/ChainsView'
+import { StoriesView } from './views/StoriesView'
 import { TimelineView } from './views/TimelineView'
 import { IocsView } from './views/IocsView'
 import { AiView } from './views/AiView'
@@ -55,7 +60,7 @@ const NAV: { id: View; label: string; icon: React.ComponentType; count?: 'events
   { id: 'mails', label: 'Mails', icon: IconMail, count: 'mails' },
   { id: 'timeline', label: 'Timeline', icon: IconTimeline },
   { id: 'findings', label: 'Findings', icon: IconFindings, count: 'findings', section: 'detect' },
-  { id: 'chains', label: 'Chains', icon: IconLink },
+  { id: 'stories', label: 'Stories', icon: IconLink },
   { id: 'rules', label: 'Rules', icon: IconRules },
   { id: 'iocs', label: 'Indicators', icon: IconIoc, count: 'iocs' },
   { id: 'ai', label: 'AI analyst', icon: IconAi, section: 'assist' },
@@ -102,8 +107,9 @@ export default function App() {
   const [newCase, setNewCase] = useState<{ name: string; storage: 'browser' | 'server' } | null>(null)
   const [global, setGlobal] = useState('')
   const [pivotRes, setPivotRes] = useState<PivotResult | null>(null)
+  const pivotAbort = useRef<AbortController | null>(null)
   const [ready, setReady] = useState(false)
-  const [pendingKind, setPendingKind] = useState<'evtx' | 'mail'>('mail')
+  const [pendingKind, setPendingKind] = useState<'evtx' | 'mail' | 'package'>('mail')
   const [migrating, setMigrating] = useState<string | null>(null)
 
   useEffect(() => {
@@ -118,17 +124,28 @@ export default function App() {
       if (lt?.value) setLocalTime(true)
       const th = await db.kv.get('storeThresholdMb')
       if (typeof th?.value === 'number') setThreshold(th.value)
-      const [tp, ou, om, onc, ocm] = await Promise.all([db.kv.get('aiTransport'), db.kv.get('aiOllamaUrl'), db.kv.get('aiModel'), db.kv.get('aiNumCtx'), db.kv.get('aiClaudeModel')])
+      const [tp, ou, om, onc, ocm, oau] = await Promise.all([
+        db.kv.get('aiTransport'),
+        db.kv.get('aiOllamaUrl'),
+        db.kv.get('aiModel'),
+        db.kv.get('aiNumCtx'),
+        db.kv.get('aiClaudeModel'),
+        db.kv.get('aiOpenaiUrl'),
+      ])
       useStore.getState().setAiConfig({
-        transport: tp?.value === 'server' ? 'server' : tp?.value === 'claude' ? 'claude' : 'browser',
+        transport: tp?.value === 'server' ? 'server' : tp?.value === 'claude' ? 'claude' : tp?.value === 'openai' ? 'openai' : 'browser',
         claudeModel: typeof ocm?.value === 'string' && ocm.value ? ocm.value : 'sonnet',
         ollamaUrl: typeof ou?.value === 'string' && ou.value ? ou.value : 'http://localhost:11434',
+        openaiUrl: typeof oau?.value === 'string' && oau.value ? oau.value : 'http://localhost:1234/v1',
         model: typeof om?.value === 'string' ? om.value : '',
         numCtx: typeof onc?.value === 'number' ? onc.value : null,
       })
-      getTransport()
-        .ping()
-        .then((r) => useStore.getState().setAiStatus({ reachable: r.reachable, error: r.error, models: r.models, checkedAt: Date.now() }))
+      // A page served from another host reaches the visitor's own model on localhost. That request is
+      // made when the analyst opens the AI analyst, not on every page load of every visitor.
+      if (deployment(null).tier === 'this-machine' || !['browser', 'openai'].includes(useStore.getState().aiConfig.transport))
+        getTransport()
+          .ping()
+          .then((r) => useStore.getState().setAiStatus({ reachable: r.reachable, error: r.error, models: r.models, checkedAt: Date.now() }))
       // one transaction, so two boots in flight (React runs effects twice in development) create one default case
       const all = await db.transaction('rw', db.cases, db.kv, async () => {
         if ((await db.cases.count()) === 0) {
@@ -142,17 +159,39 @@ export default function App() {
       const current = all.find((c) => c.id === last) ?? all[0]
       setCurrentCase({ ...current, settings: { ...defaultSettings(), ...current.settings } })
       setReady(true)
+      // an import a closed or crashed tab left half-done: its rows go, and the evidence says it stopped
+      repairInterruptedImports((st) => {
+        useStore.getState().log('warn', `evidence #${st.evidenceId} ${st.name}: the import stopped before it finished; ${st.rows} partial row(s) removed`)
+        toast('warn', `${st.name}: its import stopped before it finished (the tab was closed or reloaded). The partial rows were removed; add the file again.`, 0)
+      })
+        .then((stopped) => {
+          const open = useStore.getState().currentCase
+          if (stopped.length && open) refreshCounts(open)
+        })
+        .catch((e: Error) => useStore.getState().log('err', `interrupted imports not checked: ${e.message}`))
     })()
     const load = () => {
       getHealth()
         .then((h) => {
           setHealth(h)
+          if (h.mode === 'browser-only' && !['browser', 'openai'].includes(useStore.getState().aiConfig.transport)) {
+            // the server-side transports do not exist here; the page talks to the analyst's own model
+            useStore.getState().setAiConfig({ ...useStore.getState().aiConfig, transport: 'browser' })
+            db.kv.put({ key: 'aiTransport', value: 'browser' }).catch(() => undefined)
+          }
           if (h.store?.thresholdMb)
             db.kv.get('storeThresholdMb').then((k) => {
               if (typeof k?.value !== 'number') setThreshold(h.store!.thresholdMb)
             })
-          // the model went unreachable (the server was down, Ollama restarted): check again with every poll until it is back
-          if (useStore.getState().aiStatus.reachable !== true) {
+          const dep = deployment(h)
+          if (dep.tier === 'this-machine') useStore.getState().setDataNotice('acknowledged')
+          else db.kv.get('dataNotice').then((k) => useStore.getState().setDataNotice(k?.value === `${dep.host}|${dep.tier}` ? 'acknowledged' : 'required'))
+          // the model went unreachable (the server was down, Ollama restarted): check again with every poll until it is back,
+          // once the analyst has asked for it (an earlier check) or where the model sits next to the page
+          if (
+            useStore.getState().aiStatus.reachable === false ||
+            (useStore.getState().aiStatus.reachable === null && (dep.tier === 'this-machine' || !transportLabel(useStore.getState().aiConfig).local))
+          ) {
             getTransport()
               .ping()
               .then((r) => useStore.getState().setAiStatus({ reachable: r.reachable, error: r.error, models: r.models, checkedAt: Date.now() }))
@@ -175,6 +214,21 @@ export default function App() {
     const t = setInterval(load, 30000)
     return () => clearInterval(t)
   }, [setCurrentCase, setHealth, setMeta, setThreshold])
+
+  // leaving while an import runs stops it; the browser asks first
+  const importing = jobs.some((j) => j.phase !== 'done' && j.phase !== 'error')
+  useEffect(() => {
+    if (!importing) return
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [importing])
+
+  // incidents group one person's accounts by the case's internal domains (rules/identity.ts)
+  useEffect(() => setCaseInternalDomains(kase?.settings.internalDomains), [kase?.settings.internalDomains])
 
   useEffect(() => {
     if (kase?.id) {
@@ -206,7 +260,7 @@ export default function App() {
   }, [kase, view, setView])
 
   useEffect(() => {
-    if (pending) setPendingKind(pending.kindOverride ?? (pending.files.every((f) => detectKind(f) === 'evtx') ? 'evtx' : 'mail'))
+    if (pending) setPendingKind(pending.kindOverride ?? 'package')
   }, [pending])
 
   const switchCase = async (id: number) => {
@@ -225,10 +279,13 @@ export default function App() {
   }
   const runPivot = async () => {
     if (!kase?.id || !global.trim()) return
+    // a new pivot replaces the one still counting
+    pivotAbort.current?.abort()
+    const ac = (pivotAbort.current = new AbortController())
     try {
-      setPivotRes(await getSource(kase).pivot(global.trim()))
+      setPivotRes(await getSource(kase).pivot(global.trim(), ac.signal))
     } catch (e) {
-      toast('err', `pivot failed: ${(e as Error).message}`)
+      if (!isAbort(e)) toast('err', `pivot failed: ${(e as Error).message}`)
     }
   }
   const goto = (v: View) => {
@@ -253,7 +310,7 @@ export default function App() {
     }
     const files = pending.files
     setPending(null)
-    files.forEach((f) => ingestFile(f, target, pending.kindOverride ?? (/(\.zip|\.tar|\.tgz|\.gz|\.bz2|\.xz)$/i.test(f.name) ? pendingKind : detectKind(f))))
+    void ingestFiles(files, target, (f) => pending.kindOverride ?? (/(\.zip|\.tar|\.tgz|\.gz|\.bz2|\.xz)$/i.test(f.name) ? pendingKind : detectKind(f)))
     setView('evidence')
   }
 
@@ -265,6 +322,17 @@ export default function App() {
     )
   const busy = jobs.some((j) => j.phase !== 'done' && j.phase !== 'error')
   const isServer = kase.storage === 'server'
+  const browserOnly = health?.mode === 'browser-only'
+  const canConvert = !isServer && !browserOnly
+  const dep = deployment(health)
+  const acknowledgeNotice = async () => {
+    if (!pending) return
+    await getDb().kv.put({ key: 'dataNotice', value: `${dep.host}|${dep.tier}` })
+    useStore.getState().setDataNotice('acknowledged')
+    const { files, kindOverride } = pending
+    setPending(null)
+    requestIngest(files, kase, kindOverride, true)
+  }
   const bigTotal = pending ? pending.files.reduce((s, f) => s + f.size, 0) : 0
   return (
     <div className={collapsed ? 'app sidebar-collapsed' : 'app'}>
@@ -295,19 +363,32 @@ export default function App() {
           ))}
         </nav>
         <div className="sidebar-footer">
-          <div>
-            <span className={`status-dot ${health ? 'ok' : 'bad'}`} />
-            server {health ? `v${health.version}` : 'offline'}
+          <div title={health ? `server ${dep.build || '?'} · page ${dep.pageBuild || '?'}${dep.mismatch ? ' - built from different commits' : ''}` : undefined}>
+            <span className={`status-dot ${health ? (dep.mismatch ? 'warn' : 'ok') : 'bad'}`} />
+            server{' '}
+            {health ? (
+              <a href={dep.source} target="_blank" rel="noreferrer noopener" className="mono">
+                {dep.build || 'build unknown'}
+              </a>
+            ) : (
+              'offline'
+            )}
           </div>
-          <div title={aiCfg.transport === 'browser' ? `browser-direct: ${aiCfg.ollamaUrl}` : aiCfg.transport === 'claude' ? 'Claude Code on the server machine' : 'via REMN server'}>
+          {health && dep.tier !== 'this-machine' && (
+            <div title={dep.parsing}>
+              <span className="status-dot" />
+              parsing on {dep.host}
+            </div>
+          )}
+          <div title={transportLabel(aiCfg).where}>
             <span className={`status-dot ${aiStatus.reachable ? 'ok' : aiStatus.reachable === null ? '' : 'bad'}`} />
-            {aiCfg.transport === 'claude' ? 'claude' : 'ollama'}{' '}
+            {transportLabel(aiCfg).short}{' '}
             {aiStatus.reachable ? (aiCfg.transport === 'claude' ? 'ready' : 'online') : aiStatus.reachable === null ? '…' : aiCfg.transport === 'claude' ? 'unavailable' : 'offline'}{' '}
             <span className="dim">[{aiCfg.transport}]</span>
           </div>
-          <div>
-            <span className={`status-dot ${kase.settings.networkAllowed ? 'bad' : 'ok'}`} />
-            egress {kase.settings.networkAllowed ? 'allowed' : 'blocked'}
+          <div title="reputation lookups for this case (Settings); evidence parsing is shown above">
+            <span className={`status-dot ${!browserOnly && kase.settings.networkAllowed ? 'bad' : 'ok'}`} />
+            lookups {browserOnly ? 'none on this server' : kase.settings.networkAllowed ? 'on' : 'off'}
           </div>
           <div>
             <span className={`status-dot ${isServer ? 'ok' : ''}`} />
@@ -363,7 +444,7 @@ export default function App() {
         {view === 'mails' && <MailsView />}
         {view === 'timeline' && <TimelineView />}
         {view === 'findings' && <FindingsView />}
-        {view === 'chains' && <ChainsView />}
+        {view === 'stories' && <StoriesView key={kase?.id} />}
         {view === 'rules' && <RulesView />}
         {view === 'iocs' && <IocsView />}
         {view === 'ai' && <AiView />}
@@ -402,42 +483,60 @@ export default function App() {
             <label className="checkbox">
               <input type="radio" name="storage" checked={newCase.storage === 'browser'} onChange={() => setNewCase({ ...newCase, storage: 'browser' })} />{' '}
               <span>
-                <b>Browser store</b> <span className="muted small">— everything stays in this browser (IndexedDB). Portable, zero server state, best under ~{threshold} MB per file.</span>
-              </span>
-            </label>
-            <label className="checkbox">
-              <input type="radio" name="storage" checked={newCase.storage === 'server'} onChange={() => setNewCase({ ...newCase, storage: 'server' })} />{' '}
-              <span>
-                <b>Server store</b>{' '}
+                <b>Browser store</b>{' '}
                 <span className="muted small">
-                  — rows go to a DuckDB file on this machine ({health?.store?.casesDir ?? 'backend/data/cases'}); the browser keeps findings and notes. For gigabytes of EVTX / mailboxes.
+                  — the case is stored in this browser (IndexedDB); {dep.tier === 'this-machine' ? 'files are parsed on this machine' : `each file is uploaded to ${dep.host} to be parsed`}. Best under
+                  ~{threshold} MB per file.
                 </span>
               </span>
             </label>
+            {!browserOnly && (
+              <label className="checkbox">
+                <input type="radio" name="storage" checked={newCase.storage === 'server'} onChange={() => setNewCase({ ...newCase, storage: 'server' })} />{' '}
+                <span>
+                  <b>Server store</b>{' '}
+                  <span className="muted small">
+                    — rows go to a DuckDB file on this machine ({health?.store?.casesDir ?? 'backend/data/cases'}); the browser keeps findings and notes. For gigabytes of EVTX / mailboxes.
+                  </span>
+                </span>
+              </label>
+            )}
           </div>
-          <div className="hint">A browser case can be converted to the server store later from Settings, or when a large file is dropped.</div>
+          <div className="hint">
+            {browserOnly
+              ? 'This server runs in browser-only mode: it parses evidence and returns the rows, and keeps nothing. Every case stays in this browser.'
+              : 'A browser case can be converted to the server store later from Settings, or when a large file is dropped.'}
+          </div>
         </Modal>
       )}
       {pending && (
         <Modal
-          title={pending.reason === 'big' ? 'Large evidence' : 'Archive contents'}
+          title={pending.reason === 'notice' ? `Before you add evidence to ${dep.host}` : pending.reason === 'big' ? 'Large evidence' : 'Archive contents'}
           onClose={() => !migrating && setPending(null)}
           footer={
             <>
               <button className="btn" disabled={!!migrating} onClick={() => setPending(null)}>
                 cancel
               </button>
-              {pending.reason === 'big' && !isServer && (
+              {pending.reason === 'notice' && (
+                <button className="btn primary" autoFocus onClick={acknowledgeNotice}>
+                  I understand, add the evidence
+                </button>
+              )}
+              {pending.reason === 'big' && canConvert && (
                 <button className="btn" disabled={!!migrating} onClick={() => proceedPending(false)}>
                   ingest in the browser anyway
                 </button>
               )}
-              <button className="btn primary" disabled={!!migrating} onClick={() => proceedPending(pending.reason === 'big' && !isServer)}>
-                {pending.reason === 'big' && !isServer ? 'convert case to server store and ingest' : 'ingest'}
-              </button>
+              {pending.reason !== 'notice' && (
+                <button className="btn primary" disabled={!!migrating} onClick={() => proceedPending(pending.reason === 'big' && canConvert)}>
+                  {pending.reason === 'big' && canConvert ? 'convert case to server store and ingest' : 'ingest'}
+                </button>
+              )}
             </>
           }
         >
+          {pending.reason === 'notice' && <DataNotice dep={dep} />}
           <div className="col" style={{ gap: 6 }}>
             {pending.files.slice(0, 8).map((f) => (
               <div key={f.name} className="row small mono">
@@ -449,16 +548,22 @@ export default function App() {
             ))}
             {pending.files.length > 8 && <div className="small muted">…and {pending.files.length - 8} more</div>}
           </div>
-          {pending.reason === 'big' && !isServer && (
+          {pending.reason === 'big' && canConvert && (
             <div className="hint">
               {fmtBytes(bigTotal)} is above the {threshold} MB browser threshold. The browser store gets slow past a few hundred MB; the server store (DuckDB on this machine) handles gigabytes.
               Converting moves the existing {fmtNum(counts.events + counts.mails)} rows of this case too.
             </div>
           )}
-          {pending.files.some((f) => /(\.zip|\.tar|\.tgz|\.gz|\.bz2|\.xz)$/i.test(f.name)) && !pending.kindOverride && (
+          {pending.reason === 'big' && browserOnly && (
+            <div className="hint">
+              {fmtBytes(bigTotal)} is above the {threshold} MB browser threshold. This server keeps nothing, so the rows go into this browser, which gets slow past a few hundred MB.
+            </div>
+          )}
+          {pending.reason !== 'notice' && pending.files.some((f) => /(\.zip|\.tar|\.tgz|\.gz|\.bz2|\.xz)$/i.test(f.name)) && !pending.kindOverride && (
             <label className="field">
               <span>what is inside the archive(s)?</span>
-              <select className="select" value={pendingKind} onChange={(e) => setPendingKind(e.target.value as 'evtx' | 'mail')}>
+              <select className="select" value={pendingKind} onChange={(e) => setPendingKind(e.target.value as 'evtx' | 'mail' | 'package')}>
+                <option value="package">Investigation package (detect every member, including mixed mail and events)</option>
                 <option value="evtx">Windows event logs (.evtx files)</option>
                 <option value="mail">Mailbox / mail corpus (.eml, .msg, .mbox, .pst, extension-less messages)</option>
               </select>
@@ -481,6 +586,11 @@ export default function App() {
                 <span className="value accent">{fmtNum(pivotRes.events.count)}</span>
               </div>
               <div className="small dim">{pivotRes.events.first ? `${fmtTs(pivotRes.events.first)} → ${fmtTs(pivotRes.events.last)}` : ''}</div>
+              {pivotRes.events.scannedOf && (
+                <div className="small" style={{ color: 'var(--warn)' }}>
+                  counted over the first {fmtNum(pivotRes.events.scannedOf.scanned)} of {fmtNum(pivotRes.events.scannedOf.total)} events: open Events for all of them
+                </div>
+              )}
               <div className="small mono" style={{ marginTop: 6 }}>
                 {Object.entries(pivotRes.events.byEventId)
                   .sort((a, b) => b[1] - a[1])

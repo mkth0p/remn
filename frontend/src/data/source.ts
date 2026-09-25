@@ -10,6 +10,7 @@ import type { Filter, SettingsLike } from '../rules/filter'
 import type { Rule, RuleDiag } from '../rules/engine'
 import * as local from './queries'
 import { settingsForRules, runRules as runLocalRules } from './rules'
+import { runQuery } from './queryClient'
 
 export interface AggGroup {
   value: string
@@ -25,6 +26,8 @@ export interface Aggregation {
 export interface SearchResult<T> {
   rows: T[]
   truncated: boolean
+  /** the sort ran over this many matching rows, taken in time order, not over every match */
+  sampledFrom?: number
 }
 export interface FacetItem {
   value: string
@@ -53,18 +56,21 @@ export interface RuleRunResult {
 
 export interface DataSource {
   readonly kind: 'browser' | 'server'
-  searchEvents(filter: Filter, limit: number): Promise<SearchResult<EventRow>>
-  countEvents(filter: Filter): Promise<number>
-  aggregateEvents(filter: Filter, field: string, limit: number): Promise<Aggregation>
-  timelineEvents(filter: Filter, bucket: local.Bucket): Promise<{ t: number; count: number }[]>
-  searchMails(filter: Filter, limit: number): Promise<SearchResult<MailRow>>
-  countMails(filter: Filter): Promise<number>
-  aggregateMails(filter: Filter, field: string, limit: number): Promise<Aggregation>
-  timelineMails(filter: Filter, bucket: local.Bucket): Promise<{ t: number; count: number }[]>
-  facets(source: 'events' | 'mails', field: string, limit: number): Promise<FacetItem[]>
+  // The read queries take a signal: aborting it stops the query (a browser-store scan ends in its
+  // worker, a server request is cancelled) and rejects with an AbortError (queryClient.isAbort).
+  searchEvents(filter: Filter, limit: number, signal?: AbortSignal): Promise<SearchResult<EventRow>>
+  countEvents(filter: Filter, signal?: AbortSignal): Promise<number>
+  aggregateEvents(filter: Filter, field: string, limit: number, signal?: AbortSignal): Promise<Aggregation>
+  timelineEvents(filter: Filter, bucket: local.Bucket, signal?: AbortSignal): Promise<{ t: number; count: number }[]>
+  searchMails(filter: Filter, limit: number, signal?: AbortSignal): Promise<SearchResult<MailRow>>
+  countMails(filter: Filter, signal?: AbortSignal): Promise<number>
+  aggregateMails(filter: Filter, field: string, limit: number, signal?: AbortSignal): Promise<Aggregation>
+  timelineMails(filter: Filter, bucket: local.Bucket, signal?: AbortSignal): Promise<{ t: number; count: number }[]>
+  /** the most frequent values of a field, or those containing q when it is given */
+  facets(source: 'events' | 'mails', field: string, limit: number, q?: string): Promise<FacetItem[]>
   getEvent(id: number): Promise<EventRow | null>
   getMail(id: number): Promise<{ row: MailRow; body: MailBody | null } | null>
-  pivot(value: string): Promise<local.PivotResult>
+  pivot(value: string, signal?: AbortSignal): Promise<local.PivotResult>
   summary(): Promise<Record<string, unknown>>
   listIocs(opts: IocListOptions): Promise<IocList>
   setIocReputation(items: { kind: string; value: string; verdict: string; tags: string[]; summary: unknown; verdicts: unknown; checkedAt: number }[]): Promise<void>
@@ -84,32 +90,33 @@ class BrowserSource implements DataSource {
   private get settings(): SettingsLike {
     return settingsForRules(this.kase)
   }
-  searchEvents(filter: Filter, limit: number) {
-    return local.searchEvents(this.id, filter, { limit, settings: this.settings })
+  // every scan runs in a query worker (queryClient.ts), off the page's thread
+  searchEvents(filter: Filter, limit: number, signal?: AbortSignal) {
+    return runQuery('searchEvents', [this.id, filter, { limit, settings: this.settings }], signal)
   }
-  countEvents(filter: Filter) {
-    return local.countEvents(this.id, filter, this.settings)
+  countEvents(filter: Filter, signal?: AbortSignal) {
+    return runQuery('countEvents', [this.id, filter, this.settings], signal)
   }
-  aggregateEvents(filter: Filter, field: string, limit: number) {
-    return local.aggregateEvents(this.id, filter, field, limit, this.settings)
+  aggregateEvents(filter: Filter, field: string, limit: number, signal?: AbortSignal) {
+    return runQuery('aggregateEvents', [this.id, filter, field, limit, this.settings], signal)
   }
-  timelineEvents(filter: Filter, bucket: local.Bucket) {
-    return local.timelineEvents(this.id, filter, bucket, this.settings)
+  timelineEvents(filter: Filter, bucket: local.Bucket, signal?: AbortSignal) {
+    return runQuery('timelineEvents', [this.id, filter, bucket, this.settings], signal)
   }
-  searchMails(filter: Filter, limit: number) {
-    return local.searchMails(this.id, filter, { limit, settings: this.settings })
+  searchMails(filter: Filter, limit: number, signal?: AbortSignal) {
+    return runQuery('searchMails', [this.id, filter, { limit, settings: this.settings }], signal)
   }
-  countMails(filter: Filter) {
-    return local.countMails(this.id, filter, this.settings)
+  countMails(filter: Filter, signal?: AbortSignal) {
+    return runQuery('countMails', [this.id, filter, this.settings], signal)
   }
-  aggregateMails(filter: Filter, field: string, limit: number) {
-    return local.aggregateMails(this.id, filter, field, limit, this.settings)
+  aggregateMails(filter: Filter, field: string, limit: number, signal?: AbortSignal) {
+    return runQuery('aggregateMails', [this.id, filter, field, limit, this.settings], signal)
   }
-  timelineMails(filter: Filter, bucket: local.Bucket) {
-    return local.timelineMails(this.id, filter, bucket, this.settings)
+  timelineMails(filter: Filter, bucket: local.Bucket, signal?: AbortSignal) {
+    return runQuery('timelineMails', [this.id, filter, bucket, this.settings], signal)
   }
-  async facets(source: 'events' | 'mails', field: string, limit: number) {
-    return (await local.getFacets(this.id, source, field, limit)).map((f) => ({ value: f.value, count: f.count }))
+  async facets(source: 'events' | 'mails', field: string, limit: number, q?: string) {
+    return (await local.getFacets(this.id, source, field, limit, q)).map((f) => ({ value: f.value, count: f.count }))
   }
   async getEvent(id: number) {
     const r = await getDb().events.get(id)
@@ -121,11 +128,11 @@ class BrowserSource implements DataSource {
     const body = (await getDb().mailBodies.get(id)) ?? null
     return { row, body }
   }
-  pivot(value: string) {
-    return local.pivot(this.id, value)
+  pivot(value: string, signal?: AbortSignal) {
+    return runQuery('pivot', [this.id, value], signal)
   }
   summary() {
-    return local.caseSummary(this.id)
+    return runQuery('caseSummary', [this.id])
   }
   async listIocs(opts: IocListOptions) {
     const db = getDb()
@@ -162,7 +169,7 @@ class BrowserSource implements DataSource {
     const { rebuildDerived } = await import('./ingest')
     const { forgetUpload } = await import('./upload')
     await deleteEvidenceData(db, this.id, evidenceId) // events, mails, bodies, attachments, urls, evidence row
-    const cleared = await clearDerivedState(this.id) // findings, chain snapshot, diagnostics (reviews archived)
+    const cleared = await clearDerivedState(this.id, evidenceId) // findings, chain snapshot, diagnostics (reviews archived)
     if (ev) await forgetUpload(ev) // resume record + server-side partial, if any
     await rebuildDerived(this.id) // facets and indicators from the rows that remain
     return cleared
@@ -179,36 +186,36 @@ class ServerSource implements DataSource {
   private get settings(): SettingsLike {
     return settingsForRules(this.kase)
   }
-  private post<T>(path: string, body: unknown) {
-    return apiPost<T>(`/api/store/${this.key}/${path}`, body)
+  private post<T>(path: string, body: unknown, signal?: AbortSignal) {
+    return apiPost<T>(`/api/store/${this.key}/${path}`, body, signal)
   }
-  private async search<T>(source: 'events' | 'mails', filter: Filter, limit: number): Promise<SearchResult<T>> {
-    const r = await this.post<{ rows: T[]; truncated: boolean }>('search', { source, filter, limit, sort: filter.sort, settings: this.settings })
+  private async search<T>(source: 'events' | 'mails', filter: Filter, limit: number, signal?: AbortSignal): Promise<SearchResult<T>> {
+    const r = await this.post<{ rows: T[]; truncated: boolean }>('search', { source, filter, limit, sort: filter.sort, settings: this.settings }, signal)
     return { rows: r.rows, truncated: r.truncated }
   }
-  searchEvents(filter: Filter, limit: number) {
-    return this.search<EventRow>('events', filter, limit)
+  searchEvents(filter: Filter, limit: number, signal?: AbortSignal) {
+    return this.search<EventRow>('events', filter, limit, signal)
   }
-  async countEvents(filter: Filter) {
-    return (await this.post<{ count: number }>('count', { source: 'events', filter, settings: this.settings })).count
+  async countEvents(filter: Filter, signal?: AbortSignal) {
+    return (await this.post<{ count: number }>('count', { source: 'events', filter, settings: this.settings }, signal)).count
   }
-  aggregateEvents(filter: Filter, field: string, limit: number) {
-    return this.post<Aggregation>('aggregate', { source: 'events', filter, field, limit, settings: this.settings })
+  aggregateEvents(filter: Filter, field: string, limit: number, signal?: AbortSignal) {
+    return this.post<Aggregation>('aggregate', { source: 'events', filter, field, limit, settings: this.settings }, signal)
   }
-  timelineEvents(filter: Filter, bucket: local.Bucket) {
-    return this.post<{ t: number; count: number }[]>('timeline', { source: 'events', filter, bucket, settings: this.settings })
+  timelineEvents(filter: Filter, bucket: local.Bucket, signal?: AbortSignal) {
+    return this.post<{ t: number; count: number }[]>('timeline', { source: 'events', filter, bucket, settings: this.settings }, signal)
   }
-  searchMails(filter: Filter, limit: number) {
-    return this.search<MailRow>('mails', filter, limit)
+  searchMails(filter: Filter, limit: number, signal?: AbortSignal) {
+    return this.search<MailRow>('mails', filter, limit, signal)
   }
-  async countMails(filter: Filter) {
-    return (await this.post<{ count: number }>('count', { source: 'mails', filter, settings: this.settings })).count
+  async countMails(filter: Filter, signal?: AbortSignal) {
+    return (await this.post<{ count: number }>('count', { source: 'mails', filter, settings: this.settings }, signal)).count
   }
-  aggregateMails(filter: Filter, field: string, limit: number) {
-    return this.post<Aggregation>('aggregate', { source: 'mails', filter, field, limit, settings: this.settings })
+  aggregateMails(filter: Filter, field: string, limit: number, signal?: AbortSignal) {
+    return this.post<Aggregation>('aggregate', { source: 'mails', filter, field, limit, settings: this.settings }, signal)
   }
-  timelineMails(filter: Filter, bucket: local.Bucket) {
-    return this.post<{ t: number; count: number }[]>('timeline', { source: 'mails', filter, bucket, settings: this.settings })
+  timelineMails(filter: Filter, bucket: local.Bucket, signal?: AbortSignal) {
+    return this.post<{ t: number; count: number }[]>('timeline', { source: 'mails', filter, bucket, settings: this.settings }, signal)
   }
   facets(source: 'events' | 'mails', field: string, limit: number) {
     return apiGet<FacetItem[]>(`/api/store/${this.key}/facets?source=${source}&field=${encodeURIComponent(field)}&limit=${limit}`)
@@ -229,8 +236,8 @@ class ServerSource implements DataSource {
       return null
     }
   }
-  pivot(value: string) {
-    return this.post<local.PivotResult>('pivot', { value })
+  pivot(value: string, signal?: AbortSignal) {
+    return this.post<local.PivotResult>('pivot', { value }, signal)
   }
   summary() {
     return apiGet<Record<string, unknown>>(`/api/store/${this.key}`)
@@ -284,7 +291,7 @@ class ServerSource implements DataSource {
     const { clearDerivedState } = await import('./caseState')
     const { forgetUpload } = await import('./upload')
     if (ev) await forgetUpload(ev)
-    return clearDerivedState(this.kase.id!)
+    return clearDerivedState(this.kase.id!, evidenceId)
   }
   sql(sql: string, limit = 200) {
     return this.post<{ rows: Record<string, unknown>[]; columns: string[]; truncated: boolean }>('sql', { sql, limit })

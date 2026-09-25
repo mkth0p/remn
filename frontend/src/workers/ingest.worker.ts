@@ -4,9 +4,11 @@
  * the NDJSON stream and writes rows / facets / IOCs into IndexedDB.
  */
 import { createSHA256 } from 'hash-wasm'
+import { refKey, resolveEngineRefs, type EngineFinding } from '../data/engineFindings'
 import { getDb, type AttachmentRow, type EventRow, type Facet, type Ioc, type MailBody, type MailRow, type UrlRow } from '../db/schema'
 import { setApiToken, streamNdjson } from '../api/client'
 import { isPublicIp } from '../util/format'
+import { duplicateEvidence } from '../data/duplicateEvidence'
 
 export interface IngestRequest {
   cmd: 'ingest'
@@ -14,9 +16,14 @@ export interface IngestRequest {
   caseId: number
   evidenceId: number
   file: File
-  kind: 'evtx' | 'mail'
+  kind: 'evtx' | 'mail' | 'package'
+  /** A completed chunked upload to parse instead of posting the file: set for large evidence. */
+  uploadId?: string
+  /** The digest computed during that upload, so the file is not read a second time. */
+  uploadSha256?: string
+  sourceName?: string
   includeRaw: boolean
-  settings: { internalDomains: string[]; brands: string[]; vipNames: string[]; trustedSenders?: string[] }
+  settings: { internalDomains: string[]; brands: string[]; vipNames: string[]; trustedSenders?: string[]; trustedArcSealers?: string[] }
   /** access token for remote deployments - the worker has its own api/client module instance */
   token?: string
 }
@@ -35,23 +42,46 @@ export type WorkerRequest = IngestRequest | HashRequest | RebuildRequest
 const ctx = self as unknown as DedicatedWorkerGlobalScope
 const post = (msg: Record<string, unknown>) => ctx.postMessage(msg)
 
-const EVENT_FACETS = ['eventId', 'channel', 'provider', 'computer', 'targetUser', 'subjectUser', 'ipAddress', 'logonType', 'category', 'levelName', 'processName', 'serviceName']
+const EVENT_FACETS = [
+  'eventId',
+  'recordKind',
+  'artifactType',
+  'sourceFile',
+  'channel',
+  'provider',
+  'computer',
+  'targetUser',
+  'subjectUser',
+  'ipAddress',
+  'logonType',
+  'category',
+  'levelName',
+  'processName',
+  'serviceName',
+]
 const MAIL_FACETS = ['fromDomain', 'fromAddr', 'fromNameNorm', 'folder', 'originIp', 'flags', 'sourceFormat', 'attExt', 'riskBand']
-const FACET_CAP = 4000
+// distinct values counted per field and ingest; past it the field is recorded as capped, and the
+// panel says so, rather than drop late values (an attacker IP first seen late in a log) unseen
+const FACET_CAP = 25_000
 const BATCH = 2000
 
 class FacetCounter {
   counts = new Map<string, Map<string, number>>()
+  capped = new Set<string>()
   add(field: string, value: unknown): void {
     if (value == null || value === '') return
     const vals = Array.isArray(value) ? value : [value]
     let m = this.counts.get(field)
     if (!m) this.counts.set(field, (m = new Map()))
     for (const v of vals) {
-      const s = String(v).slice(0, 200)
+      // long enough for any path or name these fields hold: a cut value would build a filter that matches nothing
+      const s = String(v).slice(0, 1024)
       const cur = m.get(s)
       if (cur === undefined) {
-        if (m.size >= FACET_CAP) continue
+        if (m.size >= FACET_CAP) {
+          this.capped.add(field)
+          continue
+        }
         m.set(s, 1)
       } else m.set(s, cur + 1)
     }
@@ -106,6 +136,11 @@ async function flushFacets(caseId: number, source: 'events' | 'mails', fc: Facet
       else puts.push({ caseId, source, field, value, count })
     }
     await db.facets.bulkPut(puts)
+  }
+  if (fc.capped.size) {
+    const key = `facets-capped-${caseId}`
+    const prev = ((await db.kv.get(key))?.value as string[] | undefined) ?? []
+    await db.kv.put({ key, value: Array.from(new Set([...prev, ...[...fc.capped].map((f) => `${source}:${f}`)])) })
   }
 }
 
@@ -222,44 +257,105 @@ async function ingest(req: IngestRequest): Promise<void> {
   const db = getDb()
   const { caseId, evidenceId, file, kind } = req
   const abort = { aborted: false }
-  post({ type: 'phase', phase: 'hashing' })
   let lastReport = 0
-  const sha256 = await hashFile(
-    file,
-    (done) => {
-      const now = Date.now()
-      if (now - lastReport > 150 || done === file.size) {
-        lastReport = now
-        post({ type: 'hash-progress', done, total: file.size })
-      }
-    },
-    abort,
-  )
+  // A large file was uploaded in chunks before this worker started and hashed on the way, so it
+  // is neither read nor sent a second time here.
+  let sha256 = req.uploadSha256 ?? ''
+  if (!sha256) {
+    post({ type: 'phase', phase: 'hashing' })
+    sha256 = await hashFile(
+      file,
+      (done) => {
+        const now = Date.now()
+        if (now - lastReport > 150 || done === file.size) {
+          lastReport = now
+          post({ type: 'hash-progress', done, total: file.size })
+        }
+      },
+      abort,
+    )
+  }
   post({ type: 'hash', sha256 })
+  const duplicate = await duplicateEvidence(caseId, evidenceId, req.sourceName ?? file.name, kind, sha256)
+  if (duplicate) {
+    await db.evidence.delete(evidenceId)
+    // an engine that was skipped then (busy, over a limit) did not look at this file: say which
+    const skippedEngines = ((duplicate.stats?.engines as { engine?: string; status?: string }[] | undefined) ?? [])
+      .filter((e) => e.status && e.status !== 'parsed')
+      .map((e) => String(e.engine ?? 'engine'))
+    post({ type: 'duplicate', evidenceId: duplicate.id, skippedEngines })
+    return
+  }
   await db.evidence.update(evidenceId, { sha256Client: sha256, status: 'uploading' })
 
   post({ type: 'phase', phase: 'uploading' })
   const form = new FormData()
-  form.append('file', file, file.name)
-  if (kind === 'evtx') form.append('raw', req.includeRaw ? '1' : '0')
-  else
+  if (req.uploadId) form.append('uploadId', req.uploadId)
+  else form.append('file', file, file.name)
+  form.append('sourceName', req.sourceName ?? file.name)
+  form.append('raw', req.includeRaw ? '1' : '0')
+  if (kind !== 'evtx')
     form.append(
       'settings',
-      JSON.stringify({ internalDomains: req.settings.internalDomains, brands: req.settings.brands, vipNames: req.settings.vipNames, trustedSenders: req.settings.trustedSenders ?? [] }),
+      JSON.stringify({
+        internalDomains: req.settings.internalDomains,
+        brands: req.settings.brands,
+        vipNames: req.settings.vipNames,
+        trustedSenders: req.settings.trustedSenders ?? [],
+        trustedArcSealers: req.settings.trustedArcSealers ?? [],
+      }),
     )
 
   const fc = new FacetCounter()
+  const mailFc = new FacetCounter()
   const ic = new IocCounter()
   let batch: Record<string, unknown>[] = []
+  let batchType: 'event' | 'mail' = 'event'
   let inserted = 0
   const st = { meta: null as Record<string, unknown> | null, done: null as Record<string, unknown> | null, errorMsg: null as string | null }
   let lastProgress = 0
 
+  // Findings an engine produced on the server name their rows by record identity; the ids those
+  // rows get here are only known once they are inserted, so the index is built on the way in,
+  // and only when the server said an engine would run.
+  const engineFindings: EngineFinding[] = []
+  const engineSummaries: Record<string, unknown>[] = []
+  const refIndex = new Map<string, number>()
+  const wantRefs = () => Array.isArray(st.meta?.engines) && (st.meta!.engines as unknown[]).length > 0
+  // cloud records the case already holds (an earlier export of the same audit or sign-in log)
+  let duplicates = 0
   const flushEvents = async () => {
     if (!batch.length) return
-    const rows = batch as EventRow[]
+    let rows = batch as EventRow[]
     batch = []
-    await db.events.bulkAdd(rows)
+    const keyed = rows.filter((r) => r.recordKey)
+    if (keyed.length) {
+      const held = new Set(
+        (
+          await db.events
+            .where('[caseId+recordKey]')
+            .anyOf(keyed.map((r) => [caseId, r.recordKey!]))
+            .keys()
+        ).map((k) => (k as unknown as [number, string])[1]),
+      )
+      if (held.size) {
+        const before = rows.length
+        rows = rows.filter((r) => !r.recordKey || !held.has(r.recordKey))
+        duplicates += before - rows.length
+      }
+      // counted now that the row is known to be written, so a record skipped adds no facet or indicator
+      for (const r of rows) if (r.recordKey) accumulateEvent(caseId, r as unknown as Record<string, unknown>, fc, ic)
+      if (!rows.length) return
+    }
+    if (wantRefs()) {
+      const ids = (await db.events.bulkAdd(rows, { allKeys: true })) as number[]
+      rows.forEach((row, i) => {
+        const r = row as unknown as Record<string, unknown>
+        if (r.recordId != null) refIndex.set(refKey(r), ids[i])
+      })
+    } else {
+      await db.events.bulkAdd(rows)
+    }
     inserted += rows.length
   }
   const flushMails = async () => {
@@ -301,12 +397,27 @@ async function ingest(req: IngestRequest): Promise<void> {
     if (type === 'meta') {
       st.meta = row
       post({ type: 'meta', meta: row })
+      if (kind === 'evtx' && Array.isArray(row.engines) && (row.engines as unknown[]).length === 0) {
+        post({ type: 'log', level: 'info', text: 'no detection engine on this server (Hayabusa not installed); only the rules run from the browser apply' })
+      }
       await db.evidence.update(evidenceId, { status: 'parsing', format: String(row.format ?? ''), sha256Server: String(row.sha256 ?? '') })
       post({ type: 'phase', phase: 'parsing' })
       return
     }
     if (type === 'done') {
       st.done = row
+      return
+    }
+    if (type === 'finding') {
+      delete row.type
+      engineFindings.push(row as unknown as EngineFinding)
+      return
+    }
+    if (type === 'engine') {
+      delete row.type
+      engineSummaries.push(row)
+      const status = String(row.status ?? '')
+      post({ type: 'log', level: status === 'parsed' ? 'info' : 'warn', text: `${row.engine}: ${row.findings} finding(s) in ${row.seconds}s${row.reason ? ' - ' + row.reason : ''}` })
       return
     }
     if (type === 'error') {
@@ -317,12 +428,19 @@ async function ingest(req: IngestRequest): Promise<void> {
     delete row.type
     row.caseId = caseId
     row.evidenceId = evidenceId
+    if (type === 'event' || type === 'mail') {
+      if (batch.length && type !== batchType) {
+        if (batchType === 'event') await flushEvents()
+        else await flushMails()
+      }
+      batchType = type
+    }
     if (type === 'event') {
-      accumulateEvent(caseId, row, fc, ic)
+      if (!row.recordKey) accumulateEvent(caseId, row, fc, ic)
       batch.push(row)
       if (batch.length >= BATCH) await flushEvents()
     } else if (type === 'mail') {
-      accumulateMail(caseId, row as unknown as MailRow, fc, ic)
+      accumulateMail(caseId, row as unknown as MailRow, mailFc, ic)
       batch.push(row)
       if (batch.length >= 200) await flushMails()
     }
@@ -334,12 +452,21 @@ async function ingest(req: IngestRequest): Promise<void> {
   }
 
   try {
-    await streamNdjson(kind === 'evtx' ? '/api/ingest/evtx' : '/api/ingest/mail', form, onRow, { onBytes: (n) => post({ type: 'bytes', bytes: n }) })
-    if (kind === 'evtx') await flushEvents()
+    await streamNdjson(`/api/ingest/${kind}`, form, onRow, { onBytes: (n) => post({ type: 'bytes', bytes: n }) })
+    if (!st.done) throw new Error('Ingestion stream ended before its completion record; imported rows may be partial')
+    // the server counts the rows it sent; a stream that lost some on the way is not a complete import
+    const emitted = Number(st.done.emitted)
+    const received = inserted + duplicates + batch.length
+    if (Number.isFinite(emitted) && emitted !== received && !st.errorMsg) st.errorMsg = `the server sent ${emitted} rows and ${received} arrived; the import is incomplete`
+    if (batchType === 'event') await flushEvents()
     else await flushMails()
+    const parsed = (st.done?.stats as Record<string, unknown> | undefined) ?? undefined
+    // the repeats the server dropped in this upload and the records the case already held, as one count
+    const stats = duplicates && parsed ? { ...parsed, duplicates: Number(parsed.duplicates ?? 0) + duplicates } : parsed
     post({ type: 'progress', rows: inserted })
     post({ type: 'log', level: 'info', text: 'writing facets and indicators…' })
-    await flushFacets(caseId, kind === 'evtx' ? 'events' : 'mails', fc)
+    await flushFacets(caseId, 'events', fc)
+    await flushFacets(caseId, 'mails', mailFc)
     await flushIocs(caseId, ic)
     const serverHash = (st.done?.sha256 as string) || (st.meta?.sha256 as string) || ''
     const integrity = serverHash ? (serverHash === sha256 ? 'verified' : 'mismatch') : 'pending'
@@ -347,19 +474,34 @@ async function ingest(req: IngestRequest): Promise<void> {
       status: st.errorMsg ? 'error' : 'done',
       error: st.errorMsg ?? undefined,
       count: inserted,
-      stats: (st.done?.stats as Record<string, unknown>) ?? undefined,
+      // the engine's own account of its run sits with the parser statistics, where the evidence detail shows it
+      stats: engineSummaries.length ? { ...(stats ?? {}), engines: engineSummaries } : stats,
       sha256Server: serverHash || undefined,
       integrity,
       progress: 1,
     })
-    post({ type: 'done', count: inserted, stats: st.done?.stats ?? null, sha256, sha256Server: serverHash, integrity, error: st.errorMsg })
+    if (engineFindings.length) {
+      // resolved here, where the index is; stored by the main thread, which owns the case
+      post({ type: 'findings', engine: String(engineFindings[0].engine ?? 'hayabusa'), findings: resolveEngineRefs(engineFindings, refIndex), summaries: engineSummaries })
+    }
+    post({ type: 'done', count: inserted, duplicates: Number(stats?.duplicates ?? 0), stats: stats ?? null, sha256, sha256Server: serverHash, integrity, error: st.errorMsg })
   } catch (e) {
     const msg = (e as Error).message || String(e)
     try {
-      if (kind === 'evtx') await flushEvents()
+      if (batchType === 'event') await flushEvents()
       else await flushMails()
     } catch {
       /* ignore */
+    }
+    // A truncated stream still commits the rows it received, so the facets and indicators derived
+    // from them have to be written too. Without this the rows exist while the facet and IOC tables
+    // hold nothing for them, and no rebuild is scheduled. Failures here must not mask the original.
+    try {
+      await flushFacets(caseId, 'events', fc)
+      await flushFacets(caseId, 'mails', mailFc)
+      await flushIocs(caseId, ic)
+    } catch {
+      /* the original error is the one worth reporting */
     }
     await db.evidence.update(evidenceId, { status: 'error', error: msg, count: inserted })
     post({ type: 'error', error: msg, count: inserted })

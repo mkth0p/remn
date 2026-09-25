@@ -15,3 +15,8 @@ ollama>=0.6.2
 idna>=3.19
 duckdb>=1.5.5
 pyarrow>=25.0.1
+dissect.target==3.25.1
+dissect.regf==3.14
+cabarchive==0.2.5
+defusedxml>=0.7.1,<1
+psutil>=7,<9

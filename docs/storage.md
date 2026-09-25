@@ -12,8 +12,20 @@ temporary location, streams the rows back, and keeps nothing. This is the defaul
 the mode for evidence that may not be persisted on a shared machine: nothing about the
 case exists outside that browser profile. It is comfortable up to a few hundred megabytes
 of evidence; beyond that, queries and rule runs slow down and the server store is the
-better fit. In both modes the browser keeps the case itself, its findings, notes, chains,
+better fit. Searches, counts, aggregations, timelines and the global pivot run in query
+workers, a few at a time, so the page stays responsive while they scan; a query whose
+answer is no longer wanted (the filter changed, the view or panel closed, a new pivot) is
+stopped where it stands rather than left to finish. In both modes the browser keeps the case itself, its findings, notes, chains,
 decisions and AI sessions, so a case can be exported as a bundle and imported elsewhere.
+When evidence is first added, the app asks the browser to keep the site's storage
+(`navigator.storage.persist()`); without that grant a browser short of space may clear a
+site's IndexedDB, and the Dashboard says which applies. Export a case bundle to keep a copy
+either way. The bundle also carries the custom rules its findings came from (a custom rule is global
+in the browser that made it; it arrives as a rule of the imported case), the pack and
+disabled-rule choices in force at export, and the decisions on relationship hypotheses.
+A finding the analyst decided is never pruned because its rule is missing from the
+importing browser: it is a conclusion, not an orphan. Removing one evidence file removes
+the findings built on it and keeps the engine (Hayabusa) findings of the other files.
 
 ## Server store
 
@@ -27,6 +39,25 @@ the conversion when a file above the threshold is dropped. Settings in `.env`:
 `FORENSIC_CASES_DIR`, `FORENSIC_STORE_THRESHOLD_MB` (the suggestion threshold, default
 150), `FORENSIC_MAX_CHUNKED_GB` (default 64), `FORENSIC_CHUNK_MB` (default 16).
 
+Migration transfers bounded pages to a new server store, preserves event and mail IDs,
+and retains findings, reviews, narratives and links. Only a completed transfer switches
+the case's storage and removes browser evidence. A failed transfer leaves the browser
+case available. Finish ingestion before migrating.
+
+## Portable case backups
+
+Report exports a `.remn.ndjson` backup to a selected file, or through temporary browser
+file storage. Rows are streamed and checksummed without collecting the whole dataset in
+memory. The backup includes chain snapshots, review decisions, report settings, notes and
+AI undo history. Import verifies the entire checksum before creating a case, remaps row
+IDs and links, and removes partial imports on failure. Keep ingestion and analysis idle
+while exporting to obtain a consistent snapshot.
+
+Legacy `.remn.json` browser backups remain supported and require memory for their JSON
+document. Older server backups omitted row IDs, so their investigation links cannot be
+recovered reliably; import rejects those explicitly. Original evidence files are separate
+from these parsed-data backups and should be retained separately.
+
 Measured on a laptop with 200,000 synthetic events and 55 Windows rules
 (`samples/synthetic/scale_test.py`):
 
@@ -38,8 +69,8 @@ Measured on a laptop with 200,000 synthetic events and 55 Windows rules
 | full-text search across 20 columns | about 0.5 s |
 | 55 rules (bursts, spraying, out-of-hours, LOLBins, …) | about 20 s |
 
-A 1 GB Security.evtx (about 3.5 million events) therefore ingests in a few minutes and
-queries stay interactive. Per-row rules that match more than 200 rows are collapsed into
+Those timings are measurements of that synthetic case, not a throughput guarantee for
+multi-gigabyte real evidence. Per-row rules that match more than 200 rows are collapsed into
 one finding per entity (user, host, IP, …) with a count, instead of thousands of identical
 alerts.
 
@@ -51,6 +82,17 @@ request per chunk, then `complete`, which checks the size and the SHA-256), and 
 background job parses it; the Evidence page shows the job's progress and its errors,
 and `GET /api/jobs` lists them. An interrupted upload resumes from the last received
 offset when the same file is dropped again.
+
+A browser-store import writes its rows as they arrive and completes the evidence (status,
+count, facets, indicators) at the end, so a tab closed, reloaded or crashed part-way would
+leave rows nothing counts and a file that, added again, doubles them. Each import holds a
+Web Lock while it runs, which the browser releases with the tab. When the app starts, an
+evidence still importing whose lock is free is stopped: its partial rows are removed, the
+case's derived state is rebuilt as for a removed file, and the evidence stays listed as an
+import that stopped, with the reason, until it is removed or the file is added again. The
+browser asks for confirmation before leaving the page while an import runs. Without Web
+Locks (an old browser, a page not served over HTTPS or from localhost) a stopped import
+cannot be told from one running in another tab, and nothing is removed.
 
 ## Removing evidence
 

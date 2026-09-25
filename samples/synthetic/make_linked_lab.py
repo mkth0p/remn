@@ -896,7 +896,7 @@ def write_guide(out):
         "",
         "The five attack stories are S01, S02, S03, S04 and S06. They include a seed mail, an actual reply with matching In-Reply-To, a DNS lookup for the same domain, a download with the same attachment name, a risky sign-in, mailbox access and forwarding/consent records. S02 and S04 add Outlook-to-PowerShell process creation, a scheduled task, a service installation and a Defender alert. S03 adds role assignment and a file-download burst. S04 adds failed logons, RDP success, group membership and an admin-share event.",
         "",
-        "S05 is the false-positive control: static HTML in ZIP, harmless PDF JavaScript, a CSV-export page, a bank-change notice and a normal invoice with a webmail Reply-To. Expected calibrated mail scores are **22, 31, 31, 13, 35**. These five should have no high/critical bundled mail findings.",
+        "S05 is the false-positive control: static HTML in ZIP, harmless PDF JavaScript, a CSV-export page, a bank-change notice and a normal invoice with a webmail Reply-To. Expected calibrated mail scores are **22, 31, 31, 14, 35**. These five should have no high/critical bundled mail findings.",
         "",
         "S06 comes from `reports@vendor.example`, the same authenticated supplier seen repeatedly in earlier benign mail. Its suspicious attachment should still receive a high/critical score despite sender history.",
         "",

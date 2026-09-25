@@ -1,0 +1,422 @@
+# Process lineage: who started whom, as whom and from where (service hosts, browsers, the spooler, accessibility binaries, renamed LOLBins, processes that should not listen).
+id: win-eventlog-service-crash
+title: Windows Event Log service crashed
+description: >-
+  WerFault.exe started by the svchost instance that hosts the Event Log service ("-s EventLog" on
+  its command line, Windows 10 1703 and later, where services get their own host), or the Service
+  Control Manager reporting that the Windows Event Log service terminated unexpectedly (7031 / 7034).
+  Crashing the service on purpose (malformed EventLog RPC calls, thread killing that goes wrong)
+  stops all logging until it restarts, and after the third crash the recovery policy leaves it
+  stopped, so the crash is often the only trace of the tampering; two crashes minutes apart are not
+  a coincidence. Benign cause: a genuine crash of the service (a corrupted log file, a misbehaving
+  log collector), which is rare and worth a look anyway. On older Windows the service shares its
+  svchost with other services, so a WerFault there cannot be attributed to it and is not counted.
+severity: high
+source: events
+attack: [T1685.001]
+tags: [defense-evasion, log-tampering, process-lineage]
+entities: [computer, commandLine, parentCommandLine, serviceName]
+where:
+  any_of:
+    - eventId: 1
+      provider|contains: Sysmon
+      image|endswith: "\\werfault.exe"
+      parentImage|endswith: "\\svchost.exe"
+      parentCommandLine|contains: "-s eventlog"
+    - eventId|in: [7031, 7034]
+      provider|contains: Service Control Manager
+      any_of:
+        - { serviceName|in: ["Windows Event Log", "EventLog"] }
+        # the Binary field carries the service key name in UTF-16 hex, whatever the display language:
+        # "EventLog/" followed by a code, or "EventLog" and its terminating NUL
+        - { data.Binary|startswith: ["4500760065006E0074004C006F0067002F00", "4500760065006E0074004C006F0067000000"] }
+---
+id: win-spoolsv-unexpected-child
+title: Print spooler started a program that is not a print component
+description: >-
+  spoolsv.exe, which runs as SYSTEM, started a process that is neither a print component
+  (splwow64, PrintIsolationHost, the XPS filter pipeline host), an error reporter, a program of an
+  installed printer driver (the spool\drivers architecture folders, the driver store, Program Files),
+  a driver package installed from a local MSI, nor one of the shells and admin tools the Sigma rule
+  "Suspicious Spool Service Child Process" already reports. The spooler has no reason to start
+  ordinary Windows programs such as notepad, so a child like that is the payload of code running
+  inside the spooler: shellcode injected into it (Odzhan's spooler injection) or a malicious print
+  driver or port monitor DLL (PrintNightmare), and the payload runs as SYSTEM. spool\drivers\color is
+  writable by every user, so it is not treated as a driver folder. Benign causes: a vendor's
+  printer helper installed outside Program Files and the driver folders, or a print-to-file port
+  monitor (RedMon style) that runs a converter from its own folder; check the child's path and
+  signer.
+severity: high
+source: events
+attack: [T1055, T1068]
+tags: [privilege-escalation, injection, print-spooler, process-lineage]
+entities: [computer, image, processName, commandLine, user]
+where:
+  any_of:
+    - { eventId: 4688 }
+    - { eventId: 1, provider|contains: Sysmon }
+  any_of_2:
+    - { parentImage|endswith: "\\spoolsv.exe" }
+    - { parentProcessName|endswith: "\\spoolsv.exe" }
+  # the child: image on Sysmon 1, processName on 4688
+  any_of_3:
+    - image|exists: true
+      image|not_contains: ["\\spool\\drivers\\x64\\", "\\spool\\drivers\\w32x86\\", "\\spool\\drivers\\arm64\\", "\\driverstore\\filerepository\\", ":\\program files\\", ":\\program files (x86)\\"]
+      image|not_endswith: ["\\splwow64.exe", "\\printisolationhost.exe", "\\printfilterpipelinesvc.exe", "\\spoolsv.exe", "\\conhost.exe", "\\werfault.exe", "\\werfaultsecure.exe", "\\wermgr.exe", "\\route.exe", "\\gpupdate.exe", "\\whoami.exe", "\\nltest.exe", "\\taskkill.exe", "\\wmic.exe", "\\taskmgr.exe", "\\sc.exe", "\\findstr.exe", "\\curl.exe", "\\wget.exe", "\\certutil.exe", "\\bitsadmin.exe", "\\accesschk.exe", "\\wevtutil.exe", "\\bcdedit.exe", "\\fsutil.exe", "\\cipher.exe", "\\schtasks.exe", "\\write.exe", "\\wuauclt.exe", "\\systeminfo.exe", "\\reg.exe", "\\query.exe", "\\net.exe", "\\net1.exe", "\\cmd.exe", "\\netsh.exe", "\\powershell.exe", "\\pwsh.exe"]
+    - processName|exists: true
+      processName|not_contains: ["\\spool\\drivers\\x64\\", "\\spool\\drivers\\w32x86\\", "\\spool\\drivers\\arm64\\", "\\driverstore\\filerepository\\", ":\\program files\\", ":\\program files (x86)\\"]
+      processName|not_endswith: ["\\splwow64.exe", "\\printisolationhost.exe", "\\printfilterpipelinesvc.exe", "\\spoolsv.exe", "\\conhost.exe", "\\werfault.exe", "\\werfaultsecure.exe", "\\wermgr.exe", "\\route.exe", "\\gpupdate.exe", "\\whoami.exe", "\\nltest.exe", "\\taskkill.exe", "\\wmic.exe", "\\taskmgr.exe", "\\sc.exe", "\\findstr.exe", "\\curl.exe", "\\wget.exe", "\\certutil.exe", "\\bitsadmin.exe", "\\accesschk.exe", "\\wevtutil.exe", "\\bcdedit.exe", "\\fsutil.exe", "\\cipher.exe", "\\schtasks.exe", "\\write.exe", "\\wuauclt.exe", "\\systeminfo.exe", "\\reg.exe", "\\query.exe", "\\net.exe", "\\net1.exe", "\\cmd.exe", "\\netsh.exe", "\\powershell.exe", "\\pwsh.exe"]
+  not:
+    any_of:
+      # a driver's own DLL run through rundll32, printui or the PrintConfig registration
+      - commandLine|contains: ["\\spool\\drivers\\x64\\", "\\spool\\drivers\\w32x86\\", "\\spool\\drivers\\arm64\\", "\\driverstore\\filerepository\\", "printui.dll", "printconfig.dll"]
+      # a driver package from a local MSI; msiexec fetching a package from a URL or a share still counts
+      - any_of:
+          - { image|endswith: "\\msiexec.exe" }
+          - { processName|endswith: "\\msiexec.exe" }
+        commandLine|not_contains: ["http:", "https:", "\\\\"]
+---
+id: win-browser-spawns-shell
+title: Web browser started a command shell, script host or LOLBin
+description: >-
+  Internet Explorer, Edge, Chrome, Firefox, Opera, Brave or Vivaldi started cmd, wscript, cscript,
+  mshta, rundll32, regsvr32, certutil, bitsadmin, schtasks, wmic or a .NET or installer LOLBin. A
+  browser exploit (a Flash or scripting-engine bug in the tab process) runs its shellcode inside the
+  browser, and its first move is to start one of these; the same lineage appears when a user opens a
+  downloaded .bat, .js, .vbs or .hta from the download bar, the usual end of a phishing or
+  HTML-smuggling chain. PowerShell as the child is left to the Sigma rule "Suspicious PowerShell
+  Parent Process". Excluded: the cmd.exe wrapper Chromium browsers use to start extension
+  native-messaging hosts, and the rundll32 calls behind the Internet Options and proxy dialogs,
+  clear-history, Open With, connection diagnostics and ClickOnce launches. Benign causes left: a user
+  deliberately running a downloaded batch or script file (developers, IT staff), a legacy intranet
+  application in Internet Explorer (or Edge's IE mode) that starts local programs through
+  WScript.Shell, and a custom URL protocol whose handler is a script; read the command line and the
+  file it names.
+severity: high
+source: events
+attack: [T1189, T1203, T1204.002]
+tags: [execution, initial-access, browser, process-lineage]
+entities: [computer, parentImage, parentProcessName, image, processName, commandLine, user]
+where:
+  any_of:
+    - { eventId: 4688 }
+    - { eventId: 1, provider|contains: Sysmon }
+  any_of_2:
+    - { parentImage|endswith: ["\\iexplore.exe", "\\chrome.exe", "\\firefox.exe", "\\msedge.exe", "\\microsoftedge.exe", "\\microsoftedgecp.exe", "\\opera.exe", "\\brave.exe", "\\vivaldi.exe"] }
+    - { parentProcessName|endswith: ["\\iexplore.exe", "\\chrome.exe", "\\firefox.exe", "\\msedge.exe", "\\microsoftedge.exe", "\\microsoftedgecp.exe", "\\opera.exe", "\\brave.exe", "\\vivaldi.exe"] }
+  # the child: image on Sysmon 1, processName on 4688
+  any_of_3:
+    - { image|endswith: ["\\cmd.exe", "\\wscript.exe", "\\cscript.exe", "\\mshta.exe", "\\rundll32.exe", "\\regsvr32.exe", "\\certutil.exe", "\\bitsadmin.exe", "\\schtasks.exe", "\\wmic.exe", "\\msbuild.exe", "\\installutil.exe", "\\regasm.exe", "\\regsvcs.exe", "\\cmstp.exe", "\\forfiles.exe"] }
+    - { processName|endswith: ["\\cmd.exe", "\\wscript.exe", "\\cscript.exe", "\\mshta.exe", "\\rundll32.exe", "\\regsvr32.exe", "\\certutil.exe", "\\bitsadmin.exe", "\\schtasks.exe", "\\wmic.exe", "\\msbuild.exe", "\\installutil.exe", "\\regasm.exe", "\\regsvcs.exe", "\\cmstp.exe", "\\forfiles.exe"] }
+  not:
+    commandLine|contains: ["chrome-extension://", "chrome.nativeMessaging", "moz-extension://", "NativeMessagingHosts", "inetcpl.cpl", "shell32.dll,OpenAs_RunDLL", "dfshim.dll,ShOpenVerbApplication", "ndfapi.dll,NdfRunDllDiagnoseWithAnswerFile"]
+---
+id: win-script-engine-selected-by-clsid
+title: Script host told to use a scripting engine by CLSID (//E:{...})
+description: >-
+  A command line that picks the Windows Script Host engine by class id instead of by name, such as
+  "//e:{16d51579-a30b-4c8b-a276-0ff4dc41e755}" (the Chakra jscript9 engine) or the classic JScript and
+  VBScript CLSIDs. Attackers do it to run a script under an engine that script-engine monitoring and
+  AMSI do not watch, or to run a file whose extension does not say it is a script. The check reads
+  the command line only, so it still fires when cscript or wscript has been copied under another
+  name. Legitimate scripts name their engine (//E:jscript, //E:vbscript) or rely on the file
+  extension; no benign use of a CLSID here is known.
+severity: high
+source: events
+attack: [T1059.007, T1059.005, T1685]
+tags: [execution, defense-evasion, script-host, process-lineage]
+entities: [computer, image, processName, commandLine, user]
+where:
+  any_of:
+    - { eventId: 4688 }
+    - { eventId: 1, provider|contains: Sysmon }
+  commandLine|contains: "/e:{"
+---
+id: win-renamed-windows-lolbin
+title: Windows script host or LOLBin running under another name
+description: >-
+  A copy of cmd, cscript, wscript, regsvr32, rundll32, mshta, certutil, wmic, MSBuild, RegAsm,
+  RegSvcs, bitsadmin or cmstp runs under another file name (Sysmon 1 whose PE description names the
+  Windows program while the image does not), or a binary that is not regsvr32 runs with regsvr32's
+  remote-scriptlet arguments (/i:http..., the Squiblydoo pattern). Renaming the binary defeats every
+  rule that keys on the image name, which is why droppers copy it to ProgramData or Temp first. The
+  description check only runs when the event has no OriginalFileName (Sysmon before version 10, as
+  on many Windows 7 logs); newer events are covered by the Sigma rename rules that read
+  OriginalFileName. Accessibility binaries replaced by a shell have their own critical rule. The
+  descriptions are the English ones, so localized systems rely on OriginalFileName. Benign cause:
+  none known; software does not ship renamed copies of these Windows programs.
+severity: high
+source: events
+attack: [T1036.003, T1218.010]
+tags: [defense-evasion, masquerading, process-lineage]
+entities: [computer, image, processName, commandLine, user]
+where:
+  any_of:
+    - { eventId: 4688 }
+    - { eventId: 1, provider|contains: Sysmon }
+  any_of_2:
+    - originalFileName|exists: false
+      image|not_endswith: ["\\osk.exe", "\\sethc.exe", "\\utilman.exe", "\\magnify.exe", "\\narrator.exe", "\\displayswitch.exe", "\\atbroker.exe"]
+      any_of:
+        - { data.Description: "Windows Command Processor", image|not_endswith: "\\cmd.exe" }
+        - { data.Description|contains: "Console Based Script Host", image|not_endswith: "\\cscript.exe" }
+        - { data.Description|contains: "Windows Based Script Host", image|not_endswith: "\\wscript.exe" }
+        - { data.Description: "Microsoft(C) Register Server", image|not_endswith: "\\regsvr32.exe" }
+        - { data.Description: "Windows host process (Rundll32)", image|not_endswith: "\\rundll32.exe" }
+        - { data.Description: "Microsoft (R) HTML Application host", image|not_endswith: "\\mshta.exe" }
+        - { data.Description: "CertUtil.exe", image|not_endswith: "\\certutil.exe" }
+        - { data.Description: "WMI Commandline Utility", image|not_endswith: "\\wmic.exe" }
+        - { data.Description: "MSBuild.exe", image|not_endswith: "\\msbuild.exe" }
+        - { data.Description: "Microsoft .NET Assembly Registration Utility", image|not_endswith: "\\regasm.exe" }
+        - { data.Description: "Microsoft .NET Services Installation Utility", image|not_endswith: "\\regsvcs.exe" }
+        - { data.Description: "BITS administration utility", image|not_endswith: "\\bitsadmin.exe" }
+        - { data.Description: "Microsoft Connection Manager Profile Installer", image|not_endswith: "\\cmstp.exe" }
+    # regsvr32's scriptlet arguments on a binary that is not regsvr32 (4688 carries no PE description)
+    - commandLine|contains: ["/i:http", "-i:http", "/i:ftp", "-i:ftp"]
+      commandLine|not_contains: regsvr32
+      image|not_endswith: "\\regsvr32.exe"
+      processName|not_endswith: "\\regsvr32.exe"
+---
+id: win-accessibility-binary-shell
+title: Accessibility binary replaced by a shell or starting one (sticky keys backdoor)
+description: >-
+  sethc, utilman, osk, magnify, narrator, displayswitch or atbroker is really a command shell (its PE
+  description or OriginalFileName says cmd or PowerShell), or one of them started a shell or a recon
+  tool. These programs can be launched from the logon screen without signing in and run as SYSTEM
+  there, so replacing one with cmd.exe gives a SYSTEM shell to anyone at the logon screen or at an
+  RDP pre-login screen: a classic backdoor and persistence technique. The Sigma rules cover the
+  debugger-registry variant (and its winlogon lineage); this covers the replaced or redirected file.
+  One finding per host and burst. Benign cause: none; the accessibility tools start each other
+  (utilman starts osk or narrator), never a shell.
+severity: critical
+source: events
+attack: [T1546.008]
+tags: [persistence, privilege-escalation, accessibility, process-lineage]
+entities: [computer, image, processName, parentImage, parentProcessName, user]
+where:
+  any_of:
+    - { eventId: 4688 }
+    - { eventId: 1, provider|contains: Sysmon }
+  any_of_2:
+    - image|endswith: ["\\sethc.exe", "\\utilman.exe", "\\osk.exe", "\\magnify.exe", "\\narrator.exe", "\\displayswitch.exe", "\\atbroker.exe"]
+      any_of:
+        - { data.Description: ["Windows Command Processor", "Windows PowerShell", "pwsh"] }
+        - { originalFileName|in: ["Cmd.Exe", "PowerShell.EXE", "pwsh.dll", "powershell_ise.EXE"] }
+    - parentImage|endswith: ["\\sethc.exe", "\\utilman.exe", "\\osk.exe", "\\magnify.exe", "\\narrator.exe", "\\displayswitch.exe", "\\atbroker.exe"]
+      image|endswith: ["\\cmd.exe", "\\powershell.exe", "\\pwsh.exe", "\\powershell_ise.exe", "\\wscript.exe", "\\cscript.exe", "\\mshta.exe", "\\rundll32.exe", "\\regsvr32.exe", "\\whoami.exe", "\\net.exe", "\\net1.exe", "\\systeminfo.exe", "\\taskmgr.exe"]
+    - parentProcessName|endswith: ["\\sethc.exe", "\\utilman.exe", "\\osk.exe", "\\magnify.exe", "\\narrator.exe", "\\displayswitch.exe", "\\atbroker.exe"]
+      processName|endswith: ["\\cmd.exe", "\\powershell.exe", "\\pwsh.exe", "\\powershell_ise.exe", "\\wscript.exe", "\\cscript.exe", "\\mshta.exe", "\\rundll32.exe", "\\regsvr32.exe", "\\whoami.exe", "\\net.exe", "\\net1.exe", "\\systeminfo.exe", "\\taskmgr.exe"]
+group_by: [computer]
+window: 10m
+threshold: ">= 1"
+---
+id: win-service-host-interactive-shell
+title: Interactive shell with no command started by a Windows service process
+description: >-
+  cmd.exe, powershell.exe or pwsh.exe with nothing on its command line (no /c, no script, no
+  command) whose parent is svchost, lsass, dllhost, WmiPrvSE, msdtc or SearchIndexer. A shell with no
+  command only makes sense with someone typing into it; started by a service process it is code
+  running inside that service handing a shell to an attacker: an exploited or hijacked service DLL
+  or injected shellcode giving a reverse or bind shell (usually as SYSTEM), a WMI event consumer, or
+  an elevated COM object in dllhost opening a shell for a UAC bypass. Work started by services always
+  carries its command. Excluded: the Secondary Logon service, where runas starts a bare cmd, and the
+  shared "netsvcs" host that contains it on Windows 7 and on low-memory Windows 10; on 4688 events,
+  which lack the parent's command line, svchost is not counted for that reason. Benign cause left: a
+  scheduled task whose action is a bare cmd.exe or powershell.exe, which is rare.
+severity: high
+source: events
+attack: [T1059.003, T1059.001, T1055, T1574, T1546.003, T1548.002]
+tags: [execution, reverse-shell, service, process-lineage]
+entities: [computer, image, processName, parentImage, parentProcessName, parentCommandLine, user]
+where:
+  any_of:
+    - { eventId: 4688 }
+    - { eventId: 1, provider|contains: Sysmon }
+  any_of_2:
+    - { image|endswith: ["\\cmd.exe", "\\powershell.exe", "\\pwsh.exe"] }
+    - { processName|endswith: ["\\cmd.exe", "\\powershell.exe", "\\pwsh.exe"] }
+  commandLine|re: '^\s*"?([a-z]:\\[^"]*\\)?(cmd|powershell|pwsh)(\.exe)?"?\s*$'
+  any_of_3:
+    - { parentImage|endswith: ["\\svchost.exe", "\\lsass.exe", "\\dllhost.exe", "\\wmiprvse.exe", "\\msdtc.exe", "\\searchindexer.exe"] }
+    - { parentProcessName|endswith: ["\\lsass.exe", "\\dllhost.exe", "\\wmiprvse.exe", "\\msdtc.exe", "\\searchindexer.exe"] }
+  not:
+    any_of:
+      - { parentCommandLine|contains: seclogon }
+      - { parentCommandLine|endswith: ["-k netsvcs", "-k netsvcs -p"] }
+---
+id: win-bits-job-notify-command
+title: BITS service started a program (job notify command)
+description: >-
+  A child of the Background Intelligent Transfer Service: any program started by the dedicated BITS
+  svchost ("-s BITS"), or a LOLBin (regsvr32, mshta, certutil, bitsadmin, MSBuild, InstallUtil,
+  RegAsm, RegSvcs, cmstp, odbcconf) started by the Windows 7 shared "svchost -k netsvcs" that hosts
+  BITS. A BITS job's SetNotifyCmdLine runs a command when the transfer completes or fails, and jobs
+  survive reboots: a persistence technique whose command runs as the job owner with the service as
+  parent. BITS starts nothing else. The Windows 7 shared host also runs runas (Secondary Logon) and
+  the Group Policy client, which runs computer startup scripts from it, so cmd, PowerShell, wscript
+  and cscript are not counted under it; a Windows 7 notify command that is a script, and a Windows
+  10 machine that groups BITS into the shared netsvcs host, are not covered. Benign cause: an
+  updater that registers a notify command, which is rare; the job is listed by bitsadmin /list
+  /allusers /verbose and in the BITS-Client log.
+severity: high
+source: events
+attack: [T1197]
+tags: [persistence, bits, process-lineage]
+entities: [computer, image, commandLine, parentCommandLine, user]
+where:
+  eventId: 1
+  provider|contains: Sysmon
+  parentImage|endswith: "\\svchost.exe"
+  image|not_endswith: ["\\werfault.exe", "\\wermgr.exe"]
+  any_of:
+    - { parentCommandLine|contains: "-s bits" }
+    - parentCommandLine|endswith: "-k netsvcs"
+      image|endswith: ["\\regsvr32.exe", "\\mshta.exe", "\\certutil.exe", "\\bitsadmin.exe", "\\msbuild.exe", "\\installutil.exe", "\\regasm.exe", "\\regsvcs.exe", "\\cmstp.exe", "\\odbcconf.exe"]
+---
+id: win-tsclient-execution
+title: Program executed from the RDP client's redirected drive (\\tsclient)
+description: >-
+  A process whose image is on \\tsclient\, the drive of the machine the RDP session comes from,
+  redirected into the session. The binary never lands on the target's disk, which is how SharpRDP and
+  similar RDP-based lateral movement run their payload: they open a session and start
+  \\tsclient\c\...\payload.exe through the Run dialog (the correlation rule
+  win-rdp-connect-then-run-dialog sees that part). Benign cause: administrators running a tool from
+  their own workstation through drive redirection, common in some IT teams; ask who held the RDP
+  session and whether the tool is known.
+severity: medium
+source: events
+attack: [T1021.001, T1570]
+tags: [lateral-movement, rdp, process-lineage]
+entities: [computer, image, processName, parentImage, user]
+where:
+  any_of:
+    - { eventId: 4688 }
+    - { eventId: 1, provider|contains: Sysmon }
+  any_of_2:
+    - { image|startswith: "\\\\tsclient\\" }
+    - { processName|contains: ["\\\\tsclient\\", "\\mup\\tsclient\\"] }
+---
+id: win-unexpected-inbound-listener
+title: Inbound TCP connection accepted by a process that should not listen
+description: >-
+  Sysmon 3 with Initiated false (the process accepted the connection) for a process that has no
+  reason to be a server: explorer.exe (the ShellWindows and ShellBrowserWindow DCOM objects used for
+  lateral movement live in explorer and receive the attacker's RPC calls), mshta (the LethalHTA DCOM
+  object), notepad, rundll32, regsvr32, wscript or cscript (a bind shell or relay listener in an
+  injected or hijacked process, as in potato attacks), PowerShell accepting a connection from
+  another host (powercat, Invoke-PowerShellTcp -Bind), or any program other than the kernel's
+  HTTP.sys (image System) and svchost accepting on the WinRM ports 5985/5986 (RogueWinRM waits there
+  for BITS to authenticate). Loopback peers count, except for PowerShell, whose editor services and
+  notebook kernels have used loopback sockets. One finding per host, process and burst. Benign causes: an admin script that deliberately
+  opens a TCP listener, or a shell extension in Explorer that serves the network, both rare; the peer
+  address says who connected.
+severity: high
+source: events
+attack: [T1021.003, T1095, T1134.001]
+tags: [lateral-movement, command-and-control, network, process-lineage]
+entities: [computer, image, user, sourceIp, sourcePort, destinationIp, destinationPort]
+where:
+  eventId: 3
+  provider|contains: Sysmon
+  initiated: "false"
+  protocol: tcp
+  any_of:
+    - { image|endswith: ["\\explorer.exe", "\\mshta.exe", "\\notepad.exe", "\\rundll32.exe", "\\regsvr32.exe", "\\wscript.exe", "\\cscript.exe"] }
+    - image|endswith: ["\\powershell.exe", "\\pwsh.exe", "\\powershell_ise.exe"]
+      sourceIp|not_startswith: ["127.", "::1", "0:0:0:0:0:0:0:1", "::ffff:127.", "0:0:0:0:0:ffff:7f"]
+      destinationIp|not_startswith: ["127.", "::1", "0:0:0:0:0:0:0:1", "::ffff:127.", "0:0:0:0:0:ffff:7f"]
+    # HTTP.sys accepts WinRM connections in the kernel; Sysmon names it System, or <unknown process>
+    # when it cannot resolve the process
+    - any_of:
+        - { sourcePort|in: [5985, 5986] }
+        - { destinationPort|in: [5985, 5986] }
+      image|exists: true
+      image|not_endswith: "\\svchost.exe"
+      image|nin: [System, "<unknown process>"]
+group_by: [computer, image]
+window: 10m
+threshold: ">= 1"
+---
+id: win-service-account-spawns-system
+title: Web application pool or virtual service account started a SYSTEM process
+description: >-
+  A process running as NT AUTHORITY\SYSTEM whose parent runs as an IIS application pool identity
+  (IIS APPPOOL\...) or a virtual service account (NT SERVICE\..., such as the SQL Server engine).
+  These accounts hold SeImpersonatePrivilege but never a SYSTEM token of their own, so a SYSTEM child
+  means the parent obtained one by impersonation: Rotten, Juicy, Sweet or PrintSpoofer-style potato
+  attacks run from a web shell or through xp_cmdshell. The parent's account comes from the ParentUser
+  field (Sysmon 13.30 and later) or from the parent's own process-creation event. The Sigma rule
+  "Suspicious Child Process Created as System" covers LOCAL SERVICE and NETWORK SERVICE parents.
+  Benign cause: none known.
+severity: critical
+source: events
+attack: [T1134.001, T1068, T1505.003]
+tags: [privilege-escalation, potato, process-lineage]
+entities: [computer, image, commandLine, parentImage, user]
+where:
+  eventId: 1
+  provider|contains: Sysmon
+  data.ParentUser|startswith: ["IIS APPPOOL\\", "NT SERVICE\\"]
+  user|endswith: ["\\SYSTEM", "\\Système", "\\СИСТЕМА"]
+---
+id: win-autoelevate-binary-unusual-parent
+title: Auto-elevating Windows binary started elevated by a program outside Windows and Program Files
+description: >-
+  Task Manager, Event Viewer, fodhelper, ComputerDefaults, sdclt, wsreset, slui, changepk, cliconfg,
+  msconfig, mmc, perfmon, dccw, colorcpl, iscsicpl, recdisc, winsat, sysprep or
+  SystemPropertiesAdvanced runs at High or System integrity and its parent lives outside
+  Windows\System32, SysWOW64, the shell and Start menu folders, the Configuration Manager client and
+  Program Files (Downloads, Temp, AppData, a desktop folder). These
+  binaries elevate without a prompt, and UAC-bypass tools such as UACMe start them from their own
+  folder to borrow the elevated process or hijack what it loads (UACMe method 59 takes over Task
+  Manager's debug object and starts cmd from it). Raised to high when the elevated binary itself
+  starts a shell or script host. Benign causes: a launcher installed per user (PowerToys Run, Flow
+  Launcher, Keypirinha) or a portable admin toolkit opening Task Manager or an MMC console, a
+  scripting runtime installed at the drive root (C:\Python27) running an admin script, an installer
+  that is already elevated starting one of them, and an OS deployment task sequence running sysprep
+  from its own folder.
+severity: medium
+source: events
+attack: [T1548.002]
+tags: [privilege-escalation, uac-bypass, process-lineage]
+entities: [computer, image, parentImage, parentCommandLine, processGuid]
+where:
+  eventId: 1
+  provider|contains: Sysmon
+  image|endswith: ["\\taskmgr.exe", "\\eventvwr.exe", "\\fodhelper.exe", "\\computerdefaults.exe", "\\sdclt.exe", "\\wsreset.exe", "\\slui.exe", "\\changepk.exe", "\\cliconfg.exe", "\\msconfig.exe", "\\mmc.exe", "\\perfmon.exe", "\\dccw.exe", "\\colorcpl.exe", "\\iscsicpl.exe", "\\recdisc.exe", "\\winsat.exe", "\\sysprep.exe", "\\systempropertiesadvanced.exe"]
+  integrityLevel|in: [High, System]
+  parentImage|exists: true
+  parentImage|not_contains: [":\\windows\\system32\\", ":\\windows\\syswow64\\", ":\\windows\\explorer.exe", ":\\windows\\immersivecontrolpanel\\", ":\\windows\\systemapps\\", ":\\windows\\winsxs\\", ":\\windows\\ccm\\", ":\\program files\\", ":\\program files (x86)\\"]
+group_by: [computer, processGuid]
+threshold: ">= 1"
+then:
+  where:
+    eventId: 1
+    provider|contains: Sysmon
+    image|endswith: ["\\cmd.exe", "\\powershell.exe", "\\pwsh.exe", "\\wscript.exe", "\\cscript.exe", "\\mshta.exe", "\\rundll32.exe", "\\regsvr32.exe"]
+  join: ["processGuid=parentProcessGuid"]
+  within: 5m
+  severity: high
+  title: the elevated binary started a shell
+---
+id: win-msbuild-exec-task-script-host
+title: Build event (MSBuild Exec task) started PowerShell, a script host or a LOLBin
+description: >-
+  A process whose parent is the cmd.exe that MSBuild's Exec task uses to run a Visual Studio
+  pre-build or post-build event (cmd /Q /D /C %TEMP%\tmp<guid>.exec.cmd), and the child is
+  PowerShell, rundll32, mshta, wscript, cscript, certutil, bitsadmin or curl. Building a project
+  someone sent runs its build events with the developer's rights, which is how the 2021 campaign
+  against security researchers ran its DLL (T1127). Weak on its own: build events legitimately run
+  PowerShell scripts, so expect this on developer workstations and build servers and read the child's
+  command line; regsvr32 is left out because registering a COM DLL after a build is routine. Sysmon
+  only, since 4688 does not carry the parent's command line.
+severity: low
+source: events
+attack: [T1127, T1059.001]
+tags: [execution, developer-tools, process-lineage]
+entities: [computer, image, commandLine, parentCommandLine, user]
+where:
+  eventId: 1
+  provider|contains: Sysmon
+  parentCommandLine|contains_all: ["\\tmp", ".exec.cmd"]
+  image|endswith: ["\\powershell.exe", "\\pwsh.exe", "\\rundll32.exe", "\\mshta.exe", "\\wscript.exe", "\\cscript.exe", "\\certutil.exe", "\\bitsadmin.exe", "\\curl.exe"]

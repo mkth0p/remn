@@ -1,7 +1,7 @@
-import { createSHA256 } from 'hash-wasm'
+import { createSHA1, createSHA256 } from 'hash-wasm'
 import { uuid4 } from './uuid'
-import { getDb, newServerKey, type Case, type Ioc, type MailBody } from '../db/schema'
-import { API_HEADERS, readNdjsonBody } from '../api/client'
+import { type Case, type Ioc } from '../db/schema'
+import { restoreCaseBundle, writeCaseBundle } from '../data/caseBundle'
 
 export function downloadBlob(name: string, blob: Blob): void {
   const url = URL.createObjectURL(blob)
@@ -39,33 +39,80 @@ export function exportJson(name: string, data: unknown): void {
   downloadBlob(name, new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }))
 }
 
-const STIX_TYPES: Record<string, (v: string) => string> = {
-  ip: (v) => (v.includes(':') ? `[ipv6-addr:value = '${v}']` : `[ipv4-addr:value = '${v}']`),
-  domain: (v) => `[domain-name:value = '${v}']`,
-  url: (v) => `[url:value = '${v.replace(/'/g, "\\'")}']`,
-  hash: (v) => (v.length === 64 ? `[file:hashes.'SHA-256' = '${v}']` : v.length === 40 ? `[file:hashes.'SHA-1' = '${v}']` : `[file:hashes.MD5 = '${v}']`),
-  email: (v) => `[email-addr:value = '${v}']`,
+/** A value inside a STIX pattern string literal: backslash and quote are the two characters to escape. */
+const lit = (v: string) => `'${v.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
+const HASH_NAME: Record<number, string> = { 64: 'SHA-256', 40: 'SHA-1', 32: 'MD5' }
+
+/** The STIX cyber-observable for an indicator value, and the pattern that matches it. */
+function stixObservable(kind: string, v: string): { sco: Record<string, unknown>; pattern: string } | null {
+  if (kind === 'ip') {
+    const type = v.includes(':') ? 'ipv6-addr' : 'ipv4-addr'
+    return { sco: { type, value: v }, pattern: `[${type}:value = ${lit(v)}]` }
+  }
+  if (kind === 'domain') return { sco: { type: 'domain-name', value: v }, pattern: `[domain-name:value = ${lit(v)}]` }
+  if (kind === 'url') return { sco: { type: 'url', value: v }, pattern: `[url:value = ${lit(v)}]` }
+  if (kind === 'email') return { sco: { type: 'email-addr', value: v }, pattern: `[email-addr:value = ${lit(v)}]` }
+  if (kind === 'hash' && HASH_NAME[v.length]) {
+    const name = HASH_NAME[v.length]
+    return { sco: { type: 'file', hashes: { [name]: v } }, pattern: `[file:hashes.${lit(name)} = ${lit(v)}]` }
+  }
+  return null
 }
 
-export function iocsToStix(kase: Case, iocs: Ioc[]): Record<string, unknown> {
+/** UUID version 5 (RFC 9562), as STIX 2.1 defines deterministic identifiers. */
+async function uuid5(namespace: string, name: string): Promise<string> {
+  const ns = namespace.replace(/-/g, '')
+  const bytes = new Uint8Array([...(ns.match(/../g) ?? []).map((x) => parseInt(x, 16)), ...new TextEncoder().encode(name)])
+  const h = await createSHA1()
+  h.init()
+  h.update(bytes)
+  const d = h.digest('binary')
+  d[6] = (d[6] & 0x0f) | 0x50
+  d[8] = (d[8] & 0x3f) | 0x80
+  const x = Array.from(d.slice(0, 16), (b) => b.toString(16).padStart(2, '0')).join('')
+  return `${x.slice(0, 8)}-${x.slice(8, 12)}-${x.slice(12, 16)}-${x.slice(16, 20)}-${x.slice(20)}`
+}
+/** the namespace STIX 2.1 gives for cyber-observable ids */
+const STIX_SCO_NS = '00abedb4-aa42-466c-9c01-fed23315a9b7'
+/** REMN's own namespace for the indicator and identity ids it derives, so an export re-imports without duplicates */
+const REMN_NS = '5b3c6e0e-8f0e-5a6f-9d2c-2f1d7c9e4a10'
+/** TLP:AMBER, a STIX 2.1 predefined marking: case indicators are for the recipient's organisation */
+const TLP_AMBER = 'marking-definition--f88d31f6-486f-44da-b317-01333bde0b82'
+const canonical = (o: Record<string, unknown>): string =>
+  JSON.stringify(o, (_, v) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b))) : v))
+
+/**
+ * A STIX 2.1 bundle of the case's indicators. Every value is exported as a cyber-observable; only
+ * the ones a reputation check flagged (malicious or suspicious) become indicator objects, since an
+ * indicator says "look for this", and a mailbox holds thousands of ordinary senders and domains.
+ * Identifiers are derived from the content, so the same export twice is the same objects.
+ */
+export async function iocsToStix(kase: Case, iocs: Ioc[]): Promise<Record<string, unknown>> {
   const now = new Date().toISOString()
-  const objects: Record<string, unknown>[] = []
+  const identityId = `identity--${await uuid5(REMN_NS, `case:${kase.name}`)}`
+  const objects: Record<string, unknown>[] = [{ type: 'identity', spec_version: '2.1', id: identityId, created: now, modified: now, name: `REMN case: ${kase.name}`, identity_class: 'system' }]
   for (const i of iocs) {
-    const pattern = STIX_TYPES[i.kind]?.(i.value)
-    if (!pattern) continue
+    const obs = stixObservable(i.kind, i.value)
+    if (!obs) continue
+    const scoKey = obs.sco.type === 'file' ? { hashes: obs.sco.hashes } : { value: obs.sco.value }
+    const scoId = `${obs.sco.type}--${await uuid5(STIX_SCO_NS, canonical(scoKey))}`
+    objects.push({ ...obs.sco, spec_version: '2.1', id: scoId, object_marking_refs: [TLP_AMBER] })
+    if (i.verdict !== 'malicious' && i.verdict !== 'suspicious') continue
     objects.push({
       type: 'indicator',
       spec_version: '2.1',
-      id: `indicator--${uuid4()}`,
+      id: `indicator--${await uuid5(REMN_NS, obs.pattern)}`,
+      created_by_ref: identityId,
       created: now,
       modified: now,
       name: `${i.kind}: ${i.value}`,
-      description: `Seen ${i.count} time(s) in case "${kase.name}" (sources: ${i.sources.join(', ')})${i.verdict ? ` - reputation: ${i.verdict}` : ''}`,
-      indicator_types: [i.verdict === 'malicious' ? 'malicious-activity' : i.verdict === 'suspicious' ? 'anomalous-activity' : 'unknown'],
-      pattern,
+      description: `Seen ${i.count} time(s) in case "${kase.name}" (sources: ${i.sources.join(', ')}); reputation: ${i.verdict}.`,
+      indicator_types: [i.verdict === 'malicious' ? 'malicious-activity' : 'anomalous-activity'],
+      pattern: obs.pattern,
       pattern_type: 'stix',
       valid_from: i.firstSeen ? new Date(i.firstSeen).toISOString() : now,
       labels: i.tags ?? [],
+      object_marking_refs: [TLP_AMBER],
     })
   }
   return { type: 'bundle', id: `bundle--${uuid4()}`, objects }
@@ -78,133 +125,41 @@ export async function sha256Hex(text: string): Promise<string> {
   return h.digest('hex')
 }
 
-/** Export the whole case (all tables) as one JSON bundle with a manifest hash. */
+/** Stream to a selected file, or a temporary browser file, without collecting the case in RAM. */
 export async function exportCaseBundle(kase: Case, onProgress?: (msg: string) => void): Promise<void> {
-  const db = getDb()
-  const id = kase.id!
-  const bundle: Record<string, unknown> = { format: 'remn-case', version: 1, exportedAt: new Date().toISOString(), case: kase }
-  const isServer = kase.storage === 'server' && !!kase.serverKey
-  const tables = ['evidence', 'events', 'mails', 'mailBodies', 'attachments', 'urls', 'findings', 'iocs', 'facets', 'aiSessions', 'savedSearches', 'caseNotes'] as const
-  for (const t of tables) {
-    onProgress?.(`reading ${t}…`)
-    bundle[t] = await (db[t] as unknown as { where: (k: string) => { equals: (v: number) => { toArray: () => Promise<unknown[]> } } }).where('caseId').equals(id).toArray()
+  const name = `${kase.name.replace(/[^a-z0-9_-]+/gi, '_')}-${new Date().toISOString().slice(0, 10)}.remn.ndjson`
+  const picker = (window as unknown as { showSaveFilePicker?: (opts: { suggestedName: string }) => Promise<FileSystemFileHandle> }).showSaveFilePicker
+  if (picker) {
+    const handle = await picker({ suggestedName: name })
+    const sink = await handle.createWritable()
+    try {
+      await writeCaseBundle(kase, sink, onProgress)
+      await sink.close()
+    } catch (error) {
+      await sink.abort()
+      throw error
+    }
+  } else {
+    if (!navigator.storage?.getDirectory) throw new Error('Streaming backups require a browser with file-system storage support.')
+    const root = await navigator.storage.getDirectory()
+    const temp = `remn-backup-${uuid4()}`
+    const handle = await root.getFileHandle(temp, { create: true })
+    const sink = await handle.createWritable()
+    try {
+      await writeCaseBundle(kase, sink, onProgress)
+      await sink.close()
+      downloadBlob(name, await handle.getFile())
+      // Keep the backing file while the browser starts the download.
+      setTimeout(() => {
+        void root.removeEntry(temp).catch(() => undefined)
+      }, 60_000)
+    } catch (error) {
+      await sink.abort().catch(() => undefined)
+      await root.removeEntry(temp).catch(() => undefined)
+      throw error
+    }
   }
-  if (isServer) {
-    // rows live in DuckDB, not IndexedDB: pull them from the export endpoint
-    // in /import wire format ({type: evidence|event|mail, ...})
-    onProgress?.('reading server store…')
-    const serverRows: Record<string, unknown>[] = []
-    const resp = await fetch(`/api/store/${kase.serverKey}/export`, { headers: API_HEADERS })
-    if (!resp.ok) throw new Error(`server export failed (${resp.status})`)
-    await readNdjsonBody(resp, (row) => {
-      serverRows.push(row)
-      if (serverRows.length % 20000 === 0) onProgress?.(`reading server store… ${serverRows.length.toLocaleString('en-US')} rows`)
-    })
-    bundle.serverRows = serverRows
-  }
-  const custom = await db.customRules.filter((c) => c.caseId === id).toArray()
-  bundle.customRules = custom
-  onProgress?.('hashing…')
-  const payload = JSON.stringify(bundle)
-  const hash = await sha256Hex(payload)
-  const wrapper = `{"sha256":"${hash}","bundle":${payload}}`
-  downloadBlob(`${kase.name.replace(/[^a-z0-9_-]+/gi, '_')}-${new Date().toISOString().slice(0, 10)}.remn.json`, new Blob([wrapper], { type: 'application/json' }))
   onProgress?.('done')
 }
 
-export async function importCaseBundle(file: File, onProgress?: (msg: string) => void): Promise<number> {
-  const text = await file.text()
-  const wrapper = JSON.parse(text) as { sha256: string; bundle: Record<string, unknown> }
-  if (!wrapper?.bundle || (wrapper.bundle as { format?: string }).format !== 'remn-case') throw new Error('not an REMN case bundle')
-  onProgress?.('verifying hash…')
-  const payload = text.slice(text.indexOf('"bundle":') + 9, -1)
-  const hash = await sha256Hex(payload)
-  if (hash !== wrapper.sha256) throw new Error(`bundle hash mismatch (expected ${wrapper.sha256.slice(0, 12)}…, got ${hash.slice(0, 12)}…)`)
-  const b = wrapper.bundle
-  const db = getDb()
-  const kase = { ...(b.case as Case) }
-  delete kase.id
-  kase.name = `${kase.name} (imported)`
-  const serverRows = (b.serverRows as Record<string, unknown>[] | undefined) ?? []
-  if (kase.storage === 'server') {
-    if (serverRows.length) {
-      kase.serverKey = newServerKey()
-    } else {
-      // bundle predates the server export path (or the store was empty): keep
-      // the browser-side tables but do not point at a store we cannot rebuild
-      kase.storage = 'browser'
-      delete kase.serverKey
-    }
-  }
-  const newId = await db.cases.add(kase)
-  if (kase.storage === 'server' && kase.serverKey && serverRows.length) {
-    onProgress?.('rebuilding server store…')
-    // the first /import call creates the store (registry.get(create=True))
-    const byEvidence = new Map<number, Record<string, unknown>[]>()
-    for (const r of serverRows) {
-      const eid = Number((r as { evidenceId?: number }).evidenceId ?? 0)
-      const arr = byEvidence.get(eid) ?? []
-      arr.push(r)
-      byEvidence.set(eid, arr)
-    }
-    let sent = 0
-    for (const [eid, rows] of byEvidence) {
-      for (let i = 0; i < rows.length; i += 4000) {
-        const body = rows
-          .slice(i, i + 4000)
-          .map((r) => JSON.stringify(r))
-          .join('\n')
-        const resp = await fetch(`/api/store/${kase.serverKey}/import?evidenceId=${eid}`, { method: 'POST', headers: { ...API_HEADERS, 'Content-Type': 'application/x-ndjson' }, body })
-        if (!resp.ok) throw new Error(`server import failed (${resp.status})`)
-        sent += Math.min(4000, rows.length - i)
-        onProgress?.(`rebuilding server store… ${sent.toLocaleString('en-US')} / ${serverRows.length.toLocaleString('en-US')} rows`)
-      }
-    }
-  }
-  const evidenceMap = new Map<number, number>()
-  onProgress?.('evidence…')
-  for (const e of (b.evidence as { id: number; caseId: number }[]) ?? []) {
-    const { id, ...rest } = e
-    const nid = await db.evidence.add({ ...rest, caseId: newId } as never)
-    evidenceMap.set(id, nid)
-  }
-  const remap = (r: { id?: number; caseId: number; evidenceId?: number }) => {
-    const { id, ...rest } = r
-    void id
-    return { ...rest, caseId: newId, evidenceId: r.evidenceId != null ? (evidenceMap.get(r.evidenceId) ?? r.evidenceId) : undefined }
-  }
-  onProgress?.('events…')
-  const events = ((b.events as { id?: number; caseId: number; evidenceId?: number }[]) ?? []).map(remap)
-  for (let i = 0; i < events.length; i += 5000) await db.events.bulkAdd(events.slice(i, i + 5000) as never[])
-  onProgress?.('mails…')
-  const mailMap = new Map<number, number>()
-  for (const m of (b.mails as { id: number; caseId: number; evidenceId?: number }[]) ?? []) {
-    const nid = await db.mails.add(remap(m) as never)
-    mailMap.set(m.id, nid)
-  }
-  for (const body of (b.mailBodies as MailBody[]) ?? []) {
-    const nid = mailMap.get(body.mailId)
-    if (nid) await db.mailBodies.put({ ...body, mailId: nid, caseId: newId })
-  }
-  type AnyTable = { bulkAdd: (rows: unknown[]) => Promise<unknown> }
-  for (const t of ['attachments', 'urls'] as const) {
-    const rows = ((b[t] as { id?: number; caseId: number; evidenceId?: number; mailId: number }[]) ?? []).map((r) => ({ ...remap(r), mailId: mailMap.get(r.mailId) ?? r.mailId }))
-    for (let i = 0; i < rows.length; i += 5000) await (db[t] as unknown as AnyTable).bulkAdd(rows.slice(i, i + 5000))
-  }
-  onProgress?.('findings, iocs, facets…')
-  for (const t of ['findings', 'iocs', 'facets', 'aiSessions', 'savedSearches', 'caseNotes'] as const) {
-    const rows = ((b[t] as { id?: number; caseId: number }[]) ?? []).map((r) => {
-      const { id, ...rest } = r
-      void id
-      return { ...rest, caseId: newId }
-    })
-    for (let i = 0; i < rows.length; i += 5000) await (db[t] as unknown as AnyTable).bulkAdd(rows.slice(i, i + 5000))
-  }
-  for (const c of (b.customRules as { id?: number; caseId: number | null }[]) ?? []) {
-    const { id, ...rest } = c
-    void id
-    await db.customRules.add({ ...rest, caseId: newId } as never)
-  }
-  onProgress?.('done')
-  return newId
-}
+export const importCaseBundle = restoreCaseBundle

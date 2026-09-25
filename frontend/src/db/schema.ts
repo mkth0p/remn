@@ -2,7 +2,7 @@ import Dexie, { type Table } from 'dexie'
 import { uuid4 } from '../util/uuid'
 
 export type Severity = 'info' | 'low' | 'medium' | 'high' | 'critical'
-export type EvidenceKind = 'evtx' | 'mail'
+export type EvidenceKind = 'evtx' | 'mail' | 'package'
 export type EvidenceStatus = 'hashing' | 'uploading' | 'parsing' | 'done' | 'error'
 
 export interface CaseSettings {
@@ -20,6 +20,8 @@ export interface CaseSettings {
   brands: string[]
   /** senders (addresses or domains) the analyst trusts: risk capped, spoofing rules skip them */
   trustedSenders: string[]
+  /** mailing lists and forwarders whose ARC seal is trusted to vouch for the original authentication */
+  trustedArcSealers?: string[]
   networkAllowed: boolean
   providers: string[] // reputation providers enabled (empty = all configured)
   includeRaw: boolean
@@ -85,9 +87,22 @@ export interface Evidence {
   error?: string
   note?: string
   analyst?: string
+  /** the Web Lock its import holds while it runs (data/interruptedImports.ts) */
+  importLock?: string
 }
 
 export interface EventRow {
+  recordKind?: 'event' | 'observation'
+  artifactType?: string
+  observedAt?: number | null
+  packageId?: string
+  sourceFile?: string
+  sourceSha256?: string
+  sourceIndex?: number
+  memberIndex?: number
+  parserVersion?: string
+  /** a cloud record's own identity (UAL AuditData.Id, Graph sign-in id): the case holds it once */
+  recordKey?: string
   id?: number
   caseId: number
   evidenceId: number
@@ -335,6 +350,28 @@ export interface AiSession {
   messages: Record<string, unknown>[]
   createdAt: number
   updatedAt: number
+  /** the refs the tools returned in this conversation, which its answers may cite (ai/evidence.ts) */
+  seen?: string[]
+  /** the investigation plan as the agent last wrote it */
+  plan?: { title: string; status: string }[]
+}
+
+/**
+ * One entry of a case's AI ledger: what the model was asked, which tools it ran (with a hash of each
+ * result, not the result), what it proposed and what the analyst decided. Entries are chained by
+ * hash (`prev` → `hash`), so an edited or removed entry breaks the chain; see ai/ledger.ts.
+ */
+export interface AiLedgerEntry {
+  id?: number
+  caseId: number
+  seq: number
+  at: number
+  kind: 'run' | 'tool' | 'proposal' | 'accepted' | 'rejected' | 'undone' | 'answer' | 'notice' | 'triage'
+  text: string
+  /** JSON detail (a string, so the hash covers exactly what was stored) */
+  data: string
+  prev: string
+  hash: string
 }
 
 export interface SavedSearch {
@@ -361,6 +398,43 @@ export interface KV {
 }
 
 /** Analyst-authored case material (Case notes view): timeline entries, tasks and notes. */
+export type RowMarkVerdict = 'relevant' | 'noise' | 'pivot'
+
+/**
+ * What a row was, at the moment it was marked.
+ *
+ * Row ids are not stable: deleting evidence and re-ingesting it renumbers everything, which is a
+ * routine mid-case action when a fuller collection arrives. Recording where the row came from lets
+ * a later pass re-attach the mark without any change to this schema.
+ */
+export interface RowProvenance {
+  sourceFile: string | null
+  sourceSha256: string | null
+  sourceIndex: number | null
+  /** EventRecordID for an EVTX row: unique within its channel and file. */
+  recordId: number | null
+  channel: string | null
+  computer: string | null
+  messageId: string | null
+  ts: number | null
+}
+
+/** An analyst's verdict on one evidence row. Never stored on the row itself: that is evidence. */
+export interface RowMark {
+  id?: number
+  caseId: number
+  source: 'events' | 'mails'
+  rowId: number
+  evidenceId: number | null
+  verdict: RowMarkVerdict
+  tags: string[]
+  reason: string
+  provenance?: RowProvenance
+  by: 'analyst' | 'ai'
+  createdAt: number
+  updatedAt: number
+}
+
 export interface CaseNote {
   id?: number
   caseId: number
@@ -368,12 +442,14 @@ export interface CaseNote {
   text: string
   /** event time for timeline entries; creation time otherwise */
   ts: number
+  /** a timeline entry added from a row with no event time (a collected artefact): ts only orders it */
+  untimed?: boolean
   createdAt: number
   updatedAt: number
   done?: boolean
   severity?: string
   /** the row, finding or chain a timeline entry was added from */
-  link?: { source: 'events' | 'mails' | 'findings' | 'chains'; id: number | string; label?: string }
+  link?: { source: 'events' | 'mails' | 'findings' | 'chains' | 'stories'; id: number | string; label?: string }
 }
 
 export class RemnDB extends Dexie {
@@ -388,10 +464,12 @@ export class RemnDB extends Dexie {
   iocs!: Table<Ioc, number>
   facets!: Table<Facet, number>
   aiSessions!: Table<AiSession, number>
+  aiLedger!: Table<AiLedgerEntry, number>
   savedSearches!: Table<SavedSearch, number>
   customRules!: Table<CustomRule, number>
   kv!: Table<KV, string>
   caseNotes!: Table<CaseNote, number>
+  rowMarks!: Table<RowMark, number>
 
   constructor(name = 'remn') {
     super(name)
@@ -412,6 +490,24 @@ export class RemnDB extends Dexie {
       kv: 'key',
     })
     this.version(2).stores({ caseNotes: '++id, caseId, kind, ts, [caseId+kind], [caseId+ts]' })
+    this.version(3).stores({
+      events:
+        '++id, caseId, evidenceId, ts, eventId, [caseId+id], [caseId+artifactType], [caseId+ts], [caseId+eventId], [caseId+evidenceId], computer, targetUser, subjectUser, ipAddress, logonType, channel, provider, category',
+      mails: '++id, caseId, evidenceId, date, [caseId+id], [caseId+date], [caseId+evidenceId], fromAddr, fromDomain, fromRegistrable, fromNameNorm, originIp, folder, risk, messageId, *flags',
+    })
+    // A new table only: existing stores are untouched, so an existing case opens without an
+    // upgrade function and without rewriting a single row.
+    this.version(4).stores({
+      rowMarks: '++id, caseId, [caseId+source+rowId], [caseId+source], [caseId+verdict], evidenceId, *tags',
+    })
+    // One index more on events, for the record keys of cloud audit and sign-in rows. A row
+    // without a key (every event log row) is not in it, so the upgrade adds nothing for those.
+    this.version(5).stores({
+      events:
+        '++id, caseId, evidenceId, ts, eventId, [caseId+id], [caseId+artifactType], [caseId+ts], [caseId+eventId], [caseId+evidenceId], [caseId+recordKey], computer, targetUser, subjectUser, ipAddress, logonType, channel, provider, category',
+    })
+    // The AI ledger: one row per entry, appended and never rewritten.
+    this.version(6).stores({ aiLedger: '++id, caseId, [caseId+seq]' })
   }
 }
 
@@ -427,21 +523,59 @@ export function setDb(db: RemnDB | null): void {
 
 /** kv keys that belong to one case (mirrors CASE_KV_PREFIXES in data/caseState.ts, kept here to avoid a schema -> data import). */
 export const CASE_KV_KEYS = (caseId: number) =>
-  ['chains', 'ruleDiags', 'baseline', 'mail-calibration', 'report-summary', 'finding-reviews', 'chain-reviews', 'report-settings', 'findingCounts', 'ai-suggestions', 'ai-triage'].map(
-    (p) => `${p}-${caseId}`,
-  )
+  [
+    'chains',
+    'ruleDiags',
+    'baseline',
+    'mail-calibration',
+    'report-summary',
+    'report-summary-by',
+    'report-summary-at',
+    'finding-reviews',
+    'chain-reviews',
+    'report-settings',
+    'findingCounts',
+    'ai-suggestions',
+    'ai-triage',
+    // the agent's proposals waiting for the analyst (and the decided ones), and its hypothesis board
+    'ai-inbox',
+    'ai-hypotheses',
+    'relationship-reviews',
+    'relationship-aliases',
+    'relationship-cache',
+    'relationship-stories',
+    // the stories and campaigns of the case (data/stories.ts), rebuilt from the evidence, and the analyst's notes on them
+    'stories',
+    'story-notes',
+    // the rule choices in force when the case was exported (packs, disabled rules), for the record
+    'rule-context',
+    // facet fields whose distinct values passed what one ingest counts
+    'facets-capped',
+    // the analyst's waivers and the time the report was issued as final
+    'report-final',
+  ].map((p) => `${p}-${caseId}`)
+
+/** kv keys of one case that carry an extra suffix after the case id (one record per hypothesis). */
+export const CASE_KV_PREFIXES_WITH_SUFFIX = (caseId: number) => [`relationship-hypothesis-${caseId}-`]
+
+/**
+ * Every table whose rows carry a caseId. One list, because it was previously written twice inside
+ * deleteCaseData and a table added to only one of them would be left behind on delete.
+ */
+export const CASE_TABLES = (db: RemnDB): Table<{ caseId: number }, number>[] =>
+  [db.events, db.mails, db.mailBodies, db.attachments, db.urls, db.findings, db.iocs, db.facets, db.aiSessions, db.aiLedger, db.savedSearches, db.evidence, db.caseNotes, db.rowMarks] as Table<
+    { caseId: number },
+    number
+  >[]
 
 export async function deleteCaseData(db: RemnDB, caseId: number): Promise<void> {
-  await db.transaction(
-    'rw',
-    [db.events, db.mails, db.mailBodies, db.attachments, db.urls, db.findings, db.iocs, db.facets, db.aiSessions, db.savedSearches, db.evidence, db.caseNotes, db.kv],
-    async () => {
-      for (const t of [db.events, db.mails, db.mailBodies, db.attachments, db.urls, db.findings, db.iocs, db.facets, db.aiSessions, db.savedSearches, db.evidence, db.caseNotes]) {
-        await (t as Table<{ caseId: number }, number>).where('caseId').equals(caseId).delete()
-      }
-      await db.kv.bulkDelete(CASE_KV_KEYS(caseId)) // chain snapshot, diagnostics, calibration state, archived reviews
-    },
-  )
+  const tables = CASE_TABLES(db)
+  await db.transaction('rw', [...tables, db.kv], async () => {
+    for (const t of tables) await t.where('caseId').equals(caseId).delete()
+    await db.kv.bulkDelete(CASE_KV_KEYS(caseId)) // chain snapshot, diagnostics, calibration state, archived reviews
+    await db.kv.where('key').startsWith(`relationship-ai-${caseId}-`).delete()
+    await db.kv.where('key').startsWith(`relationship-hypothesis-${caseId}-`).delete()
+  })
 }
 
 /** Everything of a case, the case row included: rows, derived state, custom rules, and the last-case pointer when it was this one. */
@@ -453,7 +587,8 @@ export async function deleteCase(db: RemnDB, caseId: number): Promise<void> {
   if (last?.value === caseId) await db.kv.delete('lastCase')
 }
 
-export async function deleteEvidenceData(db: RemnDB, caseId: number, evidenceId: number): Promise<void> {
+/** The rows of one evidence, and the evidence row itself unless `keepRecord` (an import that stopped keeps its record). */
+export async function deleteEvidenceData(db: RemnDB, caseId: number, evidenceId: number, keepRecord = false): Promise<void> {
   await db.transaction('rw', [db.events, db.mails, db.mailBodies, db.attachments, db.urls, db.evidence], async () => {
     await db.events.where('[caseId+evidenceId]').equals([caseId, evidenceId]).delete()
     const mailIds = await db.mails.where('[caseId+evidenceId]').equals([caseId, evidenceId]).primaryKeys()
@@ -463,18 +598,34 @@ export async function deleteEvidenceData(db: RemnDB, caseId: number, evidenceId:
     await db.mails.where('[caseId+evidenceId]').equals([caseId, evidenceId]).delete()
     await db.attachments.where('evidenceId').equals(evidenceId).delete()
     await db.urls.where('evidenceId').equals(evidenceId).delete()
-    await db.evidence.delete(evidenceId)
+    if (!keepRecord) await db.evidence.delete(evidenceId)
   })
 }
 
-export async function estimateStorage(): Promise<{ usage: number; quota: number } | null> {
+export async function estimateStorage(): Promise<{ usage: number; quota: number; persisted: boolean | null } | null> {
   try {
     if (navigator.storage?.estimate) {
       const e = await navigator.storage.estimate()
-      return { usage: e.usage ?? 0, quota: e.quota ?? 0 }
+      const persisted = navigator.storage.persisted ? await navigator.storage.persisted() : null
+      return { usage: e.usage ?? 0, quota: e.quota ?? 0, persisted }
     }
   } catch {
     /* ignore */
   }
   return null
+}
+
+/**
+ * Ask the browser to keep this site's storage. Without it, a browser short of space may clear the
+ * whole IndexedDB of a site it considers idle, and with it every case, finding and decision: in
+ * browser-store mode that copy is the only one. Asked when evidence is first added, where it matters.
+ */
+export async function requestPersistentStorage(): Promise<boolean | null> {
+  try {
+    if (!navigator.storage?.persist) return null
+    if (navigator.storage.persisted && (await navigator.storage.persisted())) return true
+    return await navigator.storage.persist()
+  } catch {
+    return null
+  }
 }

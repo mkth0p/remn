@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { composeSystem, pyJson, resetAiMetaCache, type AiMeta } from './meta'
-import { CLAUDE_MODELS, getTransport, pickClaudeModel, type ChatChunk, type ChatTurnParams } from './transport'
+import { capMessages, CLAUDE_MODELS, getTransport, isLocalModelUrl, openAiMessages, pickClaudeModel, ThinkSplitter, type ChatChunk, type ChatTurnParams } from './transport'
 import { DEFAULT_REPORT } from '../data/review'
 import { useStore } from '../state/store'
 
@@ -173,5 +173,133 @@ describe('Claude Code transport', () => {
 describe('report defaults', () => {
   it('prints chain graphs unless switched off', () => {
     expect(DEFAULT_REPORT.includeGraphs).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+function sseResponse(events: unknown[]): Response {
+  const text = events.map((e) => `data: ${typeof e === 'string' ? e : JSON.stringify(e)}\n\n`).join('')
+  // split mid-line, as a network does
+  const bytes = new TextEncoder().encode(text)
+  const cut = Math.floor(bytes.length / 2)
+  const stream = new ReadableStream({
+    start(c) {
+      c.enqueue(bytes.slice(0, cut))
+      c.enqueue(bytes.slice(cut))
+      c.close()
+    },
+  })
+  return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+}
+
+describe('local OpenAI-compatible servers', () => {
+  it('accept only this machine or the local network', () => {
+    for (const u of [
+      'http://localhost:1234/v1',
+      'http://127.0.0.1:8080/v1',
+      'http://[::1]:8000/v1',
+      'http://192.168.1.20:1234/v1',
+      'http://10.0.0.3/v1',
+      'http://172.20.1.1/v1',
+      'http://gpu-box:8000/v1',
+      'http://studio.local:1234/v1',
+    ])
+      expect(isLocalModelUrl(u), u).toBe(true)
+    for (const u of ['https://api.openai.com/v1', 'https://api.anthropic.com/v1', 'http://8.8.8.8/v1', 'http://172.32.0.1/v1', 'ftp://localhost/v1', 'not a url'])
+      expect(isLocalModelUrl(u), u).toBe(false)
+  })
+
+  it('split <think> out of streamed text, across chunk boundaries', () => {
+    const t = new ThinkSplitter()
+    const parts = ['Hi <thi', 'nk>let me see</th', 'ink> there', ' <'].map((x) => t.push(x))
+    const rest = t.flush()
+    expect(parts.map((p) => p.content).join('') + rest.content).toBe('Hi  there <')
+    expect(parts.map((p) => p.thinking).join('') + rest.thinking).toBe('let me see')
+  })
+
+  it('send tool calls with ids and each result answering its call, ids made up for older transcripts', () => {
+    const out = openAiMessages('SYS', [
+      { role: 'user', content: 'q' },
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          { name: 'a', arguments: { x: 1 } },
+          { id: 'k2', name: 'b', arguments: {} },
+        ],
+      },
+      { role: 'tool', content: 'ra', tool_name: 'a' },
+      { role: 'tool', content: 'rb', tool_name: 'b', tool_call_id: 'k2' },
+      { role: 'assistant', content: 'done' },
+    ])
+    expect(out[0]).toEqual({ role: 'system', content: 'SYS' })
+    const calls = (out[2] as { tool_calls: { id: string; function: { arguments: string } }[] }).tool_calls
+    expect(calls[0].function.arguments).toBe('{"x":1}')
+    expect(out[3]).toEqual({ role: 'tool', tool_call_id: calls[0].id, content: 'ra' })
+    expect(out[4]).toEqual({ role: 'tool', tool_call_id: 'k2', content: 'rb' })
+  })
+
+  it('stream tokens, reasoning, tool calls assembled from deltas, and usage', async () => {
+    useStore.getState().setAiConfig({ transport: 'openai', openaiUrl: 'http://localhost:1234/v1', model: 'qwen2.5-7b-instruct' })
+    fetchMock
+      .mockResolvedValueOnce(metaResponse('v-oa'))
+      .mockResolvedValueOnce(
+        sseResponse([
+          { model: 'qwen2.5-7b-instruct', choices: [{ delta: { reasoning_content: 'plan' } }] },
+          { choices: [{ delta: { content: 'Look' } }] },
+          { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_a', function: { name: 'search_', arguments: '{"filter":' } }] } }] },
+          { choices: [{ delta: { tool_calls: [{ index: 0, function: { name: 'events', arguments: '{}, "limit": 5}' } }] } }] },
+          { choices: [{ delta: { tool_calls: [{ index: 1, id: 'call_b', function: { name: 'finish', arguments: '{"answer":"x"}' } }] }, finish_reason: 'tool_calls' }] },
+          { choices: [], usage: { prompt_tokens: 900, completion_tokens: 40 } },
+          '[DONE]',
+        ]),
+      )
+    const chunks: ChatChunk[] = []
+    await getTransport().chatTurn({ ...chatParams(), mode: 'analyst', tools: true, toolNames: ['search_events'] }, (c) => chunks.push(c))
+    const [url, init] = fetchMock.mock.calls[1] as [string, RequestInit]
+    expect(url).toBe('http://localhost:1234/v1/chat/completions')
+    const body = JSON.parse(String(init.body))
+    expect(body.stream).toBe(true)
+    expect(body.model).toBe('qwen2.5-7b-instruct')
+    expect(init.headers).toEqual({ 'Content-Type': 'application/json' }) // no key, no REMN header
+    expect(chunks.find((c) => c.type === 'thinking')).toEqual({ type: 'thinking', content: 'plan' })
+    expect(chunks.find((c) => c.type === 'token')).toEqual({ type: 'token', content: 'Look' })
+    expect(chunks.find((c) => c.type === 'tool_calls')).toEqual({
+      type: 'tool_calls',
+      calls: [
+        { id: 'call_a', name: 'search_events', arguments: { filter: {}, limit: 5 } },
+        { id: 'call_b', name: 'finish', arguments: { answer: 'x' } },
+      ],
+    })
+    expect(chunks.at(-1)).toEqual({ type: 'done', model: 'qwen2.5-7b-instruct', stats: { prompt_eval_count: 900, eval_count: 40, done_reason: 'tool_calls' } })
+  })
+
+  it('never sends a case to a cloud endpoint', async () => {
+    useStore.getState().setAiConfig({ transport: 'openai', openaiUrl: 'https://api.openai.com/v1' })
+    const chunks: ChatChunk[] = []
+    await getTransport().chatTurn(chatParams(), (c) => chunks.push(c))
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(chunks[0]).toMatchObject({ type: 'error', error: expect.stringContaining('Cloud APIs are not supported') })
+    expect((await getTransport().ping()).reachable).toBe(false)
+  })
+
+  it('retry a turn without tools when the server has no tool support', async () => {
+    useStore.getState().setAiConfig({ transport: 'openai', openaiUrl: 'http://localhost:8080/v1', model: 'm' })
+    fetchMock
+      .mockResolvedValueOnce(metaResponse('v-oa2'))
+      .mockResolvedValueOnce(new Response('{"error":"tools param requires --jinja flag"}', { status: 400 }))
+      .mockResolvedValueOnce(sseResponse([{ choices: [{ delta: { content: 'plain' } }] }, '[DONE]']))
+    const chunks: ChatChunk[] = []
+    await getTransport().chatTurn({ ...chatParams(), tools: true }, (c) => chunks.push(c))
+    expect(JSON.parse(String((fetchMock.mock.calls[2] as [string, RequestInit])[1].body)).tools).toBeUndefined()
+    expect(chunks.find((c) => c.type === 'token')).toEqual({ type: 'token', content: 'plain' })
+  })
+})
+
+describe('long conversations', () => {
+  it('keep the question and the newest messages, not the oldest', () => {
+    const msgs = Array.from({ length: 10 }, (_, i) => i)
+    expect(capMessages(msgs, 4)).toEqual([0, 7, 8, 9])
+    expect(capMessages(msgs, 20)).toBe(msgs)
   })
 })

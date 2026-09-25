@@ -19,6 +19,8 @@ from typing import Any
 import yaml
 from django.conf import settings
 
+from services.rules import measures
+
 log = logging.getLogger(__name__)
 
 _Loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
@@ -93,7 +95,11 @@ def _parse_pack(pack_dir: Path) -> list[dict[str, Any]]:
             rules.append({"file": rel, "error": str(exc)[:200], "yaml": ""})
             continue
         for i, d in enumerate(docs):
-            rules.append({"file": f"{rel}#{i}", "rule": d})  # no yaml text: the client re-dumps a rule when it is copied
+            entry = {"file": f"{rel}#{i}", "rule": d}  # no yaml text: the client re-dumps a rule when it is copied
+            measured = measures.for_rule(d)
+            if measured is not None:
+                entry["measured"] = measured
+            rules.append(entry)
     return rules
 
 
@@ -108,15 +114,17 @@ def load_pack(pack_id: str) -> dict[str, Any] | None:
     if manifest is None:
         return None
     sig = _signature(pack_dir)
+    # the rules carry their measures (rules/measures.json): a new measurement is a new payload
+    key = f"{sig}|{measures.signature()}"
     with _lock:
         hit = _cache.get(pack_id)
-        if hit and hit[0] == sig:
+        if hit and hit[0] == key:
             return hit[1]
     rules = _parse_pack(pack_dir)
     manifest["hash"] = sig
     payload = {"pack": manifest, "rules": rules}
     with _lock:
-        _cache[pack_id] = (sig, payload)
+        _cache[pack_id] = (key, payload)
     return payload
 
 

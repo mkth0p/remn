@@ -1,0 +1,61 @@
+# Caddy in front of the browser-only container (docker-compose.public.yml). Automatic HTTPS for
+# REMN_DOMAIN; "localhost" gets a locally trusted certificate, which is how the profile is tested.
+#
+# Two things behind one name, kept apart: the app, the files of the frontend build that Caddy
+# serves from its own image (/srv/remn), and the API, the Python process that parses evidence.
+# That process runs hostile PST, OLE and EVTX through the most CVE-prone libraries of the stack;
+# serving the page from it meant a parser taken over could hand every later visitor a page of its
+# own, and a parser kept busy delayed the page. Now it answers /api/* and nothing else.
+{$REMN_DOMAIN} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	handle /api/* {
+		reverse_proxy remn:8000 {
+			# Set the header rather than appending to whatever the client sent, so the address the
+			# request budget reads is this proxy's observation and not a client-supplied value.
+			header_up X-Forwarded-For {remote_host}
+			# streamed responses (ingestion rows, job events) go through as they come
+			flush_interval -1
+			transport http {
+				read_timeout 3600s
+				write_timeout 3600s
+			}
+		}
+	}
+
+	handle {
+		root * /srv/remn
+		# The headers Django gives the page (backend/forensic/middleware.py and X_FRAME_OPTIONS);
+		# tests/backend/test_headers.py holds the two equal. The scripts need the page's policy too:
+		# a web worker takes its policy from the response that served its script.
+		header {
+			Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' http://localhost:* http://127.0.0.1:* https://localhost:* https://127.0.0.1:*; worker-src 'self' blob:; frame-src 'self' blob: data: about:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+			X-Content-Type-Options "nosniff"
+			Referrer-Policy "no-referrer"
+			Cross-Origin-Opener-Policy "same-origin"
+			Cross-Origin-Resource-Policy "same-origin"
+			Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+			X-Frame-Options "DENY"
+		}
+		# a path that names no file is a view of the app and gets the page; a path that names a
+		# file that is not there (robots.txt, a script of an earlier build) is a 404, never the
+		# page. try_files takes no matcher (it would try a file named "@view"), so it sits in a route.
+		@view not path_regexp \.[^/]*$
+		route @view {
+			try_files {path} /index.html
+		}
+		# built assets carry a content hash in their name and never change; the page is fetched
+		# fresh, so a new build reaches visitors on their next load
+		header /assets/* Cache-Control "public, max-age=31536000, immutable"
+		header @view Cache-Control "no-store"
+		header /index.html Cache-Control "no-store"
+		# files are read, nothing else: a POST to the page is refused rather than answered with it
+		@write not method GET HEAD
+		respond @write 405
+		file_server
+	}
+}

@@ -34,6 +34,7 @@ import yaml
 
 from services.analysis.headers import WEBMAIL_HINTS
 from services.analysis.urls import FILE_HOSTING, SHORTENERS, SUSPICIOUS_TLDS
+from services.common import load_untrusted_yaml_all
 from services.reference.brand_domains import BRAND_OWNED_DOMAINS
 from services.reference.notification_senders import NOTIFICATION_SENDERS
 
@@ -1087,7 +1088,7 @@ def _strip_true(cond: dict[str, Any]) -> None:
 def convert_text(text: str, source_name: str = "") -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     try:
-        docs = [d for d in yaml.safe_load_all(text) if isinstance(d, dict)]
+        docs = [d for d in load_untrusted_yaml_all(text) if isinstance(d, dict)]
     except yaml.YAMLError as exc:
         return [{"ok": False, "id": source_name or "?", "title": source_name or "(invalid yaml)", "error": f"yaml: {str(exc)[:160]}", "warnings": []}]
     for doc in docs:

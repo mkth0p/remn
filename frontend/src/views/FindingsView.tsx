@@ -7,6 +7,7 @@ import { Badge, Dot, Flyout, JsonView, Kpi, Progress, Sev, SevBar, Tabs } from '
 import { IconArrowLeft, IconCircle, IconFindings, IconInfo, IconPlay, IconSearch, IconTarget } from '../components/Icons'
 import { RescoreButton } from '../components/RescoreButton'
 import { loadRules, type LoadedRule } from '../data/rules'
+import { isLead, measuredOn, readMeasure, type MeasureReading } from '../data/ruleMeasures'
 import { findingsStaleness, runEnabledRules, type Staleness } from '../data/findingsState'
 import { resetFindingSeverityOverrides } from '../data/findingReviews'
 import { getSource } from '../data/source'
@@ -15,7 +16,7 @@ import { buildIncidents, chainMembership, effectiveSeverity, sevCounts, type Inc
 import { loadChains, type Chain } from '../data/chains'
 import { chainSeverity, loadChainReviews, type ChainReview } from '../data/review'
 import { toast, useStore } from '../state/store'
-import { classNames, fmtNum, fmtTs } from '../util/format'
+import { classNames, fmtNum, fmtTs, tzLabel } from '../util/format'
 import { exportCsv, exportJson } from '../util/export'
 import { attackHref } from '../util/safe'
 
@@ -74,6 +75,19 @@ function SeverityOverrideNotice({ findings, busy, onReset, chain = false }: { fi
  * user / host / IP within a few hours, is one line. Flat and grouped views keep the per-rule
  * detail. The banner above the queue says when the findings are behind the evidence.
  */
+/** A finding of a rule never seen to detect what it looks for (data/ruleMeasures.ts). */
+function LeadBadge({ reading }: { reading?: MeasureReading }) {
+  if (!reading || !isLead(reading)) return null
+  return (
+    <>
+      {' '}
+      <Badge sev="outline" title={reading.attacks}>
+        lead
+      </Badge>
+    </>
+  )
+}
+
 export function FindingsView() {
   const kase = useStore((s) => s.currentCase)
   const rulesVersion = useStore((s) => s.rulesVersion)
@@ -102,6 +116,15 @@ export function FindingsView() {
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set())
   const [tab, setTab] = useState<'findings' | 'attack'>('findings')
   const [selected, setSelected] = useState<Finding | null>(null)
+  // a finding cited in an AI answer opens here
+  const focusFinding = useStore((s) => s.focusFinding)
+  useEffect(() => {
+    if (focusFinding == null) return
+    getDb()
+      .findings.get(focusFinding)
+      .then((f) => f && setSelected(f))
+    useStore.getState().setFocusFinding(null)
+  }, [focusFinding])
   const [incident, setIncident] = useState<Incident | null>(null)
   const [parent, setParent] = useState<Incident | null>(null)
   const [flyTab, setFlyTab] = useState<'overview' | 'table' | 'json'>('overview')
@@ -168,6 +191,9 @@ export function FindingsView() {
   const shownRows = useMemo(() => (group === 'incident' ? [...new Map(incidents.flatMap((i) => i.findings).map((f) => [f.id, f])).values()] : rows), [group, incidents, rows])
   const allIncidents = useMemo(() => buildIncidents(active, incidentOpts), [active, incidentOpts])
   const membership = useMemo(() => chainMembership(all, chains), [all, chains])
+  // how far each rule's finding can be taken as a detection (rules/measures.json)
+  const measures = useStore((s) => s.meta?.measures)
+  const readings = useMemo(() => new Map<string, MeasureReading>(rules.map((r) => [r.rule.id, readMeasure(r.measured, r.origin)])), [rules])
   const counts = useMemo(() => (group === 'incident' ? sevCounts(allIncidents) : sevCounts(active)), [active, allIncidents, group])
   // Open details must follow a reset or rule refresh, including replacement row IDs.
   useEffect(() => {
@@ -354,6 +380,7 @@ export function FindingsView() {
               </Badge>
             </>
           ) : null}
+          <LeadBadge reading={readings.get(r.ruleId)} />
         </span>
       ),
     },
@@ -383,7 +410,7 @@ export function FindingsView() {
     },
     { key: 'source', label: 'source', width: 70 },
     { key: 'count', label: 'rows', width: 64, render: (r) => fmtNum(r.count) },
-    { key: 'ts', label: 'first seen (UTC)', width: 150, render: (r) => fmtTs(r.ts) },
+    { key: 'ts', label: `first seen (${tzLabel()})`, width: 150, render: (r) => fmtTs(r.ts) },
     { key: 'status', label: 'status', width: 110, render: (r) => <StatusBadge s={r.status} /> },
   ]
   const incidentColumns: Column<Incident>[] = [
@@ -426,8 +453,8 @@ export function FindingsView() {
       ),
     },
     { key: 'rules', label: 'rules', width: 56, render: (r) => fmtNum(r.rules.length) },
-    { key: 'ts', label: 'first seen (UTC)', width: 150, render: (r) => fmtTs(r.ts) },
-    { key: 'tsEnd', label: 'last (UTC)', width: 150, render: (r) => (r.tsEnd && r.tsEnd !== r.ts ? fmtTs(r.tsEnd) : '') },
+    { key: 'ts', label: `first seen (${tzLabel()})`, width: 150, render: (r) => fmtTs(r.ts) },
+    { key: 'tsEnd', label: `last (${tzLabel()})`, width: 150, render: (r) => (r.tsEnd && r.tsEnd !== r.ts ? fmtTs(r.tsEnd) : '') },
     { key: 'status', label: 'status', width: 110, render: (r) => <StatusBadge s={r.status} /> },
   ]
 
@@ -439,6 +466,7 @@ export function FindingsView() {
       <td className="sans">
         {f.title}
         {f.escalation ? <span className="muted"> · {f.escalation}</span> : null}
+        <LeadBadge reading={readings.get(f.ruleId)} />
         {f.severityOverride && (
           <div>
             <OverrideLabel finding={f} />
@@ -715,6 +743,7 @@ export function FindingsView() {
                         {g.label}
                       </span>
                       {group === 'ruleId' && <span className="mono small muted">{g.key}</span>}
+                      {group === 'ruleId' && <LeadBadge reading={readings.get(g.key)} />}
                       <span className="count">{fmtNum(g.items.length)}</span>
                       <span style={{ width: 120 }}>
                         <SevBar counts={sevCounts(g.items)} />
@@ -979,6 +1008,17 @@ export function FindingsView() {
                           this rule reported an error in the last run; the finding may be from an earlier run
                         </div>
                       )}
+                      {(() => {
+                        const m = readings.get(selected.ruleId)
+                        if (!m?.label) return null
+                        return (
+                          <div className="small" data-measure={m.verdict}>
+                            {m.verdict === 'detects' ? <strong>Measured. </strong> : isLead(m) ? <strong>A lead, not a detection. </strong> : null}
+                            {m.attacks} {m.clean}
+                            {measures && <div className="muted">{measuredOn(measures)}</div>}
+                          </div>
+                        )
+                      })()}
                     </div>
                     <div className="section">
                       <h3>Investigation</h3>
@@ -1034,7 +1074,7 @@ export function FindingsView() {
                               <div className="k">attack chains</div>
                               <div className="v">
                                 {rc.map((c) => (
-                                  <button key={c.id} className="btn link" style={{ display: 'block' }} onClick={() => setView('chains')}>
+                                  <button key={c.id} className="btn link" style={{ display: 'block' }} onClick={() => setView('stories')}>
                                     {c.title}
                                   </button>
                                 ))}
@@ -1070,6 +1110,7 @@ export function FindingsView() {
                     <div className="section">
                       <h3>Notes</h3>
                       <textarea
+                        key={selected.id}
                         className="textarea"
                         placeholder="analyst notes…"
                         defaultValue={selected.notes ?? ''}

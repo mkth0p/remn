@@ -290,6 +290,14 @@ def received_chain(headers: list[Header]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Authentication results
 # ---------------------------------------------------------------------------
+def _strip_comments(value: str) -> str:
+    """An RFC 8601 value without its parenthesised comments, which carry claims, not results."""
+    prev = None
+    while prev != value:
+        prev, value = value, re.sub(r"\([^()]*\)", " ", value)
+    return value
+
+
 def parse_auth_results(headers: list[Header]) -> dict[str, Any]:
     out: dict[str, Any] = {
         "spf": None,
@@ -302,23 +310,36 @@ def parse_auth_results(headers: list[Header]) -> dict[str, Any]:
         "dmarcPolicy": None,
         "raw": [],
     }
+    # Every result header is shown, but only the receiving server's own verdict is believed: the
+    # topmost Authentication-Results, which that server added. Lower ones, ARC-Authentication-Results
+    # and the claims inside RFC 8601 comments ("arc=pass (i=1 spf=pass dmarc=pass)") can all be
+    # written by the sender, and first-seen-wins over all of them let an added header turn a
+    # receiver's spf=fail, dmarc=fail into pass.
     for name in ("Authentication-Results", "ARC-Authentication-Results", "X-MS-Exchange-Authentication-Results"):
         for val in header_values(headers, name):
-            v = re.sub(r"\s+", " ", val)
-            out["raw"].append(v[:600])
-            for mech, res in _AUTH_PAIR_RE.findall(v):
-                mech, res = mech.lower(), res.lower()
-                key = {"arc": "arc", "compauth": "compauth"}.get(mech, mech)
-                if key in out and out[key] is None:
-                    out[key] = res
-            for prop, pval in _AUTH_PROP_RE.findall(v):
-                prop = prop.lower()
-                if prop == "header.d" and not out["dkimDomain"] and pval.lower() not in ("none", "-", "null"):
-                    out["dkimDomain"] = pval.lower()
-                elif prop == "smtp.mailfrom" and not out["spfDomain"]:
-                    out["spfDomain"] = domain_of(pval) or pval.lower()
-                elif prop.startswith("policy.") and "dmarc" in v.lower() and not out["dmarcPolicy"]:
-                    out["dmarcPolicy"] = pval.lower()
+            out["raw"].append(re.sub(r"\s+", " ", val)[:600])
+    for val in header_values(headers, "Authentication-Results")[:1]:
+        v = _strip_comments(re.sub(r"\s+", " ", val))
+        for mech, res in _AUTH_PAIR_RE.findall(v):
+            mech, res = mech.lower(), res.lower()
+            if mech in out and out[mech] is None:
+                out[mech] = res
+        for prop, pval in _AUTH_PROP_RE.findall(v):
+            prop = prop.lower()
+            if prop == "header.d" and not out["dkimDomain"] and pval.lower() not in ("none", "-", "null"):
+                out["dkimDomain"] = pval.lower()
+            elif prop == "smtp.mailfrom" and not out["spfDomain"]:
+                out["spfDomain"] = domain_of(pval) or pval.lower()
+            elif prop.startswith("policy.") and "dmarc" in v.lower() and not out["dmarcPolicy"]:
+                out["dmarcPolicy"] = pval.lower()
+    # Who sealed the latest ARC set (the d= of the highest i=). The receiver's arc=pass means it
+    # verified that seal, so the sealer cannot be forged; whether to trust it is the analyst's call.
+    best = -1
+    out["arcSealer"] = None
+    for seal in header_values(headers, "ARC-Seal"):
+        mi, md = re.search(r"(?i)\bi\s*=\s*(\d+)", seal), re.search(r"(?i)\bd\s*=\s*([^;\s]+)", seal)
+        if mi and md and int(mi.group(1)) > best:
+            best, out["arcSealer"] = int(mi.group(1)), md.group(1).lower()
     if out["spf"] is None:
         spf = first_header(headers, "Received-SPF")
         if spf:

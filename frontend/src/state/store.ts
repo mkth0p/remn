@@ -8,7 +8,7 @@ export interface EntityRef {
   value: string
 }
 
-export type View = 'home' | 'dashboard' | 'evidence' | 'events' | 'mails' | 'findings' | 'chains' | 'timeline' | 'iocs' | 'ai' | 'review' | 'case' | 'report' | 'rules' | 'settings'
+export type View = 'home' | 'dashboard' | 'evidence' | 'events' | 'mails' | 'findings' | 'stories' | 'timeline' | 'iocs' | 'ai' | 'review' | 'case' | 'report' | 'rules' | 'settings'
 
 export interface ConsoleLine {
   id: number
@@ -25,7 +25,7 @@ export interface IngestJob {
   id: number
   evidenceId: number
   name: string
-  kind: 'evtx' | 'mail'
+  kind: 'evtx' | 'mail' | 'package'
   phase: 'hashing' | 'uploading' | 'parsing' | 'done' | 'error'
   progress: number // 0..1 for hashing, rows for parsing
   rows: number
@@ -72,6 +72,9 @@ interface State {
   /** chain to open when the Chains page mounts (Review page hand-off) */
   focusChain: string | null
   setFocusChain: (id: string | null) => void
+  /** finding to open when the Findings page mounts (a citation in an AI answer) */
+  focusFinding: number | null
+  setFocusFinding: (id: number | null) => void
   aiPrompt: string | null
   setAiPrompt: (p: string | null) => void
   counts: { events: number; mails: number; findings: number; iocs: number; evidence: number }
@@ -80,9 +83,12 @@ interface State {
   bumpRules: () => void
   storeThresholdMb: number
   setStoreThresholdMb: (mb: number) => void
-  pendingIngest: { files: File[]; kindOverride?: 'evtx' | 'mail'; reason: 'big' | 'archive' } | null
+  pendingIngest: { files: File[]; kindOverride?: 'evtx' | 'mail' | 'package'; reason: 'big' | 'archive' | 'notice' } | null
   setPendingIngest: (p: State['pendingIngest']) => void
-  aiConfig: { transport: 'browser' | 'server' | 'claude'; ollamaUrl: string; model: string; numCtx: number | null; claudeModel: string }
+  /** whether this browser has read where its evidence goes on this host (shown before the first upload to a remote parser) */
+  dataNotice: 'unknown' | 'required' | 'acknowledged'
+  setDataNotice: (v: State['dataNotice']) => void
+  aiConfig: { transport: 'browser' | 'openai' | 'server' | 'claude'; ollamaUrl: string; openaiUrl: string; model: string; numCtx: number | null; claudeModel: string }
   setAiConfig: (patch: Partial<State['aiConfig']>) => void
   aiStatus: { reachable: boolean | null; error?: string; models?: number; checkedAt: number }
   setAiStatus: (s: State['aiStatus']) => void
@@ -135,6 +141,8 @@ export const useStore = create<State>((set) => ({
   setRulesRun: (rulesRun) => set({ rulesRun }),
   focusChain: null,
   setFocusChain: (focusChain) => set({ focusChain }),
+  focusFinding: null,
+  setFocusFinding: (focusFinding) => set({ focusFinding }),
   aiPrompt: null,
   setAiPrompt: (aiPrompt) => set({ aiPrompt }),
   counts: { events: 0, mails: 0, findings: 0, iocs: 0, evidence: 0 },
@@ -145,7 +153,9 @@ export const useStore = create<State>((set) => ({
   setStoreThresholdMb: (storeThresholdMb) => set({ storeThresholdMb }),
   pendingIngest: null,
   setPendingIngest: (pendingIngest) => set({ pendingIngest }),
-  aiConfig: { transport: 'browser', ollamaUrl: 'http://localhost:11434', model: '', numCtx: null, claudeModel: 'sonnet' },
+  dataNotice: 'unknown',
+  setDataNotice: (dataNotice) => set({ dataNotice }),
+  aiConfig: { transport: 'browser', ollamaUrl: 'http://localhost:11434', openaiUrl: 'http://localhost:1234/v1', model: '', numCtx: null, claudeModel: 'sonnet' },
   setAiConfig: (patch) => set((s) => ({ aiConfig: { ...s.aiConfig, ...patch } })),
   aiStatus: { reachable: null, checkedAt: 0 },
   setAiStatus: (aiStatus) => set({ aiStatus }),

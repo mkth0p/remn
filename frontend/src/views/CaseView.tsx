@@ -53,7 +53,11 @@ export function CaseView() {
     if (l.source === 'events' || l.source === 'mails') {
       setFocus({ source: l.source, id: Number(l.id) })
       setView(l.source)
-    } else setView(l.source === 'chains' ? 'chains' : 'findings')
+    } else if (l.source === 'chains' || l.source === 'stories') {
+      // a chain's note opens the story holding the chain; a story's, the story (its id before a '#step')
+      useStore.getState().setFocusChain(String(l.id).split('#')[0])
+      setView('stories')
+    } else setView('findings')
   }
   const add = async () => {
     const text = draft.trim()
@@ -163,7 +167,7 @@ export function CaseView() {
             )}
             {timeline.map((n) => (
               <div key={n.id} className="step" style={{ cursor: 'default', gridTemplateColumns: '150px 14px 1fr auto' }}>
-                <span className="t">{fmtTs(n.ts)}</span>
+                <span className="t">{n.untimed ? <span title={`collected ${fmtTs(n.ts)}`}>no event time</span> : fmtTs(n.ts)}</span>
                 <Dot sev={n.severity ?? 'info'} />
                 <span>
                   {editing?.id === n.id ? (

@@ -15,11 +15,20 @@ import type { Chain, ChainStep } from './chains'
  * campaign signal an analyst looks for.
  */
 
-export type Lane = 'attacker' | 'mail' | 'identity' | 'cloud' | 'host' | 'infra'
-export const LANES: Lane[] = ['attacker', 'mail', 'identity', 'cloud', 'host', 'infra']
-export const LANE_LABEL: Record<Lane, string> = { attacker: 'attacker side', mail: 'mailbox', identity: 'identity', cloud: 'Microsoft 365', host: 'host', infra: 'machines & IPs' }
+export type Lane = 'attacker' | 'mail' | 'identity' | 'cloud' | 'host' | 'artifact' | 'infra'
+export const LANES: Lane[] = ['attacker', 'mail', 'identity', 'cloud', 'host', 'artifact', 'infra']
+export const LANE_LABEL: Record<Lane, string> = {
+  attacker: 'attacker side',
+  mail: 'mailbox',
+  identity: 'identity',
+  cloud: 'Microsoft 365',
+  host: 'host',
+  artifact: 'files & processes',
+  infra: 'machines & IPs',
+}
 
-export type NodeKind = 'seed' | 'step' | 'routine' | 'user' | 'address' | 'domain' | 'attachment' | 'ip' | 'host' | 'chain'
+/** seed, step, routine and chain are the record-like nodes; the rest are entities (hash, file, process and config only appear in story graphs) */
+export type NodeKind = 'seed' | 'step' | 'routine' | 'user' | 'address' | 'domain' | 'attachment' | 'ip' | 'host' | 'chain' | 'hash' | 'file' | 'process' | 'config'
 export type EdgeKind = 'sequence' | 'artifact' | 'entity' | 'recipient'
 
 export interface GNode {
@@ -44,6 +53,10 @@ export interface GNode {
   degree?: number
   score?: number
   chainId?: string
+  /** story graph: the relationship record nodes a record node stands for */
+  recordIds?: string[]
+  /** story graph: the relationship entity node this node stands for, for entities the flyout does not cover */
+  entityId?: string
 }
 
 export interface GEdge {
@@ -113,8 +126,8 @@ export function buildChainGraph(chain: Chain): Graph {
   add({
     id: 'seed',
     label: chain.seed.subject || '(no subject)',
-    sub: `seed mail · risk ${seedRisk}`,
-    lane: 'mail',
+    sub: `seed ${chain.seed.source === 'events' ? 'event' : 'mail'} · risk ${seedRisk}`,
+    lane: chain.seed.source === 'events' ? (chain.steps[0]?.origin === 'm365' ? 'cloud' : 'host') : 'mail',
     kind: 'seed',
     x: 0,
     severity: riskSeverity(seedRisk),

@@ -65,6 +65,18 @@ describe('matchCondition', () => {
 })
 
 describe('ipInCidr', () => {
+  it('compares a whole IPv6 prefix, with or without a zone id', () => {
+    expect(ipInCidr('fe80::80ac:4126:fa58:1b81%10', 'fe80::/10')).toBe(true)
+    expect(ipInCidr('febf::1', 'fe80::/10')).toBe(true)
+    expect(ipInCidr('fec0::1', 'fe80::/10')).toBe(false)
+    // the first 16 bits agree; the prefix does not
+    expect(ipInCidr('2001:db9::1', '2001:db8::/32')).toBe(false)
+    expect(ipInCidr('2001:db8:ffff::1', '2001:db8::/32')).toBe(true)
+    expect(ipInCidr('0:0:0:0:0:0:0:1', '::1')).toBe(true)
+    expect(ipInCidr('::2', '::1/128')).toBe(false)
+    expect(ipInCidr('10.0.0.1', 'fe80::/10')).toBe(false)
+    expect(ipInCidr('not:an:address:zz::', 'fe80::/10')).toBe(false)
+  })
   it('matches v4 ranges and exact ips', () => {
     expect(ipInCidr('192.168.1.10', '192.168.0.0/16')).toBe(true)
     expect(ipInCidr('172.32.0.1', '172.16.0.0/12')).toBe(false)
@@ -166,5 +178,16 @@ describe('case-sensitive operators', () => {
     expect(matchCondition({ subject: 'x.Admin' }, { field: 'subject', op: 'endswith_cs', value: ['Admin', 'Root'] })).toBe(true)
     expect(matchCondition({ urls: [{ url: 'hTTPs://a' }, { url: 'https://b' }] }, { field: 'urls.url', op: 'contains_cs', value: 'hTTPs://' })).toBe(true)
     expect(matchCondition({ subject: null }, { field: 'subject', op: 'contains_cs', value: 'x' })).toBe(false)
+  })
+})
+
+describe('what converted Sigma rules rely on', () => {
+  it('honours a leading inline flag group and case-sensitive lists', () => {
+    expect(matchCondition({ commandLine: 'begin\nend' }, { field: 'commandLine', op: 're', value: '(?s)begin.end' })).toBe(true)
+    expect(matchCondition({ commandLine: 'begin\nend' }, { field: 'commandLine', op: 're', value: 'begin.end' })).toBe(false)
+    const enc = { field: 'commandLine', op: 'contains_cs' as const, value: ['SQBFAFgA', 'kARQBYA'] }
+    expect(matchCondition({ commandLine: '-enc eABTAFEAQgBGAEEARgBnAEEA' }, enc)).toBe(false)
+    expect(matchCondition({ commandLine: '-enc SQBFAFgAIAAoAE4AZQB3AA==' }, enc)).toBe(true)
+    expect(matchCondition({ commandLine: '-enc sqbfafgaiaaoae4azqb3aa==' }, enc)).toBe(false)
   })
 })

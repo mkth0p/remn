@@ -15,6 +15,20 @@ upstream `LICENSE` and a provenance file with the commit it was taken from.
 | SigmaHQ rules (Windows, emerging threats, threat hunting) | https://github.com/SigmaHQ/sigma | Detection Rule License 1.1 (DRL-1.1) |
 | Sublime Security rules | https://github.com/sublime-security/sublime-rules | MIT |
 
+## Native artifact decoders
+
+These libraries are installed from `backend/requirements.txt`. Native parsing uses
+a separate worker process and the libraries' public APIs; their upstream code is
+not copied into REMN. Their own licenses remain applicable.
+
+| Library | Source | License |
+| --- | --- | --- |
+| dissect.target 3.25.1 | https://github.com/fox-it/dissect.target | AGPL-3.0-or-later |
+| dissect.regf 3.14 | https://github.com/fox-it/dissect.regf | AGPL-3.0-or-later |
+| cabarchive 0.2.5 | https://github.com/hughsie/python-cabarchive | LGPL-2.1-or-later |
+| defusedxml | https://github.com/tiran/defusedxml | PSFL |
+| psutil | https://github.com/giampaolo/psutil | BSD-3-Clause |
+
 ## Fonts
 
 | Font | Source | Licence |

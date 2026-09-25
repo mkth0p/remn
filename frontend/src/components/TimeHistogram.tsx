@@ -16,8 +16,9 @@ export function TimeHistogram({ ds, source, filter, version, onRange }: { ds: Da
   const [busy, setBusy] = useState(false)
   useEffect(() => {
     let alive = true
+    const ac = new AbortController()
     setBusy(true)
-    const fetch = (b: Bucket) => (source === 'events' ? ds.timelineEvents(filter, b) : ds.timelineMails(filter, b))
+    const fetch = (b: Bucket) => (source === 'events' ? ds.timelineEvents(filter, b, ac.signal) : ds.timelineMails(filter, b, ac.signal))
     ;(async () => {
       try {
         let bucket: Bucket = 'day'
@@ -55,6 +56,7 @@ export function TimeHistogram({ ds, source, filter, version, onRange }: { ds: Da
     })()
     return () => {
       alive = false
+      ac.abort()
     }
   }, [ds, source, filter, version])
   if (!bars.length) return null

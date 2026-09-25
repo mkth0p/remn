@@ -7,6 +7,7 @@ import { IconClock } from './Icons'
 /** "Add to the case timeline" button used on findings, mails, events and chain steps. */
 export function AddToTimeline({
   ts,
+  observedAt,
   text,
   link,
   severity,
@@ -14,6 +15,8 @@ export function AddToTimeline({
   className,
 }: {
   ts: number | null | undefined
+  /** when a row without an event time was collected: orders the entry, never shown as its time */
+  observedAt?: number | null
   text: string
   link?: CaseNote['link']
   severity?: string
@@ -24,7 +27,9 @@ export function AddToTimeline({
   const [added, setAdded] = useState(false)
   const add = async () => {
     if (!kase?.id) return
-    const r = await addTimelineEntry(kase.id, { ts: ts ?? Date.now(), text, link, severity })
+    // A row with no event time (a collection snapshot, an undated mail) gets no invented one: the
+    // click time used to be stamped on it and printed in the report as when it happened.
+    const r = await addTimelineEntry(kase.id, ts != null ? { ts, text, link, severity } : { ts: observedAt ?? Date.now(), text, link, severity, untimed: true })
     toast(r === 'exists' ? 'info' : 'ok', r === 'exists' ? 'already on the case timeline' : 'added to the case timeline')
     setAdded(true)
   }

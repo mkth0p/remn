@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { runAgent } from '../ai/chat'
+import { transportLabel } from '../ai/transport'
 import { AddToTimeline } from '../components/AddToTimeline'
 import { entityKind } from '../components/EntityPanel'
 import { IconAi, IconArrowLeft, IconCheck, IconReport, IconStop } from '../components/Icons'
 import { Badge, Dot, Modal, Progress, Sev, Spinner, Toggle } from '../components/ui'
+import { VerdictBar } from '../components/VerdictBar'
 import {
   applySuggestion,
   loadSuggestions,
@@ -18,18 +20,18 @@ import {
   type TriageRun,
 } from '../data/aiReview'
 import { loadChains, type Chain } from '../data/chains'
-import { draftExecutiveSummary } from '../data/reportSummary'
+import { computeConfidence, computeVerdict, groupByRule, threatProfile, type ReportData } from '../data/reportHtml'
 import {
   applyChainVerdict,
   chainIncluded,
   chainSeverity,
-  effectiveSeverity,
   loadChainReviews,
   loadReportSettings,
   overridesForIncident,
   reviewQueue,
   saveChainReview,
   saveReportSettings,
+  selectForReport,
   setChainUnlinked,
   SEVERITIES,
   stepVisible,
@@ -37,20 +39,25 @@ import {
   type ReportSettings,
   type ReviewItem,
   type Verdict,
+  unprintedConfirmed,
 } from '../data/review'
-import { getDb, type Finding, type Severity } from '../db/schema'
+import { getDb, type Evidence, type Finding, type Severity } from '../db/schema'
 import { buildIncidents, type Incident } from '../rules/incidents'
 import { toast, useStore } from '../state/store'
-import { classNames, fmtNum, fmtTs } from '../util/format'
+import { classNames, fmtNum, fmtTs, tzLabel } from '../util/format'
 
-const STATUSES = ['new', 'reviewed', 'escalated', 'false_positive'] as const
-type Status = (typeof STATUSES)[number]
+type Status = 'new' | 'reviewed' | 'escalated' | 'false_positive'
 const STATUS_LABEL: Record<Status, string> = { new: 'not reviewed', reviewed: 'reviewed', escalated: 'confirmed', false_positive: 'false positive' }
 const STATUS_SEV: Record<Status, string> = { new: 'accent', reviewed: 'ok', escalated: 'critical', false_positive: 'info' }
-const VERDICTS: { id: Verdict; label: string; sev: string }[] = [
-  { id: 'confirmed', label: 'confirmed', sev: 'critical' },
-  { id: 'unsure', label: 'unsure', sev: 'medium' },
-  { id: 'benign', label: 'benign', sev: 'ok' },
+const DECISIONS: { id: Exclude<Status, 'new'>; label: string; key: string; tone: string }[] = [
+  { id: 'escalated', label: 'confirmed', key: 'e', tone: 'confirm' },
+  { id: 'reviewed', label: 'reviewed', key: 'r', tone: 'review' },
+  { id: 'false_positive', label: 'false positive', key: 'f', tone: 'dismiss' },
+]
+const VERDICTS: { id: Verdict; label: string; key: string; tone: string }[] = [
+  { id: 'confirmed', label: 'confirmed', key: 'e', tone: 'confirm' },
+  { id: 'unsure', label: 'unsure', key: 'r', tone: 'review' },
+  { id: 'benign', label: 'benign', key: 'f', tone: 'dismiss' },
 ]
 const DECISION_LABEL: Record<string, string> = { ...STATUS_LABEL, confirmed: 'confirmed', benign: 'benign', unsure: 'unsure' }
 const DECISION_SEV: Record<string, string> = { ...STATUS_SEV, confirmed: 'critical', benign: 'ok', unsure: 'medium' }
@@ -63,14 +70,94 @@ const SUMMARY_LABEL: Record<string, string> = {
   benign: 'chains benign',
   false_positive: 'false positives',
 }
+const chainDecision = (r?: ChainReview) => (r?.verdict === 'confirmed' ? 'critical' : r?.verdict === 'benign' ? 'ok' : 'medium')
+const trim = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…' : s)
+
+/** The facts behind an item, the way the report prints them: one line per rule with count, span and the values matched. */
+function Facts({ findings, said, onUnlink }: { findings: Finding[]; said: Record<string, string>; onUnlink?: (ids: number[]) => void }) {
+  const groups = useMemo(() => groupByRule(findings, said), [findings, said])
+  if (!groups.length) return <div className="small muted">no finding</div>
+  const idsOf = (ruleId: string) => findings.filter((f) => f.ruleId === ruleId && f.id != null).map((f) => f.id!)
+  return (
+    <table className="table compact facts">
+      <thead>
+        <tr>
+          <th>severity</th>
+          <th>finding</th>
+          <th>findings · rows</th>
+          <th>when ({tzLabel()})</th>
+          <th>what matched</th>
+          <th>status</th>
+          {onUnlink && <th></th>}
+        </tr>
+      </thead>
+      <tbody>
+        {groups.map((g) => (
+          <tr key={g.ruleId}>
+            <td style={{ width: 96 }}>
+              <Sev sev={g.severity} />
+              {g.severity !== g.ruleSeverity && <div className="small muted">rule {g.ruleSeverity}</div>}
+            </td>
+            <td className="sans">
+              {g.title}
+              <div className="small muted mono">
+                {g.ruleId}
+                {g.escalations.length ? ` · ${g.escalations.slice(0, 2).join(' · ')}` : ''}
+                {g.attack.length ? ` · ${g.attack.slice(0, 4).join(' ')}` : ''}
+              </div>
+            </td>
+            <td className="nowrap" style={{ width: 90 }}>
+              {fmtNum(g.findings)} · {fmtNum(g.rows)}
+            </td>
+            <td className="nowrap small" style={{ width: 150 }}>
+              {fmtTs(g.first)}
+              {g.last && g.first && g.last !== g.first ? <div className="muted">to {fmtTs(g.last)}</div> : null}
+            </td>
+            <td className="vals">
+              {g.values.length ? (
+                <>
+                  {g.values.slice(0, 5).map((v) => (
+                    <code key={v} title={v}>
+                      {trim(v, 110)}
+                    </code>
+                  ))}
+                  {g.values.length > 5 && <span className="small muted">+{g.values.length - 5} more</span>}
+                </>
+              ) : (
+                <span className="muted">–</span>
+              )}
+            </td>
+            <td style={{ width: 110 }}>
+              {Object.entries(g.statuses).map(([s, c]) => (
+                <span key={s} style={{ marginRight: 4 }}>
+                  <Badge sev={STATUS_SEV[s as Status]}>{STATUS_LABEL[s as Status]}</Badge>
+                  {c > 1 ? <span className="small muted"> ×{c}</span> : null}
+                </span>
+              ))}
+            </td>
+            {onUnlink && (
+              <td style={{ width: 60 }}>
+                <button className="btn link small" onClick={() => onUnlink(idsOf(g.ruleId))}>
+                  unlink
+                </button>
+              </td>
+            )}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
 
 /**
- * Review: walk the case in order (chains by score, then incidents by severity), decide on each
- * (rescore, status or verdict, note, in or out of the report), draft chain narratives with the
- * model, and set what the report prints. A chain and the findings whose rows are its steps are one
- * item: the verdict decides them together, unless a finding is unlinked. The model can propose a
- * decision per item (suggestions) or decide the whole queue (triage), every decision logged and
- * undoable. Decisions live on the findings and in the case's kv; the Report page reads them.
+ * Review: the case's verdict, live, and the queue that decides it. The verdict bar at the top is
+ * the report's cover computed from the decisions so far. The rail groups the queue into what is
+ * still to decide, what was confirmed, and the rest. Each item opens on its facts, one line per
+ * rule with the values it matched, so the decision rests on what was seen; the decision bar says
+ * what each choice does to the verdict before it is made. Chains and the findings whose rows are
+ * their steps are one item. The model can propose per item or triage the queue; every decision
+ * is logged and undoable. Decisions live on the findings and in the case's kv; the Report page
+ * prints them.
  */
 export function ReviewView() {
   const kase = useStore((s) => s.currentCase)
@@ -83,6 +170,7 @@ export function ReviewView() {
   const setEventsFilter = useStore((s) => s.setEventsFilter)
   const setMailsFilter = useStore((s) => s.setMailsFilter)
   const [findings, setFindings] = useState<Finding[]>([])
+  const [evidence, setEvidence] = useState<Evidence[]>([])
   const [chains, setChains] = useState<Chain[]>([])
   const [reviews, setReviews] = useState<Record<string, ChainReview>>({})
   const [settings, setSettings] = useState<ReportSettings | null>(null)
@@ -91,7 +179,6 @@ export function ReviewView() {
   const [showRun, setShowRun] = useState(false)
   const [askTriage, setAskTriage] = useState(false)
   const [triageDecided, setTriageDecided] = useState(false)
-  const [triageSummary, setTriageSummary] = useState(true)
   const [triage, setTriage] = useState<TriageProgress | null>(null)
   const triageAbort = useRef<AbortController | null>(null)
   const [suggesting, setSuggesting] = useState(false)
@@ -110,6 +197,7 @@ export function ReviewView() {
   useEffect(() => {
     if (!caseId) return
     reload()
+    getDb().evidence.where('caseId').equals(caseId).toArray().then(setEvidence)
     loadChains(caseId).then((r) => setChains(r?.chains ?? []))
     loadChainReviews(caseId).then(setReviews)
     loadReportSettings(caseId).then(setSettings)
@@ -119,17 +207,83 @@ export function ReviewView() {
 
   const incidents = useMemo(() => buildIncidents(findings, { chains, severityOf: (c) => chainSeverity(c, reviews[c.id]) }), [findings, chains, reviews])
   const queue = useMemo(() => reviewQueue(incidents, chains, reviews), [incidents, chains, reviews])
-  const visible = useMemo(() => (showDone ? queue : queue.filter((i) => !i.done)), [queue, showDone])
-  const current: ReviewItem | undefined = visible[Math.min(idx, Math.max(0, visible.length - 1))]
   const done = queue.filter((i) => i.done).length
   const undecided = queue.length - done
   const aiDecided = queue.filter((it) => (it.kind === 'chain' ? reviews[it.chain!.id]?.by === 'ai' : it.incident!.lead.decidedBy === 'ai')).length
+  const confirmedOf = (it: ReviewItem) => (it.kind === 'chain' ? reviews[it.chain!.id]?.verdict === 'confirmed' : it.incident!.status === 'escalated')
+  // the rail: what is still to decide, what was confirmed, the rest
+  const groups = useMemo(() => {
+    const todo = queue.filter((i) => !i.done)
+    const confirmed = queue.filter((i) => i.done && confirmedOf(i))
+    const rest = queue.filter((i) => i.done && !confirmedOf(i))
+    return [
+      { id: 'todo', label: 'to decide', items: todo },
+      { id: 'confirmed', label: 'confirmed', items: showDone ? confirmed : [] },
+      { id: 'rest', label: 'reviewed, benign, false positive', items: showDone ? rest : [] },
+    ]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queue, showDone, reviews])
+  const visible = useMemo(() => groups.flatMap((g) => g.items), [groups])
+  const current: ReviewItem | undefined = visible[Math.min(idx, Math.max(0, visible.length - 1))]
   const pending = useMemo(() => (current ? suggestionsFor(current, suggestions) : []), [current, suggestions])
   // editable text follows the current item
   useEffect(() => {
     setNote(current?.incident?.lead.notes ?? '')
     setNarrative(current?.chain ? (reviews[current.chain.id]?.narrative ?? '') : '')
   }, [current?.id, current?.incident?.lead.notes, current?.chain, reviews])
+
+  // the report's cover, live: the same selection and the same functions the Report page uses
+  const report = useMemo(() => {
+    if (!kase || !settings) return null
+    const selection = selectForReport(findings, chains, reviews, settings)
+    const grouped = buildIncidents(selection.findings, { chains: selection.chains, severityOf: (c) => chainSeverity(c, reviews[c.id]) })
+    const membersOf = new Map(grouped.filter((i) => i.kind === 'chain' && i.chain).map((i) => [i.chain!.id, i.findings.filter((f) => f.ruleId !== 'chain')]))
+    const data: ReportData = {
+      kase,
+      generatedAt: 0,
+      settings,
+      summary: '',
+      evidence,
+      chains: selection.chains,
+      reviews,
+      membersOf,
+      graphs: {},
+      campaignInsights: [],
+      incidents: grouped.filter((i) => i.kind !== 'chain'),
+      findings: selection.findings,
+      iocs: [],
+      timeline: [],
+      tasks: [],
+      notes: [],
+      undecided,
+      unprintedConfirmed: unprintedConfirmed(findings, chains, reviews, selection),
+    }
+    return { data, verdict: computeVerdict(data), confidence: computeConfidence(data), profile: threatProfile(data) }
+  }, [kase, settings, findings, chains, reviews, evidence, undecided])
+  /** what the verdict becomes if the current incident gets this status, or the current chain this verdict */
+  const effectOf = useCallback(
+    (decision: string): string | null => {
+      if (!report || !current) return null
+      const d = report.data
+      let next: ReportData
+      if (current.kind === 'chain' && current.chain) {
+        const c = current.chain
+        const r: ChainReview = { ...(reviews[c.id] ?? {}), verdict: decision as Verdict }
+        next = { ...d, reviews: { ...reviews, [c.id]: r }, undecided: d.undecided - (reviews[c.id]?.verdict ? 0 : 1) }
+      } else if (current.incident) {
+        const inc = current.incident
+        next = {
+          ...d,
+          incidents: d.incidents.map((i) => (i.id === inc.id ? { ...i, status: decision as Status } : i)),
+          undecided: d.undecided - (inc.status === 'new' ? 1 : 0),
+        }
+        if (!d.incidents.some((i) => i.id === inc.id) && decision === 'escalated') next.incidents = [...next.incidents, { ...inc, status: 'escalated' }]
+      } else return null
+      const v = computeVerdict(next)
+      return v.label === report.verdict.label ? null : v.label
+    },
+    [report, current, reviews],
+  )
 
   const go = useCallback((d: number) => setIdx((i) => Math.max(0, Math.min(visible.length - 1, i + d))), [visible.length])
 
@@ -215,8 +369,8 @@ export function ReviewView() {
           (s) =>
             `${fmtTs(s.ts)} (+${Math.round(s.offsetMin)} min) [${s.kind === 'mail' ? 'mail' : s.origin}] ${s.title}${s.artifacts.length ? ' | ties: ' + s.artifacts.join('; ') : ''}${s.findings.length ? ' | findings: ' + s.findings.map((f) => f.title).join('; ') : ''}`,
         )
-      const prompt = `Write the narrative of this attack chain for an incident report: 4 to 7 sentences, past tense, factual, no speculation beyond what the steps show, name the recipient, the seed mail, what tied the activity to it, and the impact. End with one sentence on what to verify or contain.\n\nRecipient: ${c.identityLabel}\nSeed mail: "${c.seed.subject}" from ${c.seed.fromAddr} at ${fmtTs(c.seed.ts)} (risk ${c.seed.risk}; findings: ${c.seed.findings.map((f) => f.title).join(', ') || 'none'})\nScore ${c.score} (${c.severity}), ${c.steps.length} steps over ${fmtTs(c.start)} to ${fmtTs(c.end)}, ${c.artifactLinks} artifact link(s)\nSteps:\n${steps.join('\n')}`
-      const msgs = await runAgent([{ role: 'user', content: prompt }], kase, { mode: 'report', tools: false, think: false, maxIterations: 1 })
+      const prompt = `Write the narrative of this attack chain for an incident report: 4 to 7 sentences, past tense, factual, no speculation beyond what the steps show, name the recipient, the seed mail, what tied the activity to it, and the impact. End with one sentence on what to verify or contain.\n\nRecipient: ${c.identityLabel}\nSeed ${c.seed.source ?? 'mails'}: "${c.seed.subject}" from ${c.seed.fromAddr} at ${fmtTs(c.seed.ts)} (risk ${c.seed.risk}; findings: ${c.seed.findings.map((f) => f.title).join(', ') || 'none'})\nScore ${c.score} (${c.severity}), ${c.steps.length} steps over ${fmtTs(c.start)} to ${fmtTs(c.end)}, ${c.artifactLinks} artifact link(s)\nSteps:\n${steps.join('\n')}`
+      const msgs = await runAgent([{ role: 'user', content: prompt }], kase, { mode: 'narrative', tools: false, think: false, maxIterations: 1 })
       const text = msgs
         .filter((m) => m.role === 'assistant')
         .map((m) => m.content)
@@ -264,12 +418,16 @@ export function ReviewView() {
     triageAbort.current = controller
     setTriage({ done: 0, total: items.length, batch: 0, batches: 0 })
     try {
+      // The model proposes; the analyst decides. Text in the evidence (a mail subject becomes an
+      // incident title) can steer a model, and a pass that wrote its answers straight away could
+      // take a critical incident out of the report with nobody looking. Each proposal waits on its
+      // item, with its reason, for the analyst to apply or dismiss.
       const run = await runTriage(kase, items, reviews, {
-        apply: true,
+        apply: false,
         signal: controller.signal,
         onProgress: setTriage,
-        draftSummary: triageSummary ? () => draftExecutiveSummary(kase, { signal: controller.signal }) : undefined,
       })
+      setSuggestions(await loadSuggestions(kase.id!))
       setLastRun(run)
       setShowRun(true)
       setReviews(await loadChainReviews(kase.id!))
@@ -335,16 +493,32 @@ export function ReviewView() {
   const willPrint = (sev: Severity) => SEVERITIES.indexOf(sev) <= SEVERITIES.indexOf(settings.minSeverity)
   const aiTag = (it: ReviewItem) => (it.kind === 'chain' ? reviews[it.chain!.id]?.by === 'ai' : it.incident!.lead.decidedBy === 'ai')
   const modelName = aiCfg.transport === 'claude' ? `Claude (${aiCfg.claudeModel})` : aiCfg.model || 'the default model'
+  /** what the rail says under an item: the rules and the first values they matched */
+  const factsLine = (it: ReviewItem) => {
+    if (it.kind === 'chain' || !it.incident) return it.sub
+    const gs = groupByRule(it.incident.findings, it.incident.entities)
+    const values = gs.flatMap((g) => g.values).slice(0, 2)
+    return `${gs.length} rule${gs.length === 1 ? '' : 's'} · ${fmtNum(it.incident.refs.length)} rows${values.length ? ' · ' + values.map((v) => trim(v, 40)).join(' · ') : ''}`
+  }
+  const effectLine = (options: { id: string; label: string }[]) => {
+    const parts = options.map((o) => ({ ...o, to: effectOf(o.id) })).filter((o) => o.to)
+    return parts.length ? <div className="effect">{parts.map((o) => `${o.label} → ${o.to}`).join(' · ')}</div> : null
+  }
 
   const suggestionBox = (it: ReviewItem, s: Suggestion) => (
     <div className="suggestion" key={s.target}>
       <div className="row" style={{ gap: 8, alignItems: 'baseline' }}>
         <b>the model proposes</b>
         <span className="small muted">
-          {s.by === 'chat' ? 'from the AI analyst chat' : 'asked from this page'}
+          {s.by === 'chat' ? 'from the AI analyst' : 'asked from this page'}
           {s.model ? ` · ${s.model}` : ''} · {fmtTs(s.at)}
           {s.target.startsWith('finding:') ? ` · on finding #${s.target.slice(8)}` : ''}
         </span>
+        {s.exposed && (
+          <Badge sev="medium" title="the model had read evidence text addressed to a model (asking to mark it benign, skip it…) before it proposed this: check it before applying">
+            read text aimed at AI
+          </Badge>
+        )}
       </div>
       <div className="row wrap" style={{ gap: 10 }}>
         {s.decision && <Badge sev={DECISION_SEV[s.decision]}>{DECISION_LABEL[s.decision] ?? s.decision}</Badge>}
@@ -386,7 +560,7 @@ export function ReviewView() {
           <h1>Review</h1>
           <span className="sub">
             {fmtNum(done)} of {fmtNum(queue.length)} decided{aiDecided ? ` (${aiDecided} by the model)` : ''} · {chains.length} chain{chains.length === 1 ? '' : 's'},{' '}
-            {incidents.filter((i) => i.kind !== 'chain').length} other incident{incidents.filter((i) => i.kind !== 'chain').length === 1 ? '' : 's'} · j / k move · r reviewed · e confirmed · f false
+            {incidents.filter((i) => i.kind !== 'chain').length} other incident{incidents.filter((i) => i.kind !== 'chain').length === 1 ? '' : 's'} · j / k move · e confirmed · r reviewed · f false
             positive · x in / out of the report
           </span>
         </div>
@@ -408,13 +582,8 @@ export function ReviewView() {
         <button className="btn sm" disabled={!!triage} onClick={() => setAskTriage(true)}>
           <IconAi /> triage with the model
         </button>
-        <button className="btn primary" onClick={() => setView('report')}>
-          <IconReport /> report
-        </button>
       </div>
-      <div className="review-progress">
-        <div style={{ width: `${queue.length ? (done / queue.length) * 100 : 0}%` }} />
-      </div>
+      {report && <VerdictBar verdict={report.verdict} confidence={report.confidence} profile={report.profile} done={done} total={queue.length} onReport={() => setView('report')} />}
       {triage && (
         <div className="bulkbar">
           <Spinner />
@@ -430,9 +599,13 @@ export function ReviewView() {
           </button>
         </div>
       )}
-      <div className="querybar">
-        <div className="row wrap" style={{ gap: 12 }}>
-          <span className="small muted">report contents:</span>
+      <details className="report-contents">
+        <summary>
+          report contents · from {settings.minSeverity} up · chain steps {settings.chainDetail}
+          {settings.onlyReviewed ? ' · reviewed items only' : ''}
+          {settings.includeFp ? ' · false positives included' : ''}
+        </summary>
+        <div className="row wrap" style={{ gap: 12, padding: '8px 0' }}>
           <label className="pill active">
             from{' '}
             <select value={settings.minSeverity} onChange={(e) => saveSettings({ minSeverity: e.target.value as Severity })}>
@@ -462,7 +635,7 @@ export function ReviewView() {
           <Toggle on={settings.onlyReviewed} onChange={(v) => saveSettings({ onlyReviewed: v })} label="only what was reviewed" />
           <Toggle on={settings.includeFp} onChange={(v) => saveSettings({ includeFp: v })} label="false positives" />
         </div>
-      </div>
+      </details>
       <div className="split" style={{ gridTemplateColumns: '340px 1fr' }}>
         <div className="left review-rail">
           {!visible.length && (
@@ -470,46 +643,65 @@ export function ReviewView() {
               {queue.length ? 'everything is decided' : 'run the rules and build the chains first'}
             </div>
           )}
-          {visible.map((it, i) => (
-            <div key={it.id} className={classNames('item', i === idx && 'active', it.done && 'done')} onClick={() => setIdx(i)}>
-              <Dot sev={it.severity} />
-              <div style={{ minWidth: 0 }}>
-                <div className="title ellipsis">{it.title}</div>
-                <div className="sub ellipsis">{it.sub}</div>
+          {groups.map((g) => {
+            if (!g.items.length) return null
+            const start = visible.indexOf(g.items[0])
+            return (
+              <div key={g.id} className="group">
+                <div className="group-head">
+                  <span>{g.label}</span>
+                  <span className="mono">{g.items.length}</span>
+                </div>
+                {g.items.map((it, j) => {
+                  const i = start + j
+                  return (
+                    <div key={it.id} className={classNames('item', i === idx && 'active', it.done && 'done')} onClick={() => setIdx(i)}>
+                      <Dot sev={it.severity} />
+                      <div style={{ minWidth: 0 }}>
+                        <div className="title ellipsis">{it.title}</div>
+                        <div className="sub ellipsis" title={factsLine(it)}>
+                          {factsLine(it)}
+                        </div>
+                      </div>
+                      <div className="col" style={{ alignItems: 'flex-end', gap: 2 }}>
+                        {it.done ? (
+                          <Badge sev={it.kind === 'chain' ? chainDecision(reviews[it.chain!.id]) : STATUS_SEV[it.incident!.status as Status]}>
+                            {it.kind === 'chain' ? reviews[it.chain!.id]?.verdict : STATUS_LABEL[it.incident!.status as Status]}
+                          </Badge>
+                        ) : (
+                          <span className="small muted">{i === idx ? 'now' : ''}</span>
+                        )}
+                        {aiTag(it) && (
+                          <span className="ai-tag" title="decided by the model; open the item for its reason">
+                            AI
+                          </span>
+                        )}
+                        {suggestionsFor(it, suggestions).length > 0 && !it.done && (
+                          <span className="ai-tag proposal" title="the model proposed a decision">
+                            proposal
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
-              <div className="col" style={{ alignItems: 'flex-end', gap: 2 }}>
-                {it.done ? (
-                  <Badge
-                    sev={
-                      it.kind === 'chain'
-                        ? reviews[it.chain!.id]?.verdict === 'confirmed'
-                          ? 'critical'
-                          : reviews[it.chain!.id]?.verdict === 'benign'
-                            ? 'ok'
-                            : 'medium'
-                        : STATUS_SEV[it.incident!.status as Status]
-                    }
-                  >
-                    {it.kind === 'chain' ? reviews[it.chain!.id]?.verdict : STATUS_LABEL[it.incident!.status as Status]}
-                  </Badge>
-                ) : (
-                  <span className="small muted">{i === idx ? 'now' : ''}</span>
-                )}
-                {aiTag(it) && (
-                  <span className="ai-tag" title="decided by the model; open the item for its reason">
-                    AI
-                  </span>
-                )}
-                {suggestionsFor(it, suggestions).length > 0 && !it.done && (
-                  <span className="ai-tag proposal" title="the model proposed a decision">
-                    proposal
-                  </span>
-                )}
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
         <div className="right" style={{ overflow: 'auto', padding: 16 }}>
+          {!undecided && queue.length > 0 && report && (
+            <div className="review-done">
+              <IconCheck />
+              <span>
+                Every item is decided. The report will open on <b>{report.verdict.label}</b>
+                {report.verdict.severity ? ` (${report.verdict.severity})` : ''}, confidence {report.confidence.level}.
+              </span>
+              <button className="btn sm primary" onClick={() => setView('report')}>
+                <IconReport /> print the report
+              </button>
+            </div>
+          )}
           {!current && <div className="muted">Nothing to review{showDone ? '' : ' that is still undecided'}.</div>}
 
           {inc && current && (
@@ -523,44 +715,73 @@ export function ReviewView() {
                     {inc.tsEnd && inc.tsEnd !== inc.ts ? ` → ${fmtTs(inc.tsEnd)}` : ''} · {fmtNum(inc.refs.length)} row(s)
                   </div>
                 </div>
-                <Badge sev={STATUS_SEV[inc.status as Status]}>{STATUS_LABEL[inc.status as Status]}</Badge>
+                <span className={`stamp st-${inc.status}`}>{STATUS_LABEL[inc.status as Status]}</span>
               </div>
-              <div className="controls">
-                <span>
-                  <span className="lbl">decision</span>
-                  <span className="segmented">
-                    {STATUSES.map((s) => (
-                      <button key={s} className={classNames(inc.status === s && 'active')} onClick={() => setStatus(inc, s)}>
-                        {STATUS_LABEL[s]}
-                      </button>
-                    ))}
-                  </span>
-                </span>
-                <span>
-                  <span className="lbl">severity</span>
-                  <span className="segmented">
-                    {SEVERITIES.map((s) => (
-                      <button
-                        key={s}
-                        className={classNames(inc.severity === s && 'active')}
-                        onClick={() => rescore(inc, s)}
-                        title={inc.lead.severityOverride ? `rule severity ${inc.lead.severity}` : 'rescore the incident'}
-                      >
-                        {s}
-                      </button>
-                    ))}
-                  </span>
-                  {inc.findings.some((f) => f.severityOverride) && (
-                    <button className="btn link small" onClick={() => rescore(inc, null)}>
-                      reset
-                    </button>
+              <div className="section">
+                <h3>
+                  What was seen <span className="muted">· one line per rule, with the values it matched</span>
+                </h3>
+                <Facts findings={inc.findings} said={inc.entities} />
+                <div className="row wrap" style={{ gap: 6, marginTop: 6 }}>
+                  {Object.entries(inc.entities)
+                    .slice(0, 8)
+                    .map(([k, v]) => {
+                      const kind = entityKind(k)
+                      return (
+                        <span key={k} className={classNames('pill', kind && 'click')} onClick={() => kind && setEntity({ kind, value: String(v) })} title={kind ? 'open the entity page' : k}>
+                          <span className="muted">{k}</span> {String(v)}
+                        </span>
+                      )
+                    })}
+                  {inc.kind === 'mail' && (
+                    <span
+                      className="pill click"
+                      onClick={() => {
+                        setFocus({ source: 'mails', id: inc.refs[0] })
+                        setView('mails')
+                      }}
+                    >
+                      open the mail
+                    </span>
                   )}
-                </span>
-                <Toggle
-                  on={!excluded}
-                  onChange={(v) => exclude(inc, !v)}
-                  label={willPrint(inc.severity) && !excluded && (inc.status !== 'false_positive' || settings.includeFp) ? 'in the report' : 'not in the report'}
-                />
+                </div>
+              </div>
+              <div className="decide">
+                <div className="choices">
+                  {DECISIONS.map((d) => (
+                    <button key={d.id} className={classNames('choice', d.tone, inc.status === d.id && 'active')} onClick={() => setStatus(inc, d.id)}>
+                      {d.label} <kbd>{d.key}</kbd>
+                    </button>
+                  ))}
+                </div>
+                {effectLine(DECISIONS)}
+                <div className="controls">
+                  <span>
+                    <span className="lbl">severity</span>
+                    <span className="segmented">
+                      {SEVERITIES.map((s) => (
+                        <button
+                          key={s}
+                          className={classNames(inc.severity === s && 'active')}
+                          onClick={() => rescore(inc, s)}
+                          title={inc.lead.severityOverride ? `rule severity ${inc.lead.severity}` : 'rescore the incident'}
+                        >
+                          {s}
+                        </button>
+                      ))}
+                    </span>
+                    {inc.findings.some((f) => f.severityOverride) && (
+                      <button className="btn link small" onClick={() => rescore(inc, null)}>
+                        reset
+                      </button>
+                    )}
+                  </span>
+                  <Toggle
+                    on={!excluded}
+                    onChange={(v) => exclude(inc, !v)}
+                    label={willPrint(inc.severity) && !excluded && (inc.status !== 'false_positive' || settings.includeFp) ? 'in the report' : 'not in the report'}
+                  />
+                </div>
               </div>
               {inc.lead.decidedBy === 'ai' && inc.lead.aiReason && (
                 <div className="ai-note">
@@ -585,70 +806,12 @@ export function ReviewView() {
               )}
               {pending.map((s) => suggestionBox(current, s))}
               <div className="section">
-                <h3>Findings</h3>
-                <table className="table compact">
-                  <tbody>
-                    {inc.findings.map((f) => (
-                      <tr key={f.id}>
-                        <td style={{ width: 100 }}>
-                          <Sev sev={effectiveSeverity(f)} />
-                        </td>
-                        <td className="sans">
-                          {f.title}
-                          {f.escalation ? <span className="muted"> · {f.escalation}</span> : null}
-                        </td>
-                        <td className="muted">{f.ruleId}</td>
-                        <td style={{ width: 60 }}>{fmtNum(f.count)}</td>
-                        <td style={{ width: 110 }}>
-                          <Badge sev={STATUS_SEV[f.status as Status]}>{STATUS_LABEL[f.status as Status]}</Badge>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="section">
-                <h3>Entities</h3>
-                <div className="highlight">
-                  {Object.entries(inc.entities)
-                    .slice(0, 10)
-                    .map(([k, v]) => (
-                      <div className="f" key={k}>
-                        <span className="k">{k}</span>
-                        <span
-                          className="v"
-                          onClick={() => {
-                            const kind = entityKind(k)
-                            if (kind) setEntity({ kind, value: String(v) })
-                          }}
-                        >
-                          {String(v)}
-                        </span>
-                      </div>
-                    ))}
-                  {inc.kind === 'mail' && (
-                    <div className="f">
-                      <span className="k">mail</span>
-                      <span
-                        className="v"
-                        onClick={() => {
-                          setFocus({ source: 'mails', id: inc.refs[0] })
-                          setView('mails')
-                        }}
-                      >
-                        open #{inc.refs[0]}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="section">
                 <h3>
                   Analyst note <span className="muted">(printed with the incident)</span>
                 </h3>
                 <textarea
                   className="textarea"
-                  style={{ minHeight: 90 }}
+                  style={{ minHeight: 80 }}
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
                   onBlur={() => saveNote(inc)}
@@ -673,7 +836,7 @@ export function ReviewView() {
                     useStore
                       .getState()
                       .setAiPrompt(
-                        `Assess this incident for the report and record your proposal with suggest_review. "${inc.title}" (${inc.severity}), findings: ${inc.findings.map((f) => `#${f.id} ${f.severity} ${f.title}`).join('; ')}. Entities: ${JSON.stringify(inc.entities)}. Referenced ${inc.source} rows: ${inc.refs.slice(0, 20).join(', ')}.`,
+                        `Assess this incident for the report: read its findings and rows with get_finding, then queue your proposal with propose_decision, citing the rows. "${inc.title}" (${inc.severity}), findings: ${inc.findings.map((f) => `finding:${f.id} ${f.severity} ${f.title}`).join('; ')}. Entities: ${JSON.stringify(inc.entities)}.`,
                       )
                     setView('ai')
                   }}
@@ -704,34 +867,59 @@ export function ReviewView() {
                     score {ch.score} · {ch.steps.length} steps · {ch.artifactLinks} artifact link(s) · {fmtTs(ch.start)} → {fmtTs(ch.end)} · seed "{ch.seed.subject}" from {ch.seed.fromAddr}
                   </div>
                 </div>
-                {chRev?.verdict && <Badge sev={chRev.verdict === 'confirmed' ? 'critical' : chRev.verdict === 'benign' ? 'ok' : 'medium'}>{chRev.verdict}</Badge>}
+                {chRev?.verdict && (
+                  <span className={`stamp ${chRev.verdict === 'confirmed' ? 'st-escalated' : chRev.verdict === 'benign' ? 'st-false_positive' : 'st-reviewed'}`}>{chRev.verdict}</span>
+                )}
               </div>
-              <div className="controls">
-                <span>
-                  <span className="lbl">verdict</span>
-                  <span className="segmented">
-                    {VERDICTS.map((v) => (
-                      <button key={v.id} className={classNames(chRev?.verdict === v.id && 'active')} onClick={() => chainPatch(ch, { verdict: v.id })}>
-                        {v.label}
-                      </button>
-                    ))}
+              <div className="section">
+                <h3>
+                  What was seen <span className="muted">· the findings whose rows are steps of this chain; the verdict sets their status, unlink one to decide on it separately</span>
+                </h3>
+                {members.length ? (
+                  <Facts findings={members} said={{}} onUnlink={(ids) => unlink(ids, true)} />
+                ) : (
+                  <div className="small muted">
+                    no finding has its rows among the chain's steps{findings.some((f) => f.chainUnlinked) ? ' (some were unlinked and sit in the queue on their own)' : ''}
+                  </div>
+                )}
+                <div className="small" style={{ marginTop: 6 }}>
+                  {ch.summary}
+                </div>
+                {ch.scoreBreakdown && (
+                  <div className="small mono muted">
+                    score {ch.score} = seed {ch.scoreBreakdown.seed} + links {ch.scoreBreakdown.links} + steps {ch.scoreBreakdown.steps} + findings {ch.scoreBreakdown.findings} + sources{' '}
+                    {ch.scoreBreakdown.sources}
+                    {ch.scoreBreakdown.cap ? ` · capped at ${ch.scoreBreakdown.cap}` : ''} · the report prints {ch.steps.filter((s) => stepVisible(s, settings.chainDetail)).length} of{' '}
+                    {ch.steps.length} steps at the "{settings.chainDetail}" level
+                  </div>
+                )}
+              </div>
+              <div className="decide">
+                <div className="choices">
+                  {VERDICTS.map((v) => (
+                    <button key={v.id} className={classNames('choice', v.tone, chRev?.verdict === v.id && 'active')} onClick={() => chainPatch(ch, { verdict: v.id })}>
+                      {v.label} <kbd>{v.key}</kbd>
+                    </button>
+                  ))}
+                </div>
+                {effectLine(VERDICTS)}
+                <div className="controls">
+                  <span>
+                    <span className="lbl">severity</span>
+                    <span className="segmented">
+                      {SEVERITIES.map((s) => (
+                        <button key={s} className={classNames(chainSeverity(ch, chRev) === s && 'active')} onClick={() => chainPatch(ch, { severityOverride: s === ch.severity ? undefined : s })}>
+                          {s}
+                        </button>
+                      ))}
+                    </span>
                   </span>
-                </span>
-                <span>
-                  <span className="lbl">severity</span>
-                  <span className="segmented">
-                    {SEVERITIES.map((s) => (
-                      <button key={s} className={classNames(chainSeverity(ch, chRev) === s && 'active')} onClick={() => chainPatch(ch, { severityOverride: s === ch.severity ? undefined : s })}>
-                        {s}
-                      </button>
-                    ))}
-                  </span>
-                </span>
-                <Toggle
-                  on={chainIncluded(ch, chRev)}
-                  onChange={(v) => chainPatch(ch, { include: v })}
-                  label={chainIncluded(ch, chRev) && willPrint(chainSeverity(ch, chRev)) && settings.includeChains ? 'in the report' : 'not in the report'}
-                />
+                  <Toggle
+                    on={chainIncluded(ch, chRev)}
+                    onChange={(v) => chainPatch(ch, { include: v })}
+                    label={chainIncluded(ch, chRev) && willPrint(chainSeverity(ch, chRev)) && settings.includeChains ? 'in the report' : 'not in the report'}
+                  />
+                </div>
               </div>
               {chRev?.by === 'ai' && chRev.aiReason && (
                 <div className="ai-note">
@@ -739,73 +927,21 @@ export function ReviewView() {
                 </div>
               )}
               {pending.map((s) => suggestionBox(current, s))}
-              <div className="section">
-                <h3>
-                  Findings linked to this chain <span className="muted">({members.length}) · the verdict sets their status; unlink one to decide on it separately</span>
-                </h3>
-                {members.length ? (
-                  <table className="table compact">
-                    <tbody>
-                      {members.map((f) => (
-                        <tr key={f.id}>
-                          <td style={{ width: 100 }}>
-                            <Sev sev={effectiveSeverity(f)} />
-                          </td>
-                          <td className="sans">
-                            {f.title}
-                            {f.escalation ? <span className="muted"> · {f.escalation}</span> : null}
-                          </td>
-                          <td className="muted">{f.ruleId}</td>
-                          <td style={{ width: 60 }}>{fmtNum(f.count)}</td>
-                          <td style={{ width: 110 }}>
-                            <Badge sev={STATUS_SEV[f.status as Status]}>{STATUS_LABEL[f.status as Status]}</Badge>
-                          </td>
-                          <td style={{ width: 70 }}>
-                            <button className="btn link small" onClick={() => unlink([f.id!], true)}>
-                              unlink
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                ) : (
-                  <div className="small muted">
-                    no finding has its rows among the chain's steps{findings.some((f) => f.chainUnlinked) ? ' (some were unlinked and sit in the queue on their own)' : ''}
-                  </div>
-                )}
-                {members.length > 1 && (
-                  <div className="row">
-                    <button
-                      className="btn sm ghost"
-                      onClick={() =>
-                        unlink(
-                          members.map((f) => f.id!),
-                          true,
-                        )
-                      }
-                    >
-                      unlink all {members.length}
-                    </button>
-                  </div>
-                )}
-              </div>
-              <div className="section">
-                <h3>
-                  What the report will print{' '}
-                  <span className="muted">
-                    ({ch.steps.filter((s) => stepVisible(s, settings.chainDetail)).length} of {ch.steps.length} steps at the "{settings.chainDetail}" level)
-                  </span>
-                </h3>
-                <div className="small">{ch.summary}</div>
-                {ch.scoreBreakdown && (
-                  <div className="small mono muted">
-                    score {ch.score} = seed {ch.scoreBreakdown.seed} + links {ch.scoreBreakdown.links} + steps {ch.scoreBreakdown.steps} + findings {ch.scoreBreakdown.findings} + sources{' '}
-                    {ch.scoreBreakdown.sources}
-                    {ch.scoreBreakdown.cap ? ` · capped at ${ch.scoreBreakdown.cap}` : ''}
-                  </div>
-                )}
-              </div>
+              {members.length > 1 && (
+                <div className="row">
+                  <button
+                    className="btn sm ghost"
+                    onClick={() =>
+                      unlink(
+                        members.map((f) => f.id!),
+                        true,
+                      )
+                    }
+                  >
+                    unlink all {members.length}
+                  </button>
+                </div>
+              )}
               <div className="section">
                 <h3>
                   Narrative <span className="muted">(replaces the automatic summary in the report)</span>
@@ -838,10 +974,10 @@ export function ReviewView() {
                   className="btn sm"
                   onClick={() => {
                     setFocusChain(ch.id)
-                    setView('chains')
+                    setView('stories')
                   }}
                 >
-                  open the chain
+                  open its story
                 </button>
                 <AddToTimeline
                   ts={ch.start}
@@ -885,21 +1021,20 @@ export function ReviewView() {
         >
           <div className="col" style={{ gap: 10 }}>
             <div>
-              The model decides on every item in the queue: chains get a verdict and a report narrative, incidents a decision and a note, both a severity, whether the report carries them, and a
-              reason. Chains may also have findings unlinked when they do not belong. Narratives and notes the analyst wrote are kept. Every decision is written straight away, tagged "AI", listed
-              afterwards with its reason, and can be undone one by one or all at once.
+              The model proposes a decision on every item in the queue: a verdict or decision, a severity, whether the report carries it, and a reason. Nothing is written. Each proposal waits on its
+              item, tagged "AI", until you apply or dismiss it. Text in the evidence can try to steer a model, so a proposal to lower a severity or leave an item out of the report deserves a second
+              look.
             </div>
             <div className="small muted">
               {modelName} ·{' '}
               {aiCfg.transport === 'claude'
                 ? 'Claude Code on the server machine: the items (findings, entities, chain steps) leave for Anthropic'
-                : aiCfg.transport === 'browser'
-                  ? 'your local Ollama: nothing leaves this machine'
+                : transportLabel(aiCfg).local
+                  ? `your local model (${transportLabel(aiCfg).where}): nothing leaves this machine`
                   : "the server's Ollama"}{' '}
               · {aiCfg.transport === 'claude' ? 8 : 4} items per call
             </div>
             <Toggle on={triageDecided} onChange={setTriageDecided} label={`re-triage the ${done} item${done === 1 ? '' : 's'} already decided too`} />
-            <Toggle on={triageSummary} onChange={setTriageSummary} label="draft the executive summary when done (one more call)" />
             <div>
               <b>{fmtNum(triageDecided ? queue.length : undecided)}</b> item{(triageDecided ? queue.length : undecided) === 1 ? '' : 's'} will be sent.
             </div>
@@ -912,7 +1047,8 @@ export function ReviewView() {
           wide
           title={
             <span>
-              AI triage · {lastRun.entries.filter((e) => !e.undone).length} decision{lastRun.entries.filter((e) => !e.undone).length === 1 ? '' : 's'}{' '}
+              AI triage · {lastRun.entries.filter((e) => !e.undone).length} {lastRun.proposed ? 'proposal' : 'decision'}
+              {lastRun.entries.filter((e) => !e.undone).length === 1 ? '' : 's'}{' '}
               <span className="muted small">
                 · {fmtTs(lastRun.at)}
                 {lastRun.model ? ` · ${lastRun.model}` : ''}
@@ -922,9 +1058,13 @@ export function ReviewView() {
           onClose={() => setShowRun(false)}
           footer={
             <>
-              <button className="btn ghost sm" disabled={lastRun.entries.every((e) => e.undone)} onClick={undoAll}>
-                undo all
-              </button>
+              {lastRun.proposed ? (
+                <span className="small muted">nothing was written: apply or dismiss each proposal on its item</span>
+              ) : (
+                <button className="btn ghost sm" disabled={lastRun.entries.every((e) => e.undone)} onClick={undoAll}>
+                  undo all
+                </button>
+              )}
               <span className="spacer" />
               <button className="btn primary sm" onClick={() => setShowRun(false)}>
                 close
@@ -1012,7 +1152,9 @@ export function ReviewView() {
                       {e.wrote && !e.undone ? <span className="muted"> · {e.wrote} written</span> : null}
                     </td>
                     <td className="nowrap">
-                      {e.undone ? (
+                      {lastRun.proposed ? (
+                        <span className="small muted">proposed</span>
+                      ) : e.undone ? (
                         <span className="small muted">undone</span>
                       ) : (
                         <button className="btn link small" onClick={() => undo(e)}>

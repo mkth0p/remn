@@ -107,3 +107,75 @@ def test_nested_eml_attachment():
     r = analyze_attachment("forwarded.eml", inner, "message/rfc822")
     assert "nested_mail" in r["flags"]
     assert "nested_executable" in r["flags"]
+
+
+def _bz2_zeros(mib: int) -> bytes:
+    import bz2
+
+    comp = bz2.BZ2Compressor(9)
+    return b"".join(comp.compress(b"\0" * 2**20) for _ in range(mib)) + comp.flush()
+
+
+def test_bz2_bomb_is_bounded_and_flagged():
+    import tracemalloc
+
+    from services.analysis.attachments import archive
+
+    bomb = _bz2_zeros(256)  # a few hundred bytes that expand to 256 MiB
+    assert len(bomb) < 1024
+    tracemalloc.start()
+    r = analyze_attachment("report.bz2", bomb)
+    peak = tracemalloc.get_traced_memory()[1]
+    tracemalloc.stop()
+    assert peak < 4 * archive.MAX_NESTED_BYTES
+    assert {"zip_bomb", "archive_partially_analyzed"} <= set(r["flags"])
+    assert r["details"]["archive"]["truncatedAt"] == archive.MAX_NESTED_BYTES
+    assert r["risk"] >= 80
+
+
+def test_xz_bomb_is_bounded():
+    import lzma
+
+    from services.analysis.attachments.archive import MAX_NESTED_BYTES, bounded_decompress
+
+    out, truncated = bounded_decompress("xz", lzma.compress(b"\0" * (64 * 2**20)), MAX_NESTED_BYTES)
+    assert truncated and len(out) == MAX_NESTED_BYTES
+
+
+def test_bounded_decompress_keeps_one_shot_semantics():
+    import bz2
+
+    import pytest
+
+    from services.analysis.attachments.archive import bounded_decompress
+
+    two_streams = bz2.compress(b"first ") + bz2.compress(b"second")
+    assert bounded_decompress("bz2", two_streams, 1024) == (b"first second", False)
+    assert bounded_decompress("bz2", bz2.compress(b"data") + b"trailing junk", 1024) == (b"data", False)
+    with pytest.raises(EOFError):
+        bounded_decompress("bz2", bz2.compress(b"x" * 10_000)[:-8], 1 << 20)
+
+
+def test_zip_members_with_unbounded_compression_are_not_read():
+    from services.common import read_zip_member
+
+    b = io.BytesIO()
+    with zipfile.ZipFile(b, "w") as z:
+        z.writestr("deflated.txt", b"a" * 1000, compress_type=zipfile.ZIP_DEFLATED)
+        z.writestr("bzip2.txt", b"a" * 1000, compress_type=zipfile.ZIP_BZIP2)
+        z.writestr("big.txt", b"a" * 5000, compress_type=zipfile.ZIP_DEFLATED)
+    with zipfile.ZipFile(io.BytesIO(b.getvalue())) as zf:
+        assert read_zip_member(zf, zf.getinfo("deflated.txt"), 4096) == b"a" * 1000
+        assert read_zip_member(zf, zf.getinfo("bzip2.txt"), 4096) is None
+        assert read_zip_member(zf, zf.getinfo("big.txt"), 4096) is None
+
+
+def test_oversized_ooxml_part_is_skipped_not_read():
+    from services.analysis.attachments import office
+
+    b = io.BytesIO()
+    with zipfile.ZipFile(b, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", "<Types/>")
+        z.writestr("word/document.xml", b"<w:document>" + b" " * (office.MAX_PART_BYTES + 1) + b"</w:document>")
+    inv = office._ooxml_inventory(b.getvalue())
+    assert inv["skippedParts"] == 1

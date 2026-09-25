@@ -137,6 +137,25 @@ def test_mail_write_nested_filters_and_iocs(store):
     assert any(f["value"] == "docx" for f in Q.facets(store, "mails", "attExt"))
 
 
+def test_reputation_worst_ranks_malicious_above_suspicious(store):
+    # max() over the labels was alphabetical: a mail with a malicious origin IP and a
+    # suspicious sender domain came out 'suspicious'.
+    src = MailSource("emls.zip", None, _zip_of_samples(), ParseContext(), str(store.dir))
+    w = MailWriter(store, 2)
+    for row in src:
+        w.add(row)
+    w.flush()
+    mail = Q.search(store, "mails", {"conditions": [{"field": "originIp", "op": "eq", "value": "185.220.101.4"}]})["rows"][0]
+    store.set_reputation(
+        [
+            {"kind": "ip", "value": "185.220.101.4", "verdict": "malicious", "tags": [], "checkedAt": 1},
+            {"kind": "domain", "value": mail["fromRegistrable"], "verdict": "suspicious", "tags": [], "checkedAt": 1},
+        ]
+    )
+    store.mirror_reputation_to_mails()
+    assert Q.get_row(store, "mails", mail["id"])["reputationWorst"] == "malicious"
+
+
 def test_server_rules_engine(store):
     w = EventWriter(store, 1)
     # brute force burst from 10.9.9.9 then a success; scattered failures elsewhere; night logon
@@ -479,11 +498,12 @@ def test_export_roundtrip(tmp_path):
         for ln in lines:
             kinds[ln["type"]] = kinds.get(ln["type"], 0) + 1
         assert kinds == {"evidence": 2, "event": 50, "mail": 5}
+        assert all(isinstance(row.get("id"), int) for row in lines)
 
         # rebuild into a fresh store with the same writers /import uses
         dst = reg.get(str(uuid.uuid4()))
-        ew2 = EventWriter(dst, 1)
-        mw2 = MailWriter(dst, 2)
+        ew2 = EventWriter(dst, 1, preserve_ids=True)
+        mw2 = MailWriter(dst, 2, preserve_ids=True)
         for ln in lines:
             t = ln.pop("type")
             if t == "evidence":
