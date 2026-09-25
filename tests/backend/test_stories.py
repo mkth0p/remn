@@ -489,3 +489,9 @@ def test_the_browser_sends_every_field_the_story_engine_reads():
     for name, value in (("REMOTE_SCRIPT", REMOTE_SCRIPT), ("PRIVATE_ANSWER", PRIVATE_ANSWER)):
         literal = re.search(rf"export const {name} = '([^']*)'", ts).group(1)
         assert literal.replace("\\\\", "\\") == value, name
+    # and a cut selection reads the same records first
+    from services.analysis.stories import WEIGHTY_EVENT_IDS, WEIGHTY_OPERATIONS
+
+    block = ts[ts.index("export const WEIGHTY_EVENT_IDS") :]
+    assert [int(x) for x in re.findall(r"\d+", block[: block.index("]")])] == list(WEIGHTY_EVENT_IDS)
+    assert listed("WEIGHTY_OPERATIONS") == set(WEIGHTY_OPERATIONS)

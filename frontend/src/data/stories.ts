@@ -210,10 +210,14 @@ export interface Story {
   accounts: string[]
   ips: string[]
   attackerAddresses: string[]
+  /** addresses the findings name that most of the organisation's users sign in from: they tie nothing */
+  sharedAddresses?: string[]
   chains: string[]
   findings: string[]
   campaigns: string[]
   gaps: string[]
+  /** how many steps the story cut past max_steps (its gaps say so too) */
+  stepsTruncated?: number
   lineage: { sessions: Session[]; hops: Hop[]; processes: Process[]; devices?: Device[] }
 }
 export interface CampaignTarget {
@@ -442,6 +446,71 @@ export function windows(times: number[], before = WINDOW_BEFORE, after = WINDOW_
   return spans.length > most ? [[spans[0][0], spans[spans.length - 1][1]]] : spans
 }
 
+/**
+ * A selection past its cap reads first the records that are something (a task, a service, an account or
+ * group changed, a log cleared, explicit credentials, a mailbox rule or permission, a consent), then those
+ * nearest a flag, so a late phase is not what a cut loses first. Mirrors of stories.py, compared by a test.
+ */
+export const WEIGHTY_EVENT_IDS = [104, 1102, 4648, 4697, 4698, 4702, 4720, 4722, 4724, 4728, 4732, 4738, 4756, 4781, 7045]
+export const WEIGHTY_OPERATIONS = [
+  'add app role assignment grant to user.',
+  'add member to role.',
+  'add user.',
+  'add-mailboxpermission',
+  'anonymouslinkcreated',
+  'consent to application.',
+  'filesyncdownloadedfull',
+  'new-inboxrule',
+  'reset user password.',
+  'set-inboxrule',
+  'set-mailbox',
+  'update conditional access policy.',
+  'updateinboxrules',
+] as const
+const WEIGHTY_IDS = new Set(WEIGHTY_EVENT_IDS)
+const WEIGHTY_OPS = new Set<string>(WEIGHTY_OPERATIONS)
+
+/** How far a time is from the nearest flag (times sorted). */
+function flagDistance(times: number[], t: number): number {
+  let lo = 0
+  let hi = times.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (times[mid] < t) lo = mid + 1
+    else hi = mid
+  }
+  return Math.min(lo < times.length ? times[lo] - t : Infinity, lo > 0 ? t - times[lo - 1] : Infinity)
+}
+
+interface Candidate {
+  id: number
+  rank: number
+  distance: number
+  ts: number
+  kind: string
+}
+const byPriority = (a: Candidate, b: Candidate) => a.rank - b.rank || a.distance - b.distance || a.ts - b.ts || a.id - b.id
+
+/** A capped selection: add picks, then keep() the first `cap` by priority, the kinds of those cut going to `cut`; trimmed as it grows, so a large case holds at most twice the cap. */
+function capped(cap: number, cut: Set<string>) {
+  let picks: Candidate[] = []
+  const keep = () => {
+    if (picks.length > cap) {
+      picks.sort(byPriority)
+      for (const p of picks.slice(cap)) cut.add(p.kind)
+      picks = picks.slice(0, cap)
+    }
+    return picks
+  }
+  return {
+    add(p: Candidate) {
+      picks.push(p)
+      if (picks.length >= 2 * cap) keep()
+    },
+    keep,
+  }
+}
+
 function storyData(data: unknown): Record<string, unknown> | undefined {
   if (!data || typeof data !== 'object') return undefined
   const src = data as Record<string, unknown>
@@ -525,6 +594,7 @@ export async function buildStories(kase: Case): Promise<StoryResult> {
 export async function selectRows(
   caseId: number,
   findings: ReturnType<typeof slimFinding>[],
+  cap = EVENT_CAP,
 ): Promise<{ events: Record<string, unknown>[]; mails: ReturnType<typeof slimMail>[]; truncated: string[] }> {
   const db = getDb()
   const truncated = new Set<string>()
@@ -563,9 +633,12 @@ export async function selectRows(
     }
   const events = new Map<number, Record<string, unknown>>()
   for (const e of flagged) events.set(e.id!, slimEvent(e as unknown as Record<string, unknown>))
-  const spans = windows([...flagged.map((e) => e.ts ?? 0), ...mails.map((m) => m.date ?? 0)])
-  let picked = 0
-  let dnsPicked = 0
+  const times = [...flagged.map((e) => e.ts ?? 0), ...mails.map((m) => m.date ?? 0)]
+  const flagTimes = [...new Set(times.filter((t) => t))].sort((a, b) => a - b)
+  const spans = windows(times)
+  // past a cap: the records that are something first, then those nearest a flag (as stories_for_store orders them)
+  const around = capped(cap, truncated)
+  const answers = capped(DNS_CAP, truncated)
   for (const [lo, hi] of spans) {
     await db.events
       .where('[caseId+ts]')
@@ -581,20 +654,18 @@ export async function selectRows(
         const fromIp = ips.has(ipOf(row.ipAddress))
         const flaggedHost = hosts.has(String(row.computer ?? '').toLowerCase())
         const onHost = flaggedHost && (LINEAGE.has(Number(row.eventId)) || lineageExtra(row))
+        const ts = e.ts ?? 0
+        const weighty = WEIGHTY_IDS.has(Number(row.eventId)) || WEIGHTY_OPS.has(String(row.operation ?? '').toLowerCase())
+        const pick = { id: e.id!, rank: weighty ? 0 : 1, distance: flagDistance(flagTimes, ts), ts }
         if (!named && !fromIp && !onHost) {
-          if (flaggedHost && dnsAnswer(row)) {
-            if (++dnsPicked > DNS_CAP) truncated.add('dns')
-            else events.set(e.id!, slimEvent(row))
-          }
+          if (flaggedHost && dnsAnswer(row)) answers.add({ ...pick, kind: 'dns' })
           return
         }
-        if (++picked > EVENT_CAP) {
-          truncated.add(named ? 'identities' : fromIp ? 'addresses' : 'hosts')
-          return
-        }
-        events.set(e.id!, slimEvent(row))
+        around.add({ ...pick, kind: named ? 'identities' : fromIp ? 'addresses' : 'hosts' })
       })
   }
+  const kept = [...around.keep(), ...answers.keep()].sort((a, b) => a.ts - b.ts || a.id - b.id).map((p) => p.id)
+  for (const row of await db.events.bulkGet(kept)) if (row) events.set(row.id!, slimEvent(row as unknown as Record<string, unknown>))
   // the DHCP server's leases: they have no time, so they are read whatever the windows
   let dhcpPicked = 0
   await db.events
@@ -608,7 +679,10 @@ export async function selectRows(
     })
   const inWindow = (t: number | null) => t != null && spans.some(([lo, hi]) => t >= lo && t <= hi)
   const replies = allMails.filter((m) => !mails.includes(m) && inWindow(m.date) && names.has(accountName(m.fromAddr) ?? ''))
-  if (replies.length > MAIL_CAP) truncated.add('replies')
+  if (replies.length > MAIL_CAP) {
+    truncated.add('replies')
+    replies.sort((a, b) => flagDistance(flagTimes, a.date ?? 0) - flagDistance(flagTimes, b.date ?? 0) || (a.date ?? 0) - (b.date ?? 0) || (a.id ?? 0) - (b.id ?? 0))
+  }
   return { events: [...events.values()], mails: [...mails, ...replies.slice(0, MAIL_CAP)].map(slimMail), truncated: [...truncated] }
 }
 
@@ -621,15 +695,18 @@ export async function loadStories(caseId: number): Promise<StoryResult | null> {
 export function storyCoverageWarnings(stats: StoryResult['stats'] | undefined): string[] {
   const labels: Record<string, string> = {
     flagged: `More than ${EVENT_CAP.toLocaleString('en')} records carry findings: the stories read the first ${EVENT_CAP.toLocaleString('en')}.`,
-    identities: `The records naming the flagged people passed ${EVENT_CAP.toLocaleString('en')}: the stories read the first ones in time.`,
-    addresses: `The records from the flagged addresses passed ${EVENT_CAP.toLocaleString('en')}: the stories read the first ones in time.`,
-    hosts: `The logons, processes and services on the flagged hosts passed ${EVENT_CAP.toLocaleString('en')}: the stories read the first ones in time.`,
-    replies: `Only the first ${MAIL_CAP.toLocaleString('en')} mails the flagged people sent were read.`,
-    dns: `The DNS answers on the flagged hosts passed ${DNS_CAP.toLocaleString('en')}: the addresses they give to hosts come from the first ones in time.`,
+    identities: `The records naming the flagged people passed ${EVENT_CAP.toLocaleString('en')}: the stories read the tasks, services and account changes among them first, then those nearest the flags.`,
+    addresses: `The records from the flagged addresses passed ${EVENT_CAP.toLocaleString('en')}: the stories read the tasks, services and account changes among them first, then those nearest the flags.`,
+    hosts: `The logons, processes and services on the flagged hosts passed ${EVENT_CAP.toLocaleString('en')}: the stories read the tasks, services and account changes among them first, then those nearest the flags.`,
+    replies: `Only ${MAIL_CAP.toLocaleString('en')} of the mails the flagged people sent were read, those nearest the flags.`,
+    dns: `The DNS answers on the flagged hosts passed ${DNS_CAP.toLocaleString('en')}: the addresses they give to hosts come from those nearest the flags.`,
     dhcp: `The DHCP leases passed ${DHCP_CAP.toLocaleString('en')}: the addresses they give to hosts come from the first ones.`,
+    'name-keys': 'The flagged records name more than 2,000 accounts: the stories read the records of the 2,000 they name most.',
+    'host-keys': 'More than 500 hosts carry flags: the stories read the logons, processes and services of the 500 with the most.',
+    'address-keys': 'The flags name more than 500 outside addresses: the stories read the records from the 500 they name most.',
   }
   const out = (stats?.truncated ?? []).map((k) => labels[k]).filter(Boolean)
-  if (stats?.storiesTruncated) out.push('Only the highest-scoring 200 stories are kept.')
+  if (stats?.storiesTruncated) out.push('Only the highest-scoring 200 stories are kept: the flags of the others are listed with those in no story.')
   return out
 }
 

@@ -150,6 +150,26 @@ describe('the rows a browser case posts', () => {
     expect(events.find((e) => e.id === 7)).toMatchObject({ artifactType: 'dhcp', data: { ID: '10', 'Host Name': 'WS-007' } })
   })
 
+  it('past its cap reads the tasks and services first, then the records nearest a flag, not the first in time', async () => {
+    const minute = 60_000
+    const daniel = { targetUser: 'daniel.roy', computer: 'WS-004' }
+    await db.events.bulkAdd([
+      event(1, T0, { ...daniel, eventId: 4688 }),
+      event(2, T0 - 50 * minute, { ...daniel, eventId: 4688 }),
+      event(3, T0 + minute, { ...daniel, eventId: 4688 }),
+      event(4, T0 + 2 * minute, { ...daniel, eventId: 4688 }),
+      event(5, T0 + 20 * 60 * minute, { ...daniel, eventId: 4698, taskName: '\\Updater' }),
+    ] as never)
+    const { events, truncated } = await selectRows(
+      1,
+      [finding(1, [1])].map((f) => slimFinding(f as never)),
+      2,
+    )
+    expect(events.map((e) => e.id)).toEqual([1, 3, 5])
+    expect(truncated).toEqual(['identities'])
+    expect(storyCoverageWarnings({ truncated })).toEqual([expect.stringContaining('then those nearest the flags')])
+  })
+
   it('posts the effective severity, tags, techniques and entities of each finding and leaves false positives out', async () => {
     await db.events.add(event(1, T0, { targetUser: 'daniel.roy' }) as never)
     await db.findings.bulkAdd([

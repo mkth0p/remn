@@ -16,11 +16,11 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   chaining two: a spray's daily failures no longer make one story of two intrusions three weeks
   apart. An address most of the organisation's users sign in from (an office's NAT, a VPN's
   egress) ties nothing to a story and joins no stories into a campaign, and a campaign lists the
-  accounts its sources reached within two days of its stories only. A server case's selection
-  past its cap reads the tasks, services, account and group changes, log clears and mailbox
-  rules first and then the records nearest a flag, instead of the earliest, and says when the
-  names, hosts or addresses it selects by were cut; the API holds the story and step counts a
-  caller asks for to 1,000 and 2,000.
+  accounts its sources reached within two days of its stories only. A selection past its cap,
+  in a server case or a browser case, reads the tasks, services, account and group changes, log
+  clears and mailbox rules first and then the records nearest a flag, instead of the earliest; a
+  server case says when the names, hosts or addresses it selects by were cut, and the page says
+  so; the API holds the story and step counts a caller asks for to 1,000 and 2,000.
 - REMN's own rules raise 200 high and critical findings on the seven clean machines of
   evtx-baseline instead of 895, and detect every recording they detected before (342 recordings,
   435 rule detections, up from 340 and 433). A rule a busy machine matches over and over raises
