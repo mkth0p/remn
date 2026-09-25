@@ -239,6 +239,11 @@ async function restoreRecords(original: Case, records: () => AsyncGenerator<Reco
       }
     }
     await flush()
+    // a bundle from before findings carried record keys: give them theirs from the rows just restored
+    if (!kase.serverKey) {
+      const { anchorStoredFindings } = await import('./findingAnchors')
+      await anchorStoredFindings(db, [newId])
+    }
     return newId
   } catch (error) {
     await deleteCase(db, newId)
