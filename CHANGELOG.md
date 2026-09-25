@@ -5,6 +5,22 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- Stories no longer lose what matters to routine activity or to their own caps. A program a
+  person ran with no finding joins their story only when it ran in the story's logon session or
+  process tree, not for naming them; past 400 steps a story keeps its flags, then its
+  persistence, privilege, credential and lateral steps, then its sessions and sources, cuts the
+  programs run with no finding and the routine records first, and says how many steps it cut
+  (`stepsTruncated`, in the story, its "where it stops" and the stats). The flags of the stories
+  past the 200 a case keeps, or cut from their story, are listed among the flags in no story
+  with the reason. Failed logons and mails received join the incident nearest them instead of
+  chaining two: a spray's daily failures no longer make one story of two intrusions three weeks
+  apart. An address most of the organisation's users sign in from (an office's NAT, a VPN's
+  egress) ties nothing to a story and joins no stories into a campaign, and a campaign lists the
+  accounts its sources reached within two days of its stories only. A server case's selection
+  past its cap reads the tasks, services, account and group changes, log clears and mailbox
+  rules first and then the records nearest a flag, instead of the earliest, and says when the
+  names, hosts or addresses it selects by were cut; the API holds the story and step counts a
+  caller asks for to 1,000 and 2,000.
 - REMN's own rules raise 200 high and critical findings on the seven clean machines of
   evtx-baseline instead of 895, and detect every recording they detected before (342 recordings,
   435 rule detections, up from 340 and 433). A rule a busy machine matches over and over raises

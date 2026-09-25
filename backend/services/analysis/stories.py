@@ -16,15 +16,19 @@ Every step says why it belongs to the story and how surely:
   a host of the story while the person's session there was open, it came from an address the
   story's findings name, or it follows the phishing mail's link or attachment (the chains' notes).
 
-Weak ties never put a record in a story. One person's flags more than two days apart are two
-incidents. A step reads as a phase from its rule's tactic, else its technique, else what the
-record is: a phishing mail is initial access, a log cleared is defense impairment, a scheduled
-task is persistence. Routine records (logons, sign-ins, mailbox reads without a finding) are
-folded into one step per run.
+Weak ties never put a record in a story, and a person's name alone never puts a program they ran
+in one: it must run in the story's session or process tree, or carry a finding. One person's
+flags that start a story more than two days apart are two incidents; a mail received or a failed
+logon joins the nearest, never two. A step reads as a phase from its rule's tactic, else its
+technique, else what the record is: a phishing mail is initial access, a log cleared is defense
+impairment, a scheduled task is persistence. Routine records (logons, sign-ins, mailbox reads
+without a finding) are folded into one step per run. A story past its step cap keeps its flags
+and the steps that change what an intruder holds first, and says how many it cut.
 
 Stories that share the attacker's infrastructure (an address, a sender domain, a link domain, an
 attachment, a forwarding address, a consented application) form a campaign; so do the mails a
-phishing sender sent and the accounts a password spray tried.
+phishing sender sent and the accounts a password spray tried. An address most of the
+organisation's users sign in from (its NAT, its VPN) is not the attacker's.
 """
 
 from __future__ import annotations
@@ -32,8 +36,8 @@ from __future__ import annotations
 import hashlib
 import re
 from bisect import bisect_left
-from collections import defaultdict
-from collections.abc import Iterable
+from collections import Counter, defaultdict
+from collections.abc import Collection, Iterable
 from typing import Any
 
 from .chains import _IDENT_SQL, authentication_outcome, build_chains, mail_recipients, same_org_domain
@@ -155,6 +159,12 @@ def _op(ev: dict[str, Any]) -> str:
     return str(ev.get("operation") or "").strip().lower()
 
 
+def _is_process_creation(ev: dict[str, Any]) -> bool:
+    """A program started (4688, Sysmon 1): what a person's routine day is mostly made of."""
+    eid = _eid(ev)
+    return eid == 4688 or (eid == 1 and "sysmon" in (str(ev.get("provider") or "") + str(ev.get("channel") or "")).lower())
+
+
 # --- phases ---------------------------------------------------------------------------------------
 
 
@@ -217,7 +227,7 @@ def record_phase(row: dict[str, Any], source: str, attacker: set[str]) -> tuple[
         return "lateral-movement", "an admin share opened"
     if eid == 4104:
         return "execution", "a PowerShell script block"
-    if eid == 4688 or ("sysmon" in prov and eid == 1):
+    if _is_process_creation(row):
         return "execution", "a program ran"
     return None, ""
 
@@ -438,24 +448,38 @@ def build_stories(
             flags[iid].append((int(c["seed"]["ts"]), seed_ref, kind, "the phishing mail that starts the chain"))
             ties[(iid, seed_ref)] = (STRONG, "the phishing mail that starts the chain")
 
-    stories: list[dict[str, Any]] = []
+    # an address most of the organisation's users sign in from is its own, not the attacker's
+    shared = _shared_egress(case)
+    # each story with the flags that anchor it, so a flag its story cannot keep is still listed
+    built: list[tuple[dict[str, Any], list[str]]] = []
     for iid, fl in flags.items():
         fl.sort()
-        for cluster in _clusters(fl, gap):
-            if not any(k == "start" for _, _, k, _ in cluster):
-                for _, ref, _, _ in cluster:
-                    unstoried.setdefault(ref, "a mail received or a failed logon, and nothing more of this person's")
-                continue
-            stories.append(_person_story(case, iid, cluster, chain_of.get(iid, []), ties, gap, max_steps))
+        clusters, alone = _clusters(fl, gap)
+        for _, ref, _, _ in alone:
+            unstoried.setdefault(ref, "a mail received or a failed logon, and nothing more of this person's in the same days")
+        for cluster in clusters:
+            story = _person_story(case, iid, cluster, chain_of.get(iid, []), ties, gap, max_steps, shared)
+            built.append((story, [ref for _, ref, _, _ in cluster]))
     for host, fl in host_flags.items():
         fl.sort()
-        for cluster in _clusters(fl, gap):
-            stories.append(_host_story(case, host, cluster, max_steps))
+        for cluster in _clusters(fl, gap)[0]:
+            built.append((_host_story(case, host, cluster, max_steps), [ref for _, ref, _, _ in cluster]))
+    built.sort(key=lambda b: (-b[0]["score"], b[0]["start"]))
+    truncated = len(built) > max_stories
+    stories = [s for s, _ in built[:max_stories]]
+    # what is storied is what the kept stories hold: the flags of a story cut, or cut from its story's steps, are listed
     storied = {r for s in stories for st in s["steps"] for r in st["refs"]}
-    stories.sort(key=lambda s: (-s["score"], s["start"]))
-    truncated = len(stories) > max_stories
-    stories = stories[:max_stories]
-    campaigns = _campaigns(case, stories, unstoried)
+    lost: dict[str, str] = {}
+    for n, (_, anchors) in enumerate(built):
+        why = (
+            f"its story passed {max_steps} steps and this one was cut"
+            if n < max_stories
+            else f"its story was cut: a case keeps its {max_stories} highest-scoring stories"
+        )
+        for ref in anchors:
+            if ref not in storied:
+                lost.setdefault(ref, why)
+    campaigns = _campaigns(case, stories, unstoried, gap)
     by_id = {s["id"]: s for s in stories}
     for camp in campaigns:
         for sid in camp["stories"]:
@@ -464,7 +488,7 @@ def build_stories(
     hosts = sorted({h for s in stories for h in s["hosts"]})
     un = [
         {"ref": ref, "why": why, "findings": sorted({f.get("ruleId") for f in case.f_by_ref.get(ref, [])})[:5]}
-        for ref, why in sorted(unstoried.items())
+        for ref, why in sorted({**unstoried, **lost}.items())
         if ref not in storied
     ]
     return {
@@ -485,21 +509,42 @@ def build_stories(
             "processes": len(case.lineage.processes),
             "stories": len(stories),
             "storiesTruncated": int(truncated),
+            # the stories that passed max_steps: each says how many of its steps it cut
+            "stepsTruncated": sum(1 for s in stories if s["stepsTruncated"]),
             "campaigns": len(campaigns),
             "unstoried": len(un),
         },
     }
 
 
-def _clusters(flags: list[tuple[int, str, str, str]], gap: int) -> list[list[tuple[int, str, str, str]]]:
-    """One person's flags, cut where two follow each other by more than the gap: one incident each."""
+def _clusters(flags: list[tuple[int, str, str, str]], gap: int) -> tuple[list[list[tuple[int, str, str, str]]], list[tuple[int, str, str, str]]]:
+    """One person's flags (in time order) as incidents, and the supporting flags near none.
+
+    The flags that start a story are cut where two follow each other by more than the gap; a
+    supporting flag (a mail received, a failed logon) then joins the incident nearest it, within
+    the gap. Supports never bridge two incidents: a spray's daily failures between two intrusions
+    three weeks apart leave them two stories."""
     out: list[list[tuple[int, str, str, str]]] = []
     for f in flags:
+        if f[2] != "start":
+            continue
         if out and f[0] - out[-1][-1][0] <= gap:
             out[-1].append(f)
         else:
             out.append([f])
-    return out
+    spans = [(c[0][0], c[-1][0]) for c in out]
+    alone = []
+    for f in flags:
+        if f[2] == "start":
+            continue
+        near = min(range(len(spans)), key=lambda i: max(spans[i][0] - f[0], f[0] - spans[i][1], 0), default=None)
+        if near is not None and max(spans[near][0] - f[0], f[0] - spans[near][1], 0) <= gap:
+            out[near].append(f)
+        else:
+            alone.append(f)
+    for c in out:
+        c.sort()
+    return out, alone
 
 
 class _Members(dict):
@@ -526,6 +571,7 @@ def _person_story(
     ties: dict[tuple[str, str], tuple[str, str]],
     gap: int,
     max_steps: int,
+    shared: Collection[str] = frozenset(),
 ) -> dict[str, Any]:
     ident = case.resolver.by_id[iid]
     start, end = cluster[0][0], cluster[-1][0]
@@ -555,8 +601,9 @@ def _person_story(
                 if ref in case.rows and mine(ref):
                     members.take(ref, "chain", STRONG if links else MEDIUM, "a step of the phishing chain" + (f": {links[0]}" if links else ""), links)
         start, end = min(start, int(c["start"])), max(end, int(c["end"]))
-    # the addresses the story's findings name as a source
+    # the addresses the story's findings name as a source, but for the organisation's own shared egress
     attacker: set[str] = set()
+    named_shared: set[str] = set()
     for ref in list(members):
         for f in case.f_by_ref.get(ref, []):
             if _sev(f.get("severity")) < 2:
@@ -565,8 +612,12 @@ def _person_story(
             for k in ("ipAddress", "sourceIp"):
                 ip = ip_of(ents.get(k))
                 if ip and not is_internal_ip(ip):
-                    attacker.add(ip)
+                    (named_shared if ip in shared else attacker).add(ip)
     _lineage_context(case, members)
+    lin = case.lineage
+    # the story's logon sessions and processes: a program run with no finding belongs to it only through them
+    sessions = {s["id"] for ref in members if (s := lin.session_of(ref))}
+    procs = {p["id"] for ref in members if (p := _process(case, ref))}
     lo, hi = start - _CONTEXT_BEFORE, end + gap // 2
     # the person's own records in the window: from those addresses, or that are something (a task, a rule, a clear)
     for ref in case.window(case.by_identity.get(iid, []), lo, hi):
@@ -579,6 +630,14 @@ def _person_story(
         if ip and ip in attacker:
             members.take(ref, "address", MEDIUM, f"it came from {ip}, a source the story's findings name")
         elif phase and _eid(row) not in (4624, 4625) and not _is_routine_cloud(row):
+            if _is_process_creation(row) and not case.f_by_ref.get(ref):
+                # a person's name alone does not make every program of their day part of the incident
+                how = _in_story_tree(case, ref, sessions, procs)
+                if not how:
+                    continue
+                basis = f"{basis}, {how}"
+                if p := _process(case, ref):
+                    procs.add(p["id"])
             members.take(ref, "identity", conf, f"it names {ident['label']}: {basis}")
     # what else those addresses did in the window: the other accounts they tried, the flags they raised
     for ip in sorted(attacker):
@@ -589,12 +648,70 @@ def _person_story(
             if authentication_outcome(row) == "failure" or case.f_by_ref.get(ref):
                 if mine(ref) or authentication_outcome(row) == "failure":
                     members.take(ref, "address", MEDIUM, f"the same source, {ip}, in the same days" + ("; it tried another account" if not mine(ref) else ""))
-    steps = _steps(case, members, attacker, max_steps)
-    return _story(case, "person", {"kind": "person", "id": iid, "label": ident["label"], "org": ident.get("org")}, steps, attacker, used_chains)
+    steps, cut = _steps(case, members, attacker, max_steps)
+    subject = {"kind": "person", "id": iid, "label": ident["label"], "org": ident.get("org")}
+    return _story(case, "person", subject, steps, attacker, used_chains, cut=cut, shared=named_shared)
 
 
 def _is_routine_cloud(row: dict[str, Any]) -> bool:
     return _is_cloud(row) and (_op(row) in _ROUTINE_OPS or bool(authentication_outcome(row)))
+
+
+def _process(case: _Case, ref: str) -> dict[str, Any] | None:
+    row, source = case.rows[ref]
+    if source != "events":
+        return None
+    return case.lineage.process_of(ref) or case.lineage.process_of_guid(row.get("processGuid"))
+
+
+def _in_story_tree(case: _Case, ref: str, sessions: set[str], procs: set[str]) -> str | None:
+    """How a program run with no finding is part of a story: it ran in one of the story's logon
+    sessions, or it is, or descends from, one of the story's processes. None when only its name ties it."""
+    lin = case.lineage
+    s = lin.session_of(ref)
+    if s and s["id"] in sessions:
+        return f"in the story's logon session {s['logonId']} on {s['host']}"
+    p = _process(case, ref)
+    depth = 0
+    while p and depth < 6:
+        if p["id"] in procs:
+            return "a process of the story" if depth == 0 else f"its process descends from {p['name']}, a process of the story"
+        p = lin.processes.get(p.get("parent") or "")
+        depth += 1
+    return None
+
+
+def _shared_egress(case: _Case) -> set[str]:
+    """Outside addresses most of an organisation's users sign in from (an office's NAT, a VPN's egress).
+
+    An address is shared when at least five people of one organisation signed in from it with no
+    finding on any of their records from it, and they are more than half of that organisation's
+    people seen signing in from outside. It is then no attacker's infrastructure: it ties no
+    record to a story and joins no stories into a campaign."""
+    signers: dict[Any, set[str]] = defaultdict(set)  # organisation -> people who signed in from an outside address
+    clean: dict[str, set[str]] = defaultdict(set)  # address -> people who signed in from it
+    flagged: dict[str, set[str]] = defaultdict(set)  # address -> people with a finding on a record from it
+    for ip, lst in case.by_ip.items():
+        if is_internal_ip(ip):
+            continue
+        for _, ref in lst:
+            row, _ = case.rows[ref]
+            fs = any(_sev(f.get("severity")) >= 2 for f in case.f_by_ref.get(ref, []))
+            ok = authentication_outcome(row) == "success"
+            for iid in case.named.get(ref, {}):
+                if fs:
+                    flagged[ip].add(iid)
+                if ok:
+                    clean[ip].add(iid)
+                    signers[case.resolver.by_id.get(iid, {}).get("org")].add(iid)
+    out = set()
+    for ip, people in clean.items():
+        by_org: dict[Any, int] = defaultdict(int)
+        for iid in people - flagged[ip]:
+            by_org[case.resolver.by_id.get(iid, {}).get("org")] += 1
+        if any(n >= 5 and 2 * n > len(signers[org]) for org, n in by_org.items()):
+            out.add(ip)
+    return out
 
 
 def _lineage_context(case: _Case, members: _Members) -> None:
@@ -623,8 +740,8 @@ def _host_story(case: _Case, host: str, cluster: list[tuple[int, str, str, str]]
         members.take(ref, "flag", STRONG, f"a finding on {host}")
     _lineage_context(case, members)
     name = case.lineage.hosts.get(host, {}).get("name") or host
-    steps = _steps(case, members, set(), max_steps)
-    return _story(case, "host", {"kind": "host", "id": host, "label": name, "org": None}, steps, set(), [])
+    steps, cut = _steps(case, members, set(), max_steps)
+    return _story(case, "host", {"kind": "host", "id": host, "label": name, "org": None}, steps, set(), [], cut=cut)
 
 
 def _phase_of(case: _Case, row: dict[str, Any], source: str, fs: list[dict[str, Any]], m: dict[str, Any], attacker: set[str]) -> tuple[str | None, str]:
@@ -648,7 +765,8 @@ def _phase_of(case: _Case, row: dict[str, Any], source: str, fs: list[dict[str, 
     return own, own_basis
 
 
-def _steps(case: _Case, members: _Members, attacker: set[str], max_steps: int) -> list[dict[str, Any]]:
+def _steps(case: _Case, members: _Members, attacker: set[str], max_steps: int) -> tuple[list[dict[str, Any]], int]:
+    """The members as steps in time order, folded where they repeat, and how many were cut past max_steps."""
     lin = case.lineage
     raw = []
     for ref, m in members.items():
@@ -721,14 +839,45 @@ def _steps(case: _Case, members: _Members, attacker: set[str], max_steps: int) -
             last[key] = st
     for st in steps:
         st.pop("_fold", None)
-    if len(steps) > max_steps:
-        keep = sorted(steps, key=lambda s: (not s["findings"], s["routine"], s["ts"]))[:max_steps]
+    cut = max(0, len(steps) - max_steps)
+    if cut:
+        keep = sorted(steps, key=lambda s: (_keep_rank(s), -max((_sev(f["severity"]) for f in s["findings"]), default=0), s["ts"]))[:max_steps]
         ids = {id(s) for s in keep}
         steps = [s for s in steps if id(s) in ids]
-    return steps
+    return steps, cut
 
 
-def _story(case: _Case, kind: str, subject: dict[str, Any], steps: list[dict[str, Any]], attacker: set[str], chains: list[dict[str, Any]]) -> dict[str, Any]:
+# the phases a story keeps first when it has too many steps: what changes what an intruder holds
+# (a way in, a foothold, privileges, credentials, another host, the logs, the data)
+_KEEP_FIRST = {"initial-access", "persistence", "privilege-escalation", "defense-impairment", "credential-access", "lateral-movement", "exfiltration", "impact"}
+
+
+def _keep_rank(st: dict[str, Any]) -> int:
+    """Which steps a story past max_steps keeps first: its flags; persistence, privilege, credential and
+    lateral steps and the like; its sessions, hops, process parents and sources; other steps with a
+    phase (a program run with no finding among them); and last routine records and context."""
+    if st["findings"] or st["tie"]["kind"] in ("flag", "chain"):
+        return 0
+    if st["phase"] in _KEEP_FIRST:
+        return 1
+    if st["tie"]["kind"] in ("session", "hop", "process", "address"):
+        return 2
+    if st["phase"] and not st["routine"]:
+        return 3
+    return 4
+
+
+def _story(
+    case: _Case,
+    kind: str,
+    subject: dict[str, Any],
+    steps: list[dict[str, Any]],
+    attacker: set[str],
+    chains: list[dict[str, Any]],
+    *,
+    cut: int = 0,
+    shared: Collection[str] = frozenset(),
+) -> dict[str, Any]:
     lin = case.lineage
     refs = [r for s in steps for r in s["refs"]]
     start = min((s["ts"] for s in steps), default=0)
@@ -765,8 +914,14 @@ def _story(case: _Case, kind: str, subject: dict[str, Any], steps: list[dict[str
     accounts = sorted({a for s in steps for a in s["accounts"]})
     lineage = lin.to_dict(refs=refs, hosts=hosts)
     gaps = [lim for h in lineage["hosts"] for lim in h["limits"]]
+    if cut:
+        gaps.append(
+            f"The story keeps {len(steps)} of its {len(steps) + cut} steps: its flags first, then persistence, privilege, credential and "
+            "lateral steps, then its sessions, hops and sources; the programs run with no finding and the routine records are cut first, "
+            "so a step absent from it is not a negative result."
+        )
     anchor = min((r for s in steps if s["tie"]["kind"] in ("flag", "chain") for r in s["refs"]), default=str(start))
-    headline, summary = _describe(subject, steps, phases, attacker, hosts)
+    headline, summary = _describe(subject, steps, phases, attacker, hosts, shared)
     return {
         "id": "story-" + _hid(kind, subject["id"], anchor),
         "kind": kind,
@@ -786,15 +941,25 @@ def _story(case: _Case, kind: str, subject: dict[str, Any], steps: list[dict[str
         "accounts": accounts,
         "ips": sorted({s["ip"] for s in steps if s["ip"]}),
         "attackerAddresses": sorted(attacker),
+        # addresses the findings name that most of the organisation's users sign in from: no tie, no campaign
+        "sharedAddresses": sorted(shared),
         "chains": [c["id"] for c in chains if c.get("id")],
         "findings": fkeys,
         "campaigns": [],
         "gaps": gaps,
+        "stepsTruncated": cut,
         "lineage": {"sessions": lineage["sessions"], "hops": lineage["hops"], "processes": lineage["processes"]},
     }
 
 
-def _describe(subject: dict[str, Any], steps: list[dict[str, Any]], phases: list[dict[str, Any]], attacker: set[str], hosts: list[str]) -> tuple[str, str]:
+def _describe(
+    subject: dict[str, Any],
+    steps: list[dict[str, Any]],
+    phases: list[dict[str, Any]],
+    attacker: set[str],
+    hosts: list[str],
+    shared: Collection[str] = frozenset(),
+) -> tuple[str, str]:
     """A headline (the worst finding of each phase, in order) and a few plain sentences, from the story's own steps only."""
     parts = []
     for p in phases:
@@ -818,13 +983,15 @@ def _describe(subject: dict[str, Any], steps: list[dict[str, Any]], phases: list
         lines.append(f"{len(flagged)} of its {len(steps)} steps carry findings.")
     if attacker:
         lines.append(f"The findings name {', '.join(sorted(attacker)[:3])} as a source.")
+    if shared:
+        lines.append(f"Most of the organisation's users sign in from {', '.join(sorted(shared)[:3])}, which the findings name: it ties nothing to the story.")
     if hosts:
         lines.append(f"Hosts: {', '.join(hosts[:5])}{' and more' if len(hosts) > 5 else ''}.")
     return headline[:300], " ".join(lines)[:900]
 
 
-def _campaigns(case: _Case, stories: list[dict[str, Any]], unstoried: dict[str, str]) -> list[dict[str, Any]]:
-    """Stories that share the attacker's infrastructure, with the accounts the same sources reached outside any story."""
+def _campaigns(case: _Case, stories: list[dict[str, Any]], unstoried: dict[str, str], gap: int) -> list[dict[str, Any]]:
+    """Stories that share the attacker's infrastructure, with the accounts the same sources reached outside any story around them."""
     arts_of = {s["id"]: _artifacts(case, s) for s in stories}
     artifacts: dict[tuple[str, str], set[str]] = defaultdict(set)
     for sid, arts in arts_of.items():
@@ -852,7 +1019,9 @@ def _campaigns(case: _Case, stories: list[dict[str, Any]], unstoried: dict[str, 
         arts = sorted({a for m in members for a in arts_of[m]})
         shared = [(a, sorted(artifacts[a])) for a in arts if len(artifacts[a]) > 1]
         people = {s["subject"]["id"] for m in members if (s := by_id[m])["kind"] == "person"}
-        targets = _targets(case, arts, people, unstoried)
+        # an address can be someone else's a week later (a proxy, a reassigned lease): what it reached counts near the stories only
+        spans = [(by_id[m]["start"] - gap, by_id[m]["end"] + gap) for m in members]
+        targets = _targets(case, arts, people, unstoried, spans)
         if len(members) < 2 and not targets:
             continue
         ss = sorted((by_id[m] for m in members), key=lambda s: s["start"])
@@ -879,7 +1048,7 @@ def _campaigns(case: _Case, stories: list[dict[str, Any]], unstoried: dict[str, 
             }
         )
     # flags in no story and no campaign above: mails from one sender domain, failed logons from one address
-    covered = {r for c in out for t in c["targets"] for r in t["refs"]}
+    covered = {r for c in out for t in c["targets"] for r in t["refs"]} | {r for s in stories for st in s["steps"] for r in st["refs"]}
     loose: dict[tuple[str, str], list[str]] = defaultdict(list)
     for ref in sorted(unstoried):
         if ref in covered:
@@ -953,11 +1122,15 @@ def _artifacts(case: _Case, story: dict[str, Any]) -> list[tuple[str, str]]:
     return sorted(set(out))
 
 
-def _targets(case: _Case, arts: list[tuple[str, str]], people: set[str], unstoried: dict[str, str]) -> list[dict[str, Any]]:
-    """Accounts outside the campaign's stories that its sources reached: the recipients of its mails, the accounts its addresses tried."""
+def _targets(case: _Case, arts: list[tuple[str, str]], people: set[str], unstoried: dict[str, str], spans: list[tuple[int, int]]) -> list[dict[str, Any]]:
+    """Accounts outside the campaign's stories that its sources reached within the gap of one of them:
+    the recipients of its mails, the accounts its addresses tried."""
     ips = {v for k, v in arts if k == "ip"}
     senders = {v for k, v in arts if k == "sender-domain"}
     out: dict[str, dict[str, Any]] = {}
+
+    def near(ts: int) -> bool:
+        return any(lo <= ts <= hi for lo, hi in spans)
 
     def add(iid: str, how: str, via: str, ref: str) -> None:
         if iid in people:
@@ -971,7 +1144,9 @@ def _targets(case: _Case, arts: list[tuple[str, str]], people: set[str], unstori
             t["refs"].append(ref)
 
     for ip in sorted(ips):
-        for _, ref in case.by_ip.get(ip, []):
+        for ts, ref in case.by_ip.get(ip, []):
+            if not near(ts):
+                continue
             row, _ = case.rows[ref]
             outcome = authentication_outcome(row)
             if outcome is None and not case.f_by_ref.get(ref):
@@ -984,7 +1159,7 @@ def _targets(case: _Case, arts: list[tuple[str, str]], people: set[str], unstori
         if source != "mails":
             continue
         frm = str(row.get("fromAddr") or "").lower()
-        if "@" in frm and frm.split("@", 1)[1] in senders:
+        if "@" in frm and frm.split("@", 1)[1] in senders and near(_ts(row)):
             for iid, _, _ in case.people(ref):
                 add(iid, "received a flagged mail", frm.split("@", 1)[1], ref)
     return sorted(({**t, "how": sorted(t["how"]), "via": sorted(t["via"])} for t in out.values()), key=lambda t: t["account"])
@@ -1011,6 +1186,15 @@ REMOTE_SCRIPT = r"-computername|-cn\s|enter-pssession|/node:"
 PRIVATE_ANSWER = r"(^|;)\s*(::ffff:)?(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)"
 DNS_CAP = 20_000
 DHCP_CAP = 20_000
+# the account names, flagged hosts and outside addresses a selection reads around the flags
+NAME_KEYS = 2_000
+HOST_KEYS = 500
+ADDRESS_KEYS = 500
+# a selection past its cap reads first the records that are something (a task, a service, an account
+# or group changed, a log cleared, explicit credentials, a mailbox rule or permission, a consent),
+# then the records nearest a flag, so a late phase is not what a cut loses first
+WEIGHTY_EVENT_IDS = (104, 1102, 4648, 4697, 4698, 4702, 4720, 4722, 4724, 4728, 4732, 4738, 4756, 4781, 7045)
+WEIGHTY_OPERATIONS = tuple(sorted(op for op in _OP_PHASE if op not in _ROUTINE_OPS))
 
 
 def _lineage_extra_sql() -> str:
@@ -1053,31 +1237,59 @@ def windows(times: Iterable[int], before: int = WINDOW_BEFORE_MS, after: int = W
 def selection_keys(
     rows: Iterable[dict[str, Any]], mails: Iterable[dict[str, Any]], findings: Iterable[dict[str, Any]], settings: dict[str, Any]
 ) -> dict[str, list[str]]:
-    """What to read around the flags: the account names the flagged records name, the outside addresses the findings name, the flagged hosts."""
-    names: set[str] = set()
-    hosts: set[str] = set()
-    ips: set[str] = set()
+    """What to read around the flags: the account names the flagged records name, the outside addresses the findings name, the flagged hosts.
+
+    Past its cap a kind keeps the keys the most flags name, and "cut" names each kind that was cut
+    (name-keys, host-keys, address-keys)."""
+    names: Counter[str] = Counter()
+    hosts: Counter[str] = Counter()
+    ips: Counter[str] = Counter()
     for row in rows:
         for g in event_record(row).groups:
             for f in g:
                 n = base_name(f)
                 if n and not n.endswith("$") and len(n) > 1 and kind_of(f) not in ("builtin", "machine"):
-                    names.add(n)
+                    names[n] += 1
         if row.get("computer"):
-            hosts.add(str(row["computer"]).lower())
+            hosts[str(row["computer"]).lower()] += 1
         ip = ip_of(row.get("ipAddress"))
         if ip and not is_internal_ip(ip):
-            ips.add(ip)
+            ips[ip] += 1
     for m in mails:
         for a in mail_recipients(m) + [str(m.get("fromAddr") or "").lower()]:
             if "@" in a:
-                names.add(a.split("@", 1)[0])
+                names[a.split("@", 1)[0]] += 1
     for f in findings:
         if _sev(f.get("severity")) >= 2:
             ip = ip_of((f.get("entities") or {}).get("ipAddress"))
             if ip and not is_internal_ip(ip):
-                ips.add(ip)
-    return {"names": sorted(names)[:2000], "hosts": sorted(hosts)[:500], "ips": sorted(ips)[:500]}
+                ips[ip] += 1
+
+    def top(c: Counter[str], most: int) -> list[str]:
+        return sorted(sorted(c, key=lambda k: (-c[k], k))[:most])
+
+    kinds = (("names", "name-keys", names, NAME_KEYS), ("hosts", "host-keys", hosts, HOST_KEYS), ("ips", "address-keys", ips, ADDRESS_KEYS))
+    out = {key: top(c, most) for key, _, c, most in kinds}
+    out["cut"] = [cut for _, cut, c, most in kinds if len(c) > most]
+    return out
+
+
+def _sql_str(s: str) -> str:
+    return "'" + s.replace("'", "''") + "'"
+
+
+def _nearest_first(table: str, col: str, where: str, first: str = "") -> str:
+    """SELECT a table's rows matching `where`, those `first` ranks 0 before the others, then the
+    nearest a flag's time before the farther: the flags' times are the first parameter, a list.
+    Each row finds the flag before it and the flag after it by an ASOF join, so the order costs
+    a sort, not a comparison with every flag."""
+    c = f'r."{col}"'
+    return (
+        f"WITH flag_times AS (SELECT DISTINCT unnest(?::BIGINT[]) AS t) SELECT r.* FROM {table} r "
+        f"ASOF LEFT JOIN flag_times fb ON {c} >= fb.t ASOF LEFT JOIN flag_times fa ON {c} <= fa.t "
+        f"WHERE {where} ORDER BY {first + ', ' if first else ''}"
+        f"least(coalesce({c} - fb.t, {2**62}), coalesce(fa.t - {c}, {2**62})), {c}, r.id"
+    )
 
 
 def stories_for_store(store: Any, settings: dict[str, Any] | None, findings: list[dict[str, Any]] | None = None, **opts: Any) -> dict[str, Any]:
@@ -1128,7 +1340,11 @@ def stories_for_store(store: Any, settings: dict[str, Any] | None, findings: lis
             except ValueError:
                 pass
     keys = selection_keys(events.values(), mails.values(), findings, settings)
-    spans = windows([int(r.get("ts") or 0) for r in events.values()] + [int(m.get("date") or 0) for m in mails.values()])
+    for name in keys["cut"]:
+        truncated[name] = 1
+    times = [int(r.get("ts") or 0) for r in events.values()] + [int(m.get("date") or 0) for m in mails.values()]
+    flag_times = sorted({t for t in times if t})
+    spans = windows(times)
     if spans:
         when = " OR ".join("ts BETWEEN ? AND ?" for _ in spans)
         wparams: list[Any] = [x for s in spans for x in s]
@@ -1155,9 +1371,13 @@ def stories_for_store(store: Any, settings: dict[str, Any] | None, findings: lis
                     "dns",
                 )
             )
+        weighty = (
+            f'CASE WHEN "eventId" IN ({", ".join(str(i) for i in WEIGHTY_EVENT_IDS)}) '
+            f"OR lower(coalesce(\"operation\", '')) IN ({', '.join(_sql_str(op) for op in WEIGHTY_OPERATIONS)}) THEN 0 ELSE 1 END"
+        )
         for cond, params, name in picks:
             cap = DNS_CAP if name == "dns" else EVENT_CAP
-            for r in fetch(f"SELECT * FROM events WHERE ({when}) AND ({cond}) ORDER BY ts, id", wparams + params, cap, name):
+            for r in fetch(_nearest_first("events", "ts", f"({when}) AND ({cond})", weighty), [flag_times, *wparams, *params], cap, name):
                 if r["id"] not in events:
                     if isinstance(r.get("data"), str):
                         try:
@@ -1176,9 +1396,10 @@ def stories_for_store(store: Any, settings: dict[str, Any] | None, findings: lis
                 events[r["id"]] = r
         # replies: mails the flagged people sent in the windows
         mph = ", ".join("?" for _ in names)
+        sender = _IDENT_SQL.format(col='"fromAddr"')
         cur.execute(
-            f"SELECT * FROM mails WHERE ({when.replace('ts BETWEEN', 'date BETWEEN')}) AND {_IDENT_SQL.format(col=chr(34) + 'fromAddr' + chr(34))} IN ({mph}) ORDER BY date, id LIMIT {MAIL_CAP + 1}",
-            wparams + names,
+            _nearest_first("mails", "date", f"({when.replace('ts BETWEEN', 'date BETWEEN')}) AND {sender} IN ({mph})") + f" LIMIT {MAIL_CAP + 1}",
+            [flag_times, *wparams, *names],
         )
         replies = Q._parse_json_cols(rows_to_dicts(cur), "mails") if hasattr(Q, "_parse_json_cols") else rows_to_dicts(cur)
         if len(replies) > MAIL_CAP:

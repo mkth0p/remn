@@ -23,8 +23,11 @@ you". A chain whose steps are only the recipient's routine day after a flagged m
 mail received. They join the story of their person when there is one, and otherwise stay with
 their campaign, where they are counted.
 
-The flags of one person are one incident until two of them are more than two days apart;
-then they are two stories. A flag that names no person, a service installed or a program run by
+The flags that start a story are one incident of their person until two of them are more than
+two days apart; then they are two stories. A mail received or a failed logon joins the incident
+nearest it, within two days, and never joins two: a spray's daily failures between two
+intrusions three weeks apart leave them two stories, and the failures far from both are listed
+with the flags in no story. A flag that names no person, a service installed or a program run by
 SYSTEM, belongs to the person whose session, process tree or way into the host it is part of,
 and when there is none it starts a story of its own host.
 
@@ -122,7 +125,9 @@ Every record of a story is a step, or folded into one, and every step says why i
 | same person | names the person and is something (a task, a rule, a group change) | as sure as the form |
 
 A weak tie never puts a record in a story. The story's confidence is the weakest tie of its
-flagged steps.
+flagged steps. A program run with no finding is most of a person's day, so their name alone
+does not put one in a story: it joins when it ran in one of the story's logon sessions, or is,
+or descends from, one of the story's processes, and its step says which.
 
 A step's phase comes from its rule's first tactic tag, else its first technique's tactic; with
 no finding, from what the record is: a phishing mail is initial access, a failed logon
@@ -137,7 +142,14 @@ same outside source reaching another host once it is in is lateral movement.
 
 Records that repeat without a finding (logons, sign-ins, mailbox reads, share access) fold
 into one step per run of ten minutes; so do records with the same findings and tie, a spray's
-failures among them. A story keeps at most 400 steps, those with findings first.
+failures among them. A story keeps at most 400 steps. Past them it keeps its flagged steps
+first, the worst first; then the steps that change what an intruder holds (initial access,
+persistence, privilege escalation, credential access, lateral movement, defense impairment,
+exfiltration, impact); then its sessions, hops, process parents and sources; then the other
+steps with a phase, the programs run with no finding among them; and routine records last,
+each group in time order. A story that cut steps says how many (`stepsTruncated`) and says so
+where it stops, the stats count the stories that did, and a flag cut from its story is listed
+with the flags in no story.
 
 The phase rail at the top of a story shows the fifteen tactics in ATT&CK's order, lit where
 the story has steps, numbered in the story's own order, coloured by the worst finding in each;
@@ -161,10 +173,17 @@ The attacker's infrastructure in a story's flagged steps is: the addresses its f
 the outside sender domains, link domains and attachment digests of its flagged mails, the
 forwarding addresses its inbox rules and mailbox settings name, and the applications its
 people consented to. Stories that share any of these are one campaign. A campaign also lists
-the accounts outside its stories that the same sources reached: the recipients of its flagged
-mails, the accounts its addresses tried. Flagged mails and failed logons in no story and no
-campaign are grouped by sender domain and by address. Nothing in a campaign's list of accounts
-says they were compromised.
+the accounts outside its stories that the same sources reached within two days of one of its
+stories (an address can be someone else's a week later): the recipients of its flagged mails,
+the accounts its addresses tried. Flagged mails and failed logons in no story and no campaign
+are grouped by sender domain and by address. Nothing in a campaign's list of accounts says they
+were compromised.
+
+An address most of the organisation's users sign in from, an office's NAT or a VPN's egress, is
+not the attacker's: at least five people of one organisation signed in from it with no finding
+of medium or more on their records from it, and they are more than half of that organisation's
+people the records show signing in from outside. The findings may name it, and the story says
+so (`sharedAddresses`), but it ties no record to the story and joins no stories into a campaign.
 
 ## Where it stops
 
@@ -209,8 +228,14 @@ most 20,000); the DHCP leases (at most 20,000, whatever their time, since the au
 times carry no zone and are kept without one); the high-risk mails and the mails the flagged
 people sent. A build reads at most 50,000 flagged records and
 50,000 records around them (a server case, 50,000 of each of the three kinds), and 5,000 of the
-mails the flagged people sent; when a selection is cut the page says so, and an absent step is
-then not a negative result. The browser posts only the fields the engine reads (`STORY_EVENT_FIELDS`, compared with
+mails the flagged people sent. A selection past its cap reads first the records that are
+something (a scheduled task, a service installed, an account or a group changed, a log cleared,
+explicit credentials, a mailbox rule or permission, a consent), then those nearest a flag in
+time, so what a cut loses is the routine far from every flag, not the late phases. A server case
+selects by at most 2,000 account names, 500 flagged hosts and 500 outside addresses, those the
+most flagged records name first. When a selection or its keys are cut the stats say which
+(`truncated`) and the page says so, and an absent step is then not a negative result. The
+browser posts only the fields the engine reads (`STORY_EVENT_FIELDS`, compared with
 the Python by a test). A build also returns the phishing chains of the same rows, kept for the
 review and the report as before.
 
@@ -224,7 +249,7 @@ when the page opens.
 `tests/backend/test_stories_lab.py` generates the synthetic linked lab, parses it, runs REMN's
 rules and reads it into stories. Each of the five planted attacks (S01, S02, S03, S04, S06) is
 one story of its victim, holding every planted record of its scenario (recall 1.00) with
-precision from 0.92 to 0.99, nothing of another scenario, and at most ten background records;
+precision from 0.97 to 0.99, nothing of another scenario, and at most ten background records;
 the other tenant's `alice.martin` who cleared a log on her own host is a story of her own that
 no Northstar story holds, the domain seen on Alice's host two weeks earlier is in no story, and
 the benign controls and the prompt-injection lure raise none. S04 reads as initial access,
@@ -249,4 +274,10 @@ are synthetic scenarios: a regression benchmark, not a measured accuracy on fiel
 - An Entra device is matched to a host by name only: a device renamed, or one whose name two
   hosts of different domains share, is not joined; a device id is not read against the
   machine's own records.
-- A case keeps at most 200 stories, the highest-scoring first.
+- A case keeps at most 200 stories, the highest-scoring first; the flags of the stories past
+  them are listed with the flags in no story, saying why. The API holds what a caller asks for
+  to at most 1,000 stories and 2,000 steps a story, and a gap between one hour and thirty days.
+- An address is read as the organisation's shared egress from the records a build reads: an
+  attacker who signed in to five accounts or more from one address with no finding on any of
+  those sign-ins, and so outnumbers the people the records show signing in from outside, would
+  be taken for one.

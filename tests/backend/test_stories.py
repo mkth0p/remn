@@ -212,6 +212,128 @@ def test_a_flag_on_a_host_that_names_no_one_is_a_host_story_and_false_positives_
     assert story["steps"][0]["tie"] == {"kind": "flag", "basis": "a finding on fs-002", "confidence": STRONG}
 
 
+def _refs(story):
+    return {r for st in story["steps"] for r in st["refs"]}
+
+
+def test_a_persons_routine_programs_neither_join_by_name_nor_push_a_later_foothold_out():
+    host = "WS-001.northstar.example"
+    me = dict(subjectUser="alice.martin", subjectDomain="NORTHSTAR")
+    events = [
+        ev(5, -5, eventId=4624, computer=host, targetUser="alice.martin", targetDomain="NORTHSTAR", targetLogonId="0x9001", logonType=2),
+        ev(1, 0, eventId=4688, computer=host, newProcessId="0x10", processName="C:\\Users\\Public\\mimikatz.exe", subjectLogonId="0x9001", **me),
+        # a program mimikatz started, under another logon: its process tree ties it
+        ev(2, 1, eventId=4688, computer=host, newProcessId="0x20", callerProcessId="0x10", processName="C:\\Windows\\System32\\cmd.exe", subjectLogonId="0x9002", **me),
+        # her own day on another host: her name alone does not put it in the story
+        ev(3, 30, eventId=4688, computer="WS-002.northstar.example", newProcessId="0x30", processName="C:\\Windows\\notepad.exe", subjectLogonId="0x7001", **me),
+        # a scheduled task five hours later, with no finding, after six hundred programs of the session
+        ev(4, 300, eventId=4698, computer=host, taskName="\\Updater", subjectLogonId="0x9001", **me),
+        *[
+            ev(100 + i, 2 + i * 0.3, eventId=4688, computer=host, newProcessId=hex(0x1000 + i), processName="C:\\Windows\\System32\\conhost.exe", subjectLogonId="0x9001", **me)
+            for i in range(600)
+        ],
+    ]  # fmt: skip
+    res = build_stories(events, [], [finding("win-mimikatz", "critical", [1], tags=["credential-access"])], SETTINGS)
+    [story] = res["stories"]
+    by_ref = {r: s for s in story["steps"] for r in s["refs"]}
+    assert "event:3" not in by_ref
+    assert by_ref["event:2"]["tie"]["basis"].endswith("its process descends from mimikatz.exe, a process of the story")
+    assert "in the story's logon session 0x9001" in by_ref["event:100"]["tie"]["basis"]
+    # past 400 steps the foothold stays and the programs run with no finding go, and the story says so
+    assert by_ref["event:4"]["phase"] == "persistence"
+    assert by_ref["event:5"]["tie"]["kind"] == "session"
+    assert len(story["steps"]) == 400 and story["stepsTruncated"] == 204 and res["stats"]["stepsTruncated"] == 1
+    assert any(g.startswith("The story keeps 400 of its 604 steps") for g in story["gaps"])
+
+
+def test_failed_logons_between_two_intrusions_do_not_make_them_one_story():
+    host = "WS-001.northstar.example"
+    me = dict(subjectUser="alice.martin", subjectDomain="NORTHSTAR", subjectLogonId="0x9001")
+    day = 24 * 60
+    fails = [
+        ev(10 + d, d * day, eventId=4625, computer=host, targetUser="alice.martin", targetDomain="NORTHSTAR", ipAddress="203.0.113.7", logonType=3)
+        for d in range(1, 21)
+    ]
+    events = [
+        ev(1, 0, eventId=4688, computer=host, newProcessId="0x10", processName="C:\\Users\\Public\\a.exe", **me),
+        *fails,
+        ev(2, 21 * day, eventId=4688, computer=host, newProcessId="0x20", processName="C:\\Users\\Public\\b.exe", **me),
+    ]
+    findings = [finding("rule-a", "high", [1], tags=["execution"]), finding("rule-b", "high", [2], tags=["execution"])]
+    findings += [finding("win-bruteforce-4625-by-account", "medium", [e["id"]], tags=["brute-force"], ipAddress="203.0.113.7") for e in fails]
+    res = build_stories(events, [], findings, SETTINGS)
+    first, second = sorted(res["stories"], key=lambda s: s["start"])
+    # each incident holds the failures of its own days, and the spray's address links the two
+    assert {"event:1", "event:11"} <= _refs(first) and "event:2" not in _refs(first) and first["end"] - first["start"] <= 3 * 86_400_000
+    assert {"event:2", "event:30"} <= _refs(second) and "event:1" not in _refs(second)
+    assert "event:20" in {u["ref"] for u in res["unstoried"]}
+    assert any(set(c["stories"]) == {first["id"], second["id"]} for c in res["campaigns"])
+
+
+def test_the_flags_of_the_stories_past_max_stories_are_listed_as_unstoried():
+    events = [
+        ev(
+            i,
+            i,
+            eventId=4688,
+            computer="WS-001",
+            newProcessId=hex(i),
+            processName="C:\\x.exe",
+            subjectUser=f"user{i}",
+            subjectDomain="NORTHSTAR",
+            subjectLogonId=hex(0x100 + i),
+        )
+        for i in range(1, 6)
+    ]
+    res = build_stories(events, [], [finding(f"rule-{i}", "medium", [i], tags=["execution"]) for i in range(1, 6)], SETTINGS, max_stories=2)
+    assert len(res["stories"]) == 2 and res["stats"]["storiesTruncated"] == 1
+    lost = {u["ref"]: u["why"] for u in res["unstoried"]}
+    assert set(lost) == {f"event:{i}" for i in range(1, 6)} - {r for s in res["stories"] for r in _refs(s)} and len(lost) == 3
+    assert all("highest-scoring stories" in why for why in lost.values())
+
+
+def test_an_address_most_of_the_organisation_signs_in_from_ties_nothing_and_makes_no_campaign():
+    """An office's NAT, named by two unrelated findings: two stories, no campaign, no forty targets."""
+    nat, carla = "198.51.100.50", "carla.morel@northstar.example"
+    events = [
+        ev(1, 0, base=ENTRA, upn=DANIEL, user=DANIEL, ipAddress=nat, status="0", appDisplayName="Azure CLI"),
+        ev(2, 300, base=ENTRA, upn=carla, user=carla, ipAddress=nat, status="0", appDisplayName="Graph Explorer"),
+        *[ev(100 + k, k, base=ENTRA, upn=f"employee{k:03d}@northstar.example", user=f"employee{k:03d}@northstar.example", ipAddress=nat, status="0") for k in range(40)],
+    ]  # fmt: skip
+    findings = [
+        finding("m365-signin-risky-app", "medium", [1], tags=["initial-access"], ipAddress=nat),
+        finding("m365-legacy-auth", "medium", [2], tags=["initial-access"], ipAddress=nat),
+    ]
+    res = build_stories(events, [], findings, SETTINGS)
+    assert sorted(s["subject"]["label"] for s in res["stories"]) == [carla, DANIEL] and res["campaigns"] == []
+    for s in res["stories"]:
+        assert s["attackerAddresses"] == [] and s["sharedAddresses"] == [nat]
+        assert f"Most of the organisation's users sign in from {nat}" in s["summary"]
+    # four others signing in from it is no organisation's egress: the address links the two stories
+    few = build_stories(events[:6], [], findings, SETTINGS)
+    [camp] = few["campaigns"]
+    assert camp["label"] == nat and len(camp["stories"]) == 2 and len(camp["targets"]) == 4
+
+
+def test_a_campaign_lists_the_accounts_its_address_reached_around_its_stories_only():
+    events, findings = _intrusion()
+    # ten days later the same address tries another account: someone else's, as far as the case shows
+    events.append(
+        ev(
+            60,
+            10 * 24 * 60,
+            eventId=4625,
+            computer="WS-004.northstar.example",
+            targetUser="employee021",
+            targetDomain="NORTHSTAR",
+            ipAddress="203.0.113.69",
+            logonType=3,
+        )
+    )
+    [camp] = build_stories(events, [], findings, SETTINGS)["campaigns"]
+    assert [t["account"] for t in camp["targets"]] == ["northstar\\employee019", "northstar\\employee020"]
+
+
 def test_phases_from_tags_techniques_and_records():
     assert finding_phase({"tags": ["execution", "persistence"]}) == ("execution", "rule tag execution")
     assert finding_phase({"tags": ["defense-evasion"], "attack": ["T1027"]}) == ("stealth", "rule tag defense-evasion, technique T1027")
@@ -289,6 +411,45 @@ def test_a_server_case_selects_its_rows_by_sql_and_reads_the_same_story(registry
     assert r.json()["stats"]["truncated"] == []
     with override_settings(FORENSIC_BROWSER_ONLY=True):
         assert _post({"storeKey": key, "findings": findings}).status_code == 403
+
+
+def test_a_cut_server_selection_reads_the_foothold_and_what_is_nearest_the_flag_first(registry, monkeypatch):
+    from services.analysis import stories as S
+
+    host = "WS-001.northstar.example"
+    me = dict(subjectUser="alice.martin", subjectDomain="NORTHSTAR", subjectLogonId="0x9001")
+    events = [
+        ev(5, -1, eventId=4624, computer=host, targetUser="alice.martin", targetDomain="NORTHSTAR", targetLogonId="0x9001", logonType=2),
+        ev(1, 0, eventId=4688, computer=host, newProcessId="0x10", processName="C:\\Users\\Public\\mimikatz.exe", **me),
+        ev(2, 120, eventId=4688, computer=host, newProcessId="0x11", processName="C:\\Users\\Public\\adfind.exe", subjectUser="bob", subjectDomain="NORTHSTAR", subjectLogonId="0x7001"),
+        # a scheduled task twenty hours later
+        ev(99, 20 * 60, eventId=4698, computer=host, taskName="\\Updater", **me),
+        # thirty programs of the session in the hour before the flag, thirty in the minutes after it
+        *[ev(100 + i, -50 + i * 0.5, eventId=4688, computer=host, newProcessId=hex(0x100 + i), processName="C:\\Windows\\System32\\conhost.exe", **me) for i in range(30)],
+        *[ev(200 + i, 1 + i * 0.5, eventId=4688, computer=host, newProcessId=hex(0x200 + i), processName="C:\\Windows\\System32\\conhost.exe", **me) for i in range(30)],
+    ]  # fmt: skip
+    store = registry.get(str(uuid.uuid4()))
+    writer = EventWriter(store, 1, preserve_ids=True)
+    for e in events:
+        writer.add({**e, "recordKey": None})
+    writer.flush()
+    monkeypatch.setattr(S, "EVENT_CAP", 20)
+    monkeypatch.setattr(S, "NAME_KEYS", 1)
+    findings = [finding("win-mimikatz", "critical", [1], tags=["credential-access"]), finding("win-adfind", "medium", [2], tags=["discovery"])]
+    res = S.stories_for_store(store, SETTINGS, findings)
+    [story] = [s for s in res["stories"] if s["subject"]["label"] == "northstar\\alice.martin"]
+    # the cut keeps the task, then the records nearest the flag, not the first in time
+    assert {"event:99", "event:200"} <= _refs(story) and "event:100" not in _refs(story)
+    # and says which selections were cut, the names read around the flags among them
+    assert {"identities", "hosts", "name-keys"} <= set(res["stats"]["truncated"])
+
+
+def test_the_api_holds_the_sizes_it_is_asked_for_to_bounds():
+    from api.views.stories import _opts
+
+    asked = {"maxSteps": 10**9, "maxStories": "5000000", "gapHours": "inf", "seedMinRisk": -3}
+    assert _opts(asked) == {"max_steps": 2000, "max_stories": 1000, "gap_hours": 720.0, "seed_min_risk": 0}
+    assert _opts({"max_steps": 0, "gapHours": "nan", "maxStories": "many"}) == {"max_steps": 1}
 
 
 def test_the_browser_sends_every_field_the_story_engine_reads():
