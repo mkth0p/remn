@@ -5,6 +5,8 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+## 0.2.0 (2026-09-25)
+
 - REMN's own rules raise 200 high and critical findings on the seven clean machines of
   evtx-baseline instead of 895, and detect every recording they detected before (342 recordings,
   435 rule detections, up from 340 and 433). A rule a busy machine matches over and over raises

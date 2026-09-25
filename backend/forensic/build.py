@@ -11,7 +11,7 @@ import os
 import re
 from pathlib import Path
 
-VERSION = "0.1.1"
+VERSION = "0.2.0"
 SOURCE_URL = os.environ.get("REMN_SOURCE_URL", "https://github.com/mkth0p/remn").rstrip("/")
 
 _ROOT = Path(__file__).resolve().parents[2]
