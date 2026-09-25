@@ -37,7 +37,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from .chains import _IDENT_SQL, authentication_outcome, build_chains, mail_recipients, same_org_domain
-from .identity import CONFIDENCE_RANK, MEDIUM, STRONG, WEAK, Form, Record, account_forms, base_name, event_record, kind_of, mail_record, resolve
+from .identity import CONFIDENCE_RANK, MEDIUM, STRONG, WEAK, Form, Record, Resolver, account_forms, base_name, event_record, kind_of, mail_record, resolve
 from .lineage import Lineage, build_lineage, host_key, ip_of, is_internal_ip
 
 VERSION = 1
@@ -258,7 +258,14 @@ def _addr_of(forms: list[Form]) -> list[str]:
 class _Case:
     """What the builder reads: rows, findings and the accounts each record names, the identities and the lineage."""
 
-    def __init__(self, events: list[dict[str, Any]], mails: list[dict[str, Any]], findings: list[dict[str, Any]], settings: dict[str, Any]):
+    def __init__(
+        self,
+        events: list[dict[str, Any]],
+        mails: list[dict[str, Any]],
+        findings: list[dict[str, Any]],
+        settings: dict[str, Any],
+        resolver: Resolver | None = None,
+    ):
         self.settings = settings
         self.internal = {str(d).lower().strip(".") for d in (settings.get("internal_domains") or settings.get("internalDomains") or []) if d}
         self.rows: dict[str, tuple[dict[str, Any], str]] = {}
@@ -275,7 +282,8 @@ class _Case:
                 ref = f"{prefix}:{r}"
                 if ref in self.rows:
                     self.f_by_ref[ref].append(f)
-        self.resolver = resolve(events, mails, settings)
+        # a server case resolves the whole case's accounts, not only the rows selected around its flags
+        self.resolver = resolver or resolve(events, mails, settings)
         self.lineage: Lineage = build_lineage(events, settings)
         # the people each record names, and each person's and address's records in time order
         self.named: dict[str, dict[str, tuple[str, str]]] = {}
@@ -335,10 +343,11 @@ class _Case:
         return out
 
     def account(self, user: Any, domain: Any = None, sid: Any = None) -> str | None:
+        """The person a session, a process or a hop is of: never a machine account (a client push over ADMIN$) or Windows' own."""
         forms = account_forms(user, domain, sid)
         if not forms:
             return None
-        got = [i for i, _, c in self.resolver.of_record(Record([forms], ["target"])) if c != WEAK]
+        got = [i for i, _, c in self.resolver.of_record(Record([forms], ["target"])) if c != WEAK and self.storied(i)]
         return got[0] if len(got) == 1 else None
 
     def _lineage_people(self, ref: str, row: dict[str, Any]) -> list[tuple[str, str]]:
@@ -388,6 +397,7 @@ def build_stories(
     settings: dict[str, Any] | None = None,
     *,
     chains: dict[str, Any] | None = None,
+    resolver: Resolver | None = None,
     gap_hours: float = 48.0,
     max_stories: int = 200,
     max_steps: int = 400,
@@ -397,7 +407,7 @@ def build_stories(
     events = list(events)
     mails = list(mails)
     findings = [f for f in (findings or []) if f.get("status") != "false_positive" and f.get("ruleId") != "chain"]
-    case = _Case(events, mails, findings, settings)
+    case = _Case(events, mails, findings, settings, resolver)
     # the phishing chains read the same rows: the page keeps them for the review and the report
     chain_result = chains if chains is not None else build_chains(mails, events, findings, settings)
     chains = chain_result.get("chains") or []
@@ -426,7 +436,7 @@ def build_stories(
         if c.get("kind") == "authentication":
             continue
         iid = case.resolver.of_form(Form("addr", str(c.get("identity") or "").lower()))
-        if not iid:
+        if not iid or not case.storied(iid):
             continue
         chain_of[iid].append(c)
         seed_ref = f"mail:{c['seed']['id']}"
@@ -1087,6 +1097,8 @@ def stories_for_store(store: Any, settings: dict[str, Any] | None, findings: lis
     from services.store import queries as Q
     from services.store.casestore import rows_to_dicts
 
+    from .identity import records_for_store
+
     settings = settings or {}
     findings = [f for f in (findings or []) if f.get("status") != "false_positive" and f.get("ruleId") != "chain"]
     ev_ids, ml_ids = flagged_refs(findings)
@@ -1185,8 +1197,22 @@ def stories_for_store(store: Any, settings: dict[str, Any] | None, findings: lis
             truncated["replies"] = 1
         for m in replies[:MAIL_CAP]:
             mails.setdefault(m["id"], m)
+    # who is who is read on the whole case: a bare name is judged against every account of that name,
+    # and a SID in a script block's header joins its account whatever logon stated the two together
+    records, pairs, istats = records_for_store(store)
+    if istats["truncated"]:
+        # the rarest combinations were cut: the selected rows' own are read too, so each names someone
+        truncated["accounts"] = 1
+        resolver = resolve(events.values(), mails.values(), settings, records=records, netbios_pairs=pairs)
+    else:
+        resolver = resolve(settings=settings, records=records, netbios_pairs=pairs)
     result = build_stories(
-        list(events.values()), list(mails.values()), findings, settings, **{k: v for k, v in opts.items() if k in ("gap_hours", "max_stories", "max_steps")}
+        list(events.values()),
+        list(mails.values()),
+        findings,
+        settings,
+        resolver=resolver,
+        **{k: v for k, v in opts.items() if k in ("gap_hours", "max_stories", "max_steps")},
     )
     result["stats"]["truncated"] = sorted(truncated)
     return result

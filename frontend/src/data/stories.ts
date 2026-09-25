@@ -274,6 +274,8 @@ const REMOTE_SCRIPT_RE = new RegExp(REMOTE_SCRIPT)
 const PRIVATE_ANSWER_RE = new RegExp(PRIVATE_ANSWER)
 const DNS_CAP = 20_000
 const DHCP_CAP = 20_000
+/** the ways of writing an account a server case's who-is-who reads (identity.records_for_store's limit) */
+const ACCOUNT_RECORD_CAP = 200_000
 
 /** A record beyond LINEAGE_EVENT_IDS that lineage reads on a flagged host. */
 function lineageExtra(row: Record<string, unknown>): boolean {
@@ -304,6 +306,7 @@ export const STORY_EVENT_FIELDS = [
   'category',
   'operation',
   'computer',
+  'userSid',
   'recordKey',
   'summary',
   'description',
@@ -627,6 +630,7 @@ export function storyCoverageWarnings(stats: StoryResult['stats'] | undefined): 
     replies: `Only the first ${MAIL_CAP.toLocaleString('en')} mails the flagged people sent were read.`,
     dns: `The DNS answers on the flagged hosts passed ${DNS_CAP.toLocaleString('en')}: the addresses they give to hosts come from the first ones in time.`,
     dhcp: `The DHCP leases passed ${DHCP_CAP.toLocaleString('en')}: the addresses they give to hosts come from the first ones.`,
+    accounts: `The case writes its accounts in more than ${ACCOUNT_RECORD_CAP.toLocaleString('en')} ways: who is who reads the most frequent ones and those of the records the stories read.`,
   }
   const out = (stats?.truncated ?? []).map((k) => labels[k]).filter(Boolean)
   if (stats?.storiesTruncated) out.push('Only the highest-scoring 200 stories are kept.')
