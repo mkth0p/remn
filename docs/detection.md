@@ -198,7 +198,11 @@ Recorded attacks, at the versions measured:
   identifying each (`tests/fixtures/evtx-attack-samples/expected.json`);
 - the Office 365 and Entra ID datasets of Splunk attack_data (`7a5e9d5`): 67
   recordings, each labelled with its ATT&CK technique. 25 more are Entra directory
-  audit logs, other Azure Monitor records and Splunk search exports, which REMN does not read.
+  audit logs, other Azure Monitor records and Splunk search exports, which REMN does not read;
+- EVTX-to-MITRE-Attack (`4748560`): 279 recordings, each labelled with the ATT&CK technique of
+  the folder it is filed in. No rule was written against it before it was first measured
+  ([the head-to-head](reviews/2026-09-25-head-to-head.md)); the two rules written since for
+  the gaps it showed are not measured on it (`WRITTEN_AGAINST` in the tool).
 
 Clean machines: the seven Windows installations of NextronSystems/evtx-baseline `v0.8.4`
 (6.6 million events, 91% of them Sysmon), which SigmaHQ runs its own rules against for false
@@ -225,11 +229,14 @@ need, so a Microsoft 365 rule reads no Windows event). The pages read it as:
 
 Mail rules are calibrated on mail corpora instead (below).
 
-At this commit, 830 of the 2,998 event rules fire on a recording of what they look
-for and 2,168 are leads; 457 of the 457 SigmaHQ rules with a sample fire on it; on the
-clean machines 167 of the 2,785 rules whose log sources they have fired at least once.
+At this commit, 885 of the 3,002 event rules fire on a recording of what they look
+for and 2,117 are leads; 457 of the 457 SigmaHQ rules with a sample fire on it; on the
+clean machines 168 of the 2,789 rules whose log sources they have fired at least once.
 Measuring found SigmaHQ rules that could never fire (the AppX deployment channel, comparisons
 with true) and PowerShell rules blind to PowerShell 7's log, since fixed in the converter.
+EVTX-to-MITRE-Attack, added as a source on 2026-09-25, gave 53 leads their first recorded
+attack, five of them REMN's own (AS-REP roasting, Kerberos pre-authentication brute force, audit
+policy and firewall changes, the system time changed).
 
 **Re-measuring** takes the downloads listed in the tool's docstring (about 9 GB unpacked) and
 about an hour on four cores; re-run it after changing a rule or re-importing a pack. A backend

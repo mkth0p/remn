@@ -49,6 +49,19 @@ def test_a_rule_of_the_technique_counts_at_or_above_the_level_cut(tmp_path):
     assert anylevel["detected"] == 1 and anylevel["hit"] == {SPRAY: ["Kerberos spraying"]} and anylevel["alerts"] == 3
     medium = h2h.score("REMN", alerts, truth, apart, 2)
     assert medium["detected"] == 0 and medium["anyAlert"] == 1
+    # a rule written after studying the library is left out of its score
+    skipped = h2h.score("REMN", h2h.remn(out, ("default",), skip=frozenset({"spray"})), truth, apart, 0)
+    assert skipped["detected"] == 0 and skipped["alerts"] == 1
+
+
+def test_rules_written_against_a_dataset_exist_and_name_a_measured_source():
+    import yaml
+
+    ids = {d["id"] for p in (ROOT / "rules").rglob("*.yaml") for d in yaml.safe_load_all(p.read_text(encoding="utf-8")) if isinstance(d, dict) and d.get("id")}
+    assert h2h.WRITTEN_AGAINST
+    for rid, datasets in h2h.WRITTEN_AGAINST.items():
+        assert rid in ids, rid
+        assert datasets and datasets <= {"sigma", "attackSamples", "attackData", "evtxToMitre"}, rid
 
 
 def test_hayabusa_hunting_rules_and_chainsaw_aggregates_and_own_rules(tmp_path):

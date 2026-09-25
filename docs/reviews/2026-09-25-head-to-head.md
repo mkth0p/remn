@@ -152,6 +152,37 @@ its threat-hunting rules. REMN's counts are the events each rule matched there
 4. **Keep EVTX-to-MITRE-Attack out of rule writing**, so this measure stays a test of unseen
    attacks.
 
+## Done since, the same day
+
+1. **The credential-dumping rule keeps only near-certain evidence** (dumping tools and commands,
+   ntds.dit and SAM copies) and stays critical; it no longer fires on the clean machines (2,504
+   events before). The LSASS memory reads it caught are a rule of their own, high, one finding per
+   program per machine, without the query-only rights (0x1000, 0x1400) that cannot read memory,
+   with SysWOW64 treated as System32 and THOR or Aurora duplicating a handle (0x40) left out, as
+   SigmaHQ's rule for the same events does. An LSA package that is not signed as expected is a
+   medium rule of its own, Windows' own packages left out. The breakdown that chose these looked at
+   the seven machines' matches together, so the two machines meant to be set aside (win10-client,
+   win2022-evtx) are no clean test; 2 events remain on them, an updater run from a temporary
+   folder. Every EVTX-ATTACK-SAMPLES sample the old rule identified is still found, and REMN still
+   detects the same 109 files of this library.
+   On the clean machines REMN's critical events fell from 2,589 to 85 (80 of them the logs being
+   cleared before export). Its high and above barely moved (5,005 to 4,901): 2,379 of them are an
+   antivirus installer run from a temporary folder, which opens LSASS the way a dumper does, now one
+   finding. REMN leaves it visible rather than trust a program by its name.
+2. **The two gaps have rules**: a member added to a security group other than the privileged ones
+   (medium), and a logon with explicit credentials from PowerShell, WMIC, a script host, a LOLBin
+   or a program outside the Windows and Program Files folders (high). They were written from what
+   the events mean and from Hayabusa's rules for the same events, without reading this library's
+   files, then run once on it: they fire on the three files of the gaps and on eight more group
+   changes, on none of the clean machines, and on one EVTX-ATTACK-SAMPLES file (lateral movement
+   through WMIC with explicit credentials). Because this library showed the gaps they close,
+   neither counts on it: REMN's score here stays 109 of 279 at medium and above (113 with them).
+3. **The library is a source of the rule measure** (`tools/measure_rules.py`, 279 recordings). 885
+   of the 3,002 event rules now detect a recorded attack (830 before): it gave 53 leads their first,
+   five of them REMN's own (AS-REP roasting, Kerberos pre-authentication brute force, audit policy
+   and firewall changes, the system time changed). The two gap rules are not measured on it
+   (`WRITTEN_AGAINST`), and `tools/head_to_head.py` leaves them out when it scores this library.
+
 ## What the run does not say
 
 - **Technique scoring is a proxy.** A detection tagged with another technique counts as a miss (the

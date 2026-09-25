@@ -1,5 +1,25 @@
 # REMN's rules, measured (2026-09-24)
 
+> **Update, 2026-09-25.** The rules are measured on EVTX-to-MITRE-Attack too: 279 recorded attacks,
+> each labelled with its technique, from a library no rule was written against (the two rules
+> written since for the gaps it showed are not measured on it). The credential-dumping rule was
+> split, and those two rules added ([head-to-head](2026-09-25-head-to-head.md)).
+>
+> | | 2026-09-24 | 2026-09-25 |
+> |---|---:|---:|
+> | Event rules measured | 2,998 | 3,002 |
+> | Detect a recorded attack | 830 | 885 |
+> | REMN's own Windows rules that do | 112 of 133 | 119 of 137 |
+> | Fire on the clean machines | 167 | 168 |
+>
+> The new library gave 53 leads their first recorded attack, five of them REMN's own (AS-REP
+> roasting, Kerberos pre-authentication brute force, audit policy and firewall changes, the system
+> time changed); no rule lost one. The critical credential-dumping rule, which fired 2,504 times
+> on six of the clean machines, no longer fires on them; the LSASS memory reads it caught are a
+> rule of their own (high, one finding per program): 2,400 events there in nine findings, 2,379 of
+> the events one antivirus installer run from a temporary folder. The rest of this page is the
+> measure of 2026-09-24.
+
 Every event rule REMN ships, its own and the three SigmaHQ packs', was run by
 `tools/measure_rules.py` on recorded attacks and on the logs of clean machines, and the result
 ships as `rules/measures.json`. The Rules page, the finding panel and the report read it (see

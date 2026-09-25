@@ -10,11 +10,12 @@ The datasets, at the versions measured:
     git clone https://github.com/SigmaHQ/sigma && git -C sigma checkout 272daf82bf77fb0bb97f1f0c4d82bc61154772e1
     git clone https://github.com/sbousseaden/EVTX-ATTACK-SAMPLES && git -C EVTX-ATTACK-SAMPLES checkout 4ceed2f4706daf601c212a8f91c113dd85349a2c
     GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/splunk/attack_data && git -C attack_data checkout 7a5e9d5bedf2c18450599777e870f7bfa42a4025
+    git clone https://github.com/mdecrevoisier/EVTX-to-MITRE-Attack && git -C EVTX-to-MITRE-Attack checkout 474856008f037ccd42753f02a631b42690195829
     for h in win10-client win11-client win11-client-2023 win2022-ad win2022-0-20348-azure win2022-evtx win7-x86; do
       mkdir -p baseline/$h && curl -sSfL https://github.com/NextronSystems/evtx-baseline/releases/download/v0.8.4/$h.tgz | tar xz -C baseline/$h
     done
     .venv/bin/python tools/measure_rules.py --sigma sigma --attack-samples EVTX-ATTACK-SAMPLES \\
-        --attack-data attack_data --baseline baseline --out rules/measures.json
+        --attack-data attack_data --evtx-to-mitre EVTX-to-MITRE-Attack --baseline baseline --out rules/measures.json
 
 The attack_data datasets are Git LFS files: the Office 365 and Entra ID ones (13 MB) are fetched
 from GitHub's media host at the pinned commit into --cache, unless the checkout has them.
@@ -24,7 +25,10 @@ Recorded attacks:
 - EVTX-ATTACK-SAMPLES, with the rules reviewed as identifying each file
   (tests/fixtures/evtx-attack-samples/expected.json);
 - Splunk attack_data's Office 365 and Entra ID (azure:monitor:aad) datasets, each labelled with
-  its ATT&CK technique; the Entra audit logs among them are a format REMN does not read.
+  its ATT&CK technique; the Entra audit logs among them are a format REMN does not read;
+- EVTX-to-MITRE-Attack, each file labelled with the technique of the folder it is filed in. No
+  rule was written against it before it was first measured (docs/reviews/2026-09-25-head-to-head.md);
+  a rule written since, after studying some of its files, is not measured on it (WRITTEN_AGAINST).
 Clean machines: the seven Windows installations of NextronSystems/evtx-baseline, which SigmaHQ
 runs its rules against for false positives.
 
@@ -72,6 +76,7 @@ PINS = {
     "sigma": {"repo": "SigmaHQ/sigma", "sha": "272daf82bf77fb0bb97f1f0c4d82bc61154772e1"},
     "attackSamples": {"repo": "sbousseaden/EVTX-ATTACK-SAMPLES", "sha": "4ceed2f4706daf601c212a8f91c113dd85349a2c"},
     "attackData": {"repo": "splunk/attack_data", "sha": "7a5e9d5bedf2c18450599777e870f7bfa42a4025"},
+    "evtxToMitre": {"repo": "mdecrevoisier/EVTX-to-MITRE-Attack", "sha": "474856008f037ccd42753f02a631b42690195829"},
     "baseline": {"repo": "NextronSystems/evtx-baseline", "tag": "v0.8.4"},
 }
 M365_SOURCETYPES = ("o365:management:activity", "azure:monitor:aad")
@@ -85,6 +90,14 @@ REVOKED = {
     "T1070.001": "T1685.005", "T1070.002": "T1685.006",
 }  # fmt: skip
 TECHNIQUE = re.compile(r"^T\d{4}(\.\d{3})?$")
+# EVTX-to-MITRE-Attack files a recording under its tactic and technique: TA0006-.../T1558-.../file.evtx
+TECHNIQUE_FOLDER = re.compile(r"^(T\d{4})(?:\.(\d{3}))?", re.I)
+# rules written after studying a dataset's files: that dataset is not evidence for them
+WRITTEN_AGAINST: dict[str, frozenset[str]] = {
+    # written for the gaps the head-to-head of 2026-09-25 found on EVTX-to-MITRE-Attack
+    "win-user-added-security-group": frozenset({"evtxToMitre"}),
+    "win-explicit-credentials-unusual-process": frozenset({"evtxToMitre"}),
+}
 
 
 def techniques(values: Any) -> frozenset[str]:
@@ -94,6 +107,13 @@ def techniques(values: Any) -> frozenset[str]:
         if TECHNIQUE.match(t):
             out.add(REVOKED.get(t, t))
     return frozenset(out)
+
+
+def folder_technique(rel: str) -> frozenset[str]:
+    """The technique of an EVTX-to-MITRE-Attack file from its folder, or none for a file outside a technique folder."""
+    parts = rel.split("/")
+    m = TECHNIQUE_FOLDER.match(parts[1]) if len(parts) == 3 else None
+    return techniques([m.group(1) + (f".{m.group(2)}" if m.group(2) else "")]) if m else frozenset()
 
 
 def related(a: frozenset[str], b: frozenset[str]) -> bool:
@@ -155,6 +175,16 @@ def attack_sample_recordings(root: Path, rule_tech: dict[str, frozenset[str]]) -
         credit = frozenset(expected.get(rel, []))
         tech = frozenset().union(*(rule_tech.get(r, frozenset()) for r in credit)) if credit else frozenset()
         out.append(Recording("attackSamples", rel, [p], tech, credit))
+    return out
+
+
+def evtx_to_mitre_recordings(root: Path) -> list[Recording]:
+    """One recording per file filed under a technique; the full attack chains and Defender events outside one are left out."""
+    out = []
+    for p in sorted(p for p in root.rglob("*.evtx") if ".git" not in p.parts):
+        rel = p.relative_to(root).as_posix()
+        if tech := folder_technique(rel):
+            out.append(Recording("evtxToMitre", rel, [p], tech))
     return out
 
 
@@ -403,6 +433,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--sigma", type=Path, required=True, help="SigmaHQ/sigma checkout")
     ap.add_argument("--attack-samples", type=Path, required=True, help="EVTX-ATTACK-SAMPLES checkout")
     ap.add_argument("--attack-data", type=Path, required=True, help="splunk/attack_data checkout (LFS files may be pointers)")
+    ap.add_argument("--evtx-to-mitre", type=Path, required=True, help="EVTX-to-MITRE-Attack checkout")
     ap.add_argument("--baseline", type=Path, required=True, help="evtx-baseline: one directory per machine")
     ap.add_argument("--out", type=Path, default=ROOT / "rules" / "measures.json")
     ap.add_argument("--cache", type=Path, default=Path(tempfile.gettempdir()) / "remn-measure-cache")
@@ -421,7 +452,12 @@ def main(argv: list[str] | None = None) -> int:
     rule_tech = {rid: techniques(r.get("attack")) for rid, r in rules.items()}
     settings_needed = {rid: s for rid, r in rules.items() if (s := needs_settings(R, r))}
 
-    recordings = sigma_recordings(a.sigma, rule_tech) + attack_sample_recordings(a.attack_samples, rule_tech) + attack_data_recordings(a.attack_data, a.cache)
+    recordings = (
+        sigma_recordings(a.sigma, rule_tech)
+        + attack_sample_recordings(a.attack_samples, rule_tech)
+        + attack_data_recordings(a.attack_data, a.cache)
+        + evtx_to_mitre_recordings(a.evtx_to_mitre)
+    )
     if a.limit:
         by_set = collections.defaultdict(list)
         for rec in recordings:
@@ -463,6 +499,8 @@ def main(argv: list[str] | None = None) -> int:
         tech = rule_tech[rid]
         of = hits = fires = 0
         for rec in read:
+            if rec.dataset in WRITTEN_AGAINST.get(rid, ()):
+                continue
             on = rid in rec.credit or (bool(tech) and rid in rec.readable and related(tech, rec.techniques))
             fired = rid in rec.fired
             of += on
@@ -494,6 +532,7 @@ def main(argv: list[str] | None = None) -> int:
                 "recordings": counted["attackData"],
                 "unreadable": sum(1 for r in recordings if r.dataset == "attackData" and not r.rows),
             },
+            "evtxToMitre": {**PINS["evtxToMitre"], "recordings": counted["evtxToMitre"]},
             "baseline": {**PINS["baseline"], "machines": len(clean), "events": sum(o["rows"] for o in clean.values())},
         },
         "rules": measures,

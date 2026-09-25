@@ -150,7 +150,7 @@
  "Credential Access/CA_sysmon_hashdump_cmd_meterpreter.evtx": [
   "sigma-a18dd26b-6450-46de-8c91-9659150cf088",
   "sigma-f239b326-2f41-4d6b-9dfa-c846a60ef505",
-  "win-credential-dumping"
+  "win-lsass-memory-access"
  ],
  "Credential Access/CA_teamviewer-dumper_sysmon_10.evtx": [
   "win-credential-app-memory-read"
@@ -175,7 +175,7 @@
   "win-zerologon-anonymous-account-change"
  ],
  "Credential Access/babyshark_mimikatz_powershell.evtx": [
-  "win-credential-dumping"
+  "win-lsass-memory-access"
  ],
  "Credential Access/dc_applog_ntdsutil_dfir_325_326_327.evtx": [
   "win-credential-dumping"
@@ -222,7 +222,7 @@
   "sigma-9bd012ee-0dff-44d7-84a0-aa698cfd87a3",
   "sigma-9f5c1d59-33be-4e60-bcab-85d2f566effd",
   "sigma-a5a2d357-1ab8-4675-a967-ef9990a59391",
-  "win-credential-dumping"
+  "win-lsass-memory-access"
  ],
  "Credential Access/sysmon_10_11_outlfank_dumpert_and_andrewspecial_memdump.evtx": [
   "sigma-5ef9853e-4d0e-4a70-846f-a9ca37d876da",
@@ -239,7 +239,7 @@
  ],
  "Credential Access/sysmon_10_lsass_mimikatz_sekurlsa_logonpasswords.evtx": [
   "sigma-d0d2f720-d14f-448d-8242-51ff396a334e",
-  "win-credential-dumping"
+  "win-lsass-memory-access"
  ],
  "Credential Access/sysmon_13_keylogger_directx.evtx": [
   "win-directinput-from-user-folder"
@@ -247,7 +247,7 @@
  "Credential Access/sysmon_2x10_lsass_with_different_pid_RtlCreateProcessReflection.evtx": [
   "sigma-5ef9853e-4d0e-4a70-846f-a9ca37d876da",
   "sigma-9bd012ee-0dff-44d7-84a0-aa698cfd87a3",
-  "win-credential-dumping"
+  "win-lsass-memory-access"
  ],
  "Credential Access/sysmon_3_10_Invoke-Mimikatz_hosted_Github.evtx": [
   "sigma-5ef9853e-4d0e-4a70-846f-a9ca37d876da",
@@ -260,7 +260,7 @@
  ],
  "Credential Access/tutto_malseclogon.evtx": [
   "sigma-c8da0dfd-4ed0-4b68-962d-13c9c884384e",
-  "win-credential-dumping"
+  "win-lsass-memory-access"
  ],
  "Defense Evasion/DE_104_system_log_cleared.evtx": [
   "sigma-100ef69e-3327-481c-8e5c-6d80d9507556",
@@ -420,7 +420,7 @@
   "win-privileged-local-group-enumeration"
  ],
  "Discovery/discovery_meterpreter_ps_cmd_process_listing_sysmon_10.evtx": [
-  "win-credential-dumping",
+  "win-lsass-memory-access",
   "win-process-sweep-unbacked-code"
  ],
  "Discovery/discovery_psloggedon.evtx": [

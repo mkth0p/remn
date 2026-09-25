@@ -111,6 +111,24 @@ where:
   eventId|in: [4728, 4732, 4756]
   groupName|contains: [Administrators, Administrateurs, "Domain Admins", "Admins du domaine", "Enterprise Admins", "Administrateurs de l'entreprise", "Schema Admins", "Remote Desktop Users", "Utilisateurs du Bureau", "Backup Operators", "Opérateurs de sauvegarde", DnsAdmins, "Account Operators", "Server Operators", "Print Operators", "Group Policy Creator", "Hyper-V Administrators", "Remote Management Users"]
 ---
+id: win-user-added-security-group
+title: Member added to a security group
+description: >-
+  4728 / 4732 / 4756: an account added a member to a security-enabled global, local or universal group
+  other than the privileged ones (win-user-added-privileged-group names those). Membership gives the
+  member what the group reaches (shares, applications, servers that trust it), and an attacker adds the
+  accounts they hold to the groups that reach what they want (T1098.007). Changes made by a machine
+  account (group policy, provisioning) are left out. Benign causes: access requests and onboarding
+  handled by the directory's administrators.
+severity: medium
+source: events
+attack: [T1098.007]
+tags: [persistence, privilege]
+where:
+  eventId|in: [4728, 4732, 4756]
+  subjectUser|not_endswith: "$"
+  groupName|not_contains: [Administrators, Administrateurs, "Domain Admins", "Admins du domaine", "Enterprise Admins", "Administrateurs de l'entreprise", "Schema Admins", "Remote Desktop Users", "Utilisateurs du Bureau", "Backup Operators", "Opérateurs de sauvegarde", DnsAdmins, "Account Operators", "Server Operators", "Print Operators", "Group Policy Creator", "Hyper-V Administrators", "Remote Management Users"]
+---
 id: win-account-lifecycle-short
 title: Account created then deleted shortly after
 description: A user account created (4720) and deleted (4726) within 24 hours - throwaway account.

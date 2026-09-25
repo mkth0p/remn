@@ -40,10 +40,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
-from measure_rules import related, techniques  # noqa: E402
+from measure_rules import WRITTEN_AGAINST, folder_technique, related, techniques  # noqa: E402
 
 LEVELS = {"critical": 4, "crit": 4, "high": 3, "medium": 2, "med": 2, "low": 1, "informational": 0, "info": 0}
-FOLDER = re.compile(r"^(T\d{4})(?:\.(\d{3}))?", re.I)
 TAG = re.compile(r"T\d{4}(?:\.\d{3})?", re.I)
 
 
@@ -126,7 +125,7 @@ def _tagged(tech: frozenset[str], title: str, by_title: dict[str, list[str]]) ->
     return tech or techniques(by_title.get(title.strip(), []) + (TAG.findall(title) if by_title else []))
 
 
-def remn(out: Path, sets: tuple[str, ...], by_title: dict[str, list[str]] | None = None) -> Alerts:
+def remn(out: Path, sets: tuple[str, ...], by_title: dict[str, list[str]] | None = None, skip: frozenset[str] = frozenset()) -> Alerts:
     meta = {
         r["id"]: (level(r.get("severity")), techniques(r.get("attack")), r.get("title", r["id"]))
         for s in json.loads((out / "rules.json").read_text()).values()
@@ -136,6 +135,8 @@ def remn(out: Path, sets: tuple[str, ...], by_title: dict[str, list[str]] | None
     for rel, got in json.loads((out / "sql.json").read_text()).items():
         for s in sets:
             for rid, keys in got.get(s, {}).items():
+                if rid in skip:
+                    continue
                 lv, tech, title = meta[rid]
                 alerts[rel] += [(rid, lv, _tagged(tech, title, by_title or {}), title)] * len(keys)
     return alerts
@@ -199,9 +200,7 @@ def labels(lib: Path, how: str, rule_tech: dict[str, frozenset[str]]) -> tuple[d
     out, apart = {}, []
     for rel in files:
         if how == "folders":
-            parts = rel.split("/")
-            m = FOLDER.match(parts[1]) if len(parts) == 3 else None
-            tech = techniques([m.group(1) + (f".{m.group(2)}" if m.group(2) else "")]) if m else frozenset()
+            tech = folder_technique(rel)
         else:
             tech = frozenset().union(*(rule_tech.get(r, frozenset()) for r in expected.get(rel, [])))
         if tech:
@@ -271,6 +270,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--chainsaw-default", type=Path, help="a Chainsaw run without the threat-hunting rules")
     ap.add_argument("--hayabusa-rules", type=Path, help="the hayabusa-rules checkout, to score Hayabusa without its threat-hunting rules too")
     ap.add_argument("--labels", choices=("folders", "credits"), default="folders")
+    ap.add_argument("--with-written-against", action="store_true", help="count REMN's rules written against this library (WRITTEN_AGAINST) too")
     ap.add_argument("--as-tagged", action="store_true", help="score each rule by the techniques its authors gave it, without the title maps")
     ap.add_argument("--clean", type=Path, help="count the alerts each tool raises on the clean machines' runs in this directory instead")
     ap.add_argument("--json", type=Path, help="write every score, with the files each tool detected, here")
@@ -287,9 +287,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     truth, apart = labels(a.library, a.labels, {r["id"]: techniques(r.get("attack")) for s in rules.values() for r in s})
     bt = {} if a.as_tagged else BY_TITLE
+    # a rule written after studying this library's files does not count on it (EVTX-to-MITRE-Attack)
+    skip = frozenset() if a.with_written_against or a.labels != "folders" else frozenset(r for r, ds in WRITTEN_AGAINST.items() if "evtxToMitre" in ds)
     tools = {
-        "REMN (default rules)": remn(a.remn, ("default",), bt),
-        "REMN (with the hunting pack)": remn(a.remn, ("default", "hunting"), bt),
+        "REMN (default rules)": remn(a.remn, ("default",), bt, skip),
+        "REMN (with the hunting pack)": remn(a.remn, ("default", "hunting"), bt, skip),
         "Hayabusa (every rule)": hayabusa(a.hayabusa, a.library, by_title=bt),
         "Chainsaw (SigmaHQ with hunting, and its own rules)": chainsaw(a.chainsaw, a.library, bt),
     }

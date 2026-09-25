@@ -219,6 +219,22 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   of EVTX-ATTACK-SAMPLES), Hayabusa 86 and Chainsaw 52; on seven clean machines it raises
   about four times as many high and critical alerts as either, most from its own rules. See
   `docs/reviews/2026-09-25-head-to-head.md`.
+- The critical credential-dumping rule keeps only near-certain evidence (dumping tools and
+  commands, ntds.dit and SAM copies): a program reading LSASS memory is its own high rule,
+  one finding per program per machine, which leaves out the query-only access that cannot
+  read memory and treats SysWOW64 as System32, and an LSA package that is not signed as
+  expected its own medium rule, with Windows' own packages left out. On the seven clean
+  machines the critical rule went from 2,504 matches to none and REMN's critical events from
+  2,589 to 85, while every attack sample the old rule identified is still found.
+- Two rules close the gaps the head-to-head found: a member added to a security group other
+  than the privileged ones (medium), and a logon with explicit credentials from PowerShell,
+  WMIC, a script host, a LOLBin or a program outside the Windows and Program Files folders
+  (high), which catches RunasCs. Neither fires on the clean machines.
+- Rules are measured on EVTX-to-MITRE-Attack too: 279 recorded attacks, each labelled with
+  its technique, that no rule was written against, so a rule's "detects" can rest on attacks
+  it was not written for. 885 of the 3,002 event rules now detect a recorded attack (830),
+  and 53 leads, five of REMN's own among them, have their first. A rule written after
+  studying a dataset is not measured on it, nor scored on it by `tools/head_to_head.py`.
 
 ## 0.1.1 (2026-09-07)
 

@@ -90,7 +90,7 @@ def test_the_shipped_measures_are_well_formed_and_say_which_rules_changed_since(
     if not path.is_file():
         pytest.skip("the rules have not been measured")
     data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["version"] == 1 and set(data["sources"]) == {"sigma", "attackSamples", "attackData", "baseline"}
+    assert data["version"] == 1 and set(data["sources"]) == {"sigma", "attackSamples", "attackData", "evtxToMitre", "baseline"}
     known = {"h", "own", "of", "hits", "fires", "clean", "settings"}
     for rid, m in data["rules"].items():
         assert re.fullmatch(r"[0-9a-f]{12}", m["h"]) and set(m) <= known, rid

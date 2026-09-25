@@ -173,19 +173,67 @@ where:
     - { image|contains: ["\\temp\\", "\\tmp\\", "\\downloads\\", "\\users\\public\\", "\\programdata\\", "$recycle.bin", "\\perflogs\\", "\\windows\\tasks\\", "\\windows\\debug\\", "\\windows\\fonts\\", "\\windows\\help\\", "\\appdata\\roaming\\", "\\appdata\\local\\", "\\music\\", "\\videos\\", "\\pictures\\"], image|not_contains: ["\\appdata\\local\\microsoft\\", "\\appdata\\local\\programs\\", "\\appdata\\local\\google\\", "\\appdata\\local\\mozilla\\", "\\appdata\\local\\slack\\", "\\appdata\\local\\discord\\", "\\appdata\\local\\zoom\\", "\\appdata\\local\\teams\\", "\\appdata\\local\\webex\\", "\\appdata\\local\\1password\\", "\\appdata\\local\\brave", "\\appdata\\local\\vivaldi", "\\appdata\\local\\ollama", "\\appdata\\local\\anthropic", "\\appdata\\local\\claude", "\\programdata\\microsoft\\", "\\programdata\\package cache\\", "\\programdata\\chocolatey\\", "\\programdata\\lenovo\\", "\\programdata\\dell\\", "\\programdata\\hp\\", "\\programdata\\intel\\", "\\programdata\\nvidia", "\\programdata\\adobe\\", "\\programdata\\oracle\\", "\\programdata\\docker", "\\appdata\\local\\temp\\pip-", "\\appdata\\local\\temp\\chocolatey", "\\appdata\\local\\temp\\is-", "\\appdata\\local\\temp\\7z", "\\appdata\\local\\temp\\rar", "\\appdata\\local\\temp\\{", "\\appdata\\local\\temp\\msi", "\\appdata\\local\\temp\\nvidia", "\\appdata\\local\\temp\\lenovo", "\\appdata\\local\\temp\\dell", "\\appdata\\local\\temp\\hp", "\\appdata\\local\\temp\\squirrel", "\\appdata\\local\\squirreltemp"] }
 ---
 id: win-credential-dumping
-title: Credential dumping indicators (LSASS access, ntds.dit, SAM)
-description: Sysmon 10 on lsass.exe with dangerous access masks, procdump/comsvcs/mimikatz command lines, ESENT 325/327 (ntds.dit copy), vssadmin/ntdsutil/reg save usage, or 4663 on SAM/SECURITY hives.
+title: Credential dumping tools and commands (mimikatz, procdump, comsvcs, ntdsutil), ntds.dit and SAM copies
+description: >-
+  A command line naming a credential dumping tool or technique (mimikatz, procdump -ma lsass, comsvcs MiniDump,
+  ntdsutil IFM, reg save of the SAM, SECURITY or SYSTEM hive, a shadow copy of ntds.dit), ESENT 325/327 on a
+  copy of ntds.dit, or 4663 on the SAM, SECURITY or SYSTEM hive by a process other than LSA and the service
+  host. A program reading LSASS memory is win-lsass-memory-access, and an LSA package that is not signed as
+  expected win-lsa-package-unsigned.
 severity: critical
 source: events
 attack: [T1003.001, T1003.002, T1003.003]
 tags: [credential-access]
 where:
   any_of:
-    - { eventId: 10, provider|contains: Sysmon, targetImage|endswith: lsass.exe, grantedAccess|in: ["0x1010", "0x1410", "0x1438", "0x143a", "0x1fffff", "0x1f0fff", "0x1f1fff", "0x1f2fff", "0x1f3fff", "0x40", "0x1400", "0x1000", "0x1FFFFF", "0x1F0FFF", "0x1F1FFF"], sourceImage|not_contains: ["\\program files\\", "\\program files (x86)\\", "msmpeng", "csrss", "wininit", "wmiprvse", "taskmgr", "procexp", "vmtoolsd", "sysmon"], not: { sourceImage|contains: "\\windows\\system32\\", sourceImage|not_endswith: ["\\powershell.exe", "\\pwsh.exe", "\\rundll32.exe", "\\regsvr32.exe", "\\mshta.exe", "\\wscript.exe", "\\cscript.exe", "\\cmd.exe", "\\msbuild.exe"] } }
-    - { eventId|in: [4688, 1], commandLine|contains: ["sekurlsa", "lsadump", "mimikatz", "procdump", "-ma lsass", "comsvcs.dll, MiniDump", "comsvcs.dll MiniDump", "rundll32.exe comsvcs", "ntdsutil", "ifm", "create full", "reg save hklm\\sam", "reg save hklm\\system", "reg save hklm\\security", "reg.exe save", "vssadmin create shadow", "wmic shadowcopy", "diskshadow", "esentutl /y", "esentutl.exe /y", "ntds.dit", "sam.hive", "system.hive", "lsass.dmp", "lsass.exe", "dumpert", "nanodump", "pypykatz", "lazagne", "sharpdump", "handlekatz", "dumpsec", "secretsdump", "invoke-mimikatz", "pwdump", "gsecdump", "wce.exe", "fgdump", "cachedump", "vaultcmd /list", "cmdkey /list", "rubeus", "kekeo"] }
+    - { eventId|in: [4688, 1], commandLine|contains: ["sekurlsa", "lsadump", "mimikatz", "procdump", "-ma lsass", "comsvcs.dll, MiniDump", "comsvcs.dll MiniDump", "rundll32.exe comsvcs", "ntdsutil", "create full", "reg save hklm\\sam", "reg save hklm\\system", "reg save hklm\\security", "reg.exe save", "vssadmin create shadow", "wmic shadowcopy", "diskshadow", "esentutl /y", "esentutl.exe /y", "ntds.dit", "sam.hive", "system.hive", "lsass.dmp", " lsass.exe", "dumpert", "nanodump", "pypykatz", "lazagne", "sharpdump", "handlekatz", "dumpsec", "secretsdump", "invoke-mimikatz", "pwdump", "gsecdump", "wce.exe", "fgdump", "cachedump", "vaultcmd /list", "cmdkey /list", "rubeus", "kekeo"] }
     - { eventId|in: [325, 327], provider|contains: ESENT, any_of: [ { message|contains: ntds.dit }, { data|contains: ntds.dit }, { raw|contains: ntds.dit } ] }
     - { eventId: 4663, objectName|contains: ["\\config\\sam", "\\config\\security", "\\config\\system", "ntds.dit"], processName|not_contains: [lsass.exe, services.exe, svchost.exe] }
-    - { eventId: 6155, provider|contains: LSA }
+---
+id: win-lsass-memory-access
+title: A program outside Windows read LSASS memory (Sysmon 10)
+description: >-
+  Sysmon 10: a program outside the Windows and Program Files folders, or a script host or LOLBin inside them,
+  opened lsass.exe with the right to read its memory (PROCESS_VM_READ, or full access), which is how mimikatz,
+  procdump, nanodump and their kin read the credentials it holds (T1003.001). Opening it only to query it
+  (0x1000, 0x1400) cannot read credentials and is left out, as are Defender, the Windows system folders
+  (System32, SysWOW64) and THOR or Aurora duplicating a handle (0x40). One finding per program per machine.
+  Benign causes: an antivirus or security product's installer or updater run from a temporary folder, which
+  opens LSASS the way a dumper does: check the program's signature and origin.
+severity: high
+source: events
+attack: [T1003.001]
+tags: [credential-access]
+entities: [computer, sourceImage, grantedAccess]
+where:
+  eventId: 10
+  provider|contains: Sysmon
+  targetImage|endswith: lsass.exe
+  grantedAccess|in: ["0x1010", "0x1410", "0x1438", "0x143a", "0x1fffff", "0x1f0fff", "0x1f1fff", "0x1f2fff", "0x1f3fff", "0x40"]
+  sourceImage|not_contains: ["\\program files\\", "\\program files (x86)\\", "msmpeng", "csrss", "wininit", "wmiprvse", "taskmgr", "procexp", "vmtoolsd", "sysmon"]
+  not: { sourceImage|contains: ["\\windows\\system32\\", "\\windows\\syswow64\\"], sourceImage|not_endswith: ["\\powershell.exe", "\\pwsh.exe", "\\rundll32.exe", "\\regsvr32.exe", "\\mshta.exe", "\\wscript.exe", "\\cscript.exe", "\\cmd.exe", "\\msbuild.exe"] }
+exclude:
+  grantedAccess: "0x40"
+  sourceImage|endswith: ["\\thor.exe", "\\thor64.exe", "\\aurora-agent.exe", "\\aurora-agent-64.exe"]
+group_by: [computer, sourceImage]
+threshold: ">= 1"
+---
+id: win-lsa-package-unsigned
+title: LSA loaded an authentication package that is not signed as expected (6155)
+description: >-
+  LsaSrv 6155: LSA loaded a security package (SSP or authentication package) whose signature is not the one it
+  expects. A malicious security support provider (mimilib, a custom SSP DLL) sees every password typed at logon
+  (T1547.005). Windows' own packages are left out: on some builds LSA reports them too. Benign causes: a
+  third-party package (smart card, VPN or security product) that is not signed for LSA protection, and sfapm,
+  seen on a clean Windows 11 23H2 evaluation image: check the package's DLL and its signer.
+severity: medium
+source: events
+attack: [T1547.005]
+tags: [credential-access, persistence]
+where:
+  eventId: 6155
+  provider|contains: LSA
+  data.PackageName|nin: [kerberos, msv1_0, negotiate, negoexts, ntlm, pku2u, schannel, "microsoft unified security protocol provider", tspkg, wdigest, cloudap, livessp, credssp, "default tls ssp"]
 ---
 id: win-shadow-copy-deletion
 title: Shadow copies deleted / recovery disabled (ransomware precursor)
