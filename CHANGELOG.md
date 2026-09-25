@@ -211,6 +211,14 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   read the same way: each sentence that cites rows is checked against those rows, not only
   against what the tools returned, and one that names what they do not hold is listed under
   the answer.
+- `tools/head_to_head.py` scores REMN, Hayabusa and Chainsaw on a library of recorded
+  attacks by the ATT&CK technique each file records, at the same level cut for all three,
+  and counts their false alarms on clean machines. On EVTX-to-MITRE-Attack, which REMN's
+  rules were not written against (8 of Hayabusa's rules and 2 of SigmaHQ's cite it), REMN
+  detects 109 of 279 recorded attacks at medium level and above (39%, where it detects 97%
+  of EVTX-ATTACK-SAMPLES), Hayabusa 86 and Chainsaw 52; on seven clean machines it raises
+  about four times as many high and critical alerts as either, most from its own rules. See
+  `docs/reviews/2026-09-25-head-to-head.md`.
 
 ## 0.1.1 (2026-09-07)
 

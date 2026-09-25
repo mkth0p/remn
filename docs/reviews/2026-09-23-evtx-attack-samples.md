@@ -28,6 +28,8 @@
 > - **Still out of reach**, because the rule language cannot express them: Zerologon's Netlogon 5805 (the failing client name must equal the DC's own name: a comparison between two fields), the Event Log service restarting without a reboot (the absence of a boot event), and on two privilege-escalation samples the difference between the attack and `runas /netonly` or a normal remote admin logon lies in values only a field comparison or the other host's logs would show.
 > - **Held in place**: `tools/evtx_attack_samples.py` and the `attack-samples` CI job fail when a rule listed for a sample in `tests/fixtures/evtx-attack-samples/expected.json` stops firing, or when the engines disagree on any sample.
 >
+> - **On attacks the rules were not written for, the picture is different**: on EVTX-to-MITRE-Attack, REMN detects 39% of the recorded attacks at medium level and above, Hayabusa 31% and Chainsaw 19%, and the 75 new rules account for one of REMN's detections there ([head-to-head, 2026-09-25](2026-09-25-head-to-head.md)).
+>
 > The rest of this page is the analysis as it was written before the fixes.
 
 Every EVTX file of [EVTX-ATTACK-SAMPLES](https://github.com/sbousseaden/EVTX-ATTACK-SAMPLES) (commit 4ceed2f, 278 files, 37,364 events) was parsed by REMN and run through its rules as a one-file case with the default case settings. That is what a visitor to the public site gets: the browser rule engine, with the core rules and the two SigmaHQ packs that are on by default (`sigma-windows`, `sigma-emerging-threats`; 97 + 2,682 event rules). The hunting pack, off by default, was run separately. Hayabusa, which the public server also runs, was not part of this run.
