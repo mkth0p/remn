@@ -324,10 +324,10 @@ cases keep evidence in the analyst's browser. See [Storage modes](storage.md).
 backend/            Django project (stateless API) and services/ (pure Python: parsers, analysis, reputation, AI)
 backend/data/       lists/ (offline block lists), yara/ (rules), geoip/ (GeoLite2 .mmdb); cases/ holds the server stores
 frontend/           Vite + React + TypeScript application (Dexie/IndexedDB, web workers, ECharts)
-rules/              bundled detection rules (YAML) and the community packs under rules/community/
+rules/              bundled detection rules (YAML), the community packs under rules/community/, and their measures
 samples/            synthetic generators (samples/synthetic/) and, gitignored, public corpora and local evidence
-tests/backend/      pytest suite; tests/fixtures/ holds the parity and prompt fixtures
-tools/              maintenance scripts: rule pack import, public-data validation, calibration, fixtures
-docs/               these pages
-.github/            continuous integration, release workflow, dependabot, templates
+tests/backend/      pytest suite; tests/fixtures/ holds the parity, prompt, golden-corpus and attack-sample fixtures
+tools/              maintenance scripts: rule pack import, rule measurement and the head-to-head, public-data validation, calibration, fixtures
+docs/               these pages, and docs/reviews/ for the dated reviews and measurements
+.github/            continuous integration, the weekly rule measurement, release workflow, dependabot, templates
 ```
