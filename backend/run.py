@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -22,6 +23,8 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--threads", type=int, default=8)
     args = parser.parse_args()
+    # settings size the heavy-request cap from the thread count
+    os.environ.setdefault("FORENSIC_THREADS", str(args.threads))
 
     import django
 
@@ -30,6 +33,12 @@ def main() -> None:
     from waitress import serve
 
     from forensic.wsgi import application
+
+    # waitress spools a request body over 512 KiB to a temporary file. Put those next to the other
+    # staged evidence, on the volume sized for it, rather than in the system /tmp, which a hardened
+    # container keeps small (64 MiB in docker-compose.public.yml) and where a large single-request
+    # upload failed with a reset connection.
+    tempfile.tempdir = str(settings.FILE_UPLOAD_TEMP_DIR)
 
     if not (settings.FRONTEND_DIST / "index.html").exists():
         print("[!] frontend/dist/index.html not found. Run `npm run build` in frontend/ first.")

@@ -89,6 +89,8 @@ export function IocsView() {
     { key: 'lastSeen', label: 'last', width: 150, render: (r) => fmtTs(r.lastSeen) },
   ]
   const configured = health?.providers.filter((p) => p.configured) ?? []
+  // browser-only: the server refuses lookups (403), so none are offered
+  const browserOnly = health?.mode === 'browser-only'
   const uncheckedCount = rows.filter((i) => !i.checkedAt && ['ip', 'domain', 'url', 'hash'].includes(i.kind)).length
   return (
     <div className="view">
@@ -101,21 +103,27 @@ export function IocsView() {
             .join(' · ')}
         </span>
         <span className="spacer" />
-        <Toggle
-          on={kase.settings.networkAllowed}
-          onChange={(v) => {
-            updateSettings({ networkAllowed: v })
-            getDb().cases.update(kase.id!, { settings: { ...kase.settings, networkAllowed: v } })
-            if (v) toast('warn', 'External lookups enabled: indicators will be sent to the selected providers.', 6000)
-          }}
-          label="allow external lookups"
-        />
-        <button className="btn primary sm" disabled={!!progress} onClick={() => check(rows.filter((i) => !i.checkedAt))}>
-          <IconShield /> check unchecked ({uncheckedCount})
-        </button>
-        <button className="btn sm" disabled={!!progress} onClick={() => check(rows)}>
-          re-check shown
-        </button>
+        {!browserOnly && (
+          <Toggle
+            on={kase.settings.networkAllowed}
+            onChange={(v) => {
+              updateSettings({ networkAllowed: v })
+              getDb().cases.update(kase.id!, { settings: { ...kase.settings, networkAllowed: v } })
+              if (v) toast('warn', 'External lookups enabled: indicators will be sent to the selected providers.', 6000)
+            }}
+            label="allow external lookups"
+          />
+        )}
+        {!browserOnly && (
+          <>
+            <button className="btn primary sm" disabled={!!progress} onClick={() => check(rows.filter((i) => !i.checkedAt))}>
+              <IconShield /> check unchecked ({uncheckedCount})
+            </button>
+            <button className="btn sm" disabled={!!progress} onClick={() => check(rows)}>
+              re-check shown
+            </button>
+          </>
+        )}
         <button
           className="btn ghost sm"
           onClick={() =>
@@ -136,7 +144,11 @@ export function IocsView() {
         >
           csv
         </button>
-        <button className="btn ghost sm" onClick={() => exportJson('iocs.stix.json', iocsToStix(kase, rows))}>
+        <button
+          className="btn ghost sm"
+          title="observables for every value; indicators for the ones a reputation check flagged; TLP:AMBER"
+          onClick={async () => exportJson('iocs.stix.json', await iocsToStix(kase, rows))}
+        >
           stix 2.1
         </button>
       </div>
@@ -163,7 +175,9 @@ export function IocsView() {
         </label>
         <span className="spacer" />
         <span className="small dim">
-          providers: {configured.length ? configured.map((p) => p.name).join(', ') : 'none configured (see .env.example) — offline lists: drop files in backend/data/lists'}
+          {browserOnly
+            ? 'This server makes no reputation lookups. Export the indicators (CSV, STIX) to check them with your own tools.'
+            : `providers: ${configured.length ? configured.map((p) => p.name).join(', ') : 'none configured (see .env.example) — offline lists: drop files in backend/data/lists'}`}
         </span>
       </div>
       <div className="relative" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>

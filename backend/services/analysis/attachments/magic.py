@@ -9,6 +9,8 @@ from typing import Any
 
 import puremagic
 
+from services.common import read_zip_member
+
 # Extension -> category. Categories drive the risk scoring.
 DANGEROUS_EXT: dict[str, str] = {
     # native executables
@@ -228,7 +230,7 @@ def _sniff_zip(data: bytes) -> tuple[str, str] | None:
     if "mimetype" in names:
         try:
             with zipfile.ZipFile(io.BytesIO(data)) as zf:
-                mt = zf.read("mimetype")[:100].decode("ascii", "replace")
+                mt = (read_zip_member(zf, zf.getinfo("mimetype"), 4096) or b"")[:100].decode("ascii", "replace")
             ext = {
                 "application/vnd.oasis.opendocument.text": "odt",
                 "application/vnd.oasis.opendocument.spreadsheet": "ods",

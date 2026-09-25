@@ -126,13 +126,18 @@ def mail_iocs(row: dict[str, Any], batch: IocBatch) -> None:
 
 
 class EventWriter:
-    def __init__(self, store: CaseStore, evidence_id: int, include_raw: bool = True) -> None:
+    def __init__(self, store: CaseStore, evidence_id: int, include_raw: bool = True, preserve_ids: bool = False) -> None:
         self.store = store
         self.evidence_id = evidence_id
         self.include_raw = include_raw
+        self.preserve_ids = preserve_ids
         self.batch: list[dict[str, Any]] = []
         self.iocs = IocBatch(evidence_id)
         self.count = 0
+        # rows not written because the case already holds the same record (same recordKey)
+        self.duplicates = 0
+        # rows with a record key keep their indicators until the batch knows it is writing them
+        self.keyed: list[dict[str, Any]] = []
 
     def add(self, row: dict[str, Any]) -> None:
         # Keep the row sparse: the Arrow batch builder only materialises columns that are present.
@@ -143,19 +148,35 @@ class EventWriter:
             out["data"] = _json(data)
         if not self.include_raw:
             out.pop("raw", None)
-        for k in ("id", "caseId", "type"):
+        for k in ("caseId", "type") if self.preserve_ids else ("id", "caseId", "type"):
             out.pop(k, None)
+        if self.preserve_ids:
+            out["id"] = preserved_id(self.store, "events", row.get("id"))
         out["evidenceId"] = self.evidence_id
         self.batch.append(out)
-        event_iocs(row, self.iocs)
+        if row.get("recordKey"):
+            self.keyed.append(row)
+        else:
+            event_iocs(row, self.iocs)
         if len(self.batch) >= BATCH:
             self.flush()
 
     def flush(self) -> None:
+        if self.keyed:
+            have = self.store.existing_record_keys(list({r["recordKey"] for r in self.keyed}))
+            if have:
+                kept = [r for r in self.batch if r.get("recordKey") not in have]
+                self.duplicates += len(self.batch) - len(kept)
+                self.batch = kept
+            for row in self.keyed:
+                if row["recordKey"] not in have:
+                    event_iocs(row, self.iocs)
+            self.keyed = []
         if self.batch:
-            start = self.store.reserve_ids("events", len(self.batch))
-            for i, r in enumerate(self.batch):
-                r["id"] = start + i
+            if not self.preserve_ids:
+                start = self.store.reserve_ids("events", len(self.batch))
+                for i, r in enumerate(self.batch):
+                    r["id"] = start + i
             self.store.insert_rows("events", self.batch)
             self.count += len(self.batch)
             self.batch = []
@@ -164,11 +185,20 @@ class EventWriter:
             self.store.insert_rows("iocs", iocs)
 
 
+def preserved_id(store: CaseStore, table: str, value: Any) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or not 0 < value < 2**53:
+        raise ValueError("Restored rows require a positive safe integer id")
+    with store.lock:
+        store._next[table] = max(store._next[table], value + 1)
+    return value
+
+
 class MailWriter:
-    def __init__(self, store: CaseStore, evidence_id: int, keep_bodies: bool = True) -> None:
+    def __init__(self, store: CaseStore, evidence_id: int, keep_bodies: bool = True, preserve_ids: bool = False) -> None:
         self.store = store
         self.evidence_id = evidence_id
         self.keep_bodies = keep_bodies
+        self.preserve_ids = preserve_ids
         self.mails: list[dict[str, Any]] = []
         self.bodies: list[dict[str, Any]] = []
         self.attachments: list[dict[str, Any]] = []
@@ -177,7 +207,7 @@ class MailWriter:
         self.count = 0
 
     def add(self, row: dict[str, Any]) -> None:
-        mail_id = self.store.reserve_ids("mails", 1)
+        mail_id = preserved_id(self.store, "mails", row.get("id")) if self.preserve_ids else self.store.reserve_ids("mails", 1)
         out: dict[str, Any] = {"id": mail_id, "evidenceId": self.evidence_id}
         auth = row.get("auth") or {}
         reply_to = row.get("replyTo") or []

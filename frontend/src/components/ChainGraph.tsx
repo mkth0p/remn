@@ -6,7 +6,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 import type { Chain } from '../data/chains'
 import { buildCampaignGraph, buildChainGraph, LANE_LABEL, LANES, type GNode, type Graph } from '../data/chainGraph'
 import type { EntityRef } from '../state/store'
-import { fmtTs } from '../util/format'
+import { escapeHtml, fmtTs } from '../util/format'
 
 echarts.use([GraphChart, TooltipComponent, LegendComponent, CanvasRenderer])
 
@@ -66,13 +66,23 @@ function tokens(): GraphTokens {
 const trunc = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…' : s)
 
 /** The ECharts option for a chain (swimlanes, fixed positions) or campaign graph; `print` = static picture for the report. */
-export function graphOption(graph: Graph, mode: 'chain' | 'campaign', W: number, H: number, t: GraphTokens, selectedStep: number | null, print = false): Record<string, unknown> {
+export function graphOption(
+  graph: Graph,
+  mode: 'chain' | 'campaign',
+  W: number,
+  H: number,
+  t: GraphTokens,
+  selectedStep: number | null,
+  print = false,
+  selectedNode: string | null = null,
+): Record<string, unknown> {
   const colorOf = (n: GNode): string => {
     if (n.kind === 'routine') return t.fg3
     if (n.severity) return t.sev[n.severity] ?? t.fg2
     if (n.kind === 'user' || n.kind === 'chain') return t.accent
     if (n.lane === 'attacker') return t.sev.high
     if (n.lane === 'infra') return t.sev.low
+    if (n.lane === 'artifact') return n.linked ? t.accent : t.fg2
     return n.linked ? t.accent : t.fg3
   }
   const sizeOf = (n: GNode): number | [number, number] => {
@@ -81,10 +91,21 @@ export function graphOption(graph: Graph, mode: 'chain' | 'campaign', W: number,
     if (n.kind === 'step') return 14 + Math.min(8, n.weight) * 1.5
     if (n.kind === 'routine') return 14
     if (n.kind === 'user') return 20
+    if (n.lane === 'artifact') return (n.linked ? 14 : 10) + Math.min(4, Math.log2(1 + (n.degree ?? 0))) * 2
     return 10 + Math.min(4, n.degree ?? 0) * 3
   }
   const symbolOf = (n: GNode) =>
-    n.kind === 'seed' ? 'diamond' : n.kind === 'step' || n.kind === 'chain' ? 'roundRect' : n.kind === 'user' ? 'circle' : n.kind === 'attachment' ? 'rect' : n.kind === 'routine' ? 'circle' : 'circle'
+    n.kind === 'seed'
+      ? 'diamond'
+      : n.kind === 'step' || n.kind === 'chain'
+        ? 'roundRect'
+        : n.kind === 'attachment' || n.kind === 'file'
+          ? 'rect'
+          : n.kind === 'hash'
+            ? 'triangle'
+            : n.kind === 'process' || n.kind === 'config'
+              ? 'roundRect'
+              : 'circle'
   const lanes = LANES.filter((l) => graph.nodes.some((n) => n.lane === l))
   const laneH = mode === 'chain' ? (H - 70) / Math.max(1, lanes.length) : 0
   const colW = mode === 'chain' ? Math.min(220, Math.max(96, (W - 200) / Math.max(1, graph.columns))) : 0
@@ -99,8 +120,8 @@ export function graphOption(graph: Graph, mode: 'chain' | 'campaign', W: number,
       symbolSize: sizeOf(n),
       itemStyle: {
         color: colorOf(n),
-        borderColor: n.id === (selectedStep != null ? `step:${selectedStep}` : '') ? t.fg1 : n.linked ? t.fg1 : 'transparent',
-        borderWidth: n.id === (selectedStep != null ? `step:${selectedStep}` : '') ? 3 : n.linked && n.kind !== 'seed' ? 1 : 0,
+        borderColor: n.id === (selectedStep != null ? `step:${selectedStep}` : '') || n.id === selectedNode ? t.fg1 : n.linked ? t.fg1 : 'transparent',
+        borderWidth: n.id === (selectedStep != null ? `step:${selectedStep}` : '') || n.id === selectedNode ? 3 : n.linked && n.kind !== 'seed' ? 1 : 0,
         opacity: n.kind === 'routine' ? 0.7 : 1,
       },
       label: {
@@ -178,15 +199,13 @@ export function graphOption(graph: Graph, mode: 'chain' | 'campaign', W: number,
       textStyle: { color: t.fg1, fontSize: 11 },
       confine: true,
       formatter: (p: { dataType: string; data: { node?: GNode; value?: string; source?: string; target?: string } }) => {
-        if (p.dataType === 'edge') return String(p.data.value || '')
+        // ECharts writes this as HTML, and labels, edge values and details come from the evidence
+        if (p.dataType === 'edge') return escapeHtml(String(p.data.value || ''))
         const n = p.data.node
         if (!n) return ''
-        const lines = [`<b>${n.label}</b>`, n.sub ?? '', n.ts ? fmtTs(n.ts) : '', ...(n.detail ?? []).slice(0, 8)]
+        const lines = [n.sub ?? '', n.ts ? fmtTs(n.ts) : '', ...(n.detail ?? []).slice(0, 8)]
         if (n.degree) lines.push(`in ${n.degree} chain(s)`)
-        return lines
-          .filter(Boolean)
-          .map((s) => String(s).replace(/</g, '&lt;'))
-          .join('<br/>')
+        return [`<b>${escapeHtml(String(n.label))}</b>`, ...lines.filter(Boolean).map((s) => escapeHtml(String(s)))].join('<br/>')
       },
     },
     series: [
@@ -210,19 +229,20 @@ export function graphOption(graph: Graph, mode: 'chain' | 'campaign', W: number,
   }
 }
 
-/** Render a chain or campaign graph to a PNG data URL (light palette, no animation) for the report; null when there is nothing to draw. */
-export function renderGraphPng(arg: { mode: 'chain'; chain: Chain } | { mode: 'campaign'; chains: Chain[] }): string | null {
-  const graph = arg.mode === 'chain' ? buildChainGraph(arg.chain) : buildCampaignGraph(arg.chains)
+/** Render a chain, campaign or story graph to a PNG data URL (light palette, no animation) for the report; null when there is nothing to draw. */
+export function renderGraphPng(arg: { mode: 'chain'; chain: Chain } | { mode: 'campaign'; chains: Chain[] } | { mode: 'story'; graph: Graph }): string | null {
+  const graph = arg.mode === 'chain' ? buildChainGraph(arg.chain) : arg.mode === 'story' ? arg.graph : buildCampaignGraph(arg.chains)
   if (!graph.nodes.length || typeof document === 'undefined') return null
   const lanes = LANES.filter((l) => graph.nodes.some((n) => n.lane === l))
-  const W = arg.mode === 'chain' ? Math.min(2200, Math.max(900, 300 + graph.columns * 150)) : 1200
-  const H = arg.mode === 'chain' ? 100 + lanes.length * 120 : 760
+  const laid = arg.mode !== 'campaign'
+  const W = laid ? Math.min(2200, Math.max(900, 300 + graph.columns * 150)) : 1200
+  const H = laid ? 100 + lanes.length * 120 : 760
   const host = document.createElement('div')
   host.style.cssText = `position:fixed;left:-30000px;top:0;width:${W}px;height:${H}px;pointer-events:none;`
   document.body.appendChild(host)
   const chart = echarts.init(host, undefined, { renderer: 'canvas', devicePixelRatio: 2, width: W, height: H })
   try {
-    chart.setOption(graphOption(graph, arg.mode, W, H, PRINT_TOKENS, null, true), true)
+    chart.setOption(graphOption(graph, laid ? 'chain' : 'campaign', W, H, PRINT_TOKENS, null, true), true)
     return chart.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#ffffff' })
   } catch {
     return null
@@ -236,17 +256,28 @@ interface Props {
   mode: 'chain' | 'campaign'
   chain: Chain | null
   chains: Chain[]
+  /** a graph laid out by someone else (a story), drawn with the swimlane layout instead of the chain's */
+  graph?: Graph | null
   selectedStep: number | null
   onStep: (i: number) => void
   onEntity: (e: EntityRef) => void
   onChain: (id: string) => void
+  /** story graph: a record node was clicked; the ids are relationship record node ids */
+  onRecords?: (ids: string[]) => void
+  /** story graph: an entity node without a flyout page was clicked (a file, a digest, a process, a service); the id is the relationship node id */
+  onEntityNode?: (id: string) => void
+  /** story graph: the node to outline */
+  selectedNode?: string | null
 }
 
-/** ECharts renderer for the chain and campaign graphs (see data/chainGraph.ts for the models). */
-export function ChainGraph({ mode, chain, chains, selectedStep, onStep, onEntity, onChain }: Props) {
+/** ECharts renderer for the chain, campaign and story graphs (see data/chainGraph.ts and data/storyGraph.ts for the models). */
+export function ChainGraph({ mode, chain, chains, graph: given, selectedStep, onStep, onEntity, onChain, onRecords, onEntityNode, selectedNode }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   const chartRef = useRef<echarts.ECharts | null>(null)
-  const graph: (Graph & { insights?: { text: string }[] }) | null = useMemo(() => (mode === 'chain' ? (chain ? buildChainGraph(chain) : null) : buildCampaignGraph(chains)), [mode, chain, chains])
+  const graph: (Graph & { insights?: { text: string }[] }) | null = useMemo(
+    () => (given !== undefined ? given : mode === 'chain' ? (chain ? buildChainGraph(chain) : null) : buildCampaignGraph(chains)),
+    [given, mode, chain, chains],
+  )
 
   useEffect(() => {
     if (!ref.current || !graph) return
@@ -255,14 +286,16 @@ export function ChainGraph({ mode, chain, chains, selectedStep, onStep, onEntity
     const t = tokens()
     const W = Math.max(480, c.getWidth())
     const H = Math.max(320, c.getHeight())
-    c.setOption(graphOption(graph, mode, W, H, t, selectedStep), true)
+    c.setOption(graphOption(graph, mode, W, H, t, selectedStep, false, selectedNode ?? null), true)
     const onClick = (p: { dataType?: string; data?: { node?: GNode } }) => {
       const n = p.dataType === 'node' ? p.data?.node : undefined
       if (!n) return
       if (n.kind === 'chain' && n.chainId) return onChain(n.chainId)
+      if (n.recordIds?.length && onRecords) return onRecords(n.recordIds)
       if (n.stepIdx != null) return onStep(n.stepIdx)
       if (n.stepIdxs?.length) return onStep(n.stepIdxs[0])
-      if (n.entity) onEntity(n.entity)
+      if (n.entity) return onEntity(n.entity)
+      if (n.entityId && onEntityNode) onEntityNode(n.entityId)
     }
     c.on('click', onClick as never)
     const onResize = () => c.resize()
@@ -274,7 +307,7 @@ export function ChainGraph({ mode, chain, chains, selectedStep, onStep, onEntity
       window.removeEventListener('resize', onResize)
       obs.disconnect()
     }
-  }, [graph, mode, selectedStep, onStep, onEntity, onChain])
+  }, [graph, mode, selectedStep, selectedNode, onStep, onEntity, onChain, onRecords, onEntityNode])
   useEffect(
     () => () => {
       chartRef.current?.dispose()
@@ -299,9 +332,15 @@ export function ChainGraph({ mode, chain, chains, selectedStep, onStep, onEntity
           )}
         </div>
       )}
-      {mode === 'chain' && (
+      {mode === 'chain' && !given && (
         <div className="chain-graph-key small muted">
           diamond = seed mail · box = step (size = weight, colour = worst finding) · grey dot = collapsed routine steps · green edges = ties to the mail · scroll to zoom, drag to pan, click a node
+        </div>
+      )}
+      {given && (
+        <div className="chain-graph-key small muted">
+          diamond = record that started the story · box = record with a finding or a mark · grey dot = folded plain records · triangle = digest, square = file · green edges = entities shared across
+          source files · scroll to zoom, drag to pan, click a record or an entity
         </div>
       )}
     </div>

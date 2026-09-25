@@ -1,3 +1,4 @@
+import { getLocalTime } from '../util/format'
 import { useEffect, useState } from 'react'
 import { getTransport } from '../ai/transport'
 import { getDb } from '../db/schema'
@@ -242,7 +243,9 @@ export function FilterBar({ source, filter, onChange, fields, total, loading, fa
             <button onClick={() => preset(24 * 30)}>30d</button>
             <button onClick={() => onChange({ ...filter, timeRange: undefined })}>any</button>
           </div>
-          <span className="hint">times are UTC · click a histogram bar to narrow to that bucket</span>
+          <span className="hint" style={getLocalTime() ? { color: 'var(--warn)' } : undefined}>
+            {getLocalTime() ? 'times entered here are UTC, while the tables show local time' : 'times are UTC'} · click a histogram bar to narrow to that bucket
+          </span>
         </div>
       )}
       {showRegex && (

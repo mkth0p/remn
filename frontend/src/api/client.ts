@@ -3,6 +3,8 @@
  * the server (cookie-less CSRF protection). Works in the main thread and in
  * web workers.
  */
+import type { MeasureSources, RuleMeasure } from '../data/ruleMeasures'
+
 export const API_HEADERS: Record<string, string> = { 'X-Forensic-Client': 'remn' }
 
 /** Set the shared access token for remote deployments (FORENSIC_AUTH_TOKEN on the server). Mutated in place so every module (and worker) sharing this instance picks it up. */
@@ -154,10 +156,20 @@ export interface Health {
   ok: boolean
   name: string
   version: string
+  /** version+commit of the server, in every mode */
+  build?: string
+  /** where the exact source of that build can be read */
+  source?: string
+  /** coarse formats the parser reads, reported in browser-only mode instead of the native libraries */
+  formats?: { pst?: boolean }
   stateless: boolean
+  /** browser-only: the server parses and returns rows and keeps nothing; no server store, lookups or server-side models */
+  mode?: 'full' | 'browser-only'
   python?: string
   platform?: string
-  limits: { maxUploadMb: number; inMemoryMb: number; maxChunkedGb?: number; chunkMb?: number }
+  limits: { maxUploadMb: number; inMemoryMb: number; maxChunkedGb?: number; chunkMb?: number; uploadMaxAgeS?: number }
+  /** what the deployment guarantees: "public" = docker-compose.public.yml (RAM-only staging, no route off the host) */
+  profile?: string | null
   store?: { thresholdMb: number; casesDir: string }
   ollama: {
     reachable: boolean
@@ -169,7 +181,9 @@ export interface Health {
     error?: string
     numCtx?: number
   }
-  optional: { pst: boolean; yara: boolean; yaraRules: number; claudeCode?: boolean }
+  optional: { pst?: boolean; yara?: boolean; yaraRules?: number; claudeCode?: boolean; hayabusa?: boolean }
+  /** external detection engines this server runs on every event log it ingests */
+  engines?: string[]
   providers: ProviderInfo[]
 }
 export interface ProviderInfo {
@@ -192,8 +206,10 @@ export interface Meta {
   mailWeights?: Record<string, number>
   mailStrongFlags?: string[]
   dangerousExtensions: Record<string, string>
-  rules: { file: string; yaml: string; rule?: Record<string, unknown>; error?: string }[]
+  rules: { file: string; yaml: string; rule?: Record<string, unknown>; error?: string; measured?: RuleMeasure }[]
   packs?: PackInfo[]
+  /** what the rules were measured on (rules/measures.json), when they were */
+  measures?: MeasureSources | null
 }
 /** Manifest of a community rule pack (rules/community/<id>/pack.json). */
 export interface PackInfo {
@@ -212,7 +228,7 @@ export interface PackInfo {
 }
 export interface PackRules {
   pack: PackInfo
-  rules: { file: string; rule?: Record<string, unknown>; error?: string; yaml?: string }[]
+  rules: { file: string; rule?: Record<string, unknown>; error?: string; yaml?: string; measured?: RuleMeasure }[]
 }
 export const getHealth = () => apiGet<Health>('/api/health')
 export const getMeta = () => apiGet<Meta>('/api/meta')

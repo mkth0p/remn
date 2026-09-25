@@ -8,7 +8,7 @@ import { getSource } from '../data/source'
 import { listNotes } from '../data/caseNotes'
 import { getDb, type CaseNote, type Finding } from '../db/schema'
 import { useStore } from '../state/store'
-import { classNames, fmtNum, fmtTs } from '../util/format'
+import { classNames, escapeHtml, fmtNum, fmtTs, getLocalTime } from '../util/format'
 import { Badge, Dot, Sev } from '../components/ui'
 import { IconClock } from '../components/Icons'
 
@@ -86,18 +86,21 @@ export function TimelineView() {
     if (!chart.current) chart.current = echarts.init(ref.current, undefined, { renderer: 'canvas' })
     const c = chart.current
     let alive = true
+    const ac = new AbortController()
     const ds = getSource(kase)
     const caseId = kase.id
     Promise.all([
-      ds.timelineEvents(useFilters ? eventsFilter : {}, bucket).catch(() => []),
-      ds.timelineMails(useFilters ? mailsFilter : {}, bucket).catch(() => []),
+      ds.timelineEvents(useFilters ? eventsFilter : {}, bucket, ac.signal).catch(() => []),
+      ds.timelineMails(useFilters ? mailsFilter : {}, bucket, ac.signal).catch(() => []),
       getDb()
         .findings.where('caseId')
         .equals(caseId)
         .filter((f) => f.ts != null && f.status !== 'false_positive')
         .toArray(),
       listNotes(caseId, 'timeline').catch(() => [] as CaseNote[]),
-    ]).then(([ev, ml, fd, notes]) => {
+    ]).then(([ev, ml, fd, allNotes]) => {
+      // an entry with no event time has no place on a time axis
+      const notes = allNotes.filter((n) => !n.untimed)
       if (!alive) return
       const t = tokens()
       const allT = [...ev.map((b) => b.t), ...ml.map((b) => b.t), ...fd.map((f) => f.ts as number), ...notes.map((n) => n.ts)]
@@ -195,6 +198,8 @@ export function TimelineView() {
         {
           backgroundColor: 'transparent',
           animation: false,
+          // the axis in the same zone as every other time on the page
+          useUTC: !getLocalTime(),
           textStyle: { fontFamily: t.mono, color: t.fg2 },
           tooltip: {
             trigger: 'axis',
@@ -205,8 +210,12 @@ export function TimelineView() {
             formatter: (params: { seriesName: string; value: [number, number, ...unknown[]]; marker: string }[]) => {
               const ts = params[0]?.value?.[0]
               return (
-                `<b>${fmtTs(ts as number)}</b><br/>` +
-                params.map((p) => `${p.marker} ${p.seriesName}: ${p.seriesName === 'findings' || p.seriesName === 'case timeline' ? String(p.value[2] ?? '') : fmtNum(p.value[1])}`).join('<br/>')
+                // ECharts puts this string into the page as HTML, and a finding title or a timeline
+                // entry can carry a mail subject an attacker wrote: every text is escaped
+                `<b>${escapeHtml(fmtTs(ts as number))}</b><br/>` +
+                params
+                  .map((p) => `${p.marker} ${escapeHtml(p.seriesName)}: ${escapeHtml(p.seriesName === 'findings' || p.seriesName === 'case timeline' ? String(p.value[2] ?? '') : fmtNum(p.value[1]))}`)
+                  .join('<br/>')
               )
             },
           },
@@ -245,6 +254,7 @@ export function TimelineView() {
     window.addEventListener('resize', onResize)
     return () => {
       alive = false
+      ac.abort()
       c.off('brushEnd', onBrush as never)
       window.removeEventListener('resize', onResize)
     }

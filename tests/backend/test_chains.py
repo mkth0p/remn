@@ -131,7 +131,7 @@ def test_chain_links_mail_host_and_m365_by_identity_and_artifacts():
     res = C.build_chains(mails, events, findings, {"expected_countries": ["FR"], "internal_domains": ["contoso.com"]})
     assert res["stats"]["seeds"] == 2 and len(res["chains"]) == 1, res["stats"]
     c = res["chains"][0]
-    assert c["identity"] == "alice" and c["identityLabel"] == VICTIM and c["severity"] == "critical" and c["score"] >= 80
+    assert c["identity"] == VICTIM and c["identityLabel"] == VICTIM and c["severity"] == "critical" and c["score"] >= 80
     assert c["seed"]["id"] == 1 and c["seed"]["findings"][0]["ruleId"] == "mail-credential-phishing"
     assert [s["seed"]["id"] if isinstance(s, dict) and "seed" in s else s["id"] for s in c["relatedSeeds"]] == [3]
     steps = c["steps"]
@@ -241,7 +241,7 @@ def test_chains_for_store_selects_identities_via_sql(store):
     res = C.chains_for_store(store, {"expected_countries": ["FR"]}, findings, seed_min_risk=45)
     assert len(res["chains"]) == 1
     c = res["chains"][0]
-    assert c["identity"] == "alice" and res["stats"]["events"] > 30
+    assert c["identity"] == VICTIM and res["stats"]["events"] > 30
     assert any(s["kind"] == "mail" and "same thread" in s["artifacts"] for s in c["steps"])
     assert any("DNS query evil-login.net" in s["title"] and s["artifacts"] for s in c["steps"])
     assert any("role assigned" in s["title"] for s in c["steps"])
@@ -258,7 +258,7 @@ def test_build_endpoint_accepts_posted_rows():
     )
     assert r.status_code == 200, r.content
     body = r.json()
-    assert len(body["chains"]) == 1 and body["chains"][0]["identity"] == "alice" and body["stats"]["chains"] == 1
+    assert len(body["chains"]) == 1 and body["chains"][0]["identity"] == VICTIM and body["stats"]["chains"] == 1
     r2 = c.post("/api/chains/build", json.dumps({"storeKey": "00000000-0000-0000-0000-000000000000"}), content_type="application/json", **HDR)
     assert r2.status_code == 404
 
@@ -333,6 +333,9 @@ def test_routine_activity_and_own_domain_links_do_not_make_a_chain():
     assert art["domains"] == set() and art["hosts"] == set()
     res = C.build_chains([seed], events, findings, settings)
     assert res["stats"]["seeds"] == 1 and res["chains"] == [], res["chains"][:1]
+    # a case whose settings name no internal domain: the recipient's own domain is not an artifact either
+    assert C.artifacts_for(C.seed_artifacts(seed, {}), "northstar.example")["domains"] == set()
+    assert C.build_chains([seed], events, findings, {"expected_countries": ["FR"]})["chains"] == []
     # an external lure link changes nothing while no event names it: still no chain
     lure = dict(seed, urls=[{"url": "https://login-northstar.evil-login.net/x", "host": "login-northstar.evil-login.net", "domain": "evil-login.net"}])
     assert C.build_chains([lure], events, findings, settings)["chains"] == []
@@ -343,6 +346,10 @@ def test_routine_activity_and_own_domain_links_do_not_make_a_chain():
     c = res2["chains"][0]
     assert c["artifactLinks"] >= 1 and any("mail URL domain evil-login.net" in a for s in c["steps"] for a in s["artifacts"])
     assert c["severity"] in ("medium", "high") and c["score"] < 80
+    # a lure sent to its sender's own domain, the victims in copy: the link is still the victims' click
+    bcc = dict(lure, to=[{"addr": "billing@evil-login.net"}], cc=[{"addr": "employee019@northstar.example"}])
+    [c2] = C.build_chains([bcc], events + [click], findings, {"expected_countries": ["FR"]})["chains"]
+    assert c2["identity"] == "employee019@northstar.example" and c2["artifactLinks"] >= 1
 
 
 def test_score_is_bounded_and_explained():
@@ -452,3 +459,130 @@ def test_identity_realms():
     assert C.netbios_hints({"user": "OTHER\\alice", "upn": "alice@other-tenant.example"}) == [("other", "other-tenant.example")]
     assert C.netbios_hints({"targetUser": "alice", "targetDomain": "NORTHSTAR"}) == []
     assert not C.realm_matches("northstar.example", "other-tenant.example", "dns", internal, set())
+
+
+def test_two_tenants_same_name_keep_independent_chains():
+    mails = []
+    for base, domain in [(1, "northstar.example"), (101, "other-tenant.example")]:
+        user = f"alice@{domain}"
+        thread = f"<seed@{domain}>"
+        mails += [_mail(base, 5, "Password expiry", PHISHER, [user], 90, message_id=thread), _mail(base + 1, 12, "RE", user, [PHISHER], 0, in_reply_to=thread)]
+    result = C.build_chains(mails, [])
+    assert {c["identity"] for c in result["chains"]} == {"alice@northstar.example", "alice@other-tenant.example"}
+    assert all(not c.get("relatedSeeds") for c in result["chains"])
+
+
+def auth_events(cloud=False, success=True):
+    events = []
+    for i in range(12 + int(success)):
+        ok = i == 12
+        ev = _ev(4624 if ok else 4625, i, id=100 + i, targetUser="alice", targetDomain="CONTOSO", ipAddress="203.0.113.25")
+        if cloud:
+            ev.update(
+                provider="EntraID", channel="Entra", category="m365", eventId=None, operation="SignIn", upn="alice@contoso.com", status="0" if ok else "50126"
+            )
+        events.append(ev)
+    return events
+
+
+@pytest.mark.parametrize("cloud", [False, True])
+@pytest.mark.parametrize("success", [False, True])
+def test_authentication_campaign_needs_no_mail(cloud, success):
+    events = auth_events(cloud, success)
+    result = C.build_chains([], events)
+    assert len(result["chains"]) == 1
+    chain = result["chains"][0]
+    assert chain["seed"]["source"] == "events"
+    assert chain["severity"] == ("high" if success else "medium")
+    assert chain["steps"][0]["count"] == 12
+    assert {ref for s in chain["steps"] for ref in s["refs"]} == {e["id"] for e in events}
+
+
+def test_auth_campaign_excludes_other_account_ip_host_and_tenant_success():
+    failures = auth_events(success=False)
+    for changes in [{"targetUser": "bob"}, {"targetDomain": "OTHER"}, {"ipAddress": "203.0.113.26"}, {"computer": "PC2"}]:
+        success = {**auth_events()[-1], **changes}
+        chain = C.build_chains([], failures + [success])["chains"][0]
+        assert chain["severity"] == "medium"
+    assert C.build_chains([], failures[:9])["chains"] == []
+    assert C.build_chains([], [{**r, "ts": ms(i * 60)} for i, r in enumerate(failures)])["chains"] == []
+
+
+def test_store_auth_campaign_and_visible_cap(store, monkeypatch):
+    writer = EventWriter(store, 1)
+    for row in auth_events():
+        writer.add(row)
+    writer.flush()
+    assert C.chains_for_store(store, {}, [])["chains"][0]["seed"]["source"] == "events"
+    monkeypatch.setattr(C, "EVENT_CAP", 5)
+    result = C.chains_for_store(store, {}, [])
+    assert result["stats"]["authEventsTruncated"] == 1
+    assert result["chains"] == []
+
+
+def test_foreign_qualified_identity_is_not_bypassed_by_bare_alias():
+    identities = C.event_identities({"upn": "alice@other.example", "subjectUser": "alice"})
+    assert len(identities) == 1 and identities[0][2] == "other.example"
+
+
+def test_the_browser_sends_every_data_key_the_chain_builder_reads():
+    """chains.ts sends only these keys of an event's data; a key read here and missing there would
+    silently change a browser-store chain, so the two lists are compared."""
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    py = (root / "backend/services/analysis/chains.py").read_text(encoding="utf-8")
+    ts = (root / "frontend/src/data/chains.ts").read_text(encoding="utf-8")
+    read = set(re.findall(r"""data\.get\(["']([^"']+)["']\)""", py)) | set(re.findall(r"""data\[["']([^"']+)["']\]""", py))
+    for group in re.findall(r"for k in \(([^)]*)\):\s*\n\s*if data\.get\(k\)", py):
+        read |= set(re.findall(r'"([^"]+)"', group))
+    block = ts[ts.index("export const CHAIN_DATA_KEYS") : ts.index("] as const", ts.index("export const CHAIN_DATA_KEYS"))]
+    sent = set(re.findall(r"'([^']+)'", block))
+    assert read and read <= sent, f"read by chains.py but not sent by chains.ts: {sorted(read - sent)}"
+
+
+def test_a_campaign_against_the_phished_person_joins_their_chain_rules_or_not():
+    """The mail went to alice@contoso.com and the password guesses name CONTOSO\\alice: one person,
+    one chain, before the rules run as after (a flagged failure used to be what pulled them in)."""
+    thread = "<p@evil-login.net>"
+    mails = [
+        _mail(1, -30, "Password expiry", PHISHER, [VICTIM], 90, urls=["evil-login.net"], message_id=thread),
+        _mail(2, -20, "RE: Password expiry", VICTIM, [PHISHER], 0, in_reply_to=thread),
+    ]
+    events = auth_events()
+    flagged = [
+        {
+            "ruleId": "win-brute-force",
+            "title": "Brute force",
+            "severity": "high",
+            "source": "events",
+            "refs": [e["id"] for e in events[:12]],
+            "ts": events[0]["ts"],
+        }
+    ]
+    for findings in ([], flagged):
+        chains = C.build_chains(mails, [dict(e) for e in events], findings)["chains"]
+        assert [c["identity"] for c in chains] == [VICTIM], chains
+        rows = {r for s in chains[0]["steps"] if s["source"] == "events" for r in s["refs"]}
+        assert rows == {e["id"] for e in events}
+    chain = C.build_chains(mails, [dict(e) for e in events])["chains"][0]
+    assert chain["authCampaigns"][0]["account"] == "contoso\\alice" and chain["severity"] in ("high", "critical")
+    assert "203.0.113.25" in chain["entities"]["ips"] and chain["end"] == events[-1]["ts"]
+    assert any("Successful login after repeated failures" in s["title"] for s in chain["steps"])
+
+
+def test_a_campaign_of_another_organisation_or_time_stays_its_own_chain():
+    thread = "<p@evil-login.net>"
+    mails = [
+        _mail(1, -30, "Password expiry", PHISHER, [VICTIM], 90, urls=["evil-login.net"], message_id=thread),
+        _mail(2, -20, "RE: Password expiry", VICTIM, [PHISHER], 0, in_reply_to=thread),
+    ]
+    # OTHER is seen next to other-tenant.example: OTHER\\alice is someone else
+    other = [{**e, "targetDomain": "OTHER"} for e in auth_events()] + [
+        {**_ev(4624, 50, subjectUser="alice@other-tenant.example", subjectDomain="OTHER"), "id": 999}
+    ]
+    later = [{**e, "ts": e["ts"] + 10 * 86_400_000} for e in auth_events()]
+    for events in (other, later):
+        kinds = sorted(c.get("kind") or "mail" for c in C.build_chains(mails, events)["chains"])
+        assert kinds == ["authentication", "mail"], kinds

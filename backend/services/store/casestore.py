@@ -29,6 +29,8 @@ if "pandas" not in sys.modules and importlib.util.find_spec("pandas") is None:
     sys.modules["pandas"] = None  # type: ignore[assignment]
 import pyarrow as pa
 
+from services.parsers.evtx_parser import FIELD_MAP
+
 log = logging.getLogger(__name__)
 
 KEY_RE = re.compile(r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$")
@@ -46,6 +48,20 @@ EVENT_COLUMNS: list[tuple[str, tuple[str, Any]]] = [
     ("id", _L),
     ("evidenceId", _I),
     ("sourceFile", _S),
+    ("recordKind", _S),
+    ("artifactType", _S),
+    ("observedAt", _L),
+    ("processStart", _S),
+    ("processEnd", _S),
+    ("bootId", _S),
+    ("packageId", _S),
+    ("sourceSha256", _S),
+    ("sourceIndex", _L),
+    ("memberIndex", _I),
+    ("parserVersion", _S),
+    # a cloud record's own identity (UAL AuditData.Id, Graph sign-in id): a record already in
+    # the case is not added again from a later export
+    ("recordKey", _S),
     ("recordId", _L),
     ("ts", _L),
     ("tsIso", _S),
@@ -133,6 +149,13 @@ EVENT_COLUMNS: list[tuple[str, tuple[str, Any]]] = [
     ("messageNumber", _I),
     ("messageTotal", _I),
     ("payload", _S),
+    ("deceptionEpisodeId", _S),
+    ("deceptionExhibitId", _S),
+    ("deceptionParentExhibitId", _S),
+    ("deceptionScope", _S),
+    ("deceptionAction", _S),
+    ("deceptionResult", _S),
+    ("deceptionStage", _I),
     ("deviceDescription", _S),
     ("deviceId", _S),
     ("className", _S),
@@ -176,6 +199,8 @@ EVENT_COLUMNS: list[tuple[str, tuple[str, Any]]] = [
     ("signed", _S),
     ("signature", _S),
     ("signatureStatus", _S),
+    # the source process's code signer on Sysmon 8 / 10, from its own image load (parsers/evtx_parser.py)
+    ("sourceSigner", _S),
     ("sourceImage", _S),
     ("targetImage", _S),
     ("grantedAccess", _S),
@@ -201,10 +226,26 @@ EVENT_COLUMNS: list[tuple[str, tuple[str, Any]]] = [
     ("message", _S),
     ("data", _S),
     ("raw", _S),
+    # what the parser filled in from another event (evtx_parser.Lineage)
+    ("enriched", _S),
 ]
+# Every other field the EVTX parser puts on a row. A field without a column was dropped when the
+# row was written, and the rules reading it (accessList, objectClass, startModule ... 65 converted
+# Sigma rules) then gave other answers here than in the browser: a condition on it never matched,
+# and one under `not` always did.
+_PARSER_ONLY = sorted(set(FIELD_MAP.values()) - {n for n, _ in EVENT_COLUMNS} - {"dataList"})
+EVENT_COLUMNS += [(n, _S) for n in _PARSER_ONLY]
+# where the parser took each of those fields from, to fill them in on stores written before they had a column
+PARSER_SOURCES: dict[str, list[str]] = {n: [k for k, v in FIELD_MAP.items() if v == n] for n in _PARSER_ONLY}
 EVENT_INT = {n for n, t in EVENT_COLUMNS if t in (_I, _L)}
 
 MAIL_COLUMNS: list[tuple[str, tuple[str, Any]]] = [
+    ("sourceFile", _S),
+    ("packageId", _S),
+    ("sourceSha256", _S),
+    ("memberIndex", _I),
+    ("parserVersion", _S),
+    ("recordKind", _S),
     ("id", _L),
     ("evidenceId", _I),
     ("sourceIndex", _I),
@@ -484,6 +525,10 @@ class CaseStore:
                 for n, typ in cols:
                     if n not in have:
                         self._con.execute(f"ALTER TABLE {t} ADD COLUMN {q(n)} {typ[0]}")
+                        if t == "events" and n in PARSER_SOURCES:
+                            # rows written before the column existed: the same value from the EventData
+                            src = ", ".join(f"nullif(trim(json_extract_string(data, '$.\"{k}\"')), '-')" for k in PARSER_SOURCES[n])
+                            self._con.execute(f"UPDATE events SET {q(n)} = coalesce({src}) WHERE data IS NOT NULL")
             for ddl in INDEXES:
                 try:
                     self._con.execute(ddl)
@@ -534,6 +579,14 @@ class CaseStore:
             finally:
                 con.unregister("_batch")
         return len(rows)
+
+    def existing_record_keys(self, keys: list[str]) -> set[str]:
+        """The keys of ``keys`` some event of the case already carries."""
+        if not keys:
+            return set()
+        with self.lock:
+            rows = self._con.execute('SELECT DISTINCT "recordKey" FROM events WHERE "recordKey" IN (SELECT unnest(?::VARCHAR[]))', [keys]).fetchall()
+        return {r[0] for r in rows}
 
     def upsert_evidence(self, ev: dict[str, Any]) -> None:
         with self.lock:
@@ -625,9 +678,12 @@ class CaseStore:
                 UPDATE mails SET "reputationOriginIp" = r.verdict
                 FROM ioc_reputation r WHERE r.kind = 'ip' AND r.value = lower(mails."originIp") AND r.verdict IN ('malicious', 'suspicious', 'clean')
             """)
+            # Verdicts are ranked as numbers: max() over the labels themselves is alphabetical,
+            # which put 'suspicious' above 'malicious' on a mail that has both.
             con.execute("""
                 UPDATE mails SET "reputationWorst" = sub.worst FROM (
-                    SELECT m.id, max(CASE r.verdict WHEN 'malicious' THEN 'malicious' WHEN 'suspicious' THEN 'suspicious' ELSE 'clean' END) AS worst
+                    SELECT m.id, CASE max(CASE r.verdict WHEN 'malicious' THEN 3 WHEN 'suspicious' THEN 2 ELSE 1 END)
+                        WHEN 3 THEN 'malicious' WHEN 2 THEN 'suspicious' ELSE 'clean' END AS worst
                     FROM mails m
                     JOIN ioc_reputation r ON (
                         (r.kind = 'ip' AND r.value = lower(m."originIp"))

@@ -1,0 +1,491 @@
+# Security audit rules: object access, account, share, privilege, boot-policy and logon events of the Security log that the core rules did not read.
+id: win-browser-password-reauth
+title: Browser saved-password re-authentication at the console
+description: >-
+  Chrome and other Chromium browsers ask for the Windows password before they reveal, copy or export a saved
+  password, and log that check as an interactive logon (4624 or 4625, logon type 2) made by the browser process
+  with the logon process name "Chrome". It marks the moment someone at the keyboard (or in a remote session)
+  unlocked the browser's password store. A failed attempt in the same burst raises the finding: someone who does
+  not know the account password was trying to read its saved passwords. Benign cause: the user checking one of
+  their own saved passwords; the finding is a timeline marker, not a verdict.
+severity: low
+source: events
+attack: [T1555.003]
+tags: [credential-access, browser]
+entities: [computer, targetUser, processName]
+where:
+  eventId|in: [4624, 4625]
+  logonType: 2
+  any_of:
+    - logonProcess: Chrome
+    - processName|endswith: ["\\chrome.exe", "\\msedge.exe", "\\brave.exe", "\\vivaldi.exe", "\\opera.exe"]
+group_by: [computer, targetUser]
+window: 10m
+threshold: ">= 1"
+then:
+  where:
+    eventId: 4625
+    logonType: 2
+    any_of:
+      - logonProcess: Chrome
+      - processName|endswith: ["\\chrome.exe", "\\msedge.exe", "\\brave.exe", "\\vivaldi.exe", "\\opera.exe"]
+  join: [computer, targetUser]
+  within: 10m
+  severity: medium
+  title: with a failed password attempt
+---
+id: win-browser-credential-store-read
+title: Browser credential store read by a process that is not the browser
+description: >-
+  A file-system audit event (4656/4663) shows a process reading a browser or mail-client credential store:
+  Chromium "Login Data" / "Web Data" / "Local State" (Chrome, Edge, Brave, Vivaldi, Opera, Yandex) or Mozilla
+  key3.db / key4.db / logins.json / signons.sqlite. These events exist only where someone put an audit SACL on
+  those files, and outside the browser itself the readers are almost always credential stealers (T1555.003).
+  Excluded: programs under Program Files and the Windows directory (backup, antivirus, search indexer, file
+  copy tools), Microsoft Defender, and the browsers' own per-user installs (their Application folder, which
+  also holds the version folder with setup.exe, and Opera's version folders under Programs\Opera). PowerShell,
+  cmd, the script hosts, esentutl, certutil, rundll32 and the other proxy-execution binaries are not excluded
+  although they live under Windows, nor is anything run from C:\Windows\Temp, because stealers use them to
+  copy or read the stores (esentutl /y /vss "Login Data"). Remaining benign causes: a password manager or a
+  browser importing saved passwords from another browser from a per-user install path, profile migration or
+  backup scripts run from outside Program Files, and browser installers run from Temp.
+severity: high
+source: events
+attack: [T1555.003]
+tags: [credential-access, browser, object-access]
+entities: [computer, subjectUser, processName, objectName]
+where:
+  eventId|in: [4656, 4663]
+  objectType: File
+  accessList|contains: ReadData
+  any_of:
+    - objectName|endswith: ["\\Login Data", "\\Login Data For Account", "\\Web Data", "\\User Data\\Local State", "\\Opera Stable\\Local State", "\\Opera GX Stable\\Local State"]
+    - objectName|re: '\\(firefox|thunderbird|seamonkey)\\profiles\\[^\\]+\\(key3\.db|key4\.db|logins\.json|signons\.sqlite)$'
+  not:
+    any_of:
+      - processName|re: '^([a-z]:|\\device\\harddiskvolume[0-9]+)\\(windows|program files|program files \(x86\))\\'
+        processName|not_re:
+          - '^([a-z]:|\\device\\harddiskvolume[0-9]+)\\windows\\temp\\'
+          - '\\(powershell|powershell_ise|pwsh|cmd|rundll32|regsvr32|mshta|wscript|cscript|esentutl|certutil|msbuild|installutil|regasm|regsvcs)\.exe$'
+      - processName|contains: "\\ProgramData\\Microsoft\\Windows Defender"
+      - processName|re: '\\(google\\chrome( beta| dev| sxs)?|microsoft\\edge( beta| dev| sxs)?|bravesoftware\\brave-browser(-beta|-nightly)?|vivaldi|yandex\\yandexbrowser)\\application\\'
+      - processName|re: '\\programs\\opera( gx)?\\'
+      - processName|endswith: ["\\Mozilla Firefox\\firefox.exe", "\\Mozilla Thunderbird\\thunderbird.exe"]
+group_by: [computer, processName]
+threshold: ">= 1"
+---
+id: win-zerologon-anonymous-account-change
+title: Computer account changed or password reset by ANONYMOUS LOGON (Zerologon)
+description: >-
+  A computer account (name ending in $) was changed, or its password set, with ANONYMOUS LOGON (S-1-5-7) as the
+  subject (4742, 4724, 4723, 4738). A genuine machine password change runs over the Netlogon secure channel and
+  is logged with the machine account as the subject; the Zerologon exploit (CVE-2020-1472) calls
+  NetrServerPasswordSet2 on an unauthenticated channel, so the domain controller logs the reset of its own or
+  another machine account by ANONYMOUS LOGON. The attacker can then DCSync with the empty machine password.
+  The same subject appears when someone changes the password of a pre-created ("pre-Windows 2000") computer
+  account from its default value over an anonymous SAMR session (4723), which is how such accounts are taken
+  over. User accounts are left out: a user who changes an expired password over SAMR (at an RDP or web prompt, or
+  with net user) cannot authenticate first, so that routine change is logged as 4723 and 4738 by ANONYMOUS
+  LOGON. The known benign cause is a legacy device explicitly allowed to use a vulnerable Netlogon channel ("Allow
+  vulnerable Netlogon secure channel connections" policy, 5829/5830 events) changing its own password.
+severity: critical
+source: events
+attack: [T1210, T1098]
+tags: [credential-access, privilege-escalation, domain-controller]
+entities: [computer, targetUser, subjectUser, subjectSid]
+where:
+  eventId|in: [4742, 4738, 4724, 4723]
+  targetUser|endswith: "$"
+  any_of:
+    - subjectSid: S-1-5-7
+    - subjectUser: ANONYMOUS LOGON
+group_by: [computer, targetUser]
+threshold: ">= 1"
+---
+id: win-machine-account-password-reset
+title: Computer account password reset by a user account
+description: >-
+  A user account reset the password of an existing computer account (4724 on a target ending in $). Machine
+  accounts change their own passwords over Netlogon; a reset by a person over SAMR is what tools such as
+  Mimikatz lsadump::setntlm / changentlm, impacket and post-Zerologon clean-up scripts do to take over a computer
+  account or restore a domain controller's password, and a reset of a domain controller's account breaks
+  replication. The password set while a computer account is created (4741 for the same account in the log, as in
+  every domain join that creates its account) is not reported. Benign causes: joining a computer to a
+  pre-created account, "Reset Account" in Active Directory Users and Computers, netdom resetpwd,
+  Test-ComputerSecureChannel -Repair, the Seamless SSO key rollover of AZUREADSSOACC$ (Update-AzureADSSOForest)
+  and the password update of an Azure Files storage account's computer object; accounts listed as service
+  accounts in the settings (dedicated domain-join accounts) are excluded.
+severity: medium
+source: events
+attack: [T1098]
+tags: [persistence, account-manipulation]
+entities: [computer, targetUser, subjectUser]
+where:
+  targetUser|endswith: "$"
+  any_of:
+    - eventId: 4741
+    - eventId: 4724
+      subjectUser|exists: true
+      subjectUser|not_endswith: "$"
+      subjectSid|nin: [S-1-5-7, S-1-5-18]
+exclude:
+  subjectUser|in_setting: service_accounts
+group_by: [computer, targetUser]
+any_in_group: { eventId: 4724 }
+distinct: eventId
+threshold: "== 1"
+---
+id: win-registry-hive-written-to-share
+title: SAM, SYSTEM or SECURITY hive copies written over SMB
+description: >-
+  One account wrote a file named like the SAM registry hive and at least one more hive-named file, usually the
+  SYSTEM or SECURITY hive (SAM, sam.save, SYSTEM.hiv, PSECURITY, hklm_sam ...), to a network share within 10
+  minutes (5145 with WriteData). Saving the hives over the remote registry (reg save \\host\HKLM\SAM, impacket
+  reg.py backup, the Backup Operators SeBackupPrivilege technique) writes them to a share, from which the local
+  account hashes, the machine account secret and the LSA secrets are extracted offline (SAM is useless without
+  the boot key in SYSTEM, so both are taken). A name counts when it is the hive name with an optional backup extension and at
+  most a one-letter prefix, or a prefix that ends in a separator or digit (dc01-SYSTEM, hklm_sam), so user
+  folders and file names that merely end in the same letters (Wissam, Balsam, Filesystem, CyberSecurity, IT
+  Security) do not. Benign causes are unusual: a manual registry backup copied to a share by an administrator.
+severity: high
+source: events
+attack: [T1003.002, T1003.004, T1021.002]
+tags: [credential-access, share]
+entities: [computer, subjectUser, ipAddress, shareName]
+where:
+  eventId: 5145
+  accessList|contains: WriteData
+  relativeTargetName|re: '(^|\\)([^\\ ]*[^a-z\\ ]|[a-z])?(sam|system|security)(\.(save|sav|hiv|hive|bak|reg|dmp))?$'
+group_by: [computer, subjectUser]
+any_in_group:
+  relativeTargetName|re: '(^|\\)([^\\ ]*[^a-z\\ ]|[a-z])?sam(\.(save|sav|hiv|hive|bak|reg|dmp))?$'
+window: 10m
+distinct: relativeTargetName
+threshold: ">= 2"
+---
+id: win-boot-test-signing-enabled
+title: Boot configuration with test signing or integrity checks disabled (4826)
+description: >-
+  The boot configuration loaded at startup (4826) had test signing (bcdedit /set testsigning on) or
+  DisableIntegrityChecks (nointegritychecks) turned on. Either lets Windows load drivers that are not signed by
+  Microsoft, the step before a rootkit or a bring-your-own-driver attack (T1553.006). Benign causes: driver
+  development and test machines, and a few hardware tools that ask the user to enable test mode; neither belongs
+  on a production workstation or server.
+severity: high
+source: events
+attack: [T1553.006]
+tags: [defense-evasion, boot]
+where:
+  eventId: 4826
+  any_of:
+    - data.TestSigning: "%%1842"
+    - data.DisableIntegrityChecks: "%%1842"
+group_by: [computer]
+threshold: ">= 1"
+---
+id: win-boot-kernel-debug-enabled
+title: Boot configuration with kernel or hypervisor debugging enabled (4826)
+description: >-
+  The boot configuration loaded at startup (4826) had kernel debugging (bcdedit /debug on) or hypervisor
+  debugging turned on. A kernel debugger can patch the running kernel, turn off driver signature enforcement and
+  PatchGuard, and debug mode is used to load unsigned drivers (T1553.006). Benign causes: driver developers,
+  crash-analysis labs and virtual machines set up for kernel debugging.
+severity: medium
+source: events
+attack: [T1553.006]
+tags: [defense-evasion, boot]
+where:
+  eventId: 4826
+  any_of:
+    - data.KernelDebug: "%%1842"
+    - data.HypervisorDebug: "%%1842"
+group_by: [computer]
+threshold: ">= 1"
+---
+id: win-remote-eventlog-pipe
+title: Remote access to the EventLog named pipe over SMB
+description: >-
+  A user opened the \pipe\eventlog named pipe of this host over IPC$ from another computer (5145). That pipe
+  carries the legacy MS-EVEN remote event log protocol (Event Viewer, wevtutil and Get-WinEvent use MS-EVEN6 over
+  TCP instead). It is what remote log-crash tools use to make the EventLog service stop recording (LogCrusher,
+  EventLogCrasher), and a way to read or clear logs remotely (T1562.002, T1070.001). Benign causes: the legacy
+  event log API used remotely, as by Get-EventLog -ComputerName in Windows PowerShell, .NET-based monitoring
+  scripts, PsLogList and old log collectors; accounts listed as service accounts in the settings are excluded.
+severity: medium
+source: events
+attack: [T1685.001, T1685.005, T1021.002]
+tags: [defense-evasion, share]
+entities: [computer, subjectUser, ipAddress, relativeTargetName]
+where:
+  eventId: 5145
+  shareName|endswith: "\\IPC$"
+  relativeTargetName: eventlog
+  subjectUser|not_endswith: "$"
+  ipAddress|exists: true
+  ipAddress|nin: ["127.0.0.1", "::1"]
+exclude:
+  subjectUser|in_setting: service_accounts
+group_by: [computer, subjectUser, ipAddress]
+threshold: ">= 1"
+---
+id: win-executable-written-to-drive-share
+title: Executable or script written to a drive share (C$, D$) from the network
+description: >-
+  A user wrote a program, library or script (.exe, .dll, .sys, .bat, .ps1, .vbs, .hta ...) to a hidden drive
+  share such as C$ from another computer (5145 with WriteData). That is how tools are staged on a target before
+  they are run as a service, a scheduled task or through WMI (lateral tool transfer, T1570). The finding is
+  raised to high when, within 10 minutes on the same host, a service is installed whose binary is not under
+  Program Files or a scheduled task is created that is not one of the usual updater tasks (Microsoft, Office,
+  OneDrive, Google, Edge, Adobe, Mozilla); the services and tasks that installers register under Program Files
+  do not escalate it. ADMIN$ is left to win-psexec-pattern. Benign causes: administrators copying installers or
+  scripts by hand, web applications published by copying over C$, and software deployment tools that stage
+  through C$.
+severity: medium
+source: events
+attack: [T1570, T1021.002]
+tags: [lateral-movement, share]
+entities: [computer, subjectUser, ipAddress, relativeTargetName]
+where:
+  eventId: 5145
+  shareName|re: '^\\\\\*\\[a-z]\$$'
+  accessList|contains: WriteData
+  relativeTargetName|endswith: [".exe", ".dll", ".sys", ".bat", ".cmd", ".ps1", ".psm1", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".hta", ".scr", ".cpl"]
+  subjectUser|not_endswith: "$"
+  ipAddress|exists: true
+  ipAddress|nin: ["127.0.0.1", "::1"]
+group_by: [computer, subjectUser, ipAddress]
+threshold: ">= 1"
+then:
+  where:
+    any_of:
+      - eventId|in: [7045, 4697]
+        serviceFile|not_re: '^"?[a-z]:\\program files( \(x86\))?\\'
+      - eventId: 4698
+        taskName|not_contains: ["\\Microsoft\\", "OneDrive", "GoogleUpdate", "GoogleUpdater", "MicrosoftEdgeUpdate", "Adobe", "Mozilla"]
+  join: [computer]
+  within: 10m
+  severity: high
+  title: followed by a service or scheduled task on the host
+---
+id: win-privileged-local-group-enumeration
+title: Privileged local groups and accounts enumerated (4798 / 4799)
+description: >-
+  One account listed the members of two or more privileged local groups or accounts (Administrators, Remote
+  Desktop Users, Distributed COM Users, Remote Management Users, Backup/Account/Server Operators, the built-in
+  Administrator) within 30 minutes, with net.exe, PowerShell or remotely over SAMR (caller process id 0x0). That
+  is local admin and session reconnaissance as done by SharpHound/BloodHound, PowerView and "net localgroup" /
+  "net user" (T1069.001, T1087.001). Computer and managed service accounts and the system accounts are left out,
+  and a single group is not enough, so the Administrators-only SAM-R queries of Microsoft Defender for Identity
+  stay quiet. Benign causes: administrators, audit scripts and credentialed vulnerability scanners checking group
+  membership; accounts listed as service accounts in the settings (scanner accounts) are excluded.
+severity: medium
+source: events
+attack: [T1069.001, T1087.001]
+tags: [discovery]
+entities: [computer, subjectUser, targetUser]
+where:
+  eventId|in: [4798, 4799]
+  any_of:
+    - targetSid|in: [S-1-5-32-544, S-1-5-32-555, S-1-5-32-562, S-1-5-32-580, S-1-5-32-551, S-1-5-32-548, S-1-5-32-549]
+    - targetSid|endswith: "-500"
+  any_of_2:
+    - data.CallerProcessName|endswith: ["\\net.exe", "\\net1.exe", "\\powershell.exe", "\\pwsh.exe"]
+    - data.CallerProcessId: "0x0"
+  subjectUser|not_endswith: "$"
+  subjectSid|nin: [S-1-5-18, S-1-5-19, S-1-5-20]
+exclude:
+  subjectUser|in_setting: service_accounts
+group_by: [computer, subjectUser]
+window: 30m
+distinct: targetUser
+threshold: ">= 2"
+---
+id: win-share-on-system-folder
+title: Network share created on the system drive root or the Windows folder (5142)
+description: >-
+  A new network share (5142) exposes the whole system drive (C:\), C:\Windows or System32/SysWOW64 under a name
+  that is not one of the built-in administrative shares. Ransomware operators share whole drives ("net share
+  C=C:\ /grant:everyone,full") to spread and encrypt, and a share on System32 lets another host plant or replace
+  system binaries (T1021.002, T1570). The roots of other drives are left out, because file and backup servers
+  publish whole data volumes under their own share names. Benign causes are rare: legacy applications or backup
+  tools that publish the system drive under their own share name.
+severity: high
+source: events
+attack: [T1021.002, T1570]
+tags: [lateral-movement, share]
+entities: [computer, subjectUser, shareName, shareLocalPath]
+where:
+  eventId: 5142
+  shareLocalPath|re:
+    - '^(\\\?\?\\)?c:\\?$'
+    - '^(\\\?\?\\)?[a-z]:\\windows(\\system32|\\syswow64)?\\?$'
+  shareName|not_re: '\\([a-z]\$|admin\$)$'
+group_by: [computer, shareName]
+threshold: ">= 1"
+---
+id: win-txf-transaction-user-path
+title: NTFS transaction driven by a program outside Windows and Program Files (4985)
+description: >-
+  A program running from a user-writable location (ProgramData, the user profile, Temp, C:\Windows\Temp, a
+  network path) changed the state of a kernel transaction (4985). Transactional NTFS is deprecated and almost
+  only used by Windows servicing and installers, but Process Doppelganging and transacted hollowing (T1055.013)
+  and PPL bypasses such as PPLdump create and roll back a transacted file to map a payload that never exists on
+  disk. Excluded: programs under the Windows directory (except its Temp folder) and Program Files, Microsoft
+  Defender, the DISM host that Windows runs from a GUID folder under Temp, and Windows feature-update setup
+  under $WINDOWS.~BT. Benign causes: a few installers and updaters run from Temp.
+severity: medium
+source: events
+attack: [T1055.013]
+tags: [defense-evasion, injection]
+entities: [computer, subjectUser, processName]
+where:
+  eventId: 4985
+  processName|exists: true
+  any_of:
+    - processName|not_re: '^([a-z]:|\\device\\harddiskvolume[0-9]+)\\(windows|program files|program files \(x86\))\\'
+    - processName|re: '^([a-z]:|\\device\\harddiskvolume[0-9]+)\\windows\\temp\\'
+  processName|not_contains: "\\ProgramData\\Microsoft\\Windows Defender"
+  not:
+    any_of:
+      - processName|re: '\\[0-9a-f-]{36}\\dismhost\.exe$'
+      - processName|re: '^[a-z]:\\\$windows\.~(bt|ws)\\'
+group_by: [computer, processName]
+threshold: ">= 1"
+---
+id: win-web-worker-admin-logon
+title: Web server worker process logged on an administrator with explicit credentials
+description: >-
+  An IIS, Apache, nginx, PHP or Tomcat worker process called LogonUser (logon process Advapi) and received an
+  elevated administrator token (4624 with ElevatedToken yes), outside the network-cleartext logon type (8) that
+  IIS Basic authentication uses by default. A web shell does this with stolen or guessed credentials to
+  get an administrator token and start processes as that user (runas / CreateProcessAsUser from the web
+  process, T1505.003, T1134.002). The matching 4648 names the same worker. Benign causes: a web application
+  configured to impersonate a fixed administrator account, an intranet application that checks the password
+  typed into its own sign-in form with LogonUser when an administrator signs in, or Basic authentication set to
+  the network logon method for administrators.
+severity: high
+source: events
+attack: [T1505.003, T1134.002, T1078]
+tags: [persistence, privilege-escalation, webshell]
+entities: [computer, subjectUser, targetUser, processName]
+where:
+  eventId: 4624
+  logonProcess: Advapi
+  elevatedToken: "%%1842"
+  logonType|nin: [8]
+  processName|re: '\\(w3wp|httpd|nginx|php-cgi|php|tomcat[0-9]*|ws_tomcatservice)\.exe$'
+  targetUser|not_endswith: "$"
+group_by: [computer, processName, targetUser]
+threshold: ">= 1"
+---
+id: win-sensitive-privilege-enabled
+title: Debug, TCB or driver-load privilege enabled by a program outside Windows and Program Files (4703)
+description: >-
+  A program running from a user-writable location (the user profile, ProgramData, Temp, C:\Windows\Temp, a
+  network path) enabled SeDebugPrivilege, SeTcbPrivilege, SeLoadDriverPrivilege or SeCreateTokenPrivilege in its
+  token (4703). Credential dumpers enable SeDebugPrivilege to open LSASS (mimikatz privilege::debug), token
+  thieves need SeTcb, and bring-your-own-driver tools need SeLoadDriverPrivilege (T1134, T1003.001). Excluded:
+  programs under the Windows directory (except its Temp folder) and Program Files, and Microsoft Defender and
+  Defender for Endpoint under ProgramData; well-known hacking tools are reported by
+  win-hacktool-privilege-enabled instead. Benign causes: Sysinternals tools and debuggers run from a download or
+  tools folder, and driver or security-agent installers run from Temp by a deployment tool.
+severity: medium
+source: events
+attack: [T1134, T1003.001]
+tags: [privilege-escalation, credential-access]
+entities: [computer, subjectUser, processName, data.EnabledPrivilegeList]
+where:
+  eventId: 4703
+  data.EnabledPrivilegeList|contains: [SeDebugPrivilege, SeTcbPrivilege, SeLoadDriverPrivilege, SeCreateTokenPrivilege]
+  processName|exists: true
+  any_of:
+    - processName|not_re: '^([a-z]:|\\device\\harddiskvolume[0-9]+)\\(windows|program files|program files \(x86\))\\'
+    - processName|re: '^([a-z]:|\\device\\harddiskvolume[0-9]+)\\windows\\temp\\'
+  processName|not_contains: ["\\ProgramData\\Microsoft\\Windows Defender", mimikatz, safetykatz, sharpkatz, nanodump, pypykatz, lazagne]
+group_by: [computer, processName]
+threshold: ">= 1"
+---
+id: win-hacktool-privilege-enabled
+title: Credential-theft tool enabled a sensitive privilege (4703)
+description: >-
+  A process named after a credential-theft tool (Mimikatz, SafetyKatz, SharpKatz, nanodump, pypykatz, LaZagne)
+  enabled SeDebugPrivilege or another sensitive privilege in its token (4703), the first step of dumping LSASS
+  (mimikatz privilege::debug, T1003.001). Benign cause: an authorised penetration test.
+severity: critical
+source: events
+attack: [T1003.001, T1134]
+tags: [credential-access]
+entities: [computer, subjectUser, processName, data.EnabledPrivilegeList]
+where:
+  eventId: 4703
+  data.EnabledPrivilegeList|contains: [SeDebugPrivilege, SeTcbPrivilege, SeLoadDriverPrivilege, SeImpersonatePrivilege, SeBackupPrivilege]
+  processName|contains: [mimikatz, safetykatz, sharpkatz, nanodump, pypykatz, lazagne]
+group_by: [computer, processName]
+threshold: ">= 1"
+---
+id: win-uac-bypass-token-duplication
+title: UAC bypass by token duplication (auto-elevated binary, then a seclogon logon)
+description: >-
+  An auto-elevating Windows binary (wusa, taskmgr, fodhelper, computerdefaults ...) was started with an elevated
+  token (4688, TokenElevationType %%1937) and within five seconds the Secondary Logon service made a
+  NewCredentials logon (4624 type 9, seclogo) on the same host. That is the token-duplication UAC bypass
+  (UACME, WinPwnage, Invoke-TokenDuplication / UAC-TokenMagic): the tool starts an auto-elevated process without
+  a prompt, duplicates its token and calls CreateProcessWithLogonW to run a high-integrity shell (T1548.002,
+  T1134.002). Benign cause: a user opening an elevated Task Manager just before a runas /netonly, which is rare.
+severity: high
+source: events
+attack: [T1548.002, T1134.002]
+tags: [privilege-escalation, uac-bypass]
+entities: [computer, processName, subjectUser]
+where:
+  any_of:
+    - eventId: 4688
+      tokenElevationType: "%%1937"
+      processName|endswith:
+        - "\\wusa.exe"
+        - "\\taskmgr.exe"
+        - "\\fodhelper.exe"
+        - "\\computerdefaults.exe"
+        - "\\sdclt.exe"
+        - "\\slui.exe"
+        - "\\eventvwr.exe"
+        - "\\msconfig.exe"
+        - "\\cliconfg.exe"
+        - "\\dccw.exe"
+        - "\\wsreset.exe"
+        - "\\systempropertiesadvanced.exe"
+        - "\\systempropertiesprotection.exe"
+        - "\\systempropertiesremote.exe"
+        - "\\systempropertiescomputername.exe"
+    - eventId: 4624
+      logonType: 9
+      logonProcess: seclogo
+group_by: [computer]
+window: 5s
+distinct: eventId
+threshold: ">= 2"
+---
+id: win-service-account-loopback-pipe
+title: NETWORK SERVICE or LOCAL SERVICE opened a custom named pipe over SMB loopback
+description: >-
+  The machine's NETWORK SERVICE or LOCAL SERVICE logon (subject S-1-5-20 / S-1-5-19) opened a named pipe that
+  is not a standard RPC pipe on its own IPC$ share through the loopback address (5145 from 127.0.0.1 / ::1).
+  Authenticating to a pipe of one's own over SMB loopback hands the pipe server a token of the shared service
+  logon session, which a tool running as one service account uses to reach the privileges of other services in
+  that session and then SYSTEM (J. Forshaw's "Sharing a Logon Session a Little Too Much", T1134.001). Excluded:
+  the standard RPC pipes and SQL Server's sql\query. Benign cause: a service that reaches a local application
+  pipe through the host's own UNC name.
+severity: high
+source: events
+attack: [T1134.001]
+tags: [privilege-escalation, token]
+entities: [computer, subjectUser, relativeTargetName]
+where:
+  eventId: 5145
+  shareName|endswith: "\\IPC$"
+  ipAddress|in: ["127.0.0.1", "::1"]
+  subjectSid|in: [S-1-5-19, S-1-5-20]
+  relativeTargetName|nin: [atsvc, samr, lsarpc, lsass, winreg, netlogon, srvsvc, protected_storage, wkssvc, browser, netdfs, svcctl, spoolss, ntsvcs, LSM_API_service, HydraLsPipe, TermSrv_API_service, MsFteWds, eventlog, epmapper, efsrpc, "sql\\query"]
+  relativeTargetName|not_re: '^mssql\$[^\\]*\\sql\\query$'
+group_by: [computer, relativeTargetName]
+threshold: ">= 1"

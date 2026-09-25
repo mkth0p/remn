@@ -221,6 +221,30 @@ where:
 group_by: [subjectUser, targetUser, targetServer]
 threshold: ">= 1"
 ---
+id: win-explicit-credentials-unusual-process
+title: Logon with explicit credentials from a script host, a LOLBin or a program outside Windows
+description: >-
+  4648: a process logged on another account with credentials it supplied (LogonUser,
+  CreateProcessWithLogonW). Windows' own callers and installed programs do this routinely; PowerShell,
+  WMIC, a script host, a LOLBin or a program outside the Windows and Program Files folders rarely do
+  outside an attack: RunasCs and Invoke-RunAs, a process started under stolen credentials (T1134.002),
+  lateral movement with them (T1078). Benign causes: an administrator's script that runs a command as
+  another account (Start-Process -Credential), a portable administration tool.
+severity: high
+source: events
+attack: [T1134.002, T1078]
+tags: [privilege-escalation, lateral-movement, authentication]
+entities: [computer, subjectUser, targetUser, processName]
+where:
+  eventId: 4648
+  subjectUser|not_endswith: "$"
+  targetUser|not_endswith: "$"
+  any_of:
+    - processName|endswith: ["\\powershell.exe", "\\pwsh.exe", "\\powershell_ise.exe", "\\wmic.exe", "\\cmd.exe", "\\rundll32.exe", "\\regsvr32.exe", "\\mshta.exe", "\\cscript.exe", "\\wscript.exe", "\\msbuild.exe", "\\installutil.exe"]
+    - { processName|contains: "\\", processName|not_contains: ["\\windows\\", "\\program files\\", "\\program files (x86)\\"] }
+group_by: [computer, subjectUser, targetUser, processName]
+threshold: ">= 1"
+---
 id: win-special-privileges-non-admin
 title: Special privileges assigned to a non-administrative account
 description: 4672 (admin-equivalent privileges) for an account that is not in the admin list of Settings and not a system account.

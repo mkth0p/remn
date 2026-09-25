@@ -1,5 +1,6 @@
 """
-EVTX parsing with pyevtx-rs: yields flattened, typed rows ready for IndexedDB.
+EVTX parsing with pyevtx-rs: yields flattened, typed rows ready for IndexedDB. The same records
+exported as XML (wevtutil, Event Viewer, Get-WinEvent, a SIEM's XmlWinEventLog) give the same rows.
 
 Row shape (all keys optional except recordId/eventId/ts):
   recordId, ts (epoch ms UTC), tsIso, eventId, version, level, levelName, task, opcode,
@@ -10,9 +11,15 @@ Row shape (all keys optional except recordId/eventId/ts):
 
 from __future__ import annotations
 
+import bisect
+import codecs
 import json
 import logging
-from collections import Counter
+import os
+import re
+import struct
+import zlib
+from collections import Counter, OrderedDict
 from collections.abc import Iterator
 from typing import Any
 
@@ -198,14 +205,19 @@ FIELD_MAP: dict[str, str] = {
     "CreationUtcTime": "creationUtcTime",
     "PreviousCreationUtcTime": "previousCreationUtcTime",
     "Company": "company",
-    "Description": "description",
+    # "Description" (the PE file description in Sysmon 1/6/7, the error text in Sysmon 255) is
+    # deliberately not a column: "description" holds REMN's name for the event type, which
+    # overwrote it, so no rule on the real value could match. It stays whole in data.Description,
+    # which is where the Sigma converter sends the field.
     "Product": "product",
     "FileVersion": "fileVersion",
     "Consumer": "wmiConsumer",
     "Filter": "wmiFilter",
     "Query": "wmiQuery",
     "Name": "name",
-    "Type": "type",
+    # Sysmon 25 "Image is replaced" / "Image is locked for access". Not "type": the ingest stream
+    # marks every row with type=event, which overwrote it, so no rule on it could ever match.
+    "Type": "typeName",
     "Contents": "contents",
     "Archived": "archived",
     "IsExecutable": "isExecutable",
@@ -290,6 +302,16 @@ def _scalar(value: Any) -> Any:
     return value
 
 
+# The text rules search whole: a command line (Windows allows 32,767 characters), a script
+# block, a task definition, a WMI consumer. Cut at 4,000 characters, an indicator placed after
+# the cut escaped every rule, and padding a command is trivial. Other columns keep the short cut;
+# every value stays whole in data.
+_LONG_FIELDS = frozenset(
+    {"commandLine", "parentCommandLine", "scriptBlockText", "taskContent", "payload", "contextInfo", "details", "wmiConsumer", "destination"}
+)
+LONG_LIMIT = 65_536
+
+
 def _str(value: Any, limit: int = 4000) -> str | None:
     if value is None:
         return None
@@ -301,6 +323,43 @@ def _str(value: Any, limit: int = 4000) -> str | None:
     if not s or s == "-":
         return None
     return s if len(s) <= limit else s[:limit] + "…"
+
+
+# The rights an object-access event lists (4656, 4663, 5145 ...) arrive as message codes.
+# Windows renders them as names in the event viewer, and rules are written against the names
+# ("AccessList contains WriteData"), so the names are appended to the codes: both spellings match.
+_ACCESS_NAMES = {
+    "1537": "DELETE",
+    "1538": "READ_CONTROL",
+    "1539": "WRITE_DAC",
+    "1540": "WRITE_OWNER",
+    "1541": "SYNCHRONIZE",
+    "1542": "ACCESS_SYS_SEC",
+    "4416": "ReadData (or ListDirectory)",
+    "4417": "WriteData (or AddFile)",
+    "4418": "AppendData (or AddSubdirectory or CreatePipeInstance)",
+    "4419": "ReadEA",
+    "4420": "WriteEA",
+    "4421": "Execute/Traverse",
+    "4422": "DeleteChild",
+    "4423": "ReadAttributes",
+    "4424": "WriteAttributes",
+    "4432": "Query key value",
+    "4433": "Set key value",
+    "4434": "Create sub-key",
+    "4435": "Enumerate sub-keys",
+    "4436": "Notify about changes to keys",
+    "4437": "Create Link",
+}
+_ACCESS_CODE_RE = re.compile(r"%%(\d+)")
+
+
+def render_access_list(value: str | None) -> str | None:
+    """'%%4416 %%4417' -> the codes, then a line with their names."""
+    if not value or "%%" not in value:
+        return value
+    names = [_ACCESS_NAMES[c] for c in _ACCESS_CODE_RE.findall(value) if c in _ACCESS_NAMES]
+    return f"{value}\n{' '.join(names)}" if names else value
 
 
 def _int(value: Any) -> int | None:
@@ -337,7 +396,7 @@ def flatten(event: dict[str, Any], record: dict[str, Any] | None = None, include
     system_time = time_created.get("SystemTime") if isinstance(time_created, dict) else time_created
     ts, ts_iso = parse_timestamp(system_time)
     if ts is None and record is not None:
-        ts, ts_iso = parse_timestamp(record.get("timestamp"))
+        ts, ts_iso = parse_timestamp(header_time(record))
     execution = _scalar(system.get("Execution")) or {}
     security = _scalar(system.get("Security")) or {}
     correlation = _scalar(system.get("Correlation")) or {}
@@ -406,9 +465,11 @@ def flatten(event: dict[str, Any], record: dict[str, Any] | None = None, include
             continue
         if key in row and row[key] not in (None, ""):
             continue  # first mapping wins
-        row[key] = _str(v)
+        row[key] = _str(v, LONG_LIMIT if key in _LONG_FIELDS else 4000)
 
     # Event-specific fix-ups
+    if row.get("accessList"):
+        row["accessList"] = render_access_list(row["accessList"])
     if event_id in _GROUP_EVENTS and row.get("targetUser"):
         row["groupName"] = row["targetUser"]
         row["groupDomain"] = row.get("targetDomain")
@@ -450,10 +511,236 @@ def flatten(event: dict[str, Any], record: dict[str, Any] | None = None, include
     return row
 
 
+def header_time(record: dict[str, Any] | None) -> str | None:
+    """The record header's write time as pyevtx-rs gives it ('2019-04-27T15:57:27.0876132Z UTC'),
+    without the trailing ' UTC' that parse_timestamp does not read. None for the zero FILETIME
+    (1601-01-01), which filtered exports write in place of a time."""
+    value = (record or {}).get("timestamp")
+    if isinstance(value, str) and value.endswith(" UTC"):
+        value = value[:-4]
+    if isinstance(value, str) and value.startswith("1601-01-01T00:00:00"):
+        return None
+    return value
+
+
+EVTX_CHUNK = 65536
+
+
+def chunk_checksums(src: Any) -> dict[str, Any] | None:
+    """
+    The CRC32 checks the EVTX format defines: the file header over its first 120 bytes, each
+    chunk header over bytes 0-120 and 128-512, and each chunk's records from byte 512 to its
+    free-space offset. A chunk that fails was changed after Windows wrote it, or damaged; the
+    parser reads its records all the same, so this is where that is said. None when src is not
+    an EVTX file that can be read a second time. A stream is left where it was.
+    """
+    if isinstance(src, (str, os.PathLike)):
+        fh, start = open(src, "rb"), None  # noqa: SIM115 - closed in finally
+    elif hasattr(src, "seek") and hasattr(src, "read"):
+        fh, start = src, src.tell()
+        src.seek(0)
+    else:
+        return None
+    try:
+        head = fh.read(4096)
+        if len(head) < 128 or head[:8] != b"ElfFile\x00":
+            return None
+        out: dict[str, Any] = {
+            "chunks": 0,
+            "fileHeader": zlib.crc32(head[:120]) == struct.unpack_from("<I", head, 124)[0],
+            # written while Windows still had the log open (a live copy): not a fault
+            "dirty": bool(struct.unpack_from("<I", head, 120)[0] & 1),
+        }
+        bad_header: list[int] = []
+        bad_data: list[int] = []
+        index = 0
+        while True:
+            chunk = fh.read(EVTX_CHUNK)
+            if len(chunk) < EVTX_CHUNK:
+                break
+            if chunk[:8] == b"ElfChnk\x00":
+                out["chunks"] += 1
+                if zlib.crc32(chunk[:120] + chunk[128:512]) != struct.unpack_from("<I", chunk, 124)[0]:
+                    bad_header.append(index)
+                free = struct.unpack_from("<I", chunk, 48)[0]
+                if not 512 <= free <= EVTX_CHUNK or zlib.crc32(chunk[512:free]) != struct.unpack_from("<I", chunk, 52)[0]:
+                    bad_data.append(index)
+            index += 1
+        if bad_header:
+            out["badHeader"] = bad_header[:50]
+            out["badHeaderCount"] = len(bad_header)
+        if bad_data:
+            out["badData"] = bad_data[:50]
+            out["badDataCount"] = len(bad_data)
+        return out
+    except OSError:
+        return None
+    finally:
+        if start is None:
+            fh.close()
+        else:
+            fh.seek(start)
+
+
+class FileSequence:
+    """
+    One EVTX file's records in the order the file numbers them: the record header's id and write
+    time, which the file assigns itself, rather than the EventRecordID and TimeCreated inside the
+    event, which a forwarded log copies from the machine that wrote them. A hole in the ids is
+    records that are no longer in the file (deleted, or in a chunk that could not be read). A write
+    time earlier than the record before it is a clock set back, events buffered while Windows
+    started and written once the log service ran, or a record put in later: each step keeps both
+    times, for the case's clock changes and log service starts to tell them apart.
+    """
+
+    # covered id ranges followed before a file is too fragmented to follow
+    MAX_SPANS = 100_000
+    # holes and backward steps listed in the stats; the counts stay exact
+    LISTED = 50
+    # computer names listed (a machine renamed during setup logs under both)
+    NAMES = 20
+    # clock changes and event log service starts listed
+    MARKS = 500
+    # EvtxECmd's default: a step back of more than a second
+    BACKWARD_MS = 1000
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.count = 0
+        # sorted, disjoint [first, last] ranges of the ids read
+        self.spans: list[list[int]] = []
+        self.overflow = False
+        self.channels: Counter[str] = Counter()
+        self.computers: Counter[str] = Counter()
+        self.first_ts: int | None = None
+        self.last_ts: int | None = None
+        self.prev_id: int | None = None
+        self.prev_written: int | None = None
+        self.backwards = 0
+        self.backwards_max = 0
+        # [record id, write time of the record before, its own write time]
+        self.steps: list[list[int]] = []
+        # what explains a step: the clock set (Kernel-General 1, Security 4616) and the event log
+        # service started (System 6005), when records buffered meanwhile are written
+        self.clock_changes: list[dict[str, Any]] = []
+        self.log_starts: list[dict[str, Any]] = []
+        self.checksums: dict[str, Any] | None = None
+
+    def add(self, record_id: Any, written: int | None, row: dict[str, Any] | None = None) -> None:
+        self.count += 1
+        if row is not None:
+            if row.get("channel"):
+                self.channels[row["channel"]] += 1
+            if row.get("computer"):
+                self.computers[row["computer"]] += 1
+            ts = row.get("ts")
+            if ts is not None:
+                self.first_ts = ts if self.first_ts is None else min(self.first_ts, ts)
+                self.last_ts = ts if self.last_ts is None else max(self.last_ts, ts)
+            if row.get("eventId") in (1, 4616, 6005):
+                self._mark(row)
+        if not isinstance(record_id, int) or isinstance(record_id, bool) or record_id < 1:
+            return
+        if self.prev_id is not None and record_id == self.prev_id + 1 and written is not None and self.prev_written is not None:
+            step = self.prev_written - written
+            if step > self.BACKWARD_MS:
+                self.backwards += 1
+                self.backwards_max = max(self.backwards_max, step)
+                if len(self.steps) < self.LISTED:
+                    self.steps.append([record_id, self.prev_written, written])
+        self.prev_id, self.prev_written = record_id, written
+        self._cover(record_id)
+
+    def _mark(self, row: dict[str, Any]) -> None:
+        eid, provider = row.get("eventId"), row.get("provider")
+        if eid == 6005 and provider == "EventLog":
+            if row.get("ts") is not None and len(self.log_starts) < self.MARKS:
+                self.log_starts.append({"computer": row.get("computer"), "ts": row["ts"]})
+            return
+        if eid == 1 and provider == "Microsoft-Windows-Kernel-General":
+            data = row.get("data") or {}
+            old, new = data.get("OldTime"), data.get("NewTime")
+        elif eid == 4616 and provider == "Microsoft-Windows-Security-Auditing":
+            old, new = row.get("previousTime"), row.get("newTime")
+        else:
+            return
+        old_ms, new_ms = parse_timestamp(old)[0], parse_timestamp(new)[0]
+        # the time service corrects the clock by fractions of a second all day
+        if old_ms is None or new_ms is None or abs(new_ms - old_ms) <= self.BACKWARD_MS:
+            return
+        if len(self.clock_changes) < self.MARKS:
+            self.clock_changes.append({"computer": row.get("computer"), "old": old_ms, "new": new_ms})
+
+    def _cover(self, rid: int) -> None:
+        spans = self.spans
+        if spans and spans[-1][1] + 1 == rid:
+            spans[-1][1] = rid
+            return
+        if self.overflow:
+            return
+        # the first span that starts after rid
+        i = bisect.bisect_right(spans, rid, key=lambda s: s[0])
+        if i and spans[i - 1][1] >= rid:
+            return
+        joins_prev = i > 0 and spans[i - 1][1] + 1 == rid
+        joins_next = i < len(spans) and spans[i][0] - 1 == rid
+        if joins_prev and joins_next:
+            spans[i - 1][1] = spans[i][1]
+            del spans[i]
+        elif joins_prev:
+            spans[i - 1][1] = rid
+        elif joins_next:
+            spans[i][0] = rid
+        else:
+            spans.insert(i, [rid, rid])
+            if len(spans) > self.MAX_SPANS:
+                self.overflow = True
+
+    def holes(self) -> list[tuple[int, int]]:
+        return [(a[1] + 1, b[0] - 1) for a, b in zip(self.spans, self.spans[1:], strict=False)]
+
+    def to_dict(self) -> dict[str, Any]:
+        holes = self.holes()
+        out: dict[str, Any] = {"file": self.name, "count": self.count}
+        if self.channels:
+            out["channel"] = self.channels.most_common(1)[0][0]
+            out["channels"] = len(self.channels)
+        if self.computers:
+            out["computer"] = self.computers.most_common(1)[0][0]
+            out["computers"] = len(self.computers)
+            out["computerNames"] = [c for c, _ in self.computers.most_common(self.NAMES)]
+        if self.spans:
+            out.update(first=self.spans[0][0], last=self.spans[-1][1])
+            out["missing"] = sum(b - a + 1 for a, b in holes)
+            if holes:
+                out["holes"] = [list(h) for h in holes[: self.LISTED]]
+                out["holeCount"] = len(holes)
+        out.update(firstTs=self.first_ts, lastTs=self.last_ts)
+        if self.backwards:
+            out.update(backwards=self.backwards, backwardsMaxMs=self.backwards_max, steps=self.steps)
+        if self.clock_changes:
+            out["clockChanges"] = self.clock_changes
+        if self.log_starts:
+            out["logStarts"] = self.log_starts
+        if self.overflow:
+            # too fragmented to follow every hole: the ones listed and counted are a floor
+            out["overflow"] = True
+        if self.checksums is not None:
+            out["checksums"] = self.checksums
+        return out
+
+
 class Stats:
     def __init__(self) -> None:
         self.count = 0
         self.errors = 0
+        # records dropped because the same record (one key) was already read: cloud exports only
+        self.duplicates = 0
+        # records exported as XML that were read once what their exporter left unescaped was escaped
+        self.repaired = 0
+        # one per EVTX file read: its record numbering and chunk checksums, for the statement of
+        # what the evidence cannot show
+        self.sequences: list[FileSequence] = []
         self.first_ts: int | None = None
         self.last_ts: int | None = None
         self.event_ids: Counter[int] = Counter()
@@ -492,21 +779,119 @@ class Stats:
             "providers": dict(self.providers.most_common(200)),
             "computers": dict(self.computers.most_common(200)),
             "levels": dict(self.levels),
+            **({"duplicates": self.duplicates} if self.duplicates else {}),
+            **({"repaired": self.repaired} if self.repaired else {}),
+            **self.coverage(),
         }
 
+    def begin_file(self, name: str) -> FileSequence:
+        seq = FileSequence(name)
+        self.sequences.append(seq)
+        return seq
 
-def iter_events(path_or_file: Any, include_raw: bool = True, stats: Stats | None = None, number_of_threads: int = 0) -> Iterator[dict[str, Any]]:
+    def coverage(self) -> dict[str, Any]:
+        """The EVTX files' record numbering and checksums, when any EVTX file was read."""
+        return {"sequences": [s.to_dict() for s in self.sequences[:500]]} if self.sequences else {}
+
+
+class Lineage:
+    """Fills in what an older log leaves out about a process's parent, from the parent's own event
+    in the same log: the parent's account on a Sysmon 1 written before Sysmon had ParentUser, and
+    the parent's image on a 4688 written before Windows logged ParentProcessName. Rules on "a
+    SYSTEM child of a service account" or "a child of WmiPrvSE" then work on those logs.
+
+    It also gives a Sysmon 8 or 10 the code signer of its source process (`sourceSigner`): the
+    valid signature Sysmon recorded on that process's own executable when it loaded it (Sysmon 7),
+    as long as every image the log shows the process loading before was signed as well; a signed
+    program that has loaded an unsigned DLL is no longer vouched for by its signature. What was
+    filled in is named in the row's `enriched` field; the record itself (raw) is unchanged."""
+
+    MAX = 200_000
+
+    def __init__(self) -> None:
+        self.users: OrderedDict[str, str] = OrderedDict()
+        self.images: OrderedDict[tuple[str, str], tuple[str, int]] = OrderedDict()
+        # a Sysmon process's signer by its GUID; None once it has loaded an unsigned image
+        self.signers: OrderedDict[str, str | None] = OrderedDict()
+
+    def _keep(self, table: OrderedDict, key: Any, value: Any) -> None:
+        table[key] = value
+        table.move_to_end(key)
+        if len(table) > self.MAX:
+            table.popitem(last=False)
+
+    def apply(self, row: dict[str, Any]) -> None:
+        eid = row.get("eventId")
+        data = row.get("data") if isinstance(row.get("data"), dict) else None
+        if eid in (7, 8, 10) and data is not None and "sysmon" in str(row.get("provider") or "").lower():
+            self._signer(row, eid, data)
+            return
+        if eid == 1 and data is not None and "sysmon" in str(row.get("provider") or "").lower():
+            guid = str(row.get("processGuid") or "").lower()
+            if guid and data.get("User"):
+                self._keep(self.users, guid, str(data["User"]))
+            parent = str(row.get("parentProcessGuid") or "").lower()
+            if not data.get("ParentUser") and parent in self.users:
+                data["ParentUser"] = self.users[parent]
+                row["enriched"] = _enriched(row, "data.ParentUser from the parent's process creation event")
+        elif eid == 4688 and str(row.get("channel") or "") == "Security":
+            computer = str(row.get("computer") or "").lower()
+            pid = str(row.get("newProcessId") or "").lower()
+            if pid and row.get("processName"):
+                self._keep(self.images, (computer, pid), (str(row["processName"]), int(row.get("ts") or 0)))
+            creator = str(row.get("callerProcessId") or "").lower()
+            if not row.get("parentProcessName") and creator:
+                hit = self.images.get((computer, creator))
+                # the latest creation of that process id before this one, within a week (ids are reused)
+                if hit and 0 <= int(row.get("ts") or 0) - hit[1] <= 7 * 86_400_000:
+                    row["parentProcessName"] = hit[0]
+                    row["enriched"] = _enriched(row, "parentProcessName from the 4688 that created the parent process id")
+
+    def _signer(self, row: dict[str, Any], eid: int, data: dict[str, Any]) -> None:
+        if eid == 7:
+            guid = str(row.get("processGuid") or data.get("ProcessGuid") or "").strip("{}").lower()
+            if not guid:
+                return
+            signed = str(row.get("signed") or data.get("Signed") or "").lower() == "true"
+            if not signed:
+                self._keep(self.signers, guid, None)
+                return
+            loaded, image = str(row.get("imageLoaded") or "").lower(), str(row.get("image") or data.get("Image") or "").lower()
+            status = str(row.get("signatureStatus") or data.get("SignatureStatus") or "").lower()
+            signature = str(row.get("signature") or data.get("Signature") or "").strip()
+            if loaded and loaded == image and status == "valid" and signature and self.signers.get(guid, "") is not None:
+                self._keep(self.signers, guid, signature)
+            return
+        source = str(data.get("SourceProcessGUID") or data.get("SourceProcessGuid") or "").strip("{}").lower()
+        signer = self.signers.get(source) if source else None
+        if signer:
+            row["sourceSigner"] = signer
+            row["enriched"] = _enriched(row, "sourceSigner from the source process's own image load (Sysmon 7)")
+
+
+def _enriched(row: dict[str, Any], note: str) -> str:
+    return f"{row['enriched']}; {note}" if row.get("enriched") else note
+
+
+def iter_events(
+    path_or_file: Any, include_raw: bool = True, stats: Stats | None = None, number_of_threads: int = 0, source_file: str | None = None
+) -> Iterator[dict[str, Any]]:
     """
     Yield flattened rows from an EVTX file path (str/Path) or file-like object.
-    Invalid records are counted in ``stats.errors`` and skipped.
+    Invalid records are counted in ``stats.errors`` and skipped. With ``stats``, the file's record
+    numbering and chunk checksums are kept in ``stats.sequences`` under ``source_file``.
     """
     from evtx import PyEvtxParser
 
+    seq = stats.begin_file(source_file or "") if stats is not None else None
+    if seq is not None:
+        seq.checksums = chunk_checksums(path_or_file)
     try:
         parser = PyEvtxParser(path_or_file, number_of_threads=number_of_threads, indent=False)
     except TypeError:
         parser = PyEvtxParser(path_or_file, number_of_threads)
     iterator = parser.records_json()
+    lineage = Lineage()
     while True:
         try:
             rec = next(iterator)
@@ -530,8 +915,198 @@ def iter_events(path_or_file: Any, include_raw: bool = True, stats: Stats | None
         except Exception as exc:  # noqa: BLE001
             if stats is not None:
                 stats.errors += 1
+            # the record is in the file even though its content could not be read
+            if seq is not None and isinstance(rec, dict):
+                seq.add(rec.get("event_record_id"), parse_timestamp(header_time(rec))[0])
             log.debug("flatten failed: %s", exc)
             continue
+        if seq is not None:
+            seq.add(rec.get("event_record_id"), parse_timestamp(header_time(rec))[0], row)
+        lineage.apply(row)
         if stats is not None:
             stats.add(row)
         yield row
+
+
+# ---------------------------------------------------------------------------
+# Event records exported as XML
+# ---------------------------------------------------------------------------
+# wevtutil qe /f:xml, Event Viewer's "Save All Events As" XML, Get-WinEvent's ToXml() and a SIEM's
+# XmlWinEventLog export write each record's XML, one <Event> after another (Event Viewer inside an
+# <Events> root). Each is read into the shape pyevtx-rs gives the same record in an .evtx, so the
+# rows, and every rule on them, are those of the .evtx. What an export cannot keep: the file's own
+# record numbering (an export holds what its query selected, so a missing id is no deleted record),
+# the event types the XML leaves as text, and a record's rendered message.
+XML_FORMAT = "event-xml"
+_XML_CHUNK = 1 << 20
+# one record's XML; an EVTX record is at most a 64 KiB chunk of binary XML, which grows as text
+_XML_MAX_EVENT = 4 << 20
+_XML_EVENT = re.compile(r"<Event[\s>]")
+_XML_END = "</Event>"
+_XML_INVALID = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]")
+# what some exporters leave unescaped: an ampersand that starts no reference, and markup inside a
+# value (a PowerShell block comment "<#", a task's own XML in TaskContent)
+_XML_AMP = re.compile(r"&(?!(?:[A-Za-z][A-Za-z0-9]*|#[0-9]+|#x[0-9A-Fa-f]+);)")
+_XML_DATA = re.compile(r"(<Data(?:\s[^>]*)?(?<!/)>)(.*?)(</Data>)", re.S)
+_XML_HEAD = re.compile(r"^(?:\s|<\?xml[^>]*\?>|<!--.*?-->)*<Events?[\s>]", re.S)
+
+
+def _xml_encoding(head: bytes) -> str:
+    if head.startswith(codecs.BOM_UTF8):
+        return "utf-8-sig"
+    if head.startswith(codecs.BOM_UTF16_LE):
+        return "utf-16-le"
+    if head.startswith(codecs.BOM_UTF16_BE):
+        return "utf-16-be"
+    if head[:4] in (b"<\x00?\x00", b"<\x00E\x00"):
+        return "utf-16-le"
+    if head[:4] in (b"\x00<\x00?", b"\x00<\x00E"):
+        return "utf-16-be"
+    return "utf-8"
+
+
+def looks_like_event_xml(head: bytes) -> bool:
+    """Event records exported as XML: the file opens on <Event> or on Event Viewer's <Events> root."""
+    encoding = _xml_encoding(head)
+    size = len(head) - len(head) % 2 if encoding.startswith("utf-16") else len(head)
+    text = head[:size].decode(encoding, "replace").lstrip("\ufeff")
+    return bool(_XML_HEAD.match(text))
+
+
+def _xml_text(element: Any) -> str | None:
+    text = element.text
+    # an empty element pretty-printed across lines ("<Security>\n</Security>") holds no value
+    return text if text is not None and text.strip() else None
+
+
+def _xml_value(element: Any) -> str:
+    """A Data value: its own whitespace is part of it, a pretty-printer's line and indent are not."""
+    text = element.text or ""
+    return "" if "\n" in text and not text.strip() else text
+
+
+def _xml_local(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def _xml_node(element: Any) -> Any:
+    """An element as pyevtx-rs writes it: its text, its attributes under #attributes (with the text
+    under #text), its children by name (a repeated name as a list), or None when it holds nothing."""
+    attrs = {_xml_local(k): v for k, v in element.attrib.items()}
+    children: dict[str, list[Any]] = {}
+    for child in element:
+        children.setdefault(_xml_local(child.tag), []).append(_xml_node(child))
+    text = _xml_text(element)
+    if not attrs and not children:
+        return text
+    out: dict[str, Any] = {}
+    if attrs:
+        out["#attributes"] = attrs
+    out.update({k: v[0] if len(v) == 1 else v for k, v in children.items()})
+    if text is not None:
+        out["#text"] = text
+    return out
+
+
+def _xml_event_data(element: Any) -> Any:
+    """EventData: <Data Name="X">v</Data> as X: v, unnamed Data as Data: {"#text": ...}, as pyevtx-rs has them."""
+    out: dict[str, Any] = {}
+    unnamed: list[str] = []
+    for child in element:
+        name = _xml_local(child.tag)
+        if name == "Data" and "Name" in child.attrib:
+            out[child.attrib["Name"]] = _xml_value(child)
+        elif name == "Data":
+            unnamed.append(_xml_value(child))
+        else:
+            out[name] = _xml_node(child)
+    if unnamed:
+        out["Data"] = {"#text": unnamed if len(unnamed) > 1 else unnamed[0]}
+    if element.attrib:
+        out["#attributes"] = {_xml_local(k): v for k, v in element.attrib.items()}
+    return out or None
+
+
+def _xml_repaired(text: str) -> str:
+    """A record as its exporter should have written it: control characters XML 1.0 does not allow
+    replaced, and an ampersand or markup inside a value escaped."""
+    text = _XML_AMP.sub("&amp;", _XML_INVALID.sub("\ufffd", text))
+    return _XML_DATA.sub(lambda m: m.group(1) + m.group(2).replace("<", "&lt;").replace(">", "&gt;") + m.group(3), text)
+
+
+def event_from_xml(text: str, stats: Stats | None = None) -> dict[str, Any]:
+    """One <Event> element's XML as the record pyevtx-rs gives for it. A record its exporter left
+    malformed is read once repaired (counted in ``stats.repaired``); one still malformed raises."""
+    from defusedxml.ElementTree import ParseError, fromstring
+
+    try:
+        root = fromstring(text)
+    except ParseError:
+        root = fromstring(_xml_repaired(text))
+        if stats is not None:
+            stats.repaired += 1
+    if _xml_local(root.tag) != "Event":
+        raise ValueError("not an event record")
+    event: dict[str, Any] = {}
+    for section in root:
+        name = _xml_local(section.tag)
+        if name == "EventData":
+            event[name] = _xml_event_data(section)
+        elif name != "RenderingInfo":
+            event[name] = _xml_node(section)
+    return {"Event": event}
+
+
+def _xml_records(fh: Any, encoding: str, stats: Stats | None) -> Iterator[str]:
+    """Each <Event>...</Event> in the stream, read a chunk at a time."""
+    decoder = codecs.getincrementaldecoder(encoding)("replace")
+    buf, pos = "", 0
+    while True:
+        chunk = fh.read(_XML_CHUNK)
+        buf = buf[pos:] + decoder.decode(chunk, final=not chunk)
+        pos = 0
+        while True:
+            start = _XML_EVENT.search(buf, pos)
+            if start is None:
+                # keep what could be the start of a tag cut by the chunk
+                pos = max(pos, len(buf) - len("<Event "))
+                break
+            end = buf.find(_XML_END, start.end())
+            if end < 0:
+                pos = start.start()
+                if len(buf) - pos > _XML_MAX_EVENT:
+                    # no end in sight: counted as a record not read, and read on from the next start
+                    if stats is not None:
+                        stats.errors += 1
+                    pos = start.end()
+                    continue
+                break
+            yield buf[start.start() : end + len(_XML_END)]
+            pos = end + len(_XML_END)
+        if not chunk:
+            return
+
+
+def iter_xml_events(path_or_file: Any, include_raw: bool = True, stats: Stats | None = None) -> Iterator[dict[str, Any]]:
+    """Rows from event records exported as XML (see XML_FORMAT), path or binary file object."""
+    fh = open(path_or_file, "rb") if isinstance(path_or_file, (str, os.PathLike)) else path_or_file
+    try:
+        head = fh.read(4096)
+        encoding = _xml_encoding(head)
+        fh.seek(0)
+        lineage = Lineage()
+        for text in _xml_records(fh, encoding, stats):
+            try:
+                row = flatten(event_from_xml(text, stats), None, include_raw=include_raw)
+            except Exception as exc:  # noqa: BLE001
+                if stats is not None:
+                    stats.errors += 1
+                log.debug("event XML not read: %s", exc)
+                continue
+            lineage.apply(row)
+            if stats is not None:
+                stats.add(row)
+            yield row
+    finally:
+        if fh is not path_or_file:
+            fh.close()

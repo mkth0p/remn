@@ -17,14 +17,20 @@ export function caseKvKeys(caseId: number): string[] {
   return CASE_KV_PREFIXES.map((p) => `${p}${caseId}`)
 }
 
-export async function clearDerivedState(caseId: number): Promise<{ findings: number; chains: number }> {
+export async function clearDerivedState(caseId: number, removedEvidenceId?: number): Promise<{ findings: number; chains: number }> {
   const db = getDb()
   return db.transaction('rw', [db.findings, db.kv, db.facets], async () => {
-    const findings = await db.findings.where('caseId').equals(caseId).toArray()
+    const all = await db.findings.where('caseId').equals(caseId).toArray()
+    // An engine's findings (Hayabusa) are made once, at ingest, per evidence file, and point at that
+    // file's own rows. Those of the files that stay are still valid, and no rule run could bring them
+    // back: removing one file used to erase them all, decisions included. Only the removed file's go.
+    const removedTag = removedEvidenceId != null ? `evidence:${removedEvidenceId}` : null
+    const keep = (f: (typeof all)[number]) => f.ruleId.startsWith('engine:') && removedTag != null && !(f.tags ?? []).includes(removedTag)
+    const findings = all.filter((f) => !keep(f))
     await rememberReviews(caseId, findings)
-    await db.findings.where('caseId').equals(caseId).delete()
+    await db.findings.bulkDelete(findings.map((f) => f.id!))
     const chains = ((await db.kv.get(`chains-${caseId}`))?.value as { chains?: unknown[] } | undefined)?.chains?.length ?? 0
-    await db.kv.bulkDelete([`chains-${caseId}`, `ruleDiags-${caseId}`])
+    await db.kv.bulkDelete([`chains-${caseId}`, `stories-${caseId}`, `ruleDiags-${caseId}`, `relationship-cache-${caseId}`, `relationship-stories-${caseId}`])
     await db.facets.where('caseId').equals(caseId).delete()
     return { findings: findings.length, chains }
   })

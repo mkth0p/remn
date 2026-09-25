@@ -8,7 +8,7 @@ import { removeCase } from '../data/caseState'
 import { migrateCaseToServer } from '../data/migrate'
 import { getSource } from '../data/source'
 import { API_HEADERS } from '../api/client'
-import { CLAUDE_MODELS, fetchClaudeStatus, getTransport, type ClaudeStatus, type ModelInfo } from '../ai/transport'
+import { CLAUDE_MODELS, fetchClaudeStatus, getTransport, isLocalModelUrl, OPENAI_PRESETS, type ClaudeStatus, type ModelInfo } from '../ai/transport'
 import { suggestTrustedSenders, type TrustedSuggestion } from '../data/trusted'
 import { Modal } from '../components/ui'
 
@@ -33,6 +33,7 @@ export function SettingsView() {
   const [aiModels, setAiModels] = useState<ModelInfo[]>([])
   const [aiTesting, setAiTesting] = useState(false)
   const [urlDraft, setUrlDraft] = useState(aiCfg.ollamaUrl)
+  const [openaiDraft, setOpenaiDraft] = useState(aiCfg.openaiUrl)
   const [suggesting, setSuggesting] = useState(false)
   const [suggestions, setSuggestions] = useState<TrustedSuggestion[] | null>(null)
   const [picked, setPicked] = useState<Set<string>>(new Set())
@@ -69,6 +70,7 @@ export function SettingsView() {
   if (!kase || !ds) return null
   const s = kase.settings
   const isServer = kase.storage === 'server'
+  const browserOnly = health?.mode === 'browser-only'
   const patch = async (p: Partial<CaseSettings>) => {
     updateSettings(p)
     await getDb().cases.update(kase.id!, { settings: { ...s, ...p }, updatedAt: Date.now() })
@@ -149,6 +151,7 @@ export function SettingsView() {
     const db = getDb()
     if (patch.transport !== undefined) await db.kv.put({ key: 'aiTransport', value: patch.transport })
     if (patch.ollamaUrl !== undefined) await db.kv.put({ key: 'aiOllamaUrl', value: patch.ollamaUrl })
+    if (patch.openaiUrl !== undefined) await db.kv.put({ key: 'aiOpenaiUrl', value: patch.openaiUrl })
     if (patch.model !== undefined) await db.kv.put({ key: 'aiModel', value: patch.model })
     if (patch.numCtx !== undefined) await db.kv.put({ key: 'aiNumCtx', value: patch.numCtx })
     if (patch.claudeModel !== undefined) await db.kv.put({ key: 'aiClaudeModel', value: patch.claudeModel })
@@ -163,7 +166,9 @@ export function SettingsView() {
         setAiModels(await t.listModels().catch(() => []))
         toast(
           'ok',
-          t.kind === 'claude' ? 'Claude Code is installed and signed in on the server machine' : `Ollama reachable (${t.kind === 'browser' ? t.endpoint : 'via server'}) - ${r.models ?? 0} model(s)`,
+          t.kind === 'claude'
+            ? 'Claude Code is installed and signed in on the server machine'
+            : `${t.kind === 'openai' ? 'Model server' : 'Ollama'} reachable (${t.kind === 'server' ? 'via server' : t.endpoint}) - ${r.models ?? 0} model(s)`,
         )
       } else {
         toast('err', r.error ?? 'unreachable', 0)
@@ -218,7 +223,7 @@ export function SettingsView() {
                   ? 'Rows live in a DuckDB file under the server data folder on this machine; the browser keeps cases, findings, notes and AI sessions. Suited to gigabytes of logs and mailboxes.'
                   : 'Rows live in this browser only (portable, zero server state). Suited to cases under a few hundred MB.'}
               </div>
-              {!isServer && (
+              {!isServer && !browserOnly && (
                 <div className="col">
                   <button className="btn primary sm" onClick={migrate} disabled={!!migrating}>
                     convert this case to the server store
@@ -269,22 +274,38 @@ export function SettingsView() {
                   </span>
                 </label>
                 <label className="checkbox">
-                  <input type="radio" name="aitransport" checked={aiCfg.transport === 'server'} onChange={() => saveAi({ transport: 'server' })} />{' '}
+                  <input type="radio" name="aitransport" checked={aiCfg.transport === 'openai'} onChange={() => saveAi({ transport: 'openai' })} />{' '}
                   <span>
-                    <b>Server proxy</b>{' '}
-                    <span className="muted small">— the REMN server relays to the Ollama configured in its .env (nothing persisted). Use when no local Ollama, or on Safari over HTTPS.</span>
-                  </span>
-                </label>
-                <label className="checkbox">
-                  <input type="radio" name="aitransport" checked={aiCfg.transport === 'claude'} onChange={() => saveAi({ transport: 'claude' })} />{' '}
-                  <span>
-                    <b>Claude Code</b>{' '}
+                    <b>Local OpenAI-compatible server</b>{' '}
                     <span className="muted small">
-                      — the REMN server runs the <code>claude</code> command line installed on its machine, signed in with that machine's Claude account. Prompts, tool results (evidence excerpts) and
-                      answers go to Anthropic; the server keeps nothing. Not for evidence that may not leave your organisation.
+                      — this page calls LM Studio, a llama.cpp server, vLLM or Jan on your machine or local network (<code>/v1/chat/completions</code>). Nothing reaches the REMN server; no API key is
+                      sent, and cloud endpoints are refused.
                     </span>
                   </span>
                 </label>
+                {browserOnly ? (
+                  <div className="hint">This server runs in browser-only mode: it has no model of its own. The page talks to the model server on your machine.</div>
+                ) : (
+                  <>
+                    <label className="checkbox">
+                      <input type="radio" name="aitransport" checked={aiCfg.transport === 'server'} onChange={() => saveAi({ transport: 'server' })} />{' '}
+                      <span>
+                        <b>Server proxy</b>{' '}
+                        <span className="muted small">— the REMN server relays to the Ollama configured in its .env (nothing persisted). Use when no local Ollama, or on Safari over HTTPS.</span>
+                      </span>
+                    </label>
+                    <label className="checkbox">
+                      <input type="radio" name="aitransport" checked={aiCfg.transport === 'claude'} onChange={() => saveAi({ transport: 'claude' })} />{' '}
+                      <span>
+                        <b>Claude Code</b>{' '}
+                        <span className="muted small">
+                          — the REMN server runs the <code>claude</code> command line installed on its machine, signed in with that machine's Claude account. Prompts, tool results (evidence excerpts)
+                          and answers go to Anthropic; the server keeps nothing. Not for evidence that may not leave your organisation.
+                        </span>
+                      </span>
+                    </label>
+                  </>
+                )}
               </div>
               {aiCfg.transport === 'claude' && (
                 <div className="row" style={{ alignItems: 'flex-start' }}>
@@ -326,6 +347,37 @@ export function SettingsView() {
                   </div>
                 </label>
               )}
+              {aiCfg.transport === 'openai' && (
+                <div className="col" style={{ gap: 6 }}>
+                  <label className="field">
+                    <span>model server URL, ending in /v1 (as seen from this browser)</span>
+                    <input
+                      className="input mono"
+                      value={openaiDraft}
+                      onChange={(e) => setOpenaiDraft(e.target.value)}
+                      onBlur={() => saveAi({ openaiUrl: openaiDraft.trim().replace(/\/+$/, '') || 'http://localhost:1234/v1' })}
+                      placeholder="http://localhost:1234/v1"
+                    />
+                  </label>
+                  {!isLocalModelUrl(openaiDraft) && <div className="hint">✗ not a local address: REMN only sends evidence to a model server on this machine or your local network.</div>}
+                  <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
+                    {OPENAI_PRESETS.map((p) => (
+                      <button
+                        key={p.name}
+                        className={`btn xs ${aiCfg.openaiUrl === p.url ? 'primary' : ''}`}
+                        title={p.hint}
+                        onClick={() => {
+                          setOpenaiDraft(p.url)
+                          void saveAi({ openaiUrl: p.url })
+                        }}
+                      >
+                        {p.name}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="hint">{OPENAI_PRESETS.find((p) => p.url === aiCfg.openaiUrl)?.hint ?? "Start the server with tool calling on, and let it accept this page's origin (CORS)."}</div>
+                </div>
+              )}
               {aiCfg.transport !== 'claude' && (
                 <div className="row">
                   <label className="field" style={{ flex: 1 }}>
@@ -338,7 +390,7 @@ export function SettingsView() {
                     </datalist>
                   </label>
                   <label className="field">
-                    <span>context window (num_ctx)</span>
+                    <span>{aiCfg.transport === 'openai' ? 'context window (the size loaded in the server)' : 'context window (num_ctx)'}</span>
                     <input
                       type="number"
                       className="input mono"
@@ -402,6 +454,18 @@ export function SettingsView() {
                   value={s.trustedSenders ?? []}
                   onChange={(v) => patch({ trustedSenders: v.map((x) => x.toLowerCase().replace(/^@/, '')) })}
                   placeholder={'notifications.supplier.com\nfacture@partenaire.fr'}
+                />
+              </label>
+              <label className="field">
+                <span>
+                  trusted ARC sealers (mailing lists and forwarders) - their verified ARC seal vouches for mail they forwarded; the internal domains always count. Applies to mail imported after the
+                  change.
+                </span>
+                <ListInput
+                  mono
+                  value={s.trustedArcSealers ?? []}
+                  onChange={(v) => patch({ trustedArcSealers: v.map((x) => x.toLowerCase().replace(/^@/, '')) })}
+                  placeholder={'lists.partner.org\ngoogle.com'}
                 />
               </label>
               <div className="row">
@@ -498,7 +562,11 @@ export function SettingsView() {
           <div className="panel">
             <div className="panel-h">external lookups (opt-in)</div>
             <div className="panel-b col">
-              <Toggle on={s.networkAllowed} onChange={(v) => patch({ networkAllowed: v })} label="allow reputation lookups - every checked indicator is disclosed to the provider" />
+              {browserOnly ? (
+                <div className="hint">Reputation lookups are switched off on this server (browser-only mode): it contacts no third party on your behalf.</div>
+              ) : (
+                <Toggle on={s.networkAllowed} onChange={(v) => patch({ networkAllowed: v })} label="allow reputation lookups - every checked indicator is disclosed to the provider" />
+              )}
               <div className="col" style={{ gap: 4 }}>
                 {providers.map((p) => (
                   <label key={p.name} className="checkbox small" title={p.description}>
@@ -544,7 +612,8 @@ export function SettingsView() {
                 </div>
                 <div className="k">optional</div>
                 <div className="v">
-                  PST/OST {health?.optional.pst ? 'yes' : 'no (pip install libpff-python)'} · YARA {health?.optional.yara ? `yes (${health.optional.yaraRules} rule file(s))` : 'no'}
+                  PST/OST {health?.optional.pst ? 'yes' : 'no (pip install libpff-python)'} · YARA {health?.optional.yara ? `yes (${health.optional.yaraRules} rule file(s))` : 'no'} · Hayabusa{' '}
+                  {health?.engines?.includes('hayabusa') ? 'yes (runs on every event log ingested; findings under engine:hayabusa)' : 'no (binary or its rules not found on the server)'}
                 </div>
               </div>
               <div className="divider" />

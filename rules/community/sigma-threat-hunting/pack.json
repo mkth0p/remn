@@ -18,22 +18,18 @@
     "paths": [
       "rules-threat-hunting"
     ],
-    "fetched": "2026-09-05"
+    "fetched": "2026-09-24"
   },
   "counts": {
     "upstream": 128,
-    "converted": 114,
-    "skipped": 14,
+    "converted": 117,
+    "skipped": 11,
     "warnings": 0
   },
   "skipReasons": [
     [
       "logsource category 'file_access'",
       6
-    ],
-    [
-      "IPv6 cidr ::1/128",
-      3
     ],
     [
       "level informational",
@@ -59,7 +55,7 @@
     "file_event.yaml": 9,
     "firewall_as.yaml": 1,
     "image_load.yaml": 10,
-    "network_connection.yaml": 5,
+    "network_connection.yaml": 8,
     "pipe_created.yaml": 1,
     "process_access.yaml": 4,
     "process_creation.yaml": 55,

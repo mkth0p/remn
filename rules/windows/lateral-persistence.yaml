@@ -1,18 +1,23 @@
 id: win-service-installed-suspicious
 title: Suspicious service installed (7045 / 4697)
-description: New service whose binary path points to a temp/user folder, a script host, cmd/powershell, a UNC path or a well-known remote-execution service (PsExec, PAExec, WinRM...).
+description: New service whose binary path points to a temp folder, a user profile (a service runs as SYSTEM from a folder any user can write), a script host, cmd/powershell, a UNC path or a well-known remote-execution service (PsExec, PAExec, WinRM...).
 severity: high
 source: events
 attack: [T1543.003, T1569.002]
 tags: [persistence, lateral-movement]
+entities: [computer, serviceName, serviceFile]
 where:
   eventId|in: [7045, 4697]
   any_of:
-    - serviceFile|contains: ["\\temp\\", "\\tmp\\", "\\appdata\\", "\\users\\public\\", "\\programdata\\", "\\downloads\\", "\\perflogs\\", "\\recycle", "\\windows\\tasks\\", "\\windows\\debug\\"]
+    - serviceFile|contains: ["\\temp\\", "\\tmp\\", "\\appdata\\", "\\users\\", "\\programdata\\", "\\downloads\\", "\\perflogs\\", "\\recycle", "\\windows\\tasks\\", "\\windows\\debug\\"]
     - serviceFile|contains: [cmd.exe, cmd /c, powershell, pwsh, mshta, rundll32, regsvr32, wscript, cscript, certutil, bitsadmin, msiexec /q, "%comspec%", "\\\\", "-enc", "-e ", "iex", "downloadstring", "base64", "ADMIN$", "C$"]
     - serviceName|contains: [PSEXESVC, PAExec, csexecsvc, winexesvc, RemComSvc, BTOBTO, smbexec, mssecsvc, wmiexec, atexec, sysmon64bak, "\\\\"]
     - serviceFile|re: "(?i)^[a-z]:\\\\[a-z0-9]{6,}\\.exe$"
     - serviceName|re: "^[A-Za-z0-9]{8}$"
+# Firmware and hardware tools install drivers from their own folders under vendor names; that is
+# the only exclusion, so a driver dropped under System32\drivers with a random name still counts.
+exclude:
+  serviceFile|contains: ["\\swtools\\", "\\program files\\lenovo\\", "\\program files (x86)\\lenovo\\", "\\program files\\intel\\", "\\program files (x86)\\intel\\", "\\program files\\dell\\", "\\program files (x86)\\dell\\", "\\program files\\hp\\", "\\program files (x86)\\hp\\", "\\program files\\nvidia", "\\program files\\amd\\"]
 ---
 id: win-service-installed-any
 title: New service installed (inventory)
@@ -56,27 +61,34 @@ threshold: ">= 1"
 ---
 id: win-scheduled-task-created
 title: Scheduled task created or updated
-description: 4698/4702 (Security) or 106/140 (TaskScheduler) - persistence or remote execution (at, schtasks /s).
+description: 4698/4702 (Security) or 106/140 (TaskScheduler) - persistence or remote execution (at, schtasks /s). One finding per task name and host; the task name and the account are on the finding.
 severity: medium
 source: events
 attack: [T1053.005]
 tags: [persistence]
+entities: [computer, subjectUser, taskName]
+group_by: [computer, taskName]
+threshold: ">= 1"
 where:
   any_of:
     - { eventId|in: [4698, 4702] }
     - { eventId|in: [106, 140], provider|contains: TaskScheduler }
-  taskName|not_contains: ["\\Microsoft\\Windows\\", "\\Microsoft\\Office\\", "OneDrive", "GoogleUpdate", "MicrosoftEdgeUpdate", "Adobe", "Mozilla", "Firefox", "Brave", "Opera", "Dropbox", "npcap", "Intel", "NVIDIA", "Lenovo", "Dell", "HP"]
+  taskName|not_contains: ["\\Microsoft\\Windows\\", "\\Microsoft\\Office\\", "\\SoftLanding\\", "OneDrive", "GoogleUpdate", "MicrosoftEdgeUpdate", "Adobe", "Mozilla", "Firefox", "Brave", "Opera", "Dropbox", "npcap", "Intel", "NVIDIA", "Lenovo", "Dell", "HP"]
 ---
 id: win-scheduled-task-suspicious-content
 title: Scheduled task with suspicious command
-description: Task XML (4698/4702) references cmd, powershell, mshta, script hosts, temp folders or encoded commands.
+description: Task XML (4698/4702) references cmd, powershell, mshta, script hosts, temp folders or encoded commands. One finding per task name and host; the task name and the account are on the finding, the command is in the rows.
 severity: high
 source: events
 attack: [T1053.005]
 tags: [persistence, execution]
+entities: [computer, subjectUser, taskName]
+group_by: [computer, taskName]
+threshold: ">= 1"
 where:
   eventId|in: [4698, 4702]
-  taskContent|contains: [powershell, pwsh, cmd.exe, cmd /c, mshta, wscript, cscript, rundll32, regsvr32, certutil, bitsadmin, "\\temp\\", "\\appdata\\", "\\users\\public\\", "\\programdata\\", "-enc", "-w hidden", "hidden", downloadstring, iex, "http", ".vbs", ".js", ".hta", ".ps1", ".bat"]
+  # not a bare "hidden": every task's XML carries <Hidden>true</Hidden>
+  taskContent|contains: [powershell, pwsh, cmd.exe, cmd /c, mshta, wscript, cscript, rundll32, regsvr32, certutil, bitsadmin, "\\temp\\", "\\appdata\\", "\\users\\public\\", "\\programdata\\", "-enc", "-w hidden", "-windowstyle hidden", "windowstyle hidden", downloadstring, iex, "http", ".vbs", ".js", ".hta", ".ps1", ".bat"]
 ---
 id: win-user-account-created
 title: User account created
@@ -98,6 +110,24 @@ tags: [persistence, privilege]
 where:
   eventId|in: [4728, 4732, 4756]
   groupName|contains: [Administrators, Administrateurs, "Domain Admins", "Admins du domaine", "Enterprise Admins", "Administrateurs de l'entreprise", "Schema Admins", "Remote Desktop Users", "Utilisateurs du Bureau", "Backup Operators", "Opérateurs de sauvegarde", DnsAdmins, "Account Operators", "Server Operators", "Print Operators", "Group Policy Creator", "Hyper-V Administrators", "Remote Management Users"]
+---
+id: win-user-added-security-group
+title: Member added to a security group
+description: >-
+  4728 / 4732 / 4756: an account added a member to a security-enabled global, local or universal group
+  other than the privileged ones (win-user-added-privileged-group names those). Membership gives the
+  member what the group reaches (shares, applications, servers that trust it), and an attacker adds the
+  accounts they hold to the groups that reach what they want (T1098.007). Changes made by a machine
+  account (group policy, provisioning) are left out. Benign causes: access requests and onboarding
+  handled by the directory's administrators.
+severity: medium
+source: events
+attack: [T1098.007]
+tags: [persistence, privilege]
+where:
+  eventId|in: [4728, 4732, 4756]
+  subjectUser|not_endswith: "$"
+  groupName|not_contains: [Administrators, Administrateurs, "Domain Admins", "Admins du domaine", "Enterprise Admins", "Administrateurs de l'entreprise", "Schema Admins", "Remote Desktop Users", "Utilisateurs du Bureau", "Backup Operators", "Opérateurs de sauvegarde", DnsAdmins, "Account Operators", "Server Operators", "Print Operators", "Group Policy Creator", "Hyper-V Administrators", "Remote Management Users"]
 ---
 id: win-account-lifecycle-short
 title: Account created then deleted shortly after
@@ -143,7 +173,7 @@ where:
 ---
 id: win-wmi-persistence
 title: WMI event subscription (fileless persistence)
-description: Sysmon 19/20/21 or WMI-Activity 5861 - permanent event consumer/filter binding.
+description: Sysmon 19/20/21 or WMI-Activity 5861 - permanent event consumer/filter binding. The consumer Windows registers itself at every start, an event log consumer ("SCM Event Log Consumer" on the "SCM Event Log Filter") that cannot run code, is left out; it was every one of its 26 findings on the clean machines.
 severity: high
 source: events
 attack: [T1546.003]
@@ -152,40 +182,140 @@ where:
   any_of:
     - { eventId|in: [19, 20, 21], provider|contains: Sysmon }
     - { eventId: 5861, provider|contains: WMI-Activity }
+exclude:
+  data.CONSUMER: 'NTEventLogEventConsumer="SCM Event Log Consumer"'
+  data.ESS: SCM Event Log Filter
 ---
 id: win-registry-run-key
-title: Run / RunOnce registry persistence (Sysmon 13 / 4657)
-description: Value written under a Run, RunOnce, Winlogon, Services or Image File Execution Options key.
+title: Autostart or hijack registry value set to run code from a user folder, a script or a LOLBin (Sysmon 13 / 4657)
+description: 'A value that hijacks whatever it names (a debugger, global flag or verifier DLL on a program under Image File Execution Options, a SilentProcessExit monitor, AppInit DLLs, LSA security, notification or authentication packages, WDigest credentials in clear, a print monitor DLL, the RDP listener, RunOnceEx, a Winlogon shell or userinit other than the default, Defender switched off), or a Run / RunOnce value whose program is outside Program Files and the Windows system folders, runs a script host, a LOLBin, a script or something remote, or has no name. A Run value set to a program under Program Files or Windows is the low inventory rule win-registry-run-key-program, and so is the resume entry the WiX Burn engine registers in its package cache. Service keys have their own rule, win-service-registry-suspicious. One finding per value and machine.'
 severity: high
 source: events
 attack: [T1547.001, T1546.012]
 tags: [persistence, registry]
+entities: [computer, targetObject, details, objectName, objectValueName, newValue, image]
 where:
   any_of:
     - { eventId: 13, provider|contains: Sysmon }
     - { eventId: 4657 }
   any_of_2:
-    - targetObject|contains: ["\\CurrentVersion\\Run", "\\CurrentVersion\\RunOnce", "\\Winlogon\\Shell", "\\Winlogon\\Userinit", "\\Image File Execution Options\\", "\\CurrentVersion\\Explorer\\Shell Folders", "\\Policies\\Explorer\\Run", "\\Windows\\CurrentVersion\\Policies\\", "\\AppInit_DLLs", "\\Services\\", "\\Print\\Monitors\\", "\\SilentProcessExit\\", "\\Terminal Server\\WinStations\\RDP-Tcp\\", "\\Lsa\\Security Packages", "\\Lsa\\Notification Packages", "\\WDigest\\UseLogonCredential", "\\DisableAntiSpyware", "\\DisableRealtimeMonitoring"]
-    - objectName|contains: ["\\CurrentVersion\\Run", "\\CurrentVersion\\RunOnce", "\\Winlogon\\", "\\Image File Execution Options\\", "\\WDigest", "\\Lsa\\"]
+    # values that hijack whatever they point at: a debugger or a global flag on a program (IFEO),
+    # SilentProcessExit monitors, AppInit DLLs, LSA packages, WDigest in clear, print monitors, RunOnceEx
+    - targetObject|re: '(?i)\\image file execution options\\[^\\]+\\(debugger|globalflag|verifierdlls)$'
+    - targetObject|contains: ["\\SilentProcessExit\\", "\\Lsa\\Security Packages", "\\Lsa\\Notification Packages", "\\Lsa\\Authentication Packages", "\\WDigest\\UseLogonCredential", "\\Terminal Server\\WinStations\\RDP-Tcp\\", "\\CurrentVersion\\RunOnceEx\\"]
+    - targetObject|re: '(?i)\\print\\monitors\\[^\\]+\\driver$'
+    - targetObject|endswith: ["\\DisableAntiSpyware", "\\DisableRealtimeMonitoring"]
+      details|contains: "0x00000001"
+    - targetObject|endswith: "\\AppInit_DLLs"
+      details|nin: ["", "(Empty)"]
+    - targetObject|endswith: ["\\Winlogon\\Shell", "\\Winlogon\\Userinit"]
+      details|nin: ["explorer.exe", "C:\\Windows\\system32\\userinit.exe,", "C:\\Windows\\system32\\userinit.exe"]
+    # a Run value whose program is not under Program Files or the Windows system folders, runs a
+    # script host, a LOLBin, a script or something remote, or has no name (hidden)
+    - targetObject|re: '(?i)\\(currentversion|policies\\explorer)\\run(once)?\\[^\\]*$'
+      any_of:
+        - details|re: '(?i)^\s*"?([a-z]:\\|\\\\|%)'
+          details|not_re: '(?i)^\s*"?([a-z]:\\program files( \(x86\))?\\|[a-z]:\\windows\\(system32|syswow64)\\|%%?programfiles(\(x86\))?%%?\\|%%?(systemroot|windir)%%?\\(system32|syswow64)\\|[a-z]:\\(programdata|users\\[^\\]+\\appdata\\local)\\package cache\\\{[0-9a-f-]{36}\}\\)'
+        - details|contains: ["powershell", "pwsh", "cmd.exe /c", "cmd /c", "mshta", "wscript", "cscript", "rundll32", "regsvr32", "certutil", "bitsadmin", "msiexec", "forfiles", "conhost", "http:", "https:", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".hta", ".ps1", ".bat", ".cmd", ".scr", ".pif"]
+        - targetObject|endswith: "\\"
+    # the same in the Security log's registry auditing (4657): key, value name and new value
+    - objectName|contains: "\\Image File Execution Options\\"
+      objectValueName|in: [Debugger, GlobalFlag, VerifierDlls]
+    - objectName|contains: ["\\SilentProcessExit\\", "\\WDigest", "\\Lsa"]
+      objectValueName|in: [MonitorProcess, ReportingMode, UseLogonCredential, Security Packages, Notification Packages, Authentication Packages]
+    - objectName|re: '(?i)\\winlogon$'
+      objectValueName|in: [Shell, Userinit]
+      newValue|nin: ["explorer.exe", "C:\\Windows\\system32\\userinit.exe,", "C:\\Windows\\system32\\userinit.exe"]
+    - objectName|re: '(?i)\\currentversion\\run(once)?$'
+      any_of:
+        - newValue|re: '(?i)^\s*"?([a-z]:\\|\\\\|%)'
+          newValue|not_re: '(?i)^\s*"?([a-z]:\\program files( \(x86\))?\\|[a-z]:\\windows\\(system32|syswow64)\\|%%?programfiles(\(x86\))?%%?\\|%%?(systemroot|windir)%%?\\(system32|syswow64)\\|[a-z]:\\(programdata|users\\[^\\]+\\appdata\\local)\\package cache\\\{[0-9a-f-]{36}\}\\)'
+        - newValue|contains: ["powershell", "pwsh", "cmd.exe /c", "cmd /c", "mshta", "wscript", "cscript", "rundll32", "regsvr32", "certutil", "bitsadmin", "msiexec", "forfiles", "conhost", "http:", "https:", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".hta", ".ps1", ".bat", ".cmd", ".scr", ".pif"]
+        - objectValueName|in: [""]
+group_by: [computer, targetObject, objectName, objectValueName, details, newValue]
+threshold: ">= 1"
+---
+id: win-registry-run-key-program
+title: Run / RunOnce value set to a program under Program Files or Windows (Sysmon 13 / 4657)
+description: 'What starts at logon, as installers register it: a Run or RunOnce value naming a program under Program Files or the Windows system folders, a bare command, or the WiX Burn engine resuming from its package cache. Installers and updaters write these all day (the seven clean machines hold 79); a value pointing at a user folder, a script host, a LOLBin or a script, or with no name, is the high rule win-registry-run-key. One finding per value and machine.'
+severity: low
+source: events
+attack: [T1547.001]
+tags: [persistence, registry]
+entities: [computer, targetObject, details, objectName, objectValueName, newValue, image]
+where:
+  any_of:
+    - { eventId: 13, provider|contains: Sysmon }
+    - { eventId: 4657 }
+  any_of_2:
+    - targetObject|re: '(?i)\\(currentversion|policies\\explorer)\\run(once)?\\[^\\]+$'
+      details|not_contains: ["powershell", "pwsh", "cmd.exe /c", "cmd /c", "mshta", "wscript", "cscript", "rundll32", "regsvr32", "certutil", "bitsadmin", "msiexec", "forfiles", "conhost", "http:", "https:", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".hta", ".ps1", ".bat", ".cmd", ".scr", ".pif"]
+      any_of:
+        - details|not_re: '(?i)^\s*"?([a-z]:\\|\\\\|%)'
+        - details|re: '(?i)^\s*"?([a-z]:\\program files( \(x86\))?\\|[a-z]:\\windows\\(system32|syswow64)\\|%%?programfiles(\(x86\))?%%?\\|%%?(systemroot|windir)%%?\\(system32|syswow64)\\|[a-z]:\\(programdata|users\\[^\\]+\\appdata\\local)\\package cache\\\{[0-9a-f-]{36}\}\\)'
+    - objectName|re: '(?i)\\currentversion\\run(once)?$'
+      objectValueName|nin: [""]
+      newValue|not_contains: ["powershell", "pwsh", "cmd.exe /c", "cmd /c", "mshta", "wscript", "cscript", "rundll32", "regsvr32", "certutil", "bitsadmin", "msiexec", "forfiles", "conhost", "http:", "https:", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".hta", ".ps1", ".bat", ".cmd", ".scr", ".pif"]
+      any_of:
+        - newValue|not_re: '(?i)^\s*"?([a-z]:\\|\\\\|%)'
+        - newValue|re: '(?i)^\s*"?([a-z]:\\program files( \(x86\))?\\|[a-z]:\\windows\\(system32|syswow64)\\|%%?programfiles(\(x86\))?%%?\\|%%?(systemroot|windir)%%?\\(system32|syswow64)\\|[a-z]:\\(programdata|users\\[^\\]+\\appdata\\local)\\package cache\\\{[0-9a-f-]{36}\}\\)'
+group_by: [computer, targetObject, objectName, objectValueName]
+threshold: ">= 1"
+---
+id: win-service-registry-suspicious
+title: Service binary set to a suspicious command in the registry (Sysmon 13 / 4657)
+description: A service's ImagePath or ServiceDll written to point at a user profile or another user-writable folder, a shell or script host, a named pipe (Meterpreter getsystem), or an executable dropped straight into the Windows folder (PsExec and its renamed copies). The registry view of win-service-installed-suspicious, for hosts that log Sysmon but not the System channel. Any write under a Services key used to count as Run-key persistence, which included the Background Activity Moderator updating its own state.
+severity: high
+source: events
+attack: [T1543.003, T1569.002]
+tags: [persistence, lateral-movement, registry]
+entities: [computer, targetObject, details, image]
+where:
+  any_of:
+    - { eventId: 13, provider|contains: Sysmon, targetObject|contains: "\\Services\\", targetObject|endswith: ["\\ImagePath", "\\ServiceDll", "\\FailureCommand"] }
+    - { eventId: 4657, objectName|contains: "\\Services\\", data.ObjectValueName|in: [ImagePath, ServiceDll, FailureCommand] }
+  any_of_2:
+    - details|contains: ["\\temp\\", "\\tmp\\", "\\appdata\\", "\\users\\", "\\programdata\\", "\\downloads\\", "\\perflogs\\", "\\windows\\tasks\\", "cmd.exe", "cmd /c", "%comspec%", "powershell", "pwsh", "mshta", "rundll32", "regsvr32", "wscript", "cscript", "\\\\.\\pipe\\", "PSEXESVC", "PAExec"]
+    - details|re: "(?i)^\"?(c:\\\\windows|%systemroot%|\\\\systemroot)\\\\[^\\\\]+\\.exe"
+    - data.NewValue|contains: ["\\temp\\", "\\appdata\\", "\\users\\", "\\programdata\\", "cmd.exe", "%comspec%", "powershell", "rundll32", "\\\\.\\pipe\\", "PSEXESVC"]
+---
+id: win-spooler-driver-dll
+title: Print spooler loads or is pointed at a DLL from its driver folder (SpoolFool, CVE-2020-1030, PrintNightmare)
+description: spoolsv.exe loads an unsigned DLL from spool\\drivers (Sysmon 7), a process other than spoolsv or a system installer writes a DLL there (Sysmon 11), or a printer's SpoolDirectory or CopyFiles Module is set to a path under spool\\drivers (Sysmon 13). The spooler then loads the attacker's DLL as SYSTEM. The upstream Sigma rule for the load is informational and was not converted; unsigned, it is high here.
+severity: high
+source: events
+attack: [T1068, T1574]
+tags: [privilege-escalation, spooler]
+entities: [computer, image, imageLoaded, targetFilename, targetObject, details]
+where:
+  provider|contains: Sysmon
+  any_of:
+    - { eventId: 7, image|endswith: "\\spoolsv.exe", imageLoaded|contains: "\\spool\\drivers\\", signed|in: ["false", "False"] }
+    - { eventId: 11, targetFilename|contains: "\\spool\\drivers\\", targetFilename|endswith: .dll, image|not_endswith: ["\\spoolsv.exe", "\\TrustedInstaller.exe", "\\tiworker.exe", "\\drvinst.exe", "\\printisolationhost.exe"] }
+    - { eventId: 13, targetObject|contains: "\\Print\\Printers\\", targetObject|endswith: ["\\SpoolDirectory", "\\Module"], details|contains: "\\spool\\drivers\\" }
 ---
 id: win-new-firewall-rule
-title: Firewall rule added or all rules deleted
-description: 2004 (rule added), 2033 (all rules deleted) or 4946/4948 - attackers open ports for C2/RDP or wipe the firewall.
+title: Firewall rules added for an application, or all rules deleted
+description: 2004 (rule added), 2033 (all rules deleted) or 4946/4948 - attackers open ports for C2/RDP or wipe the firewall. One finding per application within six hours, since an installer adds its rules in a burst; the rule names are listed on the finding.
 severity: medium
 source: events
-attack: [T1562.004]
+attack: [T1686]
 tags: [defense-evasion, firewall]
+entities: [computer, applicationPath, ruleName]
 where:
   any_of:
     - { eventId|in: [2004, 2033], provider|contains: Firewall }
     - { eventId|in: [4946, 4948] }
+group_by: [computer, applicationPath]
+window: 6h
+threshold: ">= 1"
 ---
 id: win-rdp-enabled-registry
 title: RDP enabled / hardening changed via registry
 description: fDenyTSConnections or UserAuthentication changed (Sysmon 13 / 4657), or Remote Desktop Users group changed.
 severity: medium
 source: events
-attack: [T1021.001, T1562]
+attack: [T1021.001, T1685]
 tags: [persistence, rdp]
 where:
   any_of:

@@ -80,13 +80,12 @@ describe('derived state follows the evidence', () => {
     expect((await db.kv.toArray()).map((k) => k.key).sort()).toEqual(['chains-2', 'disabledRules'])
   })
 
-  it('prunes findings of rules that no longer exist, keeps chains, archives the decisions', async () => {
-    await replaceFindings(1, ['sigma-gone', 'mail-x', 'chain'], [finding('sigma-gone|1', 'sigma-gone'), finding('mail-x|1'), finding('chain|a|1', 'chain')])
-    const gone = await db.findings.where('[caseId+ruleId]').equals([1, 'sigma-gone']).first()
+  it('prunes undecided findings of rules that no longer exist, keeps chains and every decided finding', async () => {
+    await replaceFindings(1, ['sigma-gone', 'mail-x', 'chain'], [finding('sigma-gone|1', 'sigma-gone'), finding('sigma-gone|2', 'sigma-gone'), finding('mail-x|1'), finding('chain|a|1', 'chain')])
+    const gone = await db.findings.where('key').equals('sigma-gone|1').first()
     await db.findings.update(gone!.id!, { status: 'reviewed', notes: 'seen' })
     expect(await pruneOrphanFindings(1, ['mail-x'])).toBe(1)
-    expect((await db.findings.toArray()).map((f) => f.ruleId).sort()).toEqual(['chain', 'mail-x'])
-    expect(((await db.kv.get('finding-reviews-1'))?.value as Record<string, unknown>)['sigma-gone|1']).toMatchObject({ status: 'reviewed', notes: 'seen' })
+    expect((await db.findings.toArray()).map((f) => f.key).sort()).toEqual(['chain|a|1', 'mail-x|1', 'sigma-gone|1'])
   })
 })
 
@@ -125,5 +124,38 @@ describe('deleting a case', () => {
     expect(next.storage).toBe('browser')
     expect(await db.cases.count()).toBe(1)
     expect((await db.kv.get('lastCase'))?.value).toBe(next.id)
+  })
+})
+
+describe('what removing one evidence file takes with it', () => {
+  it('keeps the engine findings of the other files, which no rule run could bring back', async () => {
+    await db.evidence.bulkAdd([{ id: 5, caseId: 1, name: 'a.evtx' } as never, { id: 6, caseId: 1, name: 'b.evtx' } as never])
+    await db.findings.bulkAdd([
+      { ...finding('engine:hayabusa:x|1', 'engine:hayabusa:x'), tags: ['evidence:5'] },
+      { ...finding('engine:hayabusa:y|2', 'engine:hayabusa:y'), tags: ['evidence:6'], status: 'escalated', notes: 'lateral movement' },
+      finding('win-rule|3', 'win-rule'),
+    ] as never)
+    await clearDerivedState(1, 5)
+    const left = await db.findings.toArray()
+    expect(left.map((f) => f.key)).toEqual(['engine:hayabusa:y|2'])
+    expect(left[0]).toMatchObject({ status: 'escalated', notes: 'lateral movement' })
+  })
+
+  it('does not bring back a decision the analyst reverted', async () => {
+    await db.findings.add({ ...finding('mail-x|1'), status: 'false_positive' } as never)
+    await clearDerivedState(1) // archived as a false positive
+    await replaceFindings(1, ['mail-x'], [finding('mail-x|1')])
+    const f = (await db.findings.toArray())[0]
+    expect(f.status).toBe('false_positive')
+    await db.findings.update(f.id!, { status: 'new' }) // the analyst decides it is real after all
+    await clearDerivedState(1)
+    await replaceFindings(1, ['mail-x'], [finding('mail-x|1')])
+    expect((await db.findings.toArray())[0].status).toBe('new')
+  })
+
+  it('never prunes a finding the analyst decided, even when its rule is not in this browser', async () => {
+    await db.findings.bulkAdd([{ ...finding('gone|1', 'gone-rule'), status: 'escalated' }, finding('gone|2', 'gone-rule')] as never)
+    expect(await pruneOrphanFindings(1, ['mail-x'])).toBe(1)
+    expect((await db.findings.toArray()).map((f) => f.key)).toEqual(['gone|1'])
   })
 })

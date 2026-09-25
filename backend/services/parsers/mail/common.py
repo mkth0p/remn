@@ -27,7 +27,7 @@ from services.analysis.headers import (
 )
 from services.analysis.lookalike import DEFAULT_BRANDS, analyze_domain, display_name_looks_like_email, registrable, split_domain
 from services.analysis.urls import _domain_in_text, extract_urls
-from services.common import parse_timestamp
+from services.common import fix_surrogates, parse_timestamp
 from services.reference.brand_domains import BRAND_OWNED_DOMAINS
 from services.reference.notification_senders import NOTIFICATION_SENDERS
 
@@ -251,6 +251,10 @@ class ParseContext:
     analyze_attachments: bool = True
     evidence_id: str | None = None
     trusted_senders: list[str] = field(default_factory=list)
+    # messages larger than this are recorded as errors instead of being parsed
+    max_message_bytes: int = 256 * 1024 * 1024
+    # mailing lists and forwarders whose ARC seal the analyst trusts (the internal domains always are)
+    trusted_arc_sealers: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -406,14 +410,8 @@ def build_row(
     # text "news.vendor.example" pointing at vendor.example). Anchor text that names a brand or one of the
     # organisation's domains keeps the mismatch: that is the spoof pattern itself.
     auth0 = hdr["auth"] or {}
-    sender_auth_basic = bool(
-        (
-            (auth0.get("spf") == "pass" or auth0.get("dkim") == "pass")
-            and auth0.get("dmarc") in ("pass", "bestguesspass", None)
-            and not ({"spf_fail", "dkim_fail", "dmarc_fail", "compauth_fail"} & flags)
-        )
-        or auth0.get("exoAuthAs") == "internal"
-    )
+    receiver_failed = bool({"spf_fail", "dmarc_fail", "compauth_fail"} & flags)
+    sender_auth_basic = aligned_pass(auth0, flags) or (auth0.get("exoAuthAs") == "internal" and not receiver_failed)
     if sender_auth_basic and frm["registrable"]:
         internal_regs = {registrable(d) for d in ctx.internal_domains}
         brand_names = set(DEFAULT_BRANDS) | {b.lower() for b in (ctx.brands or [])}
@@ -463,7 +461,9 @@ def build_row(
     # Exchange organisation headers survive on mailbox exports. AuthAs=Internal is an
     # authenticated submission by a tenant user: Exchange neither DKIM-signs nor DMARC-evaluates
     # intra-tenant traffic, so its "none" results and mailbox-server HELO names mean nothing.
-    exo_auth_internal = auth_hdr.get("exoAuthAs") == "internal"
+    # The header is only believed when the receiver did not fail the sender: on a mailbox that Exchange
+    # did not receive (an eml or mbox from elsewhere), anyone can add it to a spoof.
+    exo_auth_internal = auth_hdr.get("exoAuthAs") == "internal" and not receiver_failed
     if exo_auth_internal:
         flags -= {
             "spf_none",
@@ -492,16 +492,24 @@ def build_row(
     if mclass.startswith(("ipm.appointment", "ipm.schedule.", "report.ipm.schedule")):
         flags.add("calendar_item")
         flags.discard("undisclosed_recipients")
-    # Mailing lists / forwarders legitimately break SPF and DKIM; a valid ARC seal restores trust.
-    arc_ok = auth_hdr.get("arc") == "pass"
+    # Mailing lists and forwarders break SPF and DKIM legitimately. arc=pass says only that the ARC
+    # chain is intact, and a sender can seal its own chain, so it forgives nothing by itself. A
+    # receiver that trusts the sealer says so in its own composite verdict (compauth=pass, which
+    # Microsoft gives an ARC override), and that is what is believed.
+    sealer = str(auth_hdr.get("arcSealer") or "")
+    trusted_sealers = {registrable(d) for d in [*ctx.trusted_arc_sealers, *ctx.internal_domains] if d}
+    arc_trusted = auth_hdr.get("arc") == "pass" and bool(sealer) and registrable(sealer) in trusted_sealers
+    if arc_trusted:
+        flags.add("arc_trusted_sealer")
+    receiver_passed = auth_hdr.get("compauth") == "pass" or arc_trusted
     is_bulk_ctx = "bulk_mailer" in flags or bool(first_header(headers, "List-Id"))
     # PHPMailer & co. are what CMS newsletters are sent with; only unauthenticated use is a forgery signal
     if "suspicious_mailer" in flags and (sender_auth_basic or is_bulk_ctx):
         flags.discard("suspicious_mailer")
         flags.add("scripted_mailer")
     suspicion = set(flags) & SENDER_SUSPICION
-    if arc_ok:
-        suspicion -= {"spf_fail", "dkim_fail", "dmarc_fail", "compauth_fail"}
+    if receiver_passed:
+        suspicion -= {"spf_fail", "dkim_fail", "dmarc_fail"}
     sender_suspect = bool(suspicion)
     url_suspect = bool(flags & URL_SUSPICION)
     # Hidden preview text ("preheader") is standard in marketing and notification mail.
@@ -527,7 +535,17 @@ def build_row(
         flags.add("bec_pattern")
     if "credentials" in hits and "urgency" in hits and (sender_suspect or url_suspect):
         flags.add("credential_phishing_pattern")
-    if look.get("internal") and not arc_ok and ({"spf_fail", "dmarc_fail", "compauth_fail"} & flags):
+    # One of the organisation's own domains in From, and either the receiver failed it, or the only
+    # pass is for some other domain (authenticated as evil.example while claiming contoso.com).
+    other_domain_pass = (auth_hdr.get("spf") == "pass" and "spf_domain_unaligned" in flags) or (
+        auth_hdr.get("dkim") == "pass" and "dkim_domain_unaligned" in flags
+    )
+    if (
+        look.get("internal")
+        and not receiver_passed
+        and not exo_auth_internal
+        and (({"spf_fail", "dmarc_fail", "compauth_fail"} & flags) or (other_domain_pass and not aligned_pass(auth_hdr, flags)))
+    ):
         flags.add("internal_spoof")
     if not text and not html:
         flags.add("no_body")
@@ -571,13 +589,7 @@ def build_row(
 
     auth_res = hdr["auth"]
     trust = {
-        "authenticated": (
-            (auth_res.get("spf") == "pass" or auth_res.get("dkim") == "pass")
-            and auth_res.get("dmarc") in ("pass", "bestguesspass", None)
-            and not ({"spf_fail", "dkim_fail", "dmarc_fail", "compauth_fail"} & flags)
-        )
-        or (arc_ok and "compauth_fail" not in flags)
-        or exo_internal,
+        "authenticated": aligned_pass(auth_res, flags) or (receiver_passed and "dmarc_fail" not in flags) or exo_internal,
         "internal": bool(look.get("internal")),
         "exchangeInternal": exo_internal,
         "bulk": is_bulk_ctx,
@@ -689,7 +701,7 @@ def split_message(msg: Message) -> tuple[str | None, str | None, list[RawAttachm
         disp = (part.get_content_disposition() or "").lower()
         filename = part.get_filename()
         try:
-            filename = decode_mime(filename) if filename else None
+            filename = fix_surrogates(decode_mime(filename)) if filename else None
         except Exception:  # noqa: BLE001
             pass
         cid = (part.get("Content-ID") or "").strip("<> ") or None
@@ -738,10 +750,25 @@ def message_headers(msg: Message) -> list[Header]:
     out: list[Header] = []
     for k, v in msg.raw_items():
         try:
-            out.append((k, _UNFOLD_RE.sub(" ", str(v)).strip()))
+            out.append((k, fix_surrogates(_UNFOLD_RE.sub(" ", str(v)).strip())))
         except Exception:  # noqa: BLE001
             out.append((k, repr(v)))
     return out
+
+
+def aligned_pass(auth: dict[str, Any], flags: set[str]) -> bool:
+    """The receiver authenticated the From domain itself: DMARC passed, or with no DMARC result, SPF
+    or DKIM passed for a domain aligned with From. A pass for some other domain authenticates that
+    domain, not the sender the message claims; it lowered the risk of a spoof that brought one."""
+    if {"spf_fail", "dkim_fail", "dmarc_fail", "compauth_fail"} & flags:
+        return False
+    if auth.get("dmarc") in ("pass", "bestguesspass"):
+        return True
+    if auth.get("dmarc") is not None:
+        return False
+    return (auth.get("spf") == "pass" and bool(auth.get("spfDomain")) and "spf_domain_unaligned" not in flags) or (
+        auth.get("dkim") == "pass" and bool(auth.get("dkimDomain")) and "dkim_domain_unaligned" not in flags
+    )
 
 
 def parse_message_bytes(data: bytes, ctx: ParseContext, folder: str = "", depth: int = 0, extra: dict[str, Any] | None = None) -> dict[str, Any]:

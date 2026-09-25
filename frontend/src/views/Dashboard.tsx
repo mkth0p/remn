@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { estimateStorage, getDb, type Evidence, type Finding } from '../db/schema'
-import { useStore } from '../state/store'
+import { toast, useStore } from '../state/store'
 import { fmtBytes, fmtNum, fmtTs } from '../util/format'
 import { Badge, Kpi, SevBar } from '../components/ui'
 import { IconEvents, IconEvidence, IconFindings, IconMail } from '../components/Icons'
@@ -8,6 +8,9 @@ import { Dropzone } from '../components/Dropzone'
 import { requestIngest, refreshCounts } from '../data/ingest'
 import { getSource } from '../data/source'
 import { Jobs } from '../components/ConsolePanel'
+import { deployment } from '../data/deployment'
+import { openDemoCase } from '../data/demoCase'
+import { transportLabel } from '../ai/transport'
 
 interface Summary {
   counts?: { events?: number; mails?: number; iocs?: number }
@@ -26,7 +29,7 @@ export function Dashboard() {
   const jobs = useStore((s) => s.jobs)
   const [evidence, setEvidence] = useState<Evidence[]>([])
   const [findings, setFindings] = useState<Finding[]>([])
-  const [storage, setStorage] = useState<{ usage: number; quota: number } | null>(null)
+  const [storage, setStorage] = useState<{ usage: number; quota: number; persisted: boolean | null } | null>(null)
   const [summary, setSummary] = useState<Summary | null>(null)
   const ds = useMemo(() => (kase ? getSource(kase) : null), [kase])
   useEffect(() => {
@@ -50,6 +53,7 @@ export function Dashboard() {
   for (const f of findings) bySev[f.severity] = (bySev[f.severity] ?? 0) + 1
   const range = summary?.eventsTimeRange
   const isServer = kase.storage === 'server'
+  const dep = deployment(health)
   return (
     <div className="view">
       <div className="view-header">
@@ -99,11 +103,10 @@ export function Dashboard() {
             <div className="panel-h">add evidence</div>
             <div className="panel-b col">
               <Dropzone onFiles={(files) => requestIngest(files, kase)} />
+              {!counts.events && !counts.mails && <DemoCaseButton />}
               <Jobs />
               <div className="hint">
-                {isServer
-                  ? 'Files are hashed in the browser, uploaded in chunks to the local server and parsed into a DuckDB case store on this machine. Nothing leaves the host.'
-                  : "Files are hashed (SHA-256) in the browser, parsed by the local server and stored only in this browser's IndexedDB. The server keeps nothing."}
+                {isServer ? `Files are hashed in the browser, uploaded in chunks to the REMN server (${dep.host}) and parsed into a DuckDB case store there.` : `${dep.parsing} ${dep.storage}`}
               </div>
             </div>
           </div>
@@ -145,18 +148,34 @@ export function Dashboard() {
               </div>
             )}
             {isServer && <div className="small muted">DuckDB file on this machine · {kase.serverKey?.slice(0, 8)}…</div>}
+            {!isServer && storage && storage.persisted !== null && (
+              <div className="small muted" title="a browser short of space may clear a site's storage unless the site is allowed to keep it">
+                {storage.persisted ? 'kept by the browser until you delete it' : 'not persistent: the browser may clear it when short of space; export a case bundle to keep a copy'}
+              </div>
+            )}
           </div>
           <div className="card">
             <div className="stat">
               <span className="label">local AI</span>
               <span className="value" style={{ fontSize: 16 }}>
-                {aiStatus.reachable ? aiCfg.model || health?.ollama.defaultModel || 'ready' : aiStatus.reachable === null ? 'checking…' : 'Ollama unreachable'}
+                {aiStatus.reachable
+                  ? aiCfg.model || health?.ollama.defaultModel || 'ready'
+                  : aiStatus.reachable === null
+                    ? dep.tier === 'this-machine'
+                      ? 'checking…'
+                      : 'not checked'
+                    : 'Ollama unreachable'}
               </span>
             </div>
             <div className="small muted">
-              {aiCfg.transport === 'browser' ? `browser-direct · ${aiCfg.ollamaUrl}` : 'via REMN server'}
+              {transportLabel(aiCfg).where}
               {aiStatus.reachable ? ` · ${aiStatus.models ?? 0} model(s)` : aiStatus.error ? ` · ${aiStatus.error.slice(0, 120)}` : ''}
             </div>
+            {aiStatus.reachable === null && dep.tier !== 'this-machine' && (
+              <button className="btn xs" onClick={() => setView('ai')}>
+                open the AI analyst to connect your local model
+              </button>
+            )}
           </div>
           <div className="card">
             <div className="stat">
@@ -174,6 +193,32 @@ export function Dashboard() {
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+/** A first look without evidence of one's own: the synthetic lab, already read, restored in this browser. */
+function DemoCaseButton() {
+  const [busy, setBusy] = useState<string | null>(null)
+  const open = () => {
+    setBusy('Opening…')
+    openDemoCase(setBusy)
+      .then((c) => {
+        const s = useStore.getState()
+        s.setCurrentCase(c)
+        s.bumpCases()
+        s.setView('stories')
+        toast('ok', `${c.name}: synthetic evidence, restored in this browser; nothing was uploaded`)
+      })
+      .catch((e: Error) => toast('err', e.message, 0))
+      .finally(() => setBusy(null))
+  }
+  return (
+    <div className="row small" style={{ gap: 8 }}>
+      <button className="btn sm" onClick={open} disabled={!!busy}>
+        open the demo case
+      </button>
+      <span className="muted">{busy ?? 'a synthetic phishing-to-compromise lab, already read; nothing is uploaded'}</span>
     </div>
   )
 }

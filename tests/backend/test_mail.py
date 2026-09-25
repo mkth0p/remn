@@ -268,25 +268,68 @@ def test_synthetic_headers_from_pst_not_penalised():
     assert "no_message_id" in set(control["flags"])
 
 
-def test_arc_pass_restores_trust_on_forwarded_mail():
-    """Mailing-list forwarding breaks SPF/DKIM; a valid ARC seal must keep the mail quiet."""
+def _forwarded_lure(extra: list[tuple[str, str]]) -> bytes:
+    return make_samples.mail(
+        '"IT Department" <it@interne.fr>',
+        "liste-tech@interne.fr",
+        "Action required: password expiry",
+        "Your password expires soon. Sign in and update it: https://intranet.interne.fr/reset",
+        extra_headers=[
+            ("Received", "from lists.partner.org (lists.partner.org [203.0.113.44]) by mx.interne.fr with ESMTP id 5; Tue, 01 Sep 2026 09:05:00 +0000"),
+            *extra,
+        ],
+        date="Tue, 01 Sep 2026 09:02:10 +0000",
+    )
+
+
+def test_a_trusted_sealers_arc_pass_restores_trust_on_forwarded_mail():
+    """Mailing-list forwarding breaks SPF/DKIM. The receiver verified the list's ARC seal
+    (arc=pass), and the analyst trusts that list as a sealer: the mail stays quiet."""
+    from dataclasses import replace
+
+    msg = _forwarded_lure(
+        [
+            ("Authentication-Results", "mx.interne.fr; spf=fail smtp.mailfrom=lists.partner.org; dkim=fail; dmarc=fail header.from=interne.fr; arc=pass"),
+            ("ARC-Seal", "i=1; a=rsa-sha256; t=1788253500; cv=none; d=lists.partner.org; s=arc; b=AAAA"),
+        ]
+    )
+    row = parse_message_bytes(msg, replace(CTX, trusted_arc_sealers=["lists.partner.org"]))
+    f = set(row["flags"])
+    assert "arc_trusted_sealer" in f and "credential_phishing_pattern" not in f and "internal_spoof" not in f
+    assert row["risk"] <= 35, (row["risk"], sorted(f))
+    # the same seal, from a sealer nobody said to trust, forgives nothing: anyone can seal their own chain
+    untrusted = set(parse_message_bytes(msg, CTX)["flags"])
+    assert "internal_spoof" in untrusted and "arc_trusted_sealer" not in untrusted
+
+
+def test_claims_the_sender_can_write_do_not_turn_a_spoof_into_a_pass():
+    """The receiver said spf=fail, dmarc=fail for a mail claiming an internal domain. None of the
+    sender-writable headers below may undo that: a comment in the receiver's own header, a lower
+    Authentication-Results, an ARC-Authentication-Results, an Exchange AuthAs header."""
+    verdict = ("Authentication-Results", "mx.interne.fr; spf=fail smtp.mailfrom=evil.example; dmarc=fail (p=REJECT) header.from=interne.fr")
+    variants = {
+        "comment": [("Authentication-Results", verdict[1] + "; arc=pass (i=1 spf=pass dkim=pass dmarc=pass)")],
+        "lower AR": [verdict, ("Authentication-Results", "attacker.example; spf=pass; dkim=pass; dmarc=pass; arc=pass")],
+        "ARC-AR": [verdict, ("ARC-Authentication-Results", "i=1; attacker.example; spf=pass; dmarc=pass; arc=pass")],
+        "AuthAs": [verdict, ("X-MS-Exchange-Organization-AuthAs", "Internal")],
+    }
+    for name, extra in variants.items():
+        row = parse_message_bytes(_forwarded_lure(extra), CTX)
+        assert "internal_spoof" in row["flags"], (name, row["risk"], row["flags"])
+        assert row["auth"]["dmarc"] == "fail", name
+
+
+def test_a_pass_for_another_domain_does_not_authenticate_an_internal_from():
+    """A CEO-fraud mail claiming the internal domain, whose only pass is SPF for the attacker's
+    own envelope domain, used to score lower than the same mail with no result at all."""
     row = parse_message_bytes(
-        make_samples.mail(
-            '"IT Department" <it@interne.fr>',
-            "liste-tech@interne.fr",
-            "Action required: password expiry",
-            "Your password expires soon. Sign in and update it: https://intranet.interne.fr/reset",
-            extra_headers=[
-                ("Received", "from lists.partner.org (lists.partner.org [203.0.113.44]) by mx.interne.fr with ESMTP id 5; Tue, 01 Sep 2026 09:05:00 +0000"),
-                ("Authentication-Results", "mx.interne.fr; spf=fail smtp.mailfrom=lists.partner.org; dkim=fail; dmarc=fail header.from=interne.fr; arc=pass"),
-            ],
-            date="Tue, 01 Sep 2026 09:02:10 +0000",
-        ),
+        _forwarded_lure([("Authentication-Results", "mx.interne.fr; spf=pass smtp.mailfrom=evil.example")]),
         CTX,
     )
+    from services.analysis.mail_calibration import aligned_auth
+
     f = set(row["flags"])
-    assert "credential_phishing_pattern" not in f and "internal_spoof" not in f
-    assert row["risk"] <= 35, (row["risk"], sorted(f))
+    assert "internal_spoof" in f and not aligned_auth(row), (row["risk"], sorted(f))
 
 
 def test_credential_lure_from_suspicious_sender_still_high():
@@ -583,3 +626,36 @@ def test_pst_orphan_and_deleted_items_are_tagged():
     # localised deleted-folder names
     assert pst._DELETED_FOLDER_RE.search("Top of Outlook data file/Éléments supprimés")
     assert pst._DELETED_FOLDER_RE.search("Recoverable Items/Purges") and not pst._DELETED_FOLDER_RE.search("Inbox/Projects")
+
+
+def test_raw_8bit_header_bytes_do_not_end_the_mailbox():
+    """An mbox whose second message has a Latin-1 byte in its Subject: all three messages arrive,
+    and the byte is read as the character it stands for."""
+    import json
+
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from django.test import Client
+
+    def msg(subject: bytes, i: int) -> bytes:
+        return (
+            b"From a@example.com Mon Jan  1 00:00:00 2024\nFrom: a@example.com\nTo: b@example.org\nSubject: "
+            + subject
+            + b"\nMessage-ID: <"
+            + str(i).encode()
+            + b'@x>\nDate: Mon, 1 Jan 2024 00:00:00 +0000\nContent-Disposition: attachment; filename="r\xe9sum\xe9.pdf"\n\nbody\n\n'
+        )
+
+    mbox = msg(b"first", 1) + msg(b"caf\xe9 invoice \xff", 2) + msg(b"third", 3)
+    resp = Client().post("/api/ingest/mail", {"file": SimpleUploadedFile("box.mbox", mbox)}, HTTP_X_FORENSIC_CLIENT="1")
+    lines = [json.loads(line) for line in b"".join(resp.streaming_content).splitlines() if line.strip()]
+    subjects = [line["subject"] for line in lines if line["type"] == "mail"]
+    assert subjects == ["first", "café invoice ÿ", "third"]
+    assert lines[-1]["type"] == "done" and not any(line["type"] == "error" for line in lines)
+
+
+def test_an_undecoded_surrogate_becomes_a_replacement_not_a_broken_stream():
+    from services.common import fix_surrogates, ndjson_line
+
+    assert ndjson_line({"s": "a\udce9b"}) == b'{"s":"a?b"}\n'
+    assert fix_surrogates("caf\udcc3\udca9") == "café"  # valid UTF-8 bytes
+    assert fix_surrogates("caf\udce9") == "café"  # Windows-1252

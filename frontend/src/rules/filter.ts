@@ -185,28 +185,35 @@ function ipToInt(ip: string): number | null {
   if (parts.some((p) => p > 255)) return null
   return ((parts[0] << 24) >>> 0) + (parts[1] << 16) + (parts[2] << 8) + parts[3]
 }
+/** An IPv6 address as a 128-bit number (zone id dropped, '::' expanded), or null. */
+function ipv6ToBig(a: string): bigint | null {
+  const s = a.replace(/%.*$/, '')
+  if (!/^[0-9a-f:]+$/.test(s) || !s.includes(':') || s.split('::').length > 2) return null
+  const [h, t] = s.includes('::') ? s.split('::') : [s, '']
+  const head = h ? h.split(':') : []
+  const tail = t ? t.split(':') : []
+  const fill = 8 - head.length - tail.length
+  if (fill < 0 || (!s.includes('::') && fill !== 0) || [...head, ...tail].some((g) => g.length > 4)) return null
+  const groups = [...head, ...Array(fill).fill('0'), ...tail]
+  return groups.reduce((acc, g) => (acc << 16n) | BigInt(parseInt(g || '0', 16)), 0n)
+}
+
 export function ipInCidr(ip: string, cidr: string): boolean {
   const c = cidr.trim().toLowerCase()
   const v = ip.trim().toLowerCase()
   if (!c) return false
-  if (!c.includes('/')) return v === c
   const [net, bitsStr] = c.split('/')
-  const bits = Number(bitsStr)
   if (net.includes(':')) {
-    // IPv6: prefix comparison on the expanded hex form (good enough for fe80::/10, fc00::/7)
-    const exp = (a: string) => {
-      const parts = a.split('::')
-      const head = parts[0] ? parts[0].split(':') : []
-      const tail = parts[1] ? parts[1].split(':') : []
-      const fill = 8 - head.length - tail.length
-      return [...head, ...Array(Math.max(fill, 0)).fill('0'), ...tail].map((h) => h.padStart(4, '0')).join('')
-    }
-    if (!v.includes(':')) return false
-    const a = parseInt(exp(v).slice(0, 4), 16)
-    const b = parseInt(exp(net).slice(0, 4), 16)
-    const mask = bits >= 16 ? 0xffff : (0xffff << (16 - bits)) & 0xffff
+    // the whole prefix, not only its first 16 bits (2001:db8::/32, ::1/128)
+    const a = ipv6ToBig(v)
+    const b = ipv6ToBig(net)
+    const bits = bitsStr === undefined ? 128 : Number(bitsStr)
+    if (a === null || b === null || !Number.isInteger(bits) || bits < 0 || bits > 128) return false
+    const mask = bits === 0 ? 0n : ((1n << BigInt(bits)) - 1n) << BigInt(128 - bits)
     return (a & mask) === (b & mask)
   }
+  if (!c.includes('/')) return v === c
+  const bits = Number(bitsStr)
   const ipN = ipToInt(v)
   const netN = ipToInt(net)
   if (ipN === null || netN === null || !Number.isFinite(bits)) return false
@@ -297,16 +304,26 @@ export function matchCondition(row: Row, c: Condition, settings?: SettingsLike):
     case 'nin':
       if (actual == null) return true
       return !actStr.some((a) => wantStr.includes(a)) && !actArr.some((a) => typeof a === 'number' && wantArr.includes(a))
+    // On a list (flags, recipients) the SQL engine matches whole elements for contains_any,
+    // contains_all, not_contains and a contains of several values; only a contains of one value also
+    // matches inside an element. The browser engine, the only one a browser-only server has, now does
+    // the same: by substring, att_html_smuggling_possible matched att_html_smuggling and raised a
+    // critical finding on a review-level flag.
     case 'contains':
     case 'contains_any':
       if (actual == null) return false
-      if (Array.isArray(actual)) return actStr.some((a) => wantStr.some((w) => a === w || a.includes(w)))
+      if (Array.isArray(actual)) {
+        if (op === 'contains' && wantStr.length === 1) return actStr.some((a) => a === wantStr[0] || a.includes(wantStr[0]))
+        return actStr.some((a) => wantStr.includes(a))
+      }
       return wantStr.some((w) => actStr.some((a) => a.includes(w)))
     case 'contains_all':
       if (actual == null) return false
-      return wantStr.every((w) => actStr.some((a) => a === w || a.includes(w)))
+      if (Array.isArray(actual)) return wantStr.every((w) => actStr.includes(w))
+      return wantStr.every((w) => actStr.some((a) => a.includes(w)))
     case 'not_contains':
       if (actual == null) return true
+      if (Array.isArray(actual)) return !actStr.some((a) => wantStr.includes(a))
       return !wantStr.some((w) => actStr.some((a) => a.includes(w)))
     case 'startswith':
       return actStr.some((a) => wantStr.some((w) => a.startsWith(w)))
@@ -396,7 +413,26 @@ const TEXT_FIELDS_EVENTS = [
   'targetFilename',
   'targetObject',
 ]
-const TEXT_FIELDS_MAILS = ['subject', 'fromName', 'fromAddr', 'fromDomain', 'originIp', 'textPreview', 'messageId', 'folder', 'flags', 'returnPath']
+// recipients, links and attachments too: the pivot counts a mail by its attachment hash or a URL,
+// and "open in Mails" must then show it
+const TEXT_FIELDS_MAILS = [
+  'subject',
+  'fromName',
+  'fromAddr',
+  'fromDomain',
+  'originIp',
+  'textPreview',
+  'messageId',
+  'folder',
+  'flags',
+  'returnPath',
+  'to',
+  'cc',
+  'bcc',
+  'replyTo',
+  'urls',
+  'attachments',
+]
 
 export function toMs(v: string | number | null | undefined): number | null {
   if (v == null || v === '') return null
@@ -479,7 +515,18 @@ export function compileFilter(f: Filter | null | undefined, opts: { tsField?: st
       for (const fld of textFields) {
         const v = row[fld]
         if (v == null) continue
-        const s = Array.isArray(v) ? v.join(' ') : String(v)
+        // a list of addresses, links or attachments holds objects: search the values inside them
+        const s = Array.isArray(v)
+          ? v
+              .map((x) =>
+                x && typeof x === 'object'
+                  ? Object.values(x)
+                      .filter((y) => typeof y === 'string')
+                      .join(' ')
+                  : String(x),
+              )
+              .join(' ')
+          : String(v)
         if (s.toLowerCase().includes(text)) {
           hit = true
           break

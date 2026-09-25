@@ -10,6 +10,7 @@ import { RuleImport } from '../components/RuleImport'
 import { IconAi, IconEdit, IconPlus, IconTrash } from '../components/Icons'
 import type { RuleDiag } from '../rules/engine'
 import { fmtNum, fmtTs } from '../util/format'
+import { measuredOn, readMeasure, type MeasureReading, type MeasureVerdict } from '../data/ruleMeasures'
 import { safeHref } from '../util/safe'
 
 interface LastRun {
@@ -26,6 +27,26 @@ const DIAG_LABEL: Record<RuleDiag['reason'], { label: string; sev: string }> = {
   outside_time_window: { label: 'time filter', sev: 'info' },
   below_threshold: { label: 'below threshold', sev: 'info' },
   not_applicable: { label: 'not applicable', sev: 'info' },
+}
+
+const MEASURE_SEV: Record<MeasureVerdict, string> = { detects: 'ok', misses: 'medium', lead: 'info', changed: 'info', settings: 'info', custom: 'accent', unmeasured: 'info' }
+
+/** The measure of a rule, as a badge whose title says it in words. */
+function MeasureBadge({ reading }: { reading: MeasureReading }) {
+  if (!reading.label) return <span className="muted small">—</span>
+  const title = [reading.attacks, reading.clean].filter(Boolean).join(' ')
+  return (
+    <span className="row" style={{ gap: 4, flexWrap: 'wrap' }} data-measure={reading.verdict}>
+      <Badge sev={MEASURE_SEV[reading.verdict]} title={title}>
+        {reading.label}
+      </Badge>
+      {reading.noisy && (
+        <Badge sev="low" title={reading.clean}>
+          fires on clean machines
+        </Badge>
+      )}
+    </span>
+  )
 }
 
 /** Rows rendered at once; the search box narrows the rest (the packs bring ~3,000 rules). */
@@ -107,6 +128,7 @@ export function RulesView() {
   const [q, setQ] = useState('')
   const [source, setSource] = useState('')
   const [packFilter, setPackFilter] = useState('')
+  const [measureFilter, setMeasureFilter] = useState('')
   const [packsOn, setPacksOn] = useState<Set<string>>(new Set())
   const [edit, setEdit] = useState<{ id?: number; yaml: string; error?: string } | null>(null)
   const [aiAsk, setAiAsk] = useState('')
@@ -132,10 +154,18 @@ export function RulesView() {
   }, [kase, rulesVersion, meta])
   if (!kase) return null
   const needle = q.toLowerCase()
+  const readings = new Map(rules.map((r) => [r, readMeasure(r.measured, r.origin)]))
+  const measureMatch = (r: LoadedRule) => {
+    const m = readings.get(r)!
+    if (measureFilter === 'noisy') return m.noisy
+    if (measureFilter === 'lead') return m.verdict === 'lead' || m.verdict === 'misses'
+    return m.verdict === measureFilter
+  }
   const shown = rules.filter(
     (r) =>
       (!source || r.rule.source === source) &&
       (!packFilter || (packFilter === 'core' ? r.origin !== 'pack' : r.pack === packFilter)) &&
+      (!measureFilter || measureMatch(r)) &&
       (!needle || `${r.rule.id} ${r.rule.title} ${(r.rule.tags ?? []).join(' ')} ${(r.rule.attack ?? []).join(' ')}`.toLowerCase().includes(needle)),
   )
   const toggle = async (r: LoadedRule, on: boolean) => {
@@ -259,6 +289,18 @@ export function RulesView() {
               </option>
             ))}
         </select>
+        <select
+          className="select"
+          value={measureFilter}
+          onChange={(e) => setMeasureFilter(e.target.value)}
+          title={measuredOn(meta?.measures) || 'how each rule fared on recorded attacks and on clean machines'}
+        >
+          <option value="">any measure</option>
+          <option value="detects">detect recorded attacks</option>
+          <option value="lead">leads (never seen to detect)</option>
+          <option value="misses">miss their own test sample</option>
+          <option value="noisy">fire on clean machines</option>
+        </select>
         <span className="small muted">{fmtNum(shown.length)} shown</span>
         <span className="spacer" />
         <input
@@ -284,6 +326,7 @@ export function RulesView() {
               <th>severity</th>
               <th>type</th>
               <th>last run</th>
+              <th title={measuredOn(meta?.measures) || undefined}>measured</th>
               <th>att&amp;ck</th>
               <th>origin</th>
               <th></th>
@@ -337,6 +380,9 @@ export function RulesView() {
                     if (n === 0) return <span className="muted small">0</span>
                     return <span className="muted small">not run</span>
                   })()}
+                </td>
+                <td>
+                  <MeasureBadge reading={readings.get(r)!} />
                 </td>
                 <td className="small">{(r.rule.attack ?? []).join(' ')}</td>
                 <td>

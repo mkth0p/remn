@@ -38,3 +38,7 @@ frontend/public/_samples/
 samples/public/
 
 backend/data/claude-cwd/
+# Browser regression artifacts and isolated test evidence
+frontend/test-results/
+frontend/playwright-report/
+frontend/.e2e-tmp/

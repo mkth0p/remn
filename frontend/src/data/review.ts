@@ -1,6 +1,6 @@
 import { getDb, type Finding, type Severity } from '../db/schema'
 import type { Chain, ChainStep } from './chains'
-import { chainMembership, effectiveSeverity, ORDER, type Incident } from '../rules/incidents'
+import { buildIncidents, chainMembership, effectiveSeverity, ORDER, type Incident } from '../rules/incidents'
 
 /**
  * Review decisions and report selection.
@@ -120,6 +120,27 @@ export function selectForReport(findings: Finding[], chains: Chain[], reviews: R
     }),
     chains: selected,
   }
+}
+
+/**
+ * Confirmed chains and incidents of the whole case that the printed selection leaves out. The
+ * report's verdict is about the case, so they count there; the Report and Review pages both use
+ * this, so the cover reads the same on both.
+ */
+export function unprintedConfirmed(
+  findings: Finding[],
+  chains: Chain[],
+  reviews: Record<string, ChainReview>,
+  selection: { findings: Finding[]; chains: Chain[] },
+): { severity: Severity; findings: Finding[] }[] {
+  const printed = new Set(selection.findings.map((f) => f.id))
+  return buildIncidents(findings, { chains, severityOf: (c) => chainSeverity(c, reviews[c.id]) })
+    .filter((i) =>
+      i.kind === 'chain' && i.chain
+        ? reviews[i.chain.id]?.verdict === 'confirmed' && !selection.chains.some((c) => c.id === i.chain!.id)
+        : i.status === 'escalated' && !i.findings.some((f) => printed.has(f.id)),
+    )
+    .map((i) => ({ severity: i.kind === 'chain' && i.chain ? chainSeverity(i.chain, reviews[i.chain.id]) : i.severity, findings: i.findings }))
 }
 
 export interface ReviewItem {
