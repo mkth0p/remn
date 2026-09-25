@@ -419,7 +419,8 @@ export function accountName(v: unknown): string | null {
   return s
 }
 
-const PRIVATE = [/^10\./, /^192\.168\./, /^172\.(1[6-9]|2\d|3[01])\./, /^127\./, /^169\.254\./, /^::1$/, /^f[cd][0-9a-f]{2}:/i, /^fe80:/i]
+// with carrier-grade NAT's shared space, 100.64.0.0/10 (a provider's, Tailscale's)
+const PRIVATE = [/^10\./, /^192\.168\./, /^172\.(1[6-9]|2\d|3[01])\./, /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./, /^127\./, /^169\.254\./, /^::1$/, /^f[cd][0-9a-f]{2}:/i, /^fe80:/i]
 const DOC = [/^192\.0\.2\./, /^198\.51\.100\./, /^203\.0\.113\./, /^2001:db8:/i]
 /** a private address (the documentation ranges stand for internet addresses in the samples and labs) */
 export function isInternalIp(ip: string): boolean {

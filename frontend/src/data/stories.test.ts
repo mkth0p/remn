@@ -223,6 +223,8 @@ describe('values', () => {
     expect(accountName('daniel.roy@northstar.example')).toBe('daniel.roy')
     expect([accountName('WS-001$'), accountName('NT AUTHORITY\\SYSTEM'), accountName('S-1-5-18'), accountName('-')]).toEqual([null, null, null, null])
     expect([isInternalIp('10.0.0.5'), isInternalIp('203.0.113.69'), isInternalIp('198.51.100.10'), isInternalIp('8.8.8.8')]).toEqual([true, false, false, false])
+    // carrier-grade NAT's shared space is not the internet; either side of it is
+    expect([isInternalIp('100.64.0.1'), isInternalIp('100.127.255.254'), isInternalIp('100.63.0.1'), isInternalIp('100.128.0.1')]).toEqual([true, true, false, false])
     // a server case whose accounts were cut says so
     expect(storyCoverageWarnings({ truncated: ['accounts'] })).toEqual([expect.stringContaining('more than 200,000 ways')])
     expect(windows([T0, T0 + DAY, T0 + 10 * DAY])).toEqual([

@@ -161,7 +161,9 @@ Defense Evasion into Stealth and Defense Impairment, so a rule tagged `defense-e
 through its technique (T1685.005, the clearing of an event log, is defense impairment). A
 successful logon is initial access or lateral movement whatever the brute force before it
 reads as; an RDP logon from outside is initial access (external remote services), and the
-same outside source reaching another host once it is in is lateral movement.
+same outside source reaching another host once it is in is lateral movement. Private
+addresses, and carrier-grade NAT's shared space (100.64.0.0/10, a provider's or Tailscale's),
+are inside.
 
 Records that repeat without a finding (logons, sign-ins, mailbox reads, share access) fold
 into one step per run of ten minutes; so do records with the same findings and tie, a spray's

@@ -5,6 +5,9 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- Carrier-grade NAT's shared addresses (100.64.0.0/10, a provider's or Tailscale's) are inside
+  the network for stories: an RDP logon from one is lateral movement, not initial access from
+  the internet, and a finding naming one does not make it the attacker's address.
 - A record names the account its System header's SID is (the user PowerShell's script blocks
   and many operational logs name only there) when it is a user's SID, joined to the account by
   a logon of any day, so the flagged script blocks on a victim's host are steps of the victim's

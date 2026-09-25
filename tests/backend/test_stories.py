@@ -271,6 +271,12 @@ def test_phases_from_tags_techniques_and_records():
     assert MEDIUM != STRONG
 
 
+def test_carrier_grade_nat_is_not_the_internet():
+    """100.64.0.0/10 is a provider's (or Tailscale's) shared space: an RDP logon from it is no way in from outside."""
+    assert record_phase({**SEC, "eventId": 4624, "logonType": 10, "ipAddress": "100.100.5.5"}, "events", set())[0] == "lateral-movement"
+    assert record_phase({**SEC, "eventId": 4624, "logonType": 10, "ipAddress": "100.128.0.1"}, "events", set())[0] == "initial-access"
+
+
 # --- the API ------------------------------------------------------------------------------------------
 
 import json  # noqa: E402
