@@ -1,0 +1,318 @@
+# Detections on the channels outside Security and Sysmon: RDP and RdpCoreTS, RPC ETW traces, MSSQL, DCOM, WER, Program Compatibility, Winsock and classic PowerShell.
+id: win-rdp-loopback-tunnel
+title: RDP logon arriving from the loopback address (tunnelled RDP)
+description: >-
+  A Remote Desktop authentication (RemoteConnectionManager 1149) or session logon / reconnection
+  (LocalSessionManager 21/25) whose source address is 127.0.0.0/8 or ::1. The Remote Desktop client
+  refuses to connect to the machine it runs on, so an RDP session from loopback means the connection
+  reached the host through a local port forward: an SSH -L/-R tunnel, plink, ngrok, chisel or a
+  similar reverse proxy, which is how attackers expose RDP from behind a firewall. Security 4624
+  type 10 from loopback is covered by the Sigma pack; this rule reads the TerminalServices logs,
+  which survive when Security is cleared or not collected. Benign causes: an administrator's own
+  SSH tunnel to a jump host, or a remote-access gateway or agent on the same server that relays
+  the session through a local listener (an RD Gateway on the session host itself, Guacamole,
+  Teleport and the like), all of which should be known and documented, and then repeat for every
+  session on that host.
+severity: high
+source: events
+attack: [T1572, T1021.001]
+tags: [rdp, lateral-movement, tunnelling]
+entities: [computer, targetUser, ipAddress]
+where:
+  any_of:
+    - { eventId: 1149, provider|contains: TerminalServices-RemoteConnectionManager }
+    - { eventId|in: [21, 25], provider|contains: TerminalServices-LocalSessionManager }
+  any_of_2:
+    - { ipAddress|startswith: "127." }
+    - { ipAddress|in: ["::1", "0:0:0:0:0:0:0:1"] }
+---
+id: win-rpc-efsr-coercion
+title: MS-EFSR (EFS RPC) call over the network - PetitPotam-style coercion
+description: >-
+  A Microsoft-Windows-RPC trace (client event 5 or server event 6) shows a call on the Encrypting
+  File System Remote Protocol interface (c681d488-... over \pipe\lsarpc, \pipe\lsass, \pipe\samr or
+  \pipe\netlogon, or df1941c5-... over \pipe\efsrpc) carried over a named pipe or TCP. EfsRpcOpenFileRaw
+  and the other EFSR methods make the target machine authenticate to a path the caller chooses, which
+  is how PetitPotam coerces a domain controller into NTLM relay to AD CS or LDAP. EFS calls over
+  local RPC (LRPC) are not matched. Calls on one host less than five minutes apart make one
+  finding, so the client and server events of one call are reported together. RPC ETW traces are
+  only collected on purpose (logman, SilkETW, RPC firewall tooling). Benign causes: legitimate
+  remote EFS (encrypting, decrypting or raw-copying EFS-encrypted files on a file share, for
+  example robocopy /EFSRAW), which is rare and comes from known users and file servers. A local
+  client coercing its own machine over a named pipe (EfsPotato-style privilege escalation) is
+  matched too and is not benign.
+severity: high
+source: events
+attack: [T1187]
+tags: [credential-access, coercion, rpc]
+entities: [computer, data.NetworkAddress, data.Endpoint, data.ProcNum]
+where:
+  provider: Microsoft-Windows-RPC
+  eventId|in: [5, 6]
+  data.InterfaceUuid|in: [C681D488-D850-11D0-8C52-00C04FD90F7E, DF1941C5-FE89-4E79-BF10-463657ACF44D]
+  data.Protocol|in: [1, 2]
+group_by: [computer]
+window: 5m
+threshold: ">= 1"
+---
+id: win-rpc-zerologon-passwordset
+title: Unauthenticated Netlogon password set over RPC (Zerologon)
+description: >-
+  A Microsoft-Windows-RPC trace shows NetrServerPasswordSet2 (ProcNum 30) or NetrServerPasswordSet
+  (ProcNum 6) on the Netlogon interface (MS-NRPC 12345678-1234-abcd-ef00-01234567cffb) with RPC
+  authentication level 1, i.e. outside a signed and sealed secure channel. Windows machines change
+  their account password inside the secure channel, so an unauthenticated password set is the last
+  step of CVE-2020-1472 (Zerologon): after a run of NetrServerReqChallenge / NetrServerAuthenticate
+  calls with a zero client credential, the attacker resets the domain controller's machine password
+  to empty. Only calls over TCP or a named pipe are matched, since the exploit always comes over
+  the network. The only benign cause is a legacy non-Windows domain member (old Samba, NAS
+  firmware) that does not use secure RPC and is allowed by the "vulnerable Netlogon secure
+  channel" policy; it changes its password on a schedule from a known address.
+severity: critical
+source: events
+attack: [T1210]
+tags: [credential-access, exploit, netlogon, rpc]
+entities: [computer, processId, data.ProcNum, data.Endpoint]
+where:
+  provider: Microsoft-Windows-RPC
+  eventId|in: [5, 6]
+  data.InterfaceUuid: 12345678-1234-ABCD-EF00-01234567CFFB
+  data.ProcNum|in: [6, 30]
+  data.AuthenticationLevel: 1
+  data.Protocol|in: [1, 2]
+---
+id: win-lsass-silentprocessexit-dump
+title: LSASS reported as terminated by another process (SilentProcessExit dump)
+description: >-
+  Application event 3001 from Microsoft-Windows-ProcessExitMonitor says that lsass.exe was
+  terminated by another process (param2). This event only exists when SilentProcessExit monitoring
+  is configured for lsass.exe under Image File Execution Options, and tools such as
+  LsassSilentProcessExit and nanodump use exactly that: they set the ReportingMode / LocalDumpFolder
+  values and call RtlReportSilentProcessExit on lsass so that WerFault writes a full memory dump of
+  it without the tool ever reading lsass memory itself. The dump holds the credentials of every
+  logged-on user; param2 names the tool, and lsass keeps running afterwards. No legitimate software
+  is known to monitor lsass for silent exit. The only benign cause is a support engineer who set
+  up the monitoring on purpose to find out what kills lsass, in which case the machine really
+  restarted at that moment.
+severity: critical
+source: events
+attack: [T1003.001]
+tags: [credential-access, lsass, wer]
+entities: [computer, param1, param2]
+where:
+  eventId: 3001
+  provider|contains: ProcessExitMonitor
+  param1|endswith: \lsass.exe
+---
+id: win-mssql-login-spray
+title: MSSQL failed logons for many different logins in one minute
+description: >-
+  SQL Server failed logon events (18456) with a credential-guessing reason (wrong password, unknown
+  or disabled login, NT account name used with SQL authentication, SQL login tried on a server
+  that only accepts Windows authentication) for at least five distinct messages on one instance
+  within one minute. The message holds the login, the reason and the [CLIENT: address], so five
+  distinct messages means several logins tried from one client or from several: the login-list
+  spray of Metasploit mssql_login, Hydra or nmap ms-sql-brute (sa, root, admin and the built-in
+  ##MS_...## certificate logins). The finding lists the messages. Failures for infrastructure
+  reasons (database offline, token validation) are not counted, and one client retrying one login,
+  whether a stale application or a password brute force of a single login, repeats one message and
+  does not reach the threshold. Benign causes: the same stale login failing from five or more
+  application servers at once after a password rotation (one login, many clients in the listed
+  messages), or a vulnerability scanner run by the organisation.
+severity: high
+source: events
+attack: [T1110.001, T1110.003]
+tags: [credential-access, brute-force, mssql]
+entities: [computer, provider]
+where:
+  eventId: 18456
+  provider|contains: MSSQL
+  message|contains: ["Password did not match", "Could not find a login matching", "Attempting to use an NT account name with SQL Server Authentication", "An error occurred while evaluating the password", "Server is configured for Windows authentication only", "The account is disabled"]
+group_by: [computer, provider]
+window: 1m
+distinct: message
+threshold: ">= 5"
+---
+id: win-mssql-xpcmdshell-blocked
+title: MSSQL blocked a call to xp_cmdshell or OLE Automation (15281)
+description: >-
+  SQL Server logged event 15281: a query tried to run sys.xp_cmdshell or the OLE Automation
+  procedures (sp_OACreate and friends) while that component is disabled. Both run operating-system
+  commands from SQL, so a blocked call is typically SQL injection or an attacker with a SQL login
+  probing for command execution before enabling the component with sp_configure. Benign causes: a
+  legacy maintenance job or third-party backup / monitoring agent that still calls xp_cmdshell on a
+  server where it has been hardened off; those repeat on a schedule from the same application.
+severity: high
+source: events
+attack: [T1505.001, T1059.003]
+tags: [execution, mssql]
+entities: [computer, provider]
+where:
+  eventId: 15281
+  provider|contains: MSSQL
+  message|contains: [xp_cmdshell, sp_OACreate, sp_OAMethod, Ole Automation Procedures]
+---
+id: win-pca-cpl-user-path
+title: Control Panel applet (.cpl) run from a user-writable folder
+description: >-
+  The Program Compatibility Assistant (Application-Experience, event 17) recorded the
+  ControlPanelApplet resolver, or a .cpl path, for a file under a user profile, Temp, ProgramData
+  or another user-writable folder. A .cpl is a DLL that control.exe / rundll32 loads and runs on
+  double-click, so phishing campaigns ship them as "invoices" in archives and downloads. Genuine
+  applets live in System32, SysWOW64 or Program Files and are not matched. Benign causes are rare:
+  a vendor tool unpacked into a user folder that ships its own applet.
+severity: high
+source: events
+attack: [T1218.002, T1204.002]
+tags: [execution, cpl, phishing]
+entities: [computer, data.ExePath]
+where:
+  eventId: 17
+  provider|contains: Program-Compatibility-Assistant
+  any_of:
+    - { data.ResolverName: ControlPanelApplet }
+    - { data.ExePath|endswith: .cpl }
+  data.ExePath|contains: ["\\users\\", "\\temp\\", "\\programdata\\", "\\perflogs\\", "\\windows\\tasks\\", "$recycle.bin"]
+---
+id: win-dcom-lateral-denied
+title: Remote DCOM launch of a lateral-movement COM object denied (10016)
+description: >-
+  DistributedCOM 10016 with the Remote flag: a user on another host (param9 is the address,
+  param7 the user) tried to launch or activate MMC20.Application, ShellWindows, ShellBrowserWindow,
+  Internet Explorer or an Office application object on this machine and was refused. Remote
+  activation of these objects is the DCOM lateral movement of Invoke-DCOM, impacket dcomexec and
+  Cobalt Strike, which then call ExecuteShellCommand, ShellExecute, DDEInitiate or RegisterXLL to
+  run a command. A denial means the attempt failed here, but it shows who is trying from where.
+  Benign causes: legacy server-side Office automation from an application server, which targets the
+  Office objects only and repeats from the same source. The remote flag is read from param2
+  ("Remote") or, on localised systems, from a numeric address in param9.
+severity: high
+source: events
+attack: [T1021.003]
+tags: [lateral-movement, dcom]
+entities: [computer, data.param7, data.param9, data.param4]
+where:
+  eventId: 10016
+  provider|contains: DistributedCOM
+  any_of_2:
+    - data.param2: Remote
+    - data.param9|re: "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$"
+  any_of:
+    - data.param4|contains: [49B2791A-B1AE-4C90-9B8E-E860BA07F889, 7E0423CD-1119-0928-900C-E6D4A52A0715, 9BA05972-F6A8-11CF-A442-00A0C90A8F39, C08AFD90-F2A1-11D1-8455-00A0C91F3880, 0002DF01-0000-0000-C000-000000000046, 00024500-0000-0000-C000-000000000046, 00020812-0000-0000-C000-000000000046, 000209FF-0000-0000-C000-000000000046, 0006F03A-0000-0000-C000-000000000046]
+    - data.param5|contains: [49B2791A-B1AE-4C90-9B8E-E860BA07F889, 7E0423CD-1119-0928-900C-E6D4A52A0715, 9BA05972-F6A8-11CF-A442-00A0C90A8F39, C08AFD90-F2A1-11D1-8455-00A0C91F3880, 0002DF01-0000-0000-C000-000000000046, 00024500-0000-0000-C000-000000000046, 00020812-0000-0000-C000-000000000046, 000209FF-0000-0000-C000-000000000046, 0006F03A-0000-0000-C000-000000000046]
+---
+id: win-rdp-headless-client
+title: RDP session with a tiny desktop (headless RDP client such as SharpRDP)
+description: >-
+  RdpCoreTS event 168 reports the client's monitor layout, and here it is at most 400x400 pixels.
+  Interactive clients (mstsc, the Remote Desktop apps, thin clients, phones) report a real screen;
+  a desktop this small comes from a client that is not meant to be looked at, such as SharpRDP,
+  which opens an RDP session with a 200x200 desktop, types a command into the Run dialog and
+  disconnects - command execution over RDP without an interactive user. Such sessions on one host
+  less than an hour apart make one finding. Benign causes: RDP availability probes of monitoring
+  tools or scripted UI automation that set a minimal resolution; they come from known monitoring
+  hosts on a schedule.
+severity: medium
+source: events
+attack: [T1021.001]
+tags: [rdp, lateral-movement, execution]
+entities: [computer, data.MonitorWidth, data.MonitorHeight]
+where:
+  eventId: 168
+  provider|contains: RdpCoreTS
+  data.MonitorWidth|lte: 400
+  data.MonitorHeight|lte: 400
+group_by: [computer]
+window: 1h
+threshold: ">= 1"
+---
+id: win-rdp-bluekeep-ms-t120
+title: RDP client opened the internal MS_T120 channel (BlueKeep scan or exploit)
+description: >-
+  RdpCoreTS event 148 reports that a channel named MS_T120 was closed between server and client.
+  MS_T120 is the server's internal channel and no genuine client asks for it by name; requesting it
+  is the trigger of CVE-2019-0708 (BlueKeep), used by the rdpscan and Metasploit scanners to test for
+  the flaw and by the exploits themselves. On a patched host, or on Windows 8 / Server 2012 and
+  later, which the flaw does not affect, the event records a scan rather than a compromise, but it
+  still shows a machine in the network probing for a wormable RDP flaw. The RdpCoreTS
+  131 event a few seconds before it, with the same activity id, names the client address. Benign
+  causes: none known besides an authorised vulnerability scan for CVE-2019-0708.
+severity: high
+source: events
+attack: [T1210, T1595.002]
+tags: [rdp, exploit, bluekeep]
+entities: [computer, activityId]
+where:
+  eventId: 148
+  provider|contains: RdpCoreTS
+  data.ChannelName: ms_t120
+---
+id: win-ps800-download-cradle
+title: PowerShell download cradle in pipeline execution details (800)
+description: >-
+  Windows PowerShell event 800 (module logging, pipeline execution details) whose command line
+  creates a Net.WebClient and calls DownloadFile, DownloadString or DownloadData, including the
+  backtick-split form ("d`OWN`load`FIlE") that Emotet and other malspam droppers use to get past
+  keyword matching. 800 carries the whole pipeline and the parameters of each command, so it also
+  shows what was downloaded where and then run. This is the classic-log counterpart of the 4104
+  script block rule, for hosts that have module logging but not script block logging. Benign
+  causes: installer bootstrap and deployment scripts that fetch a file with WebClient (the
+  Chocolatey installer is excluded); check the host application and the URL, and whether the
+  downloaded file is run next (Invoke-Item / Start-Process in the following 800 events).
+severity: high
+source: events
+attack: [T1059.001, T1105, T1027.010]
+tags: [execution, powershell, download]
+entities: [computer]
+where:
+  eventId: 800
+  any_of:
+    - { channel: Windows PowerShell }
+    - { provider: PowerShell }
+  message|contains: webclient
+  message|re: "d`?o`?w`?n`?l`?o`?a`?d`?(f`?i`?l`?e|s`?t`?r`?i`?n`?g|d`?a`?t`?a)"
+  message|not_contains: [chocolatey.org/install.ps1]
+---
+id: win-shim-accessibility-binary
+title: Application compatibility shim applied to an accessibility or logon binary
+description: >-
+  Application-Experience/Program-Telemetry event 500 (or the related 501/502) says a compatibility
+  fix was applied when an accessibility or logon-screen program started (sticky keys, utilman,
+  osk, magnifier, narrator, display switch, AT broker, logonui, winlogon, lsass). Windows' own shim
+  database is not expected to fix these Microsoft binaries, so a fix here comes from a custom .sdb
+  installed with sdbinst: the shim persistence technique, where a fix such as CorrectFilePaths,
+  RedirectEXE or InjectDll makes the binary run the attacker's program, reachable from the logon
+  screen as SYSTEM. FixName and FixID on the row identify the fix. Starts of the same binary on one
+  host less than a day apart make one finding. Benign causes: none known for these binaries; check
+  for an accessibility vendor's custom shim before closing.
+severity: high
+source: events
+attack: [T1546.011, T1546.008]
+tags: [persistence, shim, accessibility]
+entities: [computer, data.ExePath, data.FixName]
+where:
+  eventId|in: [500, 501, 502]
+  channel|contains: Program-Telemetry
+  data.ExePath|endswith: ["\\sethc.exe", "\\utilman.exe", "\\osk.exe", "\\magnify.exe", "\\narrator.exe", "\\displayswitch.exe", "\\atbroker.exe", "\\logonui.exe", "\\winlogon.exe", "\\lsass.exe"]
+group_by: [computer, data.ExePath]
+window: 24h
+threshold: ">= 1"
+---
+id: win-winsock-lsp-installed
+title: Winsock Layered Service Provider installed (catalog change)
+description: >-
+  Winsock-WS2HELP event 1: a Layered Service Provider was added to the Winsock catalog. An LSP is a
+  DLL loaded into every process that uses sockets, so installing one gives persistence and a view
+  of all network traffic; malware (and adware) has used LSPs for both. The row names the LSP, the
+  catalog (32 or 64 bit) and the installer. Benign causes: proxy and VPN clients, parental-control
+  and older security products install LSPs with their MSI; confirm the product and the installer
+  path (an installer outside System32/SysWOW64 msiexec, or in a user folder, is the one to worry
+  about).
+severity: medium
+source: events
+attack: [T1546]
+tags: [persistence, winsock]
+entities: [computer, data.LSPName, data.Installer]
+where:
+  eventId: 1
+  provider|contains: Winsock-WS2HELP

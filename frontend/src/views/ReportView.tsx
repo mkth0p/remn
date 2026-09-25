@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { getSource } from '../data/source'
-import { loadChains, type Chain } from '../data/chains'
+import { chainCoverageWarnings, loadChains, type Chain } from '../data/chains'
 import { listNotes } from '../data/caseNotes'
-import { chainSeverity, effectiveSeverity, loadChainReviews, loadReportSettings, selectForReport, type ChainReview, type ReportSettings } from '../data/review'
+import { chainSeverity, effectiveSeverity, loadChainReviews, loadReportSettings, selectForReport, unprintedConfirmed, type ChainReview, type ReportSettings } from '../data/review'
 import { getDb, type CaseNote, type Evidence, type Finding, type Ioc } from '../db/schema'
 import { buildIncidents } from '../rules/incidents'
 import { toast, useStore } from '../state/store'
@@ -11,10 +11,20 @@ import { downloadBlob, exportCaseBundle, importCaseBundle } from '../util/export
 import { Badge, Spinner } from '../components/ui'
 import { Dropzone } from '../components/Dropzone'
 import { renderGraphPng } from '../components/ChainGraph'
-import { buildReportHtml, loadReportFont } from '../data/reportHtml'
+import { buildReportHtml, loadReportFont, type AiUsage } from '../data/reportHtml'
+import { summariseLedger } from '../ai/ledger'
 import { draftExecutiveSummary } from '../data/reportSummary'
 import { buildCampaignGraph } from '../data/chainGraph'
 import { IconAi, IconCheck, IconDownload } from '../components/Icons'
+import { reportRelationships, type RelationshipReview } from '../data/relationshipReviews'
+import { findingsStaleness } from '../data/findingsState'
+import { aiDecided, issueStatus, loadReportIssue, preflightChecks, saveReportIssue, type ReportIssue } from '../data/reportPreflight'
+import { loadEvidenceGaps, type GapStatement } from '../data/evidenceGaps'
+import { loadRules, settingsForRules } from '../data/rules'
+import { measuredOn, readMeasure, type MeasureReading } from '../data/ruleMeasures'
+import { loadReportClaims, type ReportClaims } from '../data/claims'
+import { loadStories, loadStoryNotes, reportStories, storyRowIds, type Story, type StoryNotes } from '../data/stories'
+import type { Rule } from '../rules/engine'
 
 const ORDER = ['critical', 'high', 'medium', 'low', 'info']
 
@@ -30,11 +40,34 @@ export function ReportView() {
   const [evidence, setEvidence] = useState<Evidence[]>([])
   const [findings, setFindings] = useState<Finding[]>([])
   const [chains, setChains] = useState<Chain[]>([])
+  /** the case's stories and the analyst's notes on them */
+  const [stories, setStories] = useState<Story[]>([])
+  const [storyNotes, setStoryNotes] = useState<StoryNotes>({})
+  const [coverageWarnings, setCoverageWarnings] = useState<string[]>([])
   const [reviews, setReviews] = useState<Record<string, ChainReview>>({})
+  const [relationships, setRelationships] = useState<RelationshipReview[]>([])
   const [settings, setSettings] = useState<ReportSettings | null>(null)
   const [iocs, setIocs] = useState<Ioc[]>([])
+  const [iocCounts, setIocCounts] = useState<{ total: number; checked: number }>({ total: 0, checked: 0 })
+  const [aiUsage, setAiUsage] = useState<AiUsage | undefined>(undefined)
+  const [issue, setIssue] = useState<ReportIssue>({ waivers: {} })
+  // the preview is drawn during render, which must not read the clock: it shows when the page opened
+  const [previewAt] = useState(() => Date.now())
+  const [rulesState, setRulesState] = useState<{ lastRun: number | null; evidenceAfter: number; errors: number } | undefined>(undefined)
+  /** what the evidence cannot show, for "Where it stops" */
+  const [gaps, setGaps] = useState<GapStatement[]>([])
+  /** how far each rule's finding can be taken as a detection */
+  const [measures, setMeasures] = useState<Record<string, MeasureReading>>({})
+  /** the rules as they are now, to check each printed finding's rows against */
+  const [ruleMap, setRuleMap] = useState<Map<string, Rule>>(new Map())
+  /** the printed findings and texts read back against the rows they cite */
+  const [claims, setClaims] = useState<ReportClaims | undefined>(undefined)
+  const measureSources = useStore((s) => s.meta?.measures)
   const [notes, setNotes] = useState<CaseNote[]>([])
   const [summary, setSummary] = useState<string>('')
+  /** who wrote the summary last: the model's draft is labelled in the report until the analyst edits it */
+  const [summaryBy, setSummaryBy] = useState<'analyst' | 'ai' | undefined>(undefined)
+  const [summaryAt, setSummaryAt] = useState<number | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState('')
   const [fontData, setFontData] = useState<string | undefined>(undefined)
@@ -54,13 +87,42 @@ export function ReportView() {
       .listIocs({ onlyBad: true, limit: 500 })
       .then((r) => setIocs(r.rows))
       .catch(() => setIocs([]))
+    // what the report says about enrichment follows the lookups that ran, not the setting
+    Promise.all([getSource(kase).listIocs({ limit: 1 }), getSource(kase).listIocs({ unchecked: true, limit: 1 })])
+      .then(([all, unchecked]) => setIocCounts({ total: all.total, checked: Math.max(0, all.total - unchecked.total) }))
+      .catch(() => setIocCounts({ total: 0, checked: 0 }))
+    loadReportIssue(kase.id).then(setIssue)
+    loadEvidenceGaps(kase.id, getSource(kase))
+      .then(setGaps)
+      .catch(() => setGaps([]))
+    loadRules(kase.id)
+      .then((rs) => {
+        setMeasures(Object.fromEntries(rs.map((r) => [r.rule.id, readMeasure(r.measured, r.origin)])))
+        setRuleMap(new Map(rs.filter((r) => !r.error).map((r) => [r.rule.id, r.rule])))
+      })
+      .catch(() => setMeasures({}))
+    summariseLedger(kase.id)
+      .then(setAiUsage)
+      .catch(() => setAiUsage(undefined))
+    findingsStaleness(kase.id)
+      .then((s) => setRulesState({ lastRun: s.lastRun, evidenceAfter: s.evidenceAfter, errors: s.errors.length }))
+      .catch(() => setRulesState(undefined))
     db.kv.get(`report-summary-${kase.id}`).then((k) => setSummary((k?.value as string) ?? ''))
+    db.kv.get(`report-summary-by-${kase.id}`).then((k) => setSummaryBy((k?.value as 'analyst' | 'ai' | undefined) ?? undefined))
+    db.kv.get(`report-summary-at-${kase.id}`).then((k) => setSummaryAt((k?.value as number | undefined) ?? undefined))
     listNotes(kase.id).then(setNotes)
-    loadChains(kase.id).then((r) => setChains(r?.chains ?? []))
+    loadChains(kase.id).then((r) => {
+      setChains(r?.chains ?? [])
+      setCoverageWarnings(chainCoverageWarnings(r?.stats))
+    })
+    loadStories(kase.id).then((r) => setStories(r?.stories ?? []))
+    loadStoryNotes(kase.id).then(setStoryNotes)
     loadChainReviews(kase.id).then(setReviews)
+    reportRelationships(kase.id).then(setRelationships)
     loadReportSettings(kase.id).then(setSettings)
   }, [kase, rulesVersion])
   const selection = useMemo(() => (settings ? selectForReport(findings, chains, reviews, settings) : { findings: [], chains: [] }), [findings, chains, reviews, settings])
+  const printedStories = useMemo(() => (settings ? reportStories(stories, storyNotes, settings.minSeverity, settings.onlyReviewed) : { stories: [], left: 0 }), [stories, storyNotes, settings])
   // graph pictures for the report, drawn off-screen from the same models as the Chains page
   const [graphs, setGraphs] = useState<Record<string, string>>({})
   useEffect(() => {
@@ -79,6 +141,33 @@ export function ReportView() {
     }
     setGraphs(out)
   }, [selection.chains, settings?.includeGraphs])
+  // what the report will print, read back against the rows it cites (after the summary settles)
+  useEffect(() => {
+    if (!kase?.id || !settings) return
+    let alive = true
+    setClaims(undefined)
+    const printed = buildIncidents(selection.findings, { chains: selection.chains, severityOf: (c) => chainSeverity(c, reviews[c.id]) }).filter((i) => i.kind !== 'chain')
+    const timer = setTimeout(() => {
+      loadReportClaims({
+        source: getSource(kase),
+        findings: selection.findings,
+        rules: ruleMap,
+        settings: settingsForRules(kase),
+        evidence,
+        chains: selection.chains,
+        narratives: Object.fromEntries(Object.entries(reviews).map(([id, r]) => [id, r.narrative])),
+        incidents: printed,
+        summary,
+        stories: printedStories.stories.filter((st) => st.note).map((st) => ({ key: st.key, title: st.story.title, note: st.note!, ids: storyRowIds(st.story) })),
+      })
+        .then((c) => alive && setClaims(c))
+        .catch(() => alive && setClaims(undefined))
+    }, 400)
+    return () => {
+      alive = false
+      clearTimeout(timer)
+    }
+  }, [kase, settings, selection, reviews, ruleMap, evidence, summary, printedStories])
   if (!kase || !settings) return null
   const shown = selection.findings
   // findings linked to a printed chain are printed with it, not as incidents
@@ -91,12 +180,37 @@ export function ReportView() {
   const analystNotes = notes.filter((n) => n.kind === 'note').sort((a, b) => a.createdAt - b.createdAt)
   // same unit as the Review page: incidents without a decision plus chains without a verdict
   const undecided = buildIncidents(findings, { chains }).filter((i) => (i.kind === 'chain' && i.chain ? !reviews[i.chain.id]?.verdict : i.status === 'new')).length
+  const hiddenConfirmed = unprintedConfirmed(findings, chains, reviews, selection)
+  const printedChecks = shown.map((f) => (f.id != null ? claims?.findings[f.id] : undefined)).filter((c) => !!c)
+  const claimSummary = claims && {
+    checked: printedChecks.length,
+    unsupported: printedChecks.filter((c) => c.status === 'unsupported').length,
+    contradicted: printedChecks.filter((c) => c.status === 'contradicted').length,
+    texts: claims.texts.length,
+    textsUnsupported: claims.texts.filter((t) => t.check.status !== 'verified').length,
+  }
+  const unverified = [
+    ...shown.flatMap((f) => {
+      const c = f.id != null ? claims?.findings[f.id] : undefined
+      return c && c.status !== 'verified' ? [{ what: `${f.title} (${f.ruleId})`, status: c.status, reasons: c.reasons }] : []
+    }),
+    ...(claims?.texts ?? []).filter((t) => t.check.status !== 'verified').map((t) => ({ what: t.what, status: t.check.status, reasons: t.check.reasons })),
+  ]
+  const checks = preflightChecks({ evidence, rules: rulesState, undecided, aiDecided: aiDecided(findings), unprintedConfirmed: hiddenConfirmed.length, claims: claimSummary })
+  const status = issueStatus(checks, issue)
+  const updateIssue = (next: ReportIssue) => {
+    setIssue(next)
+    void saveReportIssue(kase.id!, next)
+  }
 
   const generateSummary = async () => {
     if (useStore.getState().aiStatus.reachable !== true) return toast('err', 'the analyst model is not reachable (see the AI section in Settings)')
     setBusy(true)
     try {
+      // draftExecutiveSummary records who wrote it and when with the text
       setSummary(await draftExecutiveSummary(kase))
+      setSummaryBy('ai')
+      setSummaryAt(Date.now())
     } catch (e) {
       toast('err', (e as Error).message)
     } finally {
@@ -104,15 +218,21 @@ export function ReportView() {
     }
   }
 
-  const html = () =>
+  // the report made now (download, print, a tab), or at a given time (the preview, drawn during render)
+  const html = (generatedAt?: number) =>
     buildReportHtml({
       kase,
-      generatedAt: Date.now(),
+      generatedAt,
       settings,
       summary,
+      summaryBy,
+      summaryAt,
+      falsePositives: buildIncidents(findings, { chains }).filter((i) => (i.kind === 'chain' && i.chain ? reviews[i.chain.id]?.verdict === 'benign' : i.status === 'false_positive')).length,
       evidence,
       chains: selection.chains,
       reviews,
+      coverageWarnings,
+      relationships,
       membersOf,
       graphs,
       campaignInsights:
@@ -128,7 +248,19 @@ export function ReportView() {
       tasks,
       notes: analystNotes,
       undecided,
+      unprintedConfirmed: hiddenConfirmed,
+      issue: { status: status.status, finalAt: status.finalAt, open: status.open, waived: status.waived },
+      rules: rulesState,
+      iocsTotal: iocCounts.total,
+      iocsChecked: iocCounts.checked,
       fontData,
+      ai: aiUsage,
+      gaps,
+      measures,
+      measuredOn: measuredOn(measureSources),
+      claims,
+      stories: printedStories.stories,
+      storiesLeft: printedStories.left,
     })
   /** The report in its own tab: the browser's own print-to-PDF, or to keep it open next to the case. */
   const openReport = () => {
@@ -169,8 +301,9 @@ export function ReportView() {
         <div className="desc">
           <h1>Report</h1>
           <span className="sub">
-            {selection.chains.length} chain(s) · {incidents.length} incident(s) · {shown.length} finding(s) from {settings.minSeverity} up · {iocs.length} flagged IOC(s) · {evidence.length} evidence
-            file(s){undecided ? ` · ${fmtNum(undecided)} item(s) not yet reviewed` : ' · everything reviewed'}
+            {printedStories.stories.length} stor{printedStories.stories.length === 1 ? 'y' : 'ies'} · {selection.chains.length} chain(s) · {incidents.length} incident(s) · {shown.length} finding(s)
+            from {settings.minSeverity} up · {iocs.length} flagged IOC(s) · {evidence.length} evidence file(s)
+            {undecided ? ` · ${fmtNum(undecided)} item(s) not yet reviewed` : ' · everything reviewed'}
           </span>
         </div>
         <span className="spacer" />
@@ -201,6 +334,60 @@ export function ReportView() {
             </button>
           </div>
         )}
+        <div className="panel">
+          <div className="panel-h">
+            preflight · the report is <b style={{ color: status.status === 'final' ? 'var(--ok)' : 'var(--warn)' }}>{status.status === 'final' ? 'final' : 'a draft'}</b>
+            <span className="spacer" />
+            {status.status === 'final' ? (
+              <button className="btn xs" onClick={() => updateIssue({ ...issue, finalAt: undefined })}>
+                back to draft
+              </button>
+            ) : (
+              <button
+                className="btn xs primary"
+                disabled={status.open.length > 0}
+                title={status.open.length ? 'every open check needs to pass or be waived with a reason' : 'print the report as final, with the waivers listed'}
+                onClick={() => updateIssue({ ...issue, finalAt: Date.now() })}
+              >
+                issue as final
+              </button>
+            )}
+          </div>
+          <div className="panel-b col" style={{ gap: 6 }}>
+            {checks.map((c) => (
+              <div key={c.id} className="row small" style={{ gap: 8, alignItems: 'flex-start' }}>
+                <Badge sev={c.ok ? 'ok' : issue.waivers[c.id]?.trim() ? 'medium' : 'high'}>{c.ok ? 'ok' : issue.waivers[c.id]?.trim() ? 'waived' : 'open'}</Badge>
+                <div className="col" style={{ gap: 2, flex: 1 }}>
+                  <span>
+                    {c.label} <span className="muted">· {c.detail}</span>
+                  </span>
+                  {!c.ok && (
+                    <input
+                      className="input small"
+                      placeholder="waive: the reason, printed in the report"
+                      defaultValue={issue.waivers[c.id] ?? ''}
+                      onBlur={(e) => updateIssue({ ...issue, waivers: { ...issue.waivers, [c.id]: e.target.value } })}
+                    />
+                  )}
+                </div>
+              </div>
+            ))}
+            {unverified.length > 0 && (
+              <div className="col small" style={{ gap: 2 }} data-testid="unverified-claims">
+                <span className="muted">Not borne out by the rows they cite ({fmtNum(unverified.length)}):</span>
+                {unverified.slice(0, 20).map((u, i) => (
+                  <span key={`${u.what}-${i}`}>
+                    <Badge sev={u.status === 'contradicted' ? 'high' : 'medium'}>{u.status}</Badge> {u.what}: <span className="muted">{u.reasons.join('; ')}</span>
+                  </span>
+                ))}
+                {unverified.length > 20 && <span className="muted">and {fmtNum(unverified.length - 20)} more</span>}
+              </div>
+            )}
+            <div className="hint">
+              A draft says so on its cover. Final needs every check to pass or to be waived with a reason; a new open check (evidence added, a rule run that failed) returns it to draft.
+            </div>
+          </div>
+        </div>
         <div className="grid-2">
           <div className="panel">
             <div className="panel-h">executive summary</div>
@@ -214,8 +401,18 @@ export function ReportView() {
                 className="textarea"
                 style={{ marginTop: 8, minHeight: 120 }}
                 value={summary}
-                onChange={(e) => setSummary(e.target.value)}
-                onBlur={() => getDb().kv.put({ key: `report-summary-${kase.id}`, value: summary })}
+                onChange={(e) => {
+                  setSummary(e.target.value)
+                  setSummaryBy('analyst')
+                }}
+                onBlur={() => {
+                  setSummaryAt(Date.now())
+                  void getDb().kv.bulkPut([
+                    { key: `report-summary-${kase.id}`, value: summary },
+                    { key: `report-summary-by-${kase.id}`, value: summaryBy ?? 'analyst' },
+                    { key: `report-summary-at-${kase.id}`, value: Date.now() },
+                  ])
+                }}
                 placeholder="edit the summary…"
               />
             </div>
@@ -243,7 +440,7 @@ export function ReportView() {
               <div className="panel-b col">
                 <div className="row">
                   <button className="btn sm" onClick={() => exportCaseBundle(kase, setProgress).catch((e) => toast('err', e.message))}>
-                    <IconDownload /> export case bundle (.remn.json)
+                    <IconDownload /> export case bundle (.remn.ndjson)
                   </button>
                   <span className="small dim">{progress}</span>
                 </div>
@@ -266,7 +463,7 @@ export function ReportView() {
         <div className="panel">
           <div className="panel-h">preview</div>
           <div className="panel-b">
-            <iframe title="report preview" sandbox="" srcDoc={html()} style={{ width: '100%', height: 560, background: '#fff', border: '1px solid var(--line-2)', borderRadius: 4 }} />
+            <iframe title="report preview" sandbox="" srcDoc={html(previewAt)} style={{ width: '100%', height: 560, background: '#fff', border: '1px solid var(--line-2)', borderRadius: 4 }} />
           </div>
         </div>
       </div>

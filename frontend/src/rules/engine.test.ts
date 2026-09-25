@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { compileCond, parseDuration, parseThreshold, ruleApplicable, ruleChannels, ruleEventIds, ruleFields, runRule, validateRule, type Rule, type RuleDiag } from './engine'
+import { compileCond, parseDuration, parseThreshold, ruleApplicable, ruleChannels, ruleEventIds, ruleFields, ruleReadFields, runRule, validateRule, type Rule, type RuleDiag } from './engine'
 
 const T0 = Date.UTC(2026, 8, 1, 22, 0, 0)
 let id = 1
@@ -197,4 +197,33 @@ describe('applicability', () => {
     expect(ruleApplicable(rule({ targetUser: 'alice' }), present)).toEqual({ ok: true })
     expect(ruleApplicable({ ...rule({ 'risk|gte': 80 }), source: 'mails' }, { eventIds: new Set(), channels: [] })).toEqual({ ok: true })
   })
+})
+
+describe('list operators match whole elements, as the SQL engine does', () => {
+  it('does not read a review-level flag as the strong flag it starts with', () => {
+    const pred = compileCond({ 'flags|contains_any': ['att_html_smuggling', 'att_nested_html_smuggling'] })
+    expect(pred({ flags: ['att_html_smuggling_possible', 'att_html_file_download'] })).toBe(false)
+    expect(pred({ flags: ['att_html_smuggling'] })).toBe(true)
+    expect(compileCond({ 'flags|contains_all': ['a', 'b'] })({ flags: ['ab', 'bc'] })).toBe(false)
+    expect(compileCond({ 'flags|not_contains': ['spf_fail'] })({ flags: ['spf_fail_soft'] })).toBe(true)
+  })
+  it('keeps the substring match of a single-value contains, like the SQL engine', () => {
+    expect(compileCond({ 'flags|contains': 'macro' })({ flags: ['att_office_macro'] })).toBe(true)
+    expect(compileCond({ 'subject|contains_any': ['invoice'] })({ subject: 'Your invoice is ready' })).toBe(true)
+  })
+})
+
+it('names every field a rule reads, not only its conditions, so the worker keeps data for them', () => {
+  const rule = {
+    id: 'r',
+    title: 't',
+    severity: 'high',
+    source: 'events',
+    where: { eventId: 4625 },
+    exclude: { 'data.SubStatus': '0xc0000064' },
+    group_by: ['data.IpAddress'],
+    distinct: 'data.TargetUserName',
+    entities: ['computer'],
+  } as unknown as Rule
+  expect([...ruleReadFields(rule)].sort()).toEqual(['computer', 'data.IpAddress', 'data.SubStatus', 'data.TargetUserName', 'eventId'])
 })

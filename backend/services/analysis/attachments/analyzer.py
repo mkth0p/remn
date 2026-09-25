@@ -368,7 +368,7 @@ def analyze_attachment(
             if ext == "vcf":
                 flags.add("vcard")
         except Exception as exc:  # noqa: BLE001
-            log.warning("attachment analysis error for %s: %s", name, exc)
+            log.warning("attachment analysis error (%s): %s", real_ext or ext or "?", exc)
             details["error"] = str(exc)[:300]
             flags.add("office_parse_error" if category in ("office", "office_macro", "office_legacy") else "analysis_error")
         try:

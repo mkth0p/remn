@@ -2,6 +2,10 @@ import { useEffect, useState } from 'react'
 import type { DataSource, FacetItem } from '../data/source'
 import type { Condition } from '../rules/filter'
 import { classNames, fmtNum } from '../util/format'
+import { getDb } from '../db/schema'
+import { useStore } from '../state/store'
+
+const LOAD = 500
 
 export interface FacetDef {
   field: string
@@ -38,18 +42,32 @@ function FacetBlock({
   const [q, setQ] = useState('')
   const [limit, setLimit] = useState(15)
   const [loading, setLoading] = useState(false)
+  const [capped, setCapped] = useState(false)
+  const caseId = useStore((s) => s.currentCase?.id)
   useEffect(() => {
     if (!open) return
     let alive = true
     setLoading(true)
-    ds.facets(source, def.field, 500)
-      .then((f) => alive && setItems(f))
-      .catch(() => alive && setItems([]))
-      .finally(() => alive && setLoading(false))
+    // a search goes to every stored value (debounced), so a rare value outside the most frequent is reachable
+    const t = setTimeout(
+      () =>
+        ds
+          .facets(source, def.field, LOAD, q || undefined)
+          .then((f) => alive && setItems(f))
+          .catch(() => alive && setItems([]))
+          .finally(() => alive && setLoading(false)),
+      q ? 250 : 0,
+    )
+    if (caseId != null)
+      getDb()
+        .kv.get(`facets-capped-${caseId}`)
+        .then((k) => alive && setCapped(((k?.value as string[] | undefined) ?? []).includes(`${source}:${def.field}`)))
+        .catch(() => undefined)
     return () => {
       alive = false
+      clearTimeout(t)
     }
-  }, [open, ds, source, def.field, version])
+  }, [open, ds, source, def.field, version, q, caseId])
   const active = new Set(
     conditions
       .filter((c) => c.field === def.field && (c.op === 'eq' || c.op === 'in' || c.op === 'contains'))
@@ -62,19 +80,29 @@ function FacetBlock({
       .flatMap((c) => (Array.isArray(c.value) ? c.value : [c.value]))
       .map((v) => String(v).toLowerCase()),
   )
-  const shown = items.filter((i) => !q || i.value.toLowerCase().includes(q.toLowerCase())).slice(0, limit)
+  const shown = items.slice(0, limit)
   const max = items[0]?.count ?? 1
   return (
     <div className="facet">
       <div className="facet-h" onClick={() => setOpen(!open)}>
         {def.label}
-        {items.length > 0 && <span className="muted">({fmtNum(items.length)})</span>}
+        {items.length > 0 && (
+          <span className="muted" title={items.length >= LOAD ? `the ${LOAD} most frequent values; type to search all of them` : undefined}>
+            ({fmtNum(items.length)}
+            {items.length >= LOAD ? '+' : ''})
+          </span>
+        )}
         {loading && <span className="spinner" style={{ width: 10, height: 10 }} />}
         <span className="caret">{open ? '▾' : '▸'}</span>
       </div>
       {open && (
         <>
-          {items.length > 8 && <input className="input mono facet-filter" placeholder="filter…" value={q} onChange={(e) => setQ(e.target.value)} style={{ padding: '3px 8px', fontSize: 11 }} />}
+          {capped && (
+            <div className="small" style={{ padding: '2px 6px', color: 'var(--warn)' }}>
+              more distinct values than one import counts: rare ones may be missing here; search Events for them
+            </div>
+          )}
+          {(items.length > 8 || q) && <input className="input mono facet-filter" placeholder="filter…" value={q} onChange={(e) => setQ(e.target.value)} style={{ padding: '3px 8px', fontSize: 11 }} />}
           <div className="facet-list">
             {!items.length && !loading && (
               <div className="muted small" style={{ padding: '2px 6px' }}>

@@ -8,7 +8,12 @@ import re
 import zipfile
 from typing import Any
 
+from services.common import read_zip_member
+
 log = logging.getLogger(__name__)
+
+# a document part larger than this, or compressed with a method other than deflate, is not read
+MAX_PART_BYTES = 32 * 1024 * 1024
 
 _DDE_RE = re.compile(rb"(?i)DDE(?:AUTO)?\b|\\ddeauto|\\dde\b|\bDDE\x00(?:A\x00U\x00T\x00O\x00)?")
 _DDE_FIELD_RE = re.compile(rb"(?i)(?:<w:instrText[^>]*>\s*)?DDE(?:AUTO)?[\s\"'\\][^<]{0,200}")
@@ -26,12 +31,15 @@ def _rels_external(data: bytes) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
-            for name in zf.namelist():
+            for info in zf.infolist():
+                name = info.filename
                 if not name.lower().endswith(".rels"):
                     continue
                 try:
-                    content = zf.read(name)
+                    content = read_zip_member(zf, info, MAX_PART_BYTES)
                 except Exception:  # noqa: BLE001
+                    continue
+                if content is None:
                     continue
                 for rel in _EXT_REL_RE.findall(content):
                     attrs = {k.decode().lower(): v.decode("utf-8", "replace") for k, v in _ATTR_RE.findall(rel)}
@@ -77,8 +85,8 @@ def _ooxml_inventory(data: bytes) -> dict[str, Any]:
                     inv["macroSheets"] += 1
                 elif "customxml/" in low:
                     inv["customXml"] += 1
-            for n in names:
-                low = n.lower()
+            for info in zf.infolist():
+                low = info.filename.lower()
                 if (
                     low in ("word/document.xml", "word/settings.xml", "xl/workbook.xml")
                     or low.startswith("word/header")
@@ -86,8 +94,11 @@ def _ooxml_inventory(data: bytes) -> dict[str, Any]:
                     or low.startswith("xl/worksheets/")
                 ):
                     try:
-                        content = zf.read(n)
+                        content = read_zip_member(zf, info, MAX_PART_BYTES)
                     except Exception:  # noqa: BLE001
+                        continue
+                    if content is None:
+                        inv["skippedParts"] = inv.get("skippedParts", 0) + 1
                         continue
                     if _DDE_RE.search(content):
                         inv["settingsDde"] = True

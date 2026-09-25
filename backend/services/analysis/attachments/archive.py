@@ -12,6 +12,7 @@ from collections.abc import Callable
 from typing import Any
 
 from services.analysis.attachments.magic import DANGEROUS_EXT, EXEC_CATEGORIES, analyze_name, extension_of
+from services.common import read_zip_member
 
 log = logging.getLogger(__name__)
 
@@ -21,6 +22,36 @@ _UTF16_EXE_RE = re.compile(
     rb"(?i)\.\x00(?:e\x00x\x00e|l\x00n\x00k|d\x00l\x00l|j\x00s|v\x00b\x00s|b\x00a\x00t|c\x00m\x00d|h\x00t\x00a|p\x00s\x001|s\x00c\x00r|m\x00s\x00i|w\x00s\x00f|c\x00p\x00l)\x00"
 )
 _ASCII_EXE_RE = re.compile(rb"(?i)[A-Z0-9_\-. ]{1,60}\.(exe|lnk|dll|js|vbs|bat|cmd|hta|ps1|scr|msi|wsf|cpl)\b")
+
+
+def bounded_decompress(fmt: str, data: bytes, limit: int) -> tuple[bytes, bool]:
+    """Decompress bz2 or xz data, producing at most limit bytes. Returns (output, truncated).
+
+    The one-shot bz2.decompress / lzma.decompress expand the whole payload before anything can
+    look at its size, so a few hundred bytes of zeros become gigabytes in memory. This asks the
+    decompressor for no more than the limit, and walks concatenated streams the way the one-shot
+    functions do."""
+    import bz2 as _bz2
+    import lzma as _lzma
+
+    out = bytearray()
+    rest = data
+    streams = 0
+    while rest and len(out) <= limit:
+        dec = _bz2.BZ2Decompressor() if fmt == "bz2" else _lzma.LZMADecompressor()
+        try:
+            out += dec.decompress(rest, max_length=limit + 1 - len(out))
+        except (OSError, _lzma.LZMAError):
+            if streams:
+                break  # trailing bytes after a complete stream are ignored, as the one-shot functions do
+            raise
+        if not dec.eof:
+            if len(out) > limit or not dec.needs_input:
+                return bytes(out[:limit]), True
+            raise EOFError("compressed data ended before the end-of-stream marker")
+        streams += 1
+        rest = dec.unused_data
+    return bytes(out[:limit]), len(out) > limit
 
 
 def _entry_flags(names: list[str]) -> set[str]:
@@ -117,8 +148,11 @@ def analyze_archive(
                             flags.add("archive_partially_analyzed")
                             break
                         try:
-                            blob = zf.read(zi)
+                            blob = read_zip_member(zf, zi, MAX_NESTED_BYTES)
                         except Exception:  # noqa: BLE001
+                            continue
+                        if blob is None:
+                            flags.add("archive_partially_analyzed")
                             continue
                         analyzed += 1
                         nested = analyze_nested(zi.filename, blob, depth + 1)
@@ -147,15 +181,18 @@ def analyze_archive(
             return _analyze_tar(data, out, flags, analyze_nested, depth)
         elif fmt in ("bz2", "xz"):
             try:
-                import bz2 as _bz2
-                import lzma as _lzma
-
-                inner = _bz2.decompress(data[:MAX_NESTED_BYTES]) if fmt == "bz2" else _lzma.decompress(data[:MAX_NESTED_BYTES])
+                inner, truncated = bounded_decompress(fmt, data, MAX_NESTED_BYTES)
+                if truncated:
+                    # more than the nested limit from this input: say so rather than expand it
+                    flags.add("archive_partially_analyzed")
+                    out["truncatedAt"] = MAX_NESTED_BYTES
+                    if len(inner) > 100 * max(len(data), 1):
+                        flags.add("zip_bomb")
                 if inner[:262].find(b"ustar") != -1:
                     return _analyze_tar(inner, out, flags, analyze_nested, depth)
                 add_entry("(compressed member)", len(inner), len(data), False, False)
                 out["entryCount"] = 1
-                if analyze_nested and depth < 2 and len(inner) <= MAX_NESTED_BYTES:
+                if analyze_nested and depth < 2 and not truncated:
                     nested = analyze_nested("member", inner, depth + 1)
                     out["nested"].append(nested)
                     for f in nested.get("flags", []):

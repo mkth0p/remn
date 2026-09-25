@@ -143,6 +143,11 @@ def split_domain(domain: str) -> tuple[str, str, str]:
     if not d:
         return "", "", ""
     ext = _extract(d)
+    if not ext.suffix and ext.subdomain and ext.domain and not ext.domain.replace(".", "").isdigit():
+        # a suffix the list does not know (.example, .local, .lan, .internal): its last label is the
+        # suffix, as the list's default rule says, so signin-review.example is not just "example"
+        sub, _, sld = ext.subdomain.rpartition(".")
+        return sub, sld, ext.domain
     return ext.subdomain, ext.domain, ext.suffix
 
 

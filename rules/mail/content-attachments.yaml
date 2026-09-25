@@ -211,7 +211,7 @@ description: Financial request plus authority and pressure wording, corroborated
 severity: high
 confidence: medium
 source: mails
-attack: [T1566.002, T1656]
+attack: [T1566.002, T1684.001]
 tags: [bec, fraud]
 where:
   flags|contains: bec_pattern
@@ -226,7 +226,7 @@ description: Bank-change wording is a review signal, including legitimate suppli
 severity: low
 confidence: low
 source: mails
-attack: [T1656]
+attack: [T1684.001]
 tags: [bec, fraud, invoice]
 where:
   any_of:

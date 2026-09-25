@@ -13,7 +13,7 @@ from django.views.decorators.http import require_GET
 from services.analysis.attachments.magic import DANGEROUS_EXT
 from services.parsers.mail.common import MAIL_WEIGHTS, STRONG_FLAGS
 from services.reference import eventids, flags
-from services.rules import packs
+from services.rules import measures, packs
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +43,10 @@ def load_rules(rules_dir: Path) -> list[dict]:
                         "rule": d,
                     }
                 )
+    for entry in out:
+        measured = measures.for_rule(entry.get("rule"))
+        if measured is not None:
+            entry["measured"] = measured
     return out
 
 
@@ -63,5 +67,6 @@ def meta(request):
             "dangerousExtensions": DANGEROUS_EXT,
             "rules": load_rules(settings.RULES_DIR),
             "packs": packs.list_packs(),
+            "measures": measures.summary(),
         }
     )

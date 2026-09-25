@@ -36,7 +36,10 @@ commands on every push.
   `tools/parity_fixture.py` when the change is intentional.
 - **Prompts live in Python.** `backend/services/ai/prompts.py` is the source; the
   browser mirror is checked by `tests/fixtures/ai_system_compose.json`. After a prompt
-  change, regenerate the fixture (`tests/backend/test_ai_meta.py` explains how).
+  change, regenerate the fixture with `tools/ai_compose_fixture.py`. A new AI tool is
+  declared in `backend/services/ai/tools.py`, run in `frontend/src/ai/tools.ts`, and never
+  writes to the case: a change the model wants is a `propose_*` tool that queues it in the
+  approval inbox (`frontend/src/ai/inbox.ts`).
 - **Decisions survive reruns.** Anything an analyst sets on a finding (status, notes,
   severity, exclusion, unlink) is carried across rule reruns by
   `frontend/src/data/findingReviews.ts`; new decision fields go there too.

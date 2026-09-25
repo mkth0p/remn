@@ -9,6 +9,7 @@ import zipfile
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.views.decorators.http import require_GET, require_POST
 
+from services.common import read_zip_member
 from services.rules import mql, packs, sigma
 
 MAX_RULES = 6000
@@ -33,7 +34,9 @@ def _texts_from_request(request: HttpRequest) -> list[tuple[str, str]]:
                     total += info.file_size
                     if total > MAX_ZIP_TOTAL:
                         break
-                    texts.append((n, zf.read(info).decode("utf-8", "replace")))
+                    blob = read_zip_member(zf, info, MAX_ZIP_MEMBER)
+                    if blob is not None:
+                        texts.append((n, blob.decode("utf-8", "replace")))
                     if len(texts) >= MAX_RULES:
                         break
         else:

@@ -6,7 +6,7 @@
 REMN is a local investigation tool for Windows event logs and mailboxes. Drop `.evtx`
 files, PST/OST/mbox/eml/msg mailboxes and Microsoft 365 or Entra exports into the
 browser; everything is hashed, parsed by a local API, searched, run through detection
-rules, correlated into attack chains, reviewed, and printed as a report. Evidence stays
+rules, read into stories, reviewed, and printed as a report. Evidence stays
 on the machines you choose: in the browser's own database, or in a DuckDB file on the
 server for gigabyte cases.
 
@@ -16,26 +16,36 @@ server for gigabyte cases.
 
 - **Search** across events and mails with facets, filter chips, regex on any field,
   time and business-hours filters, saved searches, CSV/JSON export.
+- **Import investigation packages** with mixed mail, EVTX and structured host exports,
+  member hashes and explicit coverage; explore the relationship graph of records tied
+  across source files through shared digests, files, processes, URLs and accounts.
 - **Detect** with a YAML rule catalogue (Windows, mail, Microsoft 365) plus the SigmaHQ
   and Sublime Security community packs, two rule engines (browser and SQL) kept in
   parity, and a calibrated mail risk score measured on public phishing corpora.
-- **Correlate** a suspicious mail with what the recipient's accounts and machines did
-  afterwards: scored attack chains with a swimlane graph.
+- **Read the case as stories**: one per person or host incident, read along ATT&CK's
+  phases, each step saying why it belongs and how surely; the forms one account goes by
+  joined with a confidence per join, logon sessions, RDP and admin-share hops and process
+  trees drawn from the logs, what each host's evidence cannot show, and the campaigns that
+  share an attacker's infrastructure. A phishing mail is followed to what its recipient's
+  accounts and machines did afterwards.
 - **Review** every chain and incident in order, rescore, annotate, unlink, and let a
-  model propose or take decisions with a logged, undoable triage pass.
-- **Report** as one self-contained HTML file, printable to PDF, with chain of custody,
-  narratives, graphs and the decisions that shaped it.
-- **Ask** a local model (Ollama) or Claude through a Claude Code sign-in; it works
-  through tools over the case data and cites record ids.
+  model propose decisions, each applied or dismissed by the analyst.
+- **Report** as one self-contained HTML file, printable to PDF, with the stories, chain of
+  custody, narratives, graphs and the decisions that shaped it.
+- **Investigate with an agent** on a local model (Ollama, LM Studio, llama.cpp, vLLM,
+  Jan) or Claude through a Claude Code sign-in: it plans, runs playbooks through read-only
+  tools, keeps a hypothesis board and cites the rows it read, checked; every change it
+  proposes waits for the analyst's approval, and a hash-chained ledger records its work.
 
 | | |
 | --- | --- |
-| ![Attack chains](docs/images/chains.png) | ![Mails](docs/images/mails.png) |
+| ![Stories](docs/images/stories.png) | ![Mails](docs/images/mails.png) |
 
 ## Quick start
 
-Requires Python 3.13, Node 22, and optionally [Ollama](https://ollama.com) for the AI
-features.
+Requires Python 3.13, Node 22, and optionally a local model for the AI features:
+[Ollama](https://ollama.com), or LM Studio, a llama.cpp server, vLLM or Jan through their
+OpenAI-compatible API.
 
 ```
 python -m venv .venv
@@ -44,8 +54,9 @@ cd frontend && npm ci && npm run build && cd ..
 .venv\Scripts\python.exe backend\run.py
 ```
 
-Open http://127.0.0.1:8000, create a case, drop files. A synthetic lab with linked
-mail, Windows and Microsoft 365 activity comes with the repository:
+Open http://127.0.0.1:8000, create a case, drop files, or press "open the demo case" to
+see the synthetic lab already read. That lab, with linked mail, Windows and Microsoft 365
+activity, comes with the repository:
 
 ```
 .venv\Scripts\python.exe samples\synthetic\make_linked_lab.py --out samples\generated\lab
@@ -61,11 +72,14 @@ For development, run the API with `manage.py runserver` and the frontend with
 - [Setup and run](docs/setup.md) — requirements, installation, remote access
 - [Storage modes](docs/storage.md) — browser store, server store, uploads, the checklist before real exports
 - [Data sources](docs/sources.md) — event logs, mailboxes, Microsoft 365 and Entra, deleted mail
+- [Investigation packages](docs/packages.md) — adapters, coverage, observations and relationships
 - [Detection](docs/detection.md) — rule DSL, community packs, mail risk scoring, engine parity
+- [Stories](docs/stories.md) — who is who, sessions, hops and process trees, phases, campaigns, where a story stops
 - [Attack chains](docs/chains.md) — how chains are built and scored
 - [Interface](docs/interface.md) — the pages, the review workflow, the report
-- [AI analyst](docs/ai.md) — transports, tools, triage
+- [AI analyst](docs/ai.md) — the investigating agent, playbooks, approval inbox, AI ledger, transports
 - [Validation and test data](docs/validation.md) — public corpora, measured rates, test suites
+- [Optional archive honeypot](docs/honeypot.md) — isolated decoy, reference trail, private replay and REMN package export
 - [Security model](docs/security.md) — what leaves the machine, what is stored where
 
 ## Where things stand

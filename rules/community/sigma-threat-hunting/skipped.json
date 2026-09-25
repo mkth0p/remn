@@ -40,21 +40,6 @@
   "reason": "logsource category 'file_rename'"
  },
  {
-  "file": "rules-threat-hunting/windows/network_connection/net_connection_win_dfsvc_non_local_ip.yml",
-  "title": "Dfsvc.EXE Network Connection To Non-Local IPs",
-  "reason": "IPv6 cidr ::1/128"
- },
- {
-  "file": "rules-threat-hunting/windows/network_connection/net_connection_win_dllhost_non_local_ip.yml",
-  "title": "Dllhost.EXE Initiated Network Connection To Non-Local IP Address",
-  "reason": "IPv6 cidr ::1/128"
- },
- {
-  "file": "rules-threat-hunting/windows/network_connection/net_connection_win_powershell_network_connection.yml",
-  "title": "Network Connection Initiated By PowerShell Process",
-  "reason": "IPv6 cidr ::1/128"
- },
- {
   "file": "rules-threat-hunting/windows/process_creation/proc_creation_win_boinc_execution.yml",
   "title": "Potential BOINC Software Execution (UC-Berkeley Signature)",
   "reason": "level informational (Sigma: enrichment only, not an alert)"

@@ -1,5 +1,26 @@
 # Detection
 
+## External engines
+
+Hayabusa runs Sigma over Windows event logs with thousands of curated rules and tuned levels,
+and it does that better than a converted rule set can. When the binary is present (`hayabusa`
+on PATH or `HAYABUSA_PATH`, rules beside it or at `HAYABUSA_RULES`; the container image ships
+it pinned by version and by the SHA-256 of the release archive) every ingested event log is
+also handed to it, and its detections come back as findings with rule ids under
+`engine:hayabusa:`, the level mapped to a severity, the MITRE techniques it tags, and refs to
+the rows REMN parsed from the same records, linked by computer, channel and record id. The
+rules run in REMN's own engines are untouched; they cover mail, cloud and collected artifacts,
+which Hayabusa does not.
+
+It runs the way the native decoders do: a separate process, watched for memory, time and
+output, killed rather than trusted past a limit, with whatever it wrote before that kept and
+the stop stated in the ingest log. `HAYABUSA_ENABLED=0` keeps it out of ingest;
+`HAYABUSA_MIN_LEVEL` and `HAYABUSA_MAX_S` set the floor and the time bound; `HAYABUSA_ARGS`
+replaces the option set for a release whose flags have moved. Engine findings are stored per
+piece of evidence and replaced when that evidence is ingested again; analyst decisions on a
+finding whose key survives are kept, and orphan pruning leaves them alone.
+
+
 Findings come from three places: the rules bundled with REMN (Windows, mail, Microsoft
 365), the community rule packs converted from SigmaHQ and Sublime Security, and the mail
 risk score computed at ingest. All rules are written in one YAML language and run on two
@@ -65,7 +86,48 @@ cradles and credential dumping on the Windows side; display-name spoofing, looka
 domains, macro, PDF and HTML-smuggling attachments, the BEC lexicon, forged headers,
 score bands and the sender-baseline rules on the mail side; and the 28 business email
 compromise rules over Microsoft 365 and Entra rows listed on the [data sources
-page](sources.md). Every rule carries MITRE ATT&CK technique ids.
+page](sources.md). Every rule carries MITRE ATT&CK technique ids, as of ATT&CK v19 (April
+2026), which split Defense Evasion into Stealth and Defense Impairment and moved Impair
+Defenses and event-log clearing to T1685 to T1690 (`T1562.001` is now `T1685`, `T1070.001` is
+`T1685.005`, `T1656` is `T1684.001`); the SigmaHQ packs carry the same ids. The report's
+threat profile counts both the old and the new ids under defense evasion.
+
+The Windows set was extended against EVTX-ATTACK-SAMPLES, a public library of one attack
+technique per log (see `docs/reviews/2026-09-23-evtx-attack-samples.md`). The techniques
+the packs left undetected are covered by six files of their own: `security-audit.yaml`
+(Security channel: Zerologon traces, machine-account resets, browser credential stores,
+boot configuration, hive copies and executables written to drive shares, privileged group
+enumeration, token and logon tricks), `other-channels.yaml` (the channels no rule read: RPC
+ETW, Netlogon, ProcessExitMonitor, MSSQL, RdpCoreTS, DistributedCOM, Program Compatibility,
+Application Experience, Winsock, classic PowerShell, BITS), `correlation.yaml` (what only a
+burst or a sequence shows: share and pipe enumeration, SMB sweeps, Kerberos spraying,
+process listing), `registry.yaml` (persistence and defence-evasion keys), `image-load.yaml`
+(DLL hijacks, unsigned loads into service hosts, pipes of known tools, timestomping) and
+`process-lineage.yaml` (parent-child pairs that should not happen, renamed binaries,
+accessibility-binary backdoors). Each rule was written for a sample the packs missed, then
+reviewed for false positives against the rest of the library and the benign background of
+the linked lab, and runs the same in both engines. `tools/evtx_attack_samples.py` and a CI
+job hold the detections in place: the job fails when a rule that identifies a sample's
+attack stops firing on it, or when the engines disagree on any sample.
+
+The rules that flooded the clean machines were cut down without losing a recorded detection
+(measured in [the noise review](reviews/2026-09-25-noise-and-held-out.md)). A rule a busy
+machine matches over and over raises one finding per program per machine: a program reading
+TeamViewer's or KeePass's memory, a thread started in another process, a LOLBin command line,
+a suspicious script block, a Run key. A rule whose matches split by how sure they are is two
+rules: a Run or RunOnce value, a hijack value or a print monitor pointing into a user folder, at
+a script or a LOLBin (high) apart from one naming a program under Program Files or Windows
+(low); an unsigned DLL a Windows system process loads from outside the system folder, or under a
+phantom DLL's name (high), apart from one in the system folder itself (medium); a thread started
+in another process at no module or at a loader routine (high) apart from one at a Windows
+routine (low); msiexec installing from a URL, installing a file that is not an installer
+package or registering a DLL from outside Program Files (the LOLBin rule, high) apart from a
+quiet install of a local package (low); a program outside Windows reading LSASS
+memory (high) apart from one Sysmon saw validly signed by a vendor other than Microsoft
+(medium). The signer is the parser's: a Sysmon 8 or 10 carries `sourceSigner`, the signature
+Sysmon recorded on its source process's own executable when that process started (Sysmon 7,
+valid), as long as every image the log shows it loading before was signed as well. A log
+without Sysmon 7 gives no signer, and the high rule applies.
 
 ## Community rule packs
 
@@ -74,19 +136,24 @@ converted to the rule language so both engines run them without a converter roun
 
 | pack | upstream | rules | default |
 |---|---|---|---|
-| `sigma-windows` | SigmaHQ `rules/` (Windows, stable and test) | 2,374 of 2,410 | on |
-| `sigma-emerging-threats` | SigmaHQ `rules-emerging-threats/` (Windows) | 319 of 323 | on |
-| `sigma-threat-hunting` | SigmaHQ `rules-threat-hunting/` (Windows) | 116 of 128 | off (noisy by design) |
+| `sigma-windows` | SigmaHQ `rules/` (Windows, stable and test) | 2,387 of 2,410 | on |
+| `sigma-emerging-threats` | SigmaHQ `rules-emerging-threats/` (Windows) | 320 of 323 | on |
+| `sigma-threat-hunting` | SigmaHQ `rules-threat-hunting/` (Windows) | 117 of 128 | off (noisy by design) |
 | `sublime` | sublime-security `detection-rules/` | 189 of 1,227 | on |
 
 Each pack directory holds the rules grouped by log source (`process_creation.yaml`,
 `registry_set.yaml`, …) or by Sublime rule family, a `pack.json` manifest with the
 upstream repository, the exact commit, the licence and the counts, the upstream
 `LICENSE` verbatim, and `skipped.json` naming every upstream rule that was not converted
-and why. A rule is skipped rather than weakened: base64, utf16 and fieldref modifiers,
-IPv6 CIDRs, `file_access` sources, Sublime ML classifiers, `file.explode`, link
-analysis, and so on. The SigmaHQ rules are redistributed under the Detection Rule
-License 1.1, the Sublime rules under MIT.
+and why. A rule is skipped rather than weakened: `fieldref`, `expand` and the time-part
+modifiers, any modifier outside the Sigma 2.1 list, `file_access` sources, Sublime ML
+classifiers, `file.explode`, link analysis, and so on. What translates exactly is
+translated: `base64`, `base64offset` and `utf16`/`wide` values become the literal strings
+the encoded value can appear as (all three alignments), matched case-sensitively; `neq`
+becomes a negated equality; `cased` selects the case-sensitive operators; the regex flags
+`m` and `s` travel as an inline group; IPv6 CIDRs translate when they name one address or
+a prefix within the first group (`::1/128`, `fe80::/10`, `fc00::/7`). The SigmaHQ rules are
+redistributed under the Detection Rule License 1.1, the Sublime rules under MIT.
 
 The Rules page lists the packs with a toggle each. `/api/meta` only carries the
 manifests; a pack's rules are fetched once per session from
@@ -116,7 +183,11 @@ converts one `.yml` or a `.zip` through `POST /api/rules/convert/sigma` and
 `POST /api/rules/convert/sublime` and stores the result as custom rules. Sigma: Windows
 log sources map to channel and event id (Sysmon 1 and Security 4688 for
 `process_creation`, …), fields map to the parser's flattened columns (`Image` matches
-both Sysmon and 4688), unmapped EventData fields are reachable as `data.<Field>`, globs
+both Sysmon and 4688, and "Image has no value" means neither has one), the `Data` list of
+classic events (MSSQL, MsiInstaller, Windows PowerShell 800) is read from `message`, a
+comparison with `-`, the Windows placeholder for "no value", is made against the EventData
+value (the parser leaves the column empty for `-`), unmapped EventData fields are reachable
+as `data.<Field>`, globs
 become the right operator or an anchored regex, `1 of x*` and `all of them` become
 `any_of` and `all_of`. Sublime: the structural subset of MQL translates (sender, subject
 and header comparisons, `strings.*` and `regex.*` matchers,
@@ -127,6 +198,86 @@ negated predicates, `profile.by_sender()` through the sender-baseline columns,
 `$tenant_domains`, `$org_display_names` and `$recipient_emails` through the case
 settings, `$tranco_10k` through the bundled list; `$tranco_1m` is approximated with the
 10,000 list, which only makes those rules fire more often, never less).
+
+## Measured rules
+
+A finding is only as good as the rule behind it, so every event rule, the core ones and the
+packs', is measured on recorded attacks and on the logs of clean machines, and the pages say
+what the measure shows. `tools/measure_rules.py` runs the rules on the SQL engine and writes
+`rules/measures.json`; the server attaches each measure to the rule it was taken on. A measure
+carries a hash of the rule's logic (everything but its title, description, severity,
+techniques and other metadata, `backend/services/rules/measures.py`), so a rule changed since
+it was measured is shown as changed rather than with a measure that is not its own.
+
+Recorded attacks, at the versions measured:
+
+- the SigmaHQ regression samples (SigmaHQ/sigma at `272daf82`, the commit the packs were
+  converted from): 459 recordings, each made by a rule's author for that rule;
+- EVTX-ATTACK-SAMPLES (`4ceed2f`): 278 recordings, with the rules reviewed as
+  identifying each (`tests/fixtures/evtx-attack-samples/expected.json`);
+- the Office 365 and Entra ID datasets of Splunk attack_data (`7a5e9d5`): 67
+  recordings, each labelled with its ATT&CK technique. 25 more are Entra directory
+  audit logs, other Azure Monitor records and Splunk search exports, which REMN does not read;
+- EVTX-to-MITRE-Attack (`4748560`): 279 recordings, each labelled with the ATT&CK technique of
+  the folder it is filed in. No rule was written against it before it was first measured
+  ([the head-to-head](reviews/2026-09-25-head-to-head.md)); the two rules written since for
+  the gaps it showed are not measured on it (`WRITTEN_AGAINST` in the tool);
+- the Windows datasets of Splunk attack_data (`7a5e9d5`): 535 recordings of the event logs of
+  its attack range, kept as XmlWinEventLog, each labelled with the techniques its author tested.
+  No rule was written against them before they were first measured
+  ([the noise review](reviews/2026-09-25-noise-and-held-out.md)); the 36 datasets larger than
+  20 MB, and the 14 whose files are not at the pinned commit, are not measured.
+
+Clean machines: the seven Windows installations of NextronSystems/evtx-baseline `v0.8.4`
+(6.6 million events, 91% of them Sysmon), which SigmaHQ runs its own rules against for false
+positives.
+
+A recording is of what a rule looks for when it is the rule's own sample, a file reviewed as
+identifying it, or one the rule can read (it holds the event ids, channels and fields the rule
+needs) labelled with one of its techniques (the same ATT&CK v19 id, its parent or a
+sub-technique). The measure of a rule says whether it fires on its own SigmaHQ sample, on
+how many of the recordings of what it looks for it fires, and, on the clean machines, how many
+findings it raised, how many events they cover, on how many machines, out of how many events
+it reads (those of its channels and event ids with a value in every field its conditions
+need, so a Microsoft 365 rule reads no Windows event). The pages read it as:
+
+- **detects**: it fires on at least one recording of what it looks for;
+- **lead**: it never did, or no recording of it was available. Its finding says where to
+  look, not what happened, and the findings list, the finding panel and the report mark it;
+- **misses its sample**: a SigmaHQ rule that does not fire on the sample its author recorded,
+  so, as converted, it may not match what it looks for;
+- **fires on clean machines**: benign activity matches it too; the finding panel gives the
+  share of the events it reads that it matched;
+- **changed** or **needs settings**: not measured in its current form, or it cannot run
+  without a case setting a recording does not have (expected countries, internal domains).
+
+Mail rules are calibrated on mail corpora instead (below).
+
+At this commit, 1,023 of the 3,008 event rules fire on a recording of what they look
+for and 1,985 are leads; 457 of the 457 SigmaHQ rules with a sample fire on it; on the
+clean machines 170 of the 2,794 rules whose log sources they have fired at least once.
+Measuring found SigmaHQ rules that could never fire (the AppX deployment channel, comparisons
+with true) and PowerShell rules blind to PowerShell 7's log, since fixed in the converter.
+EVTX-to-MITRE-Attack, added as a source on 2026-09-25, gave 53 leads their first recorded
+attack, five of them REMN's own (AS-REP roasting, Kerberos pre-authentication brute force, audit
+policy and firewall changes, the system time changed); attack_data's Windows datasets, added the
+same day, gave 137, four of them REMN's own (Kerberoasting, password spraying, a suspicious DNS
+query, a member added to a security group).
+
+**Re-measuring** takes the downloads listed in the tool's docstring (about 10 GB unpacked;
+`--datasets DIR --fetch` fetches them at their pinned versions) and about two hours on four cores;
+re-run it after changing a rule or re-importing a pack, with `--detail rules/measures-detail.json`,
+and commit both files. A backend test warns while a rule has changed since it was measured.
+
+**The gate**: `--gate rules/measures-detail.json` measures again and fails when a rule no longer
+detects a recording it detected when the committed detail was taken, a SigmaHQ rule no longer
+fires on its own sample, a recording is no longer read, or a high or critical rule raises more
+findings on a clean machine (all of its findings, when it was lower when measured).
+`.github/workflows/measure-rules.yml` runs it weekly, on demand, and on a pull request that
+touches the rules, the rule engine, the parsers or the tool, and uploads the measures it took. A
+change meant to lose a detection or add noise commits those measures, so the diff of the two files
+says what it changed. The weekly run also catches a new release of a dependency (the EVTX parser,
+DuckDB) that changes what the rules match.
 
 ## Mail risk scoring
 
@@ -152,8 +303,21 @@ scoring:
   of the wording, so IT password-expiry notices and CEO newsletters stay quiet.
 - Hidden marketing preheaders count as informational, not as hidden-text salting;
   click-tracker link mismatches are expected in newsletters; `.msg` and `.pst` exports
-  without transport headers are not treated as forged mail; a valid ARC seal restores
-  trust for mailing-list forwarding.
+  without transport headers are not treated as forged mail.
+- **Only the receiver's own verdict is believed.** That is the topmost
+  `Authentication-Results`, read without its RFC 8601 comments. Lower result headers,
+  `ARC-Authentication-Results` and claims in comments ("arc=pass (i=1 spf=pass dmarc=pass)")
+  can all be written by the sender, and they are shown but never counted. SPF or DKIM
+  passing counts as authentication only for a domain aligned with the From address: a
+  pass for the attacker's own envelope domain authenticates that domain. A mail claiming
+  one of the organisation's domains whose only pass is for another domain is an
+  `internal_spoof`. `X-MS-Exchange-Organization-AuthAs: Internal` is ignored when the
+  receiver failed the sender, since on a mailbox Exchange did not receive anyone can add it.
+- **ARC forgives failures only from a sealer you trust.** arc=pass says the ARC chain is
+  intact, and anyone can seal their own chain. Mailing-list forwarding is restored when the
+  receiver verified the seal and the sealer is in the case's *trusted ARC sealers* (the
+  internal domains always are), or when the receiver's composite verdict passed
+  (`compauth=pass`, Microsoft's ARC override). The flag `arc_trusted_sealer` marks it.
 - Static HTML in an archive, a normal CSV-export button, PDF JavaScript, encrypted
   content and bank-change wording remain review signals. Stronger findings require
   payload behaviour or corroborating identity, link or authentication evidence. Related
@@ -250,6 +414,19 @@ rows, mails), runs every bundled rule on the SQL engine and records the rows and
 keys under `tests/fixtures/parity/`; `frontend/src/rules/parity.test.ts` runs the
 browser engine on the same rows and fails on any difference. Regenerate the fixture after
 changing an engine or a rule, and review the diff.
+
+The server store keeps every field the parser writes on a row (a guard test checks the
+parser's field map against the store's columns; a store written before a column existed
+gets it filled from the stored EventData when it is opened), and both engines compare IPv6
+ranges from the case settings by prefix. Before this, 65 converted rules read a field the
+store had dropped and gave other answers on the server than in the browser. Run over all
+278 EVTX-ATTACK-SAMPLES files with every default and hunting rule, the two engines now
+give the same findings (see `docs/reviews/2026-09-23-evtx-attack-samples.md`).
+
+The community packs in the repository were converted before three converter fixes (`Data`,
+`-`, empty checks on aliased fields) and Sysmon 25's `Type` moving to `typeName`;
+`tools/migrate_community_packs.py` applied the same changes to them in place, and a test
+fails if a pack still needs it. A new import makes it unnecessary.
 
 ## When a rule finds nothing
 

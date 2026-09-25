@@ -111,3 +111,20 @@ def test_rules_have_no_duplicate_keys_and_valid_shape():
 @pytest.mark.parametrize("path", sorted(RULES.rglob("*.yaml")))
 def test_each_file_parses_strictly(path):
     list(yaml.load_all(path.read_text(encoding="utf-8"), Loader=StrictLoader))
+
+
+# ATT&CK v19 (April 2026) split Defense Evasion into Stealth and Defense Impairment and revoked
+# these ids (MITRE's crosswalk: attack-website modules/resources/docs/subtechniques/de-split-crosswalk.csv)
+REVOKED_IN_V19 = {
+    "T1672": "T1684.002", "T1562": "T1685", "T1562.001": "T1685", "T1562.002": "T1685.001", "T1562.003": "T1690",
+    "T1562.004": "T1686", "T1562.006": "T1685", "T1562.007": "T1686.001", "T1562.008": "T1685.002", "T1562.009": "T1688",
+    "T1562.010": "T1689", "T1562.011": "T1685.003", "T1562.012": "T1685.004", "T1562.013": "T1686.002", "T1656": "T1684.001",
+    "T1070.001": "T1685.005", "T1070.002": "T1685.006",
+}  # fmt: skip
+
+
+def test_rules_carry_current_attack_ids():
+    # REMN's own rules still used the v18 ids while the SigmaHQ packs had moved on, so one case
+    # reported Defender tampering under T1562.001 and T1685 at once
+    old = [(d["id"], t, REVOKED_IN_V19[t]) for _, d in _docs() for t in d.get("attack", []) if t in REVOKED_IN_V19]
+    assert not old, f"ATT&CK ids revoked in v19 (rule, id, replacement): {old}"

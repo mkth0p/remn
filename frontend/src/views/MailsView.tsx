@@ -7,8 +7,9 @@ import { MailDetail } from '../components/Detail'
 import { getSource } from '../data/source'
 import type { MailRow } from '../db/schema'
 import type { Condition, Filter } from '../rules/filter'
+import { toggleFacetValue } from '../data/facetToggle'
 import { useStore } from '../state/store'
-import { fmtTs } from '../util/format'
+import { fmtTs, tzLabel } from '../util/format'
 import { exportCsv, exportJson } from '../util/export'
 import { BaselineButton } from '../components/BaselineButton'
 import { RescoreButton } from '../components/RescoreButton'
@@ -127,9 +128,11 @@ export function MailsView() {
   useEffect(() => {
     if (!ds) return
     let alive = true
+    // a filter changed before its results came is a query nobody waits for: it is stopped
+    const ac = new AbortController()
     setLoading(true)
     setError(null)
-    ds.searchMails(filter, LIMIT)
+    ds.searchMails(filter, LIMIT, ac.signal)
       .then((r) => {
         if (!alive) return
         setRows(r.rows)
@@ -138,11 +141,12 @@ export function MailsView() {
       .catch((e) => alive && setError((e as Error).message))
       .finally(() => alive && setLoading(false))
     setTotal(null)
-    ds.countMails(filter)
+    ds.countMails(filter, ac.signal)
       .then((n) => alive && setTotal(n))
       .catch(() => undefined)
     return () => {
       alive = false
+      ac.abort()
     }
   }, [ds, filter, version, rulesVersion])
   const selectedId = selected?.id
@@ -204,7 +208,9 @@ export function MailsView() {
           if (exists) return { ...prev, conditions: conds.filter((c) => c.field !== 'risk') }
           return { ...prev, conditions: [...conds.filter((c) => c.field !== 'risk'), cond, ...(hiCond && !negate ? [hiCond] : [])] }
         }
-        const op = field === 'flags' ? (negate ? 'not_contains' : 'contains') : negate ? 'ne' : 'eq'
+        if (field !== 'flags') return { ...prev, conditions: toggleFacetValue(conds, f, value, negate) }
+        // flags are several per mail: picking two means "has both", one condition per flag
+        const op = negate ? 'not_contains' : 'contains'
         cond = { field: f, op, value }
         const idx = conds.findIndex((c) => c.field === f && c.op === op && String(c.value).toLowerCase() === value.toLowerCase())
         if (idx >= 0) return { ...prev, conditions: conds.filter((_, i) => i !== idx) }
@@ -215,7 +221,7 @@ export function MailsView() {
   )
   const columns: Column<MailRow>[] = useMemo(
     () => [
-      { key: 'date', label: 'date (UTC)', width: 138, render: (r) => fmtTs(r.date) },
+      { key: 'date', label: `date (${tzLabel()})`, width: 138, render: (r) => fmtTs(r.date) },
       {
         key: 'risk',
         label: 'risk',

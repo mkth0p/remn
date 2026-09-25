@@ -291,6 +291,17 @@ textarea {
 .status-dot.bad {
   background: var(--danger);
 }
+.status-dot.warn {
+  background: var(--warn);
+}
+.sidebar-footer a {
+  color: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.plain-list li + li {
+  margin-top: 4px;
+}
 .topbar {
   display: flex;
   align-items: center;
@@ -1645,6 +1656,261 @@ label.field > span {
   color: var(--fg-3);
   margin-bottom: 4px;
 }
+/* ---------- AI analyst 2.0 ---------- */
+.split.ai-layout {
+  grid-template-columns: 220px minmax(0, 1fr) 340px;
+}
+.ai-layout > .chat {
+  min-width: 0;
+}
+@media (max-width: 1200px) {
+  .split.ai-layout {
+    grid-template-columns: 180px minmax(0, 1fr) 300px;
+  }
+}
+.ai-side {
+  border-left: 1px solid var(--line);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.ai-side-body {
+  padding: 10px;
+  overflow: auto;
+  flex: 1;
+}
+.tab .n.ai-pending {
+  color: var(--accent-fg);
+  background: var(--accent);
+  border-radius: 8px;
+  padding: 0 5px;
+}
+.cite {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  padding: 0 5px;
+  margin: 0 1px;
+  border-radius: 4px;
+  border: 1px solid var(--accent-line);
+  background: var(--accent-dim);
+  color: var(--accent);
+  cursor: pointer;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.cite.bad {
+  border-color: var(--warn);
+  background: var(--sev-medium-bg);
+  color: var(--warn);
+  cursor: help;
+  text-decoration: line-through;
+}
+.cites {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+.ai-calls {
+  align-self: flex-start;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-2);
+  border-left: 2px solid var(--line-2);
+  padding: 2px 10px;
+}
+.ai-calls-note {
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--fg-2);
+  margin-bottom: 4px;
+  white-space: pre-wrap;
+}
+.ai-step {
+  align-self: flex-start;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-2);
+  border-left: 2px solid var(--line);
+  padding: 2px 10px;
+  max-width: 100%;
+}
+.ai-step summary {
+  cursor: pointer;
+}
+.ai-step-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow: auto;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  margin: 4px 0;
+  font-size: 10.5px;
+}
+.ai-suspects {
+  font-family: var(--sans);
+  font-size: 11.5px;
+  color: var(--warn);
+  background: var(--sev-medium-bg);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  margin: 4px 0;
+}
+.warn-inline {
+  color: var(--warn);
+}
+.badge-inline {
+  color: var(--accent);
+}
+.msg.assistant.final {
+  border-color: var(--accent-line);
+}
+.msg.assistant.draft {
+  opacity: 0.6;
+  border-style: dashed;
+}
+/* narrower panes: the sessions go first, then the side panel moves under the chat */
+@media (max-width: 1100px) {
+  .split.ai-layout {
+    grid-template-columns: minmax(0, 1fr) 300px;
+  }
+  .ai-layout > .left {
+    display: none;
+  }
+}
+@media (max-width: 760px) {
+  .split.ai-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 40%);
+  }
+  .ai-side {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+}
+.ai-cite-check {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--fg-3);
+}
+.ai-cite-check.bad {
+  color: var(--warn);
+}
+.ai-cite-check.none {
+  color: var(--warn);
+}
+.ai-open ul {
+  margin: 0 0 0 18px;
+}
+.ai-playbooks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 8px;
+}
+.ai-playbook {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--fg);
+  cursor: pointer;
+}
+.ai-playbook:hover:not(:disabled) {
+  border-color: var(--accent-line);
+  background: var(--accent-dim);
+}
+.ai-run {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.ai-meter {
+  height: 4px;
+  background: var(--surface-3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.ai-meter span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.ai-meter span.hot {
+  background: var(--warn);
+}
+.ai-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ai-plan-step {
+  display: flex;
+  gap: 8px;
+  font-size: 12.5px;
+}
+.ai-plan-step.done {
+  color: var(--fg-3);
+}
+.ai-plan-step.skipped {
+  color: var(--fg-3);
+  text-decoration: line-through;
+}
+.ai-plan-step.doing {
+  color: var(--accent);
+  font-weight: 500;
+}
+.ai-plan-icon {
+  width: 12px;
+  flex: none;
+}
+.ai-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  background: var(--surface);
+}
+.ai-card.exposed {
+  border-color: var(--warn);
+}
+.ai-card.decided {
+  padding: 4px 8px;
+  background: var(--surface-2);
+}
+.ai-card-title {
+  font-weight: 500;
+  font-size: 12.5px;
+  color: var(--fg-1);
+}
+.ai-card.hyp.supported {
+  border-left: 3px solid var(--sev-high);
+}
+.ai-card.hyp.refuted {
+  border-left: 3px solid var(--fg-3);
+  opacity: 0.8;
+}
+.ai-card.hyp.open {
+  border-left: 3px solid var(--sev-low);
+}
+.ai-ledger-row {
+  display: flex;
+  gap: 6px;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+}
 .chat-input {
   border-top: 1px solid var(--line);
   padding: 10px 14px;
@@ -1901,6 +2167,215 @@ label.field > span {
   font-size: 11px;
   color: var(--fg-2);
   font-family: var(--mono);
+}
+
+/* ---------- relationships: story list (left column) and collected records in a story timeline ----------
+   .story-row mirrors .group-row: severity dot, title / summary / time span, score and counts on the right.
+   A collected artifact (process snapshot, prefetch entry, autorun) is a host record without an event time,
+   so its icon well takes the neutral tone instead of the host accent. */
+.story-row {
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  gap: 2px 10px;
+  align-items: start;
+  padding: 10px 14px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+  font-size: 12px;
+  user-select: none;
+}
+.story-row:hover {
+  background: var(--surface-3);
+}
+.story-row.active {
+  background: var(--accent-dim);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.story-row .name {
+  font-weight: 600;
+  color: var(--fg-1);
+}
+.story-row .meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-3);
+  white-space: nowrap;
+}
+.story-row .meta .score {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-1);
+}
+.story-row .meta .bridged {
+  color: var(--accent);
+}
+.story .step .n.collected {
+  background: var(--fg-3);
+}
+
+/* ---------- stories: the phase strip of a list row, the phase rail of a story, its day headers,
+   the tie of each step and the measure of each finding ---------- */
+.phase-strip {
+  display: flex;
+  gap: 2px;
+  margin: 4px 0 2px;
+}
+.phase-strip .cell {
+  width: 9px;
+  height: 6px;
+  border-radius: 1px;
+  background: var(--surface-3);
+}
+.phase-strip .cell.on {
+  background: var(--sev-info);
+}
+.phase-strip .cell.on.low {
+  background: var(--sev-low);
+}
+.phase-strip .cell.on.medium {
+  background: var(--sev-medium);
+}
+.phase-strip .cell.on.high {
+  background: var(--sev-high);
+}
+.phase-strip .cell.on.critical {
+  background: var(--sev-critical);
+}
+.phase-rail {
+  display: grid;
+  grid-template-columns: repeat(15, minmax(0, 1fr));
+  gap: 4px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.phase-rail .phase {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  min-width: 0;
+  padding: 5px 2px 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--fg-3);
+  font: inherit;
+  cursor: default;
+}
+.phase-rail .phase .code {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+}
+.phase-rail .phase .lbl {
+  font-size: 9px;
+  line-height: 1.15;
+  text-align: center;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.phase-rail .phase .ord {
+  position: absolute;
+  top: -6px;
+  right: -4px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background: var(--fg-1);
+  color: var(--surface);
+  font-family: var(--mono);
+  font-size: 9px;
+  line-height: 15px;
+  text-align: center;
+}
+.phase-rail .phase.on {
+  cursor: pointer;
+  color: var(--fg-1);
+  border-color: var(--line-2);
+  background: var(--sev-info-bg);
+}
+.phase-rail .phase.on.low {
+  background: var(--sev-low-bg);
+  border-color: var(--sev-low);
+}
+.phase-rail .phase.on.medium {
+  background: var(--sev-medium-bg);
+  border-color: var(--sev-medium);
+}
+.phase-rail .phase.on.high {
+  background: var(--sev-high-bg);
+  border-color: var(--sev-high);
+}
+.phase-rail .phase.on.critical {
+  background: var(--sev-critical-bg);
+  border-color: var(--sev-critical);
+}
+.phase-rail .phase.active {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.story-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.story-day {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-3);
+  color: var(--fg-2);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+}
+.story .step.routine .title {
+  font-weight: 400;
+  color: var(--fg-2);
+}
+.story .step .phase-tag {
+  font-weight: 600;
+  color: var(--fg-2);
+}
+.phase-chip {
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--surface-3);
+  color: var(--fg-2);
+  font-size: 11px;
+  line-height: 18px;
+}
+.story .step .tie {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg-3);
+  font-size: 11px;
+}
+.badge .measure {
+  font-weight: 400;
+  opacity: 0.8;
+}
+.badge .measure.lead,
+.badge .measure.misses {
+  text-decoration: underline dotted;
+}
+.proc.active {
+  background: var(--accent-dim);
 }
 @media print {
   .sidebar,
@@ -2224,4 +2699,343 @@ label.field > span {
 }
 .triage-table tr.undone td:last-child {
   text-decoration: none;
+}
+
+/* Analyst marks on evidence rows. Noise recedes; anything else the analyst kept is lifted. A mark
+   is an opinion, so it reads as a tint rather than a severity colour, which belongs to the rules. */
+.vrow.row-marked {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.vrow.row-noise {
+  opacity: 0.45;
+}
+.vrow.row-noise:hover {
+  opacity: 1;
+}
+
+/* ---------- review: the verdict bar (the report's cover, live), the grouped rail, the facts table and the decision bar ----------
+   The seal and the hex badges are the same shapes the printed report draws, in the app's tokens. */
+.verdict-bar {
+  display: grid;
+  grid-template-columns: 96px minmax(220px, 1fr) auto auto;
+  gap: 16px 20px;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.verdict-bar .seal {
+  position: relative;
+  width: 96px;
+  height: 96px;
+}
+.verdict-bar .seal svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.verdict-bar .seal svg polygon {
+  fill: var(--surface-2);
+  stroke: var(--fg-3);
+  stroke-width: 3;
+}
+.verdict-bar .seal-in {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0 12px;
+}
+.verdict-bar .seal .k {
+  font-family: var(--mono);
+  font-size: 7.5px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+.verdict-bar .seal .w {
+  font-weight: 700;
+  font-size: 10.5px;
+  line-height: 1.15;
+  margin-top: 2px;
+  color: var(--fg-1);
+}
+.verdict-bar .seal .s {
+  margin-top: 3px;
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.verdict-bar .seal.compromise svg polygon {
+  stroke: var(--sev-critical);
+  fill: color-mix(in srgb, var(--sev-critical) 10%, var(--surface));
+}
+.verdict-bar .seal.compromise .w,
+.verdict-bar .seal.compromise .s {
+  color: var(--sev-critical);
+}
+.verdict-bar .seal.suspicious svg polygon {
+  stroke: var(--sev-medium);
+  fill: color-mix(in srgb, var(--sev-medium) 12%, var(--surface));
+}
+.verdict-bar .seal.suspicious .w,
+.verdict-bar .seal.suspicious .s {
+  color: var(--sev-medium);
+}
+.verdict-bar .seal.unwanted svg polygon {
+  stroke: #6b4fd6;
+  fill: color-mix(in srgb, #6b4fd6 10%, var(--surface));
+}
+.verdict-bar .seal.unwanted .w,
+.verdict-bar .seal.unwanted .s {
+  color: #6b4fd6;
+}
+.verdict-bar .seal.unconfirmed svg polygon {
+  stroke: var(--sev-low);
+  fill: color-mix(in srgb, var(--sev-low) 10%, var(--surface));
+}
+.verdict-bar .seal.unconfirmed .w {
+  color: var(--sev-low);
+}
+.verdict-bar .seal.pending svg polygon {
+  stroke: var(--fg-3);
+  stroke-dasharray: 6 4;
+  fill: var(--surface-3);
+}
+.verdict-bar .seal.pending .w {
+  color: var(--fg-2);
+}
+.verdict-bar .seal.clean svg polygon {
+  stroke: var(--accent);
+  fill: var(--accent-dim);
+}
+.verdict-bar .seal.clean .w {
+  color: var(--accent);
+}
+.verdict-text .line {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg-1);
+  margin-bottom: 4px;
+}
+.verdict-text .conf b {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-right: 6px;
+}
+.verdict-text .conf.high b {
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+.verdict-text .conf.medium b {
+  color: var(--sev-medium);
+  background: color-mix(in srgb, var(--sev-medium) 12%, transparent);
+}
+.verdict-text .conf.low b {
+  color: var(--sev-high);
+  background: color-mix(in srgb, var(--sev-high) 12%, transparent);
+}
+.verdict-badges .k {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  margin-bottom: 4px;
+}
+.verdict-badges .hexes {
+  display: flex;
+  gap: 2px;
+}
+.verdict-badges .hex {
+  position: relative;
+  width: 34px;
+  height: 34px;
+}
+.verdict-badges .hex svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.verdict-badges .hex svg polygon {
+  fill: var(--surface);
+  stroke: var(--line-2);
+  stroke-width: 3;
+}
+.verdict-badges .hex .code {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--line-2);
+}
+.verdict-badges .hex.observed svg polygon {
+  stroke: var(--accent);
+}
+.verdict-badges .hex.observed .code {
+  color: var(--accent);
+}
+.verdict-badges .hex.confirmed svg polygon {
+  stroke: var(--sev-high);
+  fill: var(--sev-high);
+}
+.verdict-badges .hex.confirmed .code {
+  color: #fff;
+}
+.report-contents {
+  border-bottom: 1px solid var(--line);
+  padding: 4px 16px;
+  background: var(--surface-2);
+}
+.report-contents > summary {
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--fg-2);
+  font-family: var(--mono);
+}
+.review-rail .group-head {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 12px 4px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+}
+.review-done {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-lg);
+  background: var(--accent-dim);
+  color: var(--fg-1);
+  font-size: 12.5px;
+}
+.review-done > svg {
+  color: var(--accent);
+}
+.review-card .stamp {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border: 1.5px solid currentColor;
+  border-radius: 4px;
+  transform: rotate(-2deg);
+  white-space: nowrap;
+  align-self: center;
+}
+.review-card .stamp.st-escalated {
+  color: var(--sev-critical);
+}
+.review-card .stamp.st-reviewed {
+  color: var(--accent);
+}
+.review-card .stamp.st-false_positive {
+  color: var(--fg-3);
+}
+.review-card .stamp.st-new {
+  color: var(--fg-3);
+  border-style: dashed;
+}
+.facts td.vals code {
+  display: block;
+  font-size: 10.5px;
+  color: var(--fg-2);
+  overflow-wrap: anywhere;
+}
+.decide {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.decide .choices {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.decide .choice {
+  flex: 1;
+  min-width: 140px;
+  padding: 9px 12px;
+  border: 1.5px solid var(--line-2);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--fg-1);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.decide .choice kbd {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-3);
+  border: 1px solid var(--line-2);
+  border-radius: 3px;
+  padding: 0 5px;
+}
+.decide .choice.confirm.active {
+  border-color: var(--sev-critical);
+  background: color-mix(in srgb, var(--sev-critical) 10%, var(--surface));
+  color: var(--sev-critical);
+}
+.decide .choice.review.active {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.decide .choice.dismiss.active {
+  border-color: var(--fg-3);
+  background: var(--surface-3);
+  color: var(--fg-2);
+}
+.decide .choice:hover {
+  border-color: var(--fg-3);
+}
+.decide .effect {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--fg-2);
+}
+.decide .controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  align-items: center;
+}
+.decide .controls .lbl {
+  font-size: 11px;
+  color: var(--fg-3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-right: 6px;
 }

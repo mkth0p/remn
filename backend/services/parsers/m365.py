@@ -31,12 +31,15 @@ Row conventions (shared with the EVTX parser so rules can mix both):
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
+import ipaddress
+import itertools
 import json
 import logging
 import os
 import re
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime
 from typing import Any
 
@@ -94,6 +97,10 @@ def detect_format(name: str, head: bytes) -> str | None:
             return "m365-ual-json"
         if '"userprincipalname"' in low or '"appdisplayname"' in low or '"conditionalaccessstatus"' in low or '"clientappused"' in low:
             return "entra-signin-json"
+        # Azure Monitor diagnostic records (Log Analytics, Event Hub, storage account): the
+        # sign-in is under "properties", past the head
+        if any(f'"category": "{c}"' in low or f'"category":"{c}"' in low for c in _SIGNIN_CATEGORIES):
+            return "entra-signin-json"
         return None
     header = low.split("\n", 1)[0]
     if "auditdata" in header:
@@ -110,23 +117,51 @@ def detect_format(name: str, head: bytes) -> str | None:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-_IP_RE = re.compile(r"^\[?([0-9a-fA-F:.]+?)\]?(?::\d+)?$")
+_BRACKETED_RE = re.compile(r"^\[([0-9a-fA-F:.]+)\](?::\d+)?$")
 
 
 def clean_ip(v: Any) -> str | None:
+    """The address in "1.2.3.4", "1.2.3.4:443", "2001:db8::1" or "[2001:db8::1]:443".
+
+    A bare IPv6 address is taken whole: its last group can be all digits, and reading that as a
+    port turned 2001:db8::1 into 2001:db8:. Anything that is not an address is kept as it came."""
     s = str(v or "").strip()
     if not s or s.lower() in ("null", "none", "<null>"):
         return None
-    m = _IP_RE.match(s)
-    if m:
-        ip = m.group(1)
-        # IPv4 with port "1.2.3.4:443" is handled; bare IPv6 keeps its colons
-        return ip
-    return s[:100]
+    m = _BRACKETED_RE.match(s)
+    candidate = m.group(1) if m else s.rsplit(":", 1)[0] if s.count(":") == 1 else s
+    try:
+        ipaddress.ip_address(candidate)
+        return candidate
+    except ValueError:
+        return s[:100]
 
 
-def parse_ts(v: Any) -> tuple[int | None, str | None]:
-    """ISO-8601 (with or without zone / fractional seconds) or portal 'M/D/YYYY, h:mm:ss AM' -> (ms, iso)."""
+_NUMERIC_DATE_RE = re.compile(r"^\s*(\d{1,2})[/.](\d{1,2})[/.](\d{4})\b")
+
+
+def date_order(values: Iterable[Any]) -> bool | None:
+    """Whether the numeric dates of one export are day-first (True), month-first (False), or
+    cannot tell (None). An export is written in one culture, so one value with a day above 12
+    settles the order for all of them; before this, 05/01 in a French export was read as 1 May
+    while 15/01 in the same file was read as 15 January."""
+    day_first = month_first = False
+    for v in values:
+        m = _NUMERIC_DATE_RE.match(str(v or ""))
+        if not m:
+            continue
+        a, b = int(m.group(1)), int(m.group(2))
+        day_first = day_first or a > 12
+        month_first = month_first or b > 12
+    if day_first == month_first:
+        return None
+    return day_first
+
+
+def parse_ts(v: Any, day_first: bool | None = None) -> tuple[int | None, str | None]:
+    """ISO-8601 (with or without zone / fractional seconds), portal 'M/D/YYYY, h:mm:ss AM', or a
+    culture's numeric date -> (ms, iso). day_first is the order date_order found for the file;
+    None keeps the portal's own month-first order for slashes. Dotted dates are always day-first."""
     if v is None:
         return None, None
     if isinstance(v, (int, float)):
@@ -140,7 +175,12 @@ def parse_ts(v: Any) -> tuple[int | None, str | None]:
     try:
         dt = datetime.fromisoformat(s2)
     except ValueError:
-        for fmt in ("%m/%d/%Y, %I:%M:%S %p", "%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%d/%m/%Y %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"):
+        slashes = (
+            ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y, %H:%M:%S", "%d/%m/%Y %H:%M")
+            if day_first
+            else ("%m/%d/%Y, %I:%M:%S %p", "%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M")
+        )
+        for fmt in (*slashes, "%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"):
             try:
                 dt = datetime.strptime(s, fmt)
                 break
@@ -176,6 +216,94 @@ def _named_list(items: Any, name_key: str = "Name", value_key: str = "Value") ->
     return out
 
 
+_EMAIL_RE = re.compile(r"[\w.+'-]+@[\w-]+(?:\.[\w-]+)+")
+
+
+def _json_value(v: Any) -> Any:
+    if isinstance(v, str) and v.strip()[:1] in ("[", "{"):
+        try:
+            return json.loads(v)
+        except ValueError:
+            return v
+    return v
+
+
+def _strings(v: Any) -> Iterator[str]:
+    if isinstance(v, str):
+        yield v
+    elif isinstance(v, dict):
+        for x in v.values():
+            yield from _strings(x)
+    elif isinstance(v, list):
+        for x in v:
+            yield from _strings(x)
+
+
+def _walk(v: Any) -> Iterator[tuple[str, Any]]:
+    if isinstance(v, dict):
+        for k, x in v.items():
+            yield str(k), x
+            yield from _walk(x)
+    elif isinstance(v, list):
+        for x in v:
+            yield from _walk(x)
+
+
+def outlook_rule_fields(data: dict[str, Any]) -> dict[str, Any]:
+    """The fields of an inbox rule made in Outlook or over MAPI (UpdateInboxRules), under the names
+    the New-/Set-InboxRule cmdlets use, so the same rules read both.
+
+    UpdateInboxRules logs the rule as RuleActions and RuleCondition, each a JSON string, rather than
+    as cmdlet parameters. An attacker in a stolen Outlook session makes exactly this kind of rule,
+    and with only the cmdlet names looked at, a forward-and-delete rule raised a low finding."""
+    out: dict[str, Any] = {}
+    if data.get("RuleName") and not data.get("Name"):
+        out["Name"] = data["RuleName"]
+    actions = _json_value(data.get("RuleActions"))
+    for action in actions if isinstance(actions, list) else [actions] if isinstance(actions, dict) else []:
+        if not isinstance(action, dict):
+            continue
+        kind = str(action.get("ActionType") or action.get("Type") or "").lower()
+        recipients = sorted({m.lower() for text in _strings(action) for m in _EMAIL_RE.findall(text)})
+        if "redirect" in kind:
+            key = "RedirectTo"
+        elif "forward" in kind and "attach" in kind:
+            key = "ForwardAsAttachmentTo"
+        elif "forward" in kind:
+            key = "ForwardTo"
+        else:
+            key = ""
+        if key and recipients:
+            out[key] = ";".join(recipients)
+        if "delete" in kind:
+            out["DeleteMessage" if "permanent" in kind or "soft" not in kind else "SoftDeleteMessage"] = "True"
+        if "markasread" in kind.replace(" ", "") or "markread" in kind.replace(" ", ""):
+            out["MarkAsRead"] = "True"
+        if "move" in kind:
+            folder = action.get("Folder") or action.get("FolderName") or action.get("TargetFolder") or action.get("FolderId")
+            if folder:
+                out["MoveToFolder"] = str(folder)[:200]
+    condition = _json_value(data.get("RuleCondition"))
+    words: dict[str, list[str]] = {}
+    for k, v in _walk(condition):
+        if k.lower() not in ("words", "value", "values"):
+            continue
+        items = v if isinstance(v, list) else [v]
+        texts = [str(x) for x in items if isinstance(x, (str, int, float))]
+        if texts:
+            words.setdefault("SubjectOrBodyContainsWords", []).extend(texts)
+    for k, v in _walk(condition):
+        if k.lower() in ("type", "conditiontype") and isinstance(v, str):
+            low = v.lower()
+            if "subject" in low and "body" not in low and "SubjectOrBodyContainsWords" in words:
+                words["SubjectContainsWords"] = words.pop("SubjectOrBodyContainsWords")
+            elif "from" in low and "SubjectOrBodyContainsWords" in words:
+                words["FromAddressContainsWords"] = words.pop("SubjectOrBodyContainsWords")
+    for k, v in words.items():
+        out[k] = ";".join(v)[:500]
+    return {k: v for k, v in out.items() if k not in data}
+
+
 def flatten_audit(a: dict[str, Any]) -> dict[str, Any]:
     """AuditData -> flat data dict: scalars as-is, well-known list-of-{Name,Value} shapes by name."""
     data: dict[str, Any] = {}
@@ -201,12 +329,36 @@ def flatten_audit(a: dict[str, Any]) -> dict[str, Any]:
         elif k == "Folders" and isinstance(v, list):
             data["Folders"] = "; ".join(str(f.get("Path")) for f in v if isinstance(f, dict) and f.get("Path"))[:2000]
             data["FolderItemCount"] = sum(len(f.get("FolderItems") or []) for f in v if isinstance(f, dict))
+            _message_ids(data, (it for f in v if isinstance(f, dict) for it in (f.get("FolderItems") or [])))
+        elif k == "AffectedItems" and isinstance(v, list):
+            data["AffectedItems"] = _scalar(v)
+            _message_ids(data, v)
         elif isinstance(v, dict):
             for k2, v2 in v.items():
                 data[f"{k}.{k2}"] = _scalar(v2)
         else:
             data[k] = _scalar(v)
     return data
+
+
+MAX_MESSAGE_IDS = 1000
+
+
+def _message_ids(data: dict[str, Any], items: Iterable[Any]) -> None:
+    """The Internet message ids of the items a record read (MailItemsAccessed FolderItems) or
+    deleted and moved (AffectedItems), as data.InternetMessageId, the way the mailbox stores
+    messageId: it answers "which messages did the attacker read" against the mailbox itself.
+    Beyond MAX_MESSAGE_IDS the list stops and data["InternetMessageId.total"] says how many
+    there were."""
+    ids = [str(it["InternetMessageId"]).strip() for it in items if isinstance(it, dict) and it.get("InternetMessageId")]
+    ids = list(dict.fromkeys(i for i in ids if i))
+    if not ids:
+        return
+    have = [i for i in str(data.get("InternetMessageId") or "").split(", ") if i]
+    ids = list(dict.fromkeys(have + ids))
+    data["InternetMessageId"] = ", ".join(ids[:MAX_MESSAGE_IDS])
+    if len(ids) > MAX_MESSAGE_IDS:
+        data["InternetMessageId.total"] = len(ids)
 
 
 def _clean_json_string(v: Any) -> Any:
@@ -234,6 +386,18 @@ def _first(d: dict[str, Any], *keys: str) -> Any:
 # ---------------------------------------------------------------------------
 # Unified Audit Log rows
 # ---------------------------------------------------------------------------
+_GUID_RE = re.compile(r"^[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}$")
+
+
+def record_key(prefix: str, value: Any) -> str | None:
+    """A record's own identity, the same whichever export or file it came in: the UAL
+    AuditData.Id, the Graph sign-in id. Two rows with one key are one record exported twice
+    (overlapping time slices, a re-run export), so only the first is kept. A value that is not
+    a GUID is no identity and gives no key: a row without a key is never dropped."""
+    v = str(value or "").strip().strip("{}")
+    return f"{prefix}:{v.lower()}" if _GUID_RE.match(v) else None
+
+
 def ual_row(a: dict[str, Any], record_type: Any = None) -> dict[str, Any]:
     op = str(a.get("Operation") or "")
     workload = str(a.get("Workload") or "")
@@ -250,8 +414,10 @@ def ual_row(a: dict[str, Any], record_type: Any = None) -> dict[str, Any]:
                 break
     if not target and a.get("MailboxOwnerUPN"):
         target = str(a["MailboxOwnerUPN"])
+    if op.lower() == "updateinboxrules":
+        data.update(outlook_rule_fields(data))
     obj = str(a.get("ObjectId") or "")
-    if op.lower() in ("new-inboxrule", "set-inboxrule", "remove-inboxrule", "enable-inboxrule", "disable-inboxrule") and data.get("Name"):
+    if op.lower() in ("new-inboxrule", "set-inboxrule", "remove-inboxrule", "enable-inboxrule", "disable-inboxrule", "updateinboxrules") and data.get("Name"):
         obj = str(data["Name"])
     row: dict[str, Any] = {
         "ts": ts,
@@ -274,6 +440,7 @@ def ual_row(a: dict[str, Any], record_type: Any = None) -> dict[str, Any]:
         "ipAddress": ip,
         "status": str(result) if result not in (None, "") else None,
         "workstation": (str(_first(a, "ClientInfoString", "UserAgent") or "")[:200] or None),
+        "recordKey": record_key("ual", a.get("Id")),
         "data": data,
     }
     row["summary"] = _ual_summary(op, user, ip, data, obj, target, result)
@@ -290,7 +457,7 @@ def _ual_summary(op: str, user: str, ip: str | None, d: dict[str, Any], obj: str
     if ip:
         parts += ["from", ip]
     lo = op.lower()
-    if lo in ("new-inboxrule", "set-inboxrule"):
+    if lo in ("new-inboxrule", "set-inboxrule", "updateinboxrules"):
         bits = []
         for k in ("ForwardTo", "ForwardAsAttachmentTo", "RedirectTo"):
             if d.get(k):
@@ -372,15 +539,76 @@ _PORTAL_MAP = {
     "compliant": "isCompliant",
     "managed": "isManaged",
     "device id": "deviceId",
+    "device name": "deviceName",
+    "join type": "trustType",
     "user type": "userType",
     "country or region": "country",
     "country": "country",
     "city": "city",
     "state": "state",
+    "id": "id",
+    "session id": "sessionId",
+    "unique token identifier": "uniqueTokenIdentifier",
+    "authentication protocol": "authenticationProtocol",
+    "original transfer method": "originalTransferMethod",
+    "incoming token type": "incomingTokenType",
+    "token issuer type": "tokenIssuerType",
+    "cross tenant access type": "crossTenantAccessType",
+    "autonomous system number": "autonomousSystemNumber",
+    "ip address (seen by resource)": "ipAddressFromResourceProvider",
+    "resource id": "resourceId",
+    "resource tenant id": "resourceTenantId",
+    "home tenant id": "homeTenantId",
+    "multifactor authentication auth method": "authenticationMethods",
 }
 
 
-def entra_row(o: dict[str, Any]) -> dict[str, Any]:
+def _auth_methods(g: dict[str, Any]) -> Any:
+    """The methods that succeeded (Graph authenticationDetails), or the portal's MFA method."""
+    details = g.get("authenticationDetails")
+    if isinstance(details, list):
+        done = [
+            str(d.get("authenticationMethod")) for d in details if isinstance(d, dict) and d.get("authenticationMethod") and d.get("succeeded") is not False
+        ]
+        return ", ".join(dict.fromkeys(done)) or None
+    return g.get("authenticationMethods")
+
+
+def _ca_policies(v: Any) -> str | None:
+    """Conditional access policies that applied, as "name=result" (notApplied and notEnabled left out)."""
+    if not isinstance(v, list):
+        return None
+    out = [
+        f"{p.get('displayName') or p.get('id')}={p.get('result')}"
+        for p in v
+        if isinstance(p, dict) and str(p.get("result") or "").lower() not in ("notapplied", "notenabled", "")
+    ]
+    return "; ".join(out)[:2000] or None
+
+
+# Azure Monitor diagnostic categories whose records carry a sign-in in "properties"
+_SIGNIN_CATEGORIES = ("signinlogs", "noninteractiveusersigninlogs", "serviceprincipalsigninlogs", "managedidentitysigninlogs")
+
+
+def _signin_of(obj: Any) -> dict[str, Any] | None:
+    """The sign-in an exported object holds: a Graph or portal sign-in as it is, or the
+    "properties" of an Azure Monitor diagnostic record of a sign-in category. None for another
+    diagnostic category, or for something that is not an object."""
+    if not isinstance(obj, dict):
+        return None
+    category = str(obj.get("category") or "").lower()
+    if not category or not isinstance(obj.get("properties"), dict):
+        return obj
+    if category not in _SIGNIN_CATEGORIES:
+        return None
+    props = dict(obj["properties"])
+    # the envelope's time, when the sign-in itself has none
+    if not props.get("createdDateTime") and obj.get("time"):
+        props["createdDateTime"] = obj["time"]
+    return props
+
+
+def entra_row(o: dict[str, Any], day_first: bool | None = None) -> dict[str, Any]:
     g = dict(o)
     # portal CSV headers -> Graph names
     for k in list(g.keys()):
@@ -412,7 +640,7 @@ def entra_row(o: dict[str, Any]) -> dict[str, Any]:
     country = country or g.get("country")
     dev = g.get("deviceDetail") if isinstance(g.get("deviceDetail"), dict) else {}
     user = str(g.get("userPrincipalName") or g.get("userDisplayName") or "").strip()
-    ts, iso = parse_ts(g.get("createdDateTime"))
+    ts, iso = parse_ts(g.get("createdDateTime"), day_first)
     ip = clean_ip(g.get("ipAddress"))
     success = err in (0, None, "0")
     risk_signin = g.get("riskLevelDuringSignIn")
@@ -434,6 +662,10 @@ def entra_row(o: dict[str, Any]) -> dict[str, Any]:
         "browser": dev.get("browser") or g.get("browser"),
         "operatingSystem": dev.get("operatingSystem") or g.get("operatingSystem"),
         "deviceId": dev.get("deviceId") or g.get("deviceId"),
+        # the device's name in Entra and how it is joined: a joined device named like a host of the
+        # case is that host (analysis/lineage.py)
+        "deviceName": dev.get("displayName") or g.get("deviceDisplayName") or g.get("deviceName"),
+        "trustType": dev.get("trustType") or g.get("trustType"),
         "isCompliant": dev.get("isCompliant", g.get("isCompliant")),
         "isManaged": dev.get("isManaged", g.get("isManaged")),
         "errorCode": err,
@@ -447,11 +679,30 @@ def entra_row(o: dict[str, Any]) -> dict[str, Any]:
         "mfaResult": g.get("mfaResult"),
         "tokenIssuerType": g.get("tokenIssuerType"),
         "signInEventTypes": _scalar(g.get("signInEventTypes")),
+        # what ties a sign-in to the audit records its token made (AppAccessContext.AADSessionId,
+        # AppAccessContext.UniqueTokenId) and shows device-code and token-replay use
+        "id": g.get("id"),
+        "requestId": g.get("requestId"),
+        "userId": g.get("userId"),
+        "sessionId": g.get("sessionId"),
+        "uniqueTokenIdentifier": g.get("uniqueTokenIdentifier"),
+        "authenticationProtocol": g.get("authenticationProtocol"),
+        "originalTransferMethod": g.get("originalTransferMethod"),
+        "incomingTokenType": g.get("incomingTokenType"),
+        "crossTenantAccessType": g.get("crossTenantAccessType"),
+        "autonomousSystemNumber": g.get("autonomousSystemNumber"),
+        "ipAddressFromResourceProvider": g.get("ipAddressFromResourceProvider"),
+        "resourceId": g.get("resourceId"),
+        "resourceTenantId": g.get("resourceTenantId"),
+        "homeTenantId": g.get("homeTenantId"),
+        "authenticationMethods": _auth_methods(g),
+        "appliedConditionalAccessPolicies": _ca_policies(g.get("appliedConditionalAccessPolicies")),
     }
     data = {k: _scalar(v) for k, v in data.items() if v not in (None, "")}
-    risk_txt = ""
+    device_code = str(g.get("authenticationProtocol") or "").lower() == "devicecode" or str(g.get("originalTransferMethod") or "").lower() == "devicecodeflow"
+    risk_txt = " [device code]" if device_code else ""
     if (risk_signin and str(risk_signin).lower() not in ("none", "hidden")) or (g.get("riskState") and str(g.get("riskState")).lower() not in ("none",)):
-        risk_txt = f" risk={risk_signin or risk_agg or ''}/{g.get('riskState') or ''}"
+        risk_txt += f" risk={risk_signin or risk_agg or ''}/{g.get('riskState') or ''}"
     summary = (
         f"Sign-in {'ok' if success else 'FAILED (' + str(err) + ')'}: {user or '?'} from {ip or '?'}"
         f"{' (' + str(country) + ')' if country else ''} via {g.get('clientAppUsed') or '?'} to {g.get('appDisplayName') or '?'}{risk_txt}"
@@ -479,6 +730,7 @@ def entra_row(o: dict[str, Any]) -> dict[str, Any]:
         "failureReason": failure,
         "workstation": (str(g.get("userAgent") or "")[:200] or None),
         "objectName": g.get("appDisplayName"),
+        "recordKey": record_key("entra", g.get("id")),
         "data": data,
         "summary": summary[:500],
     }
@@ -493,8 +745,11 @@ def _open_text(path: str | None, data: bytes | None) -> io.TextIOBase:
     return io.TextIOWrapper(io.BytesIO(data or b""), encoding="utf-8-sig", errors="replace", newline="")
 
 
-def _iter_json_objects(fh: io.TextIOBase) -> Iterator[Any]:
-    """A JSON array, a single object, or NDJSON."""
+def _iter_json_objects(fh: io.TextIOBase, stats: Any = None) -> Iterator[Any]:
+    """A JSON array, a single object (a Graph page {"value": [...]} included, however it is
+    indented), or NDJSON. A line of NDJSON that does not parse is counted as an error, never
+    dropped without a trace: a pretty-printed Graph page read line by line used to give 0 rows
+    and 0 errors, which reads as "no sign-ins"."""
     head = fh.read(1)
     fh.seek(0)
     if head == "[":
@@ -504,6 +759,27 @@ def _iter_json_objects(fh: io.TextIOBase) -> Iterator[Any]:
             raise ValueError(f"invalid JSON array: {str(exc)[:120]}") from None
         yield from (x for x in arr if isinstance(x, dict))
         return
+    first = ""
+    while not first:
+        line = fh.readline()
+        if not line:
+            break
+        first = line.strip().rstrip(",")
+    fh.seek(0)
+    try:
+        whole = not isinstance(json.loads(first), dict)
+    except ValueError:
+        whole = True  # the first line is not an object on its own: one indented document
+    if whole:
+        try:
+            doc = json.load(fh)
+        except ValueError as exc:
+            raise ValueError(f"invalid JSON document: {str(exc)[:120]}") from None
+        if isinstance(doc, dict) and isinstance(doc.get("value"), list):
+            yield from (x for x in doc["value"] if isinstance(x, dict))
+        elif isinstance(doc, dict):
+            yield doc
+        return
     for line in fh:
         line = line.strip().rstrip(",")
         if not line or line in ("[", "]"):
@@ -511,6 +787,8 @@ def _iter_json_objects(fh: io.TextIOBase) -> Iterator[Any]:
         try:
             obj = json.loads(line)
         except ValueError:
+            if stats is not None:
+                stats.errors += 1
             continue
         if isinstance(obj, dict):
             if "value" in obj and isinstance(obj["value"], list):  # Graph page {"value": [...]}
@@ -519,11 +797,23 @@ def _iter_json_objects(fh: io.TextIOBase) -> Iterator[Any]:
                 yield obj
 
 
+# Graph audit log query records (auditLogRecord, Microsoft-Extractor-Suite Get-UALGraph) carry
+# these in their envelope; an AuditData that omits one takes it from there
+_GRAPH_ENVELOPE = (
+    ("CreationTime", "createdDateTime"),
+    ("Operation", "operation"),
+    ("UserId", "userPrincipalName"),
+    ("ClientIP", "clientIp"),
+    ("Workload", "service"),
+)
+
+
 def _audit_from_row(obj: dict[str, Any]) -> tuple[dict[str, Any] | None, Any]:
-    """Accept a bare AuditData object or an export row carrying AuditData as a JSON string/object."""
+    """Accept a bare AuditData object, an export row carrying AuditData as a JSON string/object,
+    or a Graph auditLogRecord, whose record is under auditData."""
     ad = obj.get("AuditData")
     if ad is None:
-        ad = obj.get("auditdata") or obj.get("Auditdata")
+        ad = obj.get("auditdata") or obj.get("Auditdata") or obj.get("auditData")
     if isinstance(ad, str):
         try:
             ad = json.loads(ad)
@@ -532,14 +822,51 @@ def _audit_from_row(obj: dict[str, Any]) -> tuple[dict[str, Any] | None, Any]:
     if isinstance(ad, dict):
         if "CreationTime" not in ad and (obj.get("CreationDate") or obj.get("CreationTime")):
             ad = {**ad, "CreationTime": obj.get("CreationDate") or obj.get("CreationTime")}
+        missing = {k: obj[top] for k, top in _GRAPH_ENVELOPE if not ad.get(k) and obj.get(top)}
+        if missing:
+            ad = {**ad, **missing}
         return ad, obj.get("RecordType") or ad.get("RecordType")
     if "Operation" in obj or "Workload" in obj:
         return obj, obj.get("RecordType")
     return None, None
 
 
-def iter_records(path: str | None, data: bytes | None, fmt: str, stats: Any = None, include_raw: bool = True) -> Iterator[dict[str, Any]]:
-    """Yield event rows from a UAL / Entra export in the given format (see FORMATS)."""
+def _key_hash(key: str) -> int:
+    return int.from_bytes(hashlib.blake2b(key.encode(), digest_size=8).digest(), "big")
+
+
+def iter_records(
+    path: str | None, data: bytes | None, fmt: str, stats: Any = None, include_raw: bool = True, seen: set[int] | None = None
+) -> Iterator[dict[str, Any]]:
+    """Yield event rows from a UAL / Entra export in the given format (see FORMATS). A record
+    whose key (record_key) is already in ``seen`` is the same record exported again: it is
+    counted in ``stats.duplicates`` and not yielded: Search-UnifiedAuditLog's ReturnLargeSet
+    pages repeat records within one file, and overlapping time slices repeat them across files.
+    Pass one set for every file of an upload so an archive of slices gives each record once."""
+    seen = set() if seen is None else seen
+    for row in _iter_rows(path, data, fmt, stats, include_raw):
+        key = row.get("recordKey")
+        if key:
+            h = _key_hash(key)
+            if h in seen:
+                if stats is not None:
+                    stats.duplicates = getattr(stats, "duplicates", 0) + 1
+                continue
+            seen.add(h)
+        if stats is not None:
+            _count(row, stats)
+        yield row
+
+
+def _count(row: dict[str, Any], stats: Any) -> None:
+    try:
+        stats.add(row)
+    except Exception:  # noqa: BLE001
+        stats.count += 1
+
+
+def _iter_rows(path: str | None, data: bytes | None, fmt: str, stats: Any, include_raw: bool) -> Iterator[dict[str, Any]]:
+    # rows are counted by the caller once it knows they are kept; errors are counted here
     fh = _open_text(path, data)
     try:
         if fmt == "m365-ual-csv":
@@ -552,7 +879,7 @@ def iter_records(path: str | None, data: bytes | None, fmt: str, stats: Any = No
                     continue
                 yield _finish(ual_row(ad, rtype), ad, stats, include_raw)
         elif fmt == "m365-ual-json":
-            for obj in _iter_json_objects(fh):
+            for obj in _iter_json_objects(fh, stats):
                 ad, rtype = _audit_from_row(obj)
                 if ad is None:
                     if stats is not None:
@@ -560,13 +887,23 @@ def iter_records(path: str | None, data: bytes | None, fmt: str, stats: Any = No
                     continue
                 yield _finish(ual_row(ad, rtype), ad, stats, include_raw)
         elif fmt == "entra-signin-json":
-            for obj in _iter_json_objects(fh):
-                yield _finish(entra_row(obj), obj, stats, include_raw)
+            for obj in _iter_json_objects(fh, stats):
+                signin = _signin_of(obj)
+                if signin is None:
+                    # another diagnostic category (AuditLogs, RiskyUsers, ...): not a sign-in, not read
+                    if stats is not None:
+                        stats.errors += 1
+                    continue
+                yield _finish(entra_row(signin), obj, stats, include_raw)
         elif fmt == "entra-signin-csv":
             reader = csv.DictReader(fh)
-            for rec in reader:
+            # the date order is decided from the file's own dates before any row is read
+            head = list(itertools.islice(reader, 5000))
+            date_keys = [k for k in (reader.fieldnames or []) if _PORTAL_MAP.get(k.strip().lower()) == "createdDateTime" or k == "createdDateTime"]
+            day_first = date_order(rec.get(k) for rec in head for k in date_keys)
+            for rec in itertools.chain(head, reader):
                 obj = {k: v for k, v in rec.items() if k is not None}
-                yield _finish(entra_row(obj), obj, stats, include_raw)
+                yield _finish(entra_row(obj, day_first), obj, stats, include_raw)
         else:
             raise ValueError(f"unknown M365 format {fmt}")
     finally:
@@ -576,11 +913,6 @@ def iter_records(path: str | None, data: bytes | None, fmt: str, stats: Any = No
 def _finish(row: dict[str, Any], source: dict[str, Any], stats: Any, include_raw: bool) -> dict[str, Any]:
     if include_raw:
         row["raw"] = json.dumps(source, ensure_ascii=False, separators=(",", ":"))[:200_000]
-    if stats is not None:
-        try:
-            stats.add(row)
-        except Exception:  # noqa: BLE001
-            stats.count += 1
     return row
 
 

@@ -22,6 +22,7 @@ import csv
 import json
 import os
 import sys
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -33,6 +34,14 @@ NL_IP = "45.83.64.12"
 FR_IP = "82.64.10.3"
 
 
+# record ids are GUIDs, as the service writes them, and the same on every run
+_NS = uuid.UUID("5f0c1c2e-7a4b-4d7e-9a53-2f0f6c1d0e11")
+
+
+def _id(*parts: Any) -> str:
+    return str(uuid.uuid5(_NS, "-".join(str(p) for p in parts)))
+
+
 def _t(minutes: float, day: int = 0) -> str:
     return (T0 + timedelta(days=day, minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%S")
 
@@ -40,7 +49,7 @@ def _t(minutes: float, day: int = 0) -> str:
 def _ual(op: str, workload: str, user: str, ip: str, minutes: float, day: int = 0, **extra: Any) -> dict[str, Any]:
     rec = {
         "CreationTime": _t(minutes, day),
-        "Id": f"{op}-{minutes}-{day}",
+        "Id": _id(op, minutes, day, extra.get("ObjectId", "")),
         "Operation": op,
         "OrganizationId": "11111111-2222-3333-4444-555555555555",
         "RecordType": extra.pop("RecordType", 1),
@@ -227,7 +236,7 @@ def entra_signins() -> list[dict[str, Any]]:
         reason: str | None = None,
     ) -> dict[str, Any]:
         return {
-            "id": f"si-{user}-{minutes}-{day}",
+            "id": _id("si", user, minutes, day),
             "createdDateTime": _t(minutes, day) + "Z",
             "userDisplayName": user.split("@")[0].title(),
             "userPrincipalName": user,

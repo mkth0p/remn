@@ -1,0 +1,62 @@
+name: Rule measures
+
+# Every event rule run on the recorded attacks and the clean machines of tools/measure_rules.py,
+# against what rules/measures-detail.json says they detected and raised when last measured: the
+# run fails when a rule stops detecting a recording, a SigmaHQ rule stops firing on its own sample,
+# a recording is no longer read, or a high or critical rule raises more findings on a clean
+# machine. Weekly, and on a change to what a measure depends on. A change that means to do one of
+# those commits the measures this run uploads (rules/measures.json and rules/measures-detail.json).
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "rules/**"
+      - "backend/services/parsers/evtx_parser.py"
+      - "backend/services/parsers/m365.py"
+      - "backend/services/ingest/pipeline.py"
+      - "backend/services/rules/**"
+      - "backend/services/store/rules.py"
+      - "backend/services/store/sqlfilter.py"
+      - "backend/services/store/casestore.py"
+      - "backend/services/reference/eventids.py"
+      - "tools/measure_rules.py"
+      - "tools/evtx_attack_samples.py"
+      - "tests/fixtures/evtx-attack-samples/expected.json"
+      - ".github/workflows/measure-rules.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: measure-rules-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  measure:
+    name: measure the rules, gate on the committed measures
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r backend/requirements.txt
+      # the clean machines alone are 8 GB unpacked: the runner's second disk holds the datasets
+      - run: sudo mkdir -p /mnt/remn && sudo chown "$USER" /mnt/remn
+      - name: Fetch the datasets at their pinned versions, measure, gate
+        run: >
+          python tools/measure_rules.py --datasets /mnt/remn/datasets --fetch --cache /mnt/remn/cache
+          --out /mnt/remn/measures.json --detail /mnt/remn/measures-detail.json --gate rules/measures-detail.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rule-measures
+          path: |
+            /mnt/remn/measures.json
+            /mnt/remn/measures-detail.json
+          if-no-files-found: ignore

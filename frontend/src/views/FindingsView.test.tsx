@@ -175,6 +175,37 @@ describe('FindingsView', () => {
   )
 
   it(
+    'marks a finding of a rule never seen to detect what it looks for as a lead, and says in its panel what the measure shows',
+    async () => {
+      const { loadRules } = await import('../data/rules')
+      const rule = (id: string, title: string, measured: object) => ({ rule: { id, title, severity: 'high', source: 'events' }, yaml: '', file: 'x.yaml', origin: 'bundled', enabled: true, measured })
+      vi.mocked(loadRules).mockResolvedValue([
+        rule('win-log-cleared', 'Security audit log cleared', { of: 4, fires: 1, clean: { findings: 0, events: 0, machines: 0, scope: 5000, of: 7 } }),
+        rule('mail-credential-phishing', 'Credential phishing', { own: true, of: 2, hits: 2, fires: 2 }),
+      ] as never)
+      try {
+        await act(async () => {
+          render(<FindingsView />)
+        })
+        await waitFor(() => expect(sub()).toContain('4 finding(s)'), WAIT)
+        fireEvent.click(screen.getByRole('button', { name: 'rule' }))
+        await waitFor(() => expect(document.querySelectorAll('.group-row').length).toBe(4), WAIT)
+        fireEvent.click(screen.getByText('Security audit log cleared'))
+        await waitFor(() => expect(document.querySelector('.group-row + table tr')).toBeTruthy(), WAIT)
+        expect(document.querySelector('.group-row + table tr')?.textContent).toContain('lead')
+        fireEvent.click(document.querySelector('.group-row + table tr')!)
+        await waitFor(() => expect(document.querySelector('.flyout [data-measure="lead"]')).toBeTruthy(), WAIT)
+        expect(document.querySelector('.flyout [data-measure="lead"]')?.textContent).toContain(
+          'A lead, not a detection. Fires on none of the 4 recorded attacks of what it looks for: its findings are leads to check, not detections. It never fired on the 5,000 events of what it reads on 7 clean Windows machines.',
+        )
+      } finally {
+        vi.mocked(loadRules).mockResolvedValue([])
+      }
+    },
+    TEST_TIMEOUT,
+  )
+
+  it(
     'opens a finding from the rule grouping and writes a status change to the database',
     async () => {
       await act(async () => {

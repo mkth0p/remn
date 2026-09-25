@@ -29,7 +29,9 @@ def aligned_auth(row: dict[str, Any]) -> bool:
     flags = set(row.get("flags") or [])
     if "exchange_internal" in flags:
         return True
-    if auth.get("arc") == "pass" and "compauth_fail" not in flags:
+    # arc=pass only says the ARC chain is intact; the receiver's composite verdict, or a seal from a
+    # sealer the analyst trusts, is what counts
+    if "arc_trusted_sealer" in flags or (auth.get("compauth") == "pass" and "dmarc_fail" not in flags):
         return True
     if auth.get("dmarc") == "pass":
         return True

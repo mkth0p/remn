@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 import time
 from collections.abc import Iterator
 from typing import Any
@@ -18,7 +19,9 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 
 from api.jobs import Job, manager
 from api.views.upload import discard_upload, get_upload
+from services.analysis import hayabusa
 from services.common import ndjson_line
+from services.ingest.package import PackageSource
 from services.ingest.pipeline import EvtxSource, MailSource, MailStats
 from services.parsers import evtx_parser
 from services.parsers.mail.common import ParseContext
@@ -29,6 +32,14 @@ from services.store.sqlfilter import FilterError
 from services.store.writers import EventWriter, MailWriter
 
 log = logging.getLogger(__name__)
+
+
+def _already_in_case(stats: dict[str, Any], writer: EventWriter) -> int:
+    """Records the case already held (an earlier export of the same audit or sign-in records)
+    were not written: they count with the repeats of this upload, not as rows added."""
+    if writer.duplicates:
+        stats["duplicates"] = int(stats.get("duplicates") or 0) + writer.duplicates
+    return writer.duplicates
 
 
 def _json(request: HttpRequest) -> dict[str, Any]:
@@ -57,6 +68,8 @@ def _ctx_from(settings_obj: dict[str, Any] | None) -> ParseContext:
         include_headers=bool(s.get("includeHeaders", True)),
         analyze_attachments=bool(s.get("analyzeAttachments", True)),
         trusted_senders=[str(x) for x in (s.get("trustedSenders") or s.get("trusted_senders") or []) if x],
+        max_message_bytes=settings.FORENSIC_MAX_MESSAGE_MB * 1024 * 1024,
+        trusted_arc_sealers=[str(x).lower() for x in (s.get("trustedArcSealers") or []) if x],
     )
 
 
@@ -65,6 +78,10 @@ def _ctx_from(settings_obj: dict[str, Any] | None) -> ParseContext:
 # ---------------------------------------------------------------------------
 @require_GET
 def list_stores(request: HttpRequest):
+    """Store keys are capabilities: a case reaches its store by the key it holds. Listing every key
+    is an operator action, so it is only answered on a server with an access token configured."""
+    if not settings.FORENSIC_AUTH_TOKEN:
+        return JsonResponse({"error": "the store listing needs an access token on this server (FORENSIC_AUTH_TOKEN)", "code": "listing"}, status=403)
     return JsonResponse({"stores": registry.list(), "root": str(settings.CASES_DIR), "thresholdMb": settings.FORENSIC_STORE_THRESHOLD_MB})
 
 
@@ -103,8 +120,8 @@ def ingest(request: HttpRequest, key: str):
     kind = str(body.get("kind") or "")
     evidence = body.get("evidence") or {}
     options = body.get("options") or {}
-    if kind not in ("evtx", "mail"):
-        return JsonResponse({"error": "kind must be evtx or mail"}, status=400)
+    if kind not in ("evtx", "mail", "package"):
+        return JsonResponse({"error": "kind must be evtx, mail or package"}, status=400)
     try:
         path, meta = get_upload(upload_id)
     except (FileNotFoundError, ValueError):
@@ -141,7 +158,30 @@ def ingest(request: HttpRequest, key: str):
         count = 0
         last = 0.0
         try:
-            if kind == "evtx":
+            findings: list[dict[str, Any]] = []
+            engine_summaries: list[dict[str, Any]] = []
+            if kind == "package":
+                package = PackageSource(name, str(path), None, tmp_dir, ctx, include_raw, str(meta.get("sha256") or ""))
+                package.engines = hayabusa.engines()
+                ew = EventWriter(st, evidence_id, include_raw=include_raw)
+                pmw = MailWriter(st, evidence_id, keep_bodies=keep_bodies)
+                try:
+                    for row in package:
+                        (pmw if row["type"] == "mail" else ew).add(row)
+                        count += 1
+                        if time.time() - last > 0.5:
+                            job.update(rows=count, format=package.format, files=len(package.files))
+                            job.check()
+                            last = time.time()
+                finally:
+                    ew.flush()
+                    pmw.flush()
+                stats = package.stats()
+                count -= _already_in_case(stats, ew)
+                fmt = package.format
+                findings = hayabusa.resolve_refs(st, evidence_id, package.findings)
+                engine_summaries = package.engine_summaries
+            elif kind == "evtx":
                 src = EvtxSource(name, str(path), None, tmp_dir, include_raw=include_raw)
                 w = EventWriter(st, evidence_id, include_raw=include_raw)
                 for row in src:
@@ -154,7 +194,17 @@ def ingest(request: HttpRequest, key: str):
                 w.flush()
                 stats = src.stats.to_dict()
                 stats["files"] = src.files
+                count -= _already_in_case(stats, w)
                 fmt = src.format
+                if hayabusa.available():
+                    job.update(phase="engines")
+                    staged = hayabusa.stage([(name, str(path))], tmp_dir)
+                    try:
+                        found, summary = hayabusa.run(staged, tmp_dir)
+                    finally:
+                        shutil.rmtree(staged, ignore_errors=True)
+                    findings = hayabusa.resolve_refs(st, evidence_id, found)
+                    engine_summaries = [summary]
             else:
                 src2 = MailSource(name, str(path), None, ctx, tmp_dir)
                 mw = MailWriter(st, evidence_id, keep_bodies=keep_bodies)
@@ -208,6 +258,8 @@ def ingest(request: HttpRequest, key: str):
             "stats": stats,
             "sha256Server": meta.get("sha256"),
             "integrity": integrity,
+            "findings": findings,
+            "engineSummaries": engine_summaries,
             "format": fmt,
             "evidenceId": evidence_id,
             "seconds": round(time.time() - t0, 1),
@@ -224,7 +276,6 @@ def _nest_mail(r: dict[str, Any]) -> dict[str, Any]:
     """Reshape a flat mails-table row (+joined children) into the nested
     build_row shape that MailWriter.add (and therefore /import) consumes."""
     r = dict(r)
-    r.pop("id", None)
     r["auth"] = {k: r.pop(k, None) for k in ("spf", "dkim", "dmarc", "compauth")}
     rt_list = r.pop("replyToList", None) or []
     rt_addr, rt_dom = r.pop("replyToAddr", None), r.pop("replyToDomain", None)
@@ -271,7 +322,6 @@ def export_rows(request: HttpRequest, key: str):
                         r["data"] = json.loads(r["data"])
                     except ValueError:
                         pass
-                r.pop("id", None)
                 yield ndjson_line({"type": "event", **r})
         last = -1
         while True:
@@ -320,8 +370,9 @@ def import_rows(request: HttpRequest, key: str):
     except ValueError:
         return JsonResponse({"error": "bad evidenceId"}, status=400)
     include_raw = request.GET.get("raw", "1") not in ("0", "false")
-    ew = EventWriter(st, evidence_id, include_raw=include_raw)
-    mw = MailWriter(st, evidence_id, keep_bodies=True)
+    preserve_ids = request.GET.get("preserveIds") == "1"
+    ew = EventWriter(st, evidence_id, include_raw=include_raw, preserve_ids=preserve_ids)
+    mw = MailWriter(st, evidence_id, keep_bodies=True, preserve_ids=preserve_ids)
     n_e = n_m = 0
     stats = evtx_parser.Stats()
     mstats = MailStats()
