@@ -14,8 +14,9 @@ export function openRef(ref: RowRef | string): void {
     st.setFocusFinding(Number(r.id))
     st.setView('findings')
   } else {
+    // a chain opens the story that holds it
     st.setFocusChain(String(r.id))
-    st.setView('chains')
+    st.setView('stories')
   }
 }
 

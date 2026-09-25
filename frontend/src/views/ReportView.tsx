@@ -23,6 +23,7 @@ import { loadEvidenceGaps, type GapStatement } from '../data/evidenceGaps'
 import { loadRules, settingsForRules } from '../data/rules'
 import { measuredOn, readMeasure, type MeasureReading } from '../data/ruleMeasures'
 import { loadReportClaims, type ReportClaims } from '../data/claims'
+import { loadStories, loadStoryNotes, reportStories, storyRowIds, type Story, type StoryNotes } from '../data/stories'
 import type { Rule } from '../rules/engine'
 
 const ORDER = ['critical', 'high', 'medium', 'low', 'info']
@@ -39,6 +40,9 @@ export function ReportView() {
   const [evidence, setEvidence] = useState<Evidence[]>([])
   const [findings, setFindings] = useState<Finding[]>([])
   const [chains, setChains] = useState<Chain[]>([])
+  /** the case's stories and the analyst's notes on them */
+  const [stories, setStories] = useState<Story[]>([])
+  const [storyNotes, setStoryNotes] = useState<StoryNotes>({})
   const [coverageWarnings, setCoverageWarnings] = useState<string[]>([])
   const [reviews, setReviews] = useState<Record<string, ChainReview>>({})
   const [relationships, setRelationships] = useState<RelationshipReview[]>([])
@@ -111,11 +115,14 @@ export function ReportView() {
       setChains(r?.chains ?? [])
       setCoverageWarnings(chainCoverageWarnings(r?.stats))
     })
+    loadStories(kase.id).then((r) => setStories(r?.stories ?? []))
+    loadStoryNotes(kase.id).then(setStoryNotes)
     loadChainReviews(kase.id).then(setReviews)
     reportRelationships(kase.id).then(setRelationships)
     loadReportSettings(kase.id).then(setSettings)
   }, [kase, rulesVersion])
   const selection = useMemo(() => (settings ? selectForReport(findings, chains, reviews, settings) : { findings: [], chains: [] }), [findings, chains, reviews, settings])
+  const printedStories = useMemo(() => (settings ? reportStories(stories, storyNotes, settings.minSeverity, settings.onlyReviewed) : { stories: [], left: 0 }), [stories, storyNotes, settings])
   // graph pictures for the report, drawn off-screen from the same models as the Chains page
   const [graphs, setGraphs] = useState<Record<string, string>>({})
   useEffect(() => {
@@ -151,6 +158,7 @@ export function ReportView() {
         narratives: Object.fromEntries(Object.entries(reviews).map(([id, r]) => [id, r.narrative])),
         incidents: printed,
         summary,
+        stories: printedStories.stories.filter((st) => st.note).map((st) => ({ key: st.key, title: st.story.title, note: st.note!, ids: storyRowIds(st.story) })),
       })
         .then((c) => alive && setClaims(c))
         .catch(() => alive && setClaims(undefined))
@@ -159,7 +167,7 @@ export function ReportView() {
       alive = false
       clearTimeout(timer)
     }
-  }, [kase, settings, selection, reviews, ruleMap, evidence, summary])
+  }, [kase, settings, selection, reviews, ruleMap, evidence, summary, printedStories])
   if (!kase || !settings) return null
   const shown = selection.findings
   // findings linked to a printed chain are printed with it, not as incidents
@@ -251,6 +259,8 @@ export function ReportView() {
       measures,
       measuredOn: measuredOn(measureSources),
       claims,
+      stories: printedStories.stories,
+      storiesLeft: printedStories.left,
     })
   /** The report in its own tab: the browser's own print-to-PDF, or to keep it open next to the case. */
   const openReport = () => {
@@ -291,8 +301,9 @@ export function ReportView() {
         <div className="desc">
           <h1>Report</h1>
           <span className="sub">
-            {selection.chains.length} chain(s) · {incidents.length} incident(s) · {shown.length} finding(s) from {settings.minSeverity} up · {iocs.length} flagged IOC(s) · {evidence.length} evidence
-            file(s){undecided ? ` · ${fmtNum(undecided)} item(s) not yet reviewed` : ' · everything reviewed'}
+            {printedStories.stories.length} stor{printedStories.stories.length === 1 ? 'y' : 'ies'} · {selection.chains.length} chain(s) · {incidents.length} incident(s) · {shown.length} finding(s)
+            from {settings.minSeverity} up · {iocs.length} flagged IOC(s) · {evidence.length} evidence file(s)
+            {undecided ? ` · ${fmtNum(undecided)} item(s) not yet reviewed` : ' · everything reviewed'}
           </span>
         </div>
         <span className="spacer" />

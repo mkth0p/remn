@@ -6,19 +6,15 @@ import { gzipSync } from 'node:zlib'
 /**
  * The demo case (src/data/demoCase.ts). The first test writes it, only when asked
  * (npm run demo:bundle): the linked lab is read by the built app in the browser-only
- * configuration, the rules run, the chains are built, and the case bundle the app exports is
- * what the demo button restores. The bundle is therefore what a visitor's own browser would have
+ * configuration, the rules run, the stories are read (and the chains with them), and the case bundle
+ * the app exports is what the demo button restores. The bundle is therefore what a visitor's own browser would have
  * made of the lab, not a second implementation of it. The second test opens it as a visitor would.
  */
 const LAB = path.resolve('.e2e-tmp/lab/quick-start')
 const FILES = ['Mailboxes.mbox', 'Security.evtx', 'Sysmon.evtx', 'PowerShell.evtx', 'System.evtx', 'Defender.evtx', 'M365-UnifiedAuditLog.csv', 'M365-EntraSignIns.jsonl']
 const OUT = path.resolve('public/demo/northstar-lab.remn.ndjson.gz')
 
-const chainLine = (page: Page) =>
-  page
-    .locator('.view-header .sub, h1 + .sub, .sub')
-    .filter({ hasText: /chain\(s\) ·/ })
-    .first()
+const storyLine = (page: Page) => page.locator('.view-header .sub').filter({ hasText: /stor(y|ies) ·/ })
 
 test('writes the demo case from the linked lab, as this app reads it', async ({ page }, testInfo) => {
   test.skip(!process.env.REMN_WRITE_DEMO, 'rewrites public/demo: run npm run demo:bundle')
@@ -34,9 +30,8 @@ test('writes the demo case from the linked lab, as this app reads it', async ({ 
   await page.getByText('Evidence', { exact: true }).first().click()
   await expect(page.locator('tr').filter({ hasText: 'verified' })).toHaveCount(FILES.length, { timeout: 600_000 })
   await expect(page.getByText(/finding\(s\) from \d+ rule\(s\)/).first()).toBeVisible({ timeout: 300_000 })
-  await page.getByText('Chains', { exact: true }).first().click()
-  await page.getByRole('button', { name: /build chains/ }).click()
-  await expect(chainLine(page)).toContainText('5 chain(s) · 5 critical', { timeout: 180_000 })
+  await page.getByText('Stories', { exact: true }).first().click()
+  await expect(storyLine(page)).toContainText('6 stories · 6 critical', { timeout: 180_000 })
   await page.getByText('Report', { exact: true }).first().click()
   const downloaded = page.waitForEvent('download')
   await page.getByRole('button', { name: /export case bundle/ }).click()
@@ -56,8 +51,8 @@ test('the demo case opens in the browser, with nothing uploaded', async ({ page 
   await page.getByRole('button', { name: 'open the demo case' }).click()
   await expect(page.locator('.nav-item', { hasText: 'Events' })).toContainText('14,000', { timeout: 120_000 })
   await expect(page.locator('.nav-item', { hasText: 'Mails' })).toContainText('1,000')
-  // restored with its chains built and its findings attached
-  await expect(chainLine(page)).toContainText('5 chain(s) · 5 critical', { timeout: 60_000 })
+  // restored with its findings and chains; its stories are read again from its rows as it opens
+  await expect(storyLine(page)).toContainText('6 stories · 6 critical', { timeout: 120_000 })
   // its report: every printed finding and text read back against the rows it cites, and holding
   await page.getByText('Report', { exact: true }).first().click()
   const claims = page.locator('.row.small').filter({ hasText: 'What the report says holds against the rows it cites' })

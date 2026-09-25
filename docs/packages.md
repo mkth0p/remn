@@ -3,7 +3,7 @@
 Import a ZIP or TAR from Evidence and choose **Investigation package**. Members
 are detected independently, so one archive can contain EVTX, Microsoft 365 exports,
 mailboxes and structured host collections. The same parser feeds browser storage
-and DuckDB. Browser storage still uses the API to parse files and build relationships.
+and DuckDB. Browser storage still uses the API to parse files, build relationships and read stories.
 
 **Import folder contents** and folder drag-and-drop preserve relative paths, with
 one evidence item per file. Files import sequentially. Use a ZIP for one package
@@ -199,85 +199,15 @@ not classified as Windows/Sysmon events. New rules can target `recordKind`,
 
 ## Relationships
 
-Open **Relationships**, select the whole case or one evidence item, set the story
-window (72 hours by default, 1 to 720) and build. The graph itself is exhaustive and
-flat: every record is a node, every entity a record names is a node, and an edge says
-the record reports the entity. The tab reads that graph as stories. A story is a
-cluster of records tied together through entities specific enough to mean something:
-a digest, a file path on a host, a process instance, a URL, a service, a scheduled task,
-an account, an address, a domain. Hosts and groups give a story its context (which
-machine, which account) but never join records; a domain controller's Security log
-would otherwise turn the whole case into one story.
-
-Stories start from three kinds of seed, in this order. First, the rows findings cite,
-Hayabusa detections included (the first 2,000 rows of each finding; a finding marked
-false positive does not count, one kept out of the report still does). Second, the rows
-marked relevant or pivot; a row marked noise is left out of every story. Third, entities
-that appear in two or more source files and are specific on their own: digests, file
-paths, process instances, URLs, domains and addresses. An account or a host present in
-two logs is not news and does not start a story. From a seed the walk goes record to
-entity to record. A strong entity (digest, file, process, URL, service, scheduled task,
-autorun, program) always joins two records. A medium one (domain, address, SID,
-account) joins them only when both carry an event time within the story window, or
-when both are collection observations whose collection times fall within that same
-window. Missing event times do not permit unlimited-time joins. One extra entity hop is allowed
-when at least one of the two entities is strong, so an attachment digest reaches the
-process that ran the file through the file path, and a DNS domain reaches the mail
-through the URL; the weaker of the two decides whether time still matters. The walk
-continues past a record only when that record itself carries a finding or a mark, and
-stops three hops from the seed: routine rows are pulled in as context, they do not pull
-in more. An entity named by more than 150 records case-wide, or by more than one record in a
-hundred, is a hub; so is a digest, URL, domain or address seen on more than six hosts or
-on more than a fifth of the case's hosts. A hub is shown as context and never walked. Two seeds that reach each other become one story. A finding
-or analyst-marked seed still expands its own links when an earlier walk already
-reached it at the hop limit; covered automatic leads remain context.
-
-A story carries a severity and a score, kept apart on purpose. The severity is the
-worst finding inside it, raised only when the score alone reaches a band (20 low,
-40 medium, 60 high, 80 critical). The score measures corroboration in four bounded
-parts: findings up to 40 (30 for a critical finding, 24 high, 16 medium, 8 low, 4 info,
-plus 3 per further distinct rule up to 10), links up to 30 (8 per strong bridge, 3 per
-medium bridge up to 6), sources up to 15 (5 per source file beyond the first) and marks
-up to 15 (6 per pivot, 4 per relevant). A bridge is a specific entity (not a host, a
-group or a hub) that records from two or more source files name inside the story. One
-critical detection on one row is critical
-and lonely; a medium finding whose digest also appears in a mail attachment and a
-Prefetch entry is medium and well corroborated. Stories are listed by severity, then
-score, then start time. A story is titled after its worst finding, else after its first
-bridge ("digest sha256:… in 2 sources"), else after its earliest seed row; the summary
-counts records, sources, span, findings and marks and names the bridges, hosts and
-accounts.
-
-The left column lists the stories; the right column shows the selected one with its
-score breakdown, its entity pills and five tabs. **Story** is the record list in time
-order with a time gutter, the source file, the entity the record was reached through
-one badge per finding and mark, a cross-source badge on a row that entered on its own, and
-the anchor (the strongest seed) named in the time gutter; j and k
-move between records, and a side pane states why the record is in the story and opens
-the row. **Graph** draws the story as a swimlane graph: records in time order on the
-mail and host lanes, the entities they name above and below (addresses, URLs and
-domains; accounts; files, processes, digests and configuration; machines and
-addresses); clicking a record node selects it. **Links** lists the story's edges, bridge edges first, each with its
-rationale, confidence, source references and the review form. **Entities** lists the
-story's entities with record and source counts and their role: bridge, hub or context.
-**JSON** is the story as data. A story can be sent to the timeline or to the AI view.
-**Explore** switches the left column to the entity browser: search, filter by type,
-pick an entity, follow its neighbours in the diagram, read the related-evidence
-timeline (two connections from any entity, up to 200 source records, event time
-distinguished from collection time) and review its links. When the graph has no seed at
-all, the tab says so and Explore still lists every entity.
-
-A story holds at most 600 records; past that it is marked partial and its seeds and
-finding- or mark-bearing rows are kept first. At most 200 stories are shown, 2,000
-seeds are taken, the 60 strongest cross-source entities are considered as seeds, and
-each story lists 80 entities and 600 edges. Entity and edge limits also mark the story
-partial; retained edges only point to retained records and entities. Entity support
-counts distinct records, even when a record names an entity through multiple relations.
-Stories are computed in a worker from the
-cached graph each time the tab opens, after rules run, when a link review or the window
-changes, so a new finding or mark shows up without a rebuild; the graph itself needs a
-rebuild after the evidence changes. The stories of the last build are kept apart from the
-graph, so a graph too large to cache still leaves its stories readable until the rebuild.
+Open **Stories**, then **Explore**, select the whole case or one evidence item and build
+the relationship graph. The graph is exhaustive and flat: every record is a node, every
+entity a record names is a node, and an edge says the record reports the entity. Explore
+lists the entities by the number of their links, with a search and a type filter; picking
+one shows its neighbours, the related-evidence timeline (two connections from the entity,
+up to 200 source records, event time distinguished from collection time) and its links,
+each with its rationale, confidence, source references and review. A story step shows the
+links of its own records. The stories themselves are read from the case by the story
+engine ([Stories](stories.md)), not from this graph.
 
 The graph joins service → executable → digest ← mail attachment, and source record →
 process instance → observed endpoint. Instances require a host plus a GUID or PID with
@@ -285,15 +215,14 @@ explicit start time. A PID-only connection can resolve contextually to one proce
 host, package and explicit collection time all agree and process start is no later than
 collection. Multiple candidates remain unresolved. Full Windows paths are host-scoped;
 bare filenames do not join files. Accounts retain explicit domains/UPNs; unqualified
-names are host- or record-scoped. UPN/NetBIOS and hostname aliases are not inferred.
+names are host- or record-scoped. UPN/NetBIOS and hostname aliases are not inferred here.
 Enter known mappings in **Explicit host and account aliases** and rebuild; cycles are
 rejected. A path may have multiple historical digests; this does not establish which
 version a process executed.
 
 High confidence means the relationship is explicitly reported, not that the source
 is truthful or activity is malicious. Contextual links are weaker associations.
-Shared entities do not establish causation. Scored attack chains and their review
-workflow remain separate; a story does not require a mail seed.
+Shared entities do not establish causation.
 
 **Build relationships** scans successive pages of 1,000 events and 1,000 mails,
 with progress and a **Stop after this page** control. **Continue scanning** resumes
@@ -307,15 +236,15 @@ merged view caps at 100,000 nodes/200,000 edges, with 30 sample references per e
 Server attachment and URL joins cap at 100,000 rows each per page. Narrow the evidence
 scope when a limit is reached. A cached graph and its cursor resume on return and are
 invalidated by changed evidence. Graphs above the cache budget must be rebuilt after
-leaving the view; saved analyst reviews remain available. They are rebuildable
+leaving the page; saved analyst reviews remain available. They are rebuildable
 analysis, not authoritative evidence.
 
-Save accepted or rejected links with analyst notes, from the **Links** tab or from
-Explore. Check **Include accepted link in report** and save to include the
-relationship, rationale, aliases and source references in the report. Decisions
-survive rebuilds and case backup/restore using content provenance. Removed evidence
-is excluded from reports; reviews remain archived. Existing links without member
-hashes fall back to database identity and may need review again after restore.
+Save accepted or rejected links with analyst notes, from Explore or from a story step.
+Check **Include accepted link in report** and save to include the relationship,
+rationale, aliases and source references in the report. Decisions survive rebuilds and
+case backup/restore using content provenance. Removed evidence is excluded from reports;
+reviews remain archived. Existing links without member hashes fall back to database
+identity and may need review again after restore.
 
 Six collection rules cover user-writable persistence paths, encoded execution,
 script-host connections, remote execution service names, Defender alert text and

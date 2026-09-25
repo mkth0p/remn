@@ -333,6 +333,9 @@ def test_routine_activity_and_own_domain_links_do_not_make_a_chain():
     assert art["domains"] == set() and art["hosts"] == set()
     res = C.build_chains([seed], events, findings, settings)
     assert res["stats"]["seeds"] == 1 and res["chains"] == [], res["chains"][:1]
+    # a case whose settings name no internal domain: the recipient's own domain is not an artifact either
+    assert C.artifacts_for(C.seed_artifacts(seed, {}), "northstar.example")["domains"] == set()
+    assert C.build_chains([seed], events, findings, {"expected_countries": ["FR"]})["chains"] == []
     # an external lure link changes nothing while no event names it: still no chain
     lure = dict(seed, urls=[{"url": "https://login-northstar.evil-login.net/x", "host": "login-northstar.evil-login.net", "domain": "evil-login.net"}])
     assert C.build_chains([lure], events, findings, settings)["chains"] == []
@@ -343,6 +346,10 @@ def test_routine_activity_and_own_domain_links_do_not_make_a_chain():
     c = res2["chains"][0]
     assert c["artifactLinks"] >= 1 and any("mail URL domain evil-login.net" in a for s in c["steps"] for a in s["artifacts"])
     assert c["severity"] in ("medium", "high") and c["score"] < 80
+    # a lure sent to its sender's own domain, the victims in copy: the link is still the victims' click
+    bcc = dict(lure, to=[{"addr": "billing@evil-login.net"}], cc=[{"addr": "employee019@northstar.example"}])
+    [c2] = C.build_chains([bcc], events + [click], findings, {"expected_countries": ["FR"]})["chains"]
+    assert c2["identity"] == "employee019@northstar.example" and c2["artifactLinks"] >= 1
 
 
 def test_score_is_bounded_and_explained():

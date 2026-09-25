@@ -30,6 +30,8 @@ from collections import defaultdict
 from collections.abc import Iterable
 from typing import Any
 
+from .lookalike import registrable
+
 # ---------------------------------------------------------------------------
 # Identity
 # ---------------------------------------------------------------------------
@@ -258,6 +260,17 @@ def seed_artifacts(mail: dict[str, Any], settings: dict[str, Any] | None = None)
         if isinstance(rt, dict) and rt.get("addr"):
             senders.add(str(rt["addr"]).lower())
     return {"domains": domains, "hosts": hosts, "attachments": names, "senders": senders}
+
+
+def artifacts_for(art: dict[str, set[str]], rcpt_domain: str | None) -> dict[str, set[str]]:
+    """The seed's artifacts as one recipient's steps are read: a link to the recipient's own
+    organisation is not one either, so a case whose settings name no internal domain reads the
+    intranet portal the same. Only that recipient's: a lure that also addresses the sender's own
+    domain (To: the sender, the victims in copy) keeps its link for the victims."""
+    own = registrable(rcpt_domain) if rcpt_domain else ""
+    if not own:
+        return art
+    return {**art, "domains": {d for d in art["domains"] if not _is_own(d, {own})}, "hosts": {x for x in art["hosts"] if not _is_own(x, {own})}}
 
 
 # ---------------------------------------------------------------------------
@@ -617,6 +630,7 @@ def build_chains(
             if not ident:
                 continue
             rcpt_domain, _ = identity_realm(rcpt)
+            art_r = artifacts_for(art, rcpt_domain)
             steps: list[dict[str, Any]] = []
             last_by_key: dict[str, dict[str, Any]] = {}
             # victim replies / forwards to the phisher
@@ -655,7 +669,7 @@ def build_chains(
                 if id(ev) in seen_events:
                     continue
                 seen_events.add(id(ev))
-                cls = _m365_step(ev, art, settings) if _is_m365(ev) else _host_step(ev, art)
+                cls = _m365_step(ev, art_r, settings) if _is_m365(ev) else _host_step(ev, art_r)
                 if cls is None:
                     continue
                 w, title, notes = cls
@@ -736,7 +750,7 @@ def build_chains(
                         "risk": int(seed.get("risk") or 0),
                         "flags": list(seed.get("flags") or [])[:12],
                         "findings": _fsum(seed_findings or []),
-                        "urlDomains": sorted(art["domains"])[:10],
+                        "urlDomains": sorted(art_r["domains"])[:10],
                         "attachments": sorted(art["attachments"])[:10],
                     },
                     "steps": steps,
@@ -751,7 +765,7 @@ def build_chains(
                         "ips": ips[:20],
                         "hosts": hosts[:20],
                         "attackerAddresses": sorted(set(attacker))[:10],
-                        "domains": sorted(art["domains"])[:10],
+                        "domains": sorted(art_r["domains"])[:10],
                     },
                     "_topSeed": top_seed,
                 }

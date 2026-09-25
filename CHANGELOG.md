@@ -5,6 +5,40 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- Stories replace the Chains and Relationships pages: the case reads as one story per person,
+  or per host when its records name no one, and per incident, along ATT&CK's phases. A story
+  starts from a finding of medium severity or more or a phishing chain; a mail received or a
+  failed logon joins its person's story, or its campaign. Each step says why it belongs and how
+  surely (flagged, phishing chain, same session, same way in, process tree, same source, same
+  person), each finding carries its rule's measure, routine runs fold, and each story lists what
+  its hosts' evidence cannot show. A phishing chain starts a story only when its recipient acted
+  on the mail (the link resolved, the attachment saved, a reply). An identity resolver joins the forms an account goes by
+  (address, NetBIOS form, SID, Entra object id, distinguished name, bare name) with a confidence
+  per join, never across organisations, and names namesakes, renamed machine accounts and bare
+  names several accounts share. Host lineage reads logon sessions, hops (RDP, admin shares and
+  execution pipes, the service installed after them, explicit credentials, connections to
+  remote-access ports) and process trees from Sysmon and 4688. Campaigns group the stories that
+  share an attacker's addresses, sender and link domains, attachments, forwarding addresses or
+  consented applications, with the other accounts the same sources reached. An analyst's note on
+  a story is checked against the story's records, and the report prints the stories above its
+  floor, with their notes, before the chains. Explore keeps the relationship graph and its
+  link reviews, and a story step shows the links of its own records. On the synthetic lab each
+  of the five planted attacks is one story holding all its planted records, and the controls stay
+  out. Server cases select their rows by SQL, browser cases post them to `POST /api/stories/build`.
+  See `docs/stories.md`.
+- A domain whose suffix is not on the public suffix list (`.example`, `.local`, `.lan`,
+  `.internal`) keeps its last two labels as its registrable domain instead of the bare suffix:
+  every `.example` sender used to count as the organisation's own, reply-to and Message-ID
+  mismatches between two such domains went unnoticed, and a phishing chain matched the link
+  domain "example" in every host name. The lab's golden corpus is frozen again with the fix.
+- A phishing chain no longer takes a visit to the recipient's own organisation (the intranet
+  portal a supplier invoice links to) for a click on the mail when the case settings name no
+  internal domain: the domains of the mail's own recipients are not artifacts either. On the
+  lab read without internal domains, 38 chains of benign mails whose reply-to goes to a
+  supplier were made of such visits.
+- A report or note sentence that ends with an IP address ("…from 198.51.100.77.") has that
+  address checked against the rows, as one in the middle of a sentence was.
+
 - The AI analyst is an investigator: it plans, runs up to 40 rounds of tools on its own
   (24 by default), keeps a hypothesis board, runs seven playbooks from one click (phishing
   to compromise, password guessing, lateral movement, persistence, Microsoft 365 account

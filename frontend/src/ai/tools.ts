@@ -12,6 +12,7 @@ import { getSource, type DataSource } from '../data/source'
 import type { Filter } from '../rules/filter'
 import type { Bucket } from '../data/queries'
 import { loadChains } from '../data/chains'
+import { loadStories, PHASE_LABEL, refRow, storyGaps, type Story } from '../data/stories'
 import { chainMembership } from '../rules/incidents'
 import { normaliseDecision, type Decision } from '../data/aiReview'
 import { stepVisible } from '../data/review'
@@ -94,6 +95,7 @@ export const TOOL_GROUPS = {
   events: ['search_events', 'count_events', 'aggregate_events', 'timeline_events', 'get_event', 'process_tree', 'logon_session'],
   mails: ['search_mails', 'count_mails', 'aggregate_mails', 'timeline_mails', 'get_mail'],
   chains: ['get_chain'],
+  stories: ['get_story'],
   network: ['lookup_ioc'],
   server: ['sql'],
   agent: ['update_plan', 'record_hypothesis', 'finish'],
@@ -104,6 +106,8 @@ export interface CaseShape {
   events: number
   mails: number
   chains: number
+  /** the stories of the last story build */
+  stories?: number
 }
 
 export function toolNamesFor(kase: Case, shape: CaseShape, agent: boolean): string[] {
@@ -112,6 +116,7 @@ export function toolNamesFor(kase: Case, shape: CaseShape, agent: boolean): stri
   if (shape.events > 0 || shape.mails === 0) out.push(...TOOL_GROUPS.events)
   if (shape.mails > 0) out.push(...TOOL_GROUPS.mails)
   if (shape.chains > 0) out.push(...TOOL_GROUPS.chains)
+  if ((shape.stories ?? 0) > 0) out.push(...TOOL_GROUPS.stories)
   if (kase.settings.networkAllowed) out.push(...TOOL_GROUPS.network)
   if (kase.storage === 'server' && kase.serverKey) out.push(...TOOL_GROUPS.server)
   if (agent) out.push(...TOOL_GROUPS.agent, ...TOOL_GROUPS.propose)
@@ -122,13 +127,14 @@ export function toolNamesFor(kase: Case, shape: CaseShape, agent: boolean): stri
 export async function caseShape(kase: Case): Promise<CaseShape> {
   const db = getDb()
   const chains = ((await db.kv.get(`chains-${kase.id}`))?.value as { chains?: unknown[] } | undefined)?.chains?.length ?? 0
+  const stories = ((await db.kv.get(`stories-${kase.id}`))?.value as { stories?: unknown[] } | undefined)?.stories?.length ?? 0
   const st = useStore.getState()
-  if (st.currentCase?.id === kase.id && (st.counts.events || st.counts.mails)) return { events: st.counts.events, mails: st.counts.mails, chains }
+  if (st.currentCase?.id === kase.id && (st.counts.events || st.counts.mails)) return { events: st.counts.events, mails: st.counts.mails, chains, stories }
   // another case, or counts not loaded yet: what its evidence files hold (a package may hold both)
   const ev = await db.evidence.where('caseId').equals(kase.id!).toArray()
   const events = ev.filter((e) => e.kind !== 'mail').reduce((n, e) => n + (e.count || 1), 0)
   const mails = ev.filter((e) => e.kind !== 'evtx').reduce((n, e) => n + (e.count || 1), 0)
-  return { events, mails, chains }
+  return { events, mails, chains, stories }
 }
 
 export interface PlanStep {
@@ -428,6 +434,8 @@ async function read(name: string, args: Record<string, unknown>, ctx: ToolContex
     }
     case 'get_chain':
       return getChain(caseId, args)
+    case 'get_story':
+      return getStory(caseId, args)
     case 'list_iocs': {
       const res = await ds.listIocs({ kind: str(args.kind) || undefined, q: str(args.q) || undefined, onlyBad: args.only_bad === true, limit: num(args.limit, 50, 200) })
       return {
@@ -741,6 +749,55 @@ async function getChain(caseId: number, args: Record<string, unknown>) {
       .slice(0, 40)
       .map((f) => ({ ref: `finding:${f.id}`, ruleId: f.ruleId, severity: f.severityOverride ?? f.severity, title: f.title, source: f.source, rows: f.count, status: f.status })),
     unlinkedFindings: unlinked.slice(0, 20).map((f) => ({ ref: `finding:${f.id}`, ruleId: f.ruleId, title: f.title })),
+  }
+}
+
+/** One story (data/stories.ts), or the list of them to choose from: its phases, its steps with why each is in it, and where it stops. */
+async function getStory(caseId: number, args: Record<string, unknown>) {
+  const res = await loadStories(caseId)
+  const stories = res?.stories ?? []
+  const wantId = str(args.story_id)
+  const wantUser = str(args.user).toLowerCase()
+  const s = stories.find((x) => x.id === wantId) ?? (wantUser ? stories.find((x) => x.title.toLowerCase().includes(wantUser) || x.hosts.includes(wantUser)) : undefined)
+  const brief = (x: Story) => ({
+    id: x.id,
+    about: x.title,
+    kind: x.kind,
+    severity: x.severity,
+    score: x.score,
+    phases: x.phases.map((p) => p.label),
+    from: iso(x.start),
+    to: iso(x.end),
+    steps: x.steps.length,
+  })
+  if (!s) return { error: 'no such story', stories: stories.slice(0, 40).map(brief) }
+  const ref = (r: string) => {
+    const row = refRow(r)
+    return row ? (row.source === 'mails' ? mailRef(row.id) : evRef(row.id)) : r
+  }
+  return {
+    ...brief(s),
+    headline: s.headline,
+    summary: s.summary,
+    confidence: s.confidence,
+    hosts: s.hosts,
+    sources: s.attackerAddresses,
+    phases: s.phases.map((p) => ({ phase: p.label, from: iso(p.first), to: iso(p.last), steps: p.steps, worst: p.severity })),
+    steps: s.steps.slice(0, 60).map((st) => ({
+      refs: st.refs.slice(0, 5).map(ref),
+      records: st.count,
+      at: iso(st.ts),
+      phase: st.phase ? PHASE_LABEL[st.phase] : null,
+      why: `${st.tie.confidence}: ${st.tie.basis}`,
+      title: st.title,
+      host: st.host,
+      ip: st.ip,
+      findings: st.findings.map((f) => `${f.title} (${f.severity})`),
+    })),
+    stepsTotal: s.steps.length,
+    hops: s.lineage.hops.slice(0, 20).map((h) => `${h.kind} ${h.from.host ?? h.from.ip ?? '?'} -> ${h.to}${h.account ? ` as ${h.account}` : ''} at ${iso(h.ts)} (${h.confidence}: ${h.basis})`),
+    whereItStops: storyGaps(s, res?.stats),
+    campaigns: (res?.campaigns ?? []).filter((c) => c.stories.includes(s.id)).map((c) => ({ label: c.label, stories: c.stories.length, otherAccounts: c.targets.length })),
   }
 }
 

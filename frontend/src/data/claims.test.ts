@@ -124,6 +124,11 @@ describe('values named in a text', () => {
     expect(namedValues(text, ['WS-042', 'bob', 'ws'])).toEqual(['203.0.113.7', 'alice@northstar.example', 'a'.repeat(64), 'ws-042'])
   })
 
+  it('reads an address that ends a sentence, and not one part of a longer dotted number', () => {
+    expect(namedValues('The attacker came from 198.51.100.77. Then it left.')).toEqual(['198.51.100.77'])
+    expect(namedValues('Version 1.2.3.4.5 and 10.0.0.1.2 are not addresses.')).toEqual([])
+  })
+
   it('says which of them none of its rows holds', () => {
     const rows = [logon(1), logon(2, { ipAddress: '10.0.0.5' })]
     expect(checkText('Logons from 203.0.113.7 and 10.0.0.5 on DC01.', rows, ['DC01'])).toMatchObject({ status: 'verified' })

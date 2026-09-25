@@ -36,7 +36,8 @@ export async function writeCaseBundle(kase: Case, sink: Sink, progress?: (messag
     },
   })
   for (const key of CASE_KV_KEYS(kase.id!)) {
-    if (key.startsWith('relationship-cache-') || key.startsWith('rule-context-')) continue // Rebuildable graph IDs belong to this database only.
+    // Rebuildable graph and story references name this database's row ids: the importing case rebuilds them.
+    if (key.startsWith('relationship-cache-') || key.startsWith('rule-context-') || key.startsWith('stories-')) continue
     const row = await db.kv.get(key)
     if (row) await write({ table: 'kv', row })
   }

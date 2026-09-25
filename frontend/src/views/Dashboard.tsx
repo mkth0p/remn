@@ -207,7 +207,7 @@ function DemoCaseButton() {
         const s = useStore.getState()
         s.setCurrentCase(c)
         s.bumpCases()
-        s.setView('chains')
+        s.setView('stories')
         toast('ok', `${c.name}: synthetic evidence, restored in this browser; nothing was uploaded`)
       })
       .catch((e: Error) => toast('err', e.message, 0))

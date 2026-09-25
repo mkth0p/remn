@@ -1,5 +1,6 @@
 import type { Case, CaseNote, Evidence, Finding, Ioc, Severity } from '../db/schema'
 import type { Chain, ChainStep } from './chains'
+import type { ReportStory } from './stories'
 import type { ChainReview, ReportSettings } from './review'
 import { chainSeverity, effectiveSeverity, stepVisible } from './review'
 import type { Incident } from '../rules/incidents'
@@ -84,6 +85,10 @@ export interface ReportData {
   measuredOn?: string
   /** the printed findings and texts checked against the rows they cite (data/claims.ts) */
   claims?: ReportClaims
+  /** the stories printed (data/stories.ts reportStories), each with the analyst's note */
+  stories?: ReportStory[]
+  /** the case's stories not printed: below the severity floor, without a note when only reviewed items print, or past the first twenty */
+  storiesLeft?: number
 }
 
 /** The model's part in the case, as the report prints it. */
@@ -453,6 +458,53 @@ ${table(
 ${left || hidden ? `<div class="cap">${left ? `${left} more step row(s) not printed (open the chain in REMN for the full list)` : ''}${left && hidden ? ' · ' : ''}${hidden ? `${hidden} routine step(s) not printed at the “${h(d.settings.chainDetail)}” detail level` : ''}.</div>` : ''}
 ${members.length ? `<div class="cap" style="margin-top:8px">${members.length} finding(s) linked to this chain, decided with it</div>${groupedFindings(members, {}, d.measures, d.claims)}` : ''}
 ${r?.by === 'ai' && r.aiReason ? `<div class="cap ai">Triage note (model): ${h(r.aiReason)}</div>` : ''}
+</div>`
+}
+
+// ---------------------------------------------------------------------------
+// stories
+// ---------------------------------------------------------------------------
+
+const PHASE_WORDS: Record<string, string> = {
+  reconnaissance: 'Reconnaissance',
+  'resource-development': 'Resource development',
+  'initial-access': 'Initial access',
+  execution: 'Execution',
+  persistence: 'Persistence',
+  'privilege-escalation': 'Privilege escalation',
+  stealth: 'Stealth',
+  'defense-impairment': 'Defense impairment',
+  'credential-access': 'Credential access',
+  discovery: 'Discovery',
+  'lateral-movement': 'Lateral movement',
+  collection: 'Collection',
+  'command-and-control': 'Command and control',
+  exfiltration: 'Exfiltration',
+  impact: 'Impact',
+}
+
+/** A story: its phases in the order they happened, what marks each (its worst findings, else its first step), and where its evidence stops. */
+function storyCard({ story: s, key, note }: ReportStory, d: ReportData): string {
+  const marks = (phase: string) => {
+    const steps = s.steps.filter((st) => st.phase === phase)
+    const found = steps.flatMap((st) => st.findings).sort((a, b) => rank(b.severity) - rank(a.severity))
+    const titles = [...new Set(found.map((f) => f.title))].slice(0, 2)
+    return titles.length ? h(titles.join('; ')) + (new Set(found.map((f) => f.title)).size > 2 ? ' …' : '') : `<span class="dim">${h(steps[0]?.title ?? '')}</span>`
+  }
+  const who = s.kind === 'host' ? 'Host' : 'Person'
+  const where = [
+    s.hosts.length ? `hosts <code>${h(s.hosts.slice(0, 6).join(', '))}</code>${s.hosts.length > 6 ? ` +${s.hosts.length - 6}` : ''}` : '',
+    s.attackerAddresses.length ? `from <code>${h(s.attackerAddresses.slice(0, 6).join(', '))}</code>` : '',
+  ].filter(Boolean)
+  return `<div class="card chain ${h(s.severity)}">
+<div class="card-head">${pill(s.severity)}<h3>${h(s.title)}</h3>${chip(`${s.confidence} ties`)}</div>
+<div class="card-meta">${who} ${h(s.subject.label)} · ${span(s.start, s.end)} · ${n(s.records)} record(s) in ${n(s.steps.length)} step(s)${where.length ? ' · ' + where.join(' · ') : ''}</div>
+${note ? `<div class="narr">${md(note)}</div><div class="cap">the analyst's reading of the story</div>${textNote(`story:${key}`, d.claims)}` : `<div class="narr"><p>${h(s.summary || s.headline)}</p></div>`}
+${table(
+  ['phase', 'when (UTC)', 'steps', 'what marks it'],
+  s.phases.map((p) => [`${p.severity ? pill(p.severity) + ' ' : ''}${h(PHASE_WORDS[p.phase] ?? p.label)}`, `<span class="nowrap">${span(p.first, p.last)}</span>`, n(p.steps), marks(p.phase)]),
+)}
+${s.gaps.length ? `<div class="cap">Where it stops: ${s.gaps.map((g) => h(g)).join(' ')}</div>` : ''}
 </div>`
 }
 
@@ -880,7 +932,7 @@ function method(d: ReportData, v: Verdict, conf: Confidence): string {
     `${n(rulesFired)} rule${rulesFired === 1 ? '' : 's'} produced the printed findings${engine ? `; ${n(engine)} finding${engine === 1 ? '' : 's'} came from an external detection engine` : ''}`,
     ...(checked.length
       ? [
-          `each printed finding was read back against the rows it cites (the first ${n(CHECKED_ROWS)} of each): ${n(claimCount('verified'))} verified, ${n(claimCount('unsupported'))} unsupported, ${n(claimCount('contradicted'))} contradicted${texts.length ? `; ${n(texts.length)} text${texts.length === 1 ? '' : 's'} (chain narratives, incident notes, the summary) checked for the addresses, accounts and hashes ${texts.length === 1 ? 'it names' : 'they name'}, ${n(texts.filter((t) => t.check.status === 'verified').length)} holding` : ''}`,
+          `each printed finding was read back against the rows it cites (the first ${n(CHECKED_ROWS)} of each): ${n(claimCount('verified'))} verified, ${n(claimCount('unsupported'))} unsupported, ${n(claimCount('contradicted'))} contradicted${texts.length ? `; ${n(texts.length)} text${texts.length === 1 ? '' : 's'} (chain narratives, incident and story notes, the summary) checked for the addresses, accounts and hashes ${texts.length === 1 ? 'it names' : 'they name'}, ${n(texts.filter((t) => t.check.status === 'verified').length)} holding` : ''}`,
         ]
       : []),
     ...(readings.length
@@ -957,6 +1009,15 @@ export function buildReportHtml(d: ReportData): string {
       ? `<p class="intro">${happened.items.some((m) => m.decision === 'confirmed') ? 'The confirmed items in the order they happened.' : 'Nothing was confirmed; the reviewed items in the order they happened.'} Dates are event times, UTC.${happened.total > happened.items.length ? ` The first ${happened.items.length} of ${happened.total} are listed; the other ${happened.total - happened.items.length}, the latest, are printed in full in the incident and chain sections.` : ''}</p>${momentsList(happened.items)}`
       : `<div class="empty">${happened.decided ? 'No dated item to place.' : 'No item has been decided yet: run the review before printing.'}</div>`,
   })
+  if (d.stories?.length) {
+    const left = d.storiesLeft ?? 0
+    sections.push({
+      id: 'stories',
+      title: 'Stories',
+      count: d.stories.length,
+      body: `<p class="intro">A story is what happened to one person, or on one host, in one incident: the records around what raised a flag, read along the tactics of ATT&amp;CK in the order they happened, each record tied to the story by its account, its logon session, the way into the host or the process that started it. A story is how the case reads, not a decision: the decisions are the chains' and the incidents'. Each says where its evidence stops.</p>${d.stories.map((st) => storyCard(st, d)).join('\n')}${left ? `<div class="cap">${n(left)} more ${left === 1 ? 'story is' : 'stories are'} not printed: below the severity floor${settings.onlyReviewed ? ', without a note (reviewed items only)' : ''} or past the first twenty.</div>` : ''}`,
+    })
+  }
   if (d.chains.length) {
     const campaign =
       settings.includeGraphs && d.chains.length > 1 && d.graphs.campaign

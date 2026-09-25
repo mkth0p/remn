@@ -30,7 +30,7 @@ export async function clearDerivedState(caseId: number, removedEvidenceId?: numb
     await rememberReviews(caseId, findings)
     await db.findings.bulkDelete(findings.map((f) => f.id!))
     const chains = ((await db.kv.get(`chains-${caseId}`))?.value as { chains?: unknown[] } | undefined)?.chains?.length ?? 0
-    await db.kv.bulkDelete([`chains-${caseId}`, `ruleDiags-${caseId}`, `relationship-cache-${caseId}`, `relationship-stories-${caseId}`])
+    await db.kv.bulkDelete([`chains-${caseId}`, `stories-${caseId}`, `ruleDiags-${caseId}`, `relationship-cache-${caseId}`, `relationship-stories-${caseId}`])
     await db.facets.where('caseId').equals(caseId).delete()
     return { findings: findings.length, chains }
   })

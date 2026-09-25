@@ -974,10 +974,10 @@ export function ReviewView() {
                   className="btn sm"
                   onClick={() => {
                     setFocusChain(ch.id)
-                    setView('chains')
+                    setView('stories')
                   }}
                 >
-                  open the chain
+                  open its story
                 </button>
                 <AddToTimeline
                   ts={ch.start}

@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import path from 'node:path'
 
-test('mixed package coverage and evidence-backed relationships in the built browser app', async ({ page }, testInfo) => {
+test('mixed package coverage and evidence-backed relationships explored in the built browser app', async ({ page }, testInfo) => {
   const target = testInfo.outputPath('investigation-package.zip')
   const python = process.env.REMN_TEST_PYTHON ?? (process.platform === 'win32' ? '../.venv/Scripts/python.exe' : '../.venv/bin/python')
   execFileSync(python, ['../samples/synthetic/make_package.py', '--out', target])
@@ -26,18 +26,19 @@ test('mixed package coverage and evidence-backed relationships in the built brow
   await expect(page.locator('tr').filter({ hasText: 'Prefetch Files/unknown.bin' })).toContainText('unsupported')
   await page.getByRole('button', { name: 'close', exact: true }).last().click()
 
-  // Relationships: the graph is built once, then read as stories.
-  await page.getByText('Relationships', { exact: true }).first().click()
+  // Explore, on the Stories page: the relationship graph is built once, then browsed entity by entity.
+  await page.getByText('Stories', { exact: true }).first().click()
+  await page.getByRole('button', { name: 'Explore', exact: true }).click()
   await page.getByRole('button', { name: 'Build relationships' }).click()
-  const stories = page.locator('.story-row')
-  await expect(stories.first()).toBeVisible({ timeout: 30000 })
-  // The attachment SHA-256 is also reported by a collected process row, so the digest ties two
-  // source files and its story names it; a finding-backed story may rank above it.
-  await stories
-    .filter({ hasText: /digest/ })
+  // The attachment SHA-256 is also reported by a collected process row, so the digest ties two source files.
+  await page.getByRole('combobox', { name: 'Entity type' }).selectOption('hash')
+  await page
+    .getByRole('button')
+    .filter({ hasText: /^hash ·/ })
     .first()
     .click()
-  await page.getByRole('button', { name: 'Links', exact: true }).click()
+  await expect(page.getByRole('img', { name: 'Connections around the selected entity' })).toBeVisible()
+  await expect(page.getByText('reported digest', { exact: true }).first()).toBeVisible()
   const link = page
     .locator('details')
     .filter({ has: page.getByText('attachment digest', { exact: true }) })
@@ -50,19 +51,10 @@ test('mixed package coverage and evidence-backed relationships in the built brow
   await link.getByRole('button', { name: 'Save relationship review' }).click()
   await expect(link.getByText('Saved', { exact: true })).toBeVisible()
 
-  // Explore mode keeps the entity browser and the neighbour diagram.
-  await page.getByRole('button', { name: 'Explore', exact: true }).click()
-  await page.getByRole('combobox', { name: 'Entity type' }).selectOption('hash')
-  await page
-    .getByRole('button')
-    .filter({ hasText: /^hash ·/ })
-    .first()
-    .click()
-  await expect(page.getByRole('img', { name: 'Connections around the selected entity' })).toBeVisible()
-  await expect(page.getByText('reported digest', { exact: true }).first()).toBeVisible()
-
+  // the graph is kept for the next visit
   await page.getByText('Evidence', { exact: true }).first().click()
-  await page.getByText('Relationships', { exact: true }).first().click()
+  await page.getByText('Stories', { exact: true }).first().click()
+  await page.getByRole('button', { name: 'Explore', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Rebuild relationships' })).toBeVisible()
   await page.getByText('Report', { exact: true }).first().click()
   const report = page.frameLocator('iframe[title="report preview"]')

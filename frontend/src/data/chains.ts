@@ -245,8 +245,8 @@ export async function buildChains(kase: Case, opts: ChainOptions = {}): Promise<
   return persistChainResult(caseId, result)
 }
 
-/** Store the snapshot the Chains view reads on load and mirror the chains as findings. */
-async function persistChainResult(caseId: number, result: ChainResult): Promise<ChainResult> {
+/** Store the snapshot the review and the report read and mirror the chains as findings (a story build keeps them too). */
+export async function persistChainResult(caseId: number, result: ChainResult): Promise<ChainResult> {
   const db = getDb()
   const previous = await loadChains(caseId)
   // Preserve decisions when upgrading old bare-username chain keys to qualified ones.

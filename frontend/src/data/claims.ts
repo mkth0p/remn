@@ -165,7 +165,8 @@ export function checkFinding({ finding: f, rows, rule, settings, evidence }: Fin
 // values named in text
 // ---------------------------------------------------------------------------
 
-const IPV4 = /(?<![\d.])(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}(?![\d.])/g
+// an address may end a sentence (its full stop is not a fifth part); one more part, or a digit, makes it something else
+const IPV4 = /(?<![\d.])(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}(?!\d|\.\d)/g
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g
 const HASH = /(?<![0-9A-Fa-f])(?:[0-9A-Fa-f]{64}|[0-9A-Fa-f]{40}|[0-9A-Fa-f]{32})(?![0-9A-Fa-f])/g
 
@@ -326,6 +327,8 @@ export async function loadReportClaims(input: {
   narratives: Record<string, string | undefined>
   incidents: IncidentLike[]
   summary: string
+  /** the analyst's notes on the printed stories, each with its story's rows (data/stories.ts storyRowIds) */
+  stories?: { key: string; title: string; note: string; ids: { events: number[]; mails: number[] } }[]
 }): Promise<ReportClaims> {
   const { source, findings } = input
   const checks = await checkFindings(findings, input.rules, source, input.settings, input.evidence)
@@ -350,6 +353,11 @@ export async function loadReportClaims(input: {
     for (const f of i.findings) ids[f.source].push(...f.refs.slice(0, CHECKED_ROWS))
     const [ev, ml] = await Promise.all([readRows(source, 'events', ids.events), readRows(source, 'mails', ids.mails)])
     texts.push({ key: `incident:${i.lead.id ?? i.title}`, what: `the notes on "${i.title}"`, check: checkText(text, [...ev.values(), ...ml.values()], names) })
+  }
+  for (const st of input.stories ?? []) {
+    if (!st.note.trim()) continue
+    const [ev, ml] = await Promise.all([readRows(source, 'events', st.ids.events), readRows(source, 'mails', st.ids.mails)])
+    texts.push({ key: `story:${st.key}`, what: `the note on the story "${st.title}"`, check: checkText(st.note, [...ev.values(), ...ml.values()], names) })
   }
   if (input.summary.trim()) texts.push({ key: 'summary', what: 'the executive summary', check: await checkTextInCase(input.summary, source) })
   return { findings: Object.fromEntries(checks), texts }

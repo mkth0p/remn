@@ -166,6 +166,12 @@ TOOLS: list[dict[str, Any]] = [
         {"chain_id": _STR, "user": _STR},
     ),
     _fn(
+        "get_story",
+        "One story: what happened to a person or a host, read along ATT&CK's phases, each step with why it is in the story and how surely, "
+        "its hops, and what its evidence cannot show. By story id, or by a user or host name; without one, the list of stories.",
+        {"story_id": _STR, "user": _STR},
+    ),
+    _fn(
         "list_iocs",
         "Indicators extracted from the case (ip, domain, url, hash, email), with counts and any reputation verdict.",
         {"kind": _STR, "only_bad": {"type": "boolean"}, "q": _STR, "limit": _INT},

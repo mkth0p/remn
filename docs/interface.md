@@ -2,7 +2,7 @@
 
 The pages follow the order of an investigation. Evidence goes in on the Evidence page;
 Events and Mails are the two tables with their search bar, and the Timeline draws both;
-Findings, Chains, Rules and Indicators are what the detection produced; the AI analyst,
+Findings, Stories, Rules and Indicators are what the detection produced; the AI analyst,
 Review and Case notes are where the analyst works the case; Report prints it; Settings
 holds the case context the rules and the model read. This page describes each, the
 keyboard, the review workflow and the report, and closes with the tests that cover the
@@ -115,21 +115,38 @@ score-band finding. A status carried over from an earlier evaluation of the same
 key is labelled as such in the flyout. Findings keep up to 5,000 row ids, so every mail
 of a mailbox-wide burst stays linked from its own preview pane.
 
-## Chains
+## Stories
 
-The Chains page reads a chain as a story: the left list ranks them by severity and
-score, the middle column is the ordered narrative (time and offset from the seed mail,
-a source icon for mailbox, Microsoft 365 or host, what happened, and the artifact or
-finding that tied the step to the seed), and the right column details the selected step
-and opens its rows. `j` and `k` move between steps. The score's parts show under the
-chain header.
+The Stories page reads the case as one story per person, or per host when the records name
+no one, and per incident ([Stories](stories.md) explains how). The left list ranks the
+stories by score, each with its worst severity, its headline (the worst finding of each
+phase, in order), a strip of the fifteen ATT&CK tactics lit where it has steps, its span and
+its counts; a search and a people/hosts filter narrow it. A case with findings and no stories
+yet is read into stories when the page opens; **Rebuild stories** reads it again.
 
-The Graph tab draws the same chain as a time-ordered swimlane graph (attacker side,
-mailbox, identity, Microsoft 365, host, machines and IPs): repeated actions fold into
-one node, routine runs into one grey dot, and every artifact that ties a step to the
-mail is a labelled edge back to the seed's domain, attachment or sender. Its "all
-chains" mode draws every chain of the case against the sender addresses, link domains,
-IPs and hosts they share, and lists the shared ones.
+The selected story opens with its subject (the account, whose forms and joins are one click
+away, or the host), its score, span and the confidence of its ties, a few plain sentences,
+the sources its findings name, its hosts, its campaign, a link to review its phishing chain,
+and the analyst's note, checked against the story's own records. Under it, the phase rail
+shows the tactics in ATT&CK's order, lit and numbered in the story's order; a tactic filters
+the timeline. **Story** is the timeline by day: time and phase in the gutter, a mailbox,
+Microsoft 365 or host icon, what happened, the host, address and accounts, the findings with
+their rule's measure, and why the step is in the story, with a dot for how surely; folded runs
+show their count. `j` and `k` move between steps. A step's pane gives its phase and why, why it
+is in the story, each finding with what its rule was measured to be worth, the session, hops
+and process tree around it, the links its records support in the relationship graph (with
+their review), and opens its records. **Lineage** lists the story's hops, logon sessions and
+process trees; **Who is who** the forms of the account, how sure each join is, and the accounts
+kept apart (namesakes in other organisations, bare names several accounts share); **Where it
+stops** what its hosts' evidence cannot show and the case's own file gaps; **JSON** the story
+as data. A story or a step can go to the case timeline, and **ask the analyst** hands the story
+to the AI view.
+
+**Campaigns** groups the stories that share the attacker's infrastructure and lists the
+accounts outside them that the same sources reached; flagged mails and failed logons in no
+story are grouped by sender domain and address. **Explore** browses the relationship graph:
+its build controls, the entities with a search and a type filter, the neighbours of the
+selected one and its links with their review.
 
 ## Rules and Indicators
 
@@ -282,12 +299,14 @@ it looks for, and notes when it also fires on clean machines; the method says ho
 rules behind the printed findings detect recorded attacks, and "Where it stops" counts the
 findings that come from leads.
 
-Chains are cards with a severity pill, the verdict, a score meter split into its parts,
+Stories come first ([Stories](stories.md#in-the-report)): a card per story with its phases in
+order, what marks each, the analyst's note and where its evidence stops. Chains are cards with
+a severity pill, the verdict, a score meter split into its parts,
 the narrative in an accent block, the swimlane picture, the step table with a lane mark
 per source and the linked findings; incidents are cards with the note, the findings and
 their ATT&CK chips; the case timeline is a vertical line with severity dots. With "chain
 graphs" on (the default), each printed chain carries its swimlane graph as a picture,
-drawn off-screen from the same model as the Chains page in the report's light palette,
+drawn off-screen from the same chain model the Review page reads, in the report's light palette,
 and a report with several chains opens with the shared-entity graph and its insights. The
 pictures are PNG data URLs embedded in the HTML, so the report stays one file. Runs of
 the same step (the same title, source, machine and ties in a row) print as one row with a

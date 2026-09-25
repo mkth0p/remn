@@ -159,7 +159,7 @@ class ModeGuardMiddleware:
 # The heavy paths: parsing, correlation, enrichment, conversion, lookups, models, store writes and
 # queries that run rules or SQL. Health, meta, rule packs, chunk PUTs and plain store reads are not budgeted.
 BUDGETED = re.compile(
-    r"^/api/(ingest/|analyze/|chains/|relationships/|enrich/|rules/convert/|reputation/|ai/|upload/init$|store/[^/]+/(ingest|import|export|rules/run|sql|reputation)$)"
+    r"^/api/(ingest/|analyze/|chains/|stories/|relationships/|enrich/|rules/convert/|reputation/|ai/|upload/init$|store/[^/]+/(ingest|import|export|rules/run|sql|reputation)$)"
 )
 
 
@@ -202,7 +202,7 @@ class RateLimitMiddleware:
 # streamed for the whole parse), correlation and conversion. Chunk uploads, health, meta and packs
 # return at once and are not counted.
 HEAVY = re.compile(
-    r"^/api/(ingest/|analyze/|chains/|relationships/|enrich/|rules/convert/|reputation/lookup|ai/(chat|query)|store/[^/]+/(ingest|import|export|rules/run|sql))"
+    r"^/api/(ingest/|analyze/|chains/|stories/|relationships/|enrich/|rules/convert/|reputation/lookup|ai/(chat|query)|store/[^/]+/(ingest|import|export|rules/run|sql))"
 )
 
 

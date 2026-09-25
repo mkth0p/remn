@@ -6,7 +6,7 @@
 REMN is a local investigation tool for Windows event logs and mailboxes. Drop `.evtx`
 files, PST/OST/mbox/eml/msg mailboxes and Microsoft 365 or Entra exports into the
 browser; everything is hashed, parsed by a local API, searched, run through detection
-rules, correlated into attack chains, reviewed, and printed as a report. Evidence stays
+rules, read into stories, reviewed, and printed as a report. Evidence stays
 on the machines you choose: in the browser's own database, or in a DuckDB file on the
 server for gigabyte cases.
 
@@ -17,17 +17,21 @@ server for gigabyte cases.
 - **Search** across events and mails with facets, filter chips, regex on any field,
   time and business-hours filters, saved searches, CSV/JSON export.
 - **Import investigation packages** with mixed mail, EVTX and structured host exports,
-  member hashes and explicit coverage; read the evidence as relationship stories, records
-  tied across source files through shared digests, files, processes, URLs and accounts.
+  member hashes and explicit coverage; explore the relationship graph of records tied
+  across source files through shared digests, files, processes, URLs and accounts.
 - **Detect** with a YAML rule catalogue (Windows, mail, Microsoft 365) plus the SigmaHQ
   and Sublime Security community packs, two rule engines (browser and SQL) kept in
   parity, and a calibrated mail risk score measured on public phishing corpora.
-- **Correlate** a suspicious mail with what the recipient's accounts and machines did
-  afterwards: scored attack chains with a swimlane graph.
+- **Read the case as stories**: one per person or host incident, read along ATT&CK's
+  phases, each step saying why it belongs and how surely; the forms one account goes by
+  joined with a confidence per join, logon sessions, RDP and admin-share hops and process
+  trees drawn from the logs, what each host's evidence cannot show, and the campaigns that
+  share an attacker's infrastructure. A phishing mail is followed to what its recipient's
+  accounts and machines did afterwards.
 - **Review** every chain and incident in order, rescore, annotate, unlink, and let a
   model propose decisions, each applied or dismissed by the analyst.
-- **Report** as one self-contained HTML file, printable to PDF, with chain of custody,
-  narratives, graphs and the decisions that shaped it.
+- **Report** as one self-contained HTML file, printable to PDF, with the stories, chain of
+  custody, narratives, graphs and the decisions that shaped it.
 - **Investigate with an agent** on a local model (Ollama, LM Studio, llama.cpp, vLLM,
   Jan) or Claude through a Claude Code sign-in: it plans, runs playbooks through read-only
   tools, keeps a hypothesis board and cites the rows it read, checked; every change it
@@ -35,7 +39,7 @@ server for gigabyte cases.
 
 | | |
 | --- | --- |
-| ![Attack chains](docs/images/chains.png) | ![Mails](docs/images/mails.png) |
+| ![Stories](docs/images/stories.png) | ![Mails](docs/images/mails.png) |
 
 ## Quick start
 
@@ -70,6 +74,7 @@ For development, run the API with `manage.py runserver` and the frontend with
 - [Data sources](docs/sources.md) — event logs, mailboxes, Microsoft 365 and Entra, deleted mail
 - [Investigation packages](docs/packages.md) — adapters, coverage, observations and relationships
 - [Detection](docs/detection.md) — rule DSL, community packs, mail risk scoring, engine parity
+- [Stories](docs/stories.md) — who is who, sessions, hops and process trees, phases, campaigns, where a story stops
 - [Attack chains](docs/chains.md) — how chains are built and scored
 - [Interface](docs/interface.md) — the pages, the review workflow, the report
 - [AI analyst](docs/ai.md) — the investigating agent, playbooks, approval inbox, AI ledger, transports

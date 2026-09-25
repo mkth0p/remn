@@ -1,6 +1,6 @@
 from django.urls import path
 
-from api.views import ai, chains, enrich, health, ingest, meta, relationships, reputation, rules, store, upload
+from api.views import ai, chains, enrich, health, ingest, meta, relationships, reputation, rules, store, stories, upload
 
 urlpatterns = [
     path("health", health.health),
@@ -19,6 +19,8 @@ urlpatterns = [
     path("rules/packs/<str:pack_id>/license", rules.pack_license),
     # cross-source attack chains
     path("chains/build", chains.build),
+    # stories: each person's and host's incident, read as ATT&CK phases
+    path("stories/build", stories.build),
     path("relationships/build", relationships.relationships),
     # enrichment passes (sender baseline, campaigns)
     path("enrich/mails", enrich.mails),

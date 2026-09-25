@@ -21,7 +21,7 @@ def test_ai_meta_endpoint():
     assert set(body["prompts"]) == {"analyst", "query", "explain", "rule", "report", "triage", "narrative", "json", "free"}
     assert body["prompts"]["free"] == "" and len(body["prompts"]["analyst"]) > 3000
     names = [t["function"]["name"] for t in body["tools"]]
-    assert "timeline_mails" in names and "sql" in names and "propose_decision" in names and len(names) == len(set(names)) == 34
+    assert "timeline_mails" in names and "sql" in names and "propose_decision" in names and len(names) == len(set(names)) == 35
     assert body["querySchema"]["properties"]["source"]["enum"] == ["events", "mails"]
     assert "events(" in body["schemaDoc"]
     assert body["numCtx"] > 0 and body["limits"]["maxMessages"] == 200
@@ -58,6 +58,7 @@ def test_tool_names_cover_frontend_handlers():
         "list_findings",
         "get_finding",
         "get_chain",
+        "get_story",
         "list_iocs",
         "get_case_notes",
         "facet_values",

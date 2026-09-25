@@ -449,7 +449,7 @@ export interface CaseNote {
   done?: boolean
   severity?: string
   /** the row, finding or chain a timeline entry was added from */
-  link?: { source: 'events' | 'mails' | 'findings' | 'chains'; id: number | string; label?: string }
+  link?: { source: 'events' | 'mails' | 'findings' | 'chains' | 'stories'; id: number | string; label?: string }
 }
 
 export class RemnDB extends Dexie {
@@ -544,6 +544,9 @@ export const CASE_KV_KEYS = (caseId: number) =>
     'relationship-aliases',
     'relationship-cache',
     'relationship-stories',
+    // the stories and campaigns of the case (data/stories.ts), rebuilt from the evidence, and the analyst's notes on them
+    'stories',
+    'story-notes',
     // the rule choices in force when the case was exported (packs, disabled rules), for the record
     'rule-context',
     // facet fields whose distinct values passed what one ingest counts

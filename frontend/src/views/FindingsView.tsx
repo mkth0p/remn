@@ -1074,7 +1074,7 @@ export function FindingsView() {
                               <div className="k">attack chains</div>
                               <div className="v">
                                 {rc.map((c) => (
-                                  <button key={c.id} className="btn link" style={{ display: 'block' }} onClick={() => setView('chains')}>
+                                  <button key={c.id} className="btn link" style={{ display: 'block' }} onClick={() => setView('stories')}>
                                     {c.title}
                                   </button>
                                 ))}

@@ -6,7 +6,7 @@ import path from 'node:path'
  * host that is not loopback (Chromium sends *.localhost to 127.0.0.1, so the page sees a remote
  * server). What it checks is what a visitor relies on: the closed paths, the copy that names the
  * host, the notice before the first upload, no probe of their localhost, and the linked lab read to
- * its ground truth (14,000 events, 1,000 mails, the five planted attack chains).
+ * its ground truth (14,000 events, 1,000 mails, one story for each of the five planted attacks).
  */
 const LAB = path.resolve('.e2e-tmp/lab/quick-start')
 const FILES = ['Mailboxes.mbox', 'Security.evtx', 'Sysmon.evtx', 'PowerShell.evtx', 'System.evtx', 'Defender.evtx', 'M365-UnifiedAuditLog.csv', 'M365-EntraSignIns.jsonl']
@@ -44,20 +44,21 @@ test('a public browser-only instance says where evidence goes and reads the link
   await expect(page.getByText('14,000 matches')).toBeVisible({ timeout: 60_000 })
   await expect(page.getByText(/showing the first 3,000 rows/)).toBeVisible()
 
-  // the rules run once the last file is in; chains built before that carry no findings
+  // the rules run once the last file is in; stories read before that carry no findings
   await expect(page.getByText(/finding\(s\) from \d+ rule\(s\)/).first()).toBeVisible({ timeout: 300_000 })
-  await page.getByText('Chains', { exact: true }).first().click()
-  await page.getByRole('button', { name: /build chains/ }).click()
-  // the ground truth: one chain per planted attack, each critical once its findings are attached
-  await expect(
-    page
-      .locator('.view-header .sub, h1 + .sub, .sub')
-      .filter({ hasText: /chain\(s\) ·/ })
-      .first(),
-  ).toContainText('5 chain(s) · 5 critical', { timeout: 180_000 })
-  // the five planted attack stories each give a chain; the other-tenant Alice joins none of them
-  for (const who of ['alice.martin', 'benoit.durand', 'carla.morel', 'daniel.roy', 'farah.benali']) await expect(page.locator('main').getByText(`${who}@northstar.example`).first()).toBeVisible()
-  await expect(page.locator('main').getByText('other-tenant.example')).toHaveCount(0)
+  // a case with findings and no stories yet is read into stories when the page opens
+  await page.getByText('Stories', { exact: true }).first().click()
+  await expect(page.locator('.view-header .sub').filter({ hasText: /stor(y|ies) ·/ })).toContainText('6 stories · 6 critical', { timeout: 180_000 })
+  // the ground truth: one story for each planted attack, and the other tenant's alice.martin, who
+  // cleared a log on her own host, a story of her own that none of Northstar's holds
+  for (const who of ['alice.martin', 'benoit.durand', 'carla.morel', 'daniel.roy', 'farah.benali'])
+    await expect(page.getByRole('button', { name: `Story ${who}@northstar.example`, exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Story alice.martin@other-tenant.example', exact: true })).toBeVisible()
+  // the password-spray victim's story reads as phases, with its RDP logon a step of it
+  await page.getByRole('button', { name: 'Story daniel.roy@northstar.example', exact: true }).click()
+  const rail = page.getByRole('list', { name: 'ATT&CK phases of the story' })
+  for (const phase of ['Initial access', 'Credential access', 'Lateral movement', 'Defense impairment']) await expect(rail.getByRole('listitem').filter({ hasText: phase })).toBeEnabled()
+  await expect(page.locator('.story .step').filter({ hasText: 'RemoteInteractive' }).first()).toBeVisible()
 
   expect(probes, 'a page served from another host must not probe the visitor’s localhost on its own').toEqual([])
 })
