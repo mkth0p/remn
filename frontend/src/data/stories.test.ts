@@ -130,6 +130,26 @@ describe('the rows a browser case posts', () => {
     expect(truncated).toEqual([])
   })
 
+  it('reads on a flagged host WinRM records, remoting script blocks and DNS answers with a private address, and every DHCP lease', async () => {
+    const minute = 60_000
+    await db.events.bulkAdd([
+      event(1, T0, { targetUser: 'daniel.roy', computer: 'WS-004', logonType: 10, ipAddress: '203.0.113.69' }),
+      event(2, T0 + minute, { eventId: 6, channel: 'Microsoft-Windows-WinRM/Operational', computer: 'WS-004', data: { connection: 'fs-001/wsman', Other: 'x' } }),
+      event(3, T0 + minute, { eventId: 4104, computer: 'WS-004', scriptBlockText: 'Invoke-Command -ComputerName FS-001 { whoami }' }),
+      event(4, T0 + minute, { eventId: 4104, computer: 'WS-004', scriptBlockText: 'Get-Date' }),
+      event(5, T0 + minute, { eventId: 22, provider: 'Microsoft-Windows-Sysmon', computer: 'WS-004', query: 'fs-001.corp', queryResults: '::ffff:10.0.0.21;' }),
+      event(6, T0 + minute, { eventId: 22, provider: 'Microsoft-Windows-Sysmon', computer: 'WS-004', query: 'www.example.com', queryResults: '93.184.216.34;' }),
+      { id: 7, caseId: 1, evidenceId: 3, ts: null, eventId: null, artifactType: 'dhcp', ipAddress: '10.0.0.31', workstation: 'WS-007', data: { ID: '10', 'Host Name': 'WS-007' } },
+    ] as never)
+    const { events } = await selectRows(
+      1,
+      [finding(1, [1])].map((f) => slimFinding(f as never)),
+    )
+    expect(events.map((e) => e.id).sort()).toEqual([1, 2, 3, 5, 7])
+    expect(events.find((e) => e.id === 2)?.data).toEqual({ connection: 'fs-001/wsman' })
+    expect(events.find((e) => e.id === 7)).toMatchObject({ artifactType: 'dhcp', data: { ID: '10', 'Host Name': 'WS-007' } })
+  })
+
   it('posts the effective severity, tags, techniques and entities of each finding and leaves false positives out', async () => {
     await db.events.add(event(1, T0, { targetUser: 'daniel.roy' }) as never)
     await db.findings.bulkAdd([

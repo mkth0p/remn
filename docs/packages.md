@@ -77,6 +77,7 @@ JSONL/NDJSON are supported under these directory names or matching file stems:
 | WdSupportLogs | Defender text/structured exports and supported CAB members |
 | Registry | native hive keys/values; service and Run/RunOnce configurations |
 | Forensics Collection Summary.csv | collection summary |
+| dhcp, or `DhcpSrvLog-*.log` / `DhcpV6SrvLog-*.log` | DHCP server audit log: one observation per line, the lease's address, host name and MAC; also recognised by its header when renamed |
 
 Column matching ignores capitalization, spaces and punctuation. Aliases include
 `ComputerName`/`HostName`, `PID`/`ProcessId`/`OwningProcess`,
@@ -87,7 +88,13 @@ preambles are supported. Unknown columns remain in the original record.
 Additional adapters handle scheduled-task XML `Exec` actions, scalar PowerShell
 CLIXML, `Field : value` command output and TCP/UDP `netstat -ano` rows. Unrecognized
 text lines remain searchable observations with their original line numbers.
+Event records exported as XML (`wevtutil qe /f:xml`, Event Viewer, a SIEM's XmlWinEventLog)
+anywhere in a package are read as event logs ([Data sources](sources.md#windows-event-logs)).
 Other XML schemas/actions produce an explicit parser error.
+
+A DHCP audit log's lines carry the server's local date and time without its zone. They are
+kept as written (`data.Date`, `data.Time`) and the observation has no time: REMN does not guess
+a zone. The stories read its leases (events 10 and 11) to attribute an address to a host.
 
 Text encoding is determined from the bytes, not from a byte order mark. Several
 Windows Defender support logs are UTF-16 with nothing declaring it; read as UTF-8

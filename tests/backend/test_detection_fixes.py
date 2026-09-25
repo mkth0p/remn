@@ -191,6 +191,51 @@ def test_an_older_log_gets_the_parent_filled_in_from_the_parents_own_event():
     assert calc["parentProcessName"].endswith("WmiPrvSE.exe") and "4688" in calc["enriched"]
 
 
+def test_a_process_access_carries_the_signer_of_its_source_from_the_same_log():
+    lineage = evtx_parser.Lineage()
+    sysmon, chan = "Microsoft-Windows-Sysmon", "Microsoft-Windows-Sysmon/Operational"
+    exe = "C:\\Users\\u\\AppData\\Local\\Temp\\setup.exe"
+
+    def load(guid, image, loaded, signed, signature="", status="Valid"):
+        return evtx_parser.flatten(
+            _event(
+                7,
+                sysmon,
+                chan,
+                {"ProcessGuid": guid, "Image": image, "ImageLoaded": loaded, "Signed": signed, "Signature": signature, "SignatureStatus": status},
+            )
+        )
+
+    def access(guid, image):
+        return evtx_parser.flatten(
+            _event(
+                10,
+                sysmon,
+                chan,
+                {"SourceProcessGUID": guid, "SourceImage": image, "TargetImage": "C:\\Windows\\system32\\lsass.exe", "GrantedAccess": "0x1410"},
+            )
+        )
+
+    rows = [
+        # an installer validly signed by its vendor, whose DLLs are signed too
+        load("{A}", exe, exe, "true", "Avira Operations GmbH & Co. KG"),
+        load("{A}", exe, "C:\\Windows\\System32\\kernel32.dll", "true", "Microsoft Windows"),
+        access("{A}", exe),
+        # a signed program that loaded an unsigned DLL first is vouched for by nothing
+        load("{B}", exe, exe, "true", "Avast Software s.r.o."),
+        load("{B}", exe, "C:\\Users\\u\\AppData\\Local\\Temp\\version.dll", "false", status="Unavailable"),
+        access("{B}", exe),
+        # an executable whose signature Sysmon could not verify, and one never seen loading
+        load("{C}", exe, exe, "false", status="Unavailable"),
+        access("{C}", exe),
+        access("{D}", exe),
+    ]
+    for r in rows:
+        lineage.apply(r)
+    assert rows[2]["sourceSigner"] == "Avira Operations GmbH & Co. KG" and "sourceSigner" in rows[2]["enriched"]
+    assert [r.get("sourceSigner") for r in (rows[5], rows[7], rows[8])] == [None, None, None]
+
+
 # ---------------------------------------------------------------------------
 # the Sigma converter and the packs it wrote before
 # ---------------------------------------------------------------------------

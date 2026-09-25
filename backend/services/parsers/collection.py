@@ -115,6 +115,38 @@ def _ez_kind(fields: dict[str, Any]) -> str | None:
     return None
 
 
+# the DHCP server's audit logs, one per weekday: DhcpSrvLog-Mon.log, DhcpV6SrvLog-Mon.log
+DHCP_PREFIXES = ("dhcpsrvlog", "dhcpv6srvlog")
+_DHCP_HEADER = re.compile(r"^\s*ID,\s*Date,\s*Time,\s*Description,\s*IP(?:V6)? Address", re.I)
+# what the audit log's event ids mean (the log's own legend); 10 and 11 give an address to a host
+DHCP_EVENTS = {
+    "10": "new lease",
+    "11": "renewed",
+    "12": "released",
+    "13": "address in use",
+    "14": "pool exhausted",
+    "15": "lease denied",
+    "16": "lease deleted",
+    "17": "lease expired and deleted",
+    "18": "lease expired",
+    "20": "BOOTP address leased",
+    "21": "dynamic BOOTP address leased",
+    "24": "cleanup started",
+    "25": "cleanup statistics",
+    "30": "DNS update request",
+    "31": "DNS update failed",
+    "32": "DNS update successful",
+}
+
+
+def sniff_category(name: str, head: bytes) -> str | None:
+    """A category the file's first lines show when its name does not: a DHCP audit log renamed."""
+    text = head[:4096].decode("utf-8", "replace")
+    if "Microsoft DHCP Service Activity Log" in text or any(_DHCP_HEADER.match(line) for line in text.splitlines()[:80]):
+        return "dhcp"
+    return None
+
+
 def category(name: str) -> str | None:
     parts = name.replace("\\", "/").split("/")
     for part in parts:
@@ -126,6 +158,8 @@ def category(name: str) -> str | None:
     if "forensicscollectionsummary" in key(name):
         return "collection-summary"
     stem = key(parts[-1].rsplit(".", 1)[0]) if parts else ""
+    if stem.startswith(DHCP_PREFIXES) or any(key(part) == "dhcp" for part in parts[:-1]):
+        return "dhcp"
     for prefix, kind in VELOCIRAPTOR:
         if stem.startswith(prefix):
             return kind
@@ -647,6 +681,8 @@ def records(path: str, name: str, notes: dict[str, Any] | None = None) -> Iterat
         with io.TextIOWrapper(io.BufferedReader(_ByteBudget(raw, MAX_PARSE_BYTES)), encoding=encoding, errors="replace", newline="") as fh:
             if category(name) == "defender" and name.lower().endswith((".txt", ".log")):
                 yield from _defender_records(fh, name, notes)
+            elif category(name) == "dhcp":
+                yield from _dhcp_records(fh, notes)
             elif name.lower().endswith((".txt", ".log")):
                 head = list(islice(fh, 200))
                 if _looks_like_reg_query(head):
@@ -738,7 +774,61 @@ def records(path: str, name: str, notes: dict[str, Any] | None = None) -> Iterat
                         yield _row_to_dict(row, header, notes)
 
 
+def _dhcp_records(fh, notes: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    """The lines of a DHCP server audit log: a legend, then a CSV header and one line per record."""
+    header: list[str] | None = None
+    for index, line in enumerate(fh):
+        if index >= MAX_TEXT_LINES:
+            notes["truncatedAtLine"] = MAX_TEXT_LINES
+            break
+        line = line.strip()
+        if not line:
+            continue
+        if header is None:
+            if _DHCP_HEADER.match(line):
+                header = [h.strip().rstrip(".") for h in line.split(",")]
+            continue
+        cells = next(csv.reader([line]), [])
+        if not cells or not cells[0].strip().isdigit():
+            continue
+        row = {(header[i] if i < len(header) else f"Column{i + 1}"): c.strip() for i, c in enumerate(cells)}
+        row["LineNumber"] = index + 1
+        yield row
+
+
+def _dhcp_row(raw: dict[str, Any], index: int, context: dict[str, Any]) -> dict[str, Any]:
+    """A DHCP audit record. Its date and time are the server's local time, written without the zone,
+    so it has no time on the case's timeline: it says which host had an address, not exactly when."""
+    ip = str(raw.get("IP Address") or raw.get("IPV6 Address") or "").strip() or None
+    host = str(raw.get("Host Name") or "").strip() or None
+    mac = str(raw.get("MAC Address") or "").strip() or None
+    rid = str(raw.get("ID") or "").strip()
+    what = DHCP_EVENTS.get(rid) or str(raw.get("Description") or "").strip() or "record"
+    local = f"{raw.get('Date') or ''} {raw.get('Time') or ''}".strip()
+    return {
+        "recordKind": "observation",
+        "artifactType": "dhcp",
+        "eventId": None,
+        "ts": None,
+        "observedAt": None,
+        "sourceIndex": index,
+        "parserVersion": VERSION,
+        "provider": "Microsoft-Windows-DHCP-Server",
+        "channel": "DHCP audit log",
+        "category": "collection:dhcp",
+        "computer": context.get("host"),
+        "ipAddress": ip,
+        "workstation": host,
+        "summary": (
+            f"DHCP {rid} {what}: {ip or '?'}" + (f" to {host}" if host else "") + (f" ({mac})" if mac else "") + (f", {local} server time" if local else "")
+        )[:2000],
+        "data": raw,
+    }
+
+
 def normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, Any]) -> dict[str, Any]:
+    if category(name) == "dhcp":
+        return _dhcp_row(raw, index, context)
     if category(name) == "deception":
         from services.parsers.deception import normalize as normalize_deception
 

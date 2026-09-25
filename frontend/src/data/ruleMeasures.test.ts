@@ -57,12 +57,13 @@ describe('what a rule’s measure says', () => {
           sigma: { repo: 'SigmaHQ/sigma', sha: 'x', recordings: 457 },
           attackSamples: { repo: 'r', sha: 'y', recordings: 278 },
           attackData: { repo: 'splunk/attack_data', sha: 'z', recordings: 81, unreadable: 16 },
+          attackDataWindows: { repo: 'splunk/attack_data', sha: 'z', recordings: 536, maxMb: 20, overSize: 36 },
           evtxToMitre: { repo: 'mdecrevoisier/EVTX-to-MITRE-Attack', sha: 'w', recordings: 279 },
           baseline: { repo: 'NextronSystems/evtx-baseline', tag: 'v0.8.4', machines: 7, events: 6_611_184 },
         },
       }),
     ).toBe(
-      'Measured on 2026-09-24 on 457 SigmaHQ regression samples, 278 EVTX-ATTACK-SAMPLES recordings, 81 Microsoft 365 and Entra ID datasets of Splunk attack_data and 279 EVTX-to-MITRE-Attack recordings, and on the logs of 7 clean Windows machines of evtx-baseline v0.8.4 (6,611,184 events).',
+      'Measured on 2026-09-24 on 457 SigmaHQ regression samples, 278 EVTX-ATTACK-SAMPLES recordings, 81 Microsoft 365 and Entra ID datasets of Splunk attack_data, 536 Windows event-log datasets of Splunk attack_data and 279 EVTX-to-MITRE-Attack recordings, and on the logs of 7 clean Windows machines of evtx-baseline v0.8.4 (6,611,184 events).',
     )
     expect(measuredOn(null)).toBe('')
   })

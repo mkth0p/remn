@@ -199,6 +199,8 @@ EVENT_COLUMNS: list[tuple[str, tuple[str, Any]]] = [
     ("signed", _S),
     ("signature", _S),
     ("signatureStatus", _S),
+    # the source process's code signer on Sysmon 8 / 10, from its own image load (parsers/evtx_parser.py)
+    ("sourceSigner", _S),
     ("sourceImage", _S),
     ("targetImage", _S),
     ("grantedAccess", _S),

@@ -5,6 +5,52 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- REMN's own rules raise 200 high and critical findings on the seven clean machines of
+  evtx-baseline instead of 895, and detect every recording they detected before (342 recordings,
+  435 rule detections, up from 340 and 433). A rule a busy machine matches over and over raises
+  one finding per program per machine (TeamViewer or KeePass memory read, remote threads, LOLBin
+  command lines, suspicious script blocks, Run keys). Rules whose matches split by how sure they
+  are became two: a Run or RunOnce value naming a program under Program Files or Windows is a low
+  rule of its own, an unsigned DLL in System32 itself is medium, a thread started at a Windows
+  routine is low while one started in no module or at a loader routine stays high (Sysmon 8's
+  start module and function are read), and a quiet install of a local MSI package is low. The WMI
+  persistence rule no longer fires on the SCM Event Log consumer Windows registers itself, and the
+  LOLBin rule no longer takes wmic's own output formats (`/format:list`) for XSL script
+  processing. See `docs/reviews/2026-09-25-noise-and-held-out.md`.
+- A Sysmon 8 or 10 carries the signer of its source process (`sourceSigner`): the valid signature
+  Sysmon recorded on the process's own executable when it started (Sysmon 7), as long as every
+  image the log shows it loading before was signed. A program signed by a vendor other than
+  Microsoft reading LSASS memory is a medium finding of its own (security products' installers
+  and updaters do it); an unsigned one, one signed by Microsoft, or one whose signer the log does
+  not show stays high.
+- Event records exported as XML are read as event logs, into the rows the same records give from
+  an `.evtx`: `wevtutil qe /f:xml`, Event Viewer's "Save All Events As" XML, Get-WinEvent's
+  `ToXml()` and a SIEM's XmlWinEventLog export (Splunk's one record a line), as `.xml`, `.log` or
+  `.txt`, in UTF-8 or UTF-16, alone, in an archive of event logs or in a package. They used to be
+  refused as an unsupported XML schema or left unread. The 50,176 records of EVTX-ATTACK-SAMPLES
+  and EVTX-to-MITRE-Attack read both ways give the same rows but for line breaks, boolean text
+  and control characters XML does not allow; "where the evidence stops" says an export cannot
+  show records deleted before it was made.
+- Host lineage reads WMI and WinRM lateral movement (a program started by WmiPrvSE or the WinRM
+  plug-in host tied to the network logon before it, WinRM 91 on the target, `wmic /node:`,
+  `Invoke-Command -ComputerName`, `Enter-PSSession`, `winrs -r:` and WinRM 6 on the source, WMI
+  queries a remote host refused), attributes addresses to hosts from DNS answers (Sysmon 22) and
+  DHCP leases with the time span of each, and places an Entra sign-in on the host of its device's
+  name. The DHCP server's audit log (`DhcpSrvLog-*.log`) is read as a collection artifact, its
+  local times kept without a zone.
+- The rules are measured on a second library they were not written for: the 535 Windows datasets
+  of Splunk attack_data (785,361 events, 226 ATT&CK techniques), which REMN reads now. By default
+  REMN detects 227 of them (42%) at medium level and above, 33 of those through its own rules
+  alone; a finding its technique and level do not explain is not counted. 137 rules that no
+  recording showed detecting before, four of them REMN's own, have their first.
+- `tools/measure_rules.py --gate rules/measures-detail.json` fails when a rule stops detecting a
+  recording it detected, a SigmaHQ rule stops firing on its own sample, a recording is no longer
+  read, or a high or critical rule raises more findings on a clean machine;
+  `.github/workflows/measure-rules.yml` runs it weekly, on demand and on a pull request that
+  changes the rules, the rule engine or the parsers. `--datasets DIR --fetch` fetches every
+  dataset at its pinned version, and `--detail` writes what each rule detects, recording by
+  recording (`rules/measures-detail.json`, committed with `rules/measures.json`).
+
 - Stories replace the Chains and Relationships pages: the case reads as one story per person,
   or per host when its records name no one, and per incident, along ATT&CK's phases. A story
   starts from a finding of medium severity or more or a phishing chain; a mail received or a

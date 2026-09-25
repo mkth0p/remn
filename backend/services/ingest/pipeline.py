@@ -91,6 +91,8 @@ def detect_evtx_format(name: str, head: bytes) -> str:
     arc = detect_archive(name, head)
     if arc:
         return arc
+    if evtx_parser.looks_like_event_xml(head):
+        return evtx_parser.XML_FORMAT
     return m365.detect_format(name, head) or "evtx"
 
 
@@ -195,7 +197,8 @@ def member_to_tempfile(member: Member, tmp_dir: str, suffix: str = ".member") ->
 # EVTX
 # ---------------------------------------------------------------------------
 class EvtxSource:
-    """Iterates events from a single EVTX or an archive of EVTX files, tagging rows with sourceFile."""
+    """Iterates events from a single EVTX, event records exported as XML, a cloud export, or an
+    archive of them, tagging rows with sourceFile."""
 
     def __init__(
         self,
@@ -225,9 +228,9 @@ class EvtxSource:
         self.format = detect_evtx_format(name, head)
 
     def __iter__(self) -> Iterator[dict[str, Any]]:
-        if self.format == "evtx":
+        if self.format in ("evtx", evtx_parser.XML_FORMAT):
             src: Any = self.path if self.path else io.BytesIO(self.data or b"")
-            yield from self._iter_one(src, self.name)
+            yield from self._iter_one(src, self.name, self.format)
             return
         if self.format in m365.FORMATS:
             yield from self._iter_m365(self.path, self.data, self.format, self.name)
@@ -236,27 +239,32 @@ class EvtxSource:
             low = member.name.lower()
             if low.endswith(".evtx"):
                 suffix, fmt = ".evtx", "evtx"
-            elif low.endswith((".csv", ".json", ".jsonl", ".ndjson")):
+            elif low.endswith((".csv", ".json", ".jsonl", ".ndjson", ".xml", ".log", ".txt")):
                 with member.open() as fh:
                     head = fh.read(SNIFF_BYTES)
-                fmt = m365.detect_format(member.name, head) or ""
+                fmt = evtx_parser.XML_FORMAT if evtx_parser.looks_like_event_xml(head) else m365.detect_format(member.name, head) or ""
                 if not fmt:
-                    skip_record(self.files, member.name, member.size, "not a recognised Microsoft 365 or Entra export")
+                    table = low.endswith((".csv", ".json", ".jsonl", ".ndjson"))
+                    skip_record(
+                        self.files, member.name, member.size, "not a recognised Microsoft 365 or Entra export" if table else "not an event log or cloud export"
+                    )
                     continue
-                suffix = ".member"
+                suffix = ".xml" if fmt == evtx_parser.XML_FORMAT else ".member"
             else:
                 skip_record(self.files, member.name, member.size, "not an event log or cloud export")
                 continue
             tmp_path, sha = member_to_tempfile(member, self.tmp_dir, suffix)
             try:
-                before, dup_before = self.stats.count, self.stats.duplicates
-                if fmt == "evtx":
-                    yield from self._iter_one(tmp_path, member.name)
+                before, dup_before, rep_before = self.stats.count, self.stats.duplicates, self.stats.repaired
+                if fmt in ("evtx", evtx_parser.XML_FORMAT):
+                    yield from self._iter_one(tmp_path, member.name, fmt)
                 else:
                     yield from self._iter_m365(tmp_path, None, fmt, member.name)
                 entry = {"name": member.name, "size": member.size, "sha256": sha, "count": self.stats.count - before, "format": fmt, "status": "parsed"}
                 if self.stats.duplicates > dup_before:
                     entry["duplicates"] = self.stats.duplicates - dup_before
+                if self.stats.repaired > rep_before:
+                    entry["repaired"] = self.stats.repaired - rep_before
                 self.files.append(entry)
             finally:
                 try:
@@ -274,9 +282,14 @@ class EvtxSource:
             self.stats.errors += 1
             self.files.append({"name": source_file, "status": "error", "error": str(exc)[:200]})
 
-    def _iter_one(self, src: Any, source_file: str) -> Iterator[dict[str, Any]]:
+    def _iter_one(self, src: Any, source_file: str, fmt: str = "evtx") -> Iterator[dict[str, Any]]:
         try:
-            for row in evtx_parser.iter_events(src, include_raw=self.include_raw, stats=self.stats, source_file=source_file):
+            rows = (
+                evtx_parser.iter_xml_events(src, include_raw=self.include_raw, stats=self.stats)
+                if fmt == evtx_parser.XML_FORMAT
+                else evtx_parser.iter_events(src, include_raw=self.include_raw, stats=self.stats, source_file=source_file)
+            )
+            for row in rows:
                 row["sourceFile"] = source_file
                 yield row
         except Exception as exc:  # noqa: BLE001

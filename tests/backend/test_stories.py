@@ -187,6 +187,18 @@ def test_flags_two_days_apart_are_two_incidents_and_a_namesake_elsewhere_is_its_
     assert other["org"] == "other-tenant.example"
 
 
+def test_a_sign_in_from_a_joined_device_happened_on_that_host():
+    events, findings = _intrusion()
+    signin = dict(
+        ev(50, 45, base=ENTRA, user=DANIEL, upn=DANIEL, subjectUser=DANIEL, targetUser=DANIEL, ipAddress="203.0.113.69", status="0"),
+        data={"deviceName": "WS-004", "deviceId": "b1c2", "trustType": "Hybrid Azure AD joined"},
+    )
+    findings.append(finding("m365-signin-risky", "high", [50], tags=["initial-access"], attack=["T1078.004"], ipAddress="203.0.113.69"))
+    [story] = build_stories([*events, signin], [], findings, SETTINGS)["stories"]
+    [step] = [st for st in story["steps"] if "event:50" in st["refs"]]
+    assert step["host"] == "ws-004" and "from the Entra device WS-004 (Hybrid Azure AD joined)" in step["notes"]
+
+
 def test_a_flag_on_a_host_that_names_no_one_is_a_host_story_and_false_positives_are_left_out():
     events = [
         ev(1, 0, base=SCM, eventId=7045, computer="FS-002.northstar.example", serviceName="evil", serviceFile="C:\\x.exe"),
@@ -295,7 +307,7 @@ def test_the_browser_sends_every_field_the_story_engine_reads():
 
     mail_only = {"date", "fromAddr", "fromName", "replyTo", "urls", "attachments", "messageId", "subject", "first", "n"}
     fields = set(re.findall(r"""\b(?:ev|row)\.get\(["']([A-Za-z]+)["']""", py)) - mail_only
-    data = set(re.findall(r"""(?:\bdata|_data\(ev\))\.get\(["']([A-Za-z.]+)["']""", py))
+    data = set(re.findall(r"""(?:\bdata|\bd|_data\(\w+\))\.get\(["']([A-Za-z. ]+)["']""", py))
     chain_keys = set(
         re.findall(
             r"'([^']+)'", (root / "frontend/src/data/chains.ts").read_text(encoding="utf-8").split("export const CHAIN_DATA_KEYS")[1].split("] as const")[0]
@@ -308,3 +320,11 @@ def test_the_browser_sends_every_field_the_story_engine_reads():
 
     block = ts[ts.index("export const LINEAGE_EVENT_IDS") :]
     assert {int(x) for x in re.findall(r"\d+", block[: block.index("]")])} == set(LINEAGE_EVENT_IDS)
+    from services.analysis.stories import LINEAGE_CHANNEL_EVENTS, PRIVATE_ANSWER, REMOTE_SCRIPT
+
+    block = ts[ts.index("export const LINEAGE_CHANNEL_EVENTS") :]
+    block = block[: block.index("\n]")]
+    assert [(c, tuple(int(i) for i in ids.split(","))) for c, ids in re.findall(r"\['([a-z-]+)', \[([\d, ]+)\]\]", block)] == list(LINEAGE_CHANNEL_EVENTS)
+    for name, value in (("REMOTE_SCRIPT", REMOTE_SCRIPT), ("PRIVATE_ANSWER", PRIVATE_ANSWER)):
+        literal = re.search(rf"export const {name} = '([^']*)'", ts).group(1)
+        assert literal.replace("\\\\", "\\") == value, name

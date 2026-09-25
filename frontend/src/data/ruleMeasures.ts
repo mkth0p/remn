@@ -31,7 +31,8 @@ export interface MeasureSources {
   sources: {
     sigma?: { repo: string; sha: string; recordings: number }
     attackSamples?: { repo: string; sha: string; recordings: number }
-    attackData?: { repo: string; sha: string; recordings: number; unreadable?: number }
+    attackData?: { repo: string; sha: string; recordings: number; unreadable?: number; missing?: number }
+    attackDataWindows?: { repo: string; sha: string; recordings: number; maxMb?: number; overSize?: number; missing?: number }
     evtxToMitre?: { repo: string; sha: string; recordings: number }
     baseline?: { repo: string; tag: string; machines: number; events: number }
   }
@@ -122,11 +123,12 @@ export const isLead = (r: MeasureReading) => r.verdict === 'lead' || r.verdict =
 /** What the rules were measured on, in a sentence. */
 export function measuredOn(s: MeasureSources | null | undefined): string {
   if (!s?.sources) return ''
-  const { sigma, attackSamples, attackData, evtxToMitre, baseline } = s.sources
+  const { sigma, attackSamples, attackData, attackDataWindows, evtxToMitre, baseline } = s.sources
   const recorded = [
     sigma?.recordings ? `${fmtNum(sigma.recordings)} SigmaHQ regression samples` : '',
     attackSamples?.recordings ? `${fmtNum(attackSamples.recordings)} EVTX-ATTACK-SAMPLES recordings` : '',
     attackData?.recordings ? `${fmtNum(attackData.recordings)} Microsoft 365 and Entra ID datasets of Splunk attack_data` : '',
+    attackDataWindows?.recordings ? `${fmtNum(attackDataWindows.recordings)} Windows event-log datasets of Splunk attack_data` : '',
     evtxToMitre?.recordings ? `${fmtNum(evtxToMitre.recordings)} EVTX-to-MITRE-Attack recordings` : '',
   ].filter(Boolean)
   const list = recorded.length > 1 ? `${recorded.slice(0, -1).join(', ')} and ${recorded[recorded.length - 1]}` : (recorded[0] ?? '')

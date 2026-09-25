@@ -52,7 +52,8 @@ export interface FileSequenceStats {
   checksums?: { chunks: number; fileHeader: boolean; dirty: boolean; badHeader?: number[]; badHeaderCount?: number; badData?: number[]; badDataCount?: number } | null
 }
 
-export type GapKind = 'record-holes' | 'time-backwards' | 'clock-set-back' | 'checksum' | 'missing-between-files' | 'log-starts-late' | 'export-cap' | 'mail-throttled' | 'signins-start-late'
+export type GapKind =
+  'record-holes' | 'time-backwards' | 'clock-set-back' | 'checksum' | 'missing-between-files' | 'log-starts-late' | 'export-cap' | 'xml-export' | 'mail-throttled' | 'signins-start-late'
 
 export interface GapStatement {
   kind: GapKind
@@ -364,6 +365,28 @@ function exportCaps(evidence: Evidence[]): GapStatement[] {
   return out
 }
 
+/** Event records read from an XML export rather than a log file: none of the file's own numbering to check. */
+function xmlExports(evidence: Evidence[]): GapStatement[] {
+  const out: GapStatement[] = []
+  const check = (e: Evidence, file: string, format: unknown, count: unknown) => {
+    if (String(format) !== 'event-xml') return
+    const n = Number(count ?? 0)
+    out.push({
+      kind: 'xml-export',
+      severity: 'low',
+      text:
+        `${file}: ${fmtNum(n)} event ${plural(n, 'record')} exported as XML. An export holds what its query selected and not the log file's own record numbering, ` +
+        'so a record deleted from the log before the export cannot be told from one the export left out; the log file itself (wevtutil epl) can be checked for that.',
+      evidenceId: e.id,
+    })
+  }
+  for (const e of evidence) {
+    check(e, e.name, e.format, e.stats?.count)
+    for (const f of records(e.stats)) if (f.status === 'parsed') check(e, String(f.name ?? e.name), f.format, f.count)
+  }
+  return out
+}
+
 function throttledStatements(throttled: { user: string; ts: number }[]): GapStatement[] {
   const first = new Map<string, number>()
   for (const t of throttled) first.set(t.user, Math.min(first.get(t.user) ?? Infinity, t.ts))
@@ -381,7 +404,7 @@ const ORDER = { high: 0, medium: 1, low: 2 }
 /** Everything the evidence cannot show, most serious first. */
 export function evidenceGaps(input: GapInput): GapStatement[] {
   const seqs = fileSequences(input.evidence)
-  const out = [...seqs.flatMap(fileStatements), ...timeStatements(seqs), ...betweenFiles(seqs), ...exportCaps(input.evidence)]
+  const out = [...seqs.flatMap(fileStatements), ...timeStatements(seqs), ...betweenFiles(seqs), ...exportCaps(input.evidence), ...xmlExports(input.evidence)]
   const start = input.incidentStart
   if (start != null) {
     out.push(...startsLate(seqs, start))

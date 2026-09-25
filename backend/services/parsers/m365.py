@@ -539,6 +539,8 @@ _PORTAL_MAP = {
     "compliant": "isCompliant",
     "managed": "isManaged",
     "device id": "deviceId",
+    "device name": "deviceName",
+    "join type": "trustType",
     "user type": "userType",
     "country or region": "country",
     "country": "country",
@@ -660,6 +662,10 @@ def entra_row(o: dict[str, Any], day_first: bool | None = None) -> dict[str, Any
         "browser": dev.get("browser") or g.get("browser"),
         "operatingSystem": dev.get("operatingSystem") or g.get("operatingSystem"),
         "deviceId": dev.get("deviceId") or g.get("deviceId"),
+        # the device's name in Entra and how it is joined: a joined device named like a host of the
+        # case is that host (analysis/lineage.py)
+        "deviceName": dev.get("displayName") or g.get("deviceDisplayName") or g.get("deviceName"),
+        "trustType": dev.get("trustType") or g.get("trustType"),
         "isCompliant": dev.get("isCompliant", g.get("isCompliant")),
         "isManaged": dev.get("isManaged", g.get("isManaged")),
         "errorCode": err,

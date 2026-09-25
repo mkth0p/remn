@@ -110,6 +110,25 @@ the linked lab, and runs the same in both engines. `tools/evtx_attack_samples.py
 job hold the detections in place: the job fails when a rule that identifies a sample's
 attack stops firing on it, or when the engines disagree on any sample.
 
+The rules that flooded the clean machines were cut down without losing a recorded detection
+(measured in [the noise review](reviews/2026-09-25-noise-and-held-out.md)). A rule a busy
+machine matches over and over raises one finding per program per machine: a program reading
+TeamViewer's or KeePass's memory, a thread started in another process, a LOLBin command line,
+a suspicious script block, a Run key. A rule whose matches split by how sure they are is two
+rules: a Run or RunOnce value, a hijack value or a print monitor pointing into a user folder, at
+a script or a LOLBin (high) apart from one naming a program under Program Files or Windows
+(low); an unsigned DLL a Windows system process loads from outside the system folder, or under a
+phantom DLL's name (high), apart from one in the system folder itself (medium); a thread started
+in another process at no module or at a loader routine (high) apart from one at a Windows
+routine (low); msiexec installing from a URL, installing a file that is not an installer
+package or registering a DLL from outside Program Files (the LOLBin rule, high) apart from a
+quiet install of a local package (low); a program outside Windows reading LSASS
+memory (high) apart from one Sysmon saw validly signed by a vendor other than Microsoft
+(medium). The signer is the parser's: a Sysmon 8 or 10 carries `sourceSigner`, the signature
+Sysmon recorded on its source process's own executable when that process started (Sysmon 7,
+valid), as long as every image the log shows it loading before was signed as well. A log
+without Sysmon 7 gives no signer, and the high rule applies.
+
 ## Community rule packs
 
 The public collections ship with REMN as packs under `rules/community/`, already
@@ -202,7 +221,12 @@ Recorded attacks, at the versions measured:
 - EVTX-to-MITRE-Attack (`4748560`): 279 recordings, each labelled with the ATT&CK technique of
   the folder it is filed in. No rule was written against it before it was first measured
   ([the head-to-head](reviews/2026-09-25-head-to-head.md)); the two rules written since for
-  the gaps it showed are not measured on it (`WRITTEN_AGAINST` in the tool).
+  the gaps it showed are not measured on it (`WRITTEN_AGAINST` in the tool);
+- the Windows datasets of Splunk attack_data (`7a5e9d5`): 535 recordings of the event logs of
+  its attack range, kept as XmlWinEventLog, each labelled with the techniques its author tested.
+  No rule was written against them before they were first measured
+  ([the noise review](reviews/2026-09-25-noise-and-held-out.md)); the 36 datasets larger than
+  20 MB, and the 14 whose files are not at the pinned commit, are not measured.
 
 Clean machines: the seven Windows installations of NextronSystems/evtx-baseline `v0.8.4`
 (6.6 million events, 91% of them Sysmon), which SigmaHQ runs its own rules against for false
@@ -229,18 +253,31 @@ need, so a Microsoft 365 rule reads no Windows event). The pages read it as:
 
 Mail rules are calibrated on mail corpora instead (below).
 
-At this commit, 885 of the 3,002 event rules fire on a recording of what they look
-for and 2,117 are leads; 457 of the 457 SigmaHQ rules with a sample fire on it; on the
-clean machines 168 of the 2,789 rules whose log sources they have fired at least once.
+At this commit, 1,023 of the 3,008 event rules fire on a recording of what they look
+for and 1,985 are leads; 457 of the 457 SigmaHQ rules with a sample fire on it; on the
+clean machines 170 of the 2,794 rules whose log sources they have fired at least once.
 Measuring found SigmaHQ rules that could never fire (the AppX deployment channel, comparisons
 with true) and PowerShell rules blind to PowerShell 7's log, since fixed in the converter.
 EVTX-to-MITRE-Attack, added as a source on 2026-09-25, gave 53 leads their first recorded
 attack, five of them REMN's own (AS-REP roasting, Kerberos pre-authentication brute force, audit
-policy and firewall changes, the system time changed).
+policy and firewall changes, the system time changed); attack_data's Windows datasets, added the
+same day, gave 137, four of them REMN's own (Kerberoasting, password spraying, a suspicious DNS
+query, a member added to a security group).
 
-**Re-measuring** takes the downloads listed in the tool's docstring (about 9 GB unpacked) and
-about an hour on four cores; re-run it after changing a rule or re-importing a pack. A backend
-test warns while a rule has changed since it was measured.
+**Re-measuring** takes the downloads listed in the tool's docstring (about 10 GB unpacked;
+`--datasets DIR --fetch` fetches them at their pinned versions) and about two hours on four cores;
+re-run it after changing a rule or re-importing a pack, with `--detail rules/measures-detail.json`,
+and commit both files. A backend test warns while a rule has changed since it was measured.
+
+**The gate**: `--gate rules/measures-detail.json` measures again and fails when a rule no longer
+detects a recording it detected when the committed detail was taken, a SigmaHQ rule no longer
+fires on its own sample, a recording is no longer read, or a high or critical rule raises more
+findings on a clean machine (all of its findings, when it was lower when measured).
+`.github/workflows/measure-rules.yml` runs it weekly, on demand, and on a pull request that
+touches the rules, the rule engine, the parsers or the tool, and uploads the measures it took. A
+change meant to lose a detection or add noise commits those measures, so the diff of the two files
+says what it changed. The weekly run also catches a new release of a dependency (the EVTX parser,
+DuckDB) that changes what the rules match.
 
 ## Mail risk scoring
 

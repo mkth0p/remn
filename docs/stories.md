@@ -75,10 +75,30 @@ Host lineage reads, for each host:
   session manager's 21 and 25), a network session that opened an admin share or an execution
   pipe (`svcctl`, `atsvc`, `PSEXESVC`), created a task or a service or ran a program; a
   service installed within five minutes of an admin share being opened (PsExec's pattern);
-  explicit credentials used towards another host (4648), strong when the logon there follows;
-  a Sysmon connection to a remote-access port of another host of the case. A hop's source is
-  a host when the case names it (the workstation name of the logon) or shows whose address it
-  is (the private address a host's own Sysmon connections come from), otherwise the address;
+  explicit credentials used towards another host (4648), strong when the logon there follows,
+  and read as WMI, WinRM or RDP by the program that used them (`wmic.exe`, `winrs.exe`,
+  `mstsc.exe`); a Sysmon connection to a remote-access port of another host of the case;
+- **WMI and WinRM hops**: on the target, a program started by `WmiPrvSE.exe` or by the WinRM
+  plug-in host (`wsmprovhost.exe`) belongs to the network logon of a person just before it
+  (medium: tied by time, since neither logs the logon id it runs under), and a WinRM shell
+  started there (WinRM 91) marks the network session it came in on; on the source, a command
+  that reaches another host (`wmic /node:`, `Invoke-Command -ComputerName`, `Enter-PSSession`,
+  `winrs -r:`, `Invoke-WmiMethod -ComputerName`, in a process's command line or a script block),
+  the WinRM client's own connection (WinRM 6), strong when the network logon on the named host
+  follows, and a WMI query refused by a remote host (WMI-Activity 5858, medium). A hop's source
+  is a host when the case names it (the workstation name of the logon) or shows whose address it
+  is (below), otherwise the address;
+- **addresses**: a private address is a host's when the host's own Sysmon connections come from
+  it, a logon names the host as its workstation from it, a DNS answer on a host of the case gives
+  it for that host's name (Sysmon 22 or the DNS client's log, 3008; private answers only), or the
+  DHCP server leased it to that
+  host (its audit log, `DhcpSrvLog-*.log`, events 10 and 11). Each attribution keeps its basis
+  and the time span of its records, so an address that moved from one host to another is read,
+  at a step's time, as the host whose records are nearest;
+- **devices**: an Entra sign-in names the device it came from (its display name and join type,
+  from `deviceDetail`); a device of the name of a host of the case is that host, so a sign-in
+  from a joined laptop is a step on the laptop, and a device the case has no logs of is said to
+  be one;
 - **process trees**: Sysmon 1 by process GUID, 4688 by process id and creator id on one host
   (the latest creation of that id before the child, since ids are reused), a process both
   logged read as one, each placed in its logon session;
@@ -182,8 +202,12 @@ A server case asks the API (`POST /api/stories/build` with its store key) to sel
 SQL; a browser case selects them from IndexedDB and posts them. Both select the same way: the
 records the findings cite; then, from a day before to three days after each flag, the records
 that name the flagged people, the records from the outside addresses the findings name, and the
-logons, sessions, processes, shares, services and tasks on the flagged hosts; the high-risk
-mails and the mails the flagged people sent. A build reads at most 50,000 flagged records and
+logons, sessions, processes, shares, services and tasks on the flagged hosts, with the WinRM
+(6, 91), WMI-Activity (5858) and DNS client (3008) events, the process creations and script
+blocks that reach another host, and their Sysmon DNS answers that give a private address (at
+most 20,000); the DHCP leases (at most 20,000, whatever their time, since the audit log's local
+times carry no zone and are kept without one); the high-risk mails and the mails the flagged
+people sent. A build reads at most 50,000 flagged records and
 50,000 records around them (a server case, 50,000 of each of the three kinds), and 5,000 of the
 mails the flagged people sent; when a selection is cut the page says so, and an absent step is
 then not a negative result. The browser posts only the fields the engine reads (`STORY_EVENT_FIELDS`, compared with
@@ -216,10 +240,13 @@ are synthetic scenarios: a regression benchmark, not a measured accuracy on fiel
 
 - A person is joined across forms only as the records and the naming rules allow: two
   accounts one person uses (an admin account beside a user account) are two identities.
-- An address is attributed to a host only by the host's own Sysmon connections and by a
-  logon's workstation name; DHCP and DNS records are not read for it.
-- WMI and WinRM lateral movement is read only through what the network session did on the
-  target (a program run, a task, a service); their own logs are not yet read for hops.
-- Cloud sign-ins and Windows logons of one person are one story through the person, not
-  through the device: Entra device ids are not joined to hosts.
+- A DHCP lease has no time: the audit log writes the server's local time without its zone,
+  and REMN does not guess one. An address leased to several hosts is read at a step's time
+  from the other records that attribute it, and otherwise as the host it was leased to most.
+- A WMI or WinRM program on the target is tied to the network logon just before it by time
+  only (within a minute): two people's network sessions opened in the same minute on one host
+  cannot be told apart, and the step says it was tied by time.
+- An Entra device is matched to a host by name only: a device renamed, or one whose name two
+  hosts of different domains share, is not joined; a device id is not read against the
+  machine's own records.
 - A case keeps at most 200 stories, the highest-scoring first.

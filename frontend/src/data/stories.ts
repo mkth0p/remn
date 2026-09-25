@@ -107,7 +107,7 @@ export interface Session {
 }
 export interface Hop {
   id: string
-  kind: 'rdp' | 'admin-share' | 'remote-service' | 'remote-action' | 'explicit-credentials' | 'connection'
+  kind: 'rdp' | 'admin-share' | 'remote-service' | 'remote-action' | 'wmi' | 'winrm' | 'explicit-credentials' | 'connection'
   from: { host: string | null; ip: string | null; workstation: string | null; external: boolean; basis: string | null }
   to: string
   account: string | null
@@ -119,6 +119,29 @@ export interface Hop {
   evidence: string[]
   basis: string
   confidence: Confidence
+}
+/** How a hop came to its host, in words. */
+export const HOP_LABEL: Record<Hop['kind'], string> = {
+  rdp: 'RDP',
+  'admin-share': 'admin share',
+  'remote-service': 'remote service',
+  'remote-action': 'remote action',
+  wmi: 'WMI',
+  winrm: 'WinRM',
+  'explicit-credentials': 'explicit credentials',
+  connection: 'connection',
+}
+/** An Entra device the story's sign-ins came from, and the host of that name when the case has its logs. */
+export interface Device {
+  key: string
+  name: string
+  host: string | null
+  deviceIds: string[]
+  trustTypes: string[]
+  accounts: string[]
+  signIns: number
+  first: number
+  last: number
 }
 export interface Process {
   id: string
@@ -191,7 +214,7 @@ export interface Story {
   findings: string[]
   campaigns: string[]
   gaps: string[]
-  lineage: { sessions: Session[]; hops: Hop[]; processes: Process[] }
+  lineage: { sessions: Session[]; hops: Hop[]; processes: Process[]; devices?: Device[] }
 }
 export interface CampaignTarget {
   id: string
@@ -235,6 +258,41 @@ export const LINEAGE_EVENT_IDS = [
   1, 3, 21, 23, 24, 25, 104, 1102, 1116, 1117, 1149, 4624, 4625, 4634, 4647, 4648, 4672, 4688, 4697, 4698, 4702, 4720, 4722, 4724, 4728, 4732, 4738, 4756, 4778, 4779, 4781, 5140, 5145, 7045,
 ]
 const LINEAGE = new Set(LINEAGE_EVENT_IDS)
+/**
+ * And, by channel, WinRM's session records, WMI's failed calls and the DNS client's answers; the
+ * script blocks that name a remote computer; the DNS answers that give a private address (their own
+ * cap); the DHCP server's leases (no time, so case-wide). Mirrors of stories.py, compared by a test.
+ */
+export const LINEAGE_CHANNEL_EVENTS: [string, number[]][] = [
+  ['winrm', [6, 91]],
+  ['wmi-activity', [5858]],
+  ['dns-client', [3008]],
+]
+export const REMOTE_SCRIPT = '-computername|-cn\\s|enter-pssession|/node:'
+export const PRIVATE_ANSWER = '(^|;)\\s*(::ffff:)?(10\\.|192\\.168\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.)'
+const REMOTE_SCRIPT_RE = new RegExp(REMOTE_SCRIPT)
+const PRIVATE_ANSWER_RE = new RegExp(PRIVATE_ANSWER)
+const DNS_CAP = 20_000
+const DHCP_CAP = 20_000
+
+/** A record beyond LINEAGE_EVENT_IDS that lineage reads on a flagged host. */
+function lineageExtra(row: Record<string, unknown>): boolean {
+  const eid = Number(row.eventId)
+  const chan = String(row.channel ?? '').toLowerCase()
+  if (LINEAGE_CHANNEL_EVENTS.some(([c, ids]) => ids.includes(eid) && chan.includes(c))) return true
+  return eid === 4104 && REMOTE_SCRIPT_RE.test(String(row.scriptBlockText ?? '').toLowerCase())
+}
+
+/** A Sysmon DNS answer that gives a private address: lineage reads it to know whose an address is. */
+function dnsAnswer(row: Record<string, unknown>): boolean {
+  return (
+    Number(row.eventId) === 22 &&
+    String(row.provider ?? '')
+      .toLowerCase()
+      .includes('sysmon') &&
+    PRIVATE_ANSWER_RE.test(String(row.queryResults ?? ''))
+  )
+}
 
 /** The fields of an event the story engine reads (tests/backend/test_stories.py compares this list with the Python). */
 export const STORY_EVENT_FIELDS = [
@@ -293,6 +351,8 @@ export const STORY_EVENT_FIELDS = [
   'destinationHostname',
   'initiated',
   'query',
+  'queryResults',
+  'artifactType',
   'targetFilename',
   'shareName',
   'relativeTargetName',
@@ -324,6 +384,20 @@ export const STORY_DATA_KEYS = [
   'AccountDomain',
   'TargetServerName',
   'ProcessId',
+  // lineage: DNS answers, WinRM's session record, WMI's failed calls, DHCP leases, Entra devices
+  'QueryName',
+  'QueryResults',
+  'connection',
+  'Connection',
+  'ClientMachine',
+  'User',
+  'Operation',
+  'ID',
+  'IP Address',
+  'Host Name',
+  'deviceName',
+  'deviceId',
+  'trustType',
 ] as const
 
 const SKIP = new Set(['', '-', 'system', 'anonymous logon', 'local service', 'network service', 'local system', 'krbtgt'])
@@ -491,6 +565,7 @@ export async function selectRows(
   for (const e of flagged) events.set(e.id!, slimEvent(e as unknown as Record<string, unknown>))
   const spans = windows([...flagged.map((e) => e.ts ?? 0), ...mails.map((m) => m.date ?? 0)])
   let picked = 0
+  let dnsPicked = 0
   for (const [lo, hi] of spans) {
     await db.events
       .where('[caseId+ts]')
@@ -504,8 +579,15 @@ export async function selectRows(
           return !!n && names.has(n)
         })
         const fromIp = ips.has(ipOf(row.ipAddress))
-        const onHost = hosts.has(String(row.computer ?? '').toLowerCase()) && LINEAGE.has(Number(row.eventId))
-        if (!named && !fromIp && !onHost) return
+        const flaggedHost = hosts.has(String(row.computer ?? '').toLowerCase())
+        const onHost = flaggedHost && (LINEAGE.has(Number(row.eventId)) || lineageExtra(row))
+        if (!named && !fromIp && !onHost) {
+          if (flaggedHost && dnsAnswer(row)) {
+            if (++dnsPicked > DNS_CAP) truncated.add('dns')
+            else events.set(e.id!, slimEvent(row))
+          }
+          return
+        }
         if (++picked > EVENT_CAP) {
           truncated.add(named ? 'identities' : fromIp ? 'addresses' : 'hosts')
           return
@@ -513,6 +595,17 @@ export async function selectRows(
         events.set(e.id!, slimEvent(row))
       })
   }
+  // the DHCP server's leases: they have no time, so they are read whatever the windows
+  let dhcpPicked = 0
+  await db.events
+    .where('[caseId+artifactType]')
+    .equals([caseId, 'dhcp'])
+    .each((e) => {
+      const row = e as unknown as Record<string, unknown>
+      if (!row.ipAddress || events.has(e.id!)) return
+      if (++dhcpPicked > DHCP_CAP) truncated.add('dhcp')
+      else events.set(e.id!, slimEvent(row))
+    })
   const inWindow = (t: number | null) => t != null && spans.some(([lo, hi]) => t >= lo && t <= hi)
   const replies = allMails.filter((m) => !mails.includes(m) && inWindow(m.date) && names.has(accountName(m.fromAddr) ?? ''))
   if (replies.length > MAIL_CAP) truncated.add('replies')
@@ -532,6 +625,8 @@ export function storyCoverageWarnings(stats: StoryResult['stats'] | undefined): 
     addresses: `The records from the flagged addresses passed ${EVENT_CAP.toLocaleString('en')}: the stories read the first ones in time.`,
     hosts: `The logons, processes and services on the flagged hosts passed ${EVENT_CAP.toLocaleString('en')}: the stories read the first ones in time.`,
     replies: `Only the first ${MAIL_CAP.toLocaleString('en')} mails the flagged people sent were read.`,
+    dns: `The DNS answers on the flagged hosts passed ${DNS_CAP.toLocaleString('en')}: the addresses they give to hosts come from the first ones in time.`,
+    dhcp: `The DHCP leases passed ${DHCP_CAP.toLocaleString('en')}: the addresses they give to hosts come from the first ones.`,
   }
   const out = (stats?.truncated ?? []).map((k) => labels[k]).filter(Boolean)
   if (stats?.storiesTruncated) out.push('Only the highest-scoring 200 stories are kept.')

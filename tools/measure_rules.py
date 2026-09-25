@@ -15,10 +15,22 @@ The datasets, at the versions measured:
       mkdir -p baseline/$h && curl -sSfL https://github.com/NextronSystems/evtx-baseline/releases/download/v0.8.4/$h.tgz | tar xz -C baseline/$h
     done
     .venv/bin/python tools/measure_rules.py --sigma sigma --attack-samples EVTX-ATTACK-SAMPLES \\
-        --attack-data attack_data --evtx-to-mitre EVTX-to-MITRE-Attack --baseline baseline --out rules/measures.json
+        --attack-data attack_data --evtx-to-mitre EVTX-to-MITRE-Attack --baseline baseline \\
+        --out rules/measures.json --detail rules/measures-detail.json
 
-The attack_data datasets are Git LFS files: the Office 365 and Entra ID ones (13 MB) are fetched
-from GitHub's media host at the pinned commit into --cache, unless the checkout has them.
+or, with the checkouts under one directory and whichever are missing fetched first:
+
+    .venv/bin/python tools/measure_rules.py --datasets DIR --fetch --out rules/measures.json --detail rules/measures-detail.json
+
+The attack_data datasets are Git LFS files: the ones measured (the Office 365 and Entra ID ones,
+13 MB, and the Windows ones of up to --max-dataset-mb a dataset, about 1.3 GB) are fetched from GitHub's
+media host at the pinned commit into --cache, unless the checkout has them.
+
+The gate (--gate rules/measures-detail.json, run weekly and on a change to the rules, the rule
+engine or the parsers by .github/workflows/measure-rules.yml) fails when a rule no longer detects
+a recording it detected when the committed detail was measured, a SigmaHQ rule no longer fires on
+its own sample, a recording is no longer read, or a high or critical rule raises more findings on
+a clean machine. A change that means to do one of those commits the measures it takes.
 
 Recorded attacks:
 - the SigmaHQ regression samples: one recording per rule, made by the rule's author;
@@ -26,6 +38,9 @@ Recorded attacks:
   (tests/fixtures/evtx-attack-samples/expected.json);
 - Splunk attack_data's Office 365 and Entra ID (azure:monitor:aad) datasets, each labelled with
   its ATT&CK technique; the Entra audit logs among them are a format REMN does not read;
+- Splunk attack_data's Windows datasets (attackDataWindows): the event logs of its attack range,
+  kept as XmlWinEventLog, one recording per dataset labelled with its techniques. No rule was
+  written against them before they were first measured (2026-09-25);
 - EVTX-to-MITRE-Attack, each file labelled with the technique of the folder it is filed in. No
   rule was written against it before it was first measured (docs/reviews/2026-09-25-head-to-head.md);
   a rule written since, after studying some of its files, is not measured on it (WRITTEN_AGAINST).
@@ -59,7 +74,7 @@ import sys
 import tempfile
 import urllib.request
 import uuid
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -80,6 +95,10 @@ PINS = {
     "baseline": {"repo": "NextronSystems/evtx-baseline", "tag": "v0.8.4"},
 }
 M365_SOURCETYPES = ("o365:management:activity", "azure:monitor:aad")
+WINDOWS_SOURCETYPES = ("XmlWinEventLog",)
+# a Windows dataset of attack_data larger than this is not measured: the largest are days of a
+# lab's Sysmon (up to 380 MB) around one technique
+ATTACK_DATA_MAX_BYTES = 20 * 1024 * 1024
 MEDIA = "https://media.githubusercontent.com/media/{repo}/{sha}/{path}"
 # ATT&CK v19 revoked these ids (MITRE's de-split crosswalk; tests/backend/test_rules_yaml.py): the
 # rules carry the new ones, older labels are read as them
@@ -89,6 +108,11 @@ REVOKED = {
     "T1562.010": "T1689", "T1562.011": "T1685.003", "T1562.012": "T1685.004", "T1562.013": "T1686.002", "T1656": "T1684.001",
     "T1070.001": "T1685.005", "T1070.002": "T1685.006",
 }  # fmt: skip
+# --datasets: each dataset under the name of its checkout, and the option naming it on its own
+LAYOUT = {"sigma": "sigma", "attackSamples": "EVTX-ATTACK-SAMPLES", "attackData": "attack_data", "evtxToMitre": "EVTX-to-MITRE-Attack", "baseline": "baseline"}
+DEST = {"sigma": "sigma", "attackSamples": "attack_samples", "attackData": "attack_data", "evtxToMitre": "evtx_to_mitre", "baseline": "baseline"}
+BASELINE_MACHINES = ("win10-client", "win11-client", "win11-client-2023", "win2022-ad", "win2022-0-20348-azure", "win2022-evtx", "win7-x86")
+DETAIL = ROOT / "rules" / "measures-detail.json"
 TECHNIQUE = re.compile(r"^T\d{4}(\.\d{3})?$")
 # EVTX-to-MITRE-Attack files a recording under its tactic and technique: TA0006-.../T1558-.../file.evtx
 TECHNIQUE_FOLDER = re.compile(r"^(T\d{4})(?:\.(\d{3}))?", re.I)
@@ -188,33 +212,68 @@ def evtx_to_mitre_recordings(root: Path) -> list[Recording]:
     return out
 
 
-def attack_data_recordings(root: Path, cache: Path) -> list[Recording]:
-    """The Office 365 and Entra ID datasets, one recording per dataset descriptor."""
+def _lfs_size(path: Path) -> int | None:
+    """The size of a Git LFS file from its pointer, or of the file itself; None when the checkout has neither."""
+    if not path.is_file():
+        return None
+    head = path.read_bytes()[:200]
+    if head.startswith(b"version https://git-lfs"):
+        m = re.search(rb"\nsize (\d+)", head)
+        return int(m.group(1)) if m else None
+    return path.stat().st_size
+
+
+def _fetch_lfs(root: Path, cache: Path, rel: str) -> Path:
+    """A Git LFS file of the attack_data checkout: the file itself when it was checked out, else
+    fetched from GitHub's media host at the pinned commit into the cache."""
     pin = PINS["attackData"]
-    out = []
-    for desc in sorted((root / "datasets" / "attack_techniques").rglob("*.yml")):
+    local = root / rel
+    if local.is_file() and not local.read_bytes()[:40].startswith(b"version https://git-lfs"):
+        return local
+    cached = cache / pin["sha"] / rel
+    if not cached.is_file():
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        url = MEDIA.format(repo=pin["repo"], sha=pin["sha"], path=rel)
+        partial = cached.with_name(cached.name + ".part")
+        with urllib.request.urlopen(url, timeout=300) as resp, open(partial, "wb") as fh:  # noqa: S310 - a fixed https host
+            while chunk := resp.read(1 << 20):
+                fh.write(chunk)
+        partial.replace(cached)
+    return cached
+
+
+def attack_data_recordings(root: Path, cache: Path, max_bytes: int = ATTACK_DATA_MAX_BYTES) -> tuple[list[Recording], dict[str, dict[str, int]]]:
+    """
+    One recording per dataset descriptor: its Office 365 and Entra ID logs (dataset attackData),
+    and its Windows event logs, which Splunk keeps as XmlWinEventLog (attackDataWindows). A
+    descriptor whose Windows logs are larger than max_bytes together is not measured, nor one
+    whose files are not at the pinned commit; both are counted.
+    """
+    base = root / "datasets" / "attack_techniques"
+    wanted: list[tuple[str, Path, list[str], frozenset[str]]] = []
+    left_out: dict[str, dict[str, int]] = {"attackData": {}, "attackDataWindows": {}}
+    for desc in sorted(base.rglob("*.yml")):
         doc = yaml.safe_load(desc.read_text(encoding="utf-8")) or {}
-        paths = [
-            str(d["path"]).lstrip("/") for d in doc.get("datasets") or [] if isinstance(d, dict) and d.get("sourcetype") in M365_SOURCETYPES and d.get("path")
-        ]
-        if not paths:
-            continue
-        files = []
-        for rel in paths:
-            local = root / rel
-            if local.is_file() and not local.read_bytes()[:40].startswith(b"version https://git-lfs"):
-                files.append(local)
+        folder = desc.relative_to(base).parts[0]
+        tech = techniques(doc.get("mitre_technique") or [folder])
+        for dataset, types in (("attackData", M365_SOURCETYPES), ("attackDataWindows", WINDOWS_SOURCETYPES)):
+            paths = [str(d["path"]).lstrip("/") for d in doc.get("datasets") or [] if isinstance(d, dict) and d.get("sourcetype") in types and d.get("path")]
+            if not paths:
                 continue
-            cached = cache / pin["sha"] / rel
-            if not cached.is_file():
-                cached.parent.mkdir(parents=True, exist_ok=True)
-                url = MEDIA.format(repo=pin["repo"], sha=pin["sha"], path=rel)
-                with urllib.request.urlopen(url, timeout=120) as resp:  # noqa: S310 - a fixed https host
-                    cached.write_bytes(resp.read())
-            files.append(cached)
-        folder = desc.relative_to(root / "datasets" / "attack_techniques").parts[0]
-        out.append(Recording("attackData", desc.parent.relative_to(root).as_posix(), files, techniques(doc.get("mitre_technique") or [folder])))
-    return out
+            sizes = [_lfs_size(root / rel) for rel in paths]
+            if any(size is None for size in sizes):
+                left_out[dataset]["missing"] = left_out[dataset].get("missing", 0) + 1
+                continue
+            if dataset == "attackDataWindows" and sum(s or 0 for s in sizes) > max_bytes:
+                left_out[dataset]["overSize"] = left_out[dataset].get("overSize", 0) + 1
+                continue
+            wanted.append((dataset, desc, paths, tech))
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        fetched = list(pool.map(lambda item: [_fetch_lfs(root, cache, rel) for rel in item[2]], wanted))
+    out = [
+        Recording(dataset, desc.parent.relative_to(root).as_posix(), files, tech) for (dataset, desc, _paths, tech), files in zip(wanted, fetched, strict=True)
+    ]
+    return out, left_out
 
 
 # --- running the rules (in worker processes) ------------------------------------------------------
@@ -415,6 +474,84 @@ def needs_settings(R, rule: dict[str, Any]) -> list[str]:
 # --- the measures -------------------------------------------------------------------------------
 
 
+def gate(before: dict[str, Any], after: dict[str, Any], rules: dict[str, dict[str, Any]]) -> tuple[list[str], list[str], list[str]]:
+    """
+    The measure against a committed one (rules/measures-detail.json): a recording a rule detected
+    that it no longer detects, a SigmaHQ sample its rule no longer fires on, a recording no longer
+    read, and a high or critical rule raising more findings on a clean machine than it did (all of
+    them, when it was not high or critical then). What was gained is noted, not failed.
+    """
+    lost: list[str] = []
+    noisier: list[str] = []
+    notes: list[str] = []
+    if before.get("sources") != after.get("sources"):
+        lost.append("the datasets are not the versions the committed measure was taken on: re-run with --detail and commit it")
+        return lost, noisier, notes
+    for name in sorted(set(after.get("unread", [])) - set(before.get("unread", []))):
+        lost.append(f"{name} is no longer read")
+    gained = 0
+    for rid, b in sorted(before.get("rules", {}).items()):
+        now = after.get("rules", {}).get(rid, {})
+        gone = sorted(set(b.get("hits", [])) - set(now.get("hits", [])))
+        if gone:
+            more = f" and {len(gone) - 5} more" if len(gone) > 5 else ""
+            lost.append(f"{rid} no longer detects {', '.join(gone[:5])}{more}")
+        if b.get("own") is True and now.get("own") is not True:
+            lost.append(f"{rid} no longer fires on its own SigmaHQ sample")
+    for rid, now in sorted(after.get("rules", {}).items()):
+        b = before.get("rules", {}).get(rid, {})
+        gained += len(set(now.get("hits", [])) - set(b.get("hits", [])))
+        severity = str(rules.get(rid, {}).get("severity") or now.get("severity") or "")
+        high = severity in ("high", "critical")
+        then = b.get("severity")
+        # findings it raised at a lower level when measured are new at this one
+        lower_then = high and bool(b.get("clean")) and then is not None and then not in ("high", "critical")
+        was = {} if lower_then else b.get("clean", {})
+        more = {m: n for m, n in now.get("clean", {}).items() if n > was.get(m, 0)}
+        raised = f", {then} when measured" if lower_then else ""
+        if more and high:
+            noisier.append(f"{rid} ({severity}{raised}) raises more findings on {', '.join(f'{m} ({was.get(m, 0)} to {n})' for m, n in sorted(more.items()))}")
+        elif more:
+            notes.append(f"{rid} ({severity or 'no severity'}) raises more findings on {', '.join(sorted(more))}")
+    if gained:
+        notes.append(f"{gained} detection(s) gained")
+    return lost, noisier, notes
+
+
+def fetch(root: Path) -> None:
+    """Every dataset at its pinned version under root, as --datasets reads them; one already there is kept."""
+    import subprocess
+    import tarfile
+
+    root.mkdir(parents=True, exist_ok=True)
+    for key, name in LAYOUT.items():
+        dest = root / name
+        pin = PINS[key]
+        if key == "baseline":
+            for machine in BASELINE_MACHINES:
+                target = dest / machine
+                if target.is_dir() and any(target.rglob("*.evtx")):
+                    continue
+                target.mkdir(parents=True, exist_ok=True)
+                url = f"https://github.com/{pin['repo']}/releases/download/{pin['tag']}/{machine}.tgz"
+                print(f"fetching {url}", flush=True)
+                with urllib.request.urlopen(url, timeout=600) as resp, tarfile.open(fileobj=resp, mode="r|gz") as tar:  # noqa: S310 - a fixed https host
+                    tar.extractall(target, filter="data")
+            continue
+        if dest.is_dir() and any(dest.iterdir()):
+            continue
+        print(f"fetching {pin['repo']} at {pin['sha']}", flush=True)
+        # attack_data's datasets are Git LFS files: only the pointers are checked out, and the
+        # datasets measured are fetched one by one into --cache
+        env = {**os.environ, "GIT_LFS_SKIP_SMUDGE": "1"}
+        for cmd in (
+            ["git", "init", "-q", str(dest)],
+            ["git", "-C", str(dest), "fetch", "-q", "--depth", "1", f"https://github.com/{pin['repo']}", pin["sha"]],
+            ["git", "-C", str(dest), "checkout", "-q", "FETCH_HEAD"],
+        ):
+            subprocess.run(cmd, check=True, env=env)  # noqa: S603 - fixed arguments
+
+
 def dump(payload: dict[str, Any]) -> str:
     """One line per rule, in id order: a re-measurement's diff names the rules whose measure changed."""
     lines = ["{"]
@@ -430,16 +567,35 @@ def dump(payload: dict[str, Any]) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--sigma", type=Path, required=True, help="SigmaHQ/sigma checkout")
-    ap.add_argument("--attack-samples", type=Path, required=True, help="EVTX-ATTACK-SAMPLES checkout")
-    ap.add_argument("--attack-data", type=Path, required=True, help="splunk/attack_data checkout (LFS files may be pointers)")
-    ap.add_argument("--evtx-to-mitre", type=Path, required=True, help="EVTX-to-MITRE-Attack checkout")
-    ap.add_argument("--baseline", type=Path, required=True, help="evtx-baseline: one directory per machine")
+    ap.add_argument("--datasets", type=Path, help="a directory holding every dataset under the name of its checkout (" + ", ".join(LAYOUT.values()) + ")")
+    ap.add_argument("--fetch", action="store_true", help="first fetch the datasets --datasets does not hold yet, at the pinned versions")
+    ap.add_argument("--sigma", type=Path, help="SigmaHQ/sigma checkout")
+    ap.add_argument("--attack-samples", type=Path, help="EVTX-ATTACK-SAMPLES checkout")
+    ap.add_argument("--attack-data", type=Path, help="splunk/attack_data checkout (LFS files may be pointers)")
+    ap.add_argument("--evtx-to-mitre", type=Path, help="EVTX-to-MITRE-Attack checkout")
+    ap.add_argument("--baseline", type=Path, help="evtx-baseline: one directory per machine")
     ap.add_argument("--out", type=Path, default=ROOT / "rules" / "measures.json")
+    ap.add_argument(
+        "--detail", type=Path, help=f"also write what each rule detects and raises on the clean machines, recording by recording ({DETAIL.relative_to(ROOT)})"
+    )
+    ap.add_argument(
+        "--gate",
+        type=Path,
+        help="fail when a rule no longer detects a recording it detected in this detail file, or a high or critical rule raises more findings on a clean machine",
+    )
     ap.add_argument("--cache", type=Path, default=Path(tempfile.gettempdir()) / "remn-measure-cache")
+    ap.add_argument("--max-dataset-mb", type=int, default=ATTACK_DATA_MAX_BYTES >> 20, help="the largest attack_data Windows dataset measured")
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 2)
     ap.add_argument("--limit", type=int, default=0, help="a trial run: the first N recordings of each dataset (no file is written unless --out is given)")
     a = ap.parse_args(argv)
+    if a.datasets and a.fetch:
+        fetch(a.datasets)
+    for key, name in LAYOUT.items():
+        attr = DEST[key]
+        if getattr(a, attr) is None:
+            if not a.datasets:
+                ap.error(f"--{attr.replace('_', '-')} or --datasets is required")
+            setattr(a, attr, a.datasets / name)
 
     sets = event_rules()
     from services.rules.measures import logic_hash
@@ -452,11 +608,9 @@ def main(argv: list[str] | None = None) -> int:
     rule_tech = {rid: techniques(r.get("attack")) for rid, r in rules.items()}
     settings_needed = {rid: s for rid, r in rules.items() if (s := needs_settings(R, r))}
 
+    attack_data, left_out = attack_data_recordings(a.attack_data, a.cache, a.max_dataset_mb << 20)
     recordings = (
-        sigma_recordings(a.sigma, rule_tech)
-        + attack_sample_recordings(a.attack_samples, rule_tech)
-        + attack_data_recordings(a.attack_data, a.cache)
-        + evtx_to_mitre_recordings(a.evtx_to_mitre)
+        sigma_recordings(a.sigma, rule_tech) + attack_sample_recordings(a.attack_samples, rule_tech) + attack_data + evtx_to_mitre_recordings(a.evtx_to_mitre)
     )
     if a.limit:
         by_set = collections.defaultdict(list)
@@ -490,6 +644,7 @@ def main(argv: list[str] | None = None) -> int:
 
     read = [r for r in recordings if r.rows]
     measures: dict[str, dict[str, Any]] = {}
+    detail_rules: dict[str, dict[str, Any]] = {}
     for rid, rule in sorted(rules.items()):
         m: dict[str, Any] = {"h": logic_hash(rule)}
         if rid in settings_needed:
@@ -498,6 +653,7 @@ def main(argv: list[str] | None = None) -> int:
             continue
         tech = rule_tech[rid]
         of = hits = fires = 0
+        detected: list[str] = []
         for rec in read:
             if rec.dataset in WRITTEN_AGAINST.get(rid, ()):
                 continue
@@ -506,18 +662,29 @@ def main(argv: list[str] | None = None) -> int:
             of += on
             hits += on and fired
             fires += fired
+            if on and fired:
+                detected.append(f"{rec.dataset}:{rec.name}")
             if rec.owner == rid:
                 m["own"] = fired
         m.update({k: v for k, v in (("of", of), ("hits", hits), ("fires", fires)) if v})
         findings = events = machines_fired = scope = machines_scoped = 0
-        for out in clean.values():
+        noise: dict[str, int] = {}
+        for machine, out in sorted(clean.items()):
             f, e = out["found"].get(rid, (0, 0))
             findings, events, machines_fired = findings + f, events + e, machines_fired + (1 if f else 0)
+            if f:
+                noise[machine] = f
             if out["scopes"].get(rid):
                 scope, machines_scoped = scope + out["scopes"][rid], machines_scoped + 1
         if scope:
             m["clean"] = {"findings": findings, "events": events, "machines": machines_fired, "scope": scope, "of": machines_scoped}
         measures[rid] = m
+        entry = {k: v for k, v in (("hits", sorted(detected)), ("own", m.get("own")), ("clean", noise)) if v not in (None, [], {})}
+        if noise:
+            # the level its clean-machine findings were raised at, for the gate
+            entry["severity"] = rule.get("severity")
+        if entry:
+            detail_rules[rid] = entry
 
     counted = collections.Counter(r.dataset for r in read)
     unreadable = [r.name for r in recordings if not r.rows]
@@ -531,6 +698,13 @@ def main(argv: list[str] | None = None) -> int:
                 **PINS["attackData"],
                 "recordings": counted["attackData"],
                 "unreadable": sum(1 for r in recordings if r.dataset == "attackData" and not r.rows),
+                **left_out["attackData"],
+            },
+            "attackDataWindows": {
+                **PINS["attackData"],
+                "recordings": counted["attackDataWindows"],
+                "maxMb": a.max_dataset_mb,
+                **left_out["attackDataWindows"],
             },
             "evtxToMitre": {**PINS["evtxToMitre"], "recordings": counted["evtxToMitre"]},
             "baseline": {**PINS["baseline"], "machines": len(clean), "events": sum(o["rows"] for o in clean.values())},
@@ -538,6 +712,16 @@ def main(argv: list[str] | None = None) -> int:
         "rules": measures,
     }
     a.out.write_text(dump(payload), encoding="utf-8")
+    detail = {
+        "version": 1,
+        "measured": payload["measured"],
+        "sources": {k: {x: y for x, y in v.items() if x in ("sha", "tag")} for k, v in payload["sources"].items()},
+        # recordings no row could be read from: a parser that stops reading one loses what it holds
+        "unread": sorted(f"{r.dataset}:{r.name}" for r in recordings if not r.rows),
+        "rules": detail_rules,
+    }
+    if a.detail:
+        a.detail.write_text(dump(detail), encoding="utf-8")
 
     measured = [m for m in measures.values() if "settings" not in m]
     print(f"wrote {a.out}: {len(measures)} rules")
@@ -550,7 +734,23 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  need a case setting: {len(settings_needed)}")
     for p in problems[:50]:
         print("FAIL", p)
-    return 1 if problems else 0
+    failed = bool(problems)
+    if a.gate:
+        before = json.loads(a.gate.read_text(encoding="utf-8"))
+        lost, noisier, notes = gate(before, detail, rules)
+        for line in notes:
+            print("  " + line)
+        for line in lost + noisier:
+            print("GATE", line)
+        if lost or noisier:
+            print(
+                f"the gate against {a.gate} failed: {len(lost)} detection(s) lost, {len(noisier)} high or critical rule(s) noisier on the "
+                "clean machines. When that is intended, re-run with --out rules/measures.json --detail rules/measures-detail.json and commit both."
+            )
+            failed = True
+        else:
+            print(f"the gate against {a.gate} passed")
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

@@ -659,6 +659,13 @@ def _steps(case: _Case, members: _Members, attacker: set[str], max_steps: int) -
         s = lin.session_of(ref)
         p = lin.process_of(ref) or lin.process_of_guid(row.get("processGuid"))
         named = case.named.get(ref, {})
+        # a sign-in from an Entra device named like a host of the case happened on that host
+        dev = lin.device_of(row) if source == "events" and _is_cloud(row) else None
+        where = [
+            f"from the Entra device {dev['name']}"
+            + (f" ({', '.join(dev['trustTypes'])})" if dev["trustTypes"] else "")
+            + ("" if dev.get("host") else ", a device the case has no logs of")
+        ] if dev else []  # fmt: skip
         raw.append(
             {
                 "id": ref,
@@ -668,7 +675,7 @@ def _steps(case: _Case, members: _Members, attacker: set[str], max_steps: int) -
                 "tsEnd": _ts(row),
                 "count": 1,
                 "title": _title(row, source),
-                "host": host_key(row.get("computer")) or None,
+                "host": host_key(row.get("computer")) or (dev["host"] if dev else None),
                 "ip": ip_of(row.get("ipAddress")) or None,
                 "origin": "mail" if source == "mails" else "cloud" if _is_cloud(row) else "host",
                 "phase": phase,
@@ -676,7 +683,7 @@ def _steps(case: _Case, members: _Members, attacker: set[str], max_steps: int) -
                 "findings": [{"ruleId": f.get("ruleId"), "title": f.get("title"), "severity": f.get("severity"), "key": f.get("key")} for f in fs][:8],
                 "severity": _SEV_NAME.get(top) if fs else None,
                 "tie": {"kind": m["tie"], "basis": m["basis"] + (f"; also {m['also']}" if m.get("also") else ""), "confidence": m["confidence"]},
-                "notes": m["notes"][:6],
+                "notes": (m["notes"] + where)[:6],
                 "accounts": sorted(named)[:10],
                 "session": s["id"] if s else None,
                 "process": p["id"] if p else None,
@@ -996,6 +1003,24 @@ LINEAGE_EVENT_IDS = (
     1, 3, 21, 23, 24, 25, 104, 1102, 1116, 1117, 1149, 4624, 4625, 4634, 4647, 4648, 4672, 4688, 4697, 4698, 4702,
     4720, 4722, 4724, 4728, 4732, 4738, 4756, 4778, 4779, 4781, 5140, 5145, 7045,
 )  # fmt: skip
+# and, by channel, WinRM's session records, WMI's failed calls and the DNS client's answers; the
+# script blocks that name a remote computer; the DNS answers that give a private address (their own
+# cap); the DHCP server's leases (no time, so case-wide)
+LINEAGE_CHANNEL_EVENTS = (("winrm", (6, 91)), ("wmi-activity", (5858,)), ("dns-client", (3008,)))
+REMOTE_SCRIPT = r"-computername|-cn\s|enter-pssession|/node:"
+PRIVATE_ANSWER = r"(^|;)\s*(::ffff:)?(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)"
+DNS_CAP = 20_000
+DHCP_CAP = 20_000
+
+
+def _lineage_extra_sql() -> str:
+    """The records beyond LINEAGE_EVENT_IDS lineage reads on a flagged host, as SQL (stories.ts has the same test)."""
+    parts = [
+        f"(\"eventId\" IN ({', '.join(str(i) for i in ids)}) AND strpos(lower(coalesce(\"channel\", '')), '{chan}') > 0)"
+        for chan, ids in LINEAGE_CHANNEL_EVENTS
+    ]
+    parts.append(f"(\"eventId\" = 4104 AND regexp_matches(lower(coalesce(\"scriptBlockText\", '')), '{REMOTE_SCRIPT}'))")
+    return " OR ".join(parts)
 
 
 def flagged_refs(findings: Iterable[dict[str, Any]]) -> tuple[list[int], list[int]]:
@@ -1114,15 +1139,25 @@ def stories_for_store(store: Any, settings: dict[str, Any] | None, findings: lis
         if keys["ips"]:
             picks.append((f'"ipAddress" IN ({", ".join("?" for _ in keys["ips"])})', list(keys["ips"]), "addresses"))
         if keys["hosts"]:
+            hph = ", ".join("?" for _ in keys["hosts"])
             picks.append(
                 (
-                    f'lower("computer") IN ({", ".join("?" for _ in keys["hosts"])}) AND "eventId" IN ({", ".join(str(i) for i in LINEAGE_EVENT_IDS)})',
+                    f'lower("computer") IN ({hph}) AND ("eventId" IN ({", ".join(str(i) for i in LINEAGE_EVENT_IDS)}) OR {_lineage_extra_sql()})',
                     list(keys["hosts"]),
                     "hosts",
                 )
             )
+            picks.append(
+                (
+                    f'lower("computer") IN ({hph}) AND "eventId" = 22 AND strpos(lower(coalesce("provider", \'\')), \'sysmon\') > 0 '
+                    f"AND regexp_matches(coalesce(\"queryResults\", ''), '{PRIVATE_ANSWER}')",
+                    list(keys["hosts"]),
+                    "dns",
+                )
+            )
         for cond, params, name in picks:
-            for r in fetch(f"SELECT * FROM events WHERE ({when}) AND ({cond}) ORDER BY ts, id", wparams + params, EVENT_CAP, name):
+            cap = DNS_CAP if name == "dns" else EVENT_CAP
+            for r in fetch(f"SELECT * FROM events WHERE ({when}) AND ({cond}) ORDER BY ts, id", wparams + params, cap, name):
                 if r["id"] not in events:
                     if isinstance(r.get("data"), str):
                         try:
@@ -1130,6 +1165,15 @@ def stories_for_store(store: Any, settings: dict[str, Any] | None, findings: lis
                         except ValueError:
                             pass
                     events[r["id"]] = r
+        # the DHCP server's leases: they have no time, so they are read whatever the windows
+        for r in fetch('SELECT * FROM events WHERE "artifactType" = \'dhcp\' AND "ipAddress" IS NOT NULL ORDER BY id', [], DHCP_CAP, "dhcp"):
+            if r["id"] not in events:
+                if isinstance(r.get("data"), str):
+                    try:
+                        r["data"] = _json.loads(r["data"])
+                    except ValueError:
+                        pass
+                events[r["id"]] = r
         # replies: mails the flagged people sent in the windows
         mph = ", ".join("?" for _ in names)
         cur.execute(

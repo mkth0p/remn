@@ -1,5 +1,6 @@
 """
-EVTX parsing with pyevtx-rs: yields flattened, typed rows ready for IndexedDB.
+EVTX parsing with pyevtx-rs: yields flattened, typed rows ready for IndexedDB. The same records
+exported as XML (wevtutil, Event Viewer, Get-WinEvent, a SIEM's XmlWinEventLog) give the same rows.
 
 Row shape (all keys optional except recordId/eventId/ts):
   recordId, ts (epoch ms UTC), tsIso, eventId, version, level, levelName, task, opcode,
@@ -11,6 +12,7 @@ Row shape (all keys optional except recordId/eventId/ts):
 from __future__ import annotations
 
 import bisect
+import codecs
 import json
 import logging
 import os
@@ -734,6 +736,8 @@ class Stats:
         self.errors = 0
         # records dropped because the same record (one key) was already read: cloud exports only
         self.duplicates = 0
+        # records exported as XML that were read once what their exporter left unescaped was escaped
+        self.repaired = 0
         # one per EVTX file read: its record numbering and chunk checksums, for the statement of
         # what the evidence cannot show
         self.sequences: list[FileSequence] = []
@@ -776,6 +780,7 @@ class Stats:
             "computers": dict(self.computers.most_common(200)),
             "levels": dict(self.levels),
             **({"duplicates": self.duplicates} if self.duplicates else {}),
+            **({"repaired": self.repaired} if self.repaired else {}),
             **self.coverage(),
         }
 
@@ -793,7 +798,12 @@ class Lineage:
     """Fills in what an older log leaves out about a process's parent, from the parent's own event
     in the same log: the parent's account on a Sysmon 1 written before Sysmon had ParentUser, and
     the parent's image on a 4688 written before Windows logged ParentProcessName. Rules on "a
-    SYSTEM child of a service account" or "a child of WmiPrvSE" then work on those logs. What was
+    SYSTEM child of a service account" or "a child of WmiPrvSE" then work on those logs.
+
+    It also gives a Sysmon 8 or 10 the code signer of its source process (`sourceSigner`): the
+    valid signature Sysmon recorded on that process's own executable when it loaded it (Sysmon 7),
+    as long as every image the log shows the process loading before was signed as well; a signed
+    program that has loaded an unsigned DLL is no longer vouched for by its signature. What was
     filled in is named in the row's `enriched` field; the record itself (raw) is unchanged."""
 
     MAX = 200_000
@@ -801,6 +811,8 @@ class Lineage:
     def __init__(self) -> None:
         self.users: OrderedDict[str, str] = OrderedDict()
         self.images: OrderedDict[tuple[str, str], tuple[str, int]] = OrderedDict()
+        # a Sysmon process's signer by its GUID; None once it has loaded an unsigned image
+        self.signers: OrderedDict[str, str | None] = OrderedDict()
 
     def _keep(self, table: OrderedDict, key: Any, value: Any) -> None:
         table[key] = value
@@ -811,6 +823,9 @@ class Lineage:
     def apply(self, row: dict[str, Any]) -> None:
         eid = row.get("eventId")
         data = row.get("data") if isinstance(row.get("data"), dict) else None
+        if eid in (7, 8, 10) and data is not None and "sysmon" in str(row.get("provider") or "").lower():
+            self._signer(row, eid, data)
+            return
         if eid == 1 and data is not None and "sysmon" in str(row.get("provider") or "").lower():
             guid = str(row.get("processGuid") or "").lower()
             if guid and data.get("User"):
@@ -831,6 +846,27 @@ class Lineage:
                 if hit and 0 <= int(row.get("ts") or 0) - hit[1] <= 7 * 86_400_000:
                     row["parentProcessName"] = hit[0]
                     row["enriched"] = _enriched(row, "parentProcessName from the 4688 that created the parent process id")
+
+    def _signer(self, row: dict[str, Any], eid: int, data: dict[str, Any]) -> None:
+        if eid == 7:
+            guid = str(row.get("processGuid") or data.get("ProcessGuid") or "").strip("{}").lower()
+            if not guid:
+                return
+            signed = str(row.get("signed") or data.get("Signed") or "").lower() == "true"
+            if not signed:
+                self._keep(self.signers, guid, None)
+                return
+            loaded, image = str(row.get("imageLoaded") or "").lower(), str(row.get("image") or data.get("Image") or "").lower()
+            status = str(row.get("signatureStatus") or data.get("SignatureStatus") or "").lower()
+            signature = str(row.get("signature") or data.get("Signature") or "").strip()
+            if loaded and loaded == image and status == "valid" and signature and self.signers.get(guid, "") is not None:
+                self._keep(self.signers, guid, signature)
+            return
+        source = str(data.get("SourceProcessGUID") or data.get("SourceProcessGuid") or "").strip("{}").lower()
+        signer = self.signers.get(source) if source else None
+        if signer:
+            row["sourceSigner"] = signer
+            row["enriched"] = _enriched(row, "sourceSigner from the source process's own image load (Sysmon 7)")
 
 
 def _enriched(row: dict[str, Any], note: str) -> str:
@@ -890,3 +926,187 @@ def iter_events(
         if stats is not None:
             stats.add(row)
         yield row
+
+
+# ---------------------------------------------------------------------------
+# Event records exported as XML
+# ---------------------------------------------------------------------------
+# wevtutil qe /f:xml, Event Viewer's "Save All Events As" XML, Get-WinEvent's ToXml() and a SIEM's
+# XmlWinEventLog export write each record's XML, one <Event> after another (Event Viewer inside an
+# <Events> root). Each is read into the shape pyevtx-rs gives the same record in an .evtx, so the
+# rows, and every rule on them, are those of the .evtx. What an export cannot keep: the file's own
+# record numbering (an export holds what its query selected, so a missing id is no deleted record),
+# the event types the XML leaves as text, and a record's rendered message.
+XML_FORMAT = "event-xml"
+_XML_CHUNK = 1 << 20
+# one record's XML; an EVTX record is at most a 64 KiB chunk of binary XML, which grows as text
+_XML_MAX_EVENT = 4 << 20
+_XML_EVENT = re.compile(r"<Event[\s>]")
+_XML_END = "</Event>"
+_XML_INVALID = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]")
+# what some exporters leave unescaped: an ampersand that starts no reference, and markup inside a
+# value (a PowerShell block comment "<#", a task's own XML in TaskContent)
+_XML_AMP = re.compile(r"&(?!(?:[A-Za-z][A-Za-z0-9]*|#[0-9]+|#x[0-9A-Fa-f]+);)")
+_XML_DATA = re.compile(r"(<Data(?:\s[^>]*)?(?<!/)>)(.*?)(</Data>)", re.S)
+_XML_HEAD = re.compile(r"^(?:\s|<\?xml[^>]*\?>|<!--.*?-->)*<Events?[\s>]", re.S)
+
+
+def _xml_encoding(head: bytes) -> str:
+    if head.startswith(codecs.BOM_UTF8):
+        return "utf-8-sig"
+    if head.startswith(codecs.BOM_UTF16_LE):
+        return "utf-16-le"
+    if head.startswith(codecs.BOM_UTF16_BE):
+        return "utf-16-be"
+    if head[:4] in (b"<\x00?\x00", b"<\x00E\x00"):
+        return "utf-16-le"
+    if head[:4] in (b"\x00<\x00?", b"\x00<\x00E"):
+        return "utf-16-be"
+    return "utf-8"
+
+
+def looks_like_event_xml(head: bytes) -> bool:
+    """Event records exported as XML: the file opens on <Event> or on Event Viewer's <Events> root."""
+    encoding = _xml_encoding(head)
+    size = len(head) - len(head) % 2 if encoding.startswith("utf-16") else len(head)
+    text = head[:size].decode(encoding, "replace").lstrip("\ufeff")
+    return bool(_XML_HEAD.match(text))
+
+
+def _xml_text(element: Any) -> str | None:
+    text = element.text
+    # an empty element pretty-printed across lines ("<Security>\n</Security>") holds no value
+    return text if text is not None and text.strip() else None
+
+
+def _xml_value(element: Any) -> str:
+    """A Data value: its own whitespace is part of it, a pretty-printer's line and indent are not."""
+    text = element.text or ""
+    return "" if "\n" in text and not text.strip() else text
+
+
+def _xml_local(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def _xml_node(element: Any) -> Any:
+    """An element as pyevtx-rs writes it: its text, its attributes under #attributes (with the text
+    under #text), its children by name (a repeated name as a list), or None when it holds nothing."""
+    attrs = {_xml_local(k): v for k, v in element.attrib.items()}
+    children: dict[str, list[Any]] = {}
+    for child in element:
+        children.setdefault(_xml_local(child.tag), []).append(_xml_node(child))
+    text = _xml_text(element)
+    if not attrs and not children:
+        return text
+    out: dict[str, Any] = {}
+    if attrs:
+        out["#attributes"] = attrs
+    out.update({k: v[0] if len(v) == 1 else v for k, v in children.items()})
+    if text is not None:
+        out["#text"] = text
+    return out
+
+
+def _xml_event_data(element: Any) -> Any:
+    """EventData: <Data Name="X">v</Data> as X: v, unnamed Data as Data: {"#text": ...}, as pyevtx-rs has them."""
+    out: dict[str, Any] = {}
+    unnamed: list[str] = []
+    for child in element:
+        name = _xml_local(child.tag)
+        if name == "Data" and "Name" in child.attrib:
+            out[child.attrib["Name"]] = _xml_value(child)
+        elif name == "Data":
+            unnamed.append(_xml_value(child))
+        else:
+            out[name] = _xml_node(child)
+    if unnamed:
+        out["Data"] = {"#text": unnamed if len(unnamed) > 1 else unnamed[0]}
+    if element.attrib:
+        out["#attributes"] = {_xml_local(k): v for k, v in element.attrib.items()}
+    return out or None
+
+
+def _xml_repaired(text: str) -> str:
+    """A record as its exporter should have written it: control characters XML 1.0 does not allow
+    replaced, and an ampersand or markup inside a value escaped."""
+    text = _XML_AMP.sub("&amp;", _XML_INVALID.sub("\ufffd", text))
+    return _XML_DATA.sub(lambda m: m.group(1) + m.group(2).replace("<", "&lt;").replace(">", "&gt;") + m.group(3), text)
+
+
+def event_from_xml(text: str, stats: Stats | None = None) -> dict[str, Any]:
+    """One <Event> element's XML as the record pyevtx-rs gives for it. A record its exporter left
+    malformed is read once repaired (counted in ``stats.repaired``); one still malformed raises."""
+    from defusedxml.ElementTree import ParseError, fromstring
+
+    try:
+        root = fromstring(text)
+    except ParseError:
+        root = fromstring(_xml_repaired(text))
+        if stats is not None:
+            stats.repaired += 1
+    if _xml_local(root.tag) != "Event":
+        raise ValueError("not an event record")
+    event: dict[str, Any] = {}
+    for section in root:
+        name = _xml_local(section.tag)
+        if name == "EventData":
+            event[name] = _xml_event_data(section)
+        elif name != "RenderingInfo":
+            event[name] = _xml_node(section)
+    return {"Event": event}
+
+
+def _xml_records(fh: Any, encoding: str, stats: Stats | None) -> Iterator[str]:
+    """Each <Event>...</Event> in the stream, read a chunk at a time."""
+    decoder = codecs.getincrementaldecoder(encoding)("replace")
+    buf, pos = "", 0
+    while True:
+        chunk = fh.read(_XML_CHUNK)
+        buf = buf[pos:] + decoder.decode(chunk, final=not chunk)
+        pos = 0
+        while True:
+            start = _XML_EVENT.search(buf, pos)
+            if start is None:
+                # keep what could be the start of a tag cut by the chunk
+                pos = max(pos, len(buf) - len("<Event "))
+                break
+            end = buf.find(_XML_END, start.end())
+            if end < 0:
+                pos = start.start()
+                if len(buf) - pos > _XML_MAX_EVENT:
+                    # no end in sight: counted as a record not read, and read on from the next start
+                    if stats is not None:
+                        stats.errors += 1
+                    pos = start.end()
+                    continue
+                break
+            yield buf[start.start() : end + len(_XML_END)]
+            pos = end + len(_XML_END)
+        if not chunk:
+            return
+
+
+def iter_xml_events(path_or_file: Any, include_raw: bool = True, stats: Stats | None = None) -> Iterator[dict[str, Any]]:
+    """Rows from event records exported as XML (see XML_FORMAT), path or binary file object."""
+    fh = open(path_or_file, "rb") if isinstance(path_or_file, (str, os.PathLike)) else path_or_file
+    try:
+        head = fh.read(4096)
+        encoding = _xml_encoding(head)
+        fh.seek(0)
+        lineage = Lineage()
+        for text in _xml_records(fh, encoding, stats):
+            try:
+                row = flatten(event_from_xml(text, stats), None, include_raw=include_raw)
+            except Exception as exc:  # noqa: BLE001
+                if stats is not None:
+                    stats.errors += 1
+                log.debug("event XML not read: %s", exc)
+                continue
+            lineage.apply(row)
+            if stats is not None:
+                stats.add(row)
+            yield row
+    finally:
+        if fh is not path_or_file:
+            fh.close()

@@ -29,6 +29,19 @@ bundled rules target. On the machine under
 investigation, `wevtutil epl Security C:\evidence\Security.evtx` (as administrator)
 exports a channel.
 
+Event records exported as XML are read into the same rows: `wevtutil qe Security /f:xml`,
+Event Viewer's "Save All Events As" XML, `Get-WinEvent | ForEach-Object { $_.ToXml() }`, and a
+SIEM's XmlWinEventLog export (Splunk keeps one record a line), as `.xml`, `.log` or `.txt`,
+alone or in an archive, in UTF-8 or UTF-16. Each `<Event>` is read into the shape the EVTX
+parser gives the same record, so every rule reads it as it reads the `.evtx`: on the 50,176
+records of EVTX-ATTACK-SAMPLES and EVTX-to-MITRE-Attack read both ways, the rows agree except
+that XML reads a Windows line break (`\r\n`) as one line feed, a value the event types as a
+boolean is the text Windows writes (`true`), and a control character XML does not allow is
+replaced. Some exports write a value as it is, an ampersand or markup inside it unescaped; such a
+record is read with those escaped, and the file says how many were. An export holds what its
+query selected, not a file's own record numbering, so no statement about missing records is made
+for it, and its rendered message (`RenderingInfo`) is not read.
+
 Each file also says what it cannot show about itself, in its parser statistics
 (`sequences`, one entry per file, archive or package member):
 

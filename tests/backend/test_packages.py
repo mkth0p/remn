@@ -605,3 +605,34 @@ def test_one_package_cannot_spawn_unbounded_decoder_subprocesses(tmp_path):
     assert len(skipped) == 4, [(f.get("status"), f.get("reason")) for f in src.files]
     # the members past the budget are still inventoried and hashed: nothing is silently dropped
     assert all(f.get("sha256") for f in skipped)
+
+
+EVENT_XML = (
+    "<Event xmlns='http://schemas.microsoft.com/win/2004/08/events/event'><System><Provider Name='Microsoft-Windows-Security-Auditing'/>"
+    "<EventID>4624</EventID><TimeCreated SystemTime='2026-09-09T09:00:00.000Z'/><EventRecordID>{n}</EventRecordID>"
+    "<Channel>Security</Channel><Computer>WS01</Computer></System><EventData><Data Name='TargetUserName'>alice</Data>"
+    "<Data Name='LogonType'>3</Data><Data Name='IpAddress'>10.0.0.5</Data></EventData></Event>"
+)
+
+
+def test_event_records_exported_as_xml_are_read_as_event_logs(tmp_path):
+    """An Event Viewer export and a SIEM's XmlWinEventLog lines were inventoried and left unread;
+    they are event logs, read into the rows the same records give from an .evtx."""
+    from services.ingest.pipeline import EvtxSource
+
+    viewer = '<?xml version="1.0" encoding="UTF-8"?>\r\n<Events>' + EVENT_XML.format(n=1) + EVENT_XML.format(n=2) + "</Events>"
+    splunk = EVENT_XML.format(n=3) + "\n"
+    rows, stats = parse(tmp_path, archive([("exports/Security.xml", viewer), ("siem/wineventlog.log", splunk), ("notes.txt", "not an export")]))
+    assert sorted(r["recordId"] for r in rows) == [1, 2, 3]
+    assert all(r["targetUser"] == "alice" and r["logonType"] == 3 and r["ipAddress"] == "10.0.0.5" for r in rows)
+    members = {f["name"]: f for f in stats["files"]}
+    assert members["exports/Security.xml"]["status"] == "parsed" and members["exports/Security.xml"]["format"] == "event-xml"
+    assert members["siem/wineventlog.log"]["count"] == 1
+    # one export dropped on its own
+    rows, _ = parse(tmp_path, viewer.encode(), name="Security.xml")
+    assert [r["recordId"] for r in rows] == [1, 2]
+    # and inside an archive of event logs
+    blob = archive([("logs/Security.xml", viewer), ("logs/readme.txt", "no records")])
+    source = EvtxSource("logs.zip", None, blob, str(tmp_path))
+    assert sorted(r["recordId"] for r in source) == [1, 2]
+    assert {f["name"]: f["status"] for f in source.files} == {"logs/Security.xml": "parsed", "logs/readme.txt": "skipped"}

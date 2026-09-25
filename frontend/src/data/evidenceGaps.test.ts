@@ -242,6 +242,30 @@ describe('what the evidence cannot show', () => {
     expect(gaps[1].text).toContain('audit.csv: exactly 50,000 Unified Audit Log records, the most a large-set search returns')
   })
 
+  it('says an XML export cannot show records deleted from its log, alone or in a package', () => {
+    const pkg = ev(
+      3,
+      'siem.zip',
+      {
+        files: [
+          { name: 'sysmon.log', status: 'parsed', format: 'event-xml', count: 1200 },
+          { name: 'Security.evtx', status: 'parsed', format: 'evtx', count: 9 },
+        ],
+      },
+      'zip',
+    )
+    const alone = ev(4, 'Security.xml', { count: 1 }, 'event-xml')
+    const gaps = evidenceGaps({ evidence: [pkg, alone] })
+    expect(gaps.map((g) => [g.kind, g.severity, g.evidenceId])).toEqual([
+      ['xml-export', 'low', 3],
+      ['xml-export', 'low', 4],
+    ])
+    expect(gaps[0].text).toBe(
+      "sysmon.log: 1,200 event records exported as XML. An export holds what its query selected and not the log file's own record numbering, so a record deleted from the log before the export cannot be told from one the export left out; the log file itself (wevtutil epl) can be checked for that.",
+    )
+    expect(gaps[1].text).toMatch(/^Security\.xml: 1 event record exported as XML\./)
+  })
+
   it('says from when a mailbox’s item reads were throttled, once per mailbox', () => {
     const gaps = evidenceGaps({
       evidence: [],

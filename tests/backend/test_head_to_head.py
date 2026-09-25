@@ -61,7 +61,7 @@ def test_rules_written_against_a_dataset_exist_and_name_a_measured_source():
     assert h2h.WRITTEN_AGAINST
     for rid, datasets in h2h.WRITTEN_AGAINST.items():
         assert rid in ids, rid
-        assert datasets and datasets <= {"sigma", "attackSamples", "attackData", "evtxToMitre"}, rid
+        assert datasets and datasets <= {"sigma", "attackSamples", "attackData", "attackDataWindows", "evtxToMitre"}, rid
 
 
 def test_hayabusa_hunting_rules_and_chainsaw_aggregates_and_own_rules(tmp_path):

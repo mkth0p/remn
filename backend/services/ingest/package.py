@@ -18,7 +18,7 @@ from typing import Any
 from services.analysis import hayabusa
 from services.ingest.pipeline import SNIFF_BYTES, EvtxSource, MailSource, Member, detect_archive, looks_like_mail
 from services.ingest.reconcile import reconcile
-from services.parsers import collection, m365, native, triage
+from services.parsers import collection, evtx_parser, m365, native, triage
 from services.parsers.mail.common import ParseContext
 
 MAX_FILES = 20_000
@@ -610,19 +610,26 @@ class PackageSource:
                     self.budget["decodes"] += 1
                     decode_started = time.monotonic()
                     rows = (("event", r) for r in collection.native_records(kind, tmp_path, member.name, self.context, self.tmp_dir))
-                elif head.startswith(b"ElfFile\x00") or low.endswith(".evtx") or m365.detect_format(member.name, head):
+                elif (
+                    head.startswith(b"ElfFile\x00") or low.endswith(".evtx") or m365.detect_format(member.name, head) or evtx_parser.looks_like_event_xml(head)
+                ):
                     source = EvtxSource(member.name, tmp_path, None, self.tmp_dir, self.include_raw, seen=self.seen_records)
                     entry["format"] = source.format
                     rows = (("event", r) for r in source)
-                elif collection.supported(member.name) or (
-                    self.context.get("artifactDefault") == "defender" and low.endswith((".txt", ".log", ".csv", ".json"))
+                elif (
+                    collection.supported(member.name)
+                    or (self.context.get("artifactDefault") == "defender" and low.endswith((".txt", ".log", ".csv", ".json")))
+                    or (low.endswith((".log", ".txt", ".csv")) and collection.sniff_category(member.name, head))
                 ):
                     # No size pre-check: collection.records() enforces the parse budget while
                     # reading, so an oversized export yields the records before the ceiling and is
                     # reported as partial rather than contributing nothing but a hash.
                     entry["format"] = collection.VERSION
                     source = None
-                    parse_name = member.name if collection.category(member.name) else f"WdSupportLogs/{member.name}"
+                    sniffed = None if collection.category(member.name) else collection.sniff_category(member.name, head)
+                    parse_name = (
+                        member.name if collection.category(member.name) else f"dhcp/{member.name}" if sniffed == "dhcp" else f"WdSupportLogs/{member.name}"
+                    )
                     rows = (
                         ("event", collection.normalize(r, parse_name, i, self.context)) for i, r in enumerate(collection.records(tmp_path, parse_name, notes))
                     )
@@ -634,7 +641,14 @@ class PackageSource:
                     entry.update(status="unsupported", reason="no parser for this member; inventoried and hashed")
                     continue
                 yield from self._emit(entry, member.name, index, rows)
-                if self.engines and isinstance(source, EvtxSource) and tmp_path and self.budget["deferredBytes"] + size <= MAX_DEFERRED_BYTES:
+                if (
+                    self.engines
+                    # the engines read .evtx files only, not a cloud export or records exported as XML
+                    and isinstance(source, EvtxSource)
+                    and source.format == "evtx"
+                    and tmp_path
+                    and self.budget["deferredBytes"] + size <= MAX_DEFERRED_BYTES
+                ):
                     # kept for the engines that run once the loop is done; released by _drain_engines
                     self.evtx_held[tmp_path] = (entry, member.name)
                     self.budget["deferredBytes"] += size
@@ -645,6 +659,8 @@ class PackageSource:
                 if isinstance(source, EvtxSource):
                     # the member's record numbering and chunk checksums, for what the evidence cannot show
                     entry.update(source.stats.coverage())
+                    if source.stats.repaired:
+                        notes["xmlRepaired"] = source.stats.repaired
                 if source is not None and source.stats.errors:
                     raise ValueError(f"parser reported {source.stats.errors} error(s); any emitted rows are partial")
                 entry["status"] = "parsed"
@@ -671,6 +687,11 @@ class PackageSource:
                         said.append(f"{repaired} row(s) had columns merged by the exporter and were split back apart")
                     if malformed:
                         said.append(f"{malformed} row(s) do not match the header and were kept with the mismatch marked")
+                    if notes.get("xmlRepaired"):
+                        said.append(
+                            f"{notes['xmlRepaired']} record(s) held an ampersand or markup inside a value that the exporter left "
+                            "unescaped, and were read with it escaped"
+                        )
                     if notes.get("defenderKept") is not None:
                         said.append(
                             f"Defender engine log: {notes.get('defenderScanned', 0):,} lines read, "

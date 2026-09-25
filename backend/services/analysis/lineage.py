@@ -8,11 +8,20 @@ Host lineage: who was logged on to each host, how they got there, and what ran t
   are not anyone's and are left out.
 - **Hops.** How an account came to a host: an RDP logon (4624 type 10, and 4778, 1149 or the local
   session manager's 21 and 25 when those are what the evidence has), a network session that opened
-  an admin share, created a task or a service or ran a program (5140, 5145, 4698, 4697, 4688), a
-  service installed right after an admin share was opened (7045: PsExec's pattern), explicit
-  credentials used towards another host (4648), and a Sysmon connection to a remote-access port of
-  another host of the case. A hop's source is a host when the case shows whose address it is,
-  otherwise the address.
+  an admin share, created a task or a service or ran a program (5140, 5145, 4698, 4697, 4688,
+  Sysmon 1), through WMI when the program's parent is WmiPrvSE and through WinRM when it is
+  wsmprovhost or winrshost or WinRM started a shell then (91), a service installed right after an
+  admin share was opened (7045: PsExec's pattern), explicit credentials used towards another host
+  (4648), a WMI call from another host that failed (WMI-Activity 5858), remote execution named on
+  the source (wmic /node, winrs -r, PowerShell remoting and WMI cmdlets with -ComputerName, WinRM's
+  own session record 6), and a Sysmon connection to a remote-access port of another host of the
+  case. A hop's source is a host when the case shows whose address it is, otherwise the address.
+- **Addresses.** An address belongs to the host whose own Sysmon connections come from it, that a
+  logon names as its workstation (4624), that a DNS answer names for it (Sysmon 22, DNS client
+  3008) or that the DHCP server leased it to (its audit log). When the evidence gives it to several
+  hosts, the one whose records put it nearest in time is taken.
+- **Devices.** An Entra sign-in's device (its name and how it is joined) is the host of that name
+  when the case has its logs.
 - **Process trees.** Sysmon 1 by process GUID; 4688 by process id and creator id on one host, the
   latest creation of that id before the child (ids are reused); a process both logged is one.
   Each process is placed in its logon session.
@@ -66,6 +75,37 @@ _PROCESS_REUSE = 7 * 86_400_000
 _SAME_PROCESS = 2_000
 _LSM = "terminalservices-localsessionmanager"
 _RCM = "terminalservices-remoteconnectionmanager"
+# the programs remote execution runs its commands under on the target
+_WMI_PARENTS = frozenset({"wmiprvse.exe"})
+_WINRM_PARENTS = frozenset({"wsmprovhost.exe", "winrshost.exe"})
+# remote execution named on the source: wmic /node, winrs -r, PowerShell remoting and WMI cmdlets
+_REMOTE_HINT = re.compile(r"(?i)/node:|\bwinrs|-computername\b|-cn\s|\benter-pssession\b|\betsn\b")
+_REMOTE_CMDS: tuple[tuple[re.Pattern[str], str, str], ...] = (
+    (re.compile(r"(?i)\bwmic(?:\.exe)?\b[^\n]*?/node:\s*[\"']?([^\s\"',/]+)"), "wmi", "wmic ran against it (/node)"),
+    (re.compile(r"(?i)\bwinrs(?:\.exe)?\b[^\n]*?[-/]r(?:emote)?:\s*[\"']?(?:https?://)?([^\s\"':/]+)"), "winrm", "winrs ran a command on it"),
+    (
+        re.compile(r"(?i)\b(?:invoke-command|icm|enter-pssession|etsn|new-pssession|nsn)\b[^\n|;]*?\s-(?:computername|cn)\s+[\"']?([^\s\"',;)]+)"),
+        "winrm",
+        "PowerShell remoting to it",
+    ),
+    (re.compile(r"(?i)\b(?:enter-pssession|etsn)\s+[\"']?([a-z0-9][a-z0-9.\-_]*)"), "winrm", "PowerShell remoting to it"),
+    (
+        re.compile(
+            r"(?i)\b(?:invoke-wmimethod|get-wmiobject|gwmi|set-wmiinstance|swmi|invoke-cimmethod|get-ciminstance|new-cimsession)\b[^\n|;]*?\s-(?:computername|cn)\s+[\"']?([^\s\"',;)]+)"
+        ),
+        "wmi",
+        "a PowerShell WMI call to it",
+    ),
+)
+_WINRM_TARGET = re.compile(r"(?i)^(?:https?://)?\[?([^/\]:?]+)")
+# a DNS name that names a domain or a service rather than a host
+_NOT_A_HOST = frozenset({"www", "wpad", "isatap", "autodiscover", "localhost", "_msdcs", "_ldap", "_kerberos", "_gc"})
+# a program the target runs WMI's or WinRM's command under starts within this long of the caller's logon
+_EXEC_AFTER_LOGON = 60_000
+# explicit credentials used by a remote-execution client: the way in is that client's
+_EXPLICIT_KIND = {"wmic.exe": "wmi", "winrs.exe": "winrm", "mstsc.exe": "rdp"}
+# the DHCP server's audit log: a new lease, a renewal (its other records do not give an address to a host)
+_DHCP_LEASES = frozenset({"10", "11"})
 
 
 # --- values ---------------------------------------------------------------------------------------
@@ -180,6 +220,8 @@ class Lineage:
         self.hops: dict[str, dict[str, Any]] = {}
         self.processes: dict[str, dict[str, Any]] = {}
         self.ip_hosts: dict[str, dict[str, Any]] = {}
+        # Entra devices by host key: the name, ids and join types sign-ins give, the accounts that used them
+        self.devices: dict[str, dict[str, Any]] = {}
         self._by_key: dict[tuple[str, int], list[dict[str, Any]]] = defaultdict(list)
         self._session_of_ref: dict[str, str] = {}
         self._process_of_ref: dict[str, str] = {}
@@ -212,9 +254,25 @@ class Lineage:
     def hops_of(self, ref: str) -> list[dict[str, Any]]:
         return [self.hops[h] for h in self._hops_of_ref.get(ref, []) if h in self.hops]
 
-    def host_of_ip(self, ip: str) -> str | None:
+    def host_of_ip(self, ip: str, ts: int | None = None) -> str | None:
+        """The host an address belongs to; at a time, when the evidence gives it to several hosts, the one
+        whose records put it nearest to that time."""
         hit = self.ip_hosts.get(ip)
-        return hit["host"] if hit else None
+        if not hit:
+            return None
+        spans = hit.get("spans") or []
+        if ts and len(spans) > 1:
+
+            def distance(sp: dict[str, Any]) -> int:
+                return 0 if sp["first"] <= ts <= sp["last"] else min(abs(ts - sp["first"]), abs(ts - sp["last"]))
+
+            return min(spans, key=lambda sp: (distance(sp), -sp["count"]))["host"]
+        return hit["host"]
+
+    def device_of(self, row: dict[str, Any]) -> dict[str, Any] | None:
+        """The Entra device a sign-in names, with the host of that name when the case has its logs."""
+        key = host_key(_data(row).get("deviceName"))
+        return self.devices.get(key) if key else None
 
     def tree(self, proc_id: str, up: int = 6, down: int = 30) -> dict[str, Any]:
         """A process with its ancestors (nearest first) and its children, as far as the evidence goes."""
@@ -239,6 +297,7 @@ class Lineage:
                 "sessions": list(self.sessions.values()),
                 "hops": list(self.hops.values()),
                 "processes": list(self.processes.values()),
+                "devices": list(self.devices.values()),
             }
         want = set(refs or ())
         host_set = set(hosts or ())
@@ -266,6 +325,7 @@ class Lineage:
             "sessions": [self.sessions[s] for s in sorted(sessions, key=lambda s: self.sessions[s]["start"])],
             "hops": [self.hops[h] for h in sorted(hops, key=lambda h: self.hops[h]["ts"])],
             "processes": [self.processes[p] for p in sorted(procs, key=lambda p: self.processes[p]["ts"])],
+            "devices": [d for d in self.devices.values() if want.intersection(d["refs"])][:20],
         }
 
 
@@ -277,15 +337,32 @@ def _guid(v: Any) -> str:
 def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | None = None) -> Lineage:
     """Sessions, hops, process trees and coverage from the events of a case (or of a story's window)."""
     lin = Lineage()
-    rows = sorted((e for e in events if e.get("computer") or e.get("eventId")), key=lambda e: (_ts(e), str(e.get("id") or "")))
+    rows = sorted(
+        (e for e in events if e.get("computer") or e.get("eventId") or e.get("artifactType") == "dhcp" or _data(e).get("deviceName")),
+        key=lambda e: (_ts(e), str(e.get("id") or "")),
+    )
     counts: dict[str, Counter] = defaultdict(Counter)
     names: dict[str, Counter] = defaultdict(Counter)
     spans: dict[str, list[int]] = {}
     clears: dict[str, list[tuple[int, str, str]]] = defaultdict(list)
     ip_votes: dict[str, Counter] = defaultdict(Counter)
     ip_basis: dict[tuple[str, str], str] = {}
+    ip_spans: dict[tuple[str, str], list[int]] = {}
+
+    def vote(ip: str, host: str, basis: str, ts: int) -> None:
+        ip_votes[ip][host] += 1
+        ip_basis.setdefault((ip, host), basis)
+        if ts:
+            sp = ip_spans.setdefault((ip, host), [ts, ts])
+            sp[0], sp[1] = min(sp[0], ts), max(sp[1], ts)
 
     logons, logoffs, specials, activity, reconnects, rdp_other, explicit, shares, services, procs4688, sysmon1, conns = ([] for _ in range(12))
+    dns_answers: list[tuple[dict[str, Any], str]] = []
+    dhcp: list[dict[str, Any]] = []
+    winrm: list[dict[str, Any]] = []
+    wmi_failed: list[dict[str, Any]] = []
+    remote_cmds: list[dict[str, Any]] = []
+    signins: list[dict[str, Any]] = []
     for ev in rows:
         host = host_key(ev.get("computer"))
         eid = _eid(ev)
@@ -314,8 +391,10 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
             # accepted; only a private address is taken for a host's own
             own = src if initiated in ("true", "1") else dst if initiated in ("false", "0") else ""
             if host and own and is_internal_ip(own):
-                ip_votes[own][host] += 1
-                ip_basis[(own, host)] = "the address the host's own connections come from (Sysmon 3)"
+                vote(own, host, "the address the host's own connections come from (Sysmon 3)", ts)
+        elif sysmon and eid == 22:
+            c["sysmon"] += 1
+            dns_answers.append((ev, host))
         elif sysmon:
             c["sysmon"] += 1
         elif eid == 4688:
@@ -328,8 +407,7 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
             logons.append(ev)
             ip, ws = ip_of(ev.get("ipAddress")), host_key(ev.get("workstation"))
             if ip and ws and ws != host:
-                ip_votes[ip][ws] += 1
-                ip_basis.setdefault((ip, ws), "a logon came from this address under that workstation name (4624)")
+                vote(ip, ws, "a logon came from this address under that workstation name (4624)", ts)
         elif eid in (4634, 4647):
             c["logoffs"] += 1
             logoffs.append(ev)
@@ -354,14 +432,52 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
             c["powershell"] += 1
         if (eid == 1102 and "security" in prov) or (eid == 104 and "eventlog" in prov):
             clears[host].append((ts, str(ev.get("channel") or "Security"), ref_of(ev)))
+        # remote execution named on the source, WinRM's and WMI's own records, DNS answers, DHCP
+        # leases and the devices sign-ins come from
+        if eid in (1, 4688, 4104) and _REMOTE_HINT.search(str(ev.get("commandLine") or ev.get("scriptBlockText") or "")):
+            remote_cmds.append(ev)
+        if "winrm" in prov and eid in (6, 91):
+            winrm.append(ev)
+        elif "wmi-activity" in prov and eid == 5858:
+            wmi_failed.append(ev)
+        elif "dns-client" in prov and eid == 3008:
+            dns_answers.append((ev, host))
+        elif ev.get("artifactType") == "dhcp":
+            dhcp.append(ev)
+        elif "entra" in prov and _data(ev).get("deviceName"):
+            signins.append(ev)
         # activity of a session: any event naming its logon id as the subject's, on that host
         lid = logon_id(ev.get("subjectLogonId") or _data(ev).get("SubjectLogonId"))
         if host and lid is not None and lid not in _SYSTEM_LOGONS and eid not in _ACTIVITY_SKIP and eid != 4688:
             activity.append((ev, lid))
 
+    # a DNS answer names a host for a private address: only a plain answer (no alias), for a name
+    # that is a host of the case or reads as one (three labels or more, not a service record)
+    for ev, host in dns_answers:
+        name = str(ev.get("query") or _data(ev).get("QueryName") or "").strip().rstrip(".").lower()
+        results = str(ev.get("queryResults") or _data(ev).get("QueryResults") or "")
+        if not name or "type:" in results.lower() or name.startswith("_") or _is_ip(name):
+            continue
+        target = host_key(name)
+        if not target or target in _NOT_A_HOST or (target not in counts and name.count(".") < 2):
+            continue
+        for entry in results.split(";"):
+            ip = ip_of(entry)
+            if ip and is_internal_ip(ip):
+                vote(ip, target, f"a DNS answer on {host or 'a host'} gave it for {name}", _ts(ev))
+    for ev in dhcp:
+        d = _data(ev)
+        if str(d.get("ID") or "").strip() not in _DHCP_LEASES:
+            continue
+        ip, target = ip_of(ev.get("ipAddress") or d.get("IP Address")), host_key(ev.get("workstation") or d.get("Host Name"))
+        if ip and target:
+            vote(ip, target, "the DHCP server leased it to that host (its audit log)", _ts(ev))
     for ip, votes in ip_votes.items():
         host, n = votes.most_common(1)[0]
         lin.ip_hosts[ip] = {"host": host, "basis": ip_basis.get((ip, host), ""), "count": n, "others": sorted(h for h in votes if h != host)[:5]}
+        timed = [{"host": h, "first": ip_spans[(ip, h)][0], "last": ip_spans[(ip, h)][1], "count": votes[h]} for h in votes if (ip, h) in ip_spans]
+        if len(votes) > 1 and len(timed) > 1:
+            lin.ip_hosts[ip]["spans"] = sorted(timed, key=lambda sp: sp["first"])
 
     # sessions: a logon, its logoff, 4672 privileges, and its activity
     for ev in logons:
@@ -383,7 +499,7 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
             "typeName": LOGON_TYPES.get(lt, str(lt) if lt else "unknown"),
             "ip": ip or None,
             "workstation": ws if ws and ws != "-" else None,
-            "from": _source(lin, ip, ws, host),
+            "from": _source(lin, ip, ws, host, ts),
             "authPackage": ev.get("authPackage"),
             "logonProcess": ev.get("logonProcess"),
             "elevated": str(ev.get("elevatedToken") or "").lower() in ("%%1842", "yes", "true"),
@@ -481,6 +597,49 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
         )
         _hop(lin, "rdp", ev, host, ip, "", ev.get("targetUser"), ev.get("targetDomain"), s, what, STRONG)
 
+    # process trees, placed in their sessions: what a network session ran is part of what it did
+    _processes(lin, sysmon1, procs4688)
+    # A program WmiPrvSE or the WinRM host started under its own service account (4688 without the
+    # caller's logon) belongs to the network logon of a person on that host just before it: WMI
+    # and WinRM authenticate the caller, then start the program. A tie by time, so medium.
+    for p in lin.processes.values():
+        via = "WMI" if _base(p.get("parentImage")).lower() in _WMI_PARENTS else "WinRM" if _base(p.get("parentImage")).lower() in _WINRM_PARENTS else ""
+        if not via:
+            continue
+        own = lin.sessions.get(p.get("session") or "")
+        if own and own["type"] in (3, 8):
+            continue
+        near = [
+            x
+            for x in lin.sessions.values()
+            if x["host"] == p["host"]
+            and x["logonSeen"]
+            and x["type"] in (3, 8)
+            and (x["ip"] or x["workstation"])
+            and not str(x.get("user") or "").endswith("$")
+            and 0 <= p["ts"] - x["start"] <= _EXEC_AFTER_LOGON
+        ]
+        if not near:
+            continue
+        x = max(near, key=lambda x: x["start"])
+        what = f"ran a program through {via} (by time)"
+        x["actions"][what] = x["actions"].get(what, 0) + 1
+        x.setdefault("timed", True)
+        if len(x["activityRefs"]) < 200:
+            x["activityRefs"].append(p["refs"][0])
+    # WinRM started a shell (91) on a host: the network logon of that moment is its session
+    for ev in winrm:
+        if _eid(ev) != 91:
+            continue
+        host, ts = host_key(ev.get("computer")), _ts(ev)
+        near = [x for x in lin.sessions.values() if x["host"] == host and x["logonSeen"] and x["type"] in (3, 8) and abs(x["start"] - ts) <= _RDP_MATCH]
+        if near:
+            best = min(near, key=lambda x: abs(x["start"] - ts))
+            best["actions"]["started a WinRM shell (91)"] = best["actions"].get("started a WinRM shell (91)", 0) + 1
+            lin._session_of_ref[ref_of(ev)] = best["id"]
+            if len(best["activityRefs"]) < 200:
+                best["activityRefs"].append(ref_of(ev))
+
     # hops from sessions: RDP, and network sessions that did something
     for s in lin.sessions.values():
         if not s["logonSeen"]:
@@ -489,8 +648,20 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
             _session_hop(lin, s, "rdp", f"an RDP logon (4624 type {s['type']}) came from it")
         elif s["type"] in (3, 8) and (s["ip"] or s["workstation"]) and s["actions"]:
             acts = s["actions"]
-            kind = "remote-service" if "installed a service" in acts else "admin-share" if any(a.startswith("opened") for a in acts) else "remote-action"
-            _session_hop(lin, s, kind, f"a network logon from it {', '.join(sorted(acts))}")
+            kind = (
+                "remote-service"
+                if "installed a service" in acts
+                else "wmi"
+                if any(a.startswith("ran a program through WMI") for a in acts)
+                else "winrm"
+                if any(a.startswith("ran a program through WinRM") for a in acts) or "started a WinRM shell (91)" in acts
+                else "admin-share"
+                if any(a.startswith("opened") for a in acts)
+                else "remote-action"
+            )
+            # the program tied to the logon by time only is as sure as that tie
+            timed = s.get("timed") and not any(a in acts for a in ("installed a service", "ran a program through WMI", "ran a program through WinRM"))
+            _session_hop(lin, s, kind, f"a network logon from it {', '.join(sorted(acts))}", MEDIUM if timed else STRONG)
     # an admin share opened without its logon in the evidence: the share record names the source
     for ev in shares:
         host = host_key(ev.get("computer"))
@@ -530,7 +701,7 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
         match = _logon_from(lin, dst, src, ev.get("targetUser"), ts)
         h = _hop(
             lin,
-            "explicit-credentials",
+            _EXPLICIT_KIND.get(_base(ev.get("processName")).lower(), "explicit-credentials"),
             ev,
             dst,
             "",
@@ -551,7 +722,7 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
         port = _int(ev.get("destinationPort"))
         kind = _REMOTE_PORTS.get(port)
         src = host_key(ev.get("computer"))
-        dst = host_key(ev.get("destinationHostname")) or lin.host_of_ip(ip_of(ev.get("destinationIp"))) or ""
+        dst = host_key(ev.get("destinationHostname")) or lin.host_of_ip(ip_of(ev.get("destinationIp")), _ts(ev)) or ""
         if not kind or not dst or dst == src or dst not in counts:
             continue
         _hop(
@@ -569,8 +740,65 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
             from_host=src,
         )
 
-    # process trees
-    _processes(lin, sysmon1, procs4688)
+    # remote execution named on the source: a command line, a script block or WinRM's own record
+    # of the session it opened (6); strong when the logon on the target from this host follows
+    for ev in remote_cmds + [e for e in winrm if _eid(e) == 6]:
+        src, ts = host_key(ev.get("computer")), _ts(ev)
+        if not src:
+            continue
+        user = ev.get("user") or _account(ev.get("subjectUser"), ev.get("subjectDomain")) or None
+        if _eid(ev) == 6:
+            m = _WINRM_TARGET.match(str(_data(ev).get("connection") or _data(ev).get("Connection") or "").strip())
+            targets = [(m.group(1), "winrm", "WinRM opened a session to it (6)")] if m else []
+        else:
+            text = str(ev.get("commandLine") or ev.get("scriptBlockText") or "")
+            targets = [(mm.group(1), kind, what) for rx, kind, what in _REMOTE_CMDS for mm in rx.finditer(text)]
+        seen: set[tuple[str, str]] = set()
+        for raw, kind, what in targets:
+            value = raw.strip().strip("\"'").rstrip(",;")
+            if not value or value.startswith("$") or value in (".", "*"):
+                continue
+            ip = ip_of(value)
+            dst = (lin.host_of_ip(ip, ts) or ip) if ip else host_key(value)
+            if not dst or dst == src or (dst, kind) in seen:
+                continue
+            seen.add((dst, kind))
+            match = _logon_from(lin, dst, src, user, ts)
+            h = _hop(
+                lin,
+                kind,
+                ev,
+                dst,
+                "",
+                src,
+                user,
+                None,
+                match,
+                f"{what} from {src} ({_eid(ev)})" + (", and the logon there followed" if match else ""),
+                STRONG if match else MEDIUM,
+                from_host=src,
+            )
+            if h and match and match.get("logonRef"):
+                lin._hops_of_ref[match["logonRef"]].append(h["id"])
+    # a WMI call from another host that failed on this one (WMI-Activity 5858 names its client)
+    for ev in wmi_failed:
+        d = _data(ev)
+        dst, src = host_key(ev.get("computer")), host_key(d.get("ClientMachine"))
+        if dst and src and src != dst:
+            _hop(
+                lin,
+                "wmi",
+                ev,
+                dst,
+                "",
+                src,
+                d.get("User"),
+                None,
+                None,
+                f"a WMI call from it failed ({d.get('Operation') or '5858'})"[:200],
+                MEDIUM,
+                from_host=src,
+            )
 
     # hosts and what their evidence covers
     for host, c in counts.items():
@@ -588,6 +816,40 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
             "cleared": [{"ts": ts, "log": log, "ref": ref} for ts, log, ref in clears.get(host, [])],
             "limits": _limits(host, names[host].most_common(1)[0][0] if names[host] else host, c, clears.get(host, [])),
         }
+    # the devices sign-ins come from: a device named like a host of the case is that host
+    for ev in signins:
+        d = _data(ev)
+        key = host_key(d.get("deviceName"))
+        if not key:
+            continue
+        dev = lin.devices.setdefault(
+            key,
+            {
+                "key": key,
+                "name": str(d.get("deviceName")),
+                "host": None,
+                "deviceIds": [],
+                "trustTypes": [],
+                "accounts": [],
+                "signIns": 0,
+                "first": 0,
+                "last": 0,
+                "refs": [],
+            },
+        )
+        dev["signIns"] += 1
+        ts = _ts(ev)
+        dev["first"] = min(dev["first"], ts) if dev["first"] else ts
+        dev["last"] = max(dev["last"], ts)
+        for field, value in (("deviceIds", d.get("deviceId")), ("trustTypes", d.get("trustType")), ("accounts", ev.get("upn") or ev.get("user"))):
+            if value and str(value) not in dev[field] and len(dev[field]) < 10:
+                dev[field].append(str(value))
+        if len(dev["refs"]) < 200:
+            dev["refs"].append(ref_of(ev))
+    for key, dev in lin.devices.items():
+        if key in lin.hosts:
+            dev["host"] = key
+            lin.hosts[key]["devices"] = sorted(set(lin.hosts[key].get("devices", [])) | set(dev["deviceIds"]))
     return lin
 
 
@@ -598,13 +860,13 @@ def _int(v: Any) -> int:
         return 0
 
 
-def _source(lin: Lineage, ip: str, workstation: str, host: str) -> str | None:
+def _source(lin: Lineage, ip: str, workstation: str, host: str, ts: int | None = None) -> str | None:
     """The host a logon or connection came from, when the case names it or shows whose address it is."""
     ws = host_key(workstation)
     if ws and ws != host:
         return ws
     if ip:
-        h = lin.host_of_ip(ip)
+        h = lin.host_of_ip(ip, ts)
         if h and h != host:
             return h
     return None
@@ -651,7 +913,7 @@ def _unseen_session(lin: Lineage, host: str, lid: int, ev: dict[str, Any]) -> di
     return s
 
 
-def remote_action(ev: dict[str, Any]) -> str | None:
+def remote_action(ev: dict[str, Any], parent: Any = None) -> str | None:
     """What an event done in a network session did that makes the session a way in, in words."""
     eid = _eid(ev)
     share = str(ev.get("shareName") or "")
@@ -664,21 +926,26 @@ def remote_action(ev: dict[str, Any]) -> str | None:
         return "created a scheduled task" if eid == 4698 else "changed a scheduled task"
     if eid in (4697, 7045):
         return "installed a service"
-    if eid == 4688:
+    if eid == 4688 or (eid == 1 and "sysmon" in _provider(ev)):
+        by = _base(ev.get("parentProcessName") or ev.get("parentImage") or parent).lower()
+        if by in _WMI_PARENTS:
+            return "ran a program through WMI"
+        if by in _WINRM_PARENTS:
+            return "ran a program through WinRM"
         return "ran a program"
     if eid in _ACCOUNT_CHANGES:
         return "changed an account or a group"
     return None
 
 
-def _add_activity(lin: Lineage, s: dict[str, Any], ev: dict[str, Any]) -> None:
+def _add_activity(lin: Lineage, s: dict[str, Any], ev: dict[str, Any], parent: Any = None) -> None:
     ref = ref_of(ev)
     s["activity"] += 1
     if len(s["activityRefs"]) < 200:
         s["activityRefs"].append(ref)
     k = str(_eid(ev))
     s["activityKinds"][k] = s["activityKinds"].get(k, 0) + 1
-    what = remote_action(ev)
+    what = remote_action(ev, parent)
     if what:
         s["actions"][what] = s["actions"].get(what, 0) + 1
     lin._session_of_ref[ref] = s["id"]
@@ -711,14 +978,14 @@ def _logon_from(lin: Lineage, dst: str, src: str, user: Any, ts: int) -> dict[st
     return None
 
 
-def _session_hop(lin: Lineage, s: dict[str, Any], kind: str, basis: str) -> None:
+def _session_hop(lin: Lineage, s: dict[str, Any], kind: str, basis: str, confidence: str = STRONG) -> None:
     ev = {
         "computer": s["host"],
         "ts": s["start"],
         "id": s["logonRef"].split(":", 1)[1] if s["logonRef"].startswith("event:") else None,
         "recordKey": s["logonRef"],
     }
-    h = _hop(lin, kind, ev, s["host"], s["ip"] or "", s["workstation"] or "", s["user"], s["domain"], s, basis, STRONG)
+    h = _hop(lin, kind, ev, s["host"], s["ip"] or "", s["workstation"] or "", s["user"], s["domain"], s, basis, confidence)
     if not h:
         return
     h["evidence"].append(f"logon {s['logonId']} ({s['typeName']}) from {s['ip'] or s['workstation']}")
@@ -746,10 +1013,10 @@ def _hop(
     """A way into a host, merged with the same hop (kind, source, target, account) within an hour."""
     if not to:
         return None
-    src_host = from_host or _source(lin, ip, workstation, to)
+    ts = _ts(ev)
+    src_host = from_host or _source(lin, ip, workstation, to, ts)
     if not src_host and not ip:
         return None
-    ts = _ts(ev)
     account = _account(user, domain)
     key = (kind, src_host or ip, to, account.lower())
     for h in lin._hop_index.get(key, []):
@@ -800,7 +1067,7 @@ def _processes(lin: Lineage, sysmon1: list[dict[str, Any]], procs4688: list[dict
         s = lin.session_at(p["host"], lid, p["ts"])
         if s and not p.get("session"):
             p["session"] = s["id"]
-            _add_activity(lin, s, ev)
+            _add_activity(lin, s, ev, p.get("parentImage"))
 
     for ev in sysmon1:
         host, guid = host_key(ev.get("computer")), _guid(ev.get("processGuid"))

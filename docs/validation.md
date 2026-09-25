@@ -81,7 +81,11 @@ parses the library, runs the rules and fails when a rule listed for a sample in
 `attack-samples` CI job runs it, then `frontend/src/rules/attackSamples.test.ts` runs the
 browser engine on the same rows and fails on any finding the SQL engine does not share.
 It runs in CI because endpoint protection tends to quarantine the library on a
-workstation. Microsoft
+workstation. Every event rule is also measured on that library, the SigmaHQ regression samples,
+EVTX-to-MITRE-Attack, the Microsoft 365, Entra and Windows datasets of Splunk attack_data and the
+clean machines of evtx-baseline (`tools/measure_rules.py`, [Measured rules](detection.md#measured-rules)),
+and a weekly CI job fails when a rule stops detecting a recording or a high or critical rule raises
+more findings on a clean machine. Microsoft
 365 detection was checked for parsing only: the Invictus IR Unified Audit Log set,
 9,608 records of real business email compromise, loads, and its inbox-rule and
 mailbox-permission rules fire. Re-run with
@@ -139,6 +143,7 @@ timings), `ai_repro.py` (replay of a model turn).
 |---|---|---|---|
 | EVTX-ATTACK-SAMPLES | about 200 small .evtx files, one attack technique each, GPL-3.0 | the zip, or any .evtx | github.com/sbousseaden/EVTX-ATTACK-SAMPLES |
 | EVTX-to-MITRE-Attack | 270+ samples, Security, Sysmon, PowerShell | the repository zip | github.com/mdecrevoisier/EVTX-to-MITRE-Attack |
+| Splunk attack_data, Windows | about 750 attack-range recordings (Sysmon, Security, PowerShell), labelled with ATT&CK techniques, as XmlWinEventLog; Git LFS files | the `.log` files (event records as XML) | github.com/splunk/attack_data |
 | hayabusa-sample-evtx | the two sets above plus DeepBlueCLI samples | the repository zip | github.com/Yamato-Security/hayabusa-sample-evtx |
 | omerbenamram/evtx samples | security_big_sample.evtx, sysmon.evtx | the files | github.com/omerbenamram/evtx |
 | Invictus IR O365 dataset | 9,608 Unified Audit Log records from real BEC cases, CC BY 4.0 | `auditrecords.csv` after extracting the 7z | github.com/invictus-ir/o365_dataset |

@@ -19,6 +19,7 @@ import {
   PHASE_LABEL,
   PHASES,
   refRow,
+  HOP_LABEL,
   STORY_NOTES_KEY,
   storyCoverageWarnings,
   storyGaps,
@@ -242,7 +243,7 @@ function HopLine({ h }: { h: Hop }) {
   const from = [h.from.host, h.from.workstation && h.from.workstation.toLowerCase() !== h.from.host ? h.from.workstation : null, h.from.ip].filter(Boolean).join(' / ')
   return (
     <div className="small">
-      <Dot sev={CONFIDENCE_SEV[h.confidence]} /> <strong>{h.kind}</strong> {from || 'an unknown source'}
+      <Dot sev={CONFIDENCE_SEV[h.confidence]} /> <strong>{HOP_LABEL[h.kind] ?? h.kind}</strong> {from || 'an unknown source'}
       {h.from.external ? ' (outside)' : ''} → <strong>{h.to}</strong>
       {h.account ? ` as ${h.account}` : ''} · {fmtTs(h.ts)}
       {h.count > 1 ? ` · ${h.count} times` : ''}
@@ -277,7 +278,7 @@ function ProcessTrees({ processes, highlight }: { processes: Process[]; highligh
 }
 
 function LineagePanel({ story, highlight }: { story: Story; highlight?: string | null }) {
-  const { sessions, hops, processes } = story.lineage
+  const { sessions, hops, processes, devices = [] } = story.lineage
   return (
     <div className="view-body col" style={{ gap: 14 }}>
       <div className="section">
@@ -285,9 +286,22 @@ function LineagePanel({ story, highlight }: { story: Story; highlight?: string |
         {hops.length ? (
           hops.map((h) => <HopLine key={h.id} h={h} />)
         ) : (
-          <div className="small muted">No hop of this story is in the evidence: no RDP logon, admin share, remote service or explicit credentials towards its hosts.</div>
+          <div className="small muted">No hop of this story is in the evidence: no RDP logon, admin share, remote service, WMI or WinRM execution or explicit credentials towards its hosts.</div>
         )}
       </div>
+      {devices.length > 0 && (
+        <div className="section">
+          <h3>The devices its sign-ins came from</h3>
+          {devices.map((d) => (
+            <div key={d.key} className="small">
+              <strong>{d.name}</strong>
+              {d.trustTypes.length ? ` · ${d.trustTypes.join(', ')}` : ' · not joined'}
+              {d.host ? ` · the host ${d.host} of this case` : ' · a device the case has no logs of'} · {d.signIns} sign-in(s)
+              {d.accounts.length ? ` by ${d.accounts.join(', ')}` : ''}
+            </div>
+          ))}
+        </div>
+      )}
       <div className="section">
         <h3>Logon sessions</h3>
         {sessions.length ? sessions.map((s) => <SessionLine key={s.id} s={s} />) : <div className="small muted">No logon session of this story is in the evidence.</div>}
