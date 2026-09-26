@@ -1,9 +1,15 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, beforeAll, expect, it, vi } from 'vitest'
 import { getDb } from '../db/schema'
 import type { IngestRequest } from './ingest.worker'
 
 const mocks = vi.hoisted(() => ({ stream: vi.fn(), post: vi.fn() }))
 vi.mock('../api/client', () => ({ streamNdjson: mocks.stream, setApiToken: vi.fn() }))
+vi.mock('../parsers/evtx/load', async () => {
+  const { EvtxDecoder } = await import('../parsers/evtx/decoder')
+  return { loadEvtxDecoder: () => EvtxDecoder.load(readFileSync(join(__dirname, '../parsers/evtx/evtx.wasm'))) }
+})
 vi.mock('hash-wasm', () => ({ createSHA256: async () => ({ init: () => {}, update: () => {}, digest: () => 'a'.repeat(64) }) }))
 const context = { postMessage: mocks.post, onmessage: null as unknown as (e: { data: IngestRequest }) => Promise<void> }
 
@@ -76,4 +82,50 @@ it('adds a cloud record the case already holds only once, and counts it once', a
   // the skipped record adds nothing to the facets: the address is counted for the rows written
   const ip = (await db.facets.toArray()).find((f) => f.field === 'ipAddress' && f.value === '198.51.100.2')
   expect(ip?.count).toBe(2)
+})
+it('parses an EVTX file in the worker without sending it anywhere', async () => {
+  const db = getDb()
+  const id = await db.evidence.add({ caseId: 1, name: 'Defender.evtx', kind: 'evtx', size: 1, status: 'hashing', integrity: 'pending', count: 0, addedAt: 1 })
+  const bytes = readFileSync(join(__dirname, '../../../tests/fixtures/evtx/lab-Defender.evtx'))
+  await context.onmessage({
+    data: {
+      cmd: 'ingest',
+      jobId: 1,
+      caseId: 1,
+      evidenceId: id,
+      file: new File([bytes], 'Defender.evtx'),
+      kind: 'evtx',
+      includeRaw: true,
+      parseInBrowser: true,
+      settings: { internalDomains: [], brands: [], vipNames: [] },
+    },
+  })
+  expect(mocks.stream).not.toHaveBeenCalled()
+  const rows = await db.events.toArray()
+  expect(rows).toHaveLength(10)
+  expect(rows[0]).toMatchObject({ caseId: 1, evidenceId: id, sourceFile: 'Defender.evtx', provider: expect.stringContaining('Defender') })
+  expect(typeof rows[0].raw).toBe('string')
+  const ev = await db.evidence.get(id)
+  expect(ev).toMatchObject({ status: 'done', count: 10, format: 'evtx', parsedIn: 'browser', integrity: 'verified' })
+  expect(ev?.sha256Server).toBeUndefined()
+  expect(ev?.stats).toMatchObject({ count: 10, errors: 0, sequences: [{ file: 'Defender.evtx', count: 10, missing: 0, checksums: { chunks: 1, fileHeader: true } }] })
+  expect((await db.facets.toArray()).find((f) => f.field === 'provider')).toMatchObject({ count: 10 })
+})
+it('says so when a file sent to be parsed here is not an event log', async () => {
+  const db = getDb()
+  const id = await db.evidence.add({ caseId: 1, name: 'x.evtx', kind: 'evtx', size: 1, status: 'hashing', integrity: 'pending', count: 0, addedAt: 1 })
+  await context.onmessage({
+    data: {
+      cmd: 'ingest',
+      jobId: 1,
+      caseId: 1,
+      evidenceId: id,
+      file: new File(['not an event log'], 'x.evtx'),
+      kind: 'evtx',
+      includeRaw: true,
+      parseInBrowser: true,
+      settings: { internalDomains: [], brands: [], vipNames: [] },
+    },
+  })
+  expect(await db.evidence.get(id)).toMatchObject({ status: 'error', error: 'not an EVTX file (no ElfFile header)', count: 0, parsedIn: 'browser' })
 })

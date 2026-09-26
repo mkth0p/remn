@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie'
 import { uuid4 } from '../util/uuid'
+import { anchorStoredFindings } from '../data/findingAnchors'
 
 export type Severity = 'info' | 'low' | 'medium' | 'high' | 'critical'
 export type EvidenceKind = 'evtx' | 'mail' | 'package'
@@ -31,6 +32,8 @@ export interface CaseSettings {
   keepBodies?: boolean
   /** run the enabled rules when an ingest finishes so the findings never lag the evidence (default on) */
   autoRunRules?: boolean
+  /** browser store only: parse .evtx files in this browser, never uploading them (default off) */
+  parseEvtxInBrowser?: boolean
 }
 
 export const defaultSettings = (): CaseSettings => ({
@@ -89,6 +92,8 @@ export interface Evidence {
   analyst?: string
   /** the Web Lock its import holds while it runs (data/interruptedImports.ts) */
   importLock?: string
+  /** where the file was parsed: 'browser' when it never left this page */
+  parsedIn?: 'browser' | 'server'
 }
 
 export interface EventRow {
@@ -298,7 +303,15 @@ export interface Finding {
   tsEnd?: number | null
   entities: Record<string, string>
   count: number
+  /** the rows the finding cites, by their id in this browser (renumbered when evidence is added again) */
   refs: number[]
+  /**
+   * the record key of each of those rows, in the same order (data/recordKeys.ts): the file's
+   * SHA-256 and the record's place in it, which re-ingest and case import leave unchanged; empty
+   * where the row could not be read. A decision on a one-row finding is archived under it
+   * (data/findingAnchors.ts), so it follows the record and not the row id.
+   */
+  recordKeys?: string[]
   attack: string[]
   tags?: string[]
   status: 'new' | 'reviewed' | 'false_positive' | 'escalated'
@@ -508,6 +521,19 @@ export class RemnDB extends Dexie {
     })
     // The AI ledger: one row per entry, appended and never rewritten.
     this.version(6).stores({ aiLedger: '++id, caseId, [caseId+seq]' })
+    // No store changes: findings gain the record keys of the rows they cite, and the decisions
+    // archived under a row id move to the key of that row's record (data/findingAnchors.ts).
+    this.version(7)
+      .stores({})
+      .upgrade((tx) =>
+        anchorStoredFindings({
+          findings: tx.table('findings'),
+          events: tx.table('events'),
+          mails: tx.table('mails'),
+          evidence: tx.table('evidence'),
+          kv: tx.table('kv'),
+        }),
+      )
   }
 }
 

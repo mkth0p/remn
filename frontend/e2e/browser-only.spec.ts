@@ -65,3 +65,31 @@ test('a public browser-only instance says where evidence goes and reads the link
 
   expect(probes, 'a page served from another host must not probe the visitor’s localhost on its own').toEqual([])
 })
+
+test('an EVTX file parsed in the browser never leaves it, on the public instance', async ({ page }) => {
+  test.setTimeout(600_000)
+  const EVTX = FILES.filter((n) => n.endsWith('.evtx'))
+  // every request that could carry evidence: an upload, a parse, a staged chunk
+  const carried: string[] = []
+  page.on('request', (r) => {
+    const u = new URL(r.url())
+    if (r.method() !== 'GET' && u.pathname.startsWith('/api/')) carried.push(`${r.method()} ${u.pathname}`)
+  })
+  await page.goto('/')
+  await page.locator('.nav-item', { hasText: 'Settings' }).click()
+  await page.locator('label.row', { hasText: 'parse .evtx files in this browser' }).locator('.toggle').click()
+  await expect(page.locator('label.row', { hasText: 'parse .evtx files in this browser' }).locator('.toggle')).toHaveAttribute('aria-checked', 'true')
+
+  await page.locator('.nav-item', { hasText: 'Evidence' }).click()
+  await page
+    .locator('.dropzone input[type=file]')
+    .first()
+    .setInputFiles(EVTX.map((n) => path.join(LAB, n)))
+  // nothing is uploaded, so there is nothing to be told about first
+  await expect(page.locator('tr').filter({ hasText: 'parsed in this browser' }).filter({ hasText: 'verified' })).toHaveCount(EVTX.length, { timeout: 300_000 })
+  await expect(page.getByText('Before you add evidence to remn.localhost')).toHaveCount(0)
+  await expect(page.locator('.nav-item', { hasText: 'Events' })).toContainText('10,000')
+  // the rules run in the browser on the rows parsed there
+  await expect(page.getByText(/finding\(s\) from \d+ rule\(s\)/).first()).toBeVisible({ timeout: 300_000 })
+  expect(carried, 'no request may carry evidence when EVTX is parsed in the browser').toEqual([])
+})

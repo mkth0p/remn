@@ -594,6 +594,13 @@ export function SettingsView() {
             <div className="panel-h">ingestion &amp; storage</div>
             <div className="panel-b col">
               <Toggle on={s.includeRaw !== false} onChange={(v) => patch({ includeRaw: v })} label="store the raw event JSON (enables regex over the whole record; ~2x storage)" />
+              {!isServer && (
+                <Toggle
+                  on={s.parseEvtxInBrowser === true}
+                  onChange={(v) => patch({ parseEvtxInBrowser: v })}
+                  label="parse .evtx files in this browser: the file is never uploaded (server engines such as Hayabusa then do not run on it)"
+                />
+              )}
               <Toggle
                 on={s.autoRunRules !== false}
                 onChange={(v) => patch({ autoRunRules: v })}

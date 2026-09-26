@@ -170,8 +170,28 @@ const rows = (xs: string[][]) => xs.map((r) => `<tr>${r.map((c) => `<td>${c}</td
 /** a table whose header row repeats on every printed page */
 const table = (head: string[], body: string[][]) => `<table><thead><tr>${head.map((x) => `<th>${x}</th>`).join('')}</tr></thead><tbody>${rows(body)}</tbody></table>`
 /** only a PNG data URL this app produced itself is embedded */
-const img = (src: string | undefined, alt: string, caption?: string) =>
-  src && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(src) ? `<figure><img src="${src}" alt="${h(alt)}">${caption ? `<figcaption>${h(caption)}</figcaption>` : ''}</figure>` : ''
+/** a graph legend entry: the shape (a CSS class of the report) and the colour the graph draws it in */
+type KeyItem = [shape: 'diamond' | 'box' | 'dot' | 'ring' | 'line', color: string, label: string]
+const CHAIN_KEY: KeyItem[] = [
+  ['diamond', 'var(--critical)', 'seed mail'],
+  ['box', 'var(--high)', 'step, coloured by its worst finding'],
+  ['ring', 'var(--ink-3)', 'folded routine steps'],
+  ['line', 'var(--accent)', 'tie to the mail'],
+]
+const CAMPAIGN_KEY: KeyItem[] = [
+  ['box', 'var(--high)', 'person, coloured by the chain'],
+  ['dot', 'var(--high)', 'shared sender or domain'],
+  ['dot', 'var(--low)', 'shared machine or IP'],
+  ['dot', 'var(--ink-3)', 'in one chain only'],
+]
+const img = (src: string | undefined, alt: string, caption?: string, key?: KeyItem[]) =>
+  src && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(src)
+    ? `<figure><img src="${src}" alt="${h(alt)}">${
+        caption || key
+          ? `<figcaption>${key ? key.map(([shape, color, label]) => `<span class="gk"><i class="gk-${shape}" style="--k:${color}"></i>${h(label)}</span>`).join('') : ''}${caption ? h(caption) : ''}</figcaption>`
+          : ''
+      }</figure>`
+    : ''
 const span = (from: number | null | undefined, to: number | null | undefined) => (from && to && to !== from ? `${fmtTs(from)} <span class="dim">to</span> ${fmtTs(to)}` : fmtTs(from))
 const firstSentence = (text: string | undefined) => {
   const t = (text ?? '').replace(/\s+/g, ' ').trim()
@@ -479,7 +499,7 @@ function chainCard(c: Chain, d: ReportData): string {
 <div class="card-head">${pill(sev)}<h3>${h(c.identityLabel)}</h3>${verdictPill(r?.verdict)}${meter(c)}</div>
 <div class="card-meta">Seed ${c.seed.source === 'events' ? 'event' : 'mail'} “${h(c.seed.subject)}” from <code>${h(c.seed.fromAddr ?? '')}</code> at ${fmtTs(c.seed.ts)} (risk ${c.seed.risk}) · ${c.steps.length} steps from ${fmtTs(c.start)} to ${fmtTs(c.end)} · ${c.artifactLinks} artifact tie(s)${c.entities.attackerAddresses.length ? ` · attacker <code>${h(c.entities.attackerAddresses.join(', '))}</code>` : ''}${c.entities.ips.length ? ` · IPs <code>${h(c.entities.ips.join(', '))}</code>` : ''}${c.entities.hosts.length ? ` · hosts <code>${h(c.entities.hosts.join(', '))}</code>` : ''}</div>
 ${narrative}
-${d.settings.includeGraphs ? img(d.graphs[c.id], `graph of the chain for ${c.identityLabel}`, 'Steps by lane and time: diamond = seed mail, box = step (size = weight, colour = worst finding), grey dot = folded routine steps, green edges = ties to the mail.') : ''}
+${d.settings.includeGraphs ? img(d.graphs[c.id], `graph of the chain for ${c.identityLabel}`, 'Steps by lane, time left to right.', CHAIN_KEY) : ''}
 ${table(
   ['time (UTC)', 'offset', 'source', 'step', 'ties to the mail / findings'],
   printed.map((f) => {
@@ -988,8 +1008,10 @@ span.warn{color:var(--medium);font-weight:600}.ribbon.ok i{background:var(--acce
 .note{background:var(--surface-2);padding:8px 12px;border-radius:6px;margin:6px 0 8px;font-size:12px}
 .note p{margin:0 0 6px}.note p:last-child{margin:0}
 figure{margin:8px 0 10px;break-inside:avoid}
-figure img{width:100%;max-height:120mm;object-fit:contain;border:1px solid var(--line);border-radius:6px}
-figure figcaption{font-size:10px;color:var(--ink-3);margin-top:3px}
+figure img{width:100%;max-height:120mm;object-fit:contain;border:1px solid var(--line);border-radius:8px;background:#fff;padding:6px;box-sizing:border-box}
+figure figcaption{font-size:10px;color:var(--ink-3);margin-top:4px;display:flex;flex-wrap:wrap;align-items:center;gap:3px 14px}
+.gk{display:inline-flex;align-items:center;gap:5px;color:var(--ink-2)}.gk i{display:inline-block;width:9px;height:9px;background:var(--k);-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.gk-dot,.gk-ring{border-radius:50%}.gk-box{border-radius:2px}.gk-diamond{transform:rotate(45deg) scale(.85)}.gk-ring{background:#fff!important;border:1.5px dashed var(--k)}.gk-line{width:14px!important;height:2px!important}
 /* tables */
 table{border-collapse:collapse;width:100%;font-size:11px;margin:4px 0 8px}
 th{font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);text-align:left;font-weight:600;padding:5px 7px;border-bottom:1px solid var(--line-2);background:var(--surface-2)}
@@ -1185,7 +1207,7 @@ export function buildReportHtml(d: ReportData): string {
   if (d.chains.length) {
     const campaign =
       settings.includeGraphs && d.chains.length > 1 && d.graphs.campaign
-        ? `<div class="card"><div class="card-head"><h3>Shared between chains</h3></div>${img(d.graphs.campaign, 'campaign graph', 'Chains and the senders, domains, IPs and hosts they share.')}<div class="cap">${d.campaignInsights.length ? d.campaignInsights.map((x) => h(x)).join(' · ') : 'no sender, domain, IP or host is shared between the chains'}</div></div>`
+        ? `<div class="card"><div class="card-head"><h3>Shared between chains</h3></div>${img(d.graphs.campaign, 'campaign graph', 'People in the middle, the senders and domains that reached them on the left, the machines and IPs they touched on the right.', CAMPAIGN_KEY)}<div class="cap">${d.campaignInsights.length ? d.campaignInsights.map((x) => h(x)).join(' · ') : 'no sender, domain, IP or host is shared between the chains'}</div></div>`
         : ''
     sections.push({
       id: 'chains',
