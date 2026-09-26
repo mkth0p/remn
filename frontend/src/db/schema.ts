@@ -544,9 +544,11 @@ export const CASE_KV_KEYS = (caseId: number) =>
     'relationship-aliases',
     'relationship-cache',
     'relationship-stories',
-    // the stories and campaigns of the case (data/stories.ts), rebuilt from the evidence, and the analyst's notes on them
+    // the stories and campaigns of the case (data/stories.ts), rebuilt from the evidence, the analyst's notes on them,
+    // and the analyst's decisions on them (data/storyDecisions.ts), applied to every build
     'stories',
     'story-notes',
+    'story-decisions',
     // the rule choices in force when the case was exported (packs, disabled rules), for the record
     'rule-context',
     // facet fields whose distinct values passed what one ingest counts

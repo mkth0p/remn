@@ -20,6 +20,7 @@ import { getDb, type Case, type Evidence, type Finding, type MailRow, type Sever
 import { effectiveSeverity } from '../rules/incidents'
 import { CHAIN_DATA_KEYS, persistChainResult, type ChainResult } from './chains'
 import { settingsForRules } from './rules'
+import type { ReportStoryDecisions } from './storyDecisions'
 
 export type Confidence = 'strong' | 'medium' | 'weak'
 export type TieKind = 'flag' | 'chain' | 'session' | 'hop' | 'process' | 'address' | 'identity'
@@ -1021,7 +1022,7 @@ const near = (t: number, s: Story) => t >= s.start - NOTE_REACH && t <= (s.end ?
  * (a bare account name alone, which a namesake in another organisation shares, does not carry a note
  * over), and one of the note's findings or its time.
  */
-function anchorFit(anchor: StoryAnchor, story: Story, now: StoryAnchor): number {
+export function anchorFit(anchor: StoryAnchor, story: Story, now: StoryAnchor): number {
   if (anchor.kind !== now.kind) return 0
   const mine = new Map(anchor.subject.map((f) => [formValue(f), f]))
   let shared = 0
@@ -1197,6 +1198,8 @@ export interface ReportStory {
   /** the note's key (the story's id when it has none), which is also the key of its claim check: story:<key> */
   key: string
   note?: string
+  /** the analyst's decisions on the story (data/storyDecisions.ts), when it has any */
+  decisions?: ReportStoryDecisions
 }
 
 /**

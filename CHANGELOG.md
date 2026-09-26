@@ -25,6 +25,23 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   74, pbeesly 55, NEWYORK 31, NASHUA 23, UTICA 22, where they scored 82, 64, 46, 28 and 28; with
   the community packs NASHUA, where the intruder moved, scores 62 against NEWYORK's 31); the
   lab's attacks stay critical and score 84 to 100.
+- The analyst can now decide on a story instead of only annotating it, and the decisions hold
+  after every rebuild and go with the case bundle. A story is decided open, reviewed, confirmed
+  incident, benign or false positive, with a reason: the report's verdict (and the Review page's,
+  read in the same place) counts a confirmed story as a confirmed incident, with its findings in
+  the threat profile and "What happened", a benign or false positive story is not printed and
+  counts with the false positives, and "reviewed items only" prints the decided stories. A step
+  can be confirmed or disputed with its tie: a disputed step is struck out on the page and left
+  out of the story's phases, severity and headline, and listed under its story in the report;
+  its finding changes only when the analyst also marks it false positive, through the findings
+  review. A step's records can be taken out of a story, a story merged into another or split at
+  a step, each with a reason, as overrides applied after each build: nothing is merged into a
+  story decided benign or false positive, and merging two organisations' stories is asked in the
+  page. Decisions hold on to their story as notes do and to their records inside it; those a
+  rebuild can no longer place are listed to attach again or delete, and the report counts them.
+  A story's timeline exports as CSV and JSON through the app's export helpers (a cell a
+  spreadsheet would read as a formula is neutralised) and as Markdown to paste into a report. A
+  case bundle now also renumbers the finding keys in the anchors of story notes on import.
 - Stories no longer lose what matters to routine activity or to their own caps. A program a
   person ran with no finding joins their story only when it ran in the story's logon session or
   process tree, not for naming them; past 400 steps a story keeps its flags, then its

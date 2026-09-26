@@ -1,6 +1,7 @@
 import type { Case, CaseNote, Evidence, Finding, Ioc, Severity } from '../db/schema'
 import type { Chain, ChainStep } from './chains'
 import { storyCoverageWarnings, storyOwnGaps, type ReportStory, type StoryResult } from './stories'
+import { STORY_VERDICT_LABEL, type DecidedStory } from './storyDecisions'
 import type { ChainReview, ReportSettings } from './review'
 import { chainSeverity, effectiveSeverity, stepVisible } from './review'
 import type { Incident } from '../rules/incidents'
@@ -95,6 +96,16 @@ export interface ReportData {
   storiesStale?: string[]
   /** analyst notes whose story the build no longer holds (listed on the Stories page) */
   storyNotesOrphaned?: number
+  /**
+   * Every story of the case the analyst decided (data/storyDecisions.ts storiesForReport), printed or
+   * not: a confirmed story counts in the verdict as a confirmed incident does, a reviewed one as a
+   * reviewed item, a benign or false positive one as a false positive.
+   */
+  decidedStories?: DecidedStory[]
+  /** stories decided benign or false positive: not printed */
+  storiesDismissed?: number
+  /** decisions on stories the build no longer holds (listed on the Stories page) */
+  storyDecisionsOrphaned?: number
 }
 
 /** The model's part in the case, as the report prints it. */
@@ -187,22 +198,41 @@ const isUnwanted = (f: Finding) => /(^|-)(pua|adware|unwanted)($|-)/i.test(f.rul
 /** a finding that only says the user ran something (ATT&CK T1204) below high: the runs of an unwanted program, not a second threat */
 const userExecution = (f: Finding) => rank(effectiveSeverity(f)) < rank('high') && f.attack.length > 0 && f.attack.every((t) => t.toUpperCase().startsWith('T1204'))
 
-/** What the review concluded, from the decisions on chains and incidents. Findings decide nothing on their own. */
+/**
+ * What the review concluded, from the decisions on chains, incidents and stories. Findings decide
+ * nothing on their own. The one place the verdict is read: the report's cover and the Review page's
+ * both come from here.
+ */
 export function computeVerdict(d: ReportData): Verdict {
   const confirmedChains = d.chains.filter((c) => d.reviews[c.id]?.verdict === 'confirmed')
   const escalated = d.incidents.filter((i) => i.status === 'escalated')
-  const reviewed = d.chains.filter((c) => d.reviews[c.id]?.verdict === 'unsure').length + d.incidents.filter((i) => i.status === 'reviewed').length
-  const falsePositives = d.falsePositives ?? d.incidents.filter((i) => i.status === 'false_positive').length
+  // a story the analyst decided counts as an incident with the same decision would
+  const stories = d.decidedStories ?? []
+  const confirmedStories = stories.filter((s) => s.verdict === 'confirmed')
+  const reviewed =
+    d.chains.filter((c) => d.reviews[c.id]?.verdict === 'unsure').length + d.incidents.filter((i) => i.status === 'reviewed').length + stories.filter((s) => s.verdict === 'reviewed').length
+  const falsePositives = (d.falsePositives ?? d.incidents.filter((i) => i.status === 'false_positive').length) + stories.filter((s) => s.verdict === 'benign' || s.verdict === 'false_positive').length
   // a confirmed item the print settings leave out is still confirmed: a presentation filter must not
   // turn "Compromise confirmed" into "Nothing confirmed"
   const unprinted = d.unprintedConfirmed ?? []
-  const confirmed = confirmedChains.length + escalated.length + unprinted.length
+  const confirmed = confirmedChains.length + escalated.length + unprinted.length + confirmedStories.length
   const base = { confirmed, reviewed, falsePositives }
-  const notPrinted = unprinted.length ? ` ${unprinted.length} of them ${unprinted.length === 1 ? 'is' : 'are'} not printed (below the severity floor or left out).` : ''
+  const hidden = unprinted.length + confirmedStories.filter((s) => !s.printed).length
+  const notPrinted = hidden ? ` ${hidden} of them ${hidden === 1 ? 'is' : 'are'} not printed (below the severity floor or left out).` : ''
   if (confirmed) {
-    const sevs = [...confirmedChains.map((c) => chainSeverity(c, d.reviews[c.id])), ...escalated.map((i) => i.severity), ...unprinted.map((u) => u.severity)]
+    const sevs = [
+      ...confirmedChains.map((c) => chainSeverity(c, d.reviews[c.id])),
+      ...escalated.map((i) => i.severity),
+      ...unprinted.map((u) => u.severity),
+      ...confirmedStories.map((s) => s.severity),
+    ]
     const severity = worstOf(sevs)
-    const confirmedFindings = [...escalated.flatMap((i) => i.findings), ...confirmedChains.flatMap((c) => d.membersOf.get(c.id) ?? []), ...unprinted.flatMap((u) => u.findings)]
+    const confirmedFindings = [
+      ...escalated.flatMap((i) => i.findings),
+      ...confirmedChains.flatMap((c) => d.membersOf.get(c.id) ?? []),
+      ...unprinted.flatMap((u) => u.findings),
+      ...confirmedStories.flatMap((s) => s.findings),
+    ]
     // unwanted software is the verdict when a confirmed item names it and nothing confirmed rises above medium:
     // the runs of the same browser from a user profile are the same thing, not a second threat
     const unwantedPresent = confirmedFindings.some(isUnwanted)
@@ -355,6 +385,7 @@ export function threatProfile(d: ReportData): BadgeState[] {
   const confirmedIds = new Set<number>()
   for (const i of d.incidents) if (i.status === 'escalated') for (const f of i.findings) if (f.id != null) confirmedIds.add(f.id)
   for (const c of d.chains) if (d.reviews[c.id]?.verdict === 'confirmed') for (const f of d.membersOf.get(c.id) ?? []) if (f.id != null) confirmedIds.add(f.id)
+  for (const s of d.decidedStories ?? []) if (s.verdict === 'confirmed') for (const f of s.findings) if (f.id != null) confirmedIds.add(f.id)
   const printed = d.findings.filter((f) => f.status !== 'false_positive')
   return BADGES.map((def) => {
     const mine = printed.filter((f) => badgesOf(f).includes(def))
@@ -489,12 +520,30 @@ const PHASE_WORDS: Record<string, string> = {
   impact: 'Impact',
 }
 
-/** A story: its phases in the order they happened, what marks each (its worst findings, else its first step), and where its evidence stops. */
-function storyCard({ story: s, key, note }: ReportStory, d: ReportData): string {
+/** The analyst's decisions on a story, one line each: the decision and its reason, what was merged, split, taken out and disputed. */
+function storyDecisionLines(dec: ReportStory['decisions']): string {
+  if (!dec) return ''
+  const lines = [
+    dec.call ? `The analyst decided it ${h(STORY_VERDICT_LABEL[dec.call.verdict])}${dec.call.reason ? `: ${h(dec.call.reason)}` : '.'}` : '',
+    ...dec.merged.map((m) => `Merged into it by the analyst: the story of ${h(m.title)}${m.orgs ? ` (another organisation, ${h(m.orgs.join(' and '))})` : ''}: ${h(m.reason)}`),
+    dec.split ? `${dec.part === 'second' ? 'The second part of a story the analyst split' : 'Split by the analyst'} at “${h(dec.split.title)}” (${fmtTs(dec.split.ts)}): ${h(dec.split.reason)}` : '',
+    ...dec.out.map((o) => `Taken out by the analyst: “${h(o.title)}” (${n(o.count)} record${o.count === 1 ? '' : 's'}): ${h(o.reason)}`),
+    ...dec.disputed.map((x) => `Disputed by the analyst and left out of its phases and severity: “${h(x.title)}” (${fmtTs(x.ts)})${x.reason ? `: ${h(x.reason)}` : ''}`),
+    dec.confirmedSteps ? `${n(dec.confirmedSteps)} step${dec.confirmedSteps === 1 ? '' : 's'} confirmed by the analyst.` : '',
+  ].filter(Boolean)
+  return lines.map((l) => `<div class="cap">${l}</div>`).join('')
+}
+
+const STORY_PILL: Record<string, string> = { confirmed: 'confirmed', reviewed: 'unsure' }
+
+/** A story: its phases in the order they happened, what marks each (its worst findings, else its first step), the analyst's decisions on it, and where its evidence stops. */
+function storyCard({ story: s, key, note, decisions: dec }: ReportStory, d: ReportData): string {
   // the build's own limits are printed once, above the stories
   const gaps = storyOwnGaps(s)
+  // a step the analyst disputed marks no phase
+  const disputed = new Set((dec?.disputed ?? []).map((x) => x.id))
   const marks = (phase: string) => {
-    const steps = s.steps.filter((st) => st.phase === phase)
+    const steps = s.steps.filter((st) => st.phase === phase && !disputed.has(st.id))
     const found = steps.flatMap((st) => st.findings).sort((a, b) => rank(b.severity) - rank(a.severity))
     const titles = [...new Set(found.map((f) => f.title))].slice(0, 2)
     return titles.length ? h(titles.join('; ')) + (new Set(found.map((f) => f.title)).size > 2 ? ' …' : '') : `<span class="dim">${h(steps[0]?.title ?? '')}</span>`
@@ -505,13 +554,14 @@ function storyCard({ story: s, key, note }: ReportStory, d: ReportData): string 
     s.attackerAddresses.length ? `from <code>${h(s.attackerAddresses.slice(0, 6).join(', '))}</code>` : '',
   ].filter(Boolean)
   return `<div class="card chain ${h(s.severity)}">
-<div class="card-head">${pill(s.severity)}<h3>${h(s.title)}</h3>${chip(`${s.confidence} ties`)}</div>
+<div class="card-head">${pill(s.severity)}<h3>${h(s.title)}${dec?.part === 'second' ? ' (second part)' : dec?.part === 'first' ? ' (first part)' : ''}</h3>${dec?.call ? `<span class="pill verdict-${STORY_PILL[dec.call.verdict] ?? 'benign'}">${h(STORY_VERDICT_LABEL[dec.call.verdict])}</span>` : ''}${chip(`${s.confidence} ties`)}</div>
 <div class="card-meta">${who} ${h(s.subject.label)} · ${span(s.start, s.end)} · ${n(s.records)} record(s) in ${n(s.steps.length)} step(s)${where.length ? ' · ' + where.join(' · ') : ''}</div>
 ${note ? `<div class="narr">${md(note)}</div><div class="cap">the analyst's reading of the story</div>${textNote(`story:${key}`, d.claims)}` : `<div class="narr"><p>${h(s.summary || s.headline)}</p></div>`}
 ${table(
   ['phase', 'when (UTC)', 'steps', 'what marks it'],
   s.phases.map((p) => [`${p.severity ? pill(p.severity) + ' ' : ''}${h(PHASE_WORDS[p.phase] ?? p.label)}`, `<span class="nowrap">${span(p.first, p.last)}</span>`, n(p.steps), marks(p.phase)]),
 )}
+${storyDecisionLines(dec)}
 ${gaps.length ? `<div class="cap">Where it stops: ${gaps.map((g) => h(g)).join(' ')}</div>` : ''}
 </div>`
 }
@@ -521,11 +571,15 @@ function storiesCaveats(d: ReportData): string {
   const stale = d.storiesStale ?? []
   const cut = storyCoverageWarnings(d.storyStats)
   const orphaned = d.storyNotesOrphaned ?? 0
+  const lostDecisions = d.storyDecisionsOrphaned ?? 0
   return [
     stale.length ? `<div class="cap warn">Out of date: ${h(stale.join('; '))}. These stories read the case as it was then: build them again on the Stories page before relying on them.</div>` : '',
     cut.length ? `<div class="cap warn">Incomplete: ${cut.map((w) => h(w)).join(' ')} An absent step or story is not a negative result.</div>` : '',
     orphaned
       ? `<div class="cap">${n(orphaned)} analyst note${orphaned === 1 ? ' is' : 's are'} on a story this build no longer holds: the Stories page lists ${orphaned === 1 ? 'it' : 'them'} to attach again.</div>`
+      : '',
+    lostDecisions
+      ? `<div class="cap warn">${n(lostDecisions)} analyst decision${lostDecisions === 1 ? ' is' : 's are'} on a story this build no longer holds: the Stories page lists ${lostDecisions === 1 ? 'it' : 'them'} to attach again, and the report does not count ${lostDecisions === 1 ? 'it' : 'them'}.</div>`
       : '',
   ].join('')
 }
@@ -683,7 +737,7 @@ interface Moment {
   decision: string
   entities: string[]
   note: string
-  kind: 'chain' | 'incident'
+  kind: 'chain' | 'incident' | 'story'
 }
 
 /** The decided items in time order: what a reader should know happened, in the order it happened. */
@@ -717,6 +771,20 @@ export function moments(d: ReportData): { items: Moment[]; decided: boolean; tot
       entities: Object.values(i.entities).slice(0, 3).map(String),
       note: firstSentence(i.lead.notes || i.lead.aiReason),
       kind: 'incident',
+    })
+  }
+  // a printed story the analyst confirmed or reviewed, with the analyst's reason
+  for (const st of d.decidedStories ?? []) {
+    if (!st.printed || (st.verdict !== 'confirmed' && st.verdict !== 'reviewed')) continue
+    out.push({
+      ts: st.start,
+      end: st.end,
+      severity: st.severity,
+      title: `Story of ${st.title}`,
+      decision: st.verdict,
+      entities: st.hosts.slice(0, 3),
+      note: firstSentence(st.reason),
+      kind: 'story',
     })
   }
   const decided = out.length > 0
@@ -962,7 +1030,7 @@ function method(d: ReportData, v: Verdict, conf: Confidence): string {
           `of those rules, ${n(detects)} fire${detects === 1 ? 's' : ''} on recorded attacks of what ${detects === 1 ? 'it looks' : 'they look'} for and ${n(leads)} ${leads === 1 ? 'was' : 'were'} never seen to (their findings are marked lead)${d.measuredOn ? `. ${h(d.measuredOn)}` : ''}`,
         ]
       : []),
-    `findings below ${h(d.settings.minSeverity)} severity are not printed${d.settings.onlyReviewed ? '; only reviewed items are printed' : ''}${d.settings.includeFp ? '; false positives are printed' : '; false positives are not printed'}`,
+    `findings below ${h(d.settings.minSeverity)} severity are not printed${d.settings.onlyReviewed ? '; only reviewed items are printed' : ''}${d.settings.includeFp ? '; false positives are printed' : '; false positives are not printed'}${d.storiesDismissed ? `; ${n(d.storiesDismissed)} ${d.storiesDismissed === 1 ? 'story' : 'stories'} decided benign or false positive ${d.storiesDismissed === 1 ? 'is' : 'are'} not printed` : ''}`,
     `${v.confirmed} confirmed, ${v.reviewed} reviewed or unsure, ${v.falsePositives} false positive${v.falsePositives === 1 ? '' : 's'}, ${d.undecided} undecided`,
     aiTexts
       ? `${aiTexts} text${aiTexts === 1 ? '' : 's'} in this report ${aiTexts === 1 ? 'was' : 'were'} drafted by the analyst model and are labelled as such; decisions are the analyst's`
@@ -1035,11 +1103,12 @@ export function buildReportHtml(d: ReportData): string {
   })
   if (d.stories?.length) {
     const left = d.storiesLeft ?? 0
+    const dismissedStories = d.storiesDismissed ?? 0
     sections.push({
       id: 'stories',
       title: 'Stories',
       count: d.stories.length,
-      body: `<p class="intro">A story is what happened to one person, or on one host, in one incident: the records around what raised a flag, read along the tactics of ATT&amp;CK in the order they happened, each record tied to the story by its account, its logon session, the way into the host or the process that started it. A story is how the case reads, not a decision: the decisions are the chains' and the incidents'. Each says where its evidence stops.</p>${storiesCaveats(d)}${d.stories.map((st) => storyCard(st, d)).join('\n')}${left ? `<div class="cap">${n(left)} more ${left === 1 ? 'story is' : 'stories are'} not printed: below the severity floor${settings.onlyReviewed ? ', without a note (reviewed items only)' : ''} or past the first twenty.</div>` : ''}`,
+      body: `<p class="intro">A story is what happened to one person, or on one host, in one incident: the records around what raised a flag, read along the tactics of ATT&amp;CK in the order they happened, each record tied to the story by its account, its logon session, the way into the host or the process that started it. A story the analyst decided says so: a confirmed story counts in the verdict as a confirmed incident does, a story decided benign or false positive is not printed, and a step the analyst disputed is left out of its story's phases and severity and listed under it. Each says where its evidence stops.</p>${storiesCaveats(d)}${d.stories.map((st) => storyCard(st, d)).join('\n')}${left ? `<div class="cap">${n(left)} more ${left === 1 ? 'story is' : 'stories are'} not printed: below the severity floor${settings.onlyReviewed ? ', without a note or a decision (reviewed items only)' : ''} or past the first twenty.</div>` : ''}${dismissedStories ? `<div class="cap">${n(dismissedStories)} ${dismissedStories === 1 ? 'story' : 'stories'} decided benign or false positive by the analyst ${dismissedStories === 1 ? 'is' : 'are'} not printed.</div>` : ''}`,
     })
   }
   if (d.chains.length) {

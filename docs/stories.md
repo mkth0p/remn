@@ -6,7 +6,8 @@ name no one, and per incident: the records around what raised a flag, read along
 phases of ATT&CK, each step saying why it belongs and how surely. Stories that share the
 attacker's infrastructure form a campaign. The Stories page replaced the Chains and
 Relationships pages; the phishing chains ([Attack chains](chains.md)) are one of the things a
-story is built from, and the relationship graph is still there to explore.
+story is built from, and the relationship graph is still there to explore. The analyst decides
+what a story is, and can dispute a step, merge two stories or split one ([Decisions](#decisions)).
 
 The engine is `backend/services/analysis/stories.py`, with the identity resolver
 (`identity.py`) and host lineage (`lineage.py`) it builds on: pure functions over plain rows,
@@ -304,19 +305,101 @@ command line, the reasons, where it stops) goes between `<evidence>` markers as 
 does, with REMN's notice when some of it addresses a model, so a record cannot speak as the
 analyst.
 
+## Decisions
+
+A story is how the case reads; the analyst decides what it is. The decisions are kept in the
+case beside the notes (the `story-decisions-<case>` entry of its key-value store,
+`frontend/src/data/storyDecisions.ts`), go with the case bundle and are deleted with the case.
+Each is dated, and each that changes what a story holds carries the analyst's reason, which the
+page shows beside it and the report prints.
+
+**The story.** The bar under a story's head decides it: open (the default), reviewed, confirmed
+incident, benign or false positive. Confirmed, benign and false positive need a reason; reviewed
+takes one if given. The list tags a decided story and dims one decided benign or false
+positive. A story decided benign or false positive dismisses the stories merged into it too, and
+the bar says so before it is saved. The decision is on the story, not on its findings: their
+statuses stay the Findings and Review pages'.
+
+**A step.** A step's pane confirms the step and its tie, or disputes it, with an optional reason.
+A disputed step stays in the timeline, struck out and grey, and is left out of the story's
+phases, its phase rail, its severity, its headline and its findings; a confirmed step counts as
+a strong tie. Disputing a step changes no finding by itself: when the step carries findings the
+pane offers "also mark the finding false positive", which writes them through the path the
+findings review uses (`findingReviews.ts`: status false positive, decided by the analyst, a line
+in their notes naming the step, kept when a rule run finds it again), so the Review page and
+the report see it. Taking the dispute back does not set the finding back.
+
+**Not part of this story.** A step's records can be taken out of its story, with a reason: the
+story leaves them out after every rebuild, and the Decisions tab lists them to put back. The
+records stay in the case and in every other view; they are taken out of this story, not moved
+into another.
+
+**Merge and split.** "merge into another story" reads a story as part of another, with a reason:
+its steps join the other's in time order, the list no longer shows it and marks the other "+1
+merged". "split the story here" makes a step and the steps after it a story of their own, the
+"second part", which takes its own decision; a story is split once, and not at its first step.
+Both are overrides applied to the engine's stories after each build, never changes to the
+engine, and the Decisions tab undoes them. A story decided benign or false positive takes
+nothing merged into it (change its decision first), and a split story is not merged until the
+split is undone. Stories of two organisations can be merged, but the page asks first, in the
+page and not in a browser dialog, and the merge keeps both organisations' names, which the
+report prints.
+
+When decisions change what a story holds, its phases, severity (the worst finding of its
+steps, and high when three phases carry a finding of medium or more), headline, summary, span,
+hosts and findings are read again from the steps the decisions leave, the way the engine reads
+them; its score stays the engine's (the higher one of merged stories).
+
+**After a rebuild.** A story's decisions hold on to it as a note does (its anchor: the
+account's forms or the host, and its findings), and each story takes one entry. Inside the
+story, a step decision holds on to the step's records (the step that holds its first record,
+else most of them), records taken out to their own ids, a split to the record its step starts
+with and a merge to the anchor of the story it went into. A step decision whose records no story
+step holds any more, a split whose step no longer comes after another, and a merge whose story
+is gone are listed on the Decisions tab and not applied (the merged story reads on its own
+again) until the analyst undoes them. Decisions whose story is gone are listed under the stories
+("Decisions whose story is gone"), to put on the open story or delete after a second click in
+the page; the report counts them. A case bundle renumbers the records' ids on import, and the
+finding keys in the anchors of notes and decisions with them.
+
+**Exports.** A story's timeline, as the page shows it with the decisions applied, goes out as
+CSV or JSON through the app's export helpers (`util/export.ts`, whose CSV neutralises a cell a
+spreadsheet would read as a formula) and as Markdown to paste into a report, or copied. Each
+has one row per step: the time in UTC, host, accounts, phase, title, tie and its confidence,
+findings with their severity, the record references and the analyst's call on the step
+(`timeUtc`, `host`, `account`, `phase`, `title`, `tie`, `confidence`, `findings`, `refs`,
+`analyst`). The JSON (`format: remn-story-timeline`) adds the story (its subject, organisation,
+severity, score, span, phases, hosts, sources and which part of a split it is), its decision,
+what was merged into it, the split and the records taken out. In Markdown a disputed step's
+title is struck out, and what the records wrote is escaped so it cannot become a link, markup or
+a column (web addresses print defanged, `hxxp://`).
+
 ## In the report
 
 The report prints the stories at or above its severity floor, the highest-scoring first and at
-most twenty, before the chains: each with its phases in the order they happened, what marks
-each (its worst findings, else its first step), the analyst's note (checked against the
-story's records like a chain's narrative) and where its evidence stops: its hosts' coverage and
-a story no record shows starting (no initial access). Above the stories it says what the build
-could not read (every cut the page lists, below) and, when the stories no longer read the case
-as it is, that they are out of date and why; the Report page offers to rebuild them. The same
-lines go to "Where it stops" at the end, and the number of notes whose story is gone is
-printed too. With "reviewed items only", a story prints when it has a note. A story is how the
-case reads, not a decision: the verdict on the cover still comes from the chains and incidents
-the review decided.
+most twenty, before the chains, as the Stories page shows them with the analyst's decisions
+applied: each with its phases in the order they happened, what marks each (its worst findings,
+else its first step), the analyst's note (checked against the story's records like a chain's
+narrative), the analyst's decision and its reason, what the analyst merged into it, split off it
+or took out of it (each with its reason), and where its evidence stops: its hosts' coverage and
+a story no record shows starting (no initial access). A step the analyst disputed is left out of
+the phases and severity and listed under its story with the reason; a step the analyst confirmed
+is counted. A merged story's note prints under the story it went into. Above the stories it says
+what the build could not read (every cut the page lists, below) and, when the stories no longer
+read the case as it is, that they are out of date and why; the Report page offers to rebuild
+them. The same lines go to "Where it stops" at the end, and the number of notes and of decisions
+whose story is gone is printed too.
+
+A story decided a confirmed incident counts in the verdict on the cover as a confirmed incident
+does (its severity, and its findings in the threat profile), and one decided reviewed counts as
+a reviewed item; both go to "What happened". A story decided benign or false positive is not
+printed and counts with the false positives; the section says how many were left out. The
+report has no section of dismissed items. The verdict is read in one place
+(`computeVerdict` in `reportHtml.ts`), so the Review page's verdict bar counts decided stories
+the same way; a confirmed story the report does not print (below the floor, past the first
+twenty) still counts and the cover says it is not printed. With "reviewed items only", a story
+prints when it has a note or a decision other than open. An undecided story decides nothing:
+the verdict comes from the chains, incidents and stories the analyst decided.
 
 ## Explore
 
@@ -438,3 +521,7 @@ flags of the same intrusion with nothing linking them to pbeesly's.
   attacker who signed in to five accounts or more from one address with no finding on any of
   those sign-ins, and so outnumbers the people the records show signing in from outside, would
   be taken for one.
+- A decision reads a story again from the steps it leaves (phases, severity, headline), in the
+  engine's way, but keeps the engine's score and does not tie steps again: records taken out of
+  a story, or the steps split off it, take no other records with them, and a step tied through
+  one taken out keeps its tie. A story is split once.

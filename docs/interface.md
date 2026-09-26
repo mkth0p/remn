@@ -125,28 +125,40 @@ its counts; a search and a people/hosts filter narrow it. A case with findings a
 yet is read into stories when the page opens; **Rebuild stories** reads it again. Stories the
 case has moved past (a rule run, a false positive, a severity set by hand, evidence or settings
 changed since) are built again when the page opens if the last build was small, and otherwise
-say they are out of date, with a button to rebuild. Notes whose story a rebuild no longer holds
-are listed under the stories, to attach to the open story or delete.
+say they are out of date, with a button to rebuild. Notes and decisions whose story a rebuild no
+longer holds are listed under the stories, to attach to the open story or delete. A decided
+story carries its decision in the list ("confirmed incident", "benign" and so on, dimmed when
+dismissed), a story with others merged into it says "+N merged", and the second part of a split
+story is listed on its own.
 
 The selected story opens with its subject (the account, whose forms and joins are one click
-away, or the host), its score, span and the confidence of its ties, a few plain sentences,
-the sources its findings name, its hosts, its campaign, a link to review its phishing chain,
-and the analyst's note, checked against the story's own records. Under it, the phase rail
-shows the tactics in ATT&CK's order, lit and numbered in the story's order; a tactic filters
-the timeline. **Story** is the timeline by day: time and phase in the gutter, a mailbox,
+away, or the host), its score, span and the confidence of its ties, a few plain sentences, the
+sources its findings name, its hosts, its campaign, a link to review its phishing chain, and the
+analyst's note, checked against the story's own records. The **story decision** bar under it
+sets open, reviewed, confirmed incident, benign or false positive, with a reason (required for
+the last three); beside it, the timeline exports as CSV, JSON or Markdown (or copy the
+Markdown), and **merge into another story** opens a form with the story to merge into and the
+reason, which asks in the page before merging two organisations' stories. Under it, the phase
+rail shows the tactics in ATT&CK's order, lit and numbered in the story's order; a tactic
+filters the timeline. **Story** is the timeline by day: time and phase in the gutter, a mailbox,
 Microsoft 365 or host icon, what happened, the host, address and accounts, the findings with
 their rule's measure, and why the step is in the story, with a dot for how surely; folded runs
 show their count. `j` and `k` move between steps. A step's pane gives its phase and why, why it
-is in the story, each finding with what its rule was measured to be worth, the session, hops
-and process tree around it, the links its records support in the relationship graph (with
-their review), and opens its records. **Lineage** lists the story's hops, logon sessions and
-process trees; **Who is who** the forms of the account, how sure each join is, and the accounts
-kept apart (namesakes in other organisations, bare names several accounts share); **Where it
-stops** what its hosts' evidence cannot show and the case's own file gaps; **JSON** the story
-as data. A story or a step can go to the case timeline (its entry opens that step again, or says
-the story is gone), and **ask the analyst** hands the story to the AI view, with what the
-records wrote (step titles, names, reasons) between evidence markers, never as the analyst's
-own words.
+is in the story, each finding with what its rule was measured to be worth, the session, hops and
+process tree around it, the links its records support in the relationship graph (with their
+review), and opens its records. Its **Your decision** section confirms or disputes the step with
+an optional reason (a disputed step is struck out and left out of the phases and severity; "also
+mark the finding false positive" writes its findings' status too), takes its records out of the
+story ("not part of this story") or splits the story there, each of the last two with a reason.
+**Lineage** lists the story's hops, logon sessions and process trees; **Who is who** the forms
+of the account, how sure each join is, and the accounts kept apart (namesakes in other
+organisations, bare names several accounts share); **Where it stops** what its hosts' evidence
+cannot show and the case's own file gaps; **Decisions** every decision on the story with its
+reason and date, each with its undo (set back to open, take back, put back, undo the merge, undo
+the split), and the step decisions a rebuild could no longer place; **JSON** the story as data.
+A story or a step can go to the case timeline (its entry opens that step again, or says the
+story is gone), and **ask the analyst** hands the story to the AI view, with what the records
+wrote (step titles, names, reasons) between evidence markers, never as the analyst's own words.
 
 **Campaigns** groups the stories that share the attacker's infrastructure and lists the
 accounts outside them that the same sources reached; flagged mails and failed logons in no
@@ -199,7 +211,9 @@ contains: the severity floor, the chain detail level (steps tied to the mail or 
 a finding, plus weighted steps, or every step), the chain graphs, and the sections
 (chains, case timeline, tasks, notes, indicators, evidence, false positives, reviewed
 items only). Decisions live on the findings and in the case's key-value store and travel
-with the case bundle.
+with the case bundle. The verdict bar counts the stories decided on the Stories page as the
+report does: a confirmed story as a confirmed incident, a reviewed one as reviewed, a benign or
+false positive one with the false positives.
 
 ### The model in the review
 
@@ -307,7 +321,9 @@ rules behind the printed findings detect recorded attacks, and "Where it stops" 
 findings that come from leads.
 
 Stories come first ([Stories](stories.md#in-the-report)): a card per story with its phases in
-order, what marks each, the analyst's note and where its evidence stops. Chains are cards with
+order, what marks each, the analyst's note, the analyst's decisions on it and where its evidence
+stops; a story decided a confirmed incident counts in the verdict, one decided benign or false
+positive is not printed. Chains are cards with
 a severity pill, the verdict, a score meter split into its parts,
 the narrative in an accent block, the swimlane picture, the step table with a lane mark
 per source and the linked findings; incidents are cards with the note, the findings and

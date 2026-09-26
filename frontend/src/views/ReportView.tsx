@@ -23,7 +23,8 @@ import { loadEvidenceGaps, type GapStatement } from '../data/evidenceGaps'
 import { loadRules, settingsForRules } from '../data/rules'
 import { measuredOn, readMeasure, type MeasureReading } from '../data/ruleMeasures'
 import { loadReportClaims, type ReportClaims } from '../data/claims'
-import { buildStories, loadStories, loadStoryNotes, reportStories, storiesStaleness, storyInputs, storyRowIds, type StoryNotes, type StoryResult } from '../data/stories'
+import { buildStories, loadStories, loadStoryNotes, storiesStaleness, storyInputs, storyRowIds, type StoryNotes, type StoryResult } from '../data/stories'
+import { loadStoryDecisions, storiesForReport, type StoryDecisions } from '../data/storyDecisions'
 import type { Rule } from '../rules/engine'
 
 const ORDER = ['critical', 'high', 'medium', 'low', 'info']
@@ -43,6 +44,8 @@ export function ReportView() {
   /** the case's stories, the analyst's notes on them, and why the stories no longer read the case as it is */
   const [storyResult, setStoryResult] = useState<StoryResult | null>(null)
   const [storyNotes, setStoryNotes] = useState<StoryNotes>({})
+  /** the analyst's decisions on the stories (data/storyDecisions.ts), applied to them as the Stories page applies them */
+  const [storyDecisions, setStoryDecisions] = useState<StoryDecisions>({})
   const [storiesStale, setStoriesStale] = useState<string[]>([])
   const [rebuilding, setRebuilding] = useState(false)
   const [coverageWarnings, setCoverageWarnings] = useState<string[]>([])
@@ -122,14 +125,18 @@ export function ReportView() {
       setStoriesStale(r ? storiesStaleness(r, await storyInputs(kase)) : [])
     })
     loadStoryNotes(kase.id).then(setStoryNotes)
+    loadStoryDecisions(kase.id).then(setStoryDecisions)
     loadChainReviews(kase.id).then(setReviews)
     reportRelationships(kase.id).then(setRelationships)
     loadReportSettings(kase.id).then(setSettings)
   }, [kase, rulesVersion])
   const selection = useMemo(() => (settings ? selectForReport(findings, chains, reviews, settings) : { findings: [], chains: [] }), [findings, chains, reviews, settings])
   const printedStories = useMemo(
-    () => (settings ? reportStories(storyResult?.stories ?? [], storyNotes, settings.minSeverity, settings.onlyReviewed, 20, storyResult?.identities ?? []) : { stories: [], left: 0, orphans: 0 }),
-    [storyResult, storyNotes, settings],
+    () =>
+      settings
+        ? storiesForReport(storyResult, storyNotes, storyDecisions, findings, settings.minSeverity, settings.onlyReviewed, 20)
+        : { stories: [], left: 0, orphans: 0, dismissed: 0, decided: [], decisionsOrphaned: 0 },
+    [storyResult, storyNotes, storyDecisions, findings, settings],
   )
   // graph pictures for the report, drawn off-screen from the same models as the Chains page
   const [graphs, setGraphs] = useState<Record<string, string>>({})
@@ -189,6 +196,8 @@ export function ReportView() {
   // same unit as the Review page: incidents without a decision plus chains without a verdict
   const undecided = buildIncidents(findings, { chains }).filter((i) => (i.kind === 'chain' && i.chain ? !reviews[i.chain.id]?.verdict : i.status === 'new')).length
   const hiddenConfirmed = unprintedConfirmed(findings, chains, reviews, selection)
+  // a confirmed story the report leaves out (below the floor, past the first twenty) is a confirmed item not printed too
+  const hiddenStories = printedStories.decided.filter((s) => s.verdict === 'confirmed' && !s.printed).length
   const printedChecks = shown.map((f) => (f.id != null ? claims?.findings[f.id] : undefined)).filter((c) => !!c)
   const claimSummary = claims && {
     checked: printedChecks.length,
@@ -204,7 +213,7 @@ export function ReportView() {
     }),
     ...(claims?.texts ?? []).filter((t) => t.check.status !== 'verified').map((t) => ({ what: t.what, status: t.check.status, reasons: t.check.reasons })),
   ]
-  const checks = preflightChecks({ evidence, rules: rulesState, undecided, aiDecided: aiDecided(findings), unprintedConfirmed: hiddenConfirmed.length, claims: claimSummary })
+  const checks = preflightChecks({ evidence, rules: rulesState, undecided, aiDecided: aiDecided(findings), unprintedConfirmed: hiddenConfirmed.length + hiddenStories, claims: claimSummary })
   const status = issueStatus(checks, issue)
   /** The stories read again from the case as it is now; the page reloads what it prints once they are. */
   const rebuildStories = async () => {
@@ -284,6 +293,9 @@ export function ReportView() {
       storyStats: storyResult?.stats,
       storiesStale,
       storyNotesOrphaned: printedStories.orphans,
+      decidedStories: printedStories.decided,
+      storiesDismissed: printedStories.dismissed,
+      storyDecisionsOrphaned: printedStories.decisionsOrphaned,
     })
   /** The report in its own tab: the browser's own print-to-PDF, or to keep it open next to the case. */
   const openReport = () => {

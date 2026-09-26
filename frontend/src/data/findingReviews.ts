@@ -26,6 +26,30 @@ export async function resetFindingSeverityOverrides(caseId: number, ids: number[
   })
 }
 
+/**
+ * An analyst's decision on the case's findings of these keys, taken from another page (a story's
+ * step disputed on the Stories page): the status, who decided, and why after the note it has. It
+ * is archived at once with the other reviews, so a rule rerun that rebuilds the findings keeps it.
+ * Returns how many findings it decided.
+ */
+export async function decideFindings(caseId: number, keys: string[], status: Finding['status'], why?: string): Promise<number> {
+  const db = getDb()
+  const wanted = [...new Set(keys.filter(Boolean))]
+  if (!wanted.length) return 0
+  return db.transaction('rw', [db.findings, db.kv], async () => {
+    const rows = (await db.findings.where('key').anyOf(wanted).toArray()).filter((f) => f.caseId === caseId)
+    const decidedRows = rows.map((f) => ({
+      ...f,
+      status,
+      decidedBy: 'analyst' as const,
+      ...(why?.trim() ? { notes: [f.notes?.trim(), why.trim()].filter(Boolean).join('\n\n'), notesBy: 'analyst' as const } : {}),
+    }))
+    for (const f of decidedRows) await db.findings.update(f.id!, { status: f.status, decidedBy: f.decidedBy, notes: f.notes, notesBy: f.notesBy })
+    await rememberReviews(caseId, decidedRows)
+    return decidedRows.length
+  })
+}
+
 /** Keep decisions when a calibrated rule stops matching and later matches again. */
 export async function rememberReviews(caseId: number, findings: Finding[]): Promise<Map<string, Review>> {
   const db = getDb()
