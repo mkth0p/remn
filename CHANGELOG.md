@@ -5,6 +5,10 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- CSV exports quote any value holding a semicolon or a tab, and put column names through the
+  same escaping, so a value from the evidence cannot start a formula in Excel builds that split
+  CSV on semicolons. The HTML report carries its own content security policy (no script, no
+  remote loads), and the build's source link is only ever an http(s) URL.
 - A home page. REMN opens on it until a case holds evidence, and the wordmark leads back to it
   after that. It shows what the tool reads, how the rules are measured and what the measures
   show: the rule totals, recordings and clean-host baseline read live from `rules/measures.json`
