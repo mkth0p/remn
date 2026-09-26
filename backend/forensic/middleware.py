@@ -70,7 +70,7 @@ class ApiClientHeaderMiddleware:
             if not value:
                 return JsonResponse({"error": "missing X-Forensic-Client header"}, status=403)
             token = settings.FORENSIC_AUTH_TOKEN
-            if token and not hmac.compare_digest(value, token):
+            if token and not hmac.compare_digest(value.encode("utf-8", "surrogateescape"), token.encode("utf-8")):
                 return JsonResponse({"error": "invalid access token", "code": "auth"}, status=401)
         return self.get_response(request)
 

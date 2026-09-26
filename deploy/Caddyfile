@@ -14,6 +14,12 @@
 	}
 
 	handle /api/* {
+		# A chunk is at most 64 MiB (MAX_CHUNK in backend/api/views/upload.py). Refused here, a
+		# larger body never reaches waitress, which would spool all of it into the RAM-backed tmpfs.
+		@chunk path_regexp ^/api/upload/[a-f0-9]{32}/chunk$
+		request_body @chunk {
+			max_size 64MiB
+		}
 		reverse_proxy remn:8000 {
 			# Set the header rather than appending to whatever the client sent, so the address the
 			# request budget reads is this proxy's observation and not a client-supplied value.

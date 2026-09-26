@@ -28,3 +28,9 @@ def test_token_mode_covers_store_and_upload_routes():
     c = Client()
     assert c.get("/api/meta", HTTP_X_FORENSIC_CLIENT="wrong").status_code == 401
     assert c.post("/api/upload/init", HTTP_X_FORENSIC_CLIENT="wrong").status_code == 401
+
+
+@override_settings(FORENSIC_AUTH_TOKEN="s3cret-token")
+def test_a_non_ascii_token_is_refused_not_an_error():
+    r = Client().get("/api/health", HTTP_X_FORENSIC_CLIENT="s3cret-tokén")
+    assert r.status_code == 401

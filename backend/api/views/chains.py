@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 
+from django.conf import settings as conf
 from django.http import HttpRequest, JsonResponse
 from django.views.decorators.http import require_POST
 
@@ -43,6 +44,8 @@ def build(request: HttpRequest):
     opts = _opts(body)
     try:
         if body.get("storeKey"):
+            if conf.FORENSIC_BROWSER_ONLY:
+                return JsonResponse({"error": "server stores are unavailable in browser-only mode", "code": "browserOnly"}, status=403)
             try:
                 st = registry.get(str(body["storeKey"]), create=False)
             except (ValueError, FileNotFoundError):

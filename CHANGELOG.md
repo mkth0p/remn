@@ -5,6 +5,10 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- Public instance limits: a chunk upload over 64 MiB is refused before it is read (by Caddy and by
+  the server), unfinished uploads reserve the size they announced in the staging budget, and the
+  chains and mail enrichment paths refuse a server case key in browser-only mode, as stories and
+  relationships already did. A non-ASCII access token is a 401 rather than a server error.
 - Eleven rules for directory changes on a domain controller (`rules/windows/directory.yaml`):
   accounts weakened for AS-REP roasting or offline cracking, Kerberos delegation granted
   (including resource-based delegation), passwords set never to expire, permissions changed on
