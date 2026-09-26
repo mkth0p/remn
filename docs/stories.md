@@ -16,7 +16,8 @@ the same for both stores.
 
 A story starts from a flag: a finding of medium severity or more on a record, or a phishing
 mail its recipient acted on (a mail-led chain with a step tied to the mail: the link resolved,
-the attachment saved, a reply to the sender). Two kinds of flag start nothing on their own: a
+the attachment saved, a reply to the sender), or low findings of several rules on one person or
+host within a week (below). Two kinds of flag start nothing on their own: a
 mail received, and a password guessed wrong. Hundreds of people receive the same phishing mail
 and a spray tries thousands of accounts; each would be a story that says only "this happened to
 you". A chain whose steps are only the recipient's routine day after a flagged mail is still a
@@ -30,6 +31,21 @@ intrusions three weeks apart leave them two stories, and the failures far from b
 with the flags in no story. A flag that names no person, a service installed or a program run by
 SYSTEM, belongs to the person whose session, process tree or way into the host it is part of,
 and when there is none it starts a story of its own host.
+
+Low findings add up (Splunk ES's risk-based alerting). A person or a host whose low findings,
+within seven days, come from at least three rules covering at least two tactics, or from at
+least four rules whatever their tactics, starts a story of those findings even though none of
+them would start one alone. One rule firing a hundred times is one rule; a mail received and a
+failed logon do not count, nor does a finding marked false positive. The run holds together
+however far apart its findings are within the week (the two-day cut between incidents does not
+split it). Low findings within two days of one of the same person's or host's other incidents
+start nothing: that story already reads the records around it. Each of these steps is tied as a
+flag with the basis "findings of 3 rules on them within 7 days" (and how the record is theirs),
+the story says `startKind: "accumulated"` (other stories say `"flag"`), its summary starts by
+saying it was built from low findings, its severity is low, and the stats count these stories
+(`accumulated`). The thresholds are the case settings `stories_low_days` (7; 0 turns this off),
+`stories_low_rules` (3), `stories_low_tactics` (2) and `stories_low_rules_any` (4), read as
+posted with the build.
 
 A finding marked false positive starts nothing and weighs nothing; the analyst's severity
 override is the severity the story reads.
@@ -185,26 +201,55 @@ failures among them. A story keeps at most 400 steps. Past them it keeps its fla
 first, the worst first; then the steps that change what an intruder holds (initial access,
 persistence, privilege escalation, credential access, lateral movement, defense impairment,
 exfiltration, impact); then its sessions, hops, process parents and sources; then the other
-steps with a phase, the programs run with no finding among them; and routine records last,
-each group in time order. A story that cut steps says how many (`stepsTruncated`) and says so
-where it stops, the stats count the stories that did, and a flag cut from its story is listed
-with the flags in no story.
+steps with a phase, the programs run with no finding among them; and routine records last.
+The flags go worst first; within each group of context (sessions and after) the rarest in the
+case go first (below); otherwise each group keeps its time order. A story that cut steps says how many
+(`stepsTruncated`) and says so where it stops, the stats count the stories that did, and a flag
+cut from its story is listed with the flags in no story.
+
+A step says how rare it is in the case (`rarity`, after NoDoze's prevalence): for a program
+started, on how many of the case's hosts that log process creations the same parent started the
+same program ("cmd.exe → rclone.exe: seen on 1 of 40 hosts"); for a logon, how many of the
+accounts that log on to that host came from the same source ("ws-004 → fs-001: seen for 1 of
+the 12 accounts that log on to fs-001"); for a DNS query or a connection to an outside domain,
+on how many hosts that domain (its registrable part) was looked up or reached. The counts are
+over the rows the build read, in one pass; a case with one host to compare gives none. The step
+pane shows it.
 
 The phase rail at the top of a story shows the fifteen tactics in ATT&CK's order, lit where
 the story has steps, numbered in the story's own order, coloured by the worst finding in each;
 a phase is a filter for the timeline.
 
-A story's severity is its worst finding, raised to high when three phases or more each carry a
-finding of medium or more. Its score sorts the list: four points per unit of each phase's worst
-finding (critical 5, high 4, medium 2, low 1), ten for a mail-led chain, two per flagged phase
-up to ten, capped at 100.
+A story's score sorts the list and favours weight and attack order over breadth (after RapSheet,
+IEEE S&P 2020). Each finding weighs its severity (critical 10, high 6, medium 3, low 1) times how
+far its rule can be believed, from its measure: 1 for a rule seen to detect what it looks for on
+recorded attacks, 0.8 for one never measured (a mail rule, your own, another tool's, one changed
+since or that needs settings), 0.6 for a lead never seen to, 0.5 for one that misses its own
+sample; a rule that fired on the logs of clean machines loses a quarter more, half when it fired
+on all of them. The score is three points per unit of weight on the heaviest run of findings
+whose phases follow ATT&CK's order as time goes (one technique per phase: a finding out of that
+order is not part of it), plus the weight of the other techniques up to 20 points (a technique
+counts once, however many findings its rules raised), plus ten for a mail-led chain, capped at
+100. A lone critical finding from a rule that detects scores 30; an administrator's whoami,
+PsExec and scheduled task, three medium findings of which only two come in ATT&CK's order, score
+less than a critical shadow-copy deletion. The story says why (`scoreParts`: the run with each
+finding's phase, technique, rule, verdict, precision and weight, its points, the other
+techniques and their points, the chain's points, and how many techniques weigh less), in a
+sentence of its summary and on the score's tooltip.
+
+A story's severity is its worst finding, raised to high when three distinct techniques or more,
+in three phases or more, each carry a finding of medium or more from a rule that is neither a
+lead nor noisy on clean machines (a rule never measured counts). Three phases of an
+administrator's routine from rules that fire on clean machines are not an intrusion.
 
 ## Measured marks
 
 A finding on a step carries its rule's measure ([REMN's rules, measured](reviews/2026-09-24-measured-rules.md)):
 a rule that detects what it looks for on recorded attacks, a lead that has never been seen to,
 one that misses its own sample, one that fires on clean machines. The step pane gives the
-sentences behind each.
+sentences behind each. The same measures weigh each finding in the story's score and decide
+which findings can raise its severity (above); the build reads them from `rules/measures.json`
+by rule id, or from the finding when it carries its rule's measure (`measured`).
 
 ## Campaigns
 
@@ -335,10 +380,12 @@ story. A rebuild keeps the open story open, found by what it shares when its id 
 `tests/backend/test_stories_lab.py` generates the synthetic linked lab, parses it, runs REMN's
 rules and reads it into stories. Each of the five planted attacks (S01, S02, S03, S04, S06) is
 one story of its victim, holding every planted record of its scenario (recall 1.00) with
-precision from 0.97 to 0.99, nothing of another scenario, and at most ten background records;
-the other tenant's `alice.martin` who cleared a log on her own host is a story of her own that
-no Northstar story holds, the domain seen on Alice's host two weeks earlier is in no story, and
-the benign controls and the prompt-injection lure raise none. S04 reads as initial access,
+precision from 0.97 to 0.99, nothing of another scenario, and at most ten background records,
+each critical and scoring from 84 to 100; the other tenant's `alice.martin` who cleared a log on
+her own host is a story of her own that no Northstar story holds (critical, scoring 15: one
+finding, from a rule that fired on every clean machine it was measured on), the domain seen on
+Alice's host two weeks earlier is in no story, and the benign controls and the prompt-injection
+lure raise none. S04 reads as initial access,
 credential access, execution, persistence, lateral movement, collection and defense
 impairment, with its RDP session from 203.0.113.69 on WS-004, the log cleared inside that
 session, and the admin share and the service installed a minute later on FS-001; with Sysmon
@@ -360,6 +407,12 @@ are synthetic scenarios: a regression benchmark, not a measured accuracy on fiel
 - An Entra device is matched to a host by name only: a device renamed, or one whose name two
   hosts of different domains share, is not joined; a device id is not read against the
   machine's own records.
+- A finding's measure is its rule's by rule id: a rule of your own that replaces a bundled rule
+  of the same id is weighed by the bundled rule's measure unless the finding carries its own
+  (`measured`), which the page does not send yet. Mail rules and Hayabusa's are not measured and
+  weigh as rules never measured.
+- The thresholds at which low findings add up are case settings the build reads, but the page's
+  settings do not offer them yet: a case posted by the page uses the defaults.
 - A case keeps at most 200 stories, the highest-scoring first; the flags of the stories past
   them are listed with the flags in no story, saying why. The API holds what a caller asks for
   to at most 1,000 stories and 2,000 steps a story, and a gap between one hour and thirty days.

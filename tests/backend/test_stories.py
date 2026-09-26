@@ -443,6 +443,227 @@ def test_carrier_grade_nat_is_not_the_internet():
     assert record_phase({**SEC, "eventId": 4624, "logonType": 10, "ipAddress": "100.128.0.1"}, "events", set())[0] == "initial-access"
 
 
+# --- score, severity and what starts a story -----------------------------------------------------------
+
+# measures as rules/measures.json holds them: seen to detect, a lead, one that fires on every clean machine
+DETECTS = {"of": 5, "hits": 4, "fires": 4}
+LEAD = {"of": 3}
+NOISY = {"of": 5, "hits": 4, "clean": {"findings": 40, "events": 40, "machines": 7, "of": 7, "scope": 400}}
+
+
+def _admin_and_ransomware():
+    """Review finding R10: an admin's whoami, psexec and scheduled task (three medium findings in three
+    phases) beside one critical shadow-copy deletion on another person's host."""
+    admin = dict(subjectUser="it-admin", subjectDomain="NORTHSTAR", subjectLogonId="0x66")
+    events = [
+        ev(1, 0, eventId=4688, computer="WS-001", newProcessId="0x1", processName="C:\\Windows\\System32\\whoami.exe", **admin),
+        ev(2, 1, eventId=4688, computer="WS-001", newProcessId="0x2", processName="C:\\Tools\\psexec.exe", **admin),
+        ev(3, 2, eventId=4698, computer="WS-001", taskName="\\Backup", **admin),
+        ev(4, 0, eventId=4688, computer="WS-009", newProcessId="0x3", processName="C:\\Windows\\System32\\vssadmin.exe", subjectUser="eve", subjectDomain="NORTHSTAR", subjectLogonId="0x77"),
+    ]  # fmt: skip
+    findings = [
+        finding("whoami", "medium", [1], tags=["discovery"], attack=["T1033"]),
+        finding("psexec", "medium", [2], tags=["lateral-movement"], attack=["T1021.002"]),
+        finding("schtask", "medium", [3], tags=["persistence"], attack=["T1053.005"]),
+        finding("shadow-delete", "critical", [4], tags=["impact"], attack=["T1490"]),
+    ]
+    return events, findings
+
+
+def test_a_critical_finding_outranks_three_mediums_of_an_admins_day():
+    events, findings = _admin_and_ransomware()
+    res = build_stories(events, [], findings, SETTINGS, measures={})
+    ransom, admin = res["stories"]
+    assert ransom["subject"]["label"] == "northstar\\eve" and ransom["severity"] == "critical"
+    assert admin["subject"]["label"] == "northstar\\it-admin" and ransom["score"] > admin["score"]
+    # the admin's run is discovery then lateral movement: the task came after them and is out of ATT&CK's order
+    parts = admin["scoreParts"]
+    assert [w["phase"] for w in parts["run"]] == ["discovery", "lateral-movement"] and parts["others"] == 1 and parts["techniques"] == 3
+    assert admin["summary"].count(f"Score {admin['score']}: discovery → lateral movement in ATT&CK's order") == 1
+    # three techniques in three phases from rules never measured still read as an intrusion...
+    assert admin["severity"] == "high"
+    # ...but not when one of them fires on clean machines, or is a lead
+    for measure in (NOISY, LEAD):
+        [again] = [
+            s
+            for s in build_stories(events, [], findings, SETTINGS, measures={"whoami": measure})["stories"]
+            if s["kind"] == "person" and "it-admin" in s["title"]
+        ]
+        assert again["severity"] == "medium"
+
+
+def test_the_score_weighs_attack_order_and_what_each_rule_is_worth():
+    me = dict(subjectUser="alice.martin", subjectDomain="NORTHSTAR", subjectLogonId="0x9001")
+
+    def story(order, measures, repeat=1):
+        """Execution, persistence and credential access, at the given minutes; the persistence rule fires `repeat` times."""
+        events = [
+            ev(1, order[0], eventId=4688, computer="WS-001", newProcessId="0x10", processName="C:\\Users\\Public\\run.exe", **me),
+            *[ev(10 + k, order[1] + k * 0.5, eventId=4698, computer="WS-001", taskName=f"\\Updater{k}", **me) for k in range(repeat)],
+            ev(3, order[2], eventId=4688, computer="WS-001", newProcessId="0x30", processName="C:\\Users\\Public\\dump.exe", **me),
+        ]
+        findings = [
+            finding("run", "high", [1], tags=["execution"], attack=["T1204.002"]),
+            *[finding("task", "high", [10 + k], tags=["persistence"], attack=["T1053.005"]) for k in range(repeat)],
+            finding("dump", "high", [3], tags=["credential-access"], attack=["T1003.001"]),
+        ]
+        [s] = build_stories(events, [], findings, SETTINGS, measures=measures)["stories"]
+        return s
+
+    measured = {"run": DETECTS, "task": DETECTS, "dump": DETECTS}
+    in_order = story((0, 10, 20), measured)
+    assert [w["phase"] for w in in_order["scoreParts"]["run"]] == ["execution", "persistence", "credential-access"]
+    assert in_order["score"] == 3 * 18 and in_order["scoreParts"]["weighedDown"] == 0
+    # the same findings against ATT&CK's order: only one of them climbs, the others add a little
+    reversed_ = story((20, 10, 0), measured)
+    assert len(reversed_["scoreParts"]["run"]) == 1 and reversed_["score"] < in_order["score"]
+    # a lead weighs less than a rule seen to detect what it looks for, and a noisy one less again
+    lead = story((0, 10, 20), {**measured, "dump": LEAD})
+    noisy = story((0, 10, 20), {**measured, "dump": NOISY})
+    assert noisy["score"] < lead["score"] < in_order["score"]
+    assert lead["scoreParts"]["run"][-1] | {"step": None} == {
+        "phase": "credential-access",
+        "technique": "T1003.001",
+        "ruleId": "dump",
+        "severity": "high",
+        "verdict": "lead",
+        "precision": 0.6,
+        "weight": 3.6,
+        "step": None,
+    }
+    assert "1 of its 3 techniques weighs less" in lead["summary"]
+    # five scheduled tasks of one rule are one technique: breadth of one rule adds nothing
+    many = story((0, 10, 20), measured, repeat=5)
+    assert many["score"] == in_order["score"] and many["scoreParts"]["techniques"] == 3
+
+
+def test_measures_read_as_the_page_reads_them(monkeypatch):
+    from services.analysis.stories import measure_verdict
+    from services.rules import measures
+
+    assert measure_verdict(None) == ("unmeasured", False, 0.8)
+    assert measure_verdict({"changed": True}) == ("unmeasured", False, 0.8)
+    assert measure_verdict({}) == ("lead", False, 0.6)
+    assert measure_verdict({"own": False, "of": 2}) == ("misses", False, 0.5)
+    assert measure_verdict(DETECTS) == ("detects", False, 1.0)
+    # firing on one clean machine of seven costs about a quarter, on every one of them half
+    assert measure_verdict({**DETECTS, "clean": {"findings": 1, "machines": 1, "of": 7}})[2] == 0.714
+    assert measure_verdict(NOISY) == ("detects", True, 0.5)
+    # without measures given, a build reads rules/measures.json; a finding that carries its rule's measure keeps it
+    monkeypatch.setattr(measures, "load", lambda: {"rules": {"shadow-delete": {"h": "x", **LEAD}}})
+    events, findings = _admin_and_ransomware()
+    ransom = next(s for s in build_stories(events, [], findings, SETTINGS)["stories"] if "eve" in s["title"])
+    assert ransom["scoreParts"]["run"][0]["verdict"] == "lead"
+    findings[3]["measured"] = DETECTS
+    ransom = next(s for s in build_stories(events, [], findings, SETTINGS)["stories"] if "eve" in s["title"])
+    assert ransom["scoreParts"]["run"][0]["verdict"] == "detects"
+
+
+def _low(rules_days, user="carla.morel", host="WS-007"):
+    """Low findings on one person's records: (rule, tactic, day) each."""
+    me = dict(subjectUser=user, subjectDomain="NORTHSTAR", subjectLogonId="0x4401")
+    events, findings = [], []
+    for n, (rule, tactic, day) in enumerate(rules_days, 1):
+        events.append(ev(n, day * 1440, eventId=4698, computer=host, taskName=f"\\t{n}", **me))
+        findings.append(finding(rule, "low", [n], tags=[tactic]))
+    return events, findings
+
+
+def _built(events, findings, settings=SETTINGS):
+    return build_stories(events, [], findings, settings)
+
+
+def test_low_findings_of_several_rules_within_a_week_add_up_to_a_story():
+    # three rules, two tactics, over five days: more than two days apart, still one story
+    events, findings = _low([("recon-a", "discovery", 0), ("odd-task", "persistence", 2.5), ("recon-b", "discovery", 5)])
+    res = build_stories(events, [], findings, SETTINGS, measures={})
+    [story] = res["stories"]
+    assert story["startKind"] == "accumulated" and story["severity"] == "low" and res["stats"]["accumulated"] == 1
+    assert [st["id"] for st in story["steps"]] == ["event:1", "event:2", "event:3"]
+    assert story["steps"][0]["tie"]["kind"] == "flag"
+    assert story["steps"][0]["tie"]["basis"] == "findings of 3 rules on them within 7 days: the record names them (subject)"
+    assert story["summary"].startswith("No finding of medium severity or more: low findings of 3 rules within 7 days add up to this story.")
+    # two rules are not enough, nor three rules of one tactic; four rules are, whatever their tactics
+    assert _built(*_low([("a", "discovery", 0), ("b", "persistence", 1)]))["stories"] == []
+    assert _built(*_low([("a", "discovery", 0), ("b", "discovery", 1), ("c", "discovery", 2)]))["stories"] == []
+    [four] = _built(*_low([("a", "discovery", 0), ("b", "discovery", 1), ("c", "discovery", 2), ("d", "discovery", 3)]))["stories"]
+    assert four["startKind"] == "accumulated"
+    # nor findings more than a week apart, nor one rule firing many times
+    assert _built(*_low([("a", "discovery", 0), ("b", "persistence", 4), ("c", "discovery", 8)]))["stories"] == []
+    assert _built(*_low([("a", "discovery", d) for d in range(6)]))["stories"] == []
+    # a finding marked false positive does not count
+    findings[1]["status"] = "false_positive"
+    assert build_stories(events, [], findings, SETTINGS)["stories"] == []
+
+
+def test_low_findings_follow_the_settings_and_start_host_stories_too():
+    events, findings = _low([("recon-a", "discovery", 0), ("odd-task", "persistence", 1)])
+    assert build_stories(events, [], findings, SETTINGS)["stories"] == []
+    [story] = build_stories(events, [], findings, {**SETTINGS, "storiesLowRules": 2})["stories"]
+    assert story["startKind"] == "accumulated"
+    events, findings = _low([("recon-a", "discovery", 0), ("odd-task", "persistence", 1), ("recon-b", "discovery", 2)])
+    assert build_stories(events, [], findings, {**SETTINGS, "stories_low_days": 0})["stories"] == []
+    # records that name no one: the host's story
+    for e in events:
+        for k in ("subjectUser", "subjectDomain", "subjectLogonId"):
+            e.pop(k)
+    [host] = build_stories(events, [], findings, SETTINGS)["stories"]
+    assert host["kind"] == "host" and host["startKind"] == "accumulated"
+    assert host["steps"][0]["tie"]["basis"] == "findings of 3 rules on it within 7 days"
+
+
+def test_low_findings_near_an_incident_start_no_second_story():
+    events, findings = _low([("recon-a", "discovery", 0), ("odd-task", "persistence", 1), ("recon-b", "discovery", 2)])
+    events.append(ev(9, 1.5 * 1440, eventId=1102, computer="WS-007", subjectUser="carla.morel", subjectDomain="NORTHSTAR", subjectLogonId="0x4401"))
+    findings.append(finding("win-audit-log-cleared", "critical", [9], tags=["defense-evasion"], attack=["T1685.005"]))
+    [story] = build_stories(events, [], findings, SETTINGS)["stories"]
+    assert story["startKind"] == "flag" and story["severity"] == "critical"
+
+
+def test_a_step_says_how_rare_it_is_in_the_case_and_the_rarest_context_is_kept_first():
+    me = dict(subjectUser="alice.martin", subjectDomain="NORTHSTAR", subjectLogonId="0x9001")
+    cmd = "C:\\Windows\\System32\\cmd.exe"
+    sysmon = {"provider": "Microsoft-Windows-Sysmon", "channel": "Microsoft-Windows-Sysmon/Operational"}
+    events = [
+        ev(1, 0, eventId=4624, computer="WS-001", targetUser="alice.martin", targetDomain="NORTHSTAR", targetLogonId="0x9001", logonType=2),
+        ev(2, 1, eventId=4688, computer="WS-001", newProcessId="0x10", processName="C:\\Users\\Public\\mimikatz.exe", **me),
+        # cmd.exe starting conhost.exe on every host; starting rclone.exe on hers only, last
+        *[ev(10 + k, 2 + k, eventId=4688, computer="WS-001", newProcessId=hex(0x20 + k), processName="C:\\Windows\\System32\\conhost.exe", parentProcessName=cmd, **me) for k in range(4)],
+        ev(20, 30, eventId=4688, computer="WS-001", newProcessId="0x40", processName="C:\\Tools\\rclone.exe", parentProcessName=cmd, **me),
+        *[ev(30 + k, 5, eventId=4688, computer=f"WS-00{k + 2}", newProcessId="0x50", processName="C:\\Windows\\System32\\conhost.exe", parentProcessName=cmd,
+             subjectUser=f"user{k}", subjectDomain="NORTHSTAR", subjectLogonId="0x1") for k in range(3)],
+        # a network logon to the file server from her host, where three others come from WS-005
+        ev(40, 10, eventId=4624, computer="FS-001", targetUser="alice.martin", targetDomain="NORTHSTAR", targetLogonId="0x7001", logonType=3, workstation="WS-001", ipAddress="10.0.0.11"),
+        *[ev(41 + k, 11, eventId=4624, computer="FS-001", targetUser=f"user{k}", targetDomain="NORTHSTAR", targetLogonId=hex(0x7100 + k), logonType=3, workstation="WS-005", ipAddress="10.0.0.15")
+          for k in range(3)],
+        # a domain only her host looked up, and one every host did
+        ev(50, 12, base=sysmon, eventId=22, computer="WS-001", query="files.transfer-drop.example", user="NORTHSTAR\\alice.martin"),
+        *[ev(51 + k, 12, base=sysmon, eventId=22, computer=f"WS-00{k + 1}", query="www.microsoft.com", user="NORTHSTAR\\SYSTEM") for k in range(4)],
+    ]  # fmt: skip
+    findings = [
+        finding("win-mimikatz", "critical", [2], tags=["credential-access"]),
+        finding("lateral-logon", "medium", [40], tags=["lateral-movement"]),
+        finding("dns-rare", "medium", [50], tags=["command-and-control"]),
+    ]
+    [story] = build_stories(events, [], findings, SETTINGS, measures={})["stories"]
+    by_ref = {r: s for s in story["steps"] for r in s["refs"]}
+    assert by_ref["event:20"]["rarity"] == {
+        "kind": "process",
+        "value": "cmd.exe → rclone.exe",
+        "seen": 1,
+        "of": 4,
+        "unit": "hosts",
+        "text": "cmd.exe → rclone.exe: seen on 1 of 4 hosts",
+    }
+    assert by_ref["event:10"]["rarity"]["text"] == "cmd.exe → conhost.exe: seen on 4 of 4 hosts"
+    assert by_ref["event:40"]["rarity"]["text"] == "ws-001 → fs-001: seen for 1 of the 4 accounts that log on to fs-001"
+    assert by_ref["event:50"]["rarity"]["text"] == "transfer-drop.example: seen on 1 of 4 hosts"
+    # past max_steps the programs run with no finding go, the rarest kept first whatever their time
+    cut = build_stories(events, [], findings, SETTINGS, measures={}, max_steps=len(story["steps"]) - 3)["stories"][0]
+    kept = {r for s in cut["steps"] for r in s["refs"]}
+    assert "event:20" in kept and len({"event:10", "event:11", "event:12", "event:13"} & kept) == 1
+
+
 # --- the API ------------------------------------------------------------------------------------------
 
 import json  # noqa: E402

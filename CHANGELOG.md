@@ -5,6 +5,26 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- A story's score favours weight and attack order over breadth: it follows the heaviest run of
+  its findings whose phases come in ATT&CK's order as time goes (after RapSheet), each finding
+  weighing its severity (critical 10, high 6, medium 3, low 1) times how far its rule's measure
+  says it can be believed (a lead, a rule never measured and one that fires on clean machines
+  weigh less), with the other techniques adding at most 20 points, each counted once however
+  many findings its rules raised, and a mail-led chain ten. An administrator's whoami, PsExec and
+  scheduled task (three medium findings) no longer outrank a critical shadow-copy deletion (16
+  against 24, where they scored 30 against 22), and a story is raised to high only by three
+  distinct techniques in three phases whose medium findings come from rules that are neither
+  leads nor noisy. The story says why (`scoreParts`, a sentence of its summary, the score's
+  tooltip). Low findings add up (Splunk's risk-based alerting): a person or host whose low
+  findings come from three rules of two tactics, or four rules, within seven days starts a story
+  (`startKind: "accumulated"`, each step tied by "findings of 3 rules on them within 7 days"),
+  with the thresholds as case settings. A step says how rare its parent and child programs, its
+  logon path or its outside domain are in the case ("seen on 1 of 40 hosts", `rarity`), and a
+  story past 400 steps keeps its rarest context first. On APT29's first day the stories keep
+  their order and the hosts not attacked that day fall further behind the intrusion (SCRANTON
+  74, pbeesly 55, NEWYORK 31, NASHUA 23, UTICA 22, where they scored 82, 64, 46, 28 and 28; with
+  the community packs NASHUA, where the intruder moved, scores 62 against NEWYORK's 31); the
+  lab's attacks stay critical and score 84 to 100.
 - Stories no longer lose what matters to routine activity or to their own caps. A program a
   person ran with no finding joins their story only when it ran in the story's logon session or
   process tree, not for naming them; past 400 steps a story keeps its flags, then its

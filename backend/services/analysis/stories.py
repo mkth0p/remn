@@ -3,9 +3,10 @@ Stories: what happened to each person and each host, read as ATT&CK phases.
 
 A story is an incident: the records about one person (an identity of the resolver) or, when the
 records name no person, one host, over a stretch of time. It starts from what raised a flag: a
-finding of medium severity or more, or a phishing mail and what followed it (the mail-led chains).
-A mail received, or a password guessed wrong, starts no story on its own: it joins the story of
-its person when there is one, and otherwise stays with its campaign.
+finding of medium severity or more, or a phishing mail and what followed it (the mail-led chains),
+or low findings of several rules on one person or host within a week that add up (risk-based
+alerting). A mail received, or a password guessed wrong, starts no story on its own: it joins the
+story of its person when there is one, and otherwise stays with its campaign.
 
 Every step says why it belongs to the story and how surely:
 
@@ -26,7 +27,9 @@ logon joins the nearest, never two. A step reads as a phase from its rule's tact
 technique, else what the record is: a phishing mail is initial access, a log cleared is defense
 impairment, a scheduled task is persistence. Routine records (logons, sign-ins, mailbox reads
 without a finding) are folded into one step per run. A story past its step cap keeps its flags
-and the steps that change what an intruder holds first, and says how many it cut.
+and the steps that change what an intruder holds first, then the context rarest in the case, and
+says how many it cut. Its score follows the heaviest run of its findings in ATT&CK's order, each
+weighing its severity times how far its rule's measure says it can be believed.
 
 Stories that share the attacker's infrastructure (an address, a sender domain, a link domain, an
 attachment, a forwarding address, a consented application) form a campaign; so do the mails a
@@ -46,6 +49,7 @@ from typing import Any
 from .chains import _IDENT_SQL, authentication_outcome, build_chains, mail_recipients, netbios_hints, same_org_domain
 from .identity import CONFIDENCE_RANK, MEDIUM, STRONG, WEAK, Form, Record, Resolver, account_forms, base_name, event_record, kind_of, mail_record, resolve
 from .lineage import Lineage, build_lineage, host_key, ip_of, is_internal_ip
+from .lookalike import registrable
 
 VERSION = 1
 # ATT&CK v19's tactics in the order an intrusion reads (Defense Evasion is now Stealth and Defense Impairment)
@@ -326,6 +330,9 @@ class _Case:
                     self.by_ip[ip].append((ts, ref))
         for lst in (*self.by_identity.values(), *self.by_ip.values()):
             lst.sort()
+        # each rule's measure by rule id (build_stories reads rules/measures.json), and the case's rarity counts once a step asks
+        self.measures: dict[str, Any] = {}
+        self._rarity: _Rarity | None = None
 
     def kind(self, iid: str) -> str:
         return self.resolver.by_id[iid]["kind"] if iid in self.resolver.by_id else "person"
@@ -424,16 +431,21 @@ def build_stories(
     *,
     chains: dict[str, Any] | None = None,
     resolver: Resolver | None = None,
+    measures: dict[str, Any] | None = None,
     gap_hours: float = 48.0,
     max_stories: int = 200,
     max_steps: int = 400,
 ) -> dict[str, Any]:
-    """The stories, campaigns and unstoried flags of a case (or of the rows selected for it)."""
+    """The stories, campaigns and unstoried flags of a case (or of the rows selected for it).
+
+    `measures` are the rules' measures by rule id (rules/measures.json when None): how far each
+    finding can be believed weighs in its story's score."""
     settings = settings or {}
     events = list(events)
     mails = list(mails)
     findings = [f for f in (findings or []) if f.get("status") != "false_positive" and f.get("ruleId") != "chain"]
     case = _Case(events, mails, findings, settings, resolver)
+    case.measures = rule_measures() if measures is None else measures
     # the phishing chains read the same rows: the page keeps them for the review and the report
     chain_result = chains if chains is not None else build_chains(mails, events, findings, settings)
     chains = chain_result.get("chains") or []
@@ -476,20 +488,30 @@ def build_stories(
 
     # an address most of the organisation's users sign in from is its own, not the attacker's
     shared = _shared_egress(case)
+    # low findings that add up, by person and by host (risk-based alerting)
+    need = _low_thresholds(settings)
+    low_people, low_hosts = _low_items(case) if need[0] else ({}, {})
     # each story with the flags that anchor it, so a flag its story cannot keep is still listed
     built: list[tuple[dict[str, Any], list[str]]] = []
-    for iid, fl in flags.items():
-        fl.sort()
+    for iid in [*flags, *(i for i in low_people if i not in flags)]:
+        fl = sorted(flags.get(iid, []))
         clusters, alone = _clusters(fl, gap)
+        lows, alone = _low_incidents(clusters, alone, low_people.get(iid, []), gap, need, "them", ties, iid)
         for _, ref, _, _ in alone:
             unstoried.setdefault(ref, "a mail received or a failed logon, and nothing more of this person's in the same days")
         for cluster in clusters:
             story = _person_story(case, iid, cluster, chain_of.get(iid, []), ties, gap, max_steps, shared)
             built.append((story, [ref for _, ref, _, _ in cluster]))
-    for host, fl in host_flags.items():
-        fl.sort()
-        for cluster in _clusters(fl, gap)[0]:
+        for cluster, n in lows:
+            story = _accumulated(_person_story(case, iid, cluster, chain_of.get(iid, []), ties, gap, max_steps, shared), n, need[0])
+            built.append((story, [ref for _, ref, _, _ in cluster]))
+    for host in [*host_flags, *(h for h in low_hosts if h not in host_flags)]:
+        clusters = _clusters(sorted(host_flags.get(host, [])), gap)[0]
+        lows, _ = _low_incidents(clusters, [], low_hosts.get(host, []), gap, need, "it")
+        for cluster in clusters:
             built.append((_host_story(case, host, cluster, max_steps), [ref for _, ref, _, _ in cluster]))
+        for cluster, n in lows:
+            built.append((_accumulated(_host_story(case, host, cluster, max_steps), n, need[0]), [ref for _, ref, _, _ in cluster]))
     built.sort(key=lambda b: (-b[0]["score"], b[0]["start"]))
     truncated = len(built) > max_stories
     stories = [s for s, _ in built[:max_stories]]
@@ -537,6 +559,8 @@ def build_stories(
             "storiesTruncated": int(truncated),
             # the stories that passed max_steps: each says how many of its steps it cut
             "stepsTruncated": sum(1 for s in stories if s["stepsTruncated"]),
+            # the stories low findings of several rules started, none of medium severity or more
+            "accumulated": sum(1 for s in stories if s["startKind"] == "accumulated"),
             "campaigns": len(campaigns),
             "unstoried": len(un),
         },
@@ -772,8 +796,8 @@ def _lineage_context(case: _Case, members: _Members) -> None:
 
 def _host_story(case: _Case, host: str, cluster: list[tuple[int, str, str, str]], max_steps: int) -> dict[str, Any]:
     members = _Members()
-    for _, ref, _, _ in cluster:
-        members.take(ref, "flag", STRONG, f"a finding on {host}")
+    for _, ref, _, why in cluster:
+        members.take(ref, "flag", STRONG, why or f"a finding on {host}")
     _lineage_context(case, members)
     name = case.lineage.hosts.get(host, {}).get("name") or host
     steps, cut = _steps(case, members, set(), max_steps)
@@ -804,6 +828,8 @@ def _phase_of(case: _Case, row: dict[str, Any], source: str, fs: list[dict[str, 
 def _steps(case: _Case, members: _Members, attacker: set[str], max_steps: int) -> tuple[list[dict[str, Any]], int]:
     """The members as steps in time order, folded where they repeat, and how many were cut past max_steps."""
     lin = case.lineage
+    if case._rarity is None:
+        case._rarity = _Rarity(case)
     raw = []
     for ref, m in members.items():
         row, source = case.rows[ref]
@@ -842,6 +868,8 @@ def _steps(case: _Case, members: _Members, attacker: set[str], max_steps: int) -
                 "session": s["id"] if s else None,
                 "process": p["id"] if p else None,
                 "hops": [h["id"] for h in lin.hops_of(ref)][:5],
+                # how common its program pair, logon path or outside domain is in the case
+                "rarity": case._rarity.of_step(case, ref, row, source, p),
                 "routine": not fs and m["tie"] != "flag" and _fold_key(row, source) is not None,
                 "_fold": _fold_key(row, source),
             }
@@ -888,19 +916,457 @@ def _steps(case: _Case, members: _Members, attacker: set[str], max_steps: int) -
 _KEEP_FIRST = {"initial-access", "persistence", "privilege-escalation", "defense-impairment", "credential-access", "lateral-movement", "exfiltration", "impact"}
 
 
-def _keep_rank(st: dict[str, Any]) -> int:
+def _keep_rank(st: dict[str, Any]) -> tuple[int, float]:
     """Which steps a story past max_steps keeps first: its flags; persistence, privilege, credential and
     lateral steps and the like; its sessions, hops, process parents and sources; other steps with a
-    phase (a program run with no finding among them); and last routine records and context."""
+    phase (a program run with no finding among them); and last routine records and context. Within
+    each group of context (sessions and after), the rarest in the case first: a parent and child
+    program seen on one host of forty before one seen on all (NoDoze); a step the case cannot
+    compare counts as common."""
     if st["findings"] or st["tie"]["kind"] in ("flag", "chain"):
-        return 0
+        return 0, 0.0
     if st["phase"] in _KEEP_FIRST:
-        return 1
+        return 1, 0.0
+    r = st.get("rarity")
+    common = r["seen"] / r["of"] if r else 1.0
     if st["tie"]["kind"] in ("session", "hop", "process", "address"):
-        return 2
+        return 2, common
     if st["phase"] and not st["routine"]:
-        return 3
-    return 4
+        return 3, common
+    return 4, common
+
+
+# --- weight and score -------------------------------------------------------------------------------
+
+# what a finding weighs by its severity: a critical finding outweighs three mediums
+_SCORE_POINTS = {5: 10, 4: 6, 2: 3, 1: 1, 0: 0}
+# how far a finding can be believed, from its rule's measure (rules/measures.json): a rule seen to
+# detect what it looks for on recorded attacks, one never measured (its logic changed since, it needs
+# settings, it is the analyst's own or another tool's), a lead never seen to, one that misses its own sample
+_PRECISION = {"detects": 1.0, "unmeasured": 0.8, "lead": 0.6, "misses": 0.5}
+# a score's points: per unit of weight on the run in ATT&CK's order, per unit of the other techniques
+# (at most OTHER_CAP: breadth adds, it does not lead), and a mail-led chain
+RUN_POINTS = 3
+OTHER_CAP = 20
+CHAIN_POINTS = 10
+
+
+def rule_measures() -> dict[str, Any]:
+    """The rules' measures by rule id (rules/measures.json); empty when the rules were never measured
+    or outside the server (a tool that builds stories without its settings)."""
+    try:
+        from services.rules import measures as M
+
+        rules = M.load().get("rules")
+    except Exception:  # noqa: BLE001 - no Django settings, no measures file: every finding is unmeasured
+        return {}
+    return rules if isinstance(rules, dict) else {}
+
+
+def measure_verdict(m: Any) -> tuple[str, bool, float]:
+    """(verdict, noisy, precision) of a rule's measure, read as ruleMeasures.ts reads it: detects,
+    lead (measured, never seen to detect what it looks for), misses (not its own sample) or
+    unmeasured. A rule that fired on the logs of clean machines is noisy: that costs a quarter of
+    its weight, and half when it fired on every one of them."""
+    if not isinstance(m, dict) or m.get("changed") or m.get("settings"):
+        verdict = "unmeasured"
+    elif m.get("hits"):
+        verdict = "detects"
+    elif m.get("own") is False:
+        verdict = "misses"
+    else:
+        verdict = "lead"
+    clean = (m.get("clean") if isinstance(m, dict) else None) or {}
+    noisy = bool(clean.get("findings"))
+    precision = _PRECISION[verdict]
+    if noisy:
+        share = min(1.0, (clean.get("machines") or 0) / clean["of"]) if clean.get("of") else 1.0
+        precision *= 0.75 - 0.25 * share
+    return verdict, noisy, round(precision, 3)
+
+
+def _technique(f: dict[str, Any]) -> str | None:
+    """A finding's first ATT&CK technique (T1021.002), or None."""
+    for t in f.get("attack") or []:
+        m = re.match(r"(?i)(?:attack\.)?(t\d{4}(?:\.\d{3})?)\b", str(t))
+        if m:
+            return m.group(1).upper()
+    return None
+
+
+def _score(case: _Case, steps: list[dict[str, Any]], chains: list[dict[str, Any]]) -> tuple[int, dict[str, Any], list[dict[str, Any]]]:
+    """A story's score, its parts, and each of its findings as weighed.
+
+    After RapSheet (IEEE S&P 2020): the score follows the heaviest run of the story's findings whose
+    phases come in ATT&CK's order as time goes, one technique per phase, each finding weighing its
+    severity (critical 10, high 6, medium 3, low 1) times how far its rule can be believed. A finding
+    out of that order is not part of the run: noise does not climb the kill chain. The other
+    techniques add their weight up to a cap, each counted once however many findings one rule raised;
+    a mail-led chain adds ten."""
+    weighed: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for st in steps:
+        for ref in st["refs"]:
+            for f in case.f_by_ref.get(ref, []):
+                sev = _sev(f.get("severity"))
+                # a finding that cites many records counts once, at its first step
+                if id(f) in seen or not sev:
+                    continue
+                seen.add(id(f))
+                verdict, noisy, precision = measure_verdict(f["measured"] if "measured" in f else case.measures.get(str(f.get("ruleId") or "")))
+                tech = _technique(f)
+                weighed.append(
+                    {
+                        "ts": st["ts"],
+                        "phase": st["phase"],
+                        "technique": tech,
+                        "key": tech or f"rule:{f.get('ruleId')}",
+                        "ruleId": f.get("ruleId"),
+                        "severity": _SEV_NAME[sev],
+                        "verdict": verdict,
+                        "noisy": noisy,
+                        "precision": precision,
+                        "weight": round(_SCORE_POINTS[sev] * precision, 2),
+                        "step": st["id"],
+                    }
+                )
+    weighed.sort(key=lambda w: (w["ts"], PHASE_ORDER.get(w["phase"] or "", 99), -w["weight"], w["key"], str(w["ruleId"])))
+    # the heaviest run whose phases rise in ATT&CK's order: best[k] is the heaviest ending in phase k so far
+    best = [0.0] * len(PHASES)
+    last: list[int | None] = [None] * len(PHASES)
+    prev: dict[int, int | None] = {}
+    for i, w in enumerate(weighed):
+        if not w["phase"]:
+            continue
+        k = PHASE_ORDER[w["phase"]]
+        j = max(range(k), key=best.__getitem__, default=None)
+        before = best[j] if j is not None else 0.0
+        if w["weight"] + before > best[k]:
+            best[k] = w["weight"] + before
+            last[k] = i
+            prev[i] = last[j] if j is not None and before else None
+    run: list[dict[str, Any]] = []
+    at = last[max(range(len(PHASES)), key=best.__getitem__)]
+    while at is not None:
+        run.append(weighed[at])
+        at = prev[at]
+    run.reverse()
+    on_run = {w["key"] for w in run}
+    others: dict[str, dict[str, Any]] = {}
+    for w in weighed:
+        if w["key"] not in on_run and (w["key"] not in others or w["weight"] > others[w["key"]]["weight"]):
+            others[w["key"]] = w
+    surest: dict[str, float] = {}  # each technique's best precision
+    for w in weighed:
+        surest[w["key"]] = max(surest.get(w["key"], 0.0), w["precision"])
+    run_points = round(RUN_POINTS * sum(w["weight"] for w in run))
+    other_points = min(OTHER_CAP, round(sum(w["weight"] for w in others.values())))
+    chain_points = CHAIN_POINTS if chains else 0
+    parts = {
+        "run": [{k: w[k] for k in ("phase", "technique", "ruleId", "severity", "verdict", "precision", "weight", "step")} for w in run],
+        "runPoints": run_points,
+        "techniques": len(surest),
+        "others": len(others),
+        "otherPoints": other_points,
+        "chainPoints": chain_points,
+        # techniques whose findings all come from leads, unmeasured rules or rules noisy on clean machines
+        "weighedDown": sum(1 for p in surest.values() if p < 1),
+    }
+    return min(100, run_points + other_points + chain_points), parts, weighed
+
+
+def _three_in_three(weighed: list[dict[str, Any]]) -> bool:
+    """Three distinct techniques or more, in three phases or more, each with a finding of medium or
+    more from a rule that is neither a lead nor noisy on clean machines: techniques matched to
+    phases one to one (augmenting paths; a story has a few dozen techniques at most)."""
+    phases_of: dict[str, set[str]] = defaultdict(set)
+    for w in weighed:
+        if w["phase"] and SEV_WEIGHT[w["severity"]] >= 2 and w["verdict"] not in ("lead", "misses") and not w["noisy"]:
+            phases_of[w["key"]].add(w["phase"])
+    owner: dict[str, str] = {}
+
+    def assign(key: str, tried: set[str]) -> bool:
+        for p in sorted(phases_of[key]):
+            if p in tried:
+                continue
+            tried.add(p)
+            if p not in owner or assign(owner[p], tried):
+                owner[p] = key
+                return True
+        return False
+
+    return sum(1 for key in sorted(phases_of) if assign(key, set())) >= 3
+
+
+def _score_text(score: int, parts: dict[str, Any]) -> str:
+    """The score in a sentence: what it is made of."""
+    run = parts["run"]
+    if len(run) > 1:
+        what = f"{' → '.join(PHASE_LABEL[w['phase']].lower() for w in run)} in ATT&CK's order, {parts['runPoints']}"
+    elif run:
+        what = f"its heaviest finding ({PHASE_LABEL[run[0]['phase']].lower()}), {parts['runPoints']}"
+    else:
+        what = "no finding in a phase"
+    if parts["others"]:
+        what += f"; {parts['others']} other technique{'s' if parts['others'] != 1 else ''}, {parts['otherPoints']}"
+    if parts["chainPoints"]:
+        what += f"; a phishing chain, {parts['chainPoints']}"
+    text = f"Score {score}: {what}."
+    if parts["weighedDown"]:
+        n, of = parts["weighedDown"], parts["techniques"]
+        why = "its rule is a lead, unmeasured or noisy" if n == 1 else "their rules are leads, unmeasured or noisy"
+        text += f" {n} of its {of} techniques weigh{'s' if n == 1 else ''} less: {why} on clean machines."
+    return text
+
+
+# --- low findings that add up ----------------------------------------------------------------------
+
+# a person's or a host's low findings start a story when, within LOW_DAYS, they come from LOW_RULES
+# rules or more covering LOW_TACTICS tactics or more, or from LOW_RULES_ANY rules whatever their
+# tactics (Splunk ES's risk-based alerting). The case settings stories_low_days, stories_low_rules,
+# stories_low_tactics and stories_low_rules_any change them; a window of 0 days turns it off.
+LOW_DAYS = 7
+LOW_RULES = 3
+LOW_TACTICS = 2
+LOW_RULES_ANY = 4
+
+
+def _low_thresholds(settings: dict[str, Any]) -> tuple[int, int, int, int]:
+    """(days, rules, tactics, rules whatever their tactics) from the case settings, snake or camel case."""
+    out = []
+    for name, default in (
+        ("stories_low_days", LOW_DAYS),
+        ("stories_low_rules", LOW_RULES),
+        ("stories_low_tactics", LOW_TACTICS),
+        ("stories_low_rules_any", LOW_RULES_ANY),
+    ):
+        camel = re.sub(r"_([a-z])", lambda m: m.group(1).upper(), name)
+        v = settings.get(name, settings.get(camel))
+        try:
+            out.append(max(0, int(v)) if v is not None else default)
+        except (TypeError, ValueError):
+            out.append(default)
+    return out[0], out[1], out[2], out[3]
+
+
+# a person's or a host's record with only low findings: (ts, ref, rules, tactics, confidence, how it is theirs)
+_LowItem = tuple[int, str, frozenset[str], frozenset[str], str, str]
+
+
+def _low_items(case: _Case) -> tuple[dict[str, list[_LowItem]], dict[str, list[_LowItem]]]:
+    """Each person's and each host's records whose worst finding is low, in time order, with the rules and tactics of those findings."""
+    people: dict[str, list[_LowItem]] = defaultdict(list)
+    hosts: dict[str, list[_LowItem]] = defaultdict(list)
+    for ref, fs in case.f_by_ref.items():
+        if max((_sev(f.get("severity")) for f in fs), default=0) != 1:
+            continue
+        row, source = case.rows[ref]
+        # a mail received and a password guessed wrong start nothing, however many rules read them
+        if source == "mails" or authentication_outcome(row) == "failure":
+            continue
+        low = [f for f in fs if _sev(f.get("severity")) == 1]
+        rules = frozenset(str(f.get("ruleId")) for f in low)
+        tactics = frozenset(p for f in low if (p := finding_phase(f)[0]))
+        if not tactics:
+            own = record_phase(row, source, set())[0]
+            tactics = frozenset([own] if own else [])
+        who = case.people(ref)
+        for iid, conf, how in who:
+            people[iid].append((_ts(row), ref, rules, tactics, conf, how))
+        host = host_key(row.get("computer"))
+        if not who and host:
+            hosts[host].append((_ts(row), ref, rules, tactics, STRONG, ""))
+    for lst in (*people.values(), *hosts.values()):
+        lst.sort(key=lambda x: (x[0], x[1]))
+    return people, hosts
+
+
+def _adds_up(rules: Counter[str], tactics: Counter[str], need: tuple[int, int, int, int]) -> bool:
+    _, n_rules, n_tactics, n_any = need
+    return bool(n_rules and len(rules) >= n_rules and len(tactics) >= n_tactics) or bool(n_any and len(rules) >= n_any)
+
+
+def _accrue(items: list[_LowItem], need: tuple[int, int, int, int]) -> list[list[_LowItem]]:
+    """The runs of low items (in time order) that add up: every item of a window of `need[0]` days
+    whose findings come from enough rules and tactics; windows within that time of each other are one run."""
+    win = need[0] * 86_400_000
+    rules: Counter[str] = Counter()
+    tactics: Counter[str] = Counter()
+
+    def drop(c: Counter[str], keys: Iterable[str]) -> None:
+        for k in keys:
+            c[k] -= 1
+            if not c[k]:
+                del c[k]
+
+    marked = [False] * len(items)
+    lo = done = 0
+    for hi, item in enumerate(items):
+        rules.update(item[2])
+        tactics.update(item[3])
+        while item[0] - items[lo][0] > win:
+            drop(rules, items[lo][2])
+            drop(tactics, items[lo][3])
+            lo += 1
+        if _adds_up(rules, tactics, need):
+            for k in range(max(lo, done), hi + 1):
+                marked[k] = True
+            done = hi + 1
+    runs: list[list[_LowItem]] = []
+    for k, item in enumerate(items):
+        if not marked[k]:
+            continue
+        if runs and item[0] - runs[-1][-1][0] <= win:
+            runs[-1].append(item)
+        else:
+            runs.append([item])
+    return runs
+
+
+def _low_incidents(
+    clusters: list[list[tuple[int, str, str, str]]],
+    alone: list[tuple[int, str, str, str]],
+    items: list[_LowItem],
+    gap: int,
+    need: tuple[int, int, int, int],
+    who: str,
+    ties: dict[tuple[str, str], tuple[str, str]] | None = None,
+    iid: str = "",
+) -> tuple[list[tuple[list[tuple[int, str, str, str]], int]], list[tuple[int, str, str, str]]]:
+    """The incidents low findings make of one person or host, each with how many rules it holds, and
+    the supporting flags left alone. Low findings near one of its incidents start nothing: that
+    story reads the records around it already. Away from them, a run that adds up is an incident
+    of its own, and a mail received or a failed logon within the gap of it joins it."""
+    if not items:
+        return [], alone
+    spans = [(c[0][0], c[-1][0]) for c in clusters]
+    free = [x for x in items if not any(a - gap <= x[0] <= b + gap for a, b in spans)]
+    out: list[tuple[list[tuple[int, str, str, str]], int]] = []
+    for run in _accrue(free, need):
+        n = len({r for x in run for r in x[2]})
+        basis = f"findings of {n} rules on {who} within {need[0]} days"
+        cluster = []
+        for ts, ref, _, _, conf, how in run:
+            why = f"{basis}: {how}" if how else basis
+            cluster.append((ts, ref, "start", why))
+            if ties is not None:
+                ties[(iid, ref)] = (conf, why)
+        out.append((cluster, n))
+    left = []
+    for f in alone:
+        near = next((c for c, _ in out if c[0][0] - gap <= f[0] <= c[-1][0] + gap), None)
+        if near is None:
+            left.append(f)
+        else:
+            near.append(f)
+    for c, _ in out:
+        c.sort()
+    return out, left
+
+
+def _accumulated(story: dict[str, Any], rules: int, days: int) -> dict[str, Any]:
+    """Mark a story low findings started, and say so first."""
+    story["startKind"] = "accumulated"
+    said = f"No finding of medium severity or more: low findings of {rules} rules within {days} days add up to this story."
+    story["summary"] = f"{said} {story['summary']}"[:900]
+    return story
+
+
+# --- rarity in the case -----------------------------------------------------------------------------
+
+
+def _query_name(row: dict[str, Any]) -> str:
+    data = row.get("data") if isinstance(row.get("data"), dict) else {}
+    return str(row.get("query") or data.get("QueryName") or row.get("destinationHostname") or "").strip().rstrip(".").lower()
+
+
+def _logon_source(row: dict[str, Any]) -> str:
+    """Where a logon came from: the workstation it names, else its address; '' for a local one."""
+    src = host_key(row.get("workstation")) or ip_of(row.get("ipAddress"))
+    return "" if src == host_key(row.get("computer")) else src
+
+
+class _Rarity:
+    """How common a step's parent and child programs, logon path and outside domain are in the rows
+    the build has (NoDoze's prevalence, read on the case): on how many hosts each pair of programs
+    ran and each outside domain was looked up or reached, and how many accounts logged on to each
+    host from each source. One pass over the rows and processes, counted in sets."""
+
+    def __init__(self, case: _Case):
+        lin = case.lineage
+        self.pairs: dict[tuple[str, str], set[str]] = defaultdict(set)
+        proc_hosts: set[str] = set()
+        for p in lin.processes.values():
+            proc_hosts.add(p["host"])
+            parent = _program(p.get("parentImage"))
+            if parent and p.get("name"):
+                self.pairs[(parent, str(p["name"]).lower())].add(p["host"])
+        self.proc_hosts = len(proc_hosts)
+        self.logons: dict[tuple[str, str], set[str]] = defaultdict(set)
+        self.logged_on: dict[str, set[str]] = defaultdict(set)
+        self.domains: dict[str, set[str]] = defaultdict(set)
+        dns_hosts: set[str] = set()
+        self._domain: dict[str, str | None] = {}
+        for ref, (row, source) in case.rows.items():
+            host = host_key(row.get("computer")) if source == "events" else ""
+            if not host:
+                continue
+            if _eid(row) == 4624:
+                src = _logon_source(row)
+                for iid in case.named.get(ref, {}):
+                    self.logged_on[host].add(iid)
+                    if src:
+                        self.logons[(src, host)].add(iid)
+            name = _query_name(row)
+            if name:
+                dns_hosts.add(host)
+                dom = self.outside(case, name)
+                if dom:
+                    self.domains[dom].add(host)
+        self.dns_hosts = len(dns_hosts)
+
+    def outside(self, case: _Case, name: str) -> str | None:
+        """The registrable domain of a name outside the organisation, or None (an internal name, a host of the case, an address)."""
+        if name not in self._domain:
+            inside = (
+                "." not in name
+                or name.endswith((".arpa", ".local", ".lan", ".internal", ".localdomain", ".home"))
+                or bool(ip_of(name))
+                or host_key(name) in case.lineage.hosts
+                or any(same_org_domain(name, d) for d in case.internal)
+            )
+            self._domain[name] = None if inside else registrable(name) or name
+        return self._domain[name]
+
+    def of_step(self, case: _Case, ref: str, row: dict[str, Any], source: str, proc: dict[str, Any] | None) -> dict[str, Any] | None:
+        """{kind, value, seen, of, unit, text} for a program started, a logon or a domain looked up; None when the case has one host to compare."""
+        if source != "events":
+            return None
+        host = host_key(row.get("computer"))
+        if proc and _is_process_creation(row):
+            parent, child = _program(proc.get("parentImage")), str(proc.get("name") or "").lower()
+            seen = len(self.pairs.get((parent, child), ()))
+            if parent and child and seen and self.proc_hosts > 1:
+                return _rare("process", f"{parent} → {child}", seen, self.proc_hosts, "hosts")
+        if _eid(row) == 4624 and host:
+            src, of = _logon_source(row), len(self.logged_on.get(host, ()))
+            seen = len(self.logons.get((src, host), ())) if src else 0
+            if seen and of > 1:
+                return _rare("logon", f"{src} → {host}", seen, of, f"accounts that log on to {host}")
+        name = _query_name(row)
+        dom = self.outside(case, name) if name and host else None
+        if dom and self.dns_hosts > 1:
+            return _rare("domain", dom, len(self.domains.get(dom, ())), self.dns_hosts, "hosts")
+        return None
+
+
+def _program(path: Any) -> str:
+    return str(path or "").replace("/", "\\").rsplit("\\", 1)[-1].lower()
+
+
+def _rare(kind: str, value: str, seen: int, of: int, unit: str) -> dict[str, Any]:
+    where = f"for {seen} of the {of} {unit}" if kind == "logon" else f"on {seen} of {of} {unit}"
+    return {"kind": kind, "value": value, "seen": seen, "of": of, "unit": unit, "text": f"{value}: seen {where}"}
 
 
 def _story(
@@ -939,11 +1405,11 @@ def _story(
         )
     fkeys = sorted({f["key"] or f["ruleId"] for s in steps for f in s["findings"] if f.get("key") or f.get("ruleId")})
     top = max((_sev(f["severity"]) for s in steps for f in s["findings"]), default=0)
-    flagged_phases = {p["phase"] for p in phases if p["severity"] in ("medium", "high", "critical")}
-    score = min(100, sum(SEV_WEIGHT[p["severity"]] * 4 for p in phases if p["severity"]) + (10 if chains else 0) + min(10, len(flagged_phases) * 2))
+    score, parts, weighed = _score(case, steps, chains)
     severity = _SEV_NAME.get(top) or "low"
-    # three phases or more, each with a finding of medium or more, is an intrusion however each rule reads alone
-    if len(flagged_phases) >= 3 and SEV_WEIGHT[severity] < 4:
+    # three techniques in three phases, each with a finding of medium or more from a rule that can be
+    # believed, is an intrusion however each rule reads alone
+    if SEV_WEIGHT[severity] < 4 and _three_in_three(weighed):
         severity = "high"
     confidence = STRONG if all(s["tie"]["confidence"] == STRONG for s in steps if s["tie"]["kind"] in ("flag", "chain")) else MEDIUM
     hosts = sorted({s["host"] for s in steps if s["host"]})
@@ -957,7 +1423,7 @@ def _story(
             "so a step absent from it is not a negative result."
         )
     anchor = min((r for s in steps if s["tie"]["kind"] in ("flag", "chain") for r in s["refs"]), default=str(start))
-    headline, summary = _describe(subject, steps, phases, attacker, hosts, shared)
+    headline, summary = _describe(subject, steps, phases, attacker, hosts, shared, why_score=_score_text(score, parts))
     return {
         "id": "story-" + _hid(kind, subject["id"], anchor),
         "kind": kind,
@@ -969,6 +1435,10 @@ def _story(
         "end": end,
         "severity": severity,
         "score": score,
+        # why the score is what it is: the run of phases in ATT&CK's order, the other techniques, a mail-led chain
+        "scoreParts": parts,
+        # what started it: a flag (a finding of medium or more, a phishing mail acted on) or low findings that add up
+        "startKind": "flag",
         "confidence": confidence,
         "phases": phases,
         "steps": steps,
@@ -995,6 +1465,8 @@ def _describe(
     attacker: set[str],
     hosts: list[str],
     shared: Collection[str] = frozenset(),
+    *,
+    why_score: str = "",
 ) -> tuple[str, str]:
     """A headline (the worst finding of each phase, in order) and a few plain sentences, from the story's own steps only."""
     parts = []
@@ -1017,6 +1489,8 @@ def _describe(
         lines.append(f"{len(phases)} phase{'s' if len(phases) != 1 else ''}: {', '.join(p['label'].lower() for p in phases)}.")
     if flagged:
         lines.append(f"{len(flagged)} of its {len(steps)} steps carry findings.")
+    if why_score:
+        lines.append(why_score)
     if attacker:
         lines.append(f"The findings name {', '.join(sorted(attacker)[:3])} as a source.")
     if shared:

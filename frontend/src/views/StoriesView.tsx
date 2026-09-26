@@ -83,6 +83,9 @@ function spanText(ms: number): string {
   return m < 1 ? 'under a minute' : m < 90 ? `${Math.round(m)} min` : m < 48 * 60 ? `${(m / 60).toFixed(1)} h` : `${(m / 1440).toFixed(1)} d`
 }
 const day = (ts: number) => fmtTs(ts, { date: true }).slice(0, 10)
+/** What a story's score is made of, for its tooltip (the summary says it in a sentence). */
+const scoreTitle = ({ scoreParts: p }: Story) =>
+  p ? `${p.runPoints} for its run in ATT&CK's order, ${p.otherPoints} for ${p.others} other technique(s), ${p.chainPoints} for a phishing chain` : undefined
 
 /** A tiny strip of the fifteen phases, filled where the story has one: the shape of an intrusion at a glance. */
 function PhaseStrip({ story }: { story: Story }) {
@@ -625,6 +628,7 @@ function StepPane({
           <div className="small">
             <Dot sev={CONFIDENCE_SEV[step.tie.confidence]} /> <strong>{step.tie.confidence}</strong>: {step.tie.basis}
           </div>
+          {step.rarity && <div className="small muted">In this case: {step.rarity.text}</div>}
           {step.notes.map((n, i) => (
             <div key={i} className="small muted">
               {n}
@@ -1199,7 +1203,7 @@ export function StoriesView() {
                       </span>
                       <span className="muted" style={{ fontWeight: 400 }}>
                         {' '}
-                        · score {story.score} · {story.steps.length} steps, {fmtNum(story.records)} records over {spanText(story.end - story.start)} ·{' '}
+                        · <span title={scoreTitle(story)}>score {story.score}</span> · {story.steps.length} steps, {fmtNum(story.records)} records over {spanText(story.end - story.start)} ·{' '}
                         <span title="the weakest tie of a flagged step: strong when records state it, medium when naming rules or time and place join it">{story.confidence} ties</span>
                       </span>
                     </div>
