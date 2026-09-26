@@ -298,6 +298,11 @@ need, so a Microsoft 365 rule reads no Windows event). The pages read it as:
 - **changed** or **needs settings**: not measured in its current form, or it cannot run
   without a case setting a recording does not have (expected countries, internal domains).
 
+The stories' scores and the Findings page's priority weigh a finding by its rule's measure:
+a lead counts 0.6 of its severity, an unmeasured rule 0.8, and a rule that fires on clean
+machines a quarter less, half when it fired on every one of them
+([Findings](interface.md#findings)).
+
 Mail rules are calibrated on mail corpora instead (below).
 
 At this commit, 1,023 of the 3,008 event rules fire on a recording of what they look

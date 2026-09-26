@@ -120,6 +120,26 @@ is marked "lead" in the list, and the flyout says what the rule's measure shows:
 recorded attacks it fires on, and how often it fires on the logs of clean machines (see
 [measured rules](detection.md#measured-rules)).
 
+The queue is sorted by priority unless the sort control says severity or newest: what to look
+at first, deterministic and explained, in the way THOR and Cyber Triage rank what they find
+(`frontend/src/data/findingPriority.ts`, where the weights sit in one table). A finding weighs
+its severity (the review override first: critical 10, high 6, medium 3, low 1), times its
+rule's confidence (medium 0.85, low 0.7), times how far its rule's measure says it can be
+believed (as the stories weigh it: a lead 0.6, an unmeasured rule 0.8, a quarter to half less
+for a rule that fires on clean machines), times 1.5 when its rule fired on one host of the
+case (or for one user, when it names no host) of at least three, or 0.75 when it fired on half
+of them or more. Other rules on the same host or for the same user within 24 hours add a
+point each and a point more for each other ATT&CK tactic among them, up to 6. The same rule on
+the same entities (what it found, such as the program, command line or service, not the host,
+account or address, unless the rule names nothing else) escalated by an analyst before, in this
+case or another case of this browser, adds 5; marked false positive before, the finding keeps
+a quarter of its score. The model's decisions do not count, and the memory never leaves the
+browser. Reviewed and false-positive findings sort below the others. The priority column shows
+the score and the reasons that moved it ("1 of 40 hosts", "+2 rules, 1 tactic", "false
+positive before"), its tooltip and the finding flyout say each in a sentence ("marked false
+positive in case Acme on 2026-08-14"), an incident ranks by its first finding to look at, and
+the CSV export carries the score.
+
 Findings with a saved review severity override show an asterisk and the original rule
 severity in their detail, and the incident uses the review severity too. "Reset to rule
 severity" clears only the override; review status, notes and other decisions remain,

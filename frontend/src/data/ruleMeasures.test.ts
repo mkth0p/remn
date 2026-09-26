@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fmtRate, isLead, measuredOn, readMeasure } from './ruleMeasures'
+import { fmtRate, isLead, measuredOn, readMeasure, ruleTrust } from './ruleMeasures'
 
 const clean = { findings: 0, events: 0, machines: 0, scope: 1_250_000, of: 7 }
 
@@ -66,5 +66,17 @@ describe('what a rule’s measure says', () => {
       'Measured on 2026-09-24 on 457 SigmaHQ regression samples, 278 EVTX-ATTACK-SAMPLES recordings, 81 Microsoft 365 and Entra ID datasets of Splunk attack_data, 536 Windows event-log datasets of Splunk attack_data and 279 EVTX-to-MITRE-Attack recordings, and on the logs of 7 clean Windows machines of evtx-baseline v0.8.4 (6,611,184 events).',
     )
     expect(measuredOn(null)).toBe('')
+  })
+})
+
+describe('how far a rule’s findings can be believed', () => {
+  it('weighs a rule as the stories do (stories.measure_verdict): detects, unmeasured, lead, misses, less when noisy on clean machines', () => {
+    expect(ruleTrust({ hits: 2, of: 3, clean })).toEqual({ verdict: 'detects', noisy: false, precision: 1 })
+    expect(ruleTrust(undefined).precision).toBe(0.8)
+    expect(ruleTrust({ changed: true, hits: 2 }).verdict).toBe('unmeasured')
+    expect(ruleTrust({ of: 2 }).precision).toBe(0.6)
+    expect(ruleTrust({ own: false, of: 1 }).precision).toBe(0.5)
+    // fired on 2 of 8 clean machines: 0.75 - 0.25 * 2/8
+    expect(ruleTrust({ hits: 1, of: 1, clean: { findings: 3, events: 3, machines: 2, scope: 900, of: 8 } })).toEqual({ verdict: 'detects', noisy: true, machines: 2, of: 8, precision: 0.688 })
   })
 })

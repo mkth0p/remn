@@ -135,3 +135,33 @@ export function measuredOn(s: MeasureSources | null | undefined): string {
   const clean = baseline?.machines ? `, and on the logs of ${fmtNum(baseline.machines)} clean Windows machines of evtx-baseline ${baseline.tag} (${fmtNum(baseline.events)} events)` : ''
   return `Measured on ${s.measured}${list ? ` on ${list}` : ''}${clean}.`
 }
+
+/** How far a finding can be believed from its rule's measure (mirror of stories._PRECISION). */
+const PRECISION = { detects: 1, unmeasured: 0.8, lead: 0.6, misses: 0.5 } as const
+
+export interface RuleTrust {
+  verdict: keyof typeof PRECISION
+  noisy: boolean
+  /** of the clean machines that log what it reads, the ones it fired on */
+  machines?: number
+  of?: number
+  /** 0 to 1: what a finding of the rule weighs for its measure */
+  precision: number
+}
+
+/**
+ * How far a rule's findings can be believed, as the stories weigh them (mirror of
+ * stories.measure_verdict): a rule seen to detect what it looks for, one never measured (its logic
+ * changed since, it needs settings, it is the analyst's own), a lead, one that misses its own
+ * sample. A rule that fired on the logs of clean machines loses a quarter, and half when it fired
+ * on every one of them.
+ */
+export function ruleTrust(m: RuleMeasure | undefined): RuleTrust {
+  const verdict: RuleTrust['verdict'] = !m || m.changed || m.settings?.length ? 'unmeasured' : m.hits ? 'detects' : m.own === false ? 'misses' : 'lead'
+  const c = m?.clean
+  let precision: number = PRECISION[verdict]
+  if (!c?.findings) return { verdict, noisy: false, precision }
+  const share = c.of ? Math.min(1, (c.machines ?? 0) / c.of) : 1
+  precision *= 0.75 - 0.25 * share
+  return { verdict, noisy: true, machines: c.machines, of: c.of, precision: Math.round(precision * 1000) / 1000 }
+}
