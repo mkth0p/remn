@@ -51,6 +51,27 @@ def staged_bytes() -> int:
     return total
 
 
+def pending_bytes() -> int:
+    """What the unfinished chunked uploads have announced but not yet sent. staged_bytes() only sees
+    what is on disk, so without this a burst of inits each passes the budget before any chunk lands."""
+    total = 0
+    try:
+        for p in upload_dir().glob("*.json"):
+            try:
+                meta = json.loads(p.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if not meta.get("complete"):
+                total += max(0, int(meta.get("size", 0)) - int(meta.get("received", 0)))
+    except OSError:
+        pass
+    return total
+
+
+# init checks the budget and then records its reservation; two inits must not both pass on the same room
+_reserve = threading.Lock()
+
+
 def _paths(upload_id: str) -> tuple[Path, Path]:
     if not _ID.match(upload_id or ""):
         raise ValueError("bad upload id")
@@ -164,20 +185,22 @@ def init(request: HttpRequest):
         return JsonResponse({"error": f"size must be between 1 byte and {limit // 1024**2:,} MB"}, status=400)
     # Refuse rather than accept an upload the disk cannot take. Sweep first, so a burst of
     # abandoned uploads does not lock out a legitimate one for the rest of the retention window.
+    # What is announced counts as taken: the room an upload will need is reserved when it starts.
     budget = settings.FORENSIC_TMP_MAX_GB * 1024**3
-    if staged_bytes() + size > budget:
-        cleanup_stale()
-        if staged_bytes() + size > budget:
-            return JsonResponse({"error": "the server is staging as much evidence as it can hold; try again shortly", "code": "staging-full"}, status=507)
+    with _reserve:
+        if staged_bytes() + pending_bytes() + size > budget:
+            cleanup_stale()
+            if staged_bytes() + pending_bytes() + size > budget:
+                return JsonResponse({"error": "the server is staging as much evidence as it can hold; try again shortly", "code": "staging-full"}, status=507)
 
-    upload_id = uuid.uuid4().hex
-    dp, _ = _paths(upload_id)
-    dp.touch()
-    try:
-        dp.chmod(0o600)
-    except OSError:
-        pass
-    _save_meta(upload_id, {"id": upload_id, "name": name, "size": size, "received": 0, "complete": False, "created": int(time.time() * 1000)})
+        upload_id = uuid.uuid4().hex
+        dp, _ = _paths(upload_id)
+        dp.touch()
+        try:
+            dp.chmod(0o600)
+        except OSError:
+            pass
+        _save_meta(upload_id, {"id": upload_id, "name": name, "size": size, "received": 0, "complete": False, "created": int(time.time() * 1000)})
     return JsonResponse({"uploadId": upload_id, "chunkSize": settings.FORENSIC_CHUNK_MB * 1024 * 1024})
 
 
@@ -197,7 +220,15 @@ def chunk(request: HttpRequest, upload_id: str):
         return JsonResponse({"error": "bad offset"}, status=400)
     if offset != meta["received"]:
         return JsonResponse({"error": "offset mismatch", "received": meta["received"]}, status=409)
-    data = request.read()
+    # Refuse an oversized chunk before reading it: request.read() is not bounded by Django's
+    # DATA_UPLOAD_MAX_MEMORY_SIZE, so reading first would hold the whole body in memory.
+    try:
+        declared = int(request.META.get("CONTENT_LENGTH") or 0)
+    except ValueError:
+        return JsonResponse({"error": "bad content length"}, status=400)
+    if declared > MAX_CHUNK:
+        return JsonResponse({"error": "chunk too large"}, status=413)
+    data = request.read(MAX_CHUNK + 1)
     if len(data) > MAX_CHUNK:
         return JsonResponse({"error": "chunk too large"}, status=413)
     if meta["received"] + len(data) > meta["size"]:

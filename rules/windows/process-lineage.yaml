@@ -410,7 +410,7 @@ description: >-
   PowerShell scripts, so expect this on developer workstations and build servers and read the child's
   command line; regsvr32 is left out because registering a COM DLL after a build is routine. Sysmon
   only, since 4688 does not carry the parent's command line.
-severity: low
+severity: medium
 source: events
 attack: [T1127, T1059.001]
 tags: [execution, developer-tools, process-lineage]

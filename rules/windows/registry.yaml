@@ -287,8 +287,8 @@ where:
 ---
 id: win-directinput-from-user-folder
 title: Program in a download or temp folder registered as a DirectInput client (keylogger)
-description: A program running from Desktop, Downloads, Documents, a Temp folder or Users\Public registered itself under Software\Microsoft\DirectInput\MostRecentApplication, which Windows does when a program opens a DirectInput device. DirectInput keyloggers read the keyboard this way instead of through the hooks that endpoint products watch. Games and emulators write the same key, so the rule ignores installed programs and only looks at executables started from folders users download to; a portable game or controller tool run from the Desktop or Downloads is the known benign cause, which is why the severity is low. The program name is in the Name value on the finding.
-severity: low
+description: A program running from Desktop, Downloads, Documents, a Temp folder or Users\Public registered itself under Software\Microsoft\DirectInput\MostRecentApplication, which Windows does when a program opens a DirectInput device. DirectInput keyloggers read the keyboard this way instead of through the hooks that endpoint products watch. Games and emulators write the same key, so the rule ignores installed programs and only looks at executables started from folders users download to; a portable game or controller tool run from the Desktop or Downloads is the known benign cause. The severity is medium because none of the evtx-baseline clean machines raises it. The program name is in the Name value on the finding.
+severity: medium
 source: events
 attack: [T1056.001]
 tags: [collection, credential-access, registry]
