@@ -2711,9 +2711,78 @@ label.field > span {
   display: flex;
   flex-direction: column;
 }
-.chain-graph {
+/* the graph is drawn at its real size and scrolls; nothing is squeezed to fit the pane */
+.chain-graph-view {
   flex: 1;
   min-height: 320px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.chain-graph-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+/* more of the graph to the right */
+.chain-graph-view::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 56px;
+  background: linear-gradient(to right, transparent, var(--surface));
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 3;
+}
+.chain-graph-view.more-right::after {
+  opacity: 1;
+}
+.chain-graph-scroll.panning,
+.chain-graph-scroll.panning * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+.chain-graph-stage {
+  position: relative;
+}
+.chain-graph {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 1;
+}
+/* a chain's lane names stay on the left edge while its timeline scrolls under them */
+.chain-graph-lanes {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  width: 0;
+  height: 100%;
+  pointer-events: none;
+}
+.chain-graph-lane {
+  position: absolute;
+  left: 10px;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  color: var(--fg-2);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 3px 8px;
+}
+.chain-graph-scroll.scrolled .chain-graph-lane {
+  box-shadow:
+    0 0 0 6px var(--surface),
+    0 2px 10px 6px var(--surface);
 }
 .chain-graph-insights {
   padding: 6px 12px;

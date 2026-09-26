@@ -99,10 +99,9 @@ function offset(min: number): string {
 function routineSummary(steps: ChainStep[]): string {
   const heads = new Map<string, number>()
   for (const s of steps) {
-    const h = s.title
-      .replace(/\s*×\d+$/, '')
-      .split(/ (?:from|on|by|via|to) /)[0]
-      .slice(0, 28)
+    const head = s.title.replace(/\s*×\d+$/, '').split(/ (?:from|on|by|via|to|->|→) /)[0]
+    // a head cut in the middle of a word reads as a typo: a long one ends with an ellipsis
+    const h = head.length > 36 ? head.slice(0, 35).trimEnd() + '…' : head
     heads.set(h, (heads.get(h) ?? 0) + 1)
   }
   return Array.from(heads.entries())
@@ -220,7 +219,7 @@ export function buildChainGraph(chain: Chain): Graph {
     const last = g.items[n - 1].s
     const sub =
       allRoutine && n > 1
-        ? `${routineSummary(g.items.map((x) => x.s))} · ${offset(first.offsetMin)} → ${offset(last.offsetMin)}`
+        ? `${offset(first.offsetMin)} → ${offset(last.offsetMin)} · ${routineSummary(g.items.map((x) => x.s))}`
         : n === 1
           ? `${offset(first.offsetMin)}${first.count > 1 ? ` · ×${first.count}` : ''}`
           : `${offset(first.offsetMin)} → ${offset(last.offsetMin)} · ${rows} row${rows === 1 ? '' : 's'}`
@@ -295,24 +294,12 @@ export function buildChainGraph(chain: Chain): Graph {
       edges.push({ source: id, target: hid, kind: 'entity' })
     }
   }
-  // entity nodes sit under / above the mean column of the steps they connect to
+  // entity nodes sit under / above the mean column of the steps they connect to; the layout keeps the ones that meet apart
   for (const n of nodes) {
     if (n.kind === 'ip' || n.kind === 'host' || ((n.kind === 'domain' || n.kind === 'attachment' || n.kind === 'address') && n.linked)) {
       const cols = edges.filter((e) => e.source === n.id || e.target === n.id).map((e) => byId.get(e.source === n.id ? e.target : e.source)?.x ?? 0)
       if (cols.length) n.x = cols.reduce((a, b) => a + b, 0) / cols.length
     }
-  }
-  // spread entity nodes that landed on the same lane and column
-  const taken = new Map<string, number>()
-  for (const n of nodes.filter((n) => n.kind === 'ip' || n.kind === 'host' || n.lane === 'attacker').sort((a, b) => a.x - b.x)) {
-    let x = Math.round(n.x * 2) / 2
-    let key = `${n.lane}:${x}`
-    while (taken.has(key)) {
-      x += 0.5
-      key = `${n.lane}:${x}`
-    }
-    taken.set(key, 1)
-    n.x = x
   }
   return { nodes, edges, columns: col }
 }
