@@ -8,6 +8,7 @@ import { fmtBytes, fmtTs, tzLabel } from '../util/format'
 import { IconAi, IconChevronDown, IconClose, IconPivot } from './Icons'
 import { Badge, CopyButton, Dot, Flag, JsonView, KV, Risk, Sev, Tabs } from './ui'
 import { AddToTimeline } from './AddToTimeline'
+import { CiteForQuestion } from './CiteForQuestion'
 import { namedMessageIds } from '../data/namedMessages'
 
 const SEV_ORDER = ['critical', 'high', 'medium', 'low', 'info']
@@ -108,6 +109,7 @@ export function EventDetail({ row: initial, onClose }: { row: EventRow; onClose:
             text={String(initial.summary ?? `event ${initial.eventId ?? initial.operation ?? ''}`)}
             link={{ source: 'events', id: initial.id!, label: `#${initial.id}` }}
           />
+          <CiteForQuestion source="events" row={initial} />
           <button className="btn sm primary" onClick={explain}>
             <IconAi /> explain
           </button>
@@ -557,6 +559,7 @@ export function MailDetail({
           link={{ source: 'mails', id: row.id!, label: row.subject || `#${row.id}` }}
           severity={row.risk >= 80 ? 'critical' : row.risk >= 60 ? 'high' : row.risk >= 40 ? 'medium' : 'info'}
         />
+        <CiteForQuestion source="mails" row={row} />
         <button className="btn sm" onClick={explain} title="ask the local model">
           <IconAi /> analyse
         </button>

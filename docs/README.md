@@ -13,6 +13,7 @@ rest as needed.
 - [Attack chains](chains.md) — how a phishing chain is built and scored, and how it relates to findings and stories
 - [Explore: the relationship graph](relationship-intelligence.md) — identity and link semantics of the graph Explore browses
 - [Interface](interface.md) — the pages, the review workflow, the report, the tests that cover them
+- [Questions](questions.md) — the case as DFIQ's investigative questions and REMN's own: what answers each, whether the case holds the evidence, the analyst's answers in the report
 - [AI analyst](ai.md) — the investigating agent, playbooks, the approval inbox and ledger, the four transports, what leaves the machine
 - [Validation and test data](validation.md) — the test suites, the public corpora and the measured rates, the synthetic lab
 - [Security model](security.md) — where evidence lives, what leaves the machine, the hardening in place, evidence text and the model

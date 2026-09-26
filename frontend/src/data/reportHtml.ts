@@ -13,6 +13,7 @@ import { defang, escapeHtml, fmtBytes, fmtNum, fmtUtc as fmtTs, renderMarkdown }
 import type { GapStatement } from './evidenceGaps'
 import { isLead, type MeasureReading } from './ruleMeasures'
 import { CHECKED_ROWS, type ClaimCheck, type ReportClaims } from './claims'
+import { ANSWER_LABEL, type ReportQuestion, type ReportQuestions } from './questions/answers'
 
 /**
  * The printed report: one self-contained HTML file laid out for A4 and the browser's print-to-PDF.
@@ -109,6 +110,8 @@ export interface ReportData {
   storiesDismissed?: number
   /** decisions on stories the build no longer holds (listed on the Stories page) */
   storyDecisionsOrphaned?: number
+  /** the investigative questions chosen for the case and the analyst's answers (data/questions/answers.ts questionsForReport) */
+  questions?: ReportQuestions
 }
 
 /** The model's part in the case, as the report prints it. */
@@ -1004,6 +1007,7 @@ span.warn{color:var(--medium);font-weight:600}.ribbon.ok i{background:var(--acce
 .narr strong{color:var(--ink)}
 .cap{font-size:10px;color:var(--ink-3);margin-top:4px}
 .story-part{font-weight:600;color:var(--ink-2);text-transform:uppercase;letter-spacing:.06em;font-size:9px;margin:10px 0 4px;break-after:avoid}
+.q{border-top:1px solid var(--line);padding:6px 0 4px;break-inside:avoid}.q-head{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}.q-name{flex:1;min-width:200px;font-weight:600}.q .narr{margin-top:3px}.cites{margin:3px 0 0 16px;padding:0;font-size:10.5px;color:var(--ink-2)}h4.facet{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);margin:10px 0 2px}
 .cap.ai{color:var(--violet)}.cap.warn{color:var(--medium);font-weight:600}.claim.unsupported{color:var(--medium)}.claim.contradicted{color:var(--critical);font-weight:600}
 .note{background:var(--surface-2);padding:8px 12px;border-radius:6px;margin:6px 0 8px;font-size:12px}
 .note p{margin:0 0 6px}.note p:last-child{margin:0}
@@ -1136,6 +1140,12 @@ function method(d: ReportData, v: Verdict, conf: Confidence): string {
       : []),
     ...(issue?.waived ?? []).map((w) => `Issued with an open check: ${w.label.toLowerCase()}. The analyst's reason: ${w.reason}`),
     ...(d.gaps ?? []).map((g) => g.text),
+    ...(d.questions?.counts.open
+      ? [
+          `${n(d.questions.counts.open)} investigative question${d.questions.counts.open === 1 ? ' is' : 's are'} still open${d.questions.uncovered ? `; ${n(d.questions.uncovered)} of them with no evidence in the case that could answer ${d.questions.uncovered === 1 ? 'it' : 'them'}` : ''}.`,
+        ]
+      : []),
+    ...(d.questions?.counts.cannot ? [`${n(d.questions.counts.cannot)} investigative question${d.questions.counts.cannot === 1 ? '' : 's'} cannot be answered from this evidence.`] : []),
     ...claimLimits.slice(0, 12),
     ...(claimLimits.length > 12 ? [`${n(claimLimits.length - 12)} more claims are not verified; the Report page lists them.`] : []),
     ...(leadFindings
@@ -1158,6 +1168,39 @@ function method(d: ReportData, v: Verdict, conf: Confidence): string {
     ...conf.reasons.filter((r) => !/^every item decided/.test(r)).map((r) => `Confidence: ${r}.`),
   ]
   return `<div class="method"><div><h4>How this was produced</h4><ul>${sources.map((s) => `<li>${s}</li>`).join('')}</ul></div><div><h4>Where it stops</h4><ul>${limits.map((s) => `<li>${h(s)}</li>`).join('')}</ul></div></div>`
+}
+
+// ---------------------------------------------------------------------------
+// questions
+
+const QUESTION_PILL: Record<string, string> = { answered: 'verdict-benign', cannot: 'st-false_positive', open: 'verdict-unsure' }
+
+function questionRow(q: ReportQuestion): string {
+  const cites = q.citations.length
+    ? `<ul class="cites">${q.citations.map((c) => `<li>${c.source === 'findings' ? '<span class="dim">finding</span> ' : ''}${h(c.label)}${c.ts ? ` <span class="dim">· ${fmtTs(c.ts)}</span>` : ''}</li>`).join('')}</ul>`
+    : q.status === 'answered'
+      ? '<div class="cap warn">no record cited</div>'
+      : ''
+  const text = q.text.trim() ? `<div class="narr">${md(q.text)}</div>` : q.status === 'open' ? '<div class="cap warn">unanswered</div>' : ''
+  const cov = q.coverage && (q.status !== 'answered' || q.covered === false) ? `<div class="cap${q.covered === false ? ' warn' : ''}">Evidence: ${h(q.coverage)}</div>` : ''
+  return `<div class="q ${h(q.status)}"><div class="q-head"><code>${h(q.id)}</code><span class="q-name">${h(q.name)}</span><span class="pill ${QUESTION_PILL[q.status] ?? 'info'}">${h(ANSWER_LABEL[q.status] ?? q.status)}</span></div>${text}${cites}${cov}</div>`
+}
+
+/** The chosen scenarios, each facet's questions with the analyst's answer, what it cites, and the ones left open flagged. */
+export function questionsSection(q: ReportQuestions): string {
+  const { answered, cannot, open } = q.counts
+  const intro = `<p class="intro">The questions the investigation set out to answer, from the scenarios chosen for the case (DFIQ, dfiq.org, and REMN's own, whose ids start with 0). Each carries the analyst's answer and the records or findings it rests on. ${n(answered)} answered, ${n(cannot)} cannot be answered from this evidence, ${n(open)} still open${q.uncovered ? `, ${n(q.uncovered)} of them with no evidence in the case that could answer ${q.uncovered === 1 ? 'it' : 'them'}` : ''}.</p>`
+  return (
+    intro +
+    q.scenarios
+      .map(
+        (s) =>
+          `<div class="card"><div class="card-head"><h3>${h(s.name)}</h3>${chip(s.id)}${chip(s.origin === 'dfiq' ? 'DFIQ' : 'REMN')}</div>${s.facets
+            .map((f) => `<h4 class="facet">${h(f.name)}</h4>${f.questions.map(questionRow).join('')}`)
+            .join('')}</div>`,
+      )
+      .join('')
+  )
 }
 
 export function buildReportHtml(d: ReportData): string {
@@ -1194,6 +1237,13 @@ export function buildReportHtml(d: ReportData): string {
       ? `<p class="intro">${happened.items.some((m) => m.decision === 'confirmed') ? 'The confirmed items in the order they happened.' : 'Nothing was confirmed; the reviewed items in the order they happened.'} Dates are event times, UTC.${happened.total > happened.items.length ? ` The first ${happened.items.length} of ${happened.total} are listed; the other ${happened.total - happened.items.length}, the latest, are printed in full in the incident and chain sections.` : ''}</p>${momentsList(happened.items)}`
       : `<div class="empty">${happened.decided ? 'No dated item to place.' : 'No item has been decided yet: run the review before printing.'}</div>`,
   })
+  if (d.questions)
+    sections.push({
+      id: 'questions',
+      title: 'Questions',
+      count: d.questions.counts.answered + d.questions.counts.cannot + d.questions.counts.open,
+      body: questionsSection(d.questions),
+    })
   if (d.stories?.length) {
     const left = d.storiesLeft ?? 0
     const dismissedStories = d.storiesDismissed ?? 0

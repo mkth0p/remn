@@ -1,0 +1,3010 @@
+{
+ "generatedBy": "tools/dfiq_import.py from DFIQ and tools/dfiq_remn.yaml; do not edit",
+ "dfiq": {
+  "version": "1.0.1",
+  "url": "https://dfiq.org",
+  "repository": "https://github.com/google/dfiq",
+  "license": "Apache-2.0",
+  "copyright": "Copyright 2024 Google LLC"
+ },
+ "evidence": {
+  "security": {
+   "label": "Security log",
+   "channels": [
+    "Security"
+   ]
+  },
+  "system": {
+   "label": "System log",
+   "channels": [
+    "System"
+   ]
+  },
+  "application": {
+   "label": "Application log",
+   "channels": [
+    "Application"
+   ]
+  },
+  "sysmon": {
+   "label": "Sysmon log",
+   "channels": [
+    "Microsoft-Windows-Sysmon/Operational"
+   ]
+  },
+  "powershell": {
+   "label": "PowerShell logs or history",
+   "channels": [
+    "Microsoft-Windows-PowerShell/Operational",
+    "Windows PowerShell",
+    "PowerShellCore/Operational"
+   ],
+   "categories": [
+    "collection:powershell-history"
+   ]
+  },
+  "task-scheduler": {
+   "label": "Task Scheduler log",
+   "channels": [
+    "Microsoft-Windows-TaskScheduler/Operational"
+   ]
+  },
+  "defender": {
+   "label": "Defender log",
+   "channels": [
+    "Microsoft-Windows-Windows Defender/Operational"
+   ],
+   "categories": [
+    "collection:defender"
+   ]
+  },
+  "print": {
+   "label": "Print Service log",
+   "channels": [
+    "Microsoft-Windows-PrintService/Operational"
+   ]
+  },
+  "dns-client": {
+   "label": "DNS Client log",
+   "channels": [
+    "Microsoft-Windows-DNS-Client/Operational"
+   ]
+  },
+  "rdp": {
+   "label": "Remote Desktop logs",
+   "channelPrefixes": [
+    "Microsoft-Windows-TerminalServices-",
+    "Microsoft-Windows-RemoteDesktopServices-"
+   ]
+  },
+  "smb": {
+   "label": "SMB logs or sessions",
+   "channelPrefixes": [
+    "Microsoft-Windows-SMBServer/",
+    "Microsoft-Windows-SmbClient/"
+   ],
+   "categories": [
+    "collection:smb-session"
+   ]
+  },
+  "m365-audit": {
+   "label": "Unified Audit Log",
+   "categoryPrefixes": [
+    "M365 "
+   ]
+  },
+  "m365-exchange": {
+   "label": "Exchange audit records",
+   "categories": [
+    "M365 Exchange"
+   ]
+  },
+  "m365-files": {
+   "label": "SharePoint and OneDrive audit records",
+   "categories": [
+    "M365 SharePoint",
+    "M365 OneDrive"
+   ]
+  },
+  "m365-directory": {
+   "label": "Entra directory audit records",
+   "categories": [
+    "M365 Entra"
+   ]
+  },
+  "entra-signin": {
+   "label": "Entra sign-in logs",
+   "channels": [
+    "Entra SignIn"
+   ]
+  },
+  "mail": {
+   "label": "mailboxes",
+   "mails": true
+  },
+  "browser": {
+   "label": "browser history",
+   "categories": [
+    "collection:browser-history",
+    "collection:browser-download"
+   ]
+  },
+  "files": {
+   "label": "file system records (MFT",
+   "USN": null,
+   "LNK": null,
+   "jump lists)": null,
+   "categories": [
+    "collection:file",
+    "collection:shellbag"
+   ]
+  },
+  "execution": {
+   "label": "execution artefacts (Prefetch, Amcache, ShimCache, BAM, UserAssist)",
+   "categories": [
+    "collection:prefetch",
+    "collection:amcache",
+    "collection:shimcache",
+    "collection:bam",
+    "collection:userassist"
+   ]
+  },
+  "processes": {
+   "label": "process list",
+   "categories": [
+    "collection:process"
+   ]
+  },
+  "programs": {
+   "label": "installed programs",
+   "categories": [
+    "collection:program",
+    "collection:amcache"
+   ]
+  },
+  "autoruns": {
+   "label": "autoruns and registry",
+   "categories": [
+    "collection:autorun",
+    "collection:registry"
+   ]
+  },
+  "services": {
+   "label": "service list",
+   "categories": [
+    "collection:service"
+   ]
+  },
+  "tasks": {
+   "label": "scheduled task list",
+   "categories": [
+    "collection:task"
+   ]
+  },
+  "accounts": {
+   "label": "user and group list",
+   "categories": [
+    "collection:account"
+   ]
+  },
+  "network": {
+   "label": "network connections and SRUM",
+   "categories": [
+    "collection:connection",
+    "collection:sru",
+    "collection:smb-session"
+   ]
+  }
+ },
+ "scenarios": [
+  {
+   "id": "S1001",
+   "origin": "dfiq",
+   "name": "Data Exfiltration",
+   "description": "An employee is suspected of unauthorized copying of sensitive data (code, trade secrets, etc) from internal systems to those outside of the company's control.",
+   "tags": [],
+   "attack": [],
+   "facets": [
+    "F1007",
+    "F1008",
+    "F1009",
+    "F1010",
+    "F1011",
+    "F1012"
+   ]
+  },
+  {
+   "id": "S1003",
+   "origin": "dfiq",
+   "name": "Suspicious DNS Query",
+   "description": "A DNS query to an unexpected domain can be an indicator of abnormal activity on a host. If a domain has been marked as malicious, an investigator may be tasked with determining what caused the DNS query (or response) and if it indicates the host has been compromised.",
+   "tags": [
+    "Network",
+    "Malware",
+    "Triage"
+   ],
+   "attack": [],
+   "facets": [
+    "F1004",
+    "F1005"
+   ]
+  },
+  {
+   "id": "S1007",
+   "origin": "dfiq",
+   "name": "Host Persistence Audit",
+   "description": "Once an attacker is on a system, a main goal becomes trying to maintain that access. Persistence mechanisms give the attacker the ability to run malware that will survive reboots and credential changes.",
+   "tags": [],
+   "attack": [
+    "TA0003"
+   ],
+   "facets": [
+    "F1020",
+    "F1021",
+    "F1022",
+    "F1023",
+    "F1024"
+   ]
+  },
+  {
+   "id": "S1008",
+   "origin": "dfiq",
+   "name": "Lateral Movement",
+   "description": "Lateral movement is the process of an attacker moving from one system to another within a network after they have gained initial access to a system. This can be done through a variety of methods, such as exploiting vulnerabilities in software, using stolen credentials, installing their own remote access tools, or using native system utilities.",
+   "tags": [
+    "Windows"
+   ],
+   "attack": [
+    "TA0008"
+   ],
+   "facets": [
+    "F1021",
+    "F1027",
+    "F1028"
+   ]
+  },
+  {
+   "id": "S0001",
+   "origin": "remn",
+   "name": "Dwell time (first and last attacker activity)",
+   "description": "When the attacker first got in, when they were last active, and whether the evidence reaches back far enough to say so.",
+   "tags": [
+    "Timeline"
+   ],
+   "attack": [],
+   "facets": [
+    "F0001",
+    "F0002",
+    "F0003"
+   ]
+  },
+  {
+   "id": "S0002",
+   "origin": "remn",
+   "name": "Business email compromise exposure",
+   "description": "A mailbox is suspected of being taken over. What the attacker could reach, what they read, took and sent, and what they left behind in the mailbox and the tenant.",
+   "tags": [
+    "M365",
+    "Mail",
+    "BEC"
+   ],
+   "attack": [],
+   "facets": [
+    "F0004",
+    "F0005",
+    "F0006",
+    "F0007"
+   ]
+  }
+ ],
+ "facets": [
+  {
+   "id": "F1007",
+   "name": "Are there any indications of anti-forensic efforts?",
+   "description": "",
+   "tags": [],
+   "attack": [],
+   "questions": [
+    "Q1028",
+    "Q1029",
+    "Q1030",
+    "Q1033",
+    "Q1074"
+   ]
+  },
+  {
+   "id": "F1008",
+   "name": "Are there signs of staging data for future exfiltration?",
+   "description": "\"Staging\" refers to the collection of data of interest onto a local system, as a precursor step for future exfiltration of that data. When reviewing data from Questions in this Facet, look for unusual volumes of results (number or size of files downloaded or sent, for example).",
+   "tags": [],
+   "attack": [
+    "TA0009"
+   ],
+   "questions": [
+    "Q1001",
+    "Q1005",
+    "Q1006",
+    "Q1017"
+   ]
+  },
+  {
+   "id": "F1009",
+   "name": "Was any sensitive data sent externally via email?",
+   "description": "",
+   "tags": [],
+   "attack": [],
+   "questions": [
+    "Q1016",
+    "Q1075",
+    "Q1079",
+    "Q1080"
+   ]
+  },
+  {
+   "id": "F1010",
+   "name": "Was any sensitive data exfiltrated via a physical medium?",
+   "description": "",
+   "tags": [],
+   "attack": [
+    "T1052"
+   ],
+   "questions": [
+    "Q1010"
+   ]
+  },
+  {
+   "id": "F1011",
+   "name": "Was any sensitive data exfiltrated via a web service?",
+   "description": "",
+   "tags": [],
+   "attack": [
+    "T1567"
+   ],
+   "questions": [
+    "Q1007",
+    "Q1009",
+    "Q1038"
+   ]
+  },
+  {
+   "id": "F1012",
+   "name": "System Information",
+   "description": "",
+   "tags": [],
+   "attack": [],
+   "questions": [
+    "Q1008"
+   ]
+  },
+  {
+   "id": "F1004",
+   "name": "What application was responsible for the DNS query?",
+   "description": "What application made a DNS request is important for determining if it is likely legitimate or not. The source also impacts further investigative steps (depending on if `powershell.exe` or `chrome.exe` were responsible, different artifacts would be useful).",
+   "tags": [
+    "DNS"
+   ],
+   "attack": [],
+   "questions": [
+    "Q1018",
+    "Q1073"
+   ]
+  },
+  {
+   "id": "F1005",
+   "name": "Was a user's web browsing the cause of a given DNS query?",
+   "description": "Understanding if a user's actions in a web browser caused a particular DNS query is valuable context when investigating a suspicious DNS query. If the query is related to the user's actions, closer scrutiny of their browser activity may make sense. If the DNS doesn't appear related, you may need to look into the actions of other non-browser processes.",
+   "tags": [
+    "Web Browser"
+   ],
+   "attack": [],
+   "questions": [
+    "Q1019",
+    "Q1020"
+   ]
+  },
+  {
+   "id": "F1020",
+   "name": "Are there any interesting logon or boot initialization scripts?",
+   "description": "",
+   "tags": [],
+   "attack": [
+    "T1037"
+   ],
+   "questions": [
+    "Q1055",
+    "Q1057"
+   ]
+  },
+  {
+   "id": "F1021",
+   "name": "Are there any new accounts that have been created?",
+   "description": "",
+   "tags": [],
+   "attack": [
+    "T1136"
+   ],
+   "questions": [
+    "Q1058",
+    "Q1059"
+   ]
+  },
+  {
+   "id": "F1022",
+   "name": "Are there any scheduled/automated tasks that ran?",
+   "description": "",
+   "tags": [],
+   "attack": [
+    "T1053"
+   ],
+   "questions": [
+    "Q1061"
+   ]
+  },
+  {
+   "id": "F1023",
+   "name": "Are there any suspicious files running at system boot or login autoruns?",
+   "description": "",
+   "tags": [],
+   "attack": [
+    "T1547"
+   ],
+   "questions": [
+    "Q1065",
+    "Q1066"
+   ]
+  },
+  {
+   "id": "F1024",
+   "name": "Has a system process been created or modified?",
+   "description": "",
+   "tags": [],
+   "attack": [
+    "T1543"
+   ],
+   "questions": [
+    "Q1067",
+    "Q1068"
+   ]
+  },
+  {
+   "id": "F1027",
+   "name": "Are the indications of an attacker moving FROM this host to another?",
+   "description": "Once an attacker has access to a system, they may want to use it to pivot to a different system. This movement, from a source host to a destination host, leaves traces on both the source and destination hosts. A given system may be both the source and destination of lateral movement at different times. This facet examines a host for indications it was the **source** host, meaning an attacker moved **FROM** it to a different destination system.",
+   "tags": [],
+   "attack": [
+    "TA0008"
+   ],
+   "questions": [
+    "Q1036"
+   ]
+  },
+  {
+   "id": "F1028",
+   "name": "Are the indications of an attacker moving TO this host?",
+   "description": "Once an attacker has access to a system, they may want to use it to pivot to a different system. This movement, from a source host to a destination host, leaves traces on both the source and destination hosts. A given system may be both the source and destination of lateral movement at different times. This facet examines a host for indications it was the **destination** host, meaning an attacker moved **TO** it from a different system.",
+   "tags": [],
+   "attack": [
+    "TA0008"
+   ],
+   "questions": [
+    "Q1037"
+   ]
+  },
+  {
+   "id": "F0001",
+   "name": "When did the attacker first get in?",
+   "description": "",
+   "tags": [],
+   "attack": [
+    "TA0001"
+   ],
+   "questions": [
+    "Q0001",
+    "Q0002",
+    "Q0003"
+   ]
+  },
+  {
+   "id": "F0002",
+   "name": "When was the attacker last active, and is it over?",
+   "description": "",
+   "tags": [],
+   "attack": [
+    "TA0003"
+   ],
+   "questions": [
+    "Q0004",
+    "Q0005",
+    "Q0006"
+   ]
+  },
+  {
+   "id": "F0003",
+   "name": "What does the evidence miss between the first and the last activity?",
+   "description": "",
+   "tags": [],
+   "attack": [],
+   "questions": [
+    "Q0007",
+    "Q0008"
+   ]
+  },
+  {
+   "id": "F0004",
+   "name": "Was the account taken over?",
+   "description": "",
+   "tags": [],
+   "attack": [
+    "TA0001"
+   ],
+   "questions": [
+    "Q0009",
+    "Q0010",
+    "Q0011"
+   ]
+  },
+  {
+   "id": "F0005",
+   "name": "Did the attacker leave anything behind in the mailbox or the tenant?",
+   "description": "",
+   "tags": [],
+   "attack": [
+    "TA0003"
+   ],
+   "questions": [
+    "Q0012",
+    "Q0013",
+    "Q0014"
+   ]
+  },
+  {
+   "id": "F0006",
+   "name": "What did the attacker read or take?",
+   "description": "",
+   "tags": [],
+   "attack": [
+    "TA0009",
+    "TA0010"
+   ],
+   "questions": [
+    "Q0015",
+    "Q0016",
+    "Q0017"
+   ]
+  },
+  {
+   "id": "F0007",
+   "name": "Did the attacker send mail from the account or reach other people?",
+   "description": "",
+   "tags": [],
+   "attack": [],
+   "questions": [
+    "Q0018",
+    "Q0019",
+    "Q0020"
+   ]
+  }
+ ],
+ "questions": [
+  {
+   "id": "Q1028",
+   "origin": "dfiq",
+   "name": "Was there specialized \"anti-forensic\" (or \"privacy\") software on a computer?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "programs",
+    "execution",
+    "sysmon",
+    "security"
+   ],
+   "attack": [
+    "T1070.004"
+   ],
+   "ruleTags": [
+    "anti-forensics"
+   ],
+   "searches": [
+    {
+     "source": "events",
+     "label": "known wiping and privacy tools run or installed",
+     "filter": {
+      "logic": "or",
+      "conditions": [
+       {
+        "field": "image",
+        "op": "contains_any",
+        "value": [
+         "ccleaner",
+         "sdelete",
+         "bleachbit",
+         "eraser",
+         "privazer",
+         "wipe",
+         "timestomp"
+        ]
+       },
+       {
+        "field": "processName",
+        "op": "contains_any",
+        "value": [
+         "ccleaner",
+         "sdelete",
+         "bleachbit",
+         "eraser",
+         "privazer",
+         "wipe",
+         "timestomp"
+        ]
+       },
+       {
+        "field": "path",
+        "op": "contains_any",
+        "value": [
+         "ccleaner",
+         "sdelete",
+         "bleachbit",
+         "eraser",
+         "privazer",
+         "timestomp"
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q1029",
+   "origin": "dfiq",
+   "name": "Were any encryption programs used on a computer?",
+   "description": "Unexpected use of encryption programs (built-in or 3rd-party) on a computer could be an effort to hide data prior to removing it from company control.",
+   "tags": [],
+   "evidence": [
+    "programs",
+    "execution",
+    "sysmon",
+    "security"
+   ],
+   "attack": [
+    "T1486"
+   ],
+   "ruleTags": [],
+   "searches": [
+    {
+     "source": "events",
+     "label": "encryption tools run or installed",
+     "filter": {
+      "logic": "or",
+      "conditions": [
+       {
+        "field": "image",
+        "op": "contains_any",
+        "value": [
+         "veracrypt",
+         "truecrypt",
+         "axcrypt",
+         "gpg.exe",
+         "gpg2.exe",
+         "cipher.exe",
+         "manage-bde"
+        ]
+       },
+       {
+        "field": "processName",
+        "op": "contains_any",
+        "value": [
+         "veracrypt",
+         "truecrypt",
+         "axcrypt",
+         "gpg.exe",
+         "gpg2.exe",
+         "cipher.exe",
+         "manage-bde"
+        ]
+       },
+       {
+        "field": "path",
+        "op": "contains_any",
+        "value": [
+         "veracrypt",
+         "truecrypt",
+         "axcrypt"
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q1030",
+   "origin": "dfiq",
+   "name": "Were any security or monitoring agents tampered with or disabled?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "defender",
+    "system",
+    "sysmon",
+    "security"
+   ],
+   "attack": [
+    "T1562.001"
+   ],
+   "ruleTags": [
+    "defender",
+    "log-tampering"
+   ],
+   "searches": [
+    {
+     "source": "events",
+     "label": "Defender turned off or reconfigured",
+     "filter": {
+      "conditions": [
+       {
+        "field": "channel",
+        "op": "contains",
+        "value": "Defender"
+       },
+       {
+        "field": "eventId",
+        "op": "in",
+        "value": [
+         5001,
+         5007,
+         5010,
+         5012,
+         5013
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "note": "Defender 5001 (real-time protection off), 5007 (configuration changed) and 5010/5012 (scanning off); System 7036/7040 show a security service stopped or its start type changed.",
+   "approaches": []
+  },
+  {
+   "id": "Q1033",
+   "origin": "dfiq",
+   "name": "Was shell history cleared?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "powershell",
+    "sysmon",
+    "security"
+   ],
+   "attack": [
+    "T1070.003"
+   ],
+   "ruleTags": [],
+   "searches": [
+    {
+     "source": "events",
+     "label": "PowerShell history cleared or turned off",
+     "filter": {
+      "logic": "or",
+      "conditions": [
+       {
+        "field": "commandLine",
+        "op": "contains_any",
+        "value": [
+         "Clear-History",
+         "ConsoleHost_history",
+         "HistorySaveStyle",
+         "HistorySavePath"
+        ]
+       },
+       {
+        "field": "scriptBlockText",
+        "op": "contains_any",
+        "value": [
+         "Clear-History",
+         "ConsoleHost_history",
+         "HistorySaveStyle",
+         "HistorySavePath"
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q1074",
+   "origin": "dfiq",
+   "name": "Were any system event logs cleared?",
+   "description": "",
+   "tags": [
+    "Windows",
+    "macOS",
+    "Linux"
+   ],
+   "evidence": [
+    "security",
+    "system"
+   ],
+   "attack": [
+    "T1070.001",
+    "T1070.002"
+   ],
+   "ruleTags": [
+    "log-tampering",
+    "eventlog"
+   ],
+   "searches": [
+    {
+     "source": "events",
+     "label": "Security 1102 and System 104 (log cleared)",
+     "filter": {
+      "conditions": [
+       {
+        "field": "eventId",
+        "op": "in",
+        "value": [
+         1102,
+         104
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "note": "Security 1102 is written when the Security log is cleared; System 104 when any other log is. A log cleared after collection started shows neither.",
+   "approaches": [
+    {
+     "id": "Q1074.10",
+     "name": "Search CrowdStrike logs for indicator removal on host",
+     "summary": "CrowdStrike has built-in detections for \"indicator removal on host\" events.",
+     "covered": [
+      "CrowdStrike's built-in detection for \"indicator removal on host\" events."
+     ],
+     "notCovered": [
+      "CrowdStrike may not have all log clear/delete events as part of this detection."
+     ]
+    },
+    {
+     "id": "Q1074.11",
+     "name": "Examine Windows Event Logs for Audit Log cleared",
+     "summary": "Parse the Windows Security Event Log and look for \"the audit log was cleared\" event.",
+     "covered": [
+      "Security event log clearance events on Windows systems."
+     ],
+     "notCovered": [
+      "If the log is deleted or otherwise altered, this event may not be logged.",
+      "Only applies to Windows Security audit logs."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "Q1001",
+   "origin": "dfiq",
+   "name": "What files were downloaded using a web browser?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "browser"
+   ],
+   "attack": [
+    "T1105"
+   ],
+   "ruleTags": [],
+   "searches": [
+    {
+     "source": "events",
+     "label": "browser downloads and history",
+     "filter": {
+      "conditions": [
+       {
+        "field": "artifactType",
+        "op": "in",
+        "value": [
+         "browser-download",
+         "browser-history"
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": [
+    {
+     "id": "Q1001.10",
+     "name": "Collect download records from local browser artifacts",
+     "summary": "Parse download records from web browsers' own databases.",
+     "covered": [
+      "Chrome downloads. Beyond \"stable\" Chrome, this also includes Chromium, Chrome Canary, Chrome Beta, and other Chromium-based browsers (Microsoft Edge, Brave, and Opera) on Windows, macOS, and Linux",
+      "Safari downloads",
+      "Includes downloads from all Chrome profiles"
+     ],
+     "notCovered": [
+      "Firefox downloads",
+      "Downloads on any other browsers",
+      "Browsers installed in non-standard paths",
+      "Downloads made during Incognito sessions"
+     ]
+    },
+    {
+     "id": "Q1001.11",
+     "name": "Detect browser downloads via file system event logs",
+     "summary": "File downloads by some web browsers create a specific pattern of events on the file system. We can use this to see browser downloads using file system logs (like Santa).",
+     "covered": [
+      "Chrome downloads on macOS (given that Santa was installed and logging enabled)"
+     ],
+     "notCovered": [
+      "All other browsers",
+      "Downloads from other Chromium/Chrome-based browsers _might_ be collected via this method, but testing is necessary to confirm.",
+      "Downloads that occurred on macOS with Santa, but during a time period for which there are no Santa logs (out of retention or Santa was disabled)."
+     ]
+    },
+    {
+     "id": "Q1001.12",
+     "name": "Detect browser downloads via change journal records",
+     "summary": "File downloads by some web browsers create a specific pattern of events on the file system. We can use this to see browser downloads using NTFS change journal (USN journal) records.",
+     "covered": [
+      "Chrome downloads to an NTFS volume"
+     ],
+     "notCovered": [
+      "All other browsers.",
+      "Downloads from other Chromium/Chrome-based browsers _might_ be collected via this method, but testing is necessary to confirm.",
+      "Downloads on file systems other than NTFS.",
+      "Downloads that would be covered, but happened long enough ago that the USN Journal records that would show it have been deleted."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "Q1005",
+   "origin": "dfiq",
+   "name": "What files have ever been on a computer?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "files"
+   ],
+   "attack": [],
+   "ruleTags": [],
+   "searches": [
+    {
+     "source": "events",
+     "label": "file system records",
+     "filter": {
+      "conditions": [
+       {
+        "field": "artifactType",
+        "op": "eq",
+        "value": "file"
+       }
+      ]
+     }
+    }
+   ],
+   "note": "MFT and USN records name files that were deleted since; the file list of a collection names only what was there when it ran.",
+   "approaches": []
+  },
+  {
+   "id": "Q1006",
+   "origin": "dfiq",
+   "name": "What files are present on a computer?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "files"
+   ],
+   "attack": [],
+   "ruleTags": [],
+   "searches": [
+    {
+     "source": "events",
+     "label": "file system records",
+     "filter": {
+      "conditions": [
+       {
+        "field": "artifactType",
+        "op": "eq",
+        "value": "file"
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q1017",
+   "origin": "dfiq",
+   "name": "Were any files collected into a container?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "sysmon",
+    "security",
+    "files",
+    "execution"
+   ],
+   "attack": [
+    "T1560.001"
+   ],
+   "ruleTags": [
+    "archive",
+    "collection"
+   ],
+   "searches": [
+    {
+     "source": "events",
+     "label": "archivers run, or archives written",
+     "filter": {
+      "logic": "or",
+      "conditions": [
+       {
+        "field": "commandLine",
+        "op": "contains_any",
+        "value": [
+         "7z.exe",
+         "7za.exe",
+         "rar.exe",
+         "winrar",
+         "Compress-Archive",
+         "makecab",
+         "tar -c",
+         "tar.exe"
+        ]
+       },
+       {
+        "field": "targetFilename",
+        "op": "endswith",
+        "value": [
+         ".zip",
+         ".7z",
+         ".rar",
+         ".cab",
+         ".tar",
+         ".gz"
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q1016",
+   "origin": "dfiq",
+   "name": "What files were sent externally via email attachments?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "mail",
+    "m365-exchange"
+   ],
+   "attack": [
+    "T1048.003"
+   ],
+   "ruleTags": [
+    "exfiltration"
+   ],
+   "searches": [
+    {
+     "source": "mails",
+     "label": "sent mails with attachments",
+     "filter": {
+      "conditions": [
+       {
+        "field": "folder",
+        "op": "contains",
+        "value": "sent"
+       },
+       {
+        "field": "attachmentCount",
+        "op": "gt",
+        "value": 0
+       }
+      ]
+     }
+    },
+    {
+     "source": "events",
+     "label": "Exchange Send audit records",
+     "filter": {
+      "conditions": [
+       {
+        "field": "operation",
+        "op": "in",
+        "value": [
+         "Send",
+         "SendAs",
+         "SendOnBehalf"
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q1075",
+   "origin": "dfiq",
+   "name": "Is the recipient account controlled by the sender?",
+   "description": "To remove data from company control, an actor could send files to an alternate \"personal\" account.",
+   "tags": [],
+   "evidence": [
+    "mail"
+   ],
+   "attack": [],
+   "ruleTags": [],
+   "searches": [],
+   "note": "Compare the recipient's address and display name with the sender's own, private addresses and earlier mail between them.",
+   "approaches": []
+  },
+  {
+   "id": "Q1079",
+   "origin": "dfiq",
+   "name": "Is there a history of communication with the recipients?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "mail"
+   ],
+   "attack": [],
+   "ruleTags": [],
+   "searches": [],
+   "note": "The sender baseline (first contact, rare sender) is kept per mailbox; a recipient never written to before is a lead.",
+   "approaches": []
+  },
+  {
+   "id": "Q1080",
+   "origin": "dfiq",
+   "name": "How many external recipients does the email have?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "mail"
+   ],
+   "attack": [],
+   "ruleTags": [],
+   "searches": [
+    {
+     "source": "mails",
+     "label": "mails with recipients",
+     "filter": {
+      "conditions": [
+       {
+        "field": "recipientCount",
+        "op": "gt",
+        "value": 0
+       }
+      ],
+      "sort": {
+       "field": "recipientCount",
+       "dir": "desc"
+      }
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q1010",
+   "origin": "dfiq",
+   "name": "What was printed from a computer?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "print"
+   ],
+   "attack": [],
+   "ruleTags": [],
+   "searches": [
+    {
+     "source": "events",
+     "label": "documents printed (Print Service 307)",
+     "filter": {
+      "conditions": [
+       {
+        "field": "channel",
+        "op": "eq",
+        "value": "Microsoft-Windows-PrintService/Operational"
+       },
+       {
+        "field": "eventId",
+        "op": "eq",
+        "value": 307
+       }
+      ]
+     }
+    }
+   ],
+   "note": "The Print Service Operational log (event 307) is off by default; without it printing leaves no event.",
+   "approaches": []
+  },
+  {
+   "id": "Q1007",
+   "origin": "dfiq",
+   "name": "What files were synced or backed-up to external services?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "m365-files",
+    "network"
+   ],
+   "attack": [
+    "T1567.002"
+   ],
+   "ruleTags": [
+    "exfiltration",
+    "sharepoint"
+   ],
+   "searches": [
+    {
+     "source": "events",
+     "label": "files uploaded or synced to SharePoint and OneDrive",
+     "filter": {
+      "conditions": [
+       {
+        "field": "operation",
+        "op": "in",
+        "value": [
+         "FileUploaded",
+         "FileSyncUploadedFull",
+         "FileSyncUploadedPartial"
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q1009",
+   "origin": "dfiq",
+   "name": "What interactions with external cloud storage sites did the actor have using their web browser?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "browser"
+   ],
+   "attack": [
+    "T1567.002"
+   ],
+   "ruleTags": [],
+   "searches": [
+    {
+     "source": "events",
+     "label": "browser history",
+     "filter": {
+      "conditions": [
+       {
+        "field": "artifactType",
+        "op": "eq",
+        "value": "browser-history"
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q1038",
+   "origin": "dfiq",
+   "name": "Were any files sent via CLI utilities?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "sysmon",
+    "security",
+    "powershell"
+   ],
+   "attack": [
+    "T1048",
+    "T1567"
+   ],
+   "ruleTags": [
+    "exfiltration"
+   ],
+   "searches": [
+    {
+     "source": "events",
+     "label": "transfer tools on the command line",
+     "filter": {
+      "logic": "or",
+      "conditions": [
+       {
+        "field": "commandLine",
+        "op": "contains_any",
+        "value": [
+         "rclone",
+         "curl",
+         "scp ",
+         "pscp",
+         "sftp",
+         "ftp -",
+         "bitsadmin /transfer",
+         "megacmd",
+         "-Method Post",
+         "-Method Put",
+         "Invoke-RestMethod"
+        ]
+       },
+       {
+        "field": "scriptBlockText",
+        "op": "contains_any",
+        "value": [
+         "-Method Post",
+         "-Method Put",
+         "UploadFile",
+         "UploadData"
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q1008",
+   "origin": "dfiq",
+   "name": "What programs are installed on a computer?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "programs",
+    "application"
+   ],
+   "attack": [],
+   "ruleTags": [],
+   "searches": [
+    {
+     "source": "events",
+     "label": "installed programs and MSI installs",
+     "filter": {
+      "logic": "or",
+      "conditions": [
+       {
+        "field": "artifactType",
+        "op": "in",
+        "value": [
+         "program",
+         "amcache"
+        ]
+       },
+       {
+        "field": "provider",
+        "op": "eq",
+        "value": "MsiInstaller"
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q1018",
+   "origin": "dfiq",
+   "name": "What process made the DNS query?",
+   "description": "",
+   "tags": [
+    "DNS"
+   ],
+   "evidence": [
+    "sysmon",
+    "dns-client"
+   ],
+   "attack": [
+    "T1071.004"
+   ],
+   "ruleTags": [],
+   "searches": [
+    {
+     "source": "events",
+     "label": "Sysmon DNS queries (22)",
+     "filter": {
+      "conditions": [
+       {
+        "field": "channel",
+        "op": "eq",
+        "value": "Microsoft-Windows-Sysmon/Operational"
+       },
+       {
+        "field": "eventId",
+        "op": "eq",
+        "value": 22
+       }
+      ]
+     }
+    }
+   ],
+   "note": "Sysmon event 22 names the process of each query; the DNS Client log (3008 and 3020) names the query but not always the process.",
+   "approaches": [
+    {
+     "id": "Q1018.10",
+     "name": "Use Crowdstrike \"Bulk Domains\" to link source processes to DNS queries",
+     "summary": "CrowdStrike records the source process ID (ContextProcessId) for DNSRequest event.",
+     "covered": [
+      "Mac, Linux, and Windows hosts with a CrowdStrike Falcon agent"
+     ],
+     "notCovered": [
+      "Hosts with the Falcon agent, but where the Content Filter is not enabled"
+     ]
+    },
+    {
+     "id": "Q1018.11",
+     "name": "Use Crowdstrike event search to link source processes to DNS queries",
+     "summary": "CrowdStrike records the source process ID (ContextProcessId) for DNSRequest event.",
+     "covered": [
+      "Mac, Linux, and Windows hosts with a CrowdStrike Falcon agent"
+     ],
+     "notCovered": [
+      "Hosts with the Falcon agent, but where the Content Filter is not enabled"
+     ]
+    },
+    {
+     "id": "Q1018.12",
+     "name": "Use Sysmon (Event ID 22) to link source processes to DNS queries",
+     "summary": "Sysmon Event ID 22 DnsQuery stores source process ID",
+     "covered": [
+      "Windows"
+     ],
+     "notCovered": [
+      "Windows hosts without Sysmon installed"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "Q1073",
+   "origin": "dfiq",
+   "name": "Have there been any modifications to the \"hosts\" file?",
+   "description": "Check whether there is suspicious routing in the /etc/hosts file.",
+   "tags": [],
+   "evidence": [
+    "sysmon",
+    "files"
+   ],
+   "attack": [
+    "T1565.001"
+   ],
+   "ruleTags": [],
+   "searches": [
+    {
+     "source": "events",
+     "label": "writes to the hosts file",
+     "filter": {
+      "logic": "or",
+      "conditions": [
+       {
+        "field": "targetFilename",
+        "op": "endswith",
+        "value": "\\drivers\\etc\\hosts"
+       },
+       {
+        "field": "path",
+        "op": "endswith",
+        "value": "\\drivers\\etc\\hosts"
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q1019",
+   "origin": "dfiq",
+   "name": "What web browsers were running at a given time?",
+   "description": "",
+   "tags": [
+    "Web Browser"
+   ],
+   "evidence": [
+    "sysmon",
+    "security",
+    "execution",
+    "processes"
+   ],
+   "attack": [],
+   "ruleTags": [],
+   "searches": [
+    {
+     "source": "events",
+     "label": "browser processes",
+     "filter": {
+      "logic": "or",
+      "conditions": [
+       {
+        "field": "image",
+        "op": "contains_any",
+        "value": [
+         "chrome.exe",
+         "msedge.exe",
+         "firefox.exe",
+         "iexplore.exe",
+         "brave.exe",
+         "opera.exe"
+        ]
+       },
+       {
+        "field": "processName",
+        "op": "contains_any",
+        "value": [
+         "chrome.exe",
+         "msedge.exe",
+         "firefox.exe",
+         "iexplore.exe",
+         "brave.exe",
+         "opera.exe"
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": [
+    {
+     "id": "Q1019.10",
+     "name": "Collect process executions in Crowdstrike event search",
+     "summary": "CrowdStrike records process executions in ProcessRollup event.",
+     "covered": [
+      "Mac, Linux and Windows systems with the Falcon Agent",
+      "Chrome, Firefox, Safari, and Edge web browsers"
+     ],
+     "notCovered": [
+      "Other browsers (including Chromium)",
+      "One of those four browsers, but have had their process name changed"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "Q1020",
+   "origin": "dfiq",
+   "name": "What pages did web browsers visit?",
+   "description": "",
+   "tags": [
+    "Web Browser"
+   ],
+   "evidence": [
+    "browser"
+   ],
+   "attack": [],
+   "ruleTags": [],
+   "searches": [
+    {
+     "source": "events",
+     "label": "browser history",
+     "filter": {
+      "conditions": [
+       {
+        "field": "artifactType",
+        "op": "eq",
+        "value": "browser-history"
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": [
+    {
+     "id": "Q1020.10",
+     "name": "Collect URL visit records from local browser artifacts",
+     "summary": "Parse URL visit records from web browsers' own databases.",
+     "covered": [
+      "Chrome URL visits. Beyond \"stable\" Chrome, this also includes Chromium, Chrome Canary, Chrome Beta, and other Chromium-based browsers (Microsoft Edge, Brave, and Opera) on Windows, macOS, and Linux",
+      "Includes URL visits from all Chrome profiles",
+      "Firefox URL visits",
+      "Safari URL visits on Windows and macOS",
+      "Internet Explorer (4 - 10) URL visits"
+     ],
+     "notCovered": [
+      "Other Chromium-based browsers not specified above",
+      "Browsers installed in non-standard paths",
+      "Visits made in Incognito/Private sessions"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "Q1055",
+   "origin": "dfiq",
+   "name": "What Windows logon scripts are configured?",
+   "description": "",
+   "tags": [
+    "Windows"
+   ],
+   "evidence": [
+    "sysmon",
+    "autoruns"
+   ],
+   "attack": [
+    "T1037.001"
+   ],
+   "ruleTags": [],
+   "searches": [
+    {
+     "source": "events",
+     "label": "UserInitMprLogonScript set",
+     "filter": {
+      "logic": "or",
+      "conditions": [
+       {
+        "field": "targetObject",
+        "op": "contains",
+        "value": "UserInitMprLogonScript"
+       },
+       {
+        "field": "commandLine",
+        "op": "contains",
+        "value": "UserInitMprLogonScript"
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q1057",
+   "origin": "dfiq",
+   "name": "What network logon scripts are configured?",
+   "description": "",
+   "tags": [
+    "Windows"
+   ],
+   "evidence": [
+    "sysmon",
+    "autoruns",
+    "files"
+   ],
+   "attack": [
+    "T1037.003"
+   ],
+   "ruleTags": [],
+   "searches": [
+    {
+     "source": "events",
+     "label": "Group Policy logon scripts",
+     "filter": {
+      "logic": "or",
+      "conditions": [
+       {
+        "field": "targetObject",
+        "op": "contains",
+        "value": "\\Group Policy\\Scripts"
+       },
+       {
+        "field": "targetFilename",
+        "op": "contains",
+        "value": "\\scripts\\logon"
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q1058",
+   "origin": "dfiq",
+   "name": "What domain accounts have been created?",
+   "description": "",
+   "tags": [
+    "Windows"
+   ],
+   "evidence": [
+    "security",
+    "m365-directory"
+   ],
+   "attack": [
+    "T1136.002",
+    "T1136.003"
+   ],
+   "ruleTags": [
+    "account"
+   ],
+   "searches": [
+    {
+     "source": "events",
+     "label": "accounts created (4720, Add user.)",
+     "filter": {
+      "logic": "or",
+      "conditions": [
+       {
+        "field": "eventId",
+        "op": "eq",
+        "value": 4720
+       },
+       {
+        "field": "operation",
+        "op": "eq",
+        "value": "Add user."
+       }
+      ]
+     }
+    }
+   ],
+   "note": "4720 on a domain controller creates a domain account; on another machine, a local one. Entra accounts are \"Add user.\" in the directory audit.",
+   "approaches": []
+  },
+  {
+   "id": "Q1059",
+   "origin": "dfiq",
+   "name": "What local accounts have been created?",
+   "description": "",
+   "tags": [
+    "Windows",
+    "macOS",
+    "Linux"
+   ],
+   "evidence": [
+    "security",
+    "accounts"
+   ],
+   "attack": [
+    "T1136.001"
+   ],
+   "ruleTags": [
+    "account"
+   ],
+   "searches": [
+    {
+     "source": "events",
+     "label": "accounts created (4720) and the user list",
+     "filter": {
+      "logic": "or",
+      "conditions": [
+       {
+        "field": "eventId",
+        "op": "eq",
+        "value": 4720
+       },
+       {
+        "field": "artifactType",
+        "op": "eq",
+        "value": "account"
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q1061",
+   "origin": "dfiq",
+   "name": "What Scheduled Tasks are configured?",
+   "description": "",
+   "tags": [
+    "Windows"
+   ],
+   "evidence": [
+    "security",
+    "task-scheduler",
+    "tasks"
+   ],
+   "attack": [
+    "T1053.005"
+   ],
+   "ruleTags": [
+    "scheduled-task"
+   ],
+   "searches": [
+    {
+     "source": "events",
+     "label": "tasks registered or changed, and the task list",
+     "filter": {
+      "logic": "or",
+      "conditions": [
+       {
+        "field": "eventId",
+        "op": "in",
+        "value": [
+         4698,
+         4699,
+         4700,
+         4701,
+         4702
+        ]
+       },
+       {
+        "field": "channel",
+        "op": "eq",
+        "value": "Microsoft-Windows-TaskScheduler/Operational"
+       },
+       {
+        "field": "artifactType",
+        "op": "eq",
+        "value": "task"
+       }
+      ]
+     }
+    }
+   ],
+   "note": "Security 4698 needs object access auditing; the Task Scheduler log (106, 140, 141) is on by default on servers only.",
+   "approaches": []
+  },
+  {
+   "id": "Q1065",
+   "origin": "dfiq",
+   "name": "What files are referenced in Registry \"Run\" keys?",
+   "description": "",
+   "tags": [
+    "Windows"
+   ],
+   "evidence": [
+    "sysmon",
+    "autoruns"
+   ],
+   "attack": [
+    "T1547.001"
+   ],
+   "ruleTags": [],
+   "searches": [
+    {
+     "source": "events",
+     "label": "Run key writes and autoruns",
+     "filter": {
+      "logic": "or",
+      "conditions": [
+       {
+        "field": "targetObject",
+        "op": "contains_any",
+        "value": [
+         "\\CurrentVersion\\Run",
+         "\\CurrentVersion\\Policies\\Explorer\\Run"
+        ]
+       },
+       {
+        "field": "artifactType",
+        "op": "eq",
+        "value": "autorun"
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q1066",
+   "origin": "dfiq",
+   "name": "What items are in startup folders?",
+   "description": "",
+   "tags": [
+    "Windows"
+   ],
+   "evidence": [
+    "sysmon",
+    "autoruns",
+    "files"
+   ],
+   "attack": [
+    "T1547.001"
+   ],
+   "ruleTags": [],
+   "searches": [
+    {
+     "source": "events",
+     "label": "files written to startup folders",
+     "filter": {
+      "logic": "or",
+      "conditions": [
+       {
+        "field": "targetFilename",
+        "op": "contains",
+        "value": "\\Start Menu\\Programs\\Startup"
+       },
+       {
+        "field": "path",
+        "op": "contains",
+        "value": "\\Start Menu\\Programs\\Startup"
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q1067",
+   "origin": "dfiq",
+   "name": "What system services are installed?",
+   "description": "",
+   "tags": [
+    "Windows",
+    "Linux",
+    "macOS"
+   ],
+   "evidence": [
+    "system",
+    "security",
+    "services"
+   ],
+   "attack": [
+    "T1543.003"
+   ],
+   "ruleTags": [
+    "service"
+   ],
+   "searches": [
+    {
+     "source": "events",
+     "label": "services installed (7045, 4697) and the service list",
+     "filter": {
+      "logic": "or",
+      "conditions": [
+       {
+        "field": "eventId",
+        "op": "in",
+        "value": [
+         7045,
+         4697
+        ]
+       },
+       {
+        "field": "artifactType",
+        "op": "eq",
+        "value": "service"
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q1068",
+   "origin": "dfiq",
+   "name": "When were system services last modified?",
+   "description": "",
+   "tags": [
+    "Windows",
+    "Linux",
+    "macOS"
+   ],
+   "evidence": [
+    "system",
+    "sysmon"
+   ],
+   "attack": [
+    "T1543.003"
+   ],
+   "ruleTags": [
+    "service"
+   ],
+   "searches": [
+    {
+     "source": "events",
+     "label": "service start types changed (7040) and service keys written",
+     "filter": {
+      "logic": "or",
+      "conditions": [
+       {
+        "field": "eventId",
+        "op": "eq",
+        "value": 7040
+       },
+       {
+        "field": "targetObject",
+        "op": "contains",
+        "value": "\\CurrentControlSet\\Services\\"
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q1036",
+   "origin": "dfiq",
+   "name": "Have there been any executions of PsExec?",
+   "description": "PsExec is a command-line tool that allows you to execute commands on remote computers. It is part of the Sysinternals suite of tools, which are a collection of free and open-source utilities for Windows system administration. It works by establishing a remote connection to the target computer and then executing the specified command. The command can be anything that you would normally run on a local computer, such as a batch file, a PowerShell script, or a simple command-line instruction.",
+   "tags": [
+    "Windows"
+   ],
+   "evidence": [
+    "sysmon",
+    "security",
+    "execution"
+   ],
+   "attack": [
+    "T1569.002",
+    "T1021.002"
+   ],
+   "ruleTags": [
+    "lateral-movement"
+   ],
+   "searches": [
+    {
+     "source": "events",
+     "label": "PsExec run",
+     "filter": {
+      "logic": "or",
+      "conditions": [
+       {
+        "field": "image",
+        "op": "contains_any",
+        "value": [
+         "psexec.exe",
+         "psexec64.exe",
+         "paexec"
+        ]
+       },
+       {
+        "field": "processName",
+        "op": "contains_any",
+        "value": [
+         "psexec.exe",
+         "psexec64.exe",
+         "paexec"
+        ]
+       },
+       {
+        "field": "path",
+        "op": "contains_any",
+        "value": [
+         "psexec.exe",
+         "psexec64.exe"
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": [
+    {
+     "id": "Q1036.10",
+     "name": "Examine Windows Prefetch for evidence of PsExec usage",
+     "summary": "Parse Windows Prefetch files and look for PsExec.",
+     "covered": [
+      "Executions of PsExec on Windows systems with Prefetch enabled."
+     ],
+     "notCovered": [
+      "Systems where the Prefetch service has been disabled.",
+      "There is a maximum number of `.pf` allowed by Windows (the number varies by Windows version). If too many other Prefetch files were created, the PsExec Prefetch file may have been deleted, and thus will not be parsed.",
+      "Instances when the PsExec executable has been renamed.",
+      "Non-Windows systems, as the Prefetch service is Windows-only."
+     ]
+    },
+    {
+     "id": "Q1036.11",
+     "name": "Examine Windows Event Logs for PsExec executions",
+     "summary": "Parse the Windows Security Event Log and look for PsExec processes being created.",
+     "covered": [
+      "Executions of PsExec on Windows systems with logging enabled."
+     ],
+     "notCovered": [
+      "Many factors can impact log retention; if the event log containing the relevant event has been deleted, it won't be found by this approach.",
+      "Instances when the PsExec executable has been renamed."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "Q1037",
+   "origin": "dfiq",
+   "name": "Have there been any executions of PsExeSrv?",
+   "description": "PsExec is a command-line tool that allows you to execute commands on remote computers. It is part of the Sysinternals suite of tools, which are a collection of free and open-source utilities for Windows system administration. It works by establishing a remote connection to the target computer and then executing the specified command. In order to do this, it copies an executable to the target system and installs a service to run that executable.",
+   "tags": [
+    "Windows"
+   ],
+   "evidence": [
+    "system",
+    "security",
+    "sysmon",
+    "execution"
+   ],
+   "attack": [
+    "T1569.002",
+    "T1021.002"
+   ],
+   "ruleTags": [
+    "lateral-movement"
+   ],
+   "searches": [
+    {
+     "source": "events",
+     "label": "PSEXESVC installed or run",
+     "filter": {
+      "logic": "or",
+      "conditions": [
+       {
+        "field": "serviceName",
+        "op": "contains",
+        "value": "PSEXESVC"
+       },
+       {
+        "field": "image",
+        "op": "contains",
+        "value": "psexesvc"
+       },
+       {
+        "field": "processName",
+        "op": "contains",
+        "value": "psexesvc"
+       },
+       {
+        "field": "path",
+        "op": "contains",
+        "value": "psexesvc"
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": [
+    {
+     "id": "Q1037.10",
+     "name": "Examine Windows Prefetch for evidence of PsExeSvc",
+     "summary": "Parse Windows Prefetch files and look for PsExeSvc.",
+     "covered": [
+      "Executions of PsExeSvc on Windows systems with Prefetch enabled."
+     ],
+     "notCovered": [
+      "Systems where the Prefetch service has been disabled.",
+      "There is a maximum number of `.pf` allowed by Windows (the number varies by Windows version). If too many other Prefetch files were created, the PsExec Prefetch file may have been deleted, and thus will not be parsed.",
+      "Instances when the PsExeSvc executable has been renamed.",
+      "Non-Windows systems, as the Prefetch service is Windows-only."
+     ]
+    },
+    {
+     "id": "Q1037.11",
+     "name": "Examine Windows Event Logs for PsExeSvc executions",
+     "summary": "Parse the Windows Security Event Log and look for PsExeSvc processes being created.",
+     "covered": [
+      "Executions of PsExeSvc on Windows systems with logging enabled."
+     ],
+     "notCovered": [
+      "Many factors can impact log retention; if the event log containing the relevant event has been deleted, it won't be found by this approach.",
+      "Instances when the PsExeSvc executable has been renamed."
+     ]
+    },
+    {
+     "id": "Q1037.12",
+     "name": "Examine Windows Event Logs for PsExeSvc Service Installations",
+     "summary": "Parse the Windows Security Event Log and look for the PsExeSvc service being installed.",
+     "covered": [
+      "Installations of the PsExeSvc Service on Windows systems with logging enabled."
+     ],
+     "notCovered": [
+      "Many factors can impact log retention; if the event log containing the relevant event has been deleted, it won't be found by this approach.",
+      "Instances when the PsExeSvc service has been renamed."
+     ]
+    }
+   ]
+  },
+  {
+   "id": "Q0001",
+   "origin": "remn",
+   "name": "What is the earliest activity tied to the attacker?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "security",
+    "sysmon",
+    "entra-signin",
+    "m365-audit",
+    "mail"
+   ],
+   "attack": [],
+   "ruleTags": [],
+   "searches": [],
+   "note": "The earliest finding of medium severity or more that is not a false positive is a start, not the answer; read back from it.",
+   "derived": "first-activity",
+   "approaches": []
+  },
+  {
+   "id": "Q0002",
+   "origin": "remn",
+   "name": "How did the attacker get in (phishing, a valid account, an exposed service)?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "mail",
+    "security",
+    "entra-signin",
+    "rdp"
+   ],
+   "attack": [
+    "T1566",
+    "T1078",
+    "T1133",
+    "T1190"
+   ],
+   "ruleTags": [
+    "initial-access",
+    "phishing"
+   ],
+   "searches": [
+    {
+     "source": "events",
+     "label": "remote logons (types 3 and 10)",
+     "filter": {
+      "conditions": [
+       {
+        "field": "eventId",
+        "op": "eq",
+        "value": 4624
+       },
+       {
+        "field": "logonType",
+        "op": "in",
+        "value": [
+         3,
+         10
+        ]
+       }
+      ],
+      "sort": {
+       "field": "ts",
+       "dir": "asc"
+      }
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q0003",
+   "origin": "remn",
+   "name": "Do the logs reach back to before the first attacker activity?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "security",
+    "system",
+    "sysmon",
+    "entra-signin",
+    "m365-audit"
+   ],
+   "attack": [],
+   "ruleTags": [],
+   "searches": [],
+   "note": "A log that starts after the first finding was overwritten or not collected; the first activity may be earlier than the evidence shows.",
+   "derived": "log-reach",
+   "approaches": []
+  },
+  {
+   "id": "Q0004",
+   "origin": "remn",
+   "name": "What is the latest activity tied to the attacker?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "security",
+    "sysmon",
+    "entra-signin",
+    "m365-audit",
+    "mail"
+   ],
+   "attack": [],
+   "ruleTags": [],
+   "searches": [],
+   "derived": "last-activity",
+   "approaches": []
+  },
+  {
+   "id": "Q0005",
+   "origin": "remn",
+   "name": "Were the attacker's accounts disabled or their passwords reset, and did the activity stop after that?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "security",
+    "m365-directory"
+   ],
+   "attack": [
+    "T1531"
+   ],
+   "ruleTags": [],
+   "searches": [
+    {
+     "source": "events",
+     "label": "accounts disabled, reset or deleted",
+     "filter": {
+      "logic": "or",
+      "conditions": [
+       {
+        "field": "eventId",
+        "op": "in",
+        "value": [
+         4723,
+         4724,
+         4725,
+         4726
+        ]
+       },
+       {
+        "field": "operation",
+        "op": "in",
+        "value": [
+         "Reset user password.",
+         "Disable account.",
+         "Delete user.",
+         "Revoke user sessions."
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q0006",
+   "origin": "remn",
+   "name": "Is there persistence that would outlive the containment?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "system",
+    "security",
+    "sysmon",
+    "autoruns",
+    "services",
+    "tasks",
+    "m365-audit"
+   ],
+   "attack": [
+    "T1543.003",
+    "T1053.005",
+    "T1547.001",
+    "T1136",
+    "T1098"
+   ],
+   "ruleTags": [
+    "persistence"
+   ],
+   "searches": [],
+   "approaches": []
+  },
+  {
+   "id": "Q0007",
+   "origin": "remn",
+   "name": "Which hosts and accounts did the attacker touch?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "security",
+    "sysmon",
+    "entra-signin",
+    "m365-audit"
+   ],
+   "attack": [],
+   "ruleTags": [
+    "lateral-movement"
+   ],
+   "searches": [],
+   "note": "The Stories page groups the records of one person or host in one intrusion; each story names its hosts and accounts.",
+   "approaches": []
+  },
+  {
+   "id": "Q0008",
+   "origin": "remn",
+   "name": "Are there holes in the logs during the attack window?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "security",
+    "system",
+    "sysmon",
+    "entra-signin",
+    "m365-audit"
+   ],
+   "attack": [
+    "T1070.001"
+   ],
+   "ruleTags": [
+    "log-tampering"
+   ],
+   "searches": [],
+   "derived": "evidence-gaps",
+   "approaches": []
+  },
+  {
+   "id": "Q0009",
+   "origin": "remn",
+   "name": "Were there successful sign-ins from unexpected countries, addresses or clients?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "entra-signin",
+    "m365-audit"
+   ],
+   "attack": [
+    "T1078.004"
+   ],
+   "ruleTags": [
+    "sign-in",
+    "geo"
+   ],
+   "searches": [
+    {
+     "source": "events",
+     "label": "successful sign-ins",
+     "filter": {
+      "logic": "or",
+      "conditions": [
+       {
+        "field": "operation",
+        "op": "in",
+        "value": [
+         "UserLoggedIn"
+        ]
+       },
+       {
+        "field": "channel",
+        "op": "eq",
+        "value": "Entra SignIn"
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q0010",
+   "origin": "remn",
+   "name": "Was MFA bypassed or changed, or a new authentication method registered?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "m365-directory",
+    "entra-signin"
+   ],
+   "attack": [
+    "T1098.005",
+    "T1556.006",
+    "T1621"
+   ],
+   "ruleTags": [
+    "mfa"
+   ],
+   "searches": [
+    {
+     "source": "events",
+     "label": "authentication methods changed",
+     "filter": {
+      "conditions": [
+       {
+        "field": "operation",
+        "op": "contains_any",
+        "value": [
+         "security info",
+         "StrongAuthentication",
+         "Update user.",
+         "authentication method"
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q0011",
+   "origin": "remn",
+   "name": "Was the account the target of password spraying or brute force?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "entra-signin",
+    "m365-audit",
+    "security"
+   ],
+   "attack": [
+    "T1110.001",
+    "T1110.003"
+   ],
+   "ruleTags": [
+    "brute-force",
+    "spraying"
+   ],
+   "searches": [
+    {
+     "source": "events",
+     "label": "failed sign-ins",
+     "filter": {
+      "logic": "or",
+      "conditions": [
+       {
+        "field": "operation",
+        "op": "eq",
+        "value": "UserLoginFailed"
+       },
+       {
+        "field": "description",
+        "op": "eq",
+        "value": "Sign-in failure"
+       },
+       {
+        "field": "eventId",
+        "op": "eq",
+        "value": 4625
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q0012",
+   "origin": "remn",
+   "name": "Were inbox rules created or changed to forward, hide or delete mail?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "m365-exchange"
+   ],
+   "attack": [
+    "T1564.008"
+   ],
+   "ruleTags": [
+    "inbox-rule"
+   ],
+   "searches": [
+    {
+     "source": "events",
+     "label": "inbox rules",
+     "filter": {
+      "conditions": [
+       {
+        "field": "operation",
+        "op": "in",
+        "value": [
+         "New-InboxRule",
+         "Set-InboxRule",
+         "Remove-InboxRule",
+         "Enable-InboxRule",
+         "UpdateInboxRules"
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q0013",
+   "origin": "remn",
+   "name": "Was mail forwarded out of the organisation (mailbox forwarding, transport rules)?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "m365-exchange"
+   ],
+   "attack": [
+    "T1114.003"
+   ],
+   "ruleTags": [
+    "forwarding",
+    "transport-rule"
+   ],
+   "searches": [
+    {
+     "source": "events",
+     "label": "forwarding and transport rules",
+     "filter": {
+      "conditions": [
+       {
+        "field": "operation",
+        "op": "in",
+        "value": [
+         "Set-Mailbox",
+         "New-TransportRule",
+         "Set-TransportRule"
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q0014",
+   "origin": "remn",
+   "name": "Were applications consented to, or credentials added to an application or delegated access granted?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "m365-directory",
+    "m365-exchange"
+   ],
+   "attack": [
+    "T1528",
+    "T1098.001",
+    "T1098.002",
+    "T1098.003"
+   ],
+   "ruleTags": [
+    "oauth",
+    "consent",
+    "delegation"
+   ],
+   "searches": [
+    {
+     "source": "events",
+     "label": "consents, application credentials and mailbox permissions",
+     "filter": {
+      "conditions": [
+       {
+        "field": "operation",
+        "op": "in",
+        "value": [
+         "Consent to application.",
+         "Add service principal credentials.",
+         "Add application.",
+         "Add-MailboxPermission",
+         "Add-RecipientPermission",
+         "Add-MailboxFolderPermission"
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q0015",
+   "origin": "remn",
+   "name": "Which mail items did the attacker access?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "m365-exchange"
+   ],
+   "attack": [
+    "T1114.002"
+   ],
+   "ruleTags": [
+    "mailbox-access"
+   ],
+   "searches": [
+    {
+     "source": "events",
+     "label": "MailItemsAccessed",
+     "filter": {
+      "conditions": [
+       {
+        "field": "operation",
+        "op": "eq",
+        "value": "MailItemsAccessed"
+       }
+      ]
+     }
+    }
+   ],
+   "note": "MailItemsAccessed needs Audit (Premium) or the E5 licence and is throttled after about 1,000 records in 24 hours; the evidence gaps say when it was.",
+   "approaches": []
+  },
+  {
+   "id": "Q0016",
+   "origin": "remn",
+   "name": "Were mailboxes searched or exported?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "m365-audit"
+   ],
+   "attack": [
+    "T1114.002",
+    "T1213"
+   ],
+   "ruleTags": [
+    "compliance"
+   ],
+   "searches": [
+    {
+     "source": "events",
+     "label": "content searches and exports",
+     "filter": {
+      "conditions": [
+       {
+        "field": "operation",
+        "op": "in",
+        "value": [
+         "New-ComplianceSearch",
+         "Start-ComplianceSearch",
+         "New-ComplianceSearchAction",
+         "SearchQueryInitiatedExchange",
+         "New-MailboxExportRequest"
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q0017",
+   "origin": "remn",
+   "name": "Were files downloaded from SharePoint or OneDrive?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "m365-files"
+   ],
+   "attack": [
+    "T1530"
+   ],
+   "ruleTags": [
+    "sharepoint",
+    "exfiltration"
+   ],
+   "searches": [
+    {
+     "source": "events",
+     "label": "files downloaded or shared",
+     "filter": {
+      "conditions": [
+       {
+        "field": "operation",
+        "op": "in",
+        "value": [
+         "FileDownloaded",
+         "FileSyncDownloadedFull",
+         "AnonymousLinkCreated",
+         "SharingSet",
+         "SharingInvitationCreated"
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q0018",
+   "origin": "remn",
+   "name": "Were mails sent from the account by the attacker?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "m365-exchange",
+    "mail"
+   ],
+   "attack": [
+    "T1534"
+   ],
+   "ruleTags": [],
+   "searches": [
+    {
+     "source": "events",
+     "label": "Send, SendAs and SendOnBehalf",
+     "filter": {
+      "conditions": [
+       {
+        "field": "operation",
+        "op": "in",
+        "value": [
+         "Send",
+         "SendAs",
+         "SendOnBehalf"
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "source": "mails",
+     "label": "sent mails",
+     "filter": {
+      "conditions": [
+       {
+        "field": "folder",
+        "op": "contains",
+        "value": "sent"
+       }
+      ]
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q0019",
+   "origin": "remn",
+   "name": "Were payment or bank detail changes asked for, in either direction?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "mail"
+   ],
+   "attack": [
+    "T1657"
+   ],
+   "ruleTags": [
+    "invoice",
+    "fraud"
+   ],
+   "searches": [
+    {
+     "source": "mails",
+     "label": "mails about payment or bank details",
+     "filter": {
+      "text": "bank"
+     }
+    }
+   ],
+   "approaches": []
+  },
+  {
+   "id": "Q0020",
+   "origin": "remn",
+   "name": "Did the same campaign reach other people in the organisation?",
+   "description": "",
+   "tags": [],
+   "evidence": [
+    "mail"
+   ],
+   "attack": [
+    "T1566"
+   ],
+   "ruleTags": [
+    "campaign",
+    "phishing"
+   ],
+   "searches": [
+    {
+     "source": "mails",
+     "label": "mails in a campaign",
+     "filter": {
+      "conditions": [
+       {
+        "field": "campaignSize",
+        "op": "gt",
+        "value": 1
+       }
+      ],
+      "sort": {
+       "field": "date",
+       "dir": "asc"
+      }
+     }
+    }
+   ],
+   "approaches": []
+  }
+ ],
+ "skipped": [
+  {
+   "id": "Q1003",
+   "name": "What files were copied from a computer to a USB device?"
+  },
+  {
+   "id": "Q1004",
+   "name": "What screenshots were taken on a computer?"
+  },
+  {
+   "id": "Q1011",
+   "name": "What files were sent or received by a chat application?"
+  },
+  {
+   "id": "Q1021",
+   "name": "What Chrome extensions are installed?"
+  },
+  {
+   "id": "Q1022",
+   "name": "What actions did a Chrome extension perform?"
+  },
+  {
+   "id": "Q1023",
+   "name": "Is a given Chrome extension associated with a given domain?"
+  },
+  {
+   "id": "Q1024",
+   "name": "Was an Incognito/Private browser session used?"
+  },
+  {
+   "id": "Q1025",
+   "name": "What external accounts has the actor used in their web browser?"
+  },
+  {
+   "id": "Q1032",
+   "name": "What actions were taken in an Incognito (or \"private\") browser session?"
+  },
+  {
+   "id": "Q1034",
+   "name": "Was content copied from a file?"
+  },
+  {
+   "id": "Q1035",
+   "name": "Were any copies made of sensitive files?"
+  },
+  {
+   "id": "Q1052",
+   "name": "What browser extensions (non-Chrome) are installed?"
+  },
+  {
+   "id": "Q1053",
+   "name": "What Launch Agents are configured?"
+  },
+  {
+   "id": "Q1054",
+   "name": "What Launch Daemons are configured?"
+  },
+  {
+   "id": "Q1056",
+   "name": "What login hooks are configured?"
+  },
+  {
+   "id": "Q1060",
+   "name": "What AT jobs are configured?"
+  },
+  {
+   "id": "Q1062",
+   "name": "What cron jobs are configured?"
+  },
+  {
+   "id": "Q1063",
+   "name": "What periodic scripts are configured?"
+  },
+  {
+   "id": "Q1064",
+   "name": "What systemd timers are configured?"
+  },
+  {
+   "id": "Q1069",
+   "name": "Are there any indications of dylib hijacking?"
+  },
+  {
+   "id": "Q1070",
+   "name": "Are there any indications of dylib proxying?"
+  },
+  {
+   "id": "Q1071",
+   "name": "Are there any indications of dynamic linker hijacking?"
+  },
+  {
+   "id": "Q1072",
+   "name": "Did Chrome's DNS Prefetching cause a DNS query?"
+  },
+  {
+   "id": "Q1076",
+   "name": "Were the files screenshots?"
+  },
+  {
+   "id": "Q1077",
+   "name": "Were there bulk downloads from Google Drive?"
+  },
+  {
+   "id": "Q1078",
+   "name": "Were the files copies?"
+  },
+  {
+   "id": "Q1081",
+   "name": "Does the user have a recently provisioned host?"
+  },
+  {
+   "id": "Q1082",
+   "name": "Were any files sent via AirDrop?"
+  },
+  {
+   "id": "Q1083",
+   "name": "Were any files sent via Bluetooth?"
+  },
+  {
+   "id": "Q1084",
+   "name": "What data was uploaded to a website via a web browser?"
+  }
+ ]
+}

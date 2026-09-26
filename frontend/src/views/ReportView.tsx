@@ -28,6 +28,9 @@ import { loadReportClaims, type ReportClaims } from '../data/claims'
 import { buildStories, loadStories, loadStoryNotes, storiesStaleness, storyInputs, storyRowIds, type StoryNotes, type StoryResult } from '../data/stories'
 import { loadStoryDecisions, storiesForReport, type StoryDecisions } from '../data/storyDecisions'
 import type { Rule } from '../rules/engine'
+import { loadAnswers, loadScenarioChoice, questionsForReport } from '../data/questions/answers'
+import { loadEvidenceProfile, type EvidenceProfile } from '../data/questions/coverage'
+import type { QuestionAnswer } from '../db/schema'
 
 const ORDER = ['critical', 'high', 'medium', 'low', 'info']
 
@@ -71,6 +74,11 @@ export function ReportView() {
   const [claims, setClaims] = useState<ReportClaims | undefined>(undefined)
   const measureSources = useStore((s) => s.meta?.measures)
   const [notes, setNotes] = useState<CaseNote[]>([])
+  /** the investigative scenarios chosen for the case, the answers, and what evidence the case holds (data/questions) */
+  const [questionScenarios, setQuestionScenarios] = useState<string[]>([])
+  const [answers, setAnswers] = useState<Map<string, QuestionAnswer>>(new Map())
+  const [profile, setProfile] = useState<EvidenceProfile | null>(null)
+  const mailCount = useStore((s) => s.counts.mails)
   const [summary, setSummary] = useState<string>('')
   /** who wrote the summary last: the model's draft is labelled in the report until the analyst edits it */
   const [summaryBy, setSummaryBy] = useState<'analyst' | 'ai' | undefined>(undefined)
@@ -118,6 +126,8 @@ export function ReportView() {
     db.kv.get(`report-summary-by-${kase.id}`).then((k) => setSummaryBy((k?.value as 'analyst' | 'ai' | undefined) ?? undefined))
     db.kv.get(`report-summary-at-${kase.id}`).then((k) => setSummaryAt((k?.value as number | undefined) ?? undefined))
     listNotes(kase.id).then(setNotes)
+    loadScenarioChoice(kase.id).then(setQuestionScenarios)
+    loadAnswers(kase.id).then(setAnswers)
     loadChains(kase.id).then((r) => {
       setChains(r?.chains ?? [])
       setCoverageWarnings(chainCoverageWarnings(r?.stats))
@@ -132,6 +142,13 @@ export function ReportView() {
     reportRelationships(kase.id).then(setRelationships)
     loadReportSettings(kase.id).then(setSettings)
   }, [kase, rulesVersion])
+  useEffect(() => {
+    if (!kase?.id || !questionScenarios.length) return
+    loadEvidenceProfile(getSource(kase), mailCount)
+      .then(setProfile)
+      .catch(() => setProfile(null))
+  }, [kase, questionScenarios.length, mailCount])
+  const questions = useMemo(() => questionsForReport(questionScenarios, answers, profile), [questionScenarios, answers, profile])
   const selection = useMemo(() => (settings ? selectForReport(findings, chains, reviews, settings) : { findings: [], chains: [] }), [findings, chains, reviews, settings])
   const printedStories = useMemo(
     () =>
@@ -298,6 +315,7 @@ export function ReportView() {
     decidedStories: printedStories.decided,
     storiesDismissed: printedStories.dismissed,
     storyDecisionsOrphaned: printedStories.decisionsOrphaned,
+    questions,
   })
   const html = (generatedAt?: number) => buildReportHtml(reportData(generatedAt))
   const fileBase = kase.name.replace(/[^a-z0-9_-]+/gi, '_')
@@ -351,6 +369,7 @@ export function ReportView() {
             {printedStories.stories.length} stor{printedStories.stories.length === 1 ? 'y' : 'ies'} · {selection.chains.length} chain(s) · {incidents.length} incident(s) · {shown.length} finding(s)
             from {settings.minSeverity} up · {iocs.length} flagged IOC(s) · {evidence.length} evidence file(s)
             {undecided ? ` · ${fmtNum(undecided)} item(s) not yet reviewed` : ' · everything reviewed'}
+            {questions ? ` · ${fmtNum(questions.counts.open)} of ${fmtNum(questions.counts.open + questions.counts.answered + questions.counts.cannot)} question(s) open` : ''}
           </span>
         </div>
         <span className="spacer" />

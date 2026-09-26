@@ -465,6 +465,39 @@ export interface CaseNote {
   link?: { source: 'events' | 'mails' | 'findings' | 'chains' | 'stories'; id: number | string; label?: string }
 }
 
+/**
+ * What the analyst cites for an answer: an event or mail row, or a finding. A row is held by its
+ * record key (data/recordKeys.ts), which removing and adding the evidence again, or importing the
+ * case elsewhere, leaves unchanged; the row id beside it is where it was last seen, and is looked
+ * up again from the key when it no longer names that record (data/questions/answers.ts).
+ */
+export interface QuestionCitation {
+  source: 'events' | 'mails' | 'findings'
+  /** a row's id when it was cited (renumbered by a bundle import, stale after re-ingest) */
+  rowId?: number
+  /** a row's record key: file SHA-256 and place in the file */
+  recordKey?: string
+  /** a finding's key as its decision is archived (data/findingAnchors.ts reviewKey) */
+  key?: string
+  /** what the report prints: the file and record, or the finding's title */
+  label: string
+  ts?: number | null
+  addedAt: number
+}
+
+/** The analyst's answer to one investigative question of the case (a DFIQ Conclusion). */
+export interface QuestionAnswer {
+  id?: number
+  caseId: number
+  /** the DFIQ id (Q1074) or REMN's own (Q0001) */
+  questionId: string
+  status: 'open' | 'answered' | 'cannot'
+  text: string
+  citations: QuestionCitation[]
+  createdAt: number
+  updatedAt: number
+}
+
 export class RemnDB extends Dexie {
   cases!: Table<Case, number>
   evidence!: Table<Evidence, number>
@@ -483,6 +516,7 @@ export class RemnDB extends Dexie {
   kv!: Table<KV, string>
   caseNotes!: Table<CaseNote, number>
   rowMarks!: Table<RowMark, number>
+  questionAnswers!: Table<QuestionAnswer, number>
 
   constructor(name = 'remn') {
     super(name)
@@ -534,6 +568,9 @@ export class RemnDB extends Dexie {
           kv: tx.table('kv'),
         }),
       )
+    // A new table only, for the answers to the case's investigative questions: nothing existing is
+    // rewritten, so an existing case opens without an upgrade function.
+    this.version(8).stores({ questionAnswers: '++id, caseId, [caseId+questionId]' })
   }
 }
 
@@ -581,6 +618,8 @@ export const CASE_KV_KEYS = (caseId: number) =>
     'facets-capped',
     // the analyst's waivers and the time the report was issued as final
     'report-final',
+    // the investigative scenarios chosen for the case (data/questions/answers.ts); the answers are rows of questionAnswers
+    'question-scenarios',
   ].map((p) => `${p}-${caseId}`)
 
 /** kv keys of one case that carry an extra suffix after the case id (one record per hypothesis). */
@@ -591,10 +630,23 @@ export const CASE_KV_PREFIXES_WITH_SUFFIX = (caseId: number) => [`relationship-h
  * deleteCaseData and a table added to only one of them would be left behind on delete.
  */
 export const CASE_TABLES = (db: RemnDB): Table<{ caseId: number }, number>[] =>
-  [db.events, db.mails, db.mailBodies, db.attachments, db.urls, db.findings, db.iocs, db.facets, db.aiSessions, db.aiLedger, db.savedSearches, db.evidence, db.caseNotes, db.rowMarks] as Table<
-    { caseId: number },
-    number
-  >[]
+  [
+    db.events,
+    db.mails,
+    db.mailBodies,
+    db.attachments,
+    db.urls,
+    db.findings,
+    db.iocs,
+    db.facets,
+    db.aiSessions,
+    db.aiLedger,
+    db.savedSearches,
+    db.evidence,
+    db.caseNotes,
+    db.rowMarks,
+    db.questionAnswers,
+  ] as Table<{ caseId: number }, number>[]
 
 export async function deleteCaseData(db: RemnDB, caseId: number): Promise<void> {
   const tables = CASE_TABLES(db)

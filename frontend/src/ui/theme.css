@@ -3274,3 +3274,99 @@ label.field > span {
   letter-spacing: 0.05em;
   margin-right: 6px;
 }
+
+/* ---------- questions (views/QuestionsView.tsx) ---------- */
+.qs-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 380px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+.qs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: calc(100vh - 170px);
+  overflow: auto;
+}
+.qs-scenario-h {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-1);
+  padding: 2px 4px;
+}
+.qs-facet {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  padding: 6px 4px 2px;
+}
+.qs-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--fg-2);
+  padding: 4px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.qs-item:hover {
+  background: var(--surface-2);
+}
+.qs-item.active {
+  border-color: var(--accent-line);
+  background: var(--accent-dim);
+  color: var(--fg-1);
+}
+.qs-item .qs-name {
+  flex: 1;
+  min-width: 0;
+}
+.qs-gap {
+  font-size: 10px;
+  color: var(--sev-medium);
+  white-space: nowrap;
+}
+.qs-scenarios {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 8px 16px;
+}
+.qs-scenario-pick {
+  align-items: flex-start;
+}
+.qs-desc {
+  display: block;
+}
+.qs-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg-1);
+}
+.qs-sec h3 {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  margin: 0 0 6px;
+}
+.qs-cites {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+@media (max-width: 900px) {
+  .qs-layout {
+    grid-template-columns: 1fr;
+  }
+}

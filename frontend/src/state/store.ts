@@ -8,7 +8,8 @@ export interface EntityRef {
   value: string
 }
 
-export type View = 'home' | 'dashboard' | 'evidence' | 'events' | 'mails' | 'findings' | 'stories' | 'graph' | 'timeline' | 'iocs' | 'ai' | 'review' | 'case' | 'report' | 'rules' | 'settings'
+export type View =
+  'home' | 'dashboard' | 'evidence' | 'events' | 'mails' | 'findings' | 'stories' | 'graph' | 'timeline' | 'iocs' | 'ai' | 'review' | 'case' | 'questions' | 'report' | 'rules' | 'settings'
 
 export interface ConsoleLine {
   id: number
@@ -75,6 +76,9 @@ interface State {
   /** finding to open when the Findings page mounts (a citation in an AI answer) */
   focusFinding: number | null
   setFocusFinding: (id: number | null) => void
+  /** the investigative question the analyst is working on (Questions page): rows opened from its search are cited for it */
+  activeQuestion: string | null
+  setActiveQuestion: (id: string | null) => void
   aiPrompt: string | null
   setAiPrompt: (p: string | null) => void
   counts: { events: number; mails: number; findings: number; iocs: number; evidence: number }
@@ -143,6 +147,8 @@ export const useStore = create<State>((set) => ({
   setFocusChain: (focusChain) => set({ focusChain }),
   focusFinding: null,
   setFocusFinding: (focusFinding) => set({ focusFinding }),
+  activeQuestion: null,
+  setActiveQuestion: (activeQuestion) => set({ activeQuestion }),
   aiPrompt: null,
   setAiPrompt: (aiPrompt) => set({ aiPrompt }),
   counts: { events: 0, mails: 0, findings: 0, iocs: 0, evidence: 0 },

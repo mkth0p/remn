@@ -1,0 +1,611 @@
+# REMN's layer over DFIQ (https://dfiq.org), read by tools/dfiq_import.py.
+#
+# The importer takes the DFIQ scenarios listed under `include`, keeps the questions this file gives
+# REMN hints for (the evidence that can answer them, a search on the Events or Mails page, ATT&CK
+# techniques and rule tags that find the related rules), drops the rest (macOS and Linux questions,
+# browser extensions, screenshots, AirDrop: nothing REMN reads), and adds REMN's own scenarios.
+# REMN's own ids start with 0, the range DFIQ keeps for private content.
+#
+# evidence: what a case can hold, matched against the channel and category facets of its events
+#   (case-insensitive) and against its mail count. A question is covered by this case's evidence when
+#   the case holds any one of the evidence it lists.
+# search:   a filter in the Events or Mails page's own language (frontend/src/rules/filter.ts).
+
+include:
+  scenarios: [S1001, S1003, S1007, S1008]
+
+evidence:
+  security: { label: Security log, channels: [Security] }
+  system: { label: System log, channels: [System] }
+  application: { label: Application log, channels: [Application] }
+  sysmon: { label: Sysmon log, channels: [Microsoft-Windows-Sysmon/Operational] }
+  powershell:
+    label: PowerShell logs or history
+    channels: [Microsoft-Windows-PowerShell/Operational, Windows PowerShell, PowerShellCore/Operational]
+    categories: ['collection:powershell-history']
+  task-scheduler: { label: Task Scheduler log, channels: [Microsoft-Windows-TaskScheduler/Operational] }
+  defender: { label: Defender log, channels: [Microsoft-Windows-Windows Defender/Operational], categories: ['collection:defender'] }
+  print: { label: Print Service log, channels: [Microsoft-Windows-PrintService/Operational] }
+  dns-client: { label: DNS Client log, channels: [Microsoft-Windows-DNS-Client/Operational] }
+  rdp: { label: Remote Desktop logs, channelPrefixes: [Microsoft-Windows-TerminalServices-, Microsoft-Windows-RemoteDesktopServices-] }
+  smb: { label: SMB logs or sessions, channelPrefixes: [Microsoft-Windows-SMBServer/, Microsoft-Windows-SmbClient/], categories: ['collection:smb-session'] }
+  m365-audit: { label: Unified Audit Log, categoryPrefixes: ['M365 '] }
+  m365-exchange: { label: Exchange audit records, categories: [M365 Exchange] }
+  m365-files: { label: SharePoint and OneDrive audit records, categories: [M365 SharePoint, M365 OneDrive] }
+  m365-directory: { label: Entra directory audit records, categories: [M365 Entra] }
+  entra-signin: { label: Entra sign-in logs, channels: [Entra SignIn] }
+  mail: { label: mailboxes, mails: true }
+  browser: { label: browser history, categories: ['collection:browser-history', 'collection:browser-download'] }
+  files: { label: file system records (MFT, USN, LNK, jump lists), categories: ['collection:file', 'collection:shellbag'] }
+  execution:
+    label: execution artefacts (Prefetch, Amcache, ShimCache, BAM, UserAssist)
+    categories: ['collection:prefetch', 'collection:amcache', 'collection:shimcache', 'collection:bam', 'collection:userassist']
+  processes: { label: process list, categories: ['collection:process'] }
+  programs: { label: installed programs, categories: ['collection:program', 'collection:amcache'] }
+  autoruns: { label: autoruns and registry, categories: ['collection:autorun', 'collection:registry'] }
+  services: { label: service list, categories: ['collection:service'] }
+  tasks: { label: scheduled task list, categories: ['collection:task'] }
+  accounts: { label: user and group list, categories: ['collection:account'] }
+  network: { label: network connections and SRUM, categories: ['collection:connection', 'collection:sru', 'collection:smb-session'] }
+
+# Hints for the DFIQ questions REMN keeps. A DFIQ question without an entry here is not imported.
+questions:
+  # --- S1001 Data Exfiltration
+  Q1028:
+    evidence: [programs, execution, sysmon, security]
+    attack: [T1070.004]
+    ruleTags: [anti-forensics]
+    search:
+      source: events
+      label: known wiping and privacy tools run or installed
+      filter:
+        logic: or
+        conditions:
+          - { field: image, op: contains_any, value: [ccleaner, sdelete, bleachbit, eraser, privazer, wipe, timestomp] }
+          - { field: processName, op: contains_any, value: [ccleaner, sdelete, bleachbit, eraser, privazer, wipe, timestomp] }
+          - { field: path, op: contains_any, value: [ccleaner, sdelete, bleachbit, eraser, privazer, timestomp] }
+  Q1029:
+    evidence: [programs, execution, sysmon, security]
+    attack: [T1486]
+    search:
+      source: events
+      label: encryption tools run or installed
+      filter:
+        logic: or
+        conditions:
+          - { field: image, op: contains_any, value: [veracrypt, truecrypt, axcrypt, gpg.exe, gpg2.exe, cipher.exe, manage-bde] }
+          - { field: processName, op: contains_any, value: [veracrypt, truecrypt, axcrypt, gpg.exe, gpg2.exe, cipher.exe, manage-bde] }
+          - { field: path, op: contains_any, value: [veracrypt, truecrypt, axcrypt] }
+  Q1030:
+    evidence: [defender, system, sysmon, security]
+    attack: [T1562.001]
+    ruleTags: [defender, log-tampering]
+    note: Defender 5001 (real-time protection off), 5007 (configuration changed) and 5010/5012 (scanning off); System 7036/7040 show a security service stopped or its start type changed.
+    search:
+      source: events
+      label: Defender turned off or reconfigured
+      filter:
+        conditions:
+          - { field: channel, op: contains, value: Defender }
+          - { field: eventId, op: in, value: [5001, 5007, 5010, 5012, 5013] }
+  Q1033:
+    evidence: [powershell, sysmon, security]
+    attack: [T1070.003]
+    search:
+      source: events
+      label: PowerShell history cleared or turned off
+      filter:
+        logic: or
+        conditions:
+          - { field: commandLine, op: contains_any, value: [Clear-History, ConsoleHost_history, HistorySaveStyle, HistorySavePath] }
+          - { field: scriptBlockText, op: contains_any, value: [Clear-History, ConsoleHost_history, HistorySaveStyle, HistorySavePath] }
+  Q1074:
+    evidence: [security, system]
+    attack: [T1070.001]
+    ruleTags: [log-tampering, eventlog]
+    note: Security 1102 is written when the Security log is cleared; System 104 when any other log is. A log cleared after collection started shows neither.
+    search:
+      source: events
+      label: Security 1102 and System 104 (log cleared)
+      filter: { conditions: [{ field: eventId, op: in, value: [1102, 104] }] }
+  Q1001:
+    evidence: [browser]
+    attack: [T1105]
+    search:
+      source: events
+      label: browser downloads and history
+      filter: { conditions: [{ field: artifactType, op: in, value: [browser-download, browser-history] }] }
+  Q1005:
+    evidence: [files]
+    note: MFT and USN records name files that were deleted since; the file list of a collection names only what was there when it ran.
+    search:
+      source: events
+      label: file system records
+      filter: { conditions: [{ field: artifactType, op: eq, value: file }] }
+  Q1006:
+    evidence: [files]
+    search:
+      source: events
+      label: file system records
+      filter: { conditions: [{ field: artifactType, op: eq, value: file }] }
+  Q1017:
+    evidence: [sysmon, security, files, execution]
+    attack: [T1560.001]
+    ruleTags: [archive, collection]
+    search:
+      source: events
+      label: archivers run, or archives written
+      filter:
+        logic: or
+        conditions:
+          - { field: commandLine, op: contains_any, value: [7z.exe, 7za.exe, rar.exe, winrar, Compress-Archive, makecab, 'tar -c', 'tar.exe'] }
+          - { field: targetFilename, op: endswith, value: [.zip, .7z, .rar, .cab, .tar, .gz] }
+  Q1016:
+    evidence: [mail, m365-exchange]
+    attack: [T1048.003]
+    ruleTags: [exfiltration]
+    searches:
+      - source: mails
+        label: sent mails with attachments
+        filter:
+          conditions:
+            - { field: folder, op: contains, value: sent }
+            - { field: attachmentCount, op: gt, value: 0 }
+      - source: events
+        label: Exchange Send audit records
+        filter: { conditions: [{ field: operation, op: in, value: [Send, SendAs, SendOnBehalf] }] }
+  Q1075:
+    evidence: [mail]
+    note: Compare the recipient's address and display name with the sender's own, private addresses and earlier mail between them.
+  Q1079:
+    evidence: [mail]
+    note: The sender baseline (first contact, rare sender) is kept per mailbox; a recipient never written to before is a lead.
+  Q1080:
+    evidence: [mail]
+    search:
+      source: mails
+      label: mails with recipients
+      filter: { conditions: [{ field: recipientCount, op: gt, value: 0 }], sort: { field: recipientCount, dir: desc } }
+  Q1010:
+    evidence: [print]
+    note: The Print Service Operational log (event 307) is off by default; without it printing leaves no event.
+    search:
+      source: events
+      label: documents printed (Print Service 307)
+      filter:
+        conditions:
+          - { field: channel, op: eq, value: Microsoft-Windows-PrintService/Operational }
+          - { field: eventId, op: eq, value: 307 }
+  Q1007:
+    evidence: [m365-files, network]
+    attack: [T1567.002]
+    ruleTags: [exfiltration, sharepoint]
+    search:
+      source: events
+      label: files uploaded or synced to SharePoint and OneDrive
+      filter: { conditions: [{ field: operation, op: in, value: [FileUploaded, FileSyncUploadedFull, FileSyncUploadedPartial] }] }
+  Q1009:
+    evidence: [browser]
+    attack: [T1567.002]
+    search:
+      source: events
+      label: browser history
+      filter: { conditions: [{ field: artifactType, op: eq, value: browser-history }] }
+  Q1038:
+    evidence: [sysmon, security, powershell]
+    attack: [T1048, T1567]
+    ruleTags: [exfiltration]
+    search:
+      source: events
+      label: transfer tools on the command line
+      filter:
+        logic: or
+        conditions:
+          - { field: commandLine, op: contains_any, value: [rclone, curl, 'scp ', pscp, sftp, 'ftp -', 'bitsadmin /transfer', megacmd, '-Method Post', '-Method Put', 'Invoke-RestMethod'] }
+          - { field: scriptBlockText, op: contains_any, value: ['-Method Post', '-Method Put', 'UploadFile', 'UploadData'] }
+  Q1008:
+    evidence: [programs, application]
+    search:
+      source: events
+      label: installed programs and MSI installs
+      filter:
+        logic: or
+        conditions:
+          - { field: artifactType, op: in, value: [program, amcache] }
+          - { field: provider, op: eq, value: MsiInstaller }
+  # --- S1003 Suspicious DNS Query
+  Q1018:
+    evidence: [sysmon, dns-client]
+    attack: [T1071.004]
+    note: Sysmon event 22 names the process of each query; the DNS Client log (3008 and 3020) names the query but not always the process.
+    search:
+      source: events
+      label: Sysmon DNS queries (22)
+      filter:
+        conditions:
+          - { field: channel, op: eq, value: Microsoft-Windows-Sysmon/Operational }
+          - { field: eventId, op: eq, value: 22 }
+  Q1073:
+    evidence: [sysmon, files]
+    attack: [T1565.001]
+    search:
+      source: events
+      label: writes to the hosts file
+      filter:
+        logic: or
+        conditions:
+          - { field: targetFilename, op: endswith, value: '\drivers\etc\hosts' }
+          - { field: path, op: endswith, value: '\drivers\etc\hosts' }
+  Q1019:
+    evidence: [sysmon, security, execution, processes]
+    search:
+      source: events
+      label: browser processes
+      filter:
+        logic: or
+        conditions:
+          - { field: image, op: contains_any, value: [chrome.exe, msedge.exe, firefox.exe, iexplore.exe, brave.exe, opera.exe] }
+          - { field: processName, op: contains_any, value: [chrome.exe, msedge.exe, firefox.exe, iexplore.exe, brave.exe, opera.exe] }
+  Q1020:
+    evidence: [browser]
+    search:
+      source: events
+      label: browser history
+      filter: { conditions: [{ field: artifactType, op: eq, value: browser-history }] }
+  # --- S1007 Host Persistence Audit and S1008 Lateral Movement
+  Q1055:
+    evidence: [sysmon, autoruns]
+    attack: [T1037.001]
+    search:
+      source: events
+      label: UserInitMprLogonScript set
+      filter:
+        logic: or
+        conditions:
+          - { field: targetObject, op: contains, value: UserInitMprLogonScript }
+          - { field: commandLine, op: contains, value: UserInitMprLogonScript }
+  Q1057:
+    evidence: [sysmon, autoruns, files]
+    attack: [T1037.003]
+    search:
+      source: events
+      label: Group Policy logon scripts
+      filter:
+        logic: or
+        conditions:
+          - { field: targetObject, op: contains, value: '\Group Policy\Scripts' }
+          - { field: targetFilename, op: contains, value: '\scripts\logon' }
+  Q1058:
+    evidence: [security, m365-directory]
+    attack: [T1136.002, T1136.003]
+    ruleTags: [account]
+    note: 4720 on a domain controller creates a domain account; on another machine, a local one. Entra accounts are "Add user." in the directory audit.
+    search:
+      source: events
+      label: accounts created (4720, Add user.)
+      filter:
+        logic: or
+        conditions:
+          - { field: eventId, op: eq, value: 4720 }
+          - { field: operation, op: eq, value: Add user. }
+  Q1059:
+    evidence: [security, accounts]
+    attack: [T1136.001]
+    ruleTags: [account]
+    search:
+      source: events
+      label: accounts created (4720) and the user list
+      filter:
+        logic: or
+        conditions:
+          - { field: eventId, op: eq, value: 4720 }
+          - { field: artifactType, op: eq, value: account }
+  Q1061:
+    evidence: [security, task-scheduler, tasks]
+    attack: [T1053.005]
+    ruleTags: [scheduled-task]
+    note: Security 4698 needs object access auditing; the Task Scheduler log (106, 140, 141) is on by default on servers only.
+    search:
+      source: events
+      label: tasks registered or changed, and the task list
+      filter:
+        logic: or
+        conditions:
+          - { field: eventId, op: in, value: [4698, 4699, 4700, 4701, 4702] }
+          - { field: channel, op: eq, value: Microsoft-Windows-TaskScheduler/Operational }
+          - { field: artifactType, op: eq, value: task }
+  Q1065:
+    evidence: [sysmon, autoruns]
+    attack: [T1547.001]
+    search:
+      source: events
+      label: Run key writes and autoruns
+      filter:
+        logic: or
+        conditions:
+          - { field: targetObject, op: contains_any, value: ['\CurrentVersion\Run', '\CurrentVersion\Policies\Explorer\Run'] }
+          - { field: artifactType, op: eq, value: autorun }
+  Q1066:
+    evidence: [sysmon, autoruns, files]
+    attack: [T1547.001]
+    search:
+      source: events
+      label: files written to startup folders
+      filter:
+        logic: or
+        conditions:
+          - { field: targetFilename, op: contains, value: '\Start Menu\Programs\Startup' }
+          - { field: path, op: contains, value: '\Start Menu\Programs\Startup' }
+  Q1067:
+    evidence: [system, security, services]
+    attack: [T1543.003]
+    ruleTags: [service]
+    search:
+      source: events
+      label: services installed (7045, 4697) and the service list
+      filter:
+        logic: or
+        conditions:
+          - { field: eventId, op: in, value: [7045, 4697] }
+          - { field: artifactType, op: eq, value: service }
+  Q1068:
+    evidence: [system, sysmon]
+    attack: [T1543.003]
+    ruleTags: [service]
+    search:
+      source: events
+      label: service start types changed (7040) and service keys written
+      filter:
+        logic: or
+        conditions:
+          - { field: eventId, op: eq, value: 7040 }
+          - { field: targetObject, op: contains, value: '\CurrentControlSet\Services\' }
+  Q1036:
+    evidence: [sysmon, security, execution]
+    attack: [T1569.002, T1021.002]
+    ruleTags: [lateral-movement]
+    search:
+      source: events
+      label: PsExec run
+      filter:
+        logic: or
+        conditions:
+          - { field: image, op: contains_any, value: [psexec.exe, psexec64.exe, paexec] }
+          - { field: processName, op: contains_any, value: [psexec.exe, psexec64.exe, paexec] }
+          - { field: path, op: contains_any, value: [psexec.exe, psexec64.exe] }
+  Q1037:
+    evidence: [system, security, sysmon, execution]
+    attack: [T1569.002, T1021.002]
+    ruleTags: [lateral-movement]
+    search:
+      source: events
+      label: PSEXESVC installed or run
+      filter:
+        logic: or
+        conditions:
+          - { field: serviceName, op: contains, value: PSEXESVC }
+          - { field: image, op: contains, value: psexesvc }
+          - { field: processName, op: contains, value: psexesvc }
+          - { field: path, op: contains, value: psexesvc }
+
+# REMN's own scenarios: the M365 and mail side, and the dwell time every intrusion report states.
+scenarios:
+  - id: S0001
+    name: Dwell time (first and last attacker activity)
+    description: When the attacker first got in, when they were last active, and whether the evidence reaches back far enough to say so.
+    tags: [Timeline]
+    facets:
+      - id: F0001
+        name: When did the attacker first get in?
+        tags: [TA0001]
+        questions:
+          - id: Q0001
+            name: What is the earliest activity tied to the attacker?
+            evidence: [security, sysmon, entra-signin, m365-audit, mail]
+            derived: first-activity
+            note: The earliest finding of medium severity or more that is not a false positive is a start, not the answer; read back from it.
+          - id: Q0002
+            name: How did the attacker get in (phishing, a valid account, an exposed service)?
+            evidence: [mail, security, entra-signin, rdp]
+            attack: [T1566, T1078, T1133, T1190]
+            ruleTags: [initial-access, phishing]
+            search:
+              source: events
+              label: remote logons (types 3 and 10)
+              filter:
+                conditions:
+                  - { field: eventId, op: eq, value: 4624 }
+                  - { field: logonType, op: in, value: [3, 10] }
+                sort: { field: ts, dir: asc }
+          - id: Q0003
+            name: Do the logs reach back to before the first attacker activity?
+            evidence: [security, system, sysmon, entra-signin, m365-audit]
+            derived: log-reach
+            note: A log that starts after the first finding was overwritten or not collected; the first activity may be earlier than the evidence shows.
+      - id: F0002
+        name: When was the attacker last active, and is it over?
+        tags: [TA0003]
+        questions:
+          - id: Q0004
+            name: What is the latest activity tied to the attacker?
+            evidence: [security, sysmon, entra-signin, m365-audit, mail]
+            derived: last-activity
+          - id: Q0005
+            name: Were the attacker's accounts disabled or their passwords reset, and did the activity stop after that?
+            evidence: [security, m365-directory]
+            attack: [T1531]
+            search:
+              source: events
+              label: accounts disabled, reset or deleted
+              filter:
+                logic: or
+                conditions:
+                  - { field: eventId, op: in, value: [4723, 4724, 4725, 4726] }
+                  - { field: operation, op: in, value: [Reset user password., Disable account., Delete user., Revoke user sessions.] }
+          - id: Q0006
+            name: Is there persistence that would outlive the containment?
+            evidence: [system, security, sysmon, autoruns, services, tasks, m365-audit]
+            attack: [T1543.003, T1053.005, T1547.001, T1136, T1098]
+            ruleTags: [persistence]
+      - id: F0003
+        name: What does the evidence miss between the first and the last activity?
+        questions:
+          - id: Q0007
+            name: Which hosts and accounts did the attacker touch?
+            evidence: [security, sysmon, entra-signin, m365-audit]
+            ruleTags: [lateral-movement]
+            note: The Stories page groups the records of one person or host in one intrusion; each story names its hosts and accounts.
+          - id: Q0008
+            name: Are there holes in the logs during the attack window?
+            evidence: [security, system, sysmon, entra-signin, m365-audit]
+            derived: evidence-gaps
+            attack: [T1070.001]
+            ruleTags: [log-tampering]
+  - id: S0002
+    name: Business email compromise exposure
+    description: A mailbox is suspected of being taken over. What the attacker could reach, what they read, took and sent, and what they left behind in the mailbox and the tenant.
+    tags: [M365, Mail, BEC]
+    facets:
+      - id: F0004
+        name: Was the account taken over?
+        tags: [TA0001]
+        questions:
+          - id: Q0009
+            name: Were there successful sign-ins from unexpected countries, addresses or clients?
+            evidence: [entra-signin, m365-audit]
+            attack: [T1078.004]
+            ruleTags: [sign-in, geo]
+            search:
+              source: events
+              label: successful sign-ins
+              filter:
+                logic: or
+                conditions:
+                  - { field: operation, op: in, value: [UserLoggedIn] }
+                  - { field: channel, op: eq, value: Entra SignIn }
+          - id: Q0010
+            name: Was MFA bypassed or changed, or a new authentication method registered?
+            evidence: [m365-directory, entra-signin]
+            attack: [T1098.005, T1556.006, T1621]
+            ruleTags: [mfa]
+            search:
+              source: events
+              label: authentication methods changed
+              filter:
+                conditions:
+                  - { field: operation, op: contains_any, value: [security info, StrongAuthentication, Update user., authentication method] }
+          - id: Q0011
+            name: Was the account the target of password spraying or brute force?
+            evidence: [entra-signin, m365-audit, security]
+            attack: [T1110.001, T1110.003]
+            ruleTags: [brute-force, spraying]
+            search:
+              source: events
+              label: failed sign-ins
+              filter:
+                logic: or
+                conditions:
+                  - { field: operation, op: eq, value: UserLoginFailed }
+                  - { field: description, op: eq, value: Sign-in failure }
+                  - { field: eventId, op: eq, value: 4625 }
+      - id: F0005
+        name: Did the attacker leave anything behind in the mailbox or the tenant?
+        tags: [TA0003]
+        questions:
+          - id: Q0012
+            name: Were inbox rules created or changed to forward, hide or delete mail?
+            evidence: [m365-exchange]
+            attack: [T1564.008]
+            ruleTags: [inbox-rule]
+            search:
+              source: events
+              label: inbox rules
+              filter: { conditions: [{ field: operation, op: in, value: [New-InboxRule, Set-InboxRule, Remove-InboxRule, Enable-InboxRule, UpdateInboxRules] }] }
+          - id: Q0013
+            name: Was mail forwarded out of the organisation (mailbox forwarding, transport rules)?
+            evidence: [m365-exchange]
+            attack: [T1114.003]
+            ruleTags: [forwarding, transport-rule]
+            search:
+              source: events
+              label: forwarding and transport rules
+              filter: { conditions: [{ field: operation, op: in, value: [Set-Mailbox, New-TransportRule, Set-TransportRule] }] }
+          - id: Q0014
+            name: Were applications consented to, or credentials added to an application or delegated access granted?
+            evidence: [m365-directory, m365-exchange]
+            attack: [T1528, T1098.001, T1098.002, T1098.003]
+            ruleTags: [oauth, consent, delegation]
+            search:
+              source: events
+              label: consents, application credentials and mailbox permissions
+              filter:
+                conditions:
+                  - { field: operation, op: in, value: [Consent to application., Add service principal credentials., Add application., Add-MailboxPermission, Add-RecipientPermission, Add-MailboxFolderPermission] }
+      - id: F0006
+        name: What did the attacker read or take?
+        tags: [TA0009, TA0010]
+        questions:
+          - id: Q0015
+            name: Which mail items did the attacker access?
+            evidence: [m365-exchange]
+            attack: [T1114.002]
+            ruleTags: [mailbox-access]
+            note: MailItemsAccessed needs Audit (Premium) or the E5 licence and is throttled after about 1,000 records in 24 hours; the evidence gaps say when it was.
+            search:
+              source: events
+              label: MailItemsAccessed
+              filter: { conditions: [{ field: operation, op: eq, value: MailItemsAccessed }] }
+          - id: Q0016
+            name: Were mailboxes searched or exported?
+            evidence: [m365-audit]
+            attack: [T1114.002, T1213]
+            ruleTags: [compliance]
+            search:
+              source: events
+              label: content searches and exports
+              filter:
+                conditions:
+                  - { field: operation, op: in, value: [New-ComplianceSearch, Start-ComplianceSearch, New-ComplianceSearchAction, SearchQueryInitiatedExchange, New-MailboxExportRequest] }
+          - id: Q0017
+            name: Were files downloaded from SharePoint or OneDrive?
+            evidence: [m365-files]
+            attack: [T1530]
+            ruleTags: [sharepoint, exfiltration]
+            search:
+              source: events
+              label: files downloaded or shared
+              filter:
+                conditions:
+                  - { field: operation, op: in, value: [FileDownloaded, FileSyncDownloadedFull, AnonymousLinkCreated, SharingSet, SharingInvitationCreated] }
+      - id: F0007
+        name: Did the attacker send mail from the account or reach other people?
+        questions:
+          - id: Q0018
+            name: Were mails sent from the account by the attacker?
+            evidence: [m365-exchange, mail]
+            attack: [T1534]
+            searches:
+              - source: events
+                label: Send, SendAs and SendOnBehalf
+                filter: { conditions: [{ field: operation, op: in, value: [Send, SendAs, SendOnBehalf] }] }
+              - source: mails
+                label: sent mails
+                filter: { conditions: [{ field: folder, op: contains, value: sent }] }
+          - id: Q0019
+            name: Were payment or bank detail changes asked for, in either direction?
+            evidence: [mail]
+            attack: [T1657]
+            ruleTags: [invoice, fraud]
+            search:
+              source: mails
+              label: mails about payment or bank details
+              filter: { text: bank }
+          - id: Q0020
+            name: Did the same campaign reach other people in the organisation?
+            evidence: [mail]
+            attack: [T1566]
+            ruleTags: [campaign, phishing]
+            search:
+              source: mails
+              label: mails in a campaign
+              filter: { conditions: [{ field: campaignSize, op: gt, value: 1 }], sort: { field: date, dir: asc } }

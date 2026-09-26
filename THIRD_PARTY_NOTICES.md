@@ -15,6 +15,16 @@ upstream `LICENSE` and a provenance file with the commit it was taken from.
 | SigmaHQ rules (Windows, emerging threats, threat hunting) | https://github.com/SigmaHQ/sigma | Detection Rule License 1.1 (DRL-1.1) |
 | Sublime Security rules | https://github.com/sublime-security/sublime-rules | MIT |
 
+## Investigative questions (`frontend/src/data/questions/dfiq.gen.json`)
+
+Scenarios, facets, questions and approaches of DFIQ, converted to JSON by
+`tools/dfiq_import.py` with their ids and text unchanged, and bundled with the frontend. REMN's
+own questions in the same file (ids starting with 0) are REMN's.
+
+| Data | Upstream | Licence |
+| --- | --- | --- |
+| DFIQ (Digital Forensics Investigative Questions) 1.0.1, Copyright 2024 Google LLC | https://github.com/google/dfiq | Apache License 2.0 |
+
 ## Native artifact decoders
 
 These libraries are installed from `backend/requirements.txt`. Native parsing uses

@@ -3,7 +3,7 @@
 The pages follow the order of an investigation. Evidence goes in on the Evidence page;
 Events and Mails are the two tables with their search bar, and the Timeline draws both;
 Findings, Stories, Graph, Rules and Indicators are what the detection produced; the AI analyst,
-Review and Case notes are where the analyst works the case; Report prints it; Settings
+Review, Case notes and Questions are where the analyst works the case; Report prints it; Settings
 holds the case context the rules and the model read. This page describes each, the
 keyboard, the review workflow and the report, and closes with the tests that cover the
 pages.
@@ -355,6 +355,17 @@ the "timeline" button on findings, mails, events and chain steps, each linked ba
 row, or typed by hand), a task checklist and markdown notes. The three are stored with
 the case, travel in the case bundle, and are printed in the report before the automatic
 timeline of findings.
+
+## Questions
+
+Questions reads the case as the questions an investigation has to answer, from
+[DFIQ](https://dfiq.org) and REMN's own scenarios (dwell time, business email compromise).
+The analyst picks the scenarios; each question shows whether the case holds the evidence to
+answer it, searches that open the Events or Mails page, the related rules and their findings,
+and takes the analyst's answer (open, answered, cannot be answered from this evidence) with the
+rows and findings it cites. A row is cited from its detail ("cite for Q1074"). The answers go
+with the case bundle and into the report's Questions section. The page has its own
+[documentation](questions.md).
 
 ## Settings
 
