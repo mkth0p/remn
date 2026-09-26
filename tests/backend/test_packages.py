@@ -547,7 +547,8 @@ def test_an_oversized_export_keeps_the_records_it_parsed(tmp_path, monkeypatch):
     but a hash. Every other limit here raises during iteration and keeps what it read."""
     from services.parsers import collection
 
-    monkeypatch.setattr(collection, "MAX_PARSE_BYTES", 64 * 1024)
+    # a delimited export streams to the larger ceiling; the behaviour at the ceiling is the same
+    monkeypatch.setattr(collection, "MAX_STREAM_BYTES", 64 * 1024)
     export = tmp_path / "processes.csv"
     with export.open("w", encoding="utf-8", newline="") as fh:
         writer = csv.writer(fh)
@@ -571,7 +572,7 @@ def test_an_oversized_export_keeps_the_records_it_parsed(tmp_path, monkeypatch):
 def test_an_oversized_member_is_partial_in_the_package_inventory(tmp_path, monkeypatch):
     from services.parsers import collection
 
-    monkeypatch.setattr(collection, "MAX_PARSE_BYTES", 32 * 1024)
+    monkeypatch.setattr(collection, "MAX_STREAM_BYTES", 32 * 1024)
     body = io.StringIO()
     writer = csv.writer(body)
     writer.writerow(["Name", "Id", "Path"])

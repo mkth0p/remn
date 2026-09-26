@@ -594,6 +594,11 @@ export function SettingsView() {
             <div className="panel-h">ingestion &amp; storage</div>
             <div className="panel-b col">
               <Toggle on={s.includeRaw !== false} onChange={(v) => patch({ includeRaw: v })} label="store the raw event JSON (enables regex over the whole record; ~2x storage)" />
+              <Toggle
+                on={s.readFileSystem === true}
+                onChange={(v) => patch({ readFileSystem: v })}
+                label="read the $MFT and USN journal of a drive-layout collection (KAPE, Velociraptor, acquire): up to 500,000 records each, and less time left for Hayabusa"
+              />
               {!isServer && (
                 <Toggle
                   on={s.parseEvtxInBrowser === true}

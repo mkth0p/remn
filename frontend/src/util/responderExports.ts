@@ -119,7 +119,7 @@ export function timelineRecords(input: TimelineInput): { records: TimelineRecord
       clean({
         message: String(what),
         datetime: iso(at),
-        timestamp_desc: observation ? 'Collected' : 'Event Recorded',
+        timestamp_desc: observation ? 'Collected' : timestampDesc(e),
         data_type: e.artifactType ? `remn:${e.artifactType}` : 'windows:evtx:record',
         source: 'event' as const,
         host: e.computer ?? undefined,
@@ -133,6 +133,17 @@ export function timelineRecords(input: TimelineInput): { records: TimelineRecord
   }
   records.sort((a, b) => a.datetime.localeCompare(b.datetime))
   return { records, untimed }
+}
+
+/**
+ * What an event's time is. A disk artifact carries several times with different meanings (an MFT
+ * entry's $SI created and $FN modified, a USN change, a prefetch file's earlier runs), and the
+ * parser states which one a row holds in its description. An event log record's description is
+ * its event type instead, and its time is when it was recorded.
+ */
+function timestampDesc(e: { artifactType?: unknown; description?: unknown }): string {
+  const disk = typeof e.artifactType === 'string' && e.artifactType !== '' && e.artifactType !== 'event-export'
+  return disk && typeof e.description === 'string' && e.description ? e.description : 'Event Recorded'
 }
 
 /** Timesketch's JSONL import: one JSON object per line. */

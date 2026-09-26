@@ -46,6 +46,23 @@ describe('timeline export', () => {
     expect(JSON.parse(lines[1]).tag).toEqual(['remn', 'critical', 'T1021.001'])
   })
 
+  it('says which of a disk artifact’s times each line is, and keeps an event log record’s time as recorded', () => {
+    const at = Date.UTC(2026, 8, 1, 10)
+    const row = (over: Partial<EventRow>) => ({ caseId: 1, evidenceId: 1, recordKind: 'event', ts: at, eventId: null, ...over }) as EventRow
+    const { records } = timelineRecords({
+      events: [
+        row({ id: 1, artifactType: 'mft', description: 'SI created, modified', summary: 'mft: C:\\x.exe (SI M..B)' }),
+        row({ id: 2, artifactType: 'usn', description: 'USN FileCreate|Close' }),
+        row({ id: 3, artifactType: 'prefetch', description: 'prefetch earlier run' }),
+        row({ id: 4, artifactType: 'amcache' }),
+        row({ id: 5, artifactType: 'event-export', eventId: 4624, description: 'An account was successfully logged on' }),
+        row({ id: 6, eventId: 4688, description: 'A new process has been created' }),
+      ],
+    })
+    expect(records.map((r) => r.timestamp_desc)).toEqual(['SI created, modified', 'USN FileCreate|Close', 'prefetch earlier run', 'Event Recorded', 'Event Recorded', 'Event Recorded'])
+    expect(records[0]).toMatchObject({ data_type: 'remn:mft', message: 'mft: C:\\x.exe (SI M..B)' })
+  })
+
   it('writes CSV with a header Timeline Explorer reads and neutralises formulas', () => {
     const { records } = timelineRecords({ findings: [f({ ruleId: 'x', severity: 'low', title: '=HYPERLINK("http://evil")' })] })
     const csv = toTimelineCsv(records)

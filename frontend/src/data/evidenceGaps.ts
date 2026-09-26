@@ -11,7 +11,9 @@
  * - logs that start after the first finding (overwritten, or not collected);
  * - Unified Audit Log exports cut at a service limit (exactly 5,000 or 50,000 records);
  * - MailItemsAccessed throttled (item reads not recorded for 24 hours);
- * - Entra sign-ins that start after the first finding (Entra keeps them 7 or 30 days).
+ * - Entra sign-ins that start after the first finding (Entra keeps them 7 or 30 days);
+ * - package members read only in part: an export past the parse limit, a text log past its line
+ *   limit, a triage artifact past its record cap.
  *
  * The parser records the numbering and checksums per file (backend/services/parsers/evtx_parser.py
  * FileSequence); the rest comes from the case through the data source, so browser and server cases
@@ -53,7 +55,17 @@ export interface FileSequenceStats {
 }
 
 export type GapKind =
-  'record-holes' | 'time-backwards' | 'clock-set-back' | 'checksum' | 'missing-between-files' | 'log-starts-late' | 'export-cap' | 'xml-export' | 'mail-throttled' | 'signins-start-late'
+  | 'record-holes'
+  | 'time-backwards'
+  | 'clock-set-back'
+  | 'checksum'
+  | 'missing-between-files'
+  | 'log-starts-late'
+  | 'export-cap'
+  | 'xml-export'
+  | 'read-in-part'
+  | 'mail-throttled'
+  | 'signins-start-late'
 
 export interface GapStatement {
   kind: GapKind
@@ -387,6 +399,38 @@ function xmlExports(evidence: Evidence[]): GapStatement[] {
   return out
 }
 
+/**
+ * Package members REMN read only part of. The package inventory records each cut on the member (a
+ * parse limit as its error, a line limit or a record cap in its note); said here as well, because
+ * a timeline that looks complete but stops part-way through a $MFT export is the gap that misleads.
+ */
+function readInPart(evidence: Evidence[]): GapStatement[] {
+  const out: GapStatement[] = []
+  for (const e of evidence) {
+    for (const f of records(e.stats)) {
+      const file = String(f.name ?? e.name)
+      const reason = typeof f.reason === 'string' ? f.reason : ''
+      const note = typeof f.note === 'string' ? f.note : ''
+      const kept = Number(f.count ?? 0)
+      if (f.status === 'error' && /parse limit/.test(reason))
+        out.push({
+          kind: 'read-in-part',
+          severity: 'high',
+          text: `${file}: read up to the parse limit and no further (${fmtNum(kept)} ${plural(kept, 'row')} kept). Records after that point in the file are not in the case.`,
+          evidenceId: e.id,
+        })
+      else if (/kept the first [\d,]+ lines|the cap for this artifact/.test(note))
+        out.push({
+          kind: 'read-in-part',
+          severity: 'medium',
+          text: `${file}: read in part (${note}). What the file holds after that point is not in the case.`,
+          evidenceId: e.id,
+        })
+    }
+  }
+  return out
+}
+
 function throttledStatements(throttled: { user: string; ts: number }[]): GapStatement[] {
   const first = new Map<string, number>()
   for (const t of throttled) first.set(t.user, Math.min(first.get(t.user) ?? Infinity, t.ts))
@@ -404,7 +448,7 @@ const ORDER = { high: 0, medium: 1, low: 2 }
 /** Everything the evidence cannot show, most serious first. */
 export function evidenceGaps(input: GapInput): GapStatement[] {
   const seqs = fileSequences(input.evidence)
-  const out = [...seqs.flatMap(fileStatements), ...timeStatements(seqs), ...betweenFiles(seqs), ...exportCaps(input.evidence), ...xmlExports(input.evidence)]
+  const out = [...seqs.flatMap(fileStatements), ...timeStatements(seqs), ...betweenFiles(seqs), ...exportCaps(input.evidence), ...xmlExports(input.evidence), ...readInPart(input.evidence)]
   const start = input.incidentStart
   if (start != null) {
     out.push(...startsLate(seqs, start))

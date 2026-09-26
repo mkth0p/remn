@@ -282,8 +282,9 @@ in none of the files of one log (a missing archive), logs that start after the f
 finding (overwritten or not collected), Unified Audit Log exports of exactly 5,000 or
 50,000 records (cut at a service limit), event records read from an XML export (no record
 numbering to check them against), MailItemsAccessed throttled for a mailbox (item reads
-not recorded for 24 hours), and Entra sign-ins that start after the first finding (Entra
-keeps them 7 or 30 days). The first finding is the earliest one of medium severity
+not recorded for 24 hours), Entra sign-ins that start after the first finding (Entra
+keeps them 7 or 30 days), and package members read only in part (an export past the parse
+limit, a text log past 100,000 lines, a triage artifact at its record cap). The first finding is the earliest one of medium severity
 or above that is not a false positive.
 
 What the report says about rows is read back against the rows before it prints

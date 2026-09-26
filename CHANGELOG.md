@@ -5,6 +5,25 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- Disk artifacts sit on the case timeline with what each of their times means, next to the
+  event logs. An MFTECmd `$MFT` entry becomes a row per distinct `$STANDARD_INFORMATION` time and
+  per `$FILE_NAME` time that differs from it, each saying which it is (`SI created, modified`,
+  `FN created`, with the MACB mark in the summary), where it used to keep only its `$SI` creation
+  time; an entry whose `$SI` creation time is earlier than its `$FN` one, or whose `$SI` times
+  have no sub-second part, is marked as a possible timestomp. An MFTECmd `$J` row has its update
+  time, its path and its reasons (`operation: FileCreate|Close`), where it had no time and no
+  path. PECmd's earlier runs are execution rows as well as the last one. EvtxECmd's `Payload`
+  goes through the EVTX parser's own mapping, so an exported 4624 or 4688 carries its logon type,
+  source address and command line as a `.evtx` does. The event detail and the Timesketch and
+  Timeline Explorer exports (`timestamp_desc`) say what each time is.
+- A CSV or TSV export is read whole, up to the 4 GiB member ceiling, instead of stopping at
+  64 MiB, which kept only the start of a volume's `$MFT` or `$J` output. JSON exports keep the
+  64 MiB budget, and every member read only in part (a parse limit, a line limit, a triage
+  record cap) is now also named in what the evidence cannot show.
+- A drive-layout collection's `$MFT` and USN journal can be read by dissect with the new setting
+  "read the $MFT and USN journal" (off by default: they run to millions of records and share
+  the package's decoding time with Hayabusa).
+
 ## 0.2.0 (2026-09-26)
 
 - A story's score favours weight and attack order over breadth: it follows the heaviest run of
