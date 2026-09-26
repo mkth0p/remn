@@ -5,6 +5,10 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- CSV exports quote any value holding a semicolon or a tab, and put column names through the
+  same escaping, so a value from the evidence cannot start a formula in Excel builds that split
+  CSV on semicolons. The HTML report carries its own content security policy (no script, no
+  remote loads), and the build's source link is only ever an http(s) URL.
 - Eleven rules for directory changes on a domain controller (`rules/windows/directory.yaml`):
   accounts weakened for AS-REP roasting or offline cracking, Kerberos delegation granted
   (including resource-based delegation), passwords set never to expire, permissions changed on

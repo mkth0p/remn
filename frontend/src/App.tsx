@@ -56,6 +56,7 @@ import { RulesView } from './views/RulesView'
 import { SettingsView } from './views/SettingsView'
 import type { PivotResult } from './data/queries'
 import { fmtBytes, fmtNum, fmtTs } from './util/format'
+import { safeHref } from './util/safe'
 
 const NAV: { id: View; label: string; icon: React.ComponentType; count?: 'events' | 'mails' | 'findings' | 'iocs' | 'evidence'; section?: string }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: IconDashboard },
@@ -373,7 +374,7 @@ export default function App() {
             <span className={`status-dot ${health ? (dep.mismatch ? 'warn' : 'ok') : 'bad'}`} />
             server{' '}
             {health ? (
-              <a href={dep.source} target="_blank" rel="noreferrer noopener" className="mono">
+              <a href={safeHref(dep.source)} target="_blank" rel="noreferrer noopener" className="mono">
                 {dep.build || 'build unknown'}
               </a>
             ) : (
