@@ -24,7 +24,13 @@ npm test
 ```
 
 `pre-commit install` runs the linters and formatters on staged files; CI runs the same
-commands on every push.
+commands on every pull request and on `main`.
+
+## Branches
+
+`main` is the line of work and takes changes only through a pull request. `server` holds
+work meant only for self-hosted installs; it starts from `main` and takes `main`'s changes.
+Everything else is a short-lived branch for one pull request, deleted once it is merged.
 
 ## Rules of the repository
 
@@ -34,6 +40,12 @@ commands on every push.
 - **Two rule engines, one behaviour.** A change to a rule, an operator or the filter
   DSL must keep `frontend/src/rules/parity.test.ts` green; regenerate the fixture with
   `tools/parity_fixture.py` when the change is intentional.
+- **Rules are measured.** A change to a rule, a pack, the rule engine or the EVTX parser is
+  measured again before it is merged: `tools/measure_rules.py --datasets DIR --fetch --out
+  rules/measures.json --detail rules/measures-detail.json` (about two hours on four cores),
+  and both files are committed with the change. The rule-measures workflow fails a pull
+  request that makes a rule stop detecting a recording or a high or critical rule noisier
+  on the clean machines; when that is intended, the committed measures say so.
 - **Prompts live in Python.** `backend/services/ai/prompts.py` is the source; the
   browser mirror is checked by `tests/fixtures/ai_system_compose.json`. After a prompt
   change, regenerate the fixture with `tools/ai_compose_fixture.py`. A new AI tool is
