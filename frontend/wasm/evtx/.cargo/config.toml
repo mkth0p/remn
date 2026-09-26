@@ -1,0 +1,7 @@
+# ahash (inside evtx) seeds its hashers through getrandom, which has no source on a bare wasm32
+# target: the seed comes from the page's crypto.getRandomValues through the `random_fill` import.
+[target.wasm32-unknown-unknown]
+rustflags = ['--cfg', 'getrandom_backend="custom"']  # build.sh sets the same flags, with the paths remapped
+
+[build]
+target = "wasm32-unknown-unknown"

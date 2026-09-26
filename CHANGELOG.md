@@ -5,6 +5,16 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- An .evtx file can be parsed in the browser and never uploaded: a case kept in the browser has a
+  setting, "parse .evtx files in this browser", off by default. The file is read 64 KiB chunk by
+  chunk by the server's own decoder, the Rust `evtx` crate, compiled to a 259 KB WebAssembly module
+  (`frontend/wasm/evtx`, rebuilt byte for byte in CI from a pinned toolchain), and flattened by a
+  TypeScript port of the server's flattening that makes the same rows: every row of the golden
+  corpus's five event logs and all 37,364 rows of EVTX-ATTACK-SAMPLES are identical, and so is each
+  file's ledger (record ranges and holes, clock steps, chunk checksums). The evidence says "parsed
+  in this browser", no size cap of the server applies, the upload notice is not shown, and the
+  digest of the bytes the parser read is checked against the file's SHA-256. Hayabusa does not run
+  on such a file; the rules run in the browser as for any other.
 - Responder exports. The Report page writes the report as a Word document (.docx) with the same
   sections, verdict and confidence as the HTML report, as headings, paragraphs and tables a team
   can edit before it goes out (the graphs stay in the HTML report). It also exports the case as a
