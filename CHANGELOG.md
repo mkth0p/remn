@@ -5,6 +5,22 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- One intrusion now reads as one story, or as a linked set of them. A flag that names no one (a
+  task Windows ran, a script block, a Sysmon handle) joins the one person who was on its host
+  then, whose console or RDP session was open or whose own flagged steps there are within fifteen
+  minutes, with a medium tie that says so; with two people or more on the host it stays the
+  host's and says who was on. Stories are linked when a hop or explicit credentials go from one
+  story's person or host to another's host or account, when a program of one descends from
+  another's, or when one record names both people (a password reset, an account enabled), each
+  link with its basis and confidence; the stories strong and medium links join are an incident
+  (`incidents` in the build, `incident` and `links` on each story), never through a finding
+  marked false positive, never across organisations, twenty stories at most with the rest named.
+  A host's own flags make a story only when one is critical, of a rule measured to detect and
+  quiet on clean machines, of medium or more in two phases from rules not seen firing on clean
+  machines, or linked to a person's story; otherwise they are listed as "a host's lone lead". The
+  Stories page lists an incident's stories together and shows a story's linked stories, and the
+  report prints an incident's stories under one heading. On the first day of the APT29
+  evaluation the five stories (pbeesly's and four hosts', all high) are now one, hers.
 - Stories no longer lose what matters to routine activity or to their own caps. A program a
   person ran with no finding joins their story only when it ran in the story's logon session or
   process tree, not for naming them; past 400 steps a story keeps its flags, then its

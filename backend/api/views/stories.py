@@ -64,7 +64,7 @@ def build(request: HttpRequest):
             events, mails = body.get("events") or [], body.get("mails") or []
             if not isinstance(events, list) or not isinstance(mails, list):
                 return JsonResponse({"error": "events and mails must be lists"}, status=400)
-            result = S.build_stories(events, mails, findings, settings, **{k: v for k, v in opts.items() if k != "seed_min_risk"})
+            result = S.build_stories(events, mails, findings, settings, measures=S.rule_measures(), **{k: v for k, v in opts.items() if k != "seed_min_risk"})
     except Exception as exc:  # noqa: BLE001
         log.exception("story build failed")
         return JsonResponse({"error": str(exc)[:300]}, status=500)

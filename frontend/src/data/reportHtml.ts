@@ -1,6 +1,6 @@
 import type { Case, CaseNote, Evidence, Finding, Ioc, Severity } from '../db/schema'
 import type { Chain, ChainStep } from './chains'
-import { storyCoverageWarnings, storyOwnGaps, type ReportStory, type StoryResult } from './stories'
+import { groupByIncident, storyCoverageWarnings, storyOwnGaps, type ReportStory, type StoryIncident, type StoryResult } from './stories'
 import type { ChainReview, ReportSettings } from './review'
 import { chainSeverity, effectiveSeverity, stepVisible } from './review'
 import type { Incident } from '../rules/incidents'
@@ -89,6 +89,8 @@ export interface ReportData {
   stories?: ReportStory[]
   /** the case's stories not printed: below the severity floor, without a note when only reviewed items print, or past the first twenty */
   storiesLeft?: number
+  /** the story build's incidents: the printed stories of one are printed together, under one heading */
+  storyIncidents?: StoryIncident[]
   /** the stats of the story build: what it could not read (data/stories.ts storyCoverageWarnings) */
   storyStats?: StoryResult['stats']
   /** why the stories no longer read the case as it is (data/stories.ts storiesStaleness); empty or absent when they do */
@@ -516,6 +518,42 @@ ${gaps.length ? `<div class="cap">Where it stops: ${gaps.map((g) => h(g)).join('
 </div>`
 }
 
+/**
+ * The printed stories, each incident's together under one heading that says why they read as one
+ * intrusion (the strong and medium links between them) and what of it is not printed.
+ */
+function storyCards(d: ReportData): string {
+  return groupByIncident(d.stories ?? [], (r) => r.story, d.storyIncidents)
+    .map(({ incident: i, items }) => {
+      const cards = items.map((st) => storyCard(st, d)).join('\n')
+      if (!i) return cards
+      const inside = new Set(items.map((r) => r.story.id))
+      const why = new Map<string, string>()
+      for (const { story } of items)
+        for (const l of story.links ?? []) if (l.confidence !== 'weak' && inside.has(l.story)) why.set([story.id, l.story].sort().join('|'), `${l.basis} (${l.confidence})`)
+      const bases = [...why.values()]
+      const unprinted = i.stories.length - items.length
+      return `<div class="story-inc">
+<div class="card-head">${pill(i.severity)}<h3>One intrusion: ${h(i.label)}</h3>${chip(`${n(i.stories.length)} stories`)}</div>
+<div class="card-meta">${span(i.start, i.end)}${i.hosts.length ? ` · hosts <code>${h(i.hosts.slice(0, 6).join(', '))}</code>${i.hosts.length > 6 ? ` +${i.hosts.length - 6}` : ''}` : ''}</div>
+${
+  bases.length
+    ? `<div class="cap">Why they read as one: ${bases
+        .slice(0, 4)
+        .map((b) => h(b))
+        .join('; ')}${bases.length > 4 ? ` and ${bases.length - 4} more` : ''}.</div>`
+    : ''
+}${
+        unprinted > 0
+          ? `<div class="cap">${n(unprinted)} more of its stories ${unprinted === 1 ? 'is' : 'are'} not printed: below the severity floor, without a note, or past the first twenty.</div>`
+          : ''
+      }${i.cut ? `<div class="cap warn">${n(i.cut)} more linked ${i.cut === 1 ? 'story is' : 'stories are'} left out of it: an incident holds twenty stories at most.</div>` : ''}
+${cards}
+</div>`
+    })
+    .join('\n')
+}
+
 /** What the reader of the Stories section must know before any story: that they are out of date, and where the build stopped. */
 function storiesCaveats(d: ReportData): string {
   const stale = d.storiesStale ?? []
@@ -838,6 +876,7 @@ span.warn{color:var(--medium);font-weight:600}.ribbon.ok i{background:var(--acce
 .card-head{break-after:avoid;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .card-head h3{font-size:14px;font-weight:600;margin:0;flex:1;min-width:200px}
 .card-meta{font-size:11px;color:var(--ink-2);margin:6px 0 8px}
+.story-inc{border-left:2px solid var(--line-2);padding-left:12px;margin:0 0 14px}
 .meter{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:10.5px;color:var(--ink-2)}
 .meter .bar{display:flex;width:120px;height:8px;border-radius:4px;overflow:hidden;background:var(--surface-3)}
 .meter .bar span{display:block;height:100%}
@@ -1039,7 +1078,7 @@ export function buildReportHtml(d: ReportData): string {
       id: 'stories',
       title: 'Stories',
       count: d.stories.length,
-      body: `<p class="intro">A story is what happened to one person, or on one host, in one incident: the records around what raised a flag, read along the tactics of ATT&amp;CK in the order they happened, each record tied to the story by its account, its logon session, the way into the host or the process that started it. A story is how the case reads, not a decision: the decisions are the chains' and the incidents'. Each says where its evidence stops.</p>${storiesCaveats(d)}${d.stories.map((st) => storyCard(st, d)).join('\n')}${left ? `<div class="cap">${n(left)} more ${left === 1 ? 'story is' : 'stories are'} not printed: below the severity floor${settings.onlyReviewed ? ', without a note (reviewed items only)' : ''} or past the first twenty.</div>` : ''}`,
+      body: `<p class="intro">A story is what happened to one person, or on one host, in one incident: the records around what raised a flag, read along the tactics of ATT&amp;CK in the order they happened, each record tied to the story by its account, its logon session, the way into the host or the process that started it. A story is how the case reads, not a decision: the decisions are the chains' and the incidents'. Each says where its evidence stops.</p>${storiesCaveats(d)}${storyCards(d)}${left ? `<div class="cap">${n(left)} more ${left === 1 ? 'story is' : 'stories are'} not printed: below the severity floor${settings.onlyReviewed ? ', without a note (reviewed items only)' : ''} or past the first twenty.</div>` : ''}`,
     })
   }
   if (d.chains.length) {

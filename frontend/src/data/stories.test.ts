@@ -10,6 +10,7 @@ import {
   deleteStoryNote,
   findStory,
   fitToBudget,
+  groupByIncident,
   isInternalIp,
   loadStories,
   loadStoryNotes,
@@ -30,6 +31,7 @@ import {
   type Identity,
   type IdentityForm,
   type Story,
+  type StoryIncident,
   type StoryResult,
 } from './stories'
 
@@ -298,6 +300,22 @@ describe('the stories a report prints', () => {
   })
   it('checks a note against the rows of its steps', () => {
     expect(storyRowIds(story('a', 'high', 1, ['event:1', 'mail:2', 'event:3', 'entra:x']), 1)).toEqual({ events: [1], mails: [2] })
+  })
+})
+
+describe('stories of one incident', () => {
+  const story = (id: string, start: number, incident: string | null = null) => ({ id, start, incident }) as unknown as Story
+  const incident = { id: 'incident-1', label: 'x and y', stories: ['c', 'a', 'd'] } as unknown as StoryIncident
+  it('are listed together, in time order, where the first of them stood; a lone story of an incident stands alone', () => {
+    const list = [story('a', 30, 'incident-1'), story('b', 10), story('c', 5, 'incident-1'), story('d', 40, 'incident-1')]
+    const groups = groupByIncident(list, (s) => s, [incident])
+    expect(groups.map((g) => [g.incident?.id ?? null, g.items.map((s) => s.id)])).toEqual([
+      ['incident-1', ['c', 'a', 'd']],
+      [null, ['b']],
+    ])
+    // a filter that leaves one of its stories shows it on its own; an incident the result does not hold groups nothing
+    expect(groupByIncident([story('a', 30, 'incident-1'), story('b', 10)], (s) => s, [incident]).map((g) => g.incident)).toEqual([null, null])
+    expect(groupByIncident(list, (s) => s, []).every((g) => !g.incident && g.items.length === 1)).toBe(true)
   })
 })
 

@@ -471,6 +471,67 @@ describe('notes on stories', () => {
   )
 })
 
+describe('stories of one intrusion', () => {
+  it(
+    "lists an incident's stories together and shows, on a story, the stories it links to and why",
+    async () => {
+      const three = snapshot()
+      const daniel = three.stories[0]
+      const basis = 'northstar\\daniel.roy reached fs-001 30 min before its first flag there (remote service: a service installed)'
+      daniel.incident = 'incident-1'
+      daniel.links = [{ story: 'story-fs', kind: 'hop', basis, confidence: 'medium', refs: ['event:9'] }]
+      three.stories.push(
+        { ...daniel, id: 'story-carla', title: 'carla.morel@northstar.example', score: 80, start: T0 - 3_600_000, incident: null, links: [] },
+        {
+          ...daniel,
+          id: 'story-fs',
+          kind: 'host',
+          subject: { kind: 'host', id: 'fs-001', label: 'FS-001', org: null },
+          title: 'FS-001',
+          score: 70,
+          start: T0 + 30 * 60_000,
+          incident: 'incident-1',
+          standing: 'a link to a person’s story: ' + basis,
+          links: [{ story: 'story-1', kind: 'hop', basis, confidence: 'medium', refs: ['event:9'] }],
+        },
+      )
+      three.incidents = [
+        {
+          id: 'incident-1',
+          label: 'daniel.roy@northstar.example and FS-001',
+          stories: ['story-1', 'story-fs'],
+          start: T0,
+          end: T0 + 50 * 60_000,
+          severity: 'critical',
+          score: 90,
+          people: ['id:daniel'],
+          hosts: ['fs-001', 'ws-004'],
+          cut: 0,
+          cutStories: [],
+        },
+      ]
+      await db.kv.put({ key: 'stories-1', value: await current(three) })
+      render(<StoriesView />)
+      const group = await screen.findByRole('group', { name: 'Incident daniel.roy@northstar.example and FS-001' }, WAIT)
+      expect(
+        within(group)
+          .getAllByRole('button')
+          .map((b) => b.getAttribute('aria-label')),
+      ).toEqual(['Story daniel.roy@northstar.example', 'Story FS-001'])
+      expect(within(group).getByText(/one intrusion · 2 stories/)).toBeTruthy()
+      // the story outside it keeps its own row
+      expect(screen.getByRole('button', { name: 'Story carla.morel@northstar.example' }).closest('[role="group"]')).toBeNull()
+      // the open story names the one it links to, how surely and why; a click opens it, which says what it stands on
+      fireEvent.click(screen.getByRole('button', { name: 'Story daniel.roy@northstar.example' }))
+      const linked = await screen.findByRole('list', { name: 'Linked stories' }, WAIT)
+      expect(within(linked).getByText(/hop, medium: northstar\\daniel.roy reached fs-001 30 min before its first flag there/)).toBeTruthy()
+      fireEvent.click(within(linked).getByText('FS-001'))
+      expect(await screen.findByText(/Stands on a link to a person’s story/, {}, WAIT)).toBeTruthy()
+    },
+    TEST_TIMEOUT,
+  )
+})
+
 describe('links into the stories', () => {
   it(
     'opens the step a timeline link points to, and says when its story is gone instead of opening another',

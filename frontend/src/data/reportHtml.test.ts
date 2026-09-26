@@ -533,6 +533,86 @@ describe('what the report claims about the case', () => {
     expect(clean).not.toContain('Stories incomplete')
   })
 
+  it("prints an incident's stories together under one heading that says why they read as one", () => {
+    const story = (id: string, title: string, start: number, extra: Record<string, unknown> = {}) =>
+      ({
+        id,
+        kind: 'person',
+        subject: { kind: 'person', id: `id:${id}`, label: title, org: null },
+        title,
+        headline: title,
+        summary: '',
+        start,
+        end: start + 60_000,
+        severity: 'high',
+        score: 50,
+        confidence: 'strong',
+        phases: [],
+        steps: [],
+        records: 1,
+        hosts: [],
+        accounts: [],
+        ips: [],
+        attackerAddresses: [],
+        chains: [],
+        findings: [],
+        campaigns: [],
+        gaps: [],
+        lineage: { sessions: [], hops: [], processes: [] },
+        incident: null,
+        ...extra,
+      }) as never
+    const link = (other: string, confidence: string, basis: string) => ({ story: other, kind: 'credentials', basis, confidence, refs: [] })
+    const a = story('a', 'carla.morel', 60_000, { incident: 'incident-1', links: [link('c', 'strong', "carla.morel used svc-backup's account <x>")] })
+    const b = story('b', 'WS-010', 30_000)
+    const c = story('c', 'svc-backup', 120_000, { incident: 'incident-1', links: [link('a', 'strong', "carla.morel used svc-backup's account <x>"), link('b', 'weak', 'on the host then')] })
+    const incident = {
+      id: 'incident-1',
+      label: 'carla.morel and svc-backup',
+      stories: ['a', 'c', 'd'],
+      start: 60_000,
+      end: 180_000,
+      severity: 'critical',
+      score: 90,
+      people: [],
+      hosts: ['FS-001'],
+      cut: 2,
+      cutStories: [],
+    }
+    const html = buildReportHtml(
+      data({
+        stories: [
+          { story: a, key: 'a' },
+          { story: b, key: 'b' },
+          { story: c, key: 'c' },
+        ],
+        storyIncidents: [incident as never],
+      }),
+    )
+    const section = html.slice(html.indexOf('<h2>Stories</h2>'), html.indexOf('<h2>', html.indexOf('<h2>Stories</h2>') + 1))
+    expect(section).toContain('One intrusion: carla.morel and svc-backup')
+    // its stories under it, in time order, before the story it does not hold
+    expect(section.indexOf('One intrusion')).toBeLessThan(section.indexOf('<h3>carla.morel</h3>'))
+    expect(section.indexOf('<h3>carla.morel</h3>')).toBeLessThan(section.indexOf('<h3>svc-backup</h3>'))
+    expect(section.indexOf('<h3>svc-backup</h3>')).toBeLessThan(section.indexOf('<h3>WS-010</h3>'))
+    // why, once per pair and escaped; a weak link joins nothing
+    expect(section).toContain('Why they read as one: carla.morel used svc-backup&#39;s account &lt;x&gt; (strong).')
+    expect(section).not.toContain('on the host then')
+    expect(section).toContain('1 more of its stories is not printed')
+    expect(section).toContain('2 more linked stories are left out of it')
+    // without the build's incidents the stories print one by one, as before
+    expect(
+      buildReportHtml(
+        data({
+          stories: [
+            { story: a, key: 'a' },
+            { story: c, key: 'c' },
+          ],
+        }),
+      ),
+    ).not.toContain('One intrusion')
+  })
+
   it('says indicators were checked only when a lookup ran', () => {
     const on = data({ kase: { ...kase, settings: { ...kase.settings, networkAllowed: true } } })
     expect(buildReportHtml(on)).toContain('No indicator was checked against a reputation service')

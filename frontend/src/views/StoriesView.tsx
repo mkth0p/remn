@@ -17,6 +17,8 @@ import {
   cheapToRebuild,
   deleteStoryNote,
   findStory,
+  groupByIncident,
+  LINK_LABEL,
   loadStories,
   loadStoryNotes,
   PHASE_LABEL,
@@ -40,6 +42,7 @@ import {
   type Process,
   type Session,
   type Story,
+  type StoryIncident,
   type StoryNotes,
   type StoryResult,
   type StoryStep,
@@ -124,7 +127,33 @@ function PhaseRail({ story, active, onPick }: { story: Story; active: string | n
   )
 }
 
-function StoryList({ stories, active, onSelect }: { stories: Story[]; active: string | null; onSelect: (id: string) => void }) {
+/** The stories, the highest-scoring first; those of one incident together, under a line that says so. */
+function StoryList({ stories, incidents, active, onSelect }: { stories: Story[]; incidents?: StoryIncident[]; active: string | null; onSelect: (id: string) => void }) {
+  return (
+    <>
+      {groupByIncident(stories, (s) => s, incidents).map(({ incident, items }) =>
+        incident ? (
+          <div key={incident.id} role="group" aria-label={`Incident ${incident.label}`} style={{ borderLeft: '2px solid var(--line-2)', margin: '6px 0 6px 8px' }}>
+            <div
+              className="small"
+              style={{ padding: '4px 10px', color: 'var(--fg-2)' }}
+              title="stories that read as one intrusion: a strong or medium link joins each to another (open one to see why)"
+            >
+              <Dot sev={incident.severity} /> one intrusion · {items.length} stories{incident.stories.length > items.length ? ` of ${incident.stories.length} shown` : ''} ·{' '}
+              {spanText(incident.end - incident.start)}
+              {incident.cut > 0 && <span style={{ color: 'var(--sev-medium)' }}> · {incident.cut} linked left out (twenty at most)</span>}
+            </div>
+            <StoryRows stories={items} active={active} onSelect={onSelect} />
+          </div>
+        ) : (
+          <StoryRows key={items[0].id} stories={items} active={active} onSelect={onSelect} />
+        ),
+      )}
+    </>
+  )
+}
+
+function StoryRows({ stories, active, onSelect }: { stories: Story[]; active: string | null; onSelect: (id: string) => void }) {
   return (
     <>
       {stories.map((s) => (
@@ -153,6 +182,38 @@ function StoryList({ stories, active, onSelect }: { stories: Story[]; active: st
         </div>
       ))}
     </>
+  )
+}
+
+/** What a host story stands on, and the stories this one reads as one intrusion with: each link's kind, how surely and why. */
+function StoryLinks({ story, stories, onStory }: { story: Story; stories: Map<string, Story>; onStory: (id: string) => void }) {
+  const links = story.links ?? []
+  if (!links.length && !story.standing) return null
+  return (
+    <div className="small" style={{ marginTop: 8, color: 'var(--fg-2)' }}>
+      {story.standing && <div title="what makes this host's flags a story of their own">Stands on {story.standing}.</div>}
+      {links.length > 0 && (
+        <div role="list" aria-label="Linked stories" style={{ marginTop: story.standing ? 4 : 0 }}>
+          <strong style={{ color: 'var(--fg-1)' }}>Linked stories</strong>
+          {links.map((l) => {
+            const other = stories.get(l.story)
+            return (
+              <div key={l.story} role="listitem" style={{ marginTop: 2 }}>
+                <Dot sev={CONFIDENCE_SEV[l.confidence]} title={`${l.confidence} link`} />{' '}
+                {other ? (
+                  <span className="click" style={{ cursor: 'pointer', color: 'var(--fg-1)' }} onClick={() => onStory(other.id)}>
+                    {other.title}
+                  </span>
+                ) : (
+                  <span className="muted">a story this build does not list</span>
+                )}{' '}
+                · {LINK_LABEL[l.kind] ?? l.kind}, {l.confidence}: {l.basis}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -1160,7 +1221,7 @@ export function StoriesView() {
                   {res.unstoried.length ? ` ${res.unstoried.length} flag(s) stand outside any story; Campaigns groups them by sender and address.` : ''}
                 </div>
               )}
-              <StoryList stories={shown} active={storyId} onSelect={selectStory} />
+              <StoryList stories={shown} incidents={res?.incidents} active={storyId} onSelect={selectStory} />
               {resolved.orphans.length > 0 && <OrphanNotes orphans={resolved.orphans} story={story} onAttach={attachNote} onDelete={dropNote} />}
             </>
           )}
@@ -1256,6 +1317,7 @@ export function StoriesView() {
                     </span>
                   )}
                 </div>
+                <StoryLinks story={story} stories={byStory} onStory={selectStory} />
                 <StoryNote key={story.id} story={story} entry={resolved.byStory.get(story.id)} names={noteNames} onSave={saveNote} onDirty={onNoteDirty} />
               </div>
               <PhaseRail story={story} active={phase} onPick={setPhase} />

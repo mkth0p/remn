@@ -225,6 +225,43 @@ export interface Story {
   /** how many steps the story cut past max_steps (its gaps say so too) */
   stepsTruncated?: number
   lineage: { sessions: Session[]; hops: Hop[]; processes: Process[]; devices?: Device[] }
+  /** the other stories this one reads as the same intrusion with, the most certain first */
+  links?: StoryLink[]
+  /** the incident its strong and medium links put it in, when there is one */
+  incident?: string | null
+  /** a host story: the evidence of its own it stands on (a host's lone lead is left unstoried) */
+  standing?: string | null
+}
+/** Why two stories read as one intrusion. */
+export interface StoryLink {
+  story: string
+  kind: 'hop' | 'credentials' | 'process' | 'record' | 'session'
+  basis: string
+  confidence: Confidence
+  refs: string[]
+}
+export const LINK_LABEL: Record<StoryLink['kind'], string> = {
+  hop: 'hop',
+  credentials: 'explicit credentials',
+  process: 'process tree',
+  record: 'one record names both',
+  session: 'on the host then',
+}
+/** Stories their strong and medium links join: one intrusion. */
+export interface StoryIncident {
+  id: string
+  label: string
+  /** its stories in time order */
+  stories: string[]
+  start: number
+  end: number
+  severity: Severity
+  score: number
+  people: string[]
+  hosts: string[]
+  /** how many linked stories past the cap it left out, and which */
+  cut: number
+  cutStories: string[]
 }
 export interface CampaignTarget {
   id: string
@@ -249,6 +286,8 @@ export interface StoryResult {
   version: number
   stories: Story[]
   campaigns: Campaign[]
+  /** stories that read as one intrusion (older builds have none) */
+  incidents?: StoryIncident[]
   chains: ChainResult
   identities: Identity[]
   hosts: HostCoverage[]
@@ -1174,6 +1213,31 @@ export function storyQuestion(story: Story, stats: StoryResult['stats'] | undefi
 }
 
 const SEV_RANK: Record<string, number> = { info: 0, low: 1, medium: 2, high: 3, critical: 4 }
+
+/**
+ * A list of stories with each incident's stories together: an incident with more than one of them
+ * in the list takes the place of its first and holds them in time order; any other story stands alone.
+ */
+export function groupByIncident<T>(items: T[], story: (item: T) => Story, incidents: StoryIncident[] = []): { incident: StoryIncident | null; items: T[] }[] {
+  const byId = new Map(incidents.map((i) => [i.id, i]))
+  const members = new Map<string, T[]>()
+  for (const item of items) {
+    const id = story(item).incident
+    if (id && byId.has(id)) members.set(id, [...(members.get(id) ?? []), item])
+  }
+  const out: { incident: StoryIncident | null; items: T[] }[] = []
+  const placed = new Set<string>()
+  for (const item of items) {
+    const id = story(item).incident
+    const group = id ? members.get(id) : undefined
+    if (!id || !group || group.length < 2) out.push({ incident: null, items: [item] })
+    else if (!placed.has(id)) {
+      placed.add(id)
+      out.push({ incident: byId.get(id)!, items: group.slice().sort((a, b) => story(a).start - story(b).start || story(a).id.localeCompare(story(b).id)) })
+    }
+  }
+  return out
+}
 
 /** A story as the report prints it, with the analyst's note on it. */
 export interface ReportStory {
