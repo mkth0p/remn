@@ -1,4 +1,5 @@
 import type { Deployment } from '../data/deployment'
+import { safeHref } from '../util/safe'
 
 /**
  * What happens to a file added here, in the order it happens. Shown before the first upload to a
@@ -37,7 +38,7 @@ export function DataNotice({ dep }: { dep: Deployment }) {
         <li>{dep.storage}</li>
         <li>
           The server runs build{' '}
-          <a href={dep.source} target="_blank" rel="noreferrer noopener" className="mono">
+          <a href={safeHref(dep.source)} target="_blank" rel="noreferrer noopener" className="mono">
             {dep.build || 'unknown'}
           </a>
           ; that link is its exact source.{dep.mismatch ? ` This page is build ${dep.pageBuild}, from a different commit.` : ''}

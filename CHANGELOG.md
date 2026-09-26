@@ -5,6 +5,10 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- CSV exports quote any value holding a semicolon or a tab, and put column names through the
+  same escaping, so a value from the evidence cannot start a formula in Excel builds that split
+  CSV on semicolons. The HTML report carries its own content security policy (no script, no
+  remote loads), and the build's source link is only ever an http(s) URL.
 - Public instance limits: a chunk upload over 64 MiB is refused before it is read (by Caddy and by
   the server), unfinished uploads reserve the size they announced in the staging budget, and the
   chains and mail enrichment paths refuse a server case key in browser-only mode, as stories and
