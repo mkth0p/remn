@@ -91,9 +91,10 @@ def test_an_intrusion_reads_as_one_story_in_phases_with_every_step_tied():
     assert clear["phase"] == "defense-impairment" and clear["session"] == rdp["session"]
     # the admin share on the server: the same outside source was already in, so it is lateral movement
     assert by_ref["event:23"]["phase"] == "lateral-movement"
-    # the service names no one; the admin share a minute before is its tie to the story
+    # the service names no one; the admin share a minute before is its tie to the story, by time only
     service = by_ref["event:24"]
-    assert service["phase"] == "persistence" and service["hops"] and service["tie"]["confidence"] == STRONG
+    assert service["phase"] == "persistence" and service["hops"] and service["tie"]["confidence"] == MEDIUM
+    assert story["confidence"] == MEDIUM
     # five mailbox reads are one step
     assert by_ref["event:30"]["count"] == 5 and by_ref["event:30"]["phase"] == "collection"
     assert "event:41" not in by_ref
@@ -374,6 +375,49 @@ def test_a_machine_account_or_a_service_is_never_a_storys_subject():
     assert story["kind"] == "host" and story["subject"]["id"] == "ws-001"
     assert {"event:3", "event:4"} <= {r for st in story["steps"] for r in st["refs"]}
     assert not res["identities"]
+
+
+def test_a_flag_lineage_ties_by_time_only_is_medium_and_so_is_its_story():
+    host = "WS-001.northstar.example"
+    events = [
+        ev(1, 0, eventId=4624, computer=host, targetUser="dave", targetDomain="NORTHSTAR", targetLogonId="0x3001", logonType=3, ipAddress="10.0.0.31", workstation="WS-031"),
+        # WmiPrvSE started it under its own account half a minute later: the 4688 names no caller logon
+        ev(2, 0.5, eventId=4688, computer=host, newProcessId="0x900", processName="C:\\Windows\\System32\\cmd.exe",
+           parentProcessName="C:\\Windows\\System32\\wbem\\WmiPrvSE.exe", subjectUser="WS-001$", subjectDomain="NORTHSTAR", subjectLogonId="0x3e4"),
+    ]  # fmt: skip
+    [story] = build_stories(events, [], [finding("win-wmi-child", "high", [2], tags=["execution"])], SETTINGS)["stories"]
+    by_ref = {r: s for s in story["steps"] for r in s["refs"]}
+    assert by_ref["event:2"]["tie"] == {"kind": "flag", "basis": "it is part of their way into ws-001 (wmi)", "confidence": MEDIUM}
+    # the logon it is tied to by time comes with it no surer
+    assert by_ref["event:1"]["tie"]["kind"] == "hop" and by_ref["event:1"]["tie"]["confidence"] == MEDIUM
+    assert story["confidence"] == MEDIUM
+
+
+def test_a_logon_id_reused_after_a_reboot_keeps_the_other_persons_logon_out():
+    host = "WS-001.northstar.example"
+    events = [
+        ev(1, 0, eventId=4624, computer=host, targetUser="alice.martin", targetDomain="NORTHSTAR", targetLogonId="0x5a3f1", logonType=2),
+        ev(2, 60, eventId=4634, computer=host, targetUser="alice.martin", targetDomain="NORTHSTAR", targetLogonId="0x5a3f1"),
+        ev(3, 3 * 1440, eventId=4698, computer=host, subjectUser="bob.leroy", subjectDomain="NORTHSTAR", subjectLogonId="0x5a3f1", taskName="\\evil"),
+    ]
+    [story] = build_stories(events, [], [finding("win-scheduled-task", "high", [3], tags=["persistence"])], SETTINGS)["stories"]
+    assert story["subject"]["label"] == "northstar\\bob.leroy" and [r for s in story["steps"] for r in s["refs"]] == ["event:3"]
+    assert story["lineage"]["sessions"][0]["user"] == "bob.leroy"
+
+
+def test_both_logons_of_a_split_token_are_the_session_of_the_story():
+    host = "WS-004.northstar.example"
+    logon = {"computer": host, "eventId": 4624, "targetUser": "daniel.roy", "targetDomain": "NORTHSTAR", "logonType": 2}
+    events = [
+        ev(1, 0, **logon, targetLogonId="0x9a01", targetLinkedLogonId="0x9a02", elevatedToken="%%1842"),
+        ev(2, 0, **logon, targetLogonId="0x9a02", targetLinkedLogonId="0x9a01"),
+        ev(3, 5, eventId=4698, computer=host, subjectUser="daniel.roy", subjectDomain="NORTHSTAR", subjectLogonId="0x9a01", taskName="\\t"),
+    ]
+    [story] = build_stories(events, [], [finding("win-scheduled-task", "high", [3], tags=["persistence"])], SETTINGS)["stories"]
+    by_ref = {r: s for s in story["steps"] for r in s["refs"]}
+    # the two logons of one moment fold into one step, the session's
+    assert by_ref["event:1"] is by_ref["event:2"] and by_ref["event:2"]["tie"]["kind"] == "session" and by_ref["event:2"]["tie"]["confidence"] == STRONG
+    assert {s["logonId"] for s in story["lineage"]["sessions"]} == {"0x9a01", "0x9a02"}
 
 
 def test_phases_from_tags_techniques_and_records():

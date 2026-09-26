@@ -11,10 +11,13 @@ Every step says why it belongs to the story and how surely:
 
 - **strong**: the record names the person by a form a record joined to them, or it is activity
   of their logon session (its logon id), a process started by one in the story, or evidence of
-  their way into a host (the service installed after their admin share, for one);
+  their way into a host (the service installed through the service manager's pipe their admin
+  share connection opened, for one);
 - **medium**: the record names the person by a form the organisation rules joined, it happened on
-  a host of the story while the person's session there was open, it came from an address the
-  story's findings name, or it follows the phishing mail's link or attachment (the chains' notes).
+  a host of the story while the person's session there was open, lineage ties it to them by time
+  only (a program WMI started just after their network logon, a service installed just after
+  their admin share), it came from an address the story's findings name, or it follows the
+  phishing mail's link or attachment (the chains' notes).
 
 Weak ties never put a record in a story, and a person's name alone never puts a program they ran
 in one: it must run in the story's session or process tree, or carry a finding. One person's
@@ -40,7 +43,7 @@ from collections import Counter, defaultdict
 from collections.abc import Collection, Iterable
 from typing import Any
 
-from .chains import _IDENT_SQL, authentication_outcome, build_chains, mail_recipients, same_org_domain
+from .chains import _IDENT_SQL, authentication_outcome, build_chains, mail_recipients, netbios_hints, same_org_domain
 from .identity import CONFIDENCE_RANK, MEDIUM, STRONG, WEAK, Form, Record, Resolver, account_forms, base_name, event_record, kind_of, mail_record, resolve
 from .lineage import Lineage, build_lineage, host_key, ip_of, is_internal_ip
 
@@ -292,15 +295,23 @@ class _Case:
                 ref = f"{prefix}:{r}"
                 if ref in self.rows:
                     self.f_by_ref[ref].append(f)
+        # the accounts each record names, read once for the resolver and for the stories
+        records: dict[str, Record] = {}
+        ev_recs, ml_recs = [], []
+        for rows, recs, read, prefix in ((events, ev_recs, event_record, "event"), (mails, ml_recs, mail_record, "mail")):
+            for row in rows:
+                recs.append(rec := read(row))
+                if row.get("id") is not None:
+                    records[f"{prefix}:{row['id']}"] = rec
         # a server case resolves the whole case's accounts, not only the rows selected around its flags
-        self.resolver = resolver or resolve(events, mails, settings)
+        self.resolver = resolver or resolve(settings=settings, records=ev_recs + ml_recs, netbios_pairs=[p for e in events for p in netbios_hints(e)])
         self.lineage: Lineage = build_lineage(events, settings)
         # the people each record names, and each person's and address's records in time order
         self.named: dict[str, dict[str, tuple[str, str]]] = {}
         self.by_identity: dict[str, list[tuple[int, str]]] = defaultdict(list)
         self.by_ip: dict[str, list[tuple[int, str]]] = defaultdict(list)
         for ref, (row, source) in self.rows.items():
-            rec = mail_record(row) if source == "mails" else event_record(row)
+            rec = records[ref]
             got: dict[str, tuple[str, str]] = {}
             for iid, role, conf in self.resolver.of_record(rec):
                 if conf != WEAK and self.storied(iid) and (iid not in got or CONFIDENCE_RANK[conf] > CONFIDENCE_RANK[got[iid][0]]):
@@ -341,7 +352,7 @@ class _Case:
             return [(i, c, "the mail was sent to them" if i in rcpts else "they sent the mail") for i, c in inside.items()]
         out = [(i, c, f"the record names them ({role})") for i, (c, role) in named.items()]
         if not out:
-            out = [(i, STRONG, how) for i, how in self._lineage_people(ref, row)]
+            out = self._lineage_people(ref, row)
         return out
 
     def window(self, lst: list[tuple[int, str]], lo: int, hi: int) -> list[str]:
@@ -360,18 +371,23 @@ class _Case:
         got = [i for i, _, c in self.resolver.of_record(Record([forms], ["target"])) if c != WEAK and self.storied(i)]
         return got[0] if len(got) == 1 else None
 
-    def _lineage_people(self, ref: str, row: dict[str, Any]) -> list[tuple[str, str]]:
+    def _lineage_people(self, ref: str, row: dict[str, Any]) -> list[tuple[str, str, str]]:
+        """(identity, confidence, how) for each person whose session, process tree or way in a record is
+        part of, as surely as lineage ties it there (a program or a service tied by time is medium)."""
         lin = self.lineage
-        out = []
+        got: dict[str, tuple[str, str]] = {}
+
+        def add(iid: str | None, conf: str, how: str) -> None:
+            # the surest tie of each person; of equal ones, the closest (the process, then the session)
+            if iid and (iid not in got or CONFIDENCE_RANK[conf] >= CONFIDENCE_RANK[got[iid][0]]):
+                got[iid] = (conf, how)
+
         for h in lin.hops_of(ref):
-            iid = self.account(h.get("user"), h.get("domain"))
-            if iid:
-                out.append((iid, f"it is part of their way into {h['to']} ({h['kind']})"))
+            add(self.account(h.get("user"), h.get("domain")), lin.hop_tie(h, ref), f"it is part of their way into {h['to']} ({h['kind']})")
         s = lin.session_of(ref)
         if s:
-            iid = self.account(s.get("user"), s.get("domain"), s.get("sid"))
-            if iid:
-                out.append((iid, f"it happened in their logon session {s['logonId']} on {s['host']}"))
+            how = f"it happened in their logon session {s['logonId']} on {s['host']}"
+            add(self.account(s.get("user"), s.get("domain"), s.get("sid")), lin.session_tie(ref), how)
         p = lin.process_of(ref) or lin.process_of_guid(row.get("processGuid"))
         depth = 0
         while p and depth < 6:
@@ -379,11 +395,11 @@ class _Case:
                 s2 = lin.sessions[p["session"]]
                 iid = self.account(s2.get("user"), s2.get("domain"), s2.get("sid"))
                 if iid:
-                    out.append((iid, f"its process descends from {p['name']} in their session on {p['host']}"))
+                    add(iid, STRONG, f"its process descends from {p['name']} in their session on {p['host']}")
                     break
             p = lin.processes.get(p.get("parent") or "")
             depth += 1
-        return out
+        return [(i, c, how) for i, (c, how) in got.items()]
 
 
 def _anchor_kind(case: _Case, ref: str) -> str | None:
@@ -725,16 +741,26 @@ def _shared_egress(case: _Case) -> set[str]:
 
 
 def _lineage_context(case: _Case, members: _Members) -> None:
-    """Add what lineage ties to the members: the logon of their session, the rest of their hop, the processes that started theirs."""
+    """Add what lineage ties to the members: the logon of their session (both logons of a split token),
+    the rest of their hop, the processes that started theirs; each as surely as lineage ties it."""
     lin = case.lineage
     for ref in list(members):
         s = lin.session_of(ref)
-        if s and s.get("logonRef") and s["logonRef"] != ref:
-            members.take(s["logonRef"], "session", STRONG, f"the logon of session {s['logonId']} on {s['host']}, in which it happened")
+        if s:
+            conf = lin.session_tie(ref)
+            if s.get("logonRef") and s["logonRef"] != ref and s["logonRef"] in case.rows:
+                members.take(s["logonRef"], "session", conf, f"the logon of session {s['logonId']} on {s['host']}, in which it happened")
+            # an administrator's logon is two sessions, the elevated token's and the filtered one's
+            other = lin.sessions.get(s.get("linked") or "")
+            if other and other.get("logonRef") and other["logonRef"] != ref and other["logonRef"] in case.rows:
+                what = f"the other logon of session {s['logonId']} on {s['host']} (its linked token {other['logonId']}), in which it happened"
+                members.take(other["logonRef"], "session", conf, what)
         for h in lin.hops_of(ref):
+            mine = lin.hop_tie(h, ref)
             for r in h["refs"][:10]:
                 if r != ref and r in case.rows:
-                    members.take(r, "hop", STRONG, f"part of the same way into {h['to']} ({h['kind']}: {h['basis']})")
+                    conf = min(mine, lin.hop_tie(h, r), key=CONFIDENCE_RANK.__getitem__)
+                    members.take(r, "hop", conf, f"part of the same way into {h['to']} ({h['kind']}: {h['basis']})")
         p = lin.process_of(ref)
         depth = 0
         while p and p.get("parent") and depth < 3:

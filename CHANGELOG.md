@@ -57,6 +57,22 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   is another organisation's; one name under two SIDs of its domain (an account deleted and
   created again) is noted. A server case reads who is who over the whole case rather than the
   records selected around its flags. See "Who is who" in `docs/stories.md`.
+- Host lineage no longer puts one person's activity in another's session or ties by time what it
+  reports as sure. Windows hands logon ids out again after a reboot: a record after the session
+  of its logon id ended, before the first logon of that id, or of another account than the
+  session's is in a session of its own (marked as one whose logon is not in the evidence), where
+  it used to join the last session of that id as a strong tie. A record keeps the confidence of
+  its own tie into a story: a program WmiPrvSE or WinRM started, a WinRM shell or an RDP session
+  manager's record placed in a session by time, and a service installed after an admin share
+  with nothing but time between them (PsExec's pattern without the `svcctl` or `PSEXESVC` pipe,
+  the installing logon id or the service's program written through the share) are medium, and a
+  story whose flag rests on one of them is medium; they were all strong. A 4688 whose parent's
+  program is named no longer takes a creation of another program under the same process id as
+  its parent, and with the id alone a parent is looked for a day back instead of a week. Both
+  logons of a split token are the story's session. A synthetic case of 150,000 records with 6,000
+  remote executions builds its stories in 8 s instead of 40 s, and one of 300,000 with 12,000 in
+  17 s instead of 133 s: the per-record lookups read the sessions of one host by time instead of
+  every session, and each record's accounts are read once.
 - REMN's own rules raise 200 high and critical findings on the seven clean machines of
   evtx-baseline instead of 895, and detect every recording they detected before (342 recordings,
   435 rule detections, up from 340 and 433). A rule a busy machine matches over and over raises
