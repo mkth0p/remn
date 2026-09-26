@@ -491,3 +491,176 @@ def test_the_lookups_of_each_record_do_not_read_every_session(monkeypatch):
         return reads["n"]
 
     assert build(40) == build(3)
+
+
+# --- the domain controllers' records and other credentials ------------------------------------------------
+
+DC = "DC-01.northstar.example"
+G = "{5b482e77-15dd-f684-f093-e11c7ed66e%02d}"
+
+
+def _ticket(n, minutes, user, service, ip, guid=None, status="0x0", eid=4769):
+    return ev(n, eid, DC, minutes, targetUser=user, targetDomain="NORTHSTAR.EXAMPLE", serviceName=service, ipAddress=ip, logonGuid=guid, status=status)
+
+
+def _net_logon(n, host, minutes, user, lid, ip=None, ws=None, guid=None, pkg="Kerberos"):
+    return ev(n, 4624, host, minutes, targetUser=user, targetDomain="NORTHSTAR", targetLogonId=lid, logonType=3, ipAddress=ip, workstation=ws,
+              logonGuid=guid, authPackage=pkg)  # fmt: skip
+
+
+def test_a_service_ticket_with_the_logons_guid_names_its_source_and_the_service_asked_for():
+    fs = "FS-001.northstar.example"
+    events = [
+        # the logon names neither its address nor its workstation, as a Kerberos logon often does not
+        _net_logon(1, fs, 0, "lab.admin", "0x77", guid=G % 1),
+        ev(2, 5140, fs, 0.1, subjectUser="lab.admin", subjectLogonId="0x77", shareName="\\\\*\\ADMIN$"),
+        # the domain controller issued its ticket, for the server's own account, to the client's address
+        _ticket(3, -0.02, "lab.admin@NORTHSTAR.EXAMPLE", "FS-001$", "10.0.0.21", G % 1),
+        # and explicit credentials on WS-001 carried the same logon GUID as their target's
+        ev(4, 4648, "WS-001.northstar.example", -0.03, subjectUser="alice.martin", targetUser="lab.admin", targetDomain="NORTHSTAR",
+           targetServer="FS-001", data={"TargetLogonGuid": G % 1}),
+        # a ticket refused names nothing
+        _ticket(5, -0.01, "lab.admin@NORTHSTAR.EXAMPLE", "FS-001$", "10.0.0.66", G % 1, status="0x12"),
+    ]  # fmt: skip
+    lin = build_lineage(events)
+    s = lin.session_of("event:1")
+    assert s["from"] == "ws-001" and "explicit credentials used on ws-001 carried its logon GUID (4648)" in s["fromBasis"]
+    assert [(a["kind"], a["ref"], a["confidence"]) for a in s["auth"]] == [("explicit-credentials", "event:4", STRONG), ("kerberos", "event:3", STRONG)]
+    [share] = [h for h in lin.hops_of("event:1") if h["kind"] == "admin-share"]
+    assert (share["from"]["host"], share["from"]["ip"], share["confidence"]) == ("ws-001", "10.0.0.21", STRONG)
+    # the way in says which service was asked for, and the ticket is part of it
+    assert share["basis"].endswith("with a Kerberos ticket for FS-001$ from dc-01 (4769)")
+    assert "event:3" in share["refs"] and lin.hop_tie(share, "event:3") == STRONG
+    assert "dc-01 issued a Kerberos ticket for FS-001$ to 10.0.0.21 (the same logon GUID, 4769)" in share["evidence"]
+    assert "event:5" not in {a["ref"] for a in s["auth"]} and not lin.hops_of("event:5")
+    # the explicit credentials' hop: their target logon GUID is the logon's
+    [explicit] = lin.hops_of("event:4")
+    assert (explicit["kind"], explicit["to"], explicit["confidence"]) == ("explicit-credentials", "fs-001", STRONG)
+    assert explicit["basis"].endswith("and the logon there carried their logon GUID")
+
+
+def test_a_tickets_client_address_is_the_source_when_the_case_knows_whose_it_is():
+    fs = "FS-001.northstar.example"
+    events = [
+        _net_logon(1, fs, 0, "lab.admin", "0x77", guid=G % 1),
+        ev(2, 5140, fs, 0.1, subjectUser="lab.admin", subjectLogonId="0x77", shareName="\\\\*\\ADMIN$"),
+        _ticket(3, -0.02, "lab.admin@NORTHSTAR.EXAMPLE", "FS-001$", "10.0.0.21", G % 1),
+        # the machine account's own ticket-granting ticket went to WS-001's address
+        _ticket(4, -300, "WS-001$", "krbtgt", "10.0.0.21", eid=4768),
+    ]
+    lin = build_lineage(events)
+    assert lin.host_of_ip("10.0.0.21") == "ws-001" and "own account a Kerberos ticket" in lin.ip_hosts["10.0.0.21"]["basis"]
+    [hop] = lin.hops_of("event:1")
+    # the source host is as sure as the address attribution: medium, and it says where it comes from
+    assert (hop["from"]["host"], hop["from"]["ip"], hop["confidence"]) == ("ws-001", "10.0.0.21", MEDIUM)
+    assert hop["from"]["basis"].startswith("the address 10.0.0.21 dc-01 issued its Kerberos ticket to (4769)")
+    assert lin.hop_tie(hop, "event:3") == STRONG
+    assert lin.hosts["dc-01"]["coverage"]["kerberos"] == 2
+
+
+def test_a_ticket_for_the_hosts_own_account_just_before_a_network_logon_is_its_ticket_by_time():
+    fs = "FS-002.northstar.example"
+    events = [
+        # the logon's GUID is not the ticket's: the ticket for FS-002$ from its address 20 s before is, by time
+        _net_logon(1, fs, 0, "lab.admin", "0x81", ip="10.0.0.22", guid=G % 2),
+        ev(2, 5140, fs, 0.1, subjectUser="lab.admin", subjectLogonId="0x81", shareName="\\\\*\\C$"),
+        _ticket(3, -20 / 60, "lab.admin@NORTHSTAR.EXAMPLE", "FS-002$", "10.0.0.22", G % 3),
+        # a later logon that carries the same logon GUID came with the same ticket
+        _net_logon(4, fs, 0.2, "lab.admin", "0x82", ip="10.0.0.22", guid=G % 2),
+        # not another account's, another host's, one from another address, nor one two minutes before
+        _ticket(5, -0.1, "carla.morel@NORTHSTAR.EXAMPLE", "FS-002$", "10.0.0.22", G % 4),
+        _ticket(6, -0.1, "lab.admin@NORTHSTAR.EXAMPLE", "FS-003$", "10.0.0.22", G % 5),
+        _ticket(7, -0.1, "lab.admin@NORTHSTAR.EXAMPLE", "FS-002$", "10.0.0.66", G % 6),
+        _net_logon(8, fs, 10, "lab.admin", "0x83", ip="10.0.0.22", guid=G % 7),
+        _ticket(9, 8, "lab.admin@NORTHSTAR.EXAMPLE", "FS-002$", "10.0.0.22", G % 8),
+    ]
+    lin = build_lineage(events)
+    first, again, late = lin.session_of("event:1"), lin.session_of("event:4"), lin.session_of("event:8")
+    assert [(a["ref"], a["confidence"], a["basis"]) for a in first["auth"]] == [("event:3", MEDIUM, "by account, service, address and time")]
+    assert [a["ref"] for a in again["auth"]] == ["event:3"] and late["auth"] == []
+    [hop] = lin.hops_of("event:1")
+    assert "event:3" in hop["refs"] and lin.hop_tie(hop, "event:3") == MEDIUM
+    assert all(not lin.hops_of(f"event:{n}") for n in (5, 6, 7, 9))
+
+
+def test_an_ntlm_validation_names_the_workstation_of_a_network_logon_that_names_none():
+    fs = "FS-001.northstar.example"
+    events = [
+        _net_logon(1, fs, 0, "carla.morel", "0x91", ip="10.0.0.23", pkg="NTLM"),
+        ev(2, 5140, fs, 0.1, subjectUser="carla.morel", subjectLogonId="0x91", shareName="\\\\*\\ADMIN$"),
+        ev(3, 4776, DC, -10 / 60, targetUser="carla.morel", workstation="WS-003", status="0x0"),
+        # a failed validation names nothing
+        ev(4, 4776, DC, -5 / 60, targetUser="carla.morel", workstation="WS-666", status="0xc000006a"),
+        # two workstations in the same minute: which one was this logon's is not known
+        _net_logon(5, fs, 60, "dave", "0x92", ip="10.0.0.24", pkg="NTLM"),
+        ev(6, 5140, fs, 60.1, subjectUser="dave", subjectLogonId="0x92", shareName="\\\\*\\ADMIN$"),
+        ev(7, 4776, DC, 60 - 10 / 60, targetUser="dave", workstation="WS-004", status="0x0"),
+        ev(8, 4776, DC, 60 - 20 / 60, targetUser="dave", workstation="WS-005", status="0x0"),
+        # a domain controller is a host that issues tickets
+        _ticket(9, -300, "WS-009$", "krbtgt", "10.0.0.99", eid=4768),
+    ]
+    lin = build_lineage(events)
+    carla, dave = lin.session_of("event:1"), lin.session_of("event:5")
+    assert carla["from"] == "ws-003" and "NTLM validation of the account from WS-003" in carla["fromBasis"]
+    assert [(a["kind"], a["ref"], a["confidence"]) for a in carla["auth"]] == [("ntlm", "event:3", MEDIUM)]
+    [hop] = lin.hops_of("event:1")
+    assert (hop["from"]["host"], hop["confidence"]) == ("ws-003", MEDIUM) and lin.hop_tie(hop, "event:3") == MEDIUM
+    assert dave["from"] is None and dave["auth"] == []
+    assert lin.hosts["dc-01"]["coverage"]["ntlm"] == 4
+
+
+def test_a_new_credentials_logon_ties_the_account_it_used_on_the_network_to_its_session():
+    ws, fs = "WS-004.northstar.example", "FS-001.northstar.example"
+    netonly = {"targetUser": "daniel.roy", "targetDomain": "NORTHSTAR", "logonType": 9, "logonProcess": "seclogo"}
+    events = [
+        ev(1, 4624, ws, 0, **netonly, targetLogonId="0x9901", targetOutboundUser="admin.bob", targetOutboundDomain="NORTHSTAR"),
+        # admin.bob logs on to FS-001 from WS-004 half an hour later, and opens ADMIN$
+        _net_logon(2, fs, 30, "admin.bob", "0x77", ip="10.0.0.4", ws="WS-004", pkg="NTLM"),
+        ev(3, 5140, fs, 30.1, subjectUser="admin.bob", subjectLogonId="0x77", shareName="\\\\*\\ADMIN$"),
+        ev(4, 4634, ws, 60, targetUser="daniel.roy", targetLogonId="0x9901"),
+        # after the session ended, and from another host, admin.bob's logons are not its
+        _net_logon(5, fs, 90, "admin.bob", "0x78", ip="10.0.0.4", ws="WS-004", pkg="NTLM"),
+        _net_logon(6, "FS-002", 31, "admin.bob", "0x79", ip="10.0.0.9", ws="WS-009", pkg="NTLM"),
+        # runas /netonly as oneself sets no other account
+        ev(7, 4624, ws, 0, **netonly, targetLogonId="0x9902", targetOutboundUser="daniel.roy", targetOutboundDomain="NORTHSTAR.EXAMPLE"),
+    ]
+    lin = build_lineage(events)
+    s = lin.session_of("event:1")
+    assert s["network"] == "NORTHSTAR\\admin.bob" and "used other credentials (NORTHSTAR\\admin.bob) for the network" in s["actions"]
+    assert lin.session_of("event:7")["network"] is None
+    [hop] = lin.hops_of("event:1")
+    assert (hop["kind"], hop["from"]["host"], hop["to"], hop["account"], hop["confidence"]) == (
+        "explicit-credentials",
+        "ws-004",
+        "fs-001",
+        "NORTHSTAR\\admin.bob",
+        MEDIUM,
+    )
+    assert "(4624 type 9)" in hop["basis"] and hop["refs"] == ["event:1", "event:2"]
+    # the logon on FS-001 is part of that way in, as surely as account, source and time tie it
+    assert hop in lin.hops_of("event:2") and lin.hop_tie(hop, "event:2") == MEDIUM
+    assert all(hop not in lin.hops_of(f"event:{n}") for n in (5, 6))
+
+
+def test_a_hosts_clock_against_the_domain_controllers_is_noted_and_the_ties_by_time_allow_for_it():
+    fs = "FS-005.northstar.example"
+    skew = 7  # minutes the member server's clock is ahead
+    events = [
+        # three logons matched to their tickets by logon GUID, each 7 minutes after its ticket
+        *[_net_logon(n, fs, 60 * n + skew, "lab.admin", hex(0x100 + n), ip="10.0.0.21", guid=G % n) for n in (1, 2, 3)],
+        *[_ticket(10 + n, 60 * n - 0.01, "lab.admin@NORTHSTAR.EXAMPLE", "FS-005$", "10.0.0.21", G % n) for n in (1, 2, 3)],
+        # a logon whose GUID is not its ticket's: 7 minutes after the ticket is just after it on the domain controller's clock
+        _net_logon(4, fs, 300 + skew, "carla.morel", "0x200", ip="10.0.0.23", guid=G % 40),
+        _ticket(14, 300 - 0.1, "carla.morel@NORTHSTAR.EXAMPLE", "FS-005$", "10.0.0.23", G % 41),
+        # a host whose logons follow their tickets by a second has no skew to note
+        _net_logon(5, "FS-006", 1, "lab.admin", "0x300", ip="10.0.0.21", guid=G % 50),
+        _net_logon(6, "FS-006", 2, "lab.admin", "0x301", ip="10.0.0.21", guid=G % 51),
+        _ticket(15, 1 - 1 / 60, "lab.admin@NORTHSTAR.EXAMPLE", "FS-006$", "10.0.0.21", G % 50),
+        _ticket(16, 2 - 1 / 60, "lab.admin@NORTHSTAR.EXAMPLE", "FS-006$", "10.0.0.21", G % 51),
+    ]
+    lin = build_lineage(events)
+    host = lin.hosts["fs-005"]
+    assert host["clock"]["matches"] == 3 and abs(host["clock"]["offsetMs"] - skew * 60_000) < 1_000
+    assert "FS-005.northstar.example's clock reads 7 min ahead of the domain controller's" in host["limits"][-1]
+    assert [a["ref"] for a in lin.session_of("event:4")["auth"]] == ["event:14"]
+    assert "clock" not in lin.hosts["fs-006"]

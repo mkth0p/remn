@@ -6,8 +6,9 @@
  * here, as stories_for_store does in SQL, and posts them: the findings' records, then within a
  * day before and three days after each flag the records that name the flagged people, come from
  * the addresses the findings name, or are logons, processes, shares, services and tasks on the
- * flagged hosts. The build also returns the phishing chains of those rows, which are kept for the
- * review and the report as a chain build keeps them.
+ * flagged hosts, with the domain controllers' tickets and NTLM validations of those people and hosts.
+ * The build also returns the phishing chains of those rows, which are kept for the review and the
+ * report as a chain build keeps them.
  *
  * Every cut a build makes is named in its stats, so the page and the report can say where it stops.
  * The snapshot keeps a digest of what the build read (the findings, the evidence, the settings), so
@@ -112,6 +113,13 @@ export interface Session {
   ip: string | null
   workstation: string | null
   from: string | null
+  /** how the source host was named when the logon does not name it: a ticket, explicit credentials, an NTLM validation */
+  fromBasis?: string | null
+  logonGuid?: string | null
+  /** the account a NewCredentials logon (type 9) uses on the network, when it is another */
+  network?: string | null
+  /** the records that say how the logon authenticated, and how surely each is its own */
+  auth?: SessionAuth[]
   start: number
   end: number | null
   logonRef: string | null
@@ -124,6 +132,20 @@ export interface Session {
   activity: number
   activityKinds: Record<string, number>
   actions: Record<string, number>
+}
+/** The domain controller's service ticket (4769) or NTLM validation (4776) of a logon, or the explicit credentials (4648) it came from. */
+export interface SessionAuth {
+  kind: 'kerberos' | 'ntlm' | 'explicit-credentials'
+  ref: string
+  /** the domain controller, or the host the explicit credentials were used on */
+  host: string | null
+  ts: number
+  ip: string | null
+  workstation: string | null
+  /** the service account the ticket was for (FS-001$ for the host's own services) */
+  service: string | null
+  confidence: Confidence
+  basis: string
 }
 export interface Hop {
   id: string
@@ -191,6 +213,8 @@ export interface HostCoverage {
   cleared: { ts: number; log: string; ref: string }[]
   /** what this host's evidence cannot show, in words */
   limits: string[]
+  /** how far the host's clock is from the domain controllers', when its logons consistently are (by logon GUID) */
+  clock?: { offsetMs: number; matches: number }
 }
 export interface IdentityForm {
   kind: 'addr' | 'netbios' | 'dn' | 'object' | 'sid' | 'name' | 'display'
@@ -360,6 +384,14 @@ const REMOTE_SCRIPT_RE = new RegExp(REMOTE_SCRIPT)
 const PRIVATE_ANSWER_RE = new RegExp(PRIVATE_ANSWER)
 const DNS_CAP = 20_000
 const DHCP_CAP = 20_000
+/**
+ * The domain controllers' records a build reads around the flags (a ticket-granting ticket, a service
+ * ticket, an NTLM validation), for the accounts, hosts and client addresses of the flags (dcSelectionKeys):
+ * hops and sessions read which ticket a logon came with and from where. Mirror of stories.py, compared by a test.
+ */
+export const DC_AUTH_EVENT_IDS = [4768, 4769, 4776]
+const DC_IDS = new Set(DC_AUTH_EVENT_IDS)
+const DC_CAP = 20_000
 /** the ways of writing an account a server case's who-is-who reads (identity.records_for_store's limit) */
 const ACCOUNT_RECORD_CAP = 200_000
 
@@ -403,6 +435,9 @@ export const STORY_EVENT_FIELDS = [
   'targetLogonId',
   'targetLinkedLogonId',
   'targetServer',
+  'targetOutboundUser',
+  'targetOutboundDomain',
+  'logonGuid',
   'subjectUser',
   'subjectDomain',
   'subjectSid',
@@ -473,6 +508,8 @@ export const STORY_DATA_KEYS = [
   'AccountName',
   'AccountDomain',
   'TargetServerName',
+  // the logon GUID explicit credentials name for their target's logon, which the domain controller's ticket carries
+  'TargetLogonGuid',
   'ProcessId',
   // lineage: DNS answers, WinRM's session record, WMI's failed calls, DHCP leases, Entra devices
   'QueryName',
@@ -520,6 +557,58 @@ function ipOf(v: unknown): string {
   if (s.startsWith('::ffff:')) s = s.slice(7)
   if (!s || ['-', '::1', '127.0.0.1', '0.0.0.0', '::', 'localhost'].includes(s)) return ''
   return /^[\d.]+$/.test(s) || s.includes(':') ? s : ''
+}
+/** ws-004 for WS-004.northstar.example, \\WS-004 and WS-004$; empty for an address (mirror of lineage.host_key). */
+function hostKey(v: unknown): string {
+  const s = String(v ?? '')
+    .trim()
+    .replace(/^\\+|\\+$/g, '')
+    .trim()
+    .toLowerCase()
+  if (!s || s === '-' || s === 'localhost' || /^[\d.]+$/.test(s) || s.includes(':')) return ''
+  return s.replace(/\$+$/, '').split('.')[0]
+}
+
+/**
+ * What to read of the domain controllers' records around the flags, from the rows selected so far
+ * (mirror of stories.dc_selection_keys): the accounts (the flagged people's, those that logged on to a
+ * flagged host over the network, the network account of a NewCredentials logon), the flagged hosts (a
+ * ticket for a host's own account, an NTLM validation from it) and the client addresses (the outside
+ * addresses the findings name, a flagged host's own, those its network logons came from).
+ */
+function dcSelectionKeys(rows: Iterable<Record<string, unknown>>, names: Set<string>, computers: Set<string>, ips: Set<string>) {
+  const hosts = new Set([...computers].map(hostKey).filter(Boolean))
+  const out = { names: new Set(names), hosts, services: new Set([...hosts].map((h) => `${h}$`)), ips: new Set(ips) }
+  const addName = (v: unknown) => {
+    const n = accountName(v)
+    if (n) out.names.add(n)
+  }
+  for (const row of rows) {
+    const eid = Number(row.eventId)
+    const on = hosts.has(hostKey(row.computer))
+    const ip = ipOf(row.ipAddress)
+    if (eid === 4624) {
+      if (on && [3, 8].includes(Number(row.logonType))) {
+        addName(row.targetUser)
+        if (ip) out.ips.add(ip)
+      }
+      if (ip && isInternalIp(ip) && hosts.has(hostKey(row.workstation))) out.ips.add(ip)
+      addName(row.targetOutboundUser)
+    } else if (
+      on &&
+      eid === 3 &&
+      String(row.provider ?? '')
+        .toLowerCase()
+        .includes('sysmon') &&
+      ['true', '1'].includes(String(row.initiated ?? '').toLowerCase())
+    ) {
+      const src = ipOf(row.sourceIp)
+      if (src && isInternalIp(src)) out.ips.add(src)
+    } else if (row.artifactType === 'dhcp' && ip && hosts.has(hostKey(row.workstation || (row.data as Record<string, unknown> | undefined)?.['Host Name']))) {
+      out.ips.add(ip)
+    }
+  }
+  return out
 }
 
 /** the flags' times widened and merged, however many windows that makes */
@@ -815,7 +904,7 @@ export function fitToBudget(tiers: Record<string, unknown>[][], fixed: number, b
 export async function selectRows(
   caseId: number,
   findings: ReturnType<typeof slimFinding>[],
-  { budget = POST_BUDGET, eventCap = EVENT_CAP }: { budget?: number; eventCap?: number } = {},
+  { budget = POST_BUDGET, eventCap = EVENT_CAP, dcCap = DC_CAP }: { budget?: number; eventCap?: number; dcCap?: number } = {},
 ): Promise<{ events: Record<string, unknown>[]; mails: SlimMail[]; truncated: string[]; cut: Record<string, number> }> {
   const db = getDb()
   const cut: Record<string, number> = {}
@@ -845,7 +934,8 @@ export async function selectRows(
   for (const e of flagged) {
     const row = e as unknown as Record<string, unknown>
     const data = (row.data ?? {}) as Record<string, unknown>
-    for (const v of [row.targetUser, row.subjectUser, row.user, row.upn, data.UserId, data.MailboxOwnerUPN]) {
+    // with the account a NewCredentials logon uses on the network
+    for (const v of [row.targetUser, row.subjectUser, row.user, row.upn, data.UserId, data.MailboxOwnerUPN, row.targetOutboundUser]) {
       const n = accountName(v)
       if (n) names.add(n)
     }
@@ -879,6 +969,8 @@ export async function selectRows(
     count(`context-${kind}`)
   })
   const answers = capped(DNS_CAP, () => count('dns'))
+  // the domain controllers' records in the windows, read once the rows around the flags say which accounts, hosts and addresses to read them for
+  const dcSeen: { id: number; ts: number; eventId: number; user: string | null; service: string; workstation: string; ip: string }[] = []
   for (const [lo, hi] of spans) {
     await db.events
       .where('[caseId+ts]')
@@ -886,6 +978,16 @@ export async function selectRows(
       .each((e) => {
         if (events.has(e.id!)) return
         const row = e as unknown as Record<string, unknown>
+        if (DC_IDS.has(Number(row.eventId)))
+          dcSeen.push({
+            id: e.id!,
+            ts: e.ts ?? 0,
+            eventId: Number(row.eventId),
+            user: accountName(row.targetUser),
+            service: String(row.serviceName ?? '').toLowerCase(),
+            workstation: hostKey(row.workstation),
+            ip: ipOf(row.ipAddress),
+          })
         const data = (row.data ?? {}) as Record<string, unknown>
         const named = [row.targetUser, row.subjectUser, row.user, row.upn, data.UserId].some((v) => {
           const n = accountName(v)
@@ -917,6 +1019,20 @@ export async function selectRows(
       if (++dhcpPicked > DHCP_CAP) count('dhcp')
       else events.set(e.id!, slimEvent(row))
     })
+  // the domain controllers' Kerberos and NTLM records of the flagged people and hosts, by what the rows
+  // read so far name: those naming an account or a host first, then the nearest a flag (as stories_for_store)
+  const dc = dcSelectionKeys(events.values(), names, hosts, ips)
+  const dcPicks = capped(dcCap, () => count('dc'))
+  for (const c of dcSeen) {
+    if (events.has(c.id)) continue
+    const keyed = (!!c.user && dc.names.has(c.user)) || dc.services.has(c.service) || (c.eventId === 4776 && dc.hosts.has(c.workstation))
+    if (keyed || (c.ip && dc.ips.has(c.ip))) dcPicks.add({ id: c.id, rank: keyed ? 0 : 1, distance: flagDistance(flagTimes, c.ts), ts: c.ts, kind: 'dc' })
+  }
+  const dcIds = dcPicks
+    .keep()
+    .sort((a, b) => a.ts - b.ts || a.id - b.id)
+    .map((p) => p.id)
+  for (const row of await db.events.bulkGet(dcIds)) if (row) events.set(row.id!, slimEvent(row as unknown as Record<string, unknown>))
   const inWindow = (t: number | null) => t != null && spans.some(([lo, hi]) => t >= lo && t <= hi)
   const keptMails = new Set(mails.map((m) => m.id))
   const replies = allMails.filter((m) => !keptMails.has(m.id) && inWindow(m.date) && names.has(accountName(m.fromAddr) ?? ''))
@@ -966,6 +1082,7 @@ export function storyCoverageWarnings(stats: StoryResult['stats'] | undefined): 
     replies: `Only ${num(MAIL_CAP)} of the mails the flagged people sent were read, those nearest the flags.`,
     dns: `The DNS answers on the flagged hosts passed ${num(DNS_CAP)}: the addresses they give to hosts come from those nearest the flags.`,
     dhcp: `The DHCP leases passed ${num(DHCP_CAP)}: the addresses they give to hosts come from the first ones.`,
+    dc: `The domain controllers' Kerberos and NTLM records of the flagged people, hosts and addresses passed ${num(DC_CAP)}: the stories read those naming a flagged account or host first, then those nearest the flags, so a hop may miss the ticket that names its source.`,
     'name-keys': 'The flagged records name more than 2,000 accounts: the stories read the records of the 2,000 they name most.',
     'host-keys': 'More than 500 hosts carry flags: the stories read the logons, processes and services of the 500 with the most.',
     'address-keys': 'The flags name more than 500 outside addresses: the stories read the records from the 500 they name most.',

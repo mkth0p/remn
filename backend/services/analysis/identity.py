@@ -79,7 +79,7 @@ _BUILTIN_NAMES = frozenset(
 _SERVICE_PREFIXES = ("svc", "healthmailbox", "msol_", "aad_", "sm_", "$", "iusr_", "iwam_")
 _EMPTY = frozenset({"", "-", "n/a", "unknown", "null", "none", "%%1793"})
 _SCOPED = frozenset({"addr", "netbios", "dn", "object", "sid"})
-_ROLE_RANK = {"subject": 0, "target": 1, "member": 2, "user": 3, "sender": 4, "reply-to": 5, "recipient": 6}
+_ROLE_RANK = {"subject": 0, "target": 1, "member": 2, "network": 3, "user": 4, "sender": 5, "reply-to": 6, "recipient": 7}
 
 
 def _clean(v: Any) -> str:
@@ -266,6 +266,8 @@ def event_record(ev: dict[str, Any]) -> Record:
     else:
         target = account_forms(ev.get("targetUser"), ev.get("targetDomain"), ev.get("targetSid"))
         add(target, "target")
+        # a NewCredentials logon (4624 type 9) names the account its session uses on the network, as explicit credentials (4648) name theirs
+        add(account_forms(ev.get("targetOutboundUser"), ev.get("targetOutboundDomain")), "network")
         shown = _clean(ev.get("displayName") or data.get("DisplayName"))
         if target and shown.lower() not in _EMPTY and eid in (4720, 4738, 4741, 4742):
             displays.append((shown.lower(), target[0], False))
@@ -337,6 +339,8 @@ _RECORD_COLUMNS = (
     "targetUser",
     "targetDomain",
     "targetSid",
+    "targetOutboundUser",
+    "targetOutboundDomain",
     "memberName",
     "memberSid",
     "upn",

@@ -166,14 +166,42 @@ Host lineage reads, for each host:
   the WinRM client's own connection (WinRM 6), strong when the network logon on the named host
   follows, and a WMI query refused by a remote host (WMI-Activity 5858, medium). A hop's source
   is a host when the case names it (the workstation name of the logon) or shows whose address it
-  is (below), otherwise the address;
+  is (below), or the domain controllers' records name it (below), otherwise the address;
+- **the domain controllers' records**: the hosts that write Kerberos records (4768, 4769) are
+  the domain controllers, flagged or not. A service ticket (4769) granted
+  with the logon GUID of a logon (4624) is that logon's ticket (strong); without the GUID, a
+  ticket for the host's own account (`FS-001$`, which `cifs` and `host` ask for) that the same
+  account asked for from the logon's address, within a minute before its network logon there, is
+  its ticket by time (medium). A hop then says which service was asked for ("with a Kerberos
+  ticket for FS-001$ from dc-01"), holds the ticket as one of its records, and, when the logon
+  names neither an address nor a workstation, comes from the ticket's client address, read as a
+  host when the case knows whose it is (medium). Explicit credentials (4648) whose target logon
+  GUID is the logon's, or the ticket's, were used on the logon's source: the hop comes from that
+  host (strong by the logon's GUID, as sure as the ticket's tie through it), and the 4648 reaches
+  the logon there by it rather than by time. An NTLM validation (4776) of the account within a
+  minute before a network logon that names no workstation, on a domain controller or on the host
+  itself, names the workstation it came from (medium, by account and time; validations from two
+  workstations in that minute name none). A host whose logons consistently follow their tickets
+  by more than a minute, or precede them, has a clock that differs from the domain controller's:
+  the host says by how much (`clock`, the median of its logons matched by GUID, from two of them
+  on) and its limits say so, and the ties by time between its logons and the domain controllers'
+  records allow for it instead of silently missing;
+- **other credentials**: a NewCredentials logon (4624 type 9, as `runas /netonly` and
+  pass-the-hash tools make) whose network account differs from its own is a step "used other
+  credentials (…) for the network", lateral movement, that names both accounts as explicit
+  credentials (4648) do, so it joins the stories of both; a network logon of that account on
+  another host from this one, while the session is open (or within twelve hours when its logoff
+  is not in the evidence), is a way into that host with those credentials (medium, by account,
+  source and time);
 - **addresses**: a private address is a host's when the host's own Sysmon connections come from
   it, a logon names the host as its workstation from it, a DNS answer on a host of the case gives
-  it for that host's name (Sysmon 22 or the DNS client's log, 3008; private answers only), or the
+  it for that host's name (Sysmon 22 or the DNS client's log, 3008; private answers only), the
   DHCP server leased it to that
-  host (its audit log, `DhcpSrvLog-*.log`, events 10 and 11). Each attribution keeps its basis
-  and the time span of its records, so an address that moved from one host to another is read,
-  at a step's time, as the host whose records are nearest;
+  host (its audit log, `DhcpSrvLog-*.log`, events 10 and 11), a domain controller gave the host's
+  own account a Kerberos ticket there (4768, 4769), or explicit credentials used on the host
+  asked for their ticket from it (a 4648 and a 4769 of one logon GUID). Each attribution keeps
+  its basis and the time span of its records, so an address that moved from one host to another
+  is read, at a step's time, as the host whose records are nearest;
 - **devices**: an Entra sign-in names the device it came from (its display name and join type,
   from `deviceDetail`); a device of the name of a host of the case is that host, so a sign-in
   from a joined laptop is a step on the laptop, and a device the case has no logs of is said to
@@ -485,7 +513,13 @@ logons, sessions, processes, shares, services and tasks on the flagged hosts, wi
 (6, 91), WMI-Activity (5858) and DNS client (3008) events, the process creations and script
 blocks that reach another host, and their Sysmon DNS answers that give a private address (at
 most 20,000); the DHCP leases (at most 20,000, whatever their time, since the audit log's local
-times carry no zone and are kept without one); the mails the findings cite (at most 5,000), the
+times carry no zone and are kept without one); in the same windows, the domain controllers'
+Kerberos and NTLM records (4768, 4769, 4776) of the flagged accounts, of the accounts that logged
+on to a flagged host over the network or that a NewCredentials logon used on it, of the flagged
+hosts' own accounts and workstation names, and of their client addresses (the outside addresses
+the findings name, the addresses a flagged host's network logons came from, its own), those
+naming an account or a host first and then those nearest a flag (at most 20,000, a cut named);
+the domain controllers need not be flagged; the mails the findings cite (at most 5,000), the
 300 riskiest others (a risk of 45 or more) and the mails the flagged people sent. A build reads
 the first 2,000 records each finding cites, at most 50,000 flagged records and 50,000 records
 around them (a browser case under one cap for the three kinds, a server case 50,000 of each),
@@ -572,6 +606,14 @@ account on SCRANTON she enabled (one record names both).
 - A WMI or WinRM program on the target is tied to the network logon just before it by time
   only (within a minute): two people's network sessions opened in the same minute on one host
   cannot be told apart, and the step says it was tied by time.
+- A Kerberos ticket or an NTLM validation that shares no logon GUID with a logon is tied to it by
+  account and time only (within a minute, allowing for a host's clock as its GUID matches measure
+  it): of two network logons of one account to one host in that minute the nearest takes it, and
+  the hop says it was tied by time. A ticket is a step on the domain controller that issued it, so
+  the domain controller is among the hosts of a story whose way in it names.
+- A NewCredentials logon's step reaches the host its network account logged on to as a hop of
+  the story: the records of that logon are steps of the network account's story, not of the
+  account that set the credentials.
 - An Entra device is matched to a host by name only: a device renamed, or one whose name two
   hosts of different domains share, is not joined; a device id is not read against the
   machine's own records.

@@ -198,6 +198,36 @@ def test_the_sid_an_event_was_logged_under_names_its_account():
     assert header_forms("S-1-5-21-111-222-333-500") == [Form("sid", "s-1-5-21-111-222-333-500")]
 
 
+def test_a_new_credentials_logon_names_the_account_it_uses_on_the_network():
+    """runas /netonly (4624 type 9) keeps the account's own name and uses another on the network: the record names both, as explicit credentials (4648) do."""
+    rec = event_record(
+        {
+            "eventId": 4624,
+            "logonType": 9,
+            "targetUser": "daniel.roy",
+            "targetDomain": "NORTHSTAR",
+            "targetOutboundUser": "admin.bob",
+            "targetOutboundDomain": "NORTHSTAR",
+        }
+    )
+    assert list(zip(rec.groups, rec.roles, strict=True)) == [
+        ([Form("netbios", "northstar\\daniel.roy")], "target"),
+        ([Form("netbios", "northstar\\admin.bob")], "network"),
+    ]
+    # the same account on the network is one group, at its surer role
+    same = event_record(
+        {
+            "eventId": 4624,
+            "logonType": 9,
+            "targetUser": "daniel.roy",
+            "targetDomain": "NORTHSTAR",
+            "targetOutboundUser": "daniel.roy",
+            "targetOutboundDomain": "NORTHSTAR",
+        }
+    )
+    assert same.roles == ["target"]
+
+
 @pytest.mark.parametrize(
     "sid",
     [
