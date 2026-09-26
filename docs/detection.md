@@ -116,6 +116,47 @@ the linked lab, and runs the same in both engines. `tools/evtx_attack_samples.py
 job hold the detections in place: the job fails when a rule that identifies a sample's
 attack stops firing on it, or when the engines disagree on any sample.
 
+`directory.yaml` reads what a domain controller's Security log says about the directory itself:
+account control flags that weaken an account (no password required, reversible encryption,
+DES only, no Kerberos pre-authentication) or grant delegation, resource-based delegation
+written on a computer object, permissions changed on the domain root, AdminSDHolder or any
+other object, extended rights rewritten, server objects created under Sites (DCShadow), the
+domain policy changed by a user, the Special Groups table changed, sensitive user rights
+assigned and the Guest account enabled (4738, 4742, 5136, 5137, 4739, 4908, 4704, 4722). It
+was written for the directory changes the default rules missed in EVTX-to-MITRE-Attack, so
+that library does not count as held out for it (`WRITTEN_AGAINST` in
+`tools/measure_rules.py`); none of its rules fires on the clean machines of evtx-baseline.
+`other-products.yaml` reads the logs of server products that run on Windows. SQL Server's audit
+(33205) is parsed into its action, object class and name, the principal, the target and the
+client address (`eventType`, `objectType`, `objectName`, `subjectUser`, `targetUser`,
+`ipAddress`), and the rules flag audits altered or dropped, logins added to server roles or to
+powerful database roles, logins and users created, sa enabled, repeated failed logins from one
+client and failed logins as sa, as well as options that run code (xp_cmdshell, CLR, OLE
+Automation, 15457) and a start in single-user mode (17115). OpenSSH lines (OpenSSH/Operational
+4) give the account and the client, for password guessing against sshd. For Certificate
+Services, the rules flag requests carrying a subject alternative name (ESC1, ESC6), changes to
+CA permissions (ESC7) and to templates (ESC4), the CA audit filter changed, CA backups and
+certificate logons the KDC could not map strongly. On the DNS server's audit channel, they flag a
+plugin DLL set (DNSAdmins), logging lowered, and wildcard, WPAD or ISATAP records. For
+BitLocker, they flag a password protector added and encryption started. The pack was written for
+the product logs the default rules missed in EVTX-to-MITRE-Attack, so that library does not
+count as held out for it (`WRITTEN_AGAINST`); none of its rules fires on the clean machines of
+evtx-baseline, which include OpenSSH and DNS server logs.
+PowerShell module logging (4103) and pipeline execution details (800) record each command a
+session runs, with its parameters, as `CommandInvocation` and `ParameterBinding` lines. The parser
+writes them back as the command (`Get-ADGroupMember -Identity 'Domain Admins'`) into
+`commandLine`, taking 800's command as typed when it has one and leaving out what the host adds
+to every interactive pipeline (Out-Default, PSConsoleHostReadline). It also takes the user into
+`subjectUser` and the script into `path`. `powershell-commands.yaml` reads those commands:
+privileged group members listed, Kerberos tickets requested from PowerShell (Kerberoasting),
+SPN accounts searched, forest and trust enumeration, a service's ImagePath or FailureCommand
+rewritten, New-Service, BITS transfers, permanent WMI subscriptions, printer ports pointing at a
+file (PrintDemon), AMSI bypasses, named pipe shells and the OpenSSH server enabled. These are
+commands that ran, as opposed to script text that 4104 logs when a module is loaded. The pack
+was written for the PowerShell files the default rules missed in EVTX-to-MITRE-Attack, so that
+library does not count as held out for it (`WRITTEN_AGAINST`). None of its rules fires on the
+4103 and 800 events of the evtx-baseline machines.
+
 The rules that flooded the clean machines were cut down without losing a recorded detection
 (measured in [the noise review](reviews/2026-09-25-noise-and-held-out.md)). A rule a busy
 machine matches over and over raises one finding per program per machine: a program reading

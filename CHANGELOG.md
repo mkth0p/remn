@@ -5,6 +5,30 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- Eleven rules for directory changes on a domain controller (`rules/windows/directory.yaml`):
+  accounts weakened for AS-REP roasting or offline cracking, Kerberos delegation granted
+  (including resource-based delegation), passwords set never to expire, permissions changed on
+  the domain root, AdminSDHolder or other objects, extended rights rewritten, DCShadow server
+  objects, domain policy changed by a user, the Special Groups table changed, sensitive user
+  rights assigned and the Guest account enabled. They catch about 20 files of
+  EVTX-to-MITRE-Attack the default rules missed and fire on none of the evtx-baseline machines.
+- Rules for the logs of server products (`rules/windows/other-products.yaml`): SQL Server audit
+  tampering, role membership, new logins, sa enabled, failed logins, options that run code and
+  single-user starts; password guessing against OpenSSH; Certificate Services requests with a
+  subject alternative name, CA permission, template and audit changes, CA backups and weak
+  certificate mappings; DNS plugin DLLs, logging changes and wildcard or WPAD records; BitLocker
+  password protectors and encryption starts. SQL Server audit records and sshd lines are now
+  parsed into who, what and from where, in the server and the browser parser alike. The rules
+  catch 27 files of EVTX-to-MITRE-Attack the default rules missed and fire on none of the
+  evtx-baseline machines.
+- PowerShell 4103 and 800 events now carry the command they record, rebuilt from its parameter
+  bindings or taken as typed, with the user and the script, in the server and the browser parser
+  alike. Twelve rules read those commands (`rules/windows/powershell-commands.yaml`):
+  privileged group listing, Kerberoasting from PowerShell, SPN and trust discovery, service path
+  and failure-command changes, New-Service, BITS transfers, permanent WMI subscriptions,
+  PrintDemon printer ports, AMSI bypasses, named pipe shells and OpenSSH enabled. They catch 15
+  files of EVTX-to-MITRE-Attack the default rules missed and fire on none of the evtx-baseline
+  machines, and no other bundled rule changes its findings.
 - The Events page stacks a field (least-frequency analysis): its "stack" button lists every
   value of an image, parent image, process, command line, path, service, scheduled task,
   object, file, user, workstation, address, DNS query or provider and event ID pair among
