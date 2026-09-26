@@ -39,6 +39,24 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   command lines and script blocks first and saying what it left out. "Ask the analyst" gives the
   story's titles and reasons to the model as evidence, not as the analyst's words, and a story
   step added to the case timeline opens at that step, or says its story is gone.
+- Carrier-grade NAT's shared addresses (100.64.0.0/10, a provider's or Tailscale's) are inside
+  the network for stories: an RDP logon from one is lateral movement, not initial access from
+  the internet, and a finding naming one does not make it the attacker's address.
+- A record names the account its System header's SID is (the user PowerShell's script blocks
+  and many operational logs name only there) when it is a user's SID, joined to the account by
+  a logon of any day, so the flagged script blocks on a victim's host are steps of the victim's
+  story instead of a story of the host: on MITRE's APT29 day 1, the 35 flagged script blocks of
+  SCRANTON and NASHUA join pbeesly's story. A SID written where a name goes (a firewall rule's
+  `ModifyingUser`) is read as a SID; a service's, an IIS application pool's, a virtual
+  machine's or a group's SID is never a person, and the firewall service's no longer makes a
+  story. A machine account is never a story's subject: a service an SCCM site server installs
+  over `ADMIN$` is a story of its host. With no internal domain set, `CONTOSO\alice` no longer
+  joins an attacker's `alice@contoso.co` because it sorts before `contoso.com`: a NetBIOS name
+  that is the first label of two organisations' domains joins neither and is possibly either. A
+  bare name the case writes for one account only is possibly, not surely, that account when it
+  is another organisation's; one name under two SIDs of its domain (an account deleted and
+  created again) is noted. A server case reads who is who over the whole case rather than the
+  records selected around its flags. See "Who is who" in `docs/stories.md`.
 - REMN's own rules raise 200 high and critical findings on the seven clean machines of
   evtx-baseline instead of 895, and detect every recording they detected before (342 recordings,
   435 rule detections, up from 340 and 433). A rule a busy machine matches over and over raises

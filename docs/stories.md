@@ -43,27 +43,55 @@ forms into identities, and each join says why and how surely:
 - **strong**: one record states both forms (a logon's account name and its SID, a sign-in's
   UPN and its object id), or renames one to the other (4781);
 - **medium**: the organisation's naming rules join them: `CONTOSO\alice` and
-  `alice@contoso.com` when `CONTOSO` is the first label of the address's domain or of an
-  internal domain, or when the case showed the two side by side; a distinguished name and the
-  address of its domain; a bare name when only one account of that name is in the case;
+  `alice@contoso.com` when the case showed `CONTOSO` beside `contoso.com`, when `CONTOSO` is
+  the first label of an internal domain, or when `contoso.com` is the one organisation's domain
+  of the case that `CONTOSO` is the first label of; a distinguished name and the address of its
+  domain; a bare name when only one account of that name is in the case, and that account is
+  not another organisation's;
 - **weak**: only a display name, or a bare name several accounts share, matches. That is
   written as "possibly the same" and never joins two identities.
 
+A record names an account by its fields and by the SID in its System header, the account the
+event was logged under: PowerShell's script blocks (4104), and many operational logs, name
+their user only there. That SID names its account when it is a user's (a logon states it
+beside the account's name); SYSTEM's, which heads every Sysmon record, and the other SIDs of
+Windows' own name no one. The header does not say which of the record's accounts it is, so it
+joins none of them.
+
 Accounts of two organisations never join, whatever else matches: `alice.martin@other-tenant.example`
 is not `alice.martin@northstar.example`, and the resolver names it a namesake, kept apart. A
-machine account (`WS-001$`) never joins a user account unless a record renames one to the
+bare `alice.martin` is only possibly the other tenant's account, even when it is the only
+account of that name in the case, unless it was seen on one of that organisation's hosts. A
+NetBIOS name the case never shows beside a domain, and that no internal domain starts with,
+joins no address when it is the first label of two organisations' domains in the case: beside
+`contoso.com`, an attacker's `alice@contoso.co` leaves `CONTOSO\alice` possibly either. With
+`contoso.com` internal, the lookalike is a namesake, kept apart.
+
+A machine account (`WS-001$`) never joins a user account unless a record renames one to the
 other; an account written both as a machine and without its `$` is noted, since renaming a
-machine account that way is how sAMAccountName spoofing (CVE-2021-42278) begins. Built-in
-accounts and well-known SIDs (SYSTEM, LOCAL SERVICE, DWM-1, `BUILTIN\Administrators`) are
-identities of their own kind and never a story's subject; neither is an account known only by
-a SID. The built-in Administrator is an account people log on with, and can be one.
+machine account that way is how sAMAccountName spoofing (CVE-2021-42278) begins. One name
+stated with two SIDs of its domain is noted too: a SID is never reused, so the account was
+deleted and created again, or two accounts of that name followed each other.
+
+Built-in accounts and well-known SIDs are identities of their own kind: SYSTEM, LOCAL SERVICE,
+DWM-1, `BUILTIN\Administrators`, a service's own SID (`NT SERVICE\...`, S-1-5-80), an IIS
+application pool's, a virtual machine's, the domain's groups. A SID written where a name goes,
+as a firewall rule's `ModifyingUser` is, is read as a SID. None of these, nor a machine
+account, nor an account known only by a SID, is ever a story's subject: a service a site
+server's machine account installed over `ADMIN$` (an SCCM client push) is a story of the host
+it was installed on. The built-in Administrator is an account people log on with, and can be
+one.
 
 A form's confidence is that of the surest path of joins from the identity's label. A step
 that names the person by a form joined by the organisation rules is tied to the story with
 medium confidence; the "Who is who" tab shows every form, its count and its joins.
 
 On a server case the resolver reads the distinct combinations of the fields that name
-accounts from SQL, with their counts, so millions of events are a few thousand records.
+accounts from SQL, with their counts, so millions of events are a few thousand records. It
+reads them over the whole case, not only the records selected around the flags: a bare name
+two accounts write is ambiguous whatever days the stories read, and a script block's SID is
+its account's though the logon that says so was a week before. Past 200,000 combinations it
+reads the most frequent ones and those of the selected records, and the page says so.
 
 ## Sessions, hops and what ran
 
@@ -138,7 +166,9 @@ Defense Evasion into Stealth and Defense Impairment, so a rule tagged `defense-e
 through its technique (T1685.005, the clearing of an event log, is defense impairment). A
 successful logon is initial access or lateral movement whatever the brute force before it
 reads as; an RDP logon from outside is initial access (external remote services), and the
-same outside source reaching another host once it is in is lateral movement.
+same outside source reaching another host once it is in is lateral movement. Private
+addresses, and carrier-grade NAT's shared space (100.64.0.0/10, a provider's or Tailscale's),
+are inside.
 
 Records that repeat without a finding (logons, sign-ins, mailbox reads, share access) fold
 into one step per run of ten minutes; so do records with the same findings and tie, a spray's

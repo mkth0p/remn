@@ -136,6 +136,9 @@ def ip_of(v: Any) -> str:
     return s
 
 
+_SHARED = ipaddress.ip_network("100.64.0.0/10")
+
+
 def is_internal_ip(ip: str) -> bool:
     try:
         a = ipaddress.ip_address(ip)
@@ -143,7 +146,9 @@ def is_internal_ip(ip: str) -> bool:
         return False
     # the documentation ranges stand for internet addresses in the samples and labs
     doc = any(a in ipaddress.ip_network(n) for n in ("192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24", "2001:db8::/32"))
-    return (a.is_private or a.is_loopback or a.is_link_local) and not doc
+    # carrier-grade NAT's shared space (a provider's, Tailscale's) is no internet address either
+    shared = a.version == 4 and a in _SHARED
+    return (a.is_private or a.is_loopback or a.is_link_local or shared) and not doc
 
 
 def logon_id(v: Any) -> int | None:

@@ -302,6 +302,8 @@ const REMOTE_SCRIPT_RE = new RegExp(REMOTE_SCRIPT)
 const PRIVATE_ANSWER_RE = new RegExp(PRIVATE_ANSWER)
 const DNS_CAP = 20_000
 const DHCP_CAP = 20_000
+/** the ways of writing an account a server case's who-is-who reads (identity.records_for_store's limit) */
+const ACCOUNT_RECORD_CAP = 200_000
 
 /** A record beyond LINEAGE_EVENT_IDS that lineage reads on a flagged host. */
 function lineageExtra(row: Record<string, unknown>): boolean {
@@ -332,6 +334,7 @@ export const STORY_EVENT_FIELDS = [
   'category',
   'operation',
   'computer',
+  'userSid',
   'recordKey',
   'summary',
   'description',
@@ -444,7 +447,8 @@ export function accountName(v: unknown): string | null {
   return s
 }
 
-const PRIVATE = [/^10\./, /^192\.168\./, /^172\.(1[6-9]|2\d|3[01])\./, /^127\./, /^169\.254\./, /^::1$/, /^f[cd][0-9a-f]{2}:/i, /^fe80:/i]
+// with carrier-grade NAT's shared space, 100.64.0.0/10 (a provider's, Tailscale's)
+const PRIVATE = [/^10\./, /^192\.168\./, /^172\.(1[6-9]|2\d|3[01])\./, /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./, /^127\./, /^169\.254\./, /^::1$/, /^f[cd][0-9a-f]{2}:/i, /^fe80:/i]
 const DOC = [/^192\.0\.2\./, /^198\.51\.100\./, /^203\.0\.113\./, /^2001:db8:/i]
 /** a private address (the documentation ranges stand for internet addresses in the samples and labs) */
 export function isInternalIp(ip: string): boolean {
@@ -908,6 +912,7 @@ export function storyCoverageWarnings(stats: StoryResult['stats'] | undefined): 
     'address-keys': 'The flags name more than 500 outside addresses: the stories read the records from the 500 they name most.',
     trimmed: `The rows of the build passed ${mib}, more than the server takes in one request: the long text of ${num(n('trimmed'))} record(s) (command lines, script blocks, summaries) was cut to ${num(TRIM_TO)} characters.`,
     size: `The rows of the build passed ${mib} even so: ${num(n('size'))} of them were left out, the records around the flags first.`,
+    accounts: `The case writes its accounts in more than ${num(ACCOUNT_RECORD_CAP)} ways: who is who reads the most frequent ones and those of the records the stories read.`,
   }
   const out = (stats?.truncated ?? []).map((k) => labels[k]).filter(Boolean)
   if (stats?.storiesTruncated) out.push('Only the highest-scoring 200 stories are kept: the flags of the others are listed with those in no story.')
