@@ -1,0 +1,506 @@
+# Techniques the default rules did not detect in attack_data (splunk/attack_data), one rule per kind
+# of activity: directory and Kerberos abuse, PowerShell discovery and tooling, command obfuscation,
+# persistence through the registry, Python and browser policies, tampering with LSA protection, EFI
+# boot files and Defender, credential stores, and known attacker tools. Written after studying those
+# recordings, so tools/measure_rules.py does not count them there (WRITTEN_AGAINST); none fires on
+# the evtx-baseline clean machines.
+id: win-builtin-account-renamed
+title: Built-in Administrator or Guest account renamed
+description: Security 4781 renamed the account with RID 500 (built-in Administrator) or 501 (Guest), or an account whose old name was Administrator or Guest. Renaming the built-in admin hides it from lists and rules that look for its name; attackers also rename Guest before enabling it. Hardening baselines rename Administrator once when a host is built.
+severity: medium
+source: events
+attack: [T1078.003, T1098]
+entities: [computer, oldTargetUser, newTargetUser, subjectUser]
+where:
+  eventId: 4781
+  any_of:
+    - targetSid|re: '-50[01]$'
+    - oldTargetUser|in: [Administrator, Guest, Administrateur, Invité]
+---
+id: win-gpo-disabled-or-unlinked
+title: Group Policy object disabled or unlinked from the domain root
+description: Security 5136 changed the flags of a groupPolicyContainer to a disabled state (1, 2 or 3), or rewrote gPLink on the domain root. Disabling or unlinking a GPO removes the security settings it applies (audit policy, Defender, firewall) on every host it reaches. Administrators change GPO links and status during normal work, so check who made the change.
+severity: medium
+source: events
+attack: [T1484.001]
+entities: [computer, subjectUser, objectDn, attributeName, attributeValue]
+where:
+  eventId: 5136
+  any_of:
+    - { attributeName: flags, attributeValue|in: ['1', '2', '3'], objectDn|contains: ',cn=policies,cn=system,' }
+    - { attributeName: gPLink, objectDn|re: '^dc=[^,]+(,dc=[^,]+)*$' }
+---
+id: win-kerberos-rc4-tgt
+title: Kerberos TGT issued with RC4 encryption for a user account
+description: Security 4768 issued a TGT encrypted with RC4-HMAC (0x17) or its export variant (0x18) to a user account. Over-pass-the-hash with an NT hash (Rubeus asktgt /rc4, mimikatz sekurlsa::pth) makes the KDC answer in RC4, while domains at 2008 functional level or later answer normal logons in AES. Old clients, accounts whose password predates AES keys and accounts set to RC4 only also get RC4 tickets.
+severity: medium
+source: events
+attack: [T1550.002, T1558]
+entities: [computer, targetUser, ipAddress, serviceName]
+where:
+  eventId: 4768
+  status: '0x0'
+  ticketEncryption|in: ['0x17', '0x18']
+  targetUser|not_endswith: '$'
+---
+id: win-kerberos-rc4-ticket-for-computer
+title: Kerberos service ticket issued with RC4 for a computer account service
+description: Security 4769 issued a service ticket encrypted with RC4-HMAC for a service run by a computer account (name ending in $). Computer accounts have AES keys, so the KDC only answers in RC4 when the request asks for it, which is what Rubeus and impacket do for S4U, silver-ticket preparation and relay attacks. Very old hosts and non-Windows Kerberos clients can also ask for RC4.
+severity: medium
+source: events
+attack: [T1558]
+entities: [computer, targetUser, serviceName, ipAddress]
+where:
+  eventId: 4769
+  status: '0x0'
+  ticketEncryption|in: ['0x17', '0x18']
+  serviceName|endswith: '$'
+  serviceName|not_contains: krbtgt
+---
+id: win-kerberos-computer-service-ticket-sweep
+title: One client asks service tickets for many computers within minutes
+description: Security 4769 shows one client address getting service tickets for 25 or more different computer accounts within five minutes. Share and host enumeration tools (SharpShares, PowerView Invoke-ShareFinder, net view loops, BloodHound session collection) connect to every computer in the domain this way. Management servers (SCCM, backup, monitoring, vulnerability scanners) do the same, so check what the address is.
+severity: medium
+source: events
+attack: [T1135, T1018]
+entities: [ipAddress]
+where:
+  eventId: 4769
+  status: '0x0'
+  serviceName|endswith: '$'
+  ipAddress|exists: true
+  ipAddress|nin: ['127.0.0.1', '::1']
+group_by: [ipAddress]
+window: 5m
+distinct: serviceName
+threshold: '>= 25'
+---
+id: win-ntds-snapshot-mounted
+title: Active Directory snapshot mounted ($SNAP_ volume)
+description: A file or registry path names a $SNAP_..._VOLUME mount point, which ntdsutil "snapshot" "mount" creates when it exposes a shadow copy of the domain controller's volume. Copying ntds.dit from such a snapshot is a way to steal every domain hash. Backups of domain controllers rarely mount snapshots by hand.
+severity: high
+source: events
+attack: [T1003.003]
+entities: [computer, image, targetFilename, targetObject]
+where:
+  provider|contains: Sysmon
+  eventId|in: [11, 12, 13]
+  any_of:
+    - targetFilename|re: '\$snap_\d{12}_volume'
+    - targetObject|re: '\$snap_\d{12}_volume'
+---
+id: win-cloud-token-files-read
+title: Azure CLI or cloud token files read by another program
+description: Security 4663 shows a program other than the Azure CLI, Python or a known tool reading the token caches under .azure (accessTokens.json, msal_token_cache.json, azureprofile.json) or the AWS and gcloud credential files. Info-stealers such as Vidar collect these to reuse cloud sessions.
+severity: medium
+source: events
+attack: [T1528, T1552.001]
+entities: [computer, processName, objectName, subjectUser]
+where:
+  eventId: 4663
+  objectName|re: '\\(\.azure\\(accesstokens\.json|msal_token_cache\.(json|bin)|azureprofile\.json|service_principal_entries\.json)|\.aws\\credentials|gcloud\\(credentials\.db|access_tokens\.db|legacy_credentials))'
+  processName|not_endswith: ['\python.exe', '\pythonw.exe', '\az.exe', '\aws.exe', '\gcloud.exe', '\code.exe', '\explorer.exe', '\msmpeng.exe']
+---
+id: win-winscp-or-putty-secrets-read
+title: WinSCP or PuTTY saved-session secrets read by another program
+description: Security 4663 shows a program other than WinSCP or PuTTY reading the registry keys where WinSCP keeps saved passwords and PuTTY keeps sessions and host keys. Credential stealers and tools such as SessionGopher harvest them.
+severity: medium
+source: events
+attack: [T1552.001, T1552.002]
+entities: [computer, processName, objectName]
+where:
+  eventId: 4663
+  objectName|contains: ['\Martin Prikryl\WinSCP 2\', '\SimonTatham\PuTTY\Sessions']
+  processName|not_endswith: ['\winscp.exe', '\putty.exe', '\pageant.exe', '\explorer.exe', '\regedit.exe']
+---
+id: win-ps-delegation-discovery
+title: PowerShell looks for computers or users trusted for delegation
+description: A script block asks Active Directory for accounts with unconstrained or constrained delegation (Get-ADComputer/Get-ADUser -TrustedForDelegation or a filter on TrustedForDelegation/msDS-AllowedToDelegateTo, PowerView Get-NetComputer/Get-DomainComputer -Unconstrained or -TrustedToAuth). Attackers look for these hosts to steal tickets or abuse S4U. AD audits run the same queries.
+severity: medium
+source: events
+attack: [T1018, T1087.002]
+entities: [computer, scriptBlockText]
+where:
+  eventId: 4104
+  any_of:
+    - scriptBlockText|re: 'get-ad(computer|user|object)\b[^\n]{0,200}(-trustedfordelegation|trustedfordelegation\s*-eq|trustedtoauthfordelegation|msds-allowedtodelegateto|useraccountcontrol:1\.2\.840\.113556\.1\.4\.803:=(524288|16777216))'
+    - scriptBlockText|re: 'get-(net|domain)(computer|user)\b[^\n]{0,200}-(unconstrained|trustedtoauth|allowdelegation)'
+---
+id: win-ps-adsisearcher-recon
+title: PowerShell queries Active Directory through [adsisearcher]
+description: A script block uses the [adsisearcher] or DirectorySearcher type accelerator with an LDAP filter on groups, organisational units, computers, users or SPNs and calls FindAll. Living-off-the-land AD discovery uses it because it needs no RSAT module. Logon scripts and admin tooling use it too, usually for one named object (FindOne).
+severity: medium
+source: events
+attack: [T1087.002, T1069.002, T1018]
+entities: [computer, scriptBlockText]
+where:
+  eventId: 4104
+  scriptBlockText|re: '(\[adsisearcher\]|directoryservices\.directorysearcher)[^\n]{0,300}(objectcategory|objectclass|serviceprincipalname|samaccounttype|admincount)'
+  scriptBlockText|contains: findall
+---
+id: win-ps-kerberoast-tool
+title: PowerShell Kerberoasting cmdlet
+description: A script block calls PowerView Get-DomainSPNTicket or Invoke-Kerberoast, Empire's Invoke-Kerberoast, or builds KerberosRequestorSecurityToken for SPNs, which request service tickets to crack offline.
+severity: high
+source: events
+attack: [T1558.003]
+entities: [computer, scriptBlockText]
+where:
+  eventId: 4104
+  scriptBlockText|re: '(get-domainspnticket|invoke-kerberoast|request-spnticket|kerberosrequestorsecuritytoken)'
+---
+id: win-ps-winrm-trustedhosts
+title: WinRM TrustedHosts changed
+description: A script block or command line sets WSMan:\localhost\Client\TrustedHosts or runs winrm set winrm/config/client with TrustedHosts. It lets this host send credentials over WinRM to hosts outside the domain or by IP, which lateral movement with PowerShell remoting needs. Admins set it on jump hosts.
+severity: medium
+source: events
+attack: [T1021.006]
+entities: [computer, scriptBlockText, commandLine]
+where:
+  any_of:
+    - { eventId: 4104, scriptBlockText|re: 'set-item\s+[^\n]{0,40}wsman:\\?\\?localhost\\client\\trustedhosts' }
+    - { eventId: 4104, scriptBlockText|re: 'set-item\s+[^\n]{0,40}wsman:\\localhost\\client\\trustedhosts' }
+    - { commandLine|contains_all: [winrm, trustedhosts], commandLine|re: 'winrm(\.cmd|\.vbs)?\s+(s|set)\s' }
+---
+id: win-ad-credential-roaming-attribute
+title: Credential roaming attribute written from PowerShell
+description: A script block writes msPKIAccountCredentials, msPKIDPAPIMasterKeys or msPKIRoamingTimeStamp with Set-ADUser or ADSI. These attributes hold roamed certificates and DPAPI keys; writing them is the credential-roaming path traversal (CVE-2022-30170) that drops files in a user's profile at next logon.
+severity: high
+source: events
+attack: [T1037, T1098]
+entities: [computer, scriptBlockText]
+where:
+  eventId: 4104
+  scriptBlockText|re: '(set-aduser|set-adobject|\.put\(|\.invokeset\()[^\n]{0,200}mspki(accountcredentials|dpapimasterkeys|roamingtimestamp)'
+---
+id: win-powerup-privesc-checks
+title: PowerUp or PrivescCheck privilege-escalation checks run
+description: A script block calls PowerUp or PrivescCheck functions that look for weak service, DLL and registry permissions (Invoke-AllChecks, Invoke-HijackableDllsCheck, Find-PathDLLHijack, Get-ModifiableServiceFile, Invoke-PrivescCheck).
+severity: high
+source: events
+attack: [T1082, T1574.001, T1068]
+entities: [computer, scriptBlockText]
+where:
+  eventId: 4104
+  scriptBlockText|re: '(invoke-allchecks|invoke-hijackabledllscheck|find-pathdllhijack|find-processdllhijack|get-modifiableservicefile|get-modifiableservice|get-unquotedservice|invoke-privesccheck|get-registryalwaysinstallelevated)'
+---
+id: win-cmd-envvar-substring-obfuscation
+title: Command built from environment-variable substrings
+description: A command line or script block uses three or more %VAR:~start,length% substrings, the DOSfuscation trick that spells a command out of letters taken from environment variables so that the command name never appears. Batch scripts use one or two substrings for dates and paths, rarely three chained ones.
+severity: high
+source: events
+attack: [T1027.010, T1059.003]
+entities: [computer, commandLine, scriptBlockText]
+where:
+  any_of:
+    - commandLine|re: '(%[a-z0-9_()]+:~\s*-?\d+\s*(,\s*-?\d+\s*)?%[^%]{0,3}){3}'
+    - { eventId: 4104, scriptBlockText|re: '(%[a-z0-9_()]+:~\s*-?\d+\s*(,\s*-?\d+\s*)?%[^%]{0,3}){3}' }
+---
+id: win-cmd-quote-insertion
+title: Command name broken up with empty quotes
+description: cmd is started with a command whose name is split by empty double quotes (ip""con""fig, who""ami), which cmd drops but which breaks string matching on the command. Nothing legitimate writes commands this way.
+severity: high
+source: events
+attack: [T1027.010, T1059.003]
+entities: [computer, commandLine]
+where:
+  commandLine|re: '(/c|/k|/r)\s+"?[a-z]+(""[a-z]+){2,}'
+---
+id: win-file-association-hijack
+title: File type association changed with ftype or assoc
+description: cmd runs ftype to point a file type (txtfile, exefile, htafile...) at another program, or assoc to change which type an extension maps to. Attackers use it for persistence and to run code whenever a user opens a common file. Installers set associations through the registry, not through ftype.
+severity: medium
+source: events
+attack: [T1546.001, T1059.003]
+entities: [computer, commandLine, user]
+where:
+  any_of:
+    - commandLine|re: '\bftype\s+[a-z0-9._-]+\s*='
+    - commandLine|re: '\bassoc\s+\.[a-z0-9]+\s*=\s*[a-z]'
+---
+id: win-mock-trusted-directory
+title: Program or file in a fake Windows folder with a trailing space
+description: A path starts with "C:\Windows \" (a space before the backslash), the mock trusted directory trick. Windows treats programs there as if they came from C:\Windows for auto-elevation, so a copied binary plus a planted DLL bypasses UAC. Nothing legitimate creates this folder.
+severity: high
+source: events
+attack: [T1036.005, T1548.002, T1218]
+entities: [computer, image, commandLine, targetFilename]
+where:
+  any_of:
+    - image|contains: ':\windows \'
+    - commandLine|contains: ':\windows \'
+    - targetFilename|contains: ':\windows \'
+    - imageLoaded|contains: ':\windows \'
+---
+id: win-impacket-admin-share-output
+title: Command output file on ADMIN$ with the impacket naming
+description: Security 5145 shows a client reading or writing a file named __ followed by digits at the root of ADMIN$ or in ADMIN$\Temp. impacket wmiexec, smbexec and atexec write each command's output to such a file and read it back over SMB. No Windows component names files this way.
+severity: high
+source: events
+attack: [T1047, T1021.002, T1059]
+entities: [computer, ipAddress, subjectUser, relativeTargetName]
+where:
+  eventId: 5145
+  shareName|endswith: '\ADMIN$'
+  relativeTargetName|re: '^(temp\\)?__\d{5,}(\.\d+)?$'
+---
+id: win-rdp-inbound-burst
+title: Many inbound RDP connections from one address
+description: Sysmon 3 shows 15 or more inbound connections to TCP 3389 from one source address within two minutes. RDP password guessing opens a new connection per attempt; a user connecting normally opens one or two. Gateways and load balancers in front of RDP farms are the benign source.
+severity: medium
+source: events
+attack: [T1110.001, T1110.003]
+entities: [computer, sourceIp]
+where:
+  provider|contains: Sysmon
+  eventId: 3
+  initiated: 'false'
+  destinationPort: 3389
+group_by: [computer, sourceIp]
+window: 2m
+threshold: '>= 15'
+---
+id: win-rras-router-manager-dll
+title: DLL registered under the Remote Access router managers
+description: Sysmon 13 sets a value under Services\RemoteAccess\RouterManagers pointing at a DLL. The Routing and Remote Access service loads DLLs listed there at start, a persistence and privilege-escalation path (the same idea as the RemoteAccess DllPath trick). Only a RRAS configuration on a VPN or router server writes here.
+severity: medium
+source: events
+attack: [T1112, T1547]
+entities: [computer, image, targetObject, details]
+where:
+  provider|contains: Sysmon
+  eventId: 13
+  targetObject|contains: '\Services\RemoteAccess\RouterManagers\'
+  details|re: '\.dll'
+---
+id: win-mail-store-outside-mail-folder
+title: Outlook data file written outside the mail folders
+description: Sysmon 11 shows a .pst or .ost file created outside the folders Outlook uses (AppData\Local\Microsoft\Outlook and Documents\Outlook Files). Copying or exporting a mailbox to a temporary or shared folder is how mail is collected before exfiltration. Users archiving mail to another drive do this too.
+severity: medium
+source: events
+attack: [T1114.001]
+entities: [computer, image, targetFilename]
+where:
+  provider|contains: Sysmon
+  eventId: 11
+  targetFilename|re: '\.(pst|ost)$'
+  targetFilename|not_contains: ['\AppData\Local\Microsoft\Outlook\', '\Documents\Outlook Files\', '\AppData\Roaming\Microsoft\Outlook\']
+---
+id: win-browser-extension-policy
+title: Browser extension force-install or allow-list policy set
+description: Sysmon 13 or a reg command sets ExtensionInstallForcelist, ExtensionInstallAllowlist or ExtensionInstallSources under the Chrome or Edge policy keys. Malware installs a malicious extension this way that users cannot remove, to steal sessions and cookies. Enterprises push extensions through Group Policy (image svchost/gpsvc), which is excluded.
+severity: medium
+source: events
+attack: [T1176, T1185]
+entities: [computer, image, targetObject, commandLine]
+where:
+  any_of:
+    - provider|contains: Sysmon
+      eventId|in: [12, 13]
+      targetObject|re: '\\policies\\(google\\chrome|microsoft\\edge|bravesoftware\\brave)\\extensioninstall(forcelist|allowlist|sources)'
+      image|not_endswith: ['\svchost.exe', '\gpupdate.exe']
+    - commandLine|re: 'reg(\.exe)?\s+add\s+[^\n]{0,20}\\policies\\(google\\chrome|microsoft\\edge)\\extensioninstall(forcelist|allowlist|sources)'
+---
+id: win-browser-update-disabled
+title: Browser updates turned off by policy
+description: Sysmon 13 sets Google Update or Edge Update policy values that stop updates (UpdateDefault or Update{app} to 0, AutoUpdateCheckPeriodMinutes to 0, DisableAutoUpdateChecksCheckboxValue). Malware that hijacks a browser freezes its version so that a patch or a new security feature does not undo it. Group Policy (svchost) is excluded.
+severity: medium
+source: events
+attack: [T1185, T1685]
+entities: [computer, image, targetObject, details]
+where:
+  provider|contains: Sysmon
+  eventId: 13
+  targetObject|re: '\\policies\\(google\\update|microsoft\\edgeupdate)\\(updatedefault|update\{|autoupdatecheckperiodminutes|disableautoupdatecheckscheckboxvalue)'
+  details|in: ['DWORD (0x00000000)', 'DWORD (0x00000001)']
+  image|not_endswith: ['\svchost.exe', '\gpupdate.exe']
+---
+id: win-fsutil-symlink-evaluation
+title: Remote symbolic link evaluation enabled with fsutil
+description: fsutil behavior set SymlinkEvaluation turns on remote-to-local (R2L) or remote-to-remote (R2R) link following. Ransomware such as BlackCat enables it so that encryption follows links across shares. It is off by default and admins rarely change it.
+severity: high
+source: events
+attack: [T1222.001]
+entities: [computer, commandLine, user]
+where:
+  commandLine|re: 'fsutil(\.exe)?\s+behavior\s+set\s+symlinkevaluation\s+[^\n]*r2[lr]:1'
+---
+id: win-lsa-protection-disabled
+title: LSA protection (RunAsPPL) turned off
+description: Sysmon 12 or 13 deletes RunAsPPL or RunAsPPLBoot under Control\Lsa or sets it to 0. LSA protection stops credential dumpers from opening lsass; attackers turn it off and reboot, or use a driver. Admins turn it off to troubleshoot incompatible security products.
+severity: high
+source: events
+attack: [T1685, T1556, T1003.001]
+entities: [computer, image, targetObject, details]
+where:
+  provider|contains: Sysmon
+  targetObject|re: '\\control\\lsa\\runasppl(boot)?$'
+  any_of:
+    - { eventId: 12, eventType|in: [DeleteValue, DeleteKey] }
+    - { eventId: 13, details: 'DWORD (0x00000000)' }
+---
+id: win-efi-boot-file-written
+title: EFI boot file written by a program other than Windows servicing
+description: Sysmon 11 or 23 shows a file created or deleted under an EFI system partition's EFI\Boot or EFI\Microsoft\Boot folder by a program other than Windows servicing and boot tools. Bootkits (BlackLotus, ESPecter) replace bootmgfw.efi or drop files next to it to run before Windows. Windows updates, bcdboot and firmware updaters write here and are excluded.
+severity: high
+source: events
+attack: [T1542.003, T1542.001]
+entities: [computer, image, targetFilename]
+where:
+  provider|contains: Sysmon
+  eventId|in: [11, 23, 26]
+  targetFilename|re: '\\efi\\(boot|microsoft\\boot)\\'
+  image|not_endswith: ['\bcdboot.exe', '\trustedinstaller.exe', '\tiworker.exe', '\svchost.exe', '\setuphost.exe', '\setupplatform.exe', '\bitlockerwizardelev.exe', '\fwupdate.exe', '\msiexec.exe', '\sppsvc.exe']
+  image|nin: [System]
+---
+id: win-defender-control-tool
+title: Defender Control or a Defender-disabling tool dropped or run
+description: A file or process named after tools that switch Microsoft Defender off (Sordum Defender Control, dControl, DefenderSwitch, Defeat-Defender, NoDefender, DefenderRemover) appears. Ransomware operators use them before deploying.
+severity: high
+source: events
+attack: [T1685]
+entities: [computer, image, targetFilename, commandLine]
+where:
+  any_of:
+    - targetFilename|re: '\\(defendercontrol(ler)?|dcontrol|defenderswitch|defeat-defender|nodefender|defenderremover)[^\\]*\.(exe|ini|ps1|bat)$'
+    - image|re: '\\(defendercontrol(ler)?|dcontrol|defenderswitch|nodefender|defenderremover)\.exe$'
+---
+id: win-cloud-drive-cli-token
+title: Cloud drive command-line client used with a token
+description: A gdrive, gdrive3, rclone or megacmd client runs with an upload or a token on its command line. Attackers use these small command-line clients to push stolen data to Google Drive, Mega or other storage.
+severity: high
+source: events
+attack: [T1567.002]
+entities: [computer, image, commandLine, user]
+where:
+  any_of:
+    - { image|re: '\\gdrive[0-9]?(_[a-z0-9]+)?\.exe$' }
+    - { commandLine|re: '\bgdrive[0-9]?(\.exe)?"?\s+(--refresh-token|--service-account|upload|files\s+upload)' }
+    - { commandLine|re: '\b(megaput|mega-put|megacmd)(\.exe)?\s' }
+---
+id: win-dotnet-compiler-dns
+title: .NET compiler or build tool resolves an internet name
+description: Sysmon 22 shows vbc.exe, csc.exe, jsc.exe, InstallUtil, RegAsm, RegSvcs or MSBuild asking DNS for a name. Loaders that compile or host their payload inside these signed binaries then call out from them. The compilers themselves never need the network; MSBuild does for NuGet on developer machines, so it is kept only for names outside Microsoft and NuGet.
+severity: medium
+source: events
+attack: [T1071.004, T1127, T1218.004]
+entities: [computer, image, queryName]
+where:
+  provider|contains: Sysmon
+  eventId: 22
+  any_of:
+    - image|endswith: ['\vbc.exe', '\csc.exe', '\jsc.exe', '\installutil.exe', '\regasm.exe', '\regsvcs.exe', '\aspnet_compiler.exe']
+    - image|endswith: '\msbuild.exe'
+      queryName|not_re: '(\.microsoft\.com|\.nuget\.org|\.visualstudio\.com|\.windows\.net|\.azureedge\.net|\.msedge\.net|localhost|\.local)$'
+---
+id: win-python-startup-hook
+title: Python startup hook written (sitecustomize, usercustomize or .pth)
+description: Sysmon 11 shows sitecustomize.py or usercustomize.py created, or a .pth file with an unusual name created under site-packages. Python runs these at every interpreter start, so a malicious package or an attacker uses them for persistence. pip and setuptools create a few well-known .pth files, which are excluded; developer machines will still produce some.
+severity: medium
+source: events
+attack: [T1546, T1546.018]
+entities: [computer, image, targetFilename]
+where:
+  provider|contains: Sysmon
+  eventId: 11
+  any_of:
+    - targetFilename|re: '\\(site|user)customize\.py$'
+    - targetFilename|re: '\\site-packages\\[^\\]+\.pth$'
+      targetFilename|not_re: '\\(distutils-precedence|easy-install|pywin32|setuptools|_virtualenv|__editable__[^\\]*|[^\\]*-nspkg|matplotlib|protobuf|google|zope|a1_coverage|coloredlogs)\.pth$'
+---
+id: win-pythonpath-env-set
+title: PYTHONPATH set in a user's or the machine's environment
+description: Sysmon 13 sets PYTHONPATH (or PYTHONSTARTUP, PYTHONHOME) in the registry environment of a user or of the machine. It makes every Python process load modules first from the attacker's folder. Python installers do not set it; a few scientific tools and developers do.
+severity: medium
+source: events
+attack: [T1574.007]
+entities: [computer, image, targetObject, details]
+where:
+  provider|contains: Sysmon
+  eventId: 13
+  targetObject|re: '(\\environment|\\session manager\\environment)\\python(path|startup|home)$'
+---
+id: win-cmdlet-named-exe-in-windowsapps
+title: Program named like a PowerShell cmdlet in WindowsApps
+description: A process runs from AppData\Local\Microsoft\WindowsApps with a Verb-Noun name such as Get-Variable.exe. That folder is on every user's PATH and writable by the user, so a program named after a cmdlet or a command is picked up by scripts that call it without a path (path interception). Store app aliases there have plain names, never Verb-Noun ones.
+severity: high
+source: events
+attack: [T1574.008]
+entities: [computer, image, commandLine, parentImage]
+where:
+  any_of:
+    - image|re: '\\appdata\\local\\microsoft\\windowsapps\\[a-z]+-[a-z]+\.exe$'
+    - processName|re: '\\appdata\\local\\microsoft\\windowsapps\\[a-z]+-[a-z]+\.exe$'
+---
+id: win-nirsoft-password-tools
+title: NirSoft password recovery tool downloaded or run
+description: A file or process is named after a NirSoft or similar password recovery tool (WebBrowserPassView, Mail PassView, NetPass, PasswordFox, ChromePass, VNCPassView, WirelessKeyView, LSASecretsView, PassRecCommandLine...). Stealers and intruders bundle them to dump saved passwords. Help-desk staff use a few of them.
+severity: high
+source: events
+attack: [T1555, T1555.003, T1588.002]
+entities: [computer, image, targetFilename, commandLine]
+where:
+  any_of:
+    - targetFilename|re: '\\(webbrowserpassview|mailpv|netpass|passwordfox|chromepass|vncpassview|wirelesskeyview|lsasecretsview|passreccommandline|bulletspassview|credentialsfileview|pstpassword|dialupass|operapassview|iepv|pspv|routerpassview|remotedesktoppassview)[^\\]*\.(exe|zip|7z|rar)(:zone\.identifier)?$'
+    - image|re: '\\(webbrowserpassview|mailpv|netpass|passwordfox|chromepass|vncpassview|wirelesskeyview|lsasecretsview|passreccommandline|bulletspassview|credentialsfileview|pstpassword|dialupass|operapassview|iepv|pspv|routerpassview|remotedesktoppassview)(64)?\.exe$'
+    - processName|re: '\\(webbrowserpassview|mailpv|netpass|passwordfox|chromepass|vncpassview|wirelesskeyview|lsasecretsview|passreccommandline|bulletspassview|credentialsfileview|pstpassword|dialupass|operapassview|iepv|pspv|routerpassview|remotedesktoppassview)(64)?\.exe$'
+---
+id: win-network-scanner-tools
+title: Network scanner used by intruders run
+description: A process named after a scanner that intrusion crews carry (netspy, fscan, Ladon, nbtscan, masscan, SoftPerfect netscan, Advanced IP Scanner, Angry IP Scanner, rustscan, kscan) starts. Network teams use some of these, but they are rare on servers and user workstations.
+severity: medium
+source: events
+attack: [T1046, T1595, T1018]
+entities: [computer, image, processName, commandLine]
+where:
+  any_of:
+    - image|re: '\\(netspy|fscan(64|32)?|ladon(64|40)?|nbtscan|masscan|netscan|advanced_ip_scanner|ipscan(24)?|rustscan|kscan)\.exe$'
+    - processName|re: '\\(netspy|fscan(64|32)?|ladon(64|40)?|nbtscan|masscan|netscan|advanced_ip_scanner|ipscan(24)?|rustscan|kscan)\.exe$'
+---
+id: win-packet-capture-tool
+title: Packet capture started from the command line
+description: dumpcap, tshark, windump, tcpdump or pktmon start a capture, or netsh trace starts one with capture=yes. Intruders sniff traffic for credentials and to map the network. Network engineers and support staff capture traffic too; the Wireshark GUI starting dumpcap with -D to list interfaces is included and is the common benign case.
+severity: medium
+source: events
+attack: [T1040]
+entities: [computer, image, processName, commandLine, parentImage]
+where:
+  any_of:
+    - image|endswith: ['\dumpcap.exe', '\tshark.exe', '\windump.exe', '\tcpdump.exe']
+    - processName|endswith: ['\dumpcap.exe', '\tshark.exe', '\windump.exe', '\tcpdump.exe']
+    - commandLine|re: '\bpktmon(\.exe)?\s+(start|filter\s+add)'
+    - commandLine|re: '\bnetsh(\.exe)?\s+trace\s+start\b[^\n]*capture=yes'
+---
+id: win-remote-computer-management
+title: Computer Management or another MMC snap-in opened against a remote host
+description: mmc runs compmgmt.msc, services.msc, eventvwr.msc, lusrmgr.msc or taskschd.msc with /computer= or /computer:, pointed at another host. Intruders with admin credentials use these consoles to add users, create services and read logs on remote hosts without dropping tools. Admins use them the same way.
+severity: medium
+source: events
+attack: [T1021, T1021.003]
+entities: [computer, commandLine, user]
+where:
+  commandLine|re: '(compmgmt|services|eventvwr|lusrmgr|taskschd|gpedit|fsmgmt)\.msc[^\n]*/computer[:=]'
+---
+id: win-msdtc-unusual-parent
+title: MSDTC started by something other than the service manager
+description: msdtc.exe starts under a parent other than services.exe or svchost.exe. The Distributed Transaction Coordinator runs as a service; malware starts it by hand (often with -a) to load a planted DLL through it or to hide behind its name.
+severity: high
+source: events
+attack: [T1036, T1574.002]
+entities: [computer, image, commandLine, parentImage]
+where:
+  any_of:
+    - { image|endswith: '\msdtc.exe', parentImage|exists: true, parentImage|not_endswith: ['\services.exe', '\svchost.exe'] }
+    - { processName|endswith: '\msdtc.exe', parentProcessName|exists: true, parentProcessName|not_endswith: ['\services.exe', '\svchost.exe'] }
+---
+id: win-netsupport-outside-program-files
+title: NetSupport client running outside Program Files
+description: The NetSupport Manager client (client32.exe with PCICL32.DLL) runs or loads from a user or ProgramData folder. Phishing campaigns drop it as a remote-access trojan under a fake folder name; a genuine NetSupport deployment installs under Program Files.
+severity: high
+source: events
+attack: [T1219, T1036]
+entities: [computer, image, imageLoaded]
+where:
+  any_of:
+    - imageLoaded|re: '^c:\\(users|programdata)\\[^\n]*\\(pcicl32\.dll|client32\.exe)$'
+    - image|re: '^c:\\(users|programdata)\\[^\n]*\\client32\.exe$'

@@ -8,7 +8,7 @@ description: >-
   unlocked the browser's password store. A failed attempt in the same burst raises the finding: someone who does
   not know the account password was trying to read its saved passwords. Benign cause: the user checking one of
   their own saved passwords; the finding is a timeline marker, not a verdict.
-severity: low
+severity: medium
 source: events
 attack: [T1555.003]
 tags: [credential-access, browser]

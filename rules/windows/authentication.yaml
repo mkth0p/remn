@@ -130,7 +130,7 @@ threshold: ">= 1"
 id: win-logon-outside-business-hours
 title: Interactive / remote logon outside business hours
 description: Successful interactive, unlock, RDP or cached logon outside the configured business hours (Settings).
-severity: medium
+severity: low
 source: events
 attack: [T1078]
 tags: [authentication, anomaly]

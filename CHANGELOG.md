@@ -5,6 +5,18 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- Levels measured rather than inherited: 116 low rules that raise nothing on the evtx-baseline
+  clean machines are now medium, and ten rules whose only findings are on those machines are now
+  low (SigmaHQ rules through `rules/community/levels.json`, which a re-import keeps; REMN's own
+  in their files). Detections go from 235 to 245 of 535 attack_data recordings, 109 to 112 of 279
+  EVTX-to-MITRE-Attack files and 260 to 264 of 278 EVTX-ATTACK-SAMPLES files, and medium and
+  higher findings on the clean machines from 2,134 to 1,684.
+- 39 rules for techniques the default rules missed in attack_data
+  (`rules/windows/technique-gaps.yaml`): directory and Kerberos abuse, PowerShell discovery and
+  tooling, obfuscated command lines, registry, Python and browser-policy persistence, LSA
+  protection and Defender tampering, EFI boot files, credential stores and known attacker tools.
+  They add 46 attack_data detections, which does not count as held out for them, fire on none of
+  the clean machines, and add no detection on the two other libraries yet.
 - A home page. REMN opens on it until a case holds evidence, and the wordmark leads back to it
   after that. It shows what the tool reads, how the rules are measured and what the measures
   show: the rule totals, recordings and clean-host baseline read live from `rules/measures.json`
