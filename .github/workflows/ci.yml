@@ -68,6 +68,20 @@ jobs:
           echo "largest bundle: $size bytes"
           test "$size" -lt 2000000
 
+  evtx-wasm:
+    name: EVTX decoder (WebAssembly, reproducible)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Rebuild from source with the pinned toolchain
+        # rust-toolchain.toml names the toolchain; rustup installs it with the wasm target
+        run: |
+          rustup toolchain install
+          sh build.sh
+        working-directory: frontend/wasm/evtx
+      - name: The committed decoder is the one this source builds
+        run: git diff --exit-code --stat -- frontend/src/parsers/evtx/evtx.wasm
+
   image:
     name: image (build, scan)
     runs-on: ubuntu-latest
@@ -177,3 +191,11 @@ jobs:
         working-directory: frontend
         env:
           EVTX_ATTACK_OUT: ${{ runner.temp }}/attack
+      - name: EVTX parsed in the browser, row for row against the server's parser
+        run: |
+          python samples/synthetic/make_linked_lab.py --quick-only --out "$RUNNER_TEMP/lab"
+          REMN_EVTX_LAB="$RUNNER_TEMP/lab/quick-start" npx vitest run src/parsers/evtx
+        working-directory: frontend
+        env:
+          EVTX_ATTACK_OUT: ${{ runner.temp }}/attack
+          EVTX_ATTACK_LIBRARY: ${{ runner.temp }}/library

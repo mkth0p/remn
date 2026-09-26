@@ -31,6 +31,8 @@ export interface CaseSettings {
   keepBodies?: boolean
   /** run the enabled rules when an ingest finishes so the findings never lag the evidence (default on) */
   autoRunRules?: boolean
+  /** browser store only: parse .evtx files in this browser, never uploading them (default off) */
+  parseEvtxInBrowser?: boolean
 }
 
 export const defaultSettings = (): CaseSettings => ({
@@ -89,6 +91,8 @@ export interface Evidence {
   analyst?: string
   /** the Web Lock its import holds while it runs (data/interruptedImports.ts) */
   importLock?: string
+  /** where the file was parsed: 'browser' when it never left this page */
+  parsedIn?: 'browser' | 'server'
 }
 
 export interface EventRow {
