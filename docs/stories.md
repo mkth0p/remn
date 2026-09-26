@@ -30,8 +30,32 @@ two days apart; then they are two stories. A mail received or a failed logon joi
 nearest it, within two days, and never joins two: a spray's daily failures between two
 intrusions three weeks apart leave them two stories, and the failures far from both are listed
 with the flags in no story. A flag that names no person, a service installed or a program run by
-SYSTEM, belongs to the person whose session, process tree or way into the host it is part of,
-and when there is none it starts a story of its own host.
+SYSTEM, belongs to the person whose session, process tree or way into the host it is part of.
+When the records tie it to no one, it belongs to the one person who was on the host then: whose
+console, RDP or cached-credential session there was open at its time (a session whose logoff is
+not in the evidence counts as open for two days after its logon), or whose own flagged steps
+there fall within fifteen minutes of it, when that person has a flag of their own within two
+days. Their own flagged steps are what they did: a program run, a service or a task created, a
+script block; not a logon, a share opened, or the connections, lookups, file writes, image loads
+and handle opens every session makes (a domain logon opens IPC$ on a domain controller). The tie
+is medium and says so: "on WS-004 while daniel.roy's session 0x9a01 was open". Such a flag
+supports the story; it does not start one, so it never joins two incidents of its person. When
+two people or more were on the host then, the flag stays the host's and its step says who was on;
+when there is no one, it starts a story of its own host.
+
+A host's own flags make a story only on evidence of their own: a rule that fires on clean
+machines fires on a host's own maintenance too (Windows updating its built-in scheduled tasks,
+Desired State Configuration's script blocks, a console's handle on its shell). They stand when
+one of them is critical; when one is of a rule measured to detect what it looks for on recorded
+attacks and not seen firing on clean machines ([measured marks](#measured-marks)); when findings
+of medium or more fall in two phases or more from rules not seen firing on clean machines (a rule
+never measured on clean machines counts here); or when the story has a strong or medium link to a
+person's story ([incidents](#incidents)). The story says which (`standing`). Otherwise its flags
+are listed with the flags in no story, as "a host's lone lead", and the stats count them
+(`hostLeads`). "Measured to detect" alone is not the bar: on the first day of the APT29
+evaluation, the rules that flag a domain controller's and a workstation's own tasks, script
+blocks and console handles all detect what they look for on recorded attacks (the scheduled task
+rule twelve of twelve), and two of them fire on half the clean machines or more.
 
 Low findings add up (Splunk ES's risk-based alerting). A person or a host whose low findings,
 within seven days, come from at least three rules covering at least two tactics, or from at
@@ -170,7 +194,7 @@ Every record of a story is a step, or folded into one, and every step says why i
 
 | tie | the record | confidence |
 |---|---|---|
-| flagged | carries a finding, and names the person, or (naming no one) is part of their session, process tree or way in | as sure as the form it names them by, or as lineage ties it: medium for a program WMI or WinRM started, a WinRM shell or an RDP session manager's record placed in the session by time, or a service tied to an admin share by time only |
+| flagged | carries a finding, and names the person, or (naming no one) is part of their session, process tree or way in, or happened on a host only they were on then | as sure as the form it names them by, or as lineage ties it: medium for a program WMI or WinRM started, a WinRM shell or an RDP session manager's record placed in the session by time, a service tied to an admin share by time only, or a flag on a host only they were on |
 | phishing chain | is a step of the person's mail-led chain | strong with a link to the mail, else medium |
 | same session | is the logon of a session in which a flagged record happened, or the other logon of its split token | strong, medium when time alone placed the flagged record in the session |
 | same way in | is part of the same hop (the service after the admin share) | strong, medium when this record or the flagged one is part of the hop by time only |
@@ -269,6 +293,45 @@ not the attacker's: at least five people of one organisation signed in from it w
 of medium or more on their records from it, and they are more than half of that organisation's
 people the records show signing in from outside. The findings may name it, and the story says
 so (`sharedAddresses`), but it ties no record to the story and joins no stories into a campaign.
+
+## Incidents
+
+One intrusion is often several stories: the person who came in, the service account they then
+used, the server whose own flags name no one. Stories are linked when the records join them, and
+the stories their strong and medium links join are an incident. Each link says which story it
+reaches, its kind, why (`basis`), how surely and the records it rests on (`refs`):
+
+| link | when | confidence |
+|---|---|---|
+| hop | a story's person, or a host story's host while its flags were raised, reaches another story's host (RDP, an admin share, a remote service, WMI, WinRM) from an hour before its first flag to its last | the hop's own when the host story holds the hop's records, else medium at most; weak for a bare connection to a remote-access port |
+| explicit credentials | the same, with explicit credentials (4648: its subject is who took the way in), or one person's hop into another story's host or account with another person's account | the hop's own |
+| process tree | a program of one story descends, within six generations, from a program of another story's flags or of its person's session (a `runas`) | strong |
+| one record names both | one record whose two people are two stories' subjects: a password reset of one by the other, an account enabled | the weaker of the two names |
+| on the host then | a host's flag left the host's because two people or more were on it: its story and theirs | weak |
+
+A weak link is shown on the story but joins nothing; a hop from a person who was one of several
+on a host when its flags were raised is weak too, since it makes no one's the more. A link never
+passes through a record of a finding marked false positive (as Defender XDR never correlates
+through an alert so marked), and never joins two organisations: when both stories' subjects have
+one and they differ, there is no link. An incident holds twenty stories at most, the
+highest-scoring first; one that joined more says how many it left out and which (`cut`,
+`cutStories`), those stay stories of their own, and the stats count the incidents that cut
+(`incidentsCut`).
+
+The build lists its incidents (`incidents`), the highest-scoring first: `id`, a `label` from its
+two highest-scoring stories, its `stories` in time order, `start`, `end`, `severity` (its worst story's),
+`score` (its best story's), `people`, `hosts`, `cut` and `cutStories`. Each story says its
+incident (`incident`, or null) and its links (`links`: `story`, `kind` of `hop`, `credentials`,
+`process`, `record` or `session`, `basis`, `confidence`, `refs`), the surest first; a host story
+says what it stands on (`standing`). An incident is not a campaign: a campaign is the stories
+that share the attacker's infrastructure, which can be one actor's separate intrusions; an
+incident is the stories one intrusion's own records join. Campaigns are read as before.
+
+The page lists an incident's stories together, in time order, where its first story stood, under
+a line that says "one intrusion", how many stories and over what span; it says "one intrusion"
+since the app's own incidents are the rules' findings grouped. An open story lists the stories it
+links to, each with its kind, confidence and basis, one click away, and a host story says what it
+stands on.
 
 ## Where it stops
 
@@ -388,7 +451,10 @@ is counted. A merged story's note prints under the story it went into. Above the
 what the build could not read (every cut the page lists, below) and, when the stories no longer
 read the case as it is, that they are out of date and why; the Report page offers to rebuild
 them. The same lines go to "Where it stops" at the end, and the number of notes and of decisions
-whose story is gone is printed too.
+whose story is gone is printed too. The printed stories of one incident print together, in time
+order, under one heading ("One intrusion", its label, its worst severity, its span and hosts),
+with why they read as one (the bases of the strong and medium links between them) and how many
+of its stories are not printed or were left out of it past twenty.
 
 A story decided a confirmed incident counts in the verdict on the cover as a confirmed incident
 does (its severity, and its findings in the threat profile), and one decided reviewed counts as
@@ -486,14 +552,15 @@ as a server case does, and prints each story with the checks below;
 `REMN_APT29=DIR pytest -m heavy tests/backend/test_apt29_stories.py` runs the same checks, day 1 in
 about a minute. On day 1 (196,081 records: pbeesly's payload, UAC bypass, discovery, credential
 access and persistence on SCRANTON, then PsExec to NASHUA; NEWYORK is the domain controller and
-UTICA is left alone) REMN's own rules raise 258 findings and the build makes five stories in
-under four seconds. No story is about a SID or a service account, and pbeesly's story holds the
-31 flagged script blocks pbeesly ran on SCRANTON and NASHUA (their header names pbeesly's SID)
-and reaches NASHUA through the explicit credentials, the PsExec service and WinRM. Two checks
-still fail, and the test holds them as expected failures until the work they wait for lands:
-NEWYORK and UTICA are high host stories made of Windows' own scheduled tasks and DSC script
-blocks (a host story needs a minimum of evidence), and SCRANTON's and NASHUA's host stories hold
-flags of the same intrusion with nothing linking them to pbeesly's.
+UTICA is left alone) REMN's own rules raise 258 findings and the build reads one story:
+pbeesly's, holding the flags of SCRANTON (her RDP session) and NASHUA (her PsExec sessions) that
+name no one, while the domain controller's and UTICA's own maintenance are leads. No story is
+about a SID or a service account, pbeesly's story holds the 31 flagged script blocks she ran on
+SCRANTON and NASHUA (their header names her SID), and it reaches NASHUA through the explicit
+credentials, the PsExec service and WinRM. Without the joins above it read five stories: hers
+and four host stories, all four high. On day 2 it reads two incidents: dschrute's and mscott's
+stories with UTICA's and NEWYORK's, joined by explicit credentials, and kmalone's with the local
+account on SCRANTON she enabled (one record names both).
 
 ## Limits
 
@@ -514,6 +581,22 @@ flags of the same intrusion with nothing linking them to pbeesly's.
   weigh as rules never measured.
 - The thresholds at which low findings add up are case settings the build reads, but the page's
   settings do not offer them yet: a case posted by the page uses the defaults.
+- A flag that names no one joins the person on its host by time and place: a job an intruder
+  left running on a host fires in the session of whoever is on it then, and reads as theirs
+  (medium, and the step says so). A session whose logoff is not in the evidence counts as open
+  for two days after its logon.
+- A host's flags stand on their rules' measures (read by rule id, as above). A rule measured
+  quiet on the clean machines can still fire on a host's own configuration: with the SigmaHQ packs on, the
+  first day of the APT29 evaluation keeps a story of its domain controller (NEWYORK) standing on
+  a PowerShell core library loaded by a process other than PowerShell, which Desired State
+  Configuration does on its schedule there. The measures cannot tell configuration
+  management from an intruder; how rare a rule's findings are across the case's hosts would.
+- A hop links two stories by the time and the place it was taken: a person who reached a host
+  an hour before its flags, for their own reasons, links to its story (medium unless the story
+  holds the hop's own records).
+- Incidents are formed from the stories a case keeps (200 at most): a story cut past them links
+  to nothing. An incident past twenty stories keeps the twenty highest-scoring, which the stories
+  it left out may be what joined.
 - A case keeps at most 200 stories, the highest-scoring first; the flags of the stories past
   them are listed with the flags in no story, saying why. The API holds what a caller asks for
   to at most 1,000 stories and 2,000 steps a story, and a gap between one hour and thirty days.

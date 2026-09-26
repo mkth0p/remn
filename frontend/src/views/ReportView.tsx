@@ -290,6 +290,7 @@ export function ReportView() {
       claims,
       stories: printedStories.stories,
       storiesLeft: printedStories.left,
+      storyIncidents: storyResult?.incidents,
       storyStats: storyResult?.stats,
       storiesStale,
       storyNotesOrphaned: printedStories.orphans,
