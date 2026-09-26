@@ -335,6 +335,50 @@ change meant to lose a detection or add noise commits those measures, so the dif
 says what it changed. The weekly run also catches a new release of a dependency (the EVTX parser,
 DuckDB) that changes what the rules match.
 
+## Detection level
+
+A case has a detection level, from 1 (fewest false positives) to 5 (every finding), picked when
+the case is started and changed on the Rules page, which reruns the rules at the new level. The
+level decides which findings a rule run keeps, from what each rule's measure says it raised on the
+clean machines: its findings per machine that logs what it reads, with half a finding added so a
+rule silent on one machine is not taken as silent on all (`clean.findings + 0.5` over `clean.of`
+in `rules/measures.json`). Each level is a budget of findings per clean machine for a medium
+finding, doubled for each severity step above and halved below, so a critical finding may come
+from a rule four times noisier than a medium one:
+
+| level | medium budget | attack_data (535) | EVTX-to-MITRE (279) | EVTX-ATTACK-SAMPLES (278) | findings per clean machine |
+|---|---|---|---|---|---|
+| 1, fewest false positives | 0.1 | 211 | 87 | 221 | 13 |
+| 2, quiet | 0.5 | 231 | 100 | 253 | 52 |
+| **3, balanced (a new case)** | 5 | **239** | **114** | **265** | **172** |
+| 4, broad | 20 | 243 | 117 | 265 | 337 |
+| 5, every finding | none | 249 | 123 | 266 | 587 |
+| before levels: medium and up | | 235 | 109 | 260 | 305 |
+
+A rule no clean machine could measure (mail, Microsoft 365, other products' logs, a rule changed
+since it was measured) raises its findings from medium up at levels 1 to 4, and the analyst's own
+rules raise everything. A rule the level can raise nothing of does not run, and its findings are
+cleared, but for any an analyst decided on: a finding reviewed, escalated, marked false positive
+or annotated stays whatever the level. The Rules page says how many enabled rules raise findings at
+the level, and its "level" column the lowest level at which each rule raises its highest severity.
+A case started before levels existed has none and raises every finding, as it did.
+
+The table was measured on 2026-09-26 with every rule's findings (core and the two default Sigma
+packs, every severity) on every recording and clean machine of the rule measure. Detected is a
+finding of the recording's ATT&CK technique at the level, not counting a rule on the library it was
+written against (`WRITTEN_AGAINST`). A rule's level never reads the attack libraries; the five
+budgets and the doubling per severity step were picked from a scan of this same measure, so the
+detection figures carry that much selection. Noise is held out: each clean machine's findings are
+counted under rule noise taken from the six other machines (the app takes it from all seven). The
+budgets make the levels nest: a rule raised at one level is raised at every level above it.
+
+Two things follow from the table. The default level finds more than raising every medium and
+higher finding did, on all three libraries, with 44% fewer findings on clean machines: it drops
+medium rules that fire tens of times on a clean machine (the loudest, a program started from a
+temp or download folder, fires 57 times per machine) and raises low and informational findings of
+rules that never fire there. And the quietest level keeps 90% of the attack_data detections with
+4% of the noise, which suits a first pass over a large case.
+
 ## Mail risk scoring
 
 The 0 to 100 risk score on every mail is an investigation priority, not a probability of

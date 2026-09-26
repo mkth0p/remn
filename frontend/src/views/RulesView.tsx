@@ -11,6 +11,9 @@ import { IconAi, IconEdit, IconPlus, IconTrash } from '../components/Icons'
 import type { RuleDiag } from '../rules/engine'
 import { fmtNum, fmtTs } from '../util/format'
 import { measuredOn, readMeasure, type MeasureReading, type MeasureVerdict } from '../data/ruleMeasures'
+import { caseLevel, lowestLevel, ruleNoise, ruleRaises, ruleTopSeverity, severityFloors, type DetectionLevel } from '../data/detectionLevel'
+import { rulesRunning, setDetectionLevel } from '../data/findingsState'
+import { DetectionLevelPicker } from '../components/DetectionLevelPicker'
 import { safeHref } from '../util/safe'
 
 interface LastRun {
@@ -135,6 +138,8 @@ export function RulesView() {
   const [aiAsk, setAiAsk] = useState('')
   const [aiBusy, setAiBusy] = useState(false)
   const [lastRun, setLastRun] = useState<LastRun | null>(null)
+  const [pendingLevel, setPendingLevel] = useState<DetectionLevel | null>(null)
+  const [applying, setApplying] = useState(false)
   const packs = meta?.packs ?? []
   useEffect(() => {
     if (!kase) return
@@ -154,6 +159,22 @@ export function RulesView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kase, rulesVersion, meta])
   if (!kase) return null
+  const level = caseLevel(kase.settings)
+  const shownLevel = pendingLevel ?? level
+  const enabledRules = rules.filter((r) => r.enabled && !r.error)
+  const floors = severityFloors(enabledRules, shownLevel)
+  const raising = enabledRules.filter((r) => ruleRaises(r, floors)).length
+  const applyLevel = async () => {
+    if (pendingLevel == null || pendingLevel === level) return
+    if (rulesRunning()) return toast('info', 'rules are running; apply the level once they finish')
+    setApplying(true)
+    try {
+      await setDetectionLevel(kase, pendingLevel)
+      setPendingLevel(null)
+    } finally {
+      setApplying(false)
+    }
+  }
   const needle = q.toLowerCase()
   const readings = new Map(rules.map((r) => [r, readMeasure(r.measured, r.origin)]))
   const measureMatch = (r: LoadedRule) => {
@@ -251,6 +272,29 @@ export function RulesView() {
           <IconPlus /> new rule
         </button>
       </div>
+      <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)' }}>
+        <div className="row" style={{ gap: 8, alignItems: 'baseline', marginBottom: 6 }}>
+          <strong>Detection level</strong>
+          <span className="small muted">
+            which findings this case raises, from each rule&apos;s measured false positives on clean machines. {fmtNum(raising)} of {fmtNum(enabledRules.length)} enabled rules raise findings at level{' '}
+            {shownLevel}; the others do not run.
+          </span>
+          <span className="spacer" />
+          {pendingLevel != null && pendingLevel !== level && (
+            <>
+              <button className="btn xs" onClick={() => setPendingLevel(null)} disabled={applying}>
+                keep level {level}
+              </button>
+              <button className="btn xs primary" onClick={applyLevel} disabled={applying}>
+                {applying ? <Spinner /> : `apply level ${pendingLevel} and rerun the rules`}
+              </button>
+            </>
+          )}
+        </div>
+        <div style={{ maxWidth: 760 }}>
+          <DetectionLevelPicker value={shownLevel} onChange={(l) => setPendingLevel(l === level ? null : l)} disabled={applying} />
+        </div>
+      </div>
       {packs.length > 0 && (
         <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--line)' }}>
           <div className="row" style={{ gap: 8, alignItems: 'baseline', marginBottom: 6 }}>
@@ -328,6 +372,7 @@ export function RulesView() {
               <th>type</th>
               <th>last run</th>
               <th title={measuredOn(meta?.measures) || undefined}>measured</th>
+              <th title="the lowest detection level at which the rule raises its findings">level</th>
               <th>att&amp;ck</th>
               <th>origin</th>
               <th></th>
@@ -385,6 +430,16 @@ export function RulesView() {
                 </td>
                 <td>
                   <MeasureBadge reading={readings.get(r)!} />
+                </td>
+                <td className="small">
+                  {(() => {
+                    const from = lowestLevel(ruleTopSeverity(r.rule), ruleNoise(r.measured), r.origin)
+                    return (
+                      <span className={from > shownLevel ? 'muted' : undefined} title={from > shownLevel ? `not raised at level ${shownLevel}` : `raised at level ${shownLevel}`}>
+                        from {from}
+                      </span>
+                    )
+                  })()}
                 </td>
                 <td className="small">{(r.rule.attack ?? []).join(' ')}</td>
                 <td>

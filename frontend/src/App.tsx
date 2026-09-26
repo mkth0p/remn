@@ -12,6 +12,8 @@ import { setCaseInternalDomains } from './rules/incidents'
 import { repairInterruptedImports } from './data/interruptedImports'
 import { isAbort } from './data/queryClient'
 import { casesWithEvidence, FIRST_CASE_NAME } from './data/cases'
+import { DEFAULT_DETECTION_LEVEL, type DetectionLevel } from './data/detectionLevel'
+import { DetectionLevelPicker } from './components/DetectionLevelPicker'
 import {
   IconAi,
   IconDashboard,
@@ -112,7 +114,7 @@ export default function App() {
   const [cases, setCases] = useState<Case[]>([])
   const casesVersion = useStore((s) => s.casesVersion)
   const [showConsole, setShowConsole] = useState(false)
-  const [newCase, setNewCase] = useState<{ name: string; storage: 'browser' | 'server' } | null>(null)
+  const [newCase, setNewCase] = useState<{ name: string; storage: 'browser' | 'server'; level: DetectionLevel } | null>(null)
   const [global, setGlobal] = useState('')
   const [pivotRes, setPivotRes] = useState<PivotResult | null>(null)
   const pivotAbort = useRef<AbortController | null>(null)
@@ -157,7 +159,13 @@ export default function App() {
       // one transaction, so two boots in flight (React runs effects twice in development) create one default case
       const all = await db.transaction('rw', db.cases, db.kv, async () => {
         if ((await db.cases.count()) === 0) {
-          const id = await db.cases.add({ name: FIRST_CASE_NAME, createdAt: Date.now(), updatedAt: Date.now(), settings: defaultSettings(), storage: 'browser' })
+          const id = await db.cases.add({
+            name: FIRST_CASE_NAME,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            settings: { ...defaultSettings(), detectionLevel: DEFAULT_DETECTION_LEVEL },
+            storage: 'browser',
+          })
           await db.kv.put({ key: 'lastCase', value: id })
         }
         return db.cases.toArray()
@@ -281,7 +289,7 @@ export default function App() {
     if (!newCase) return
     const name = newCase.name.trim() || `Case ${cases.length + 1}`
     const serverKey = newCase.storage === 'server' ? newServerKey() : undefined
-    const id = await getDb().cases.add({ name, createdAt: Date.now(), updatedAt: Date.now(), settings: defaultSettings(), storage: newCase.storage, serverKey })
+    const id = await getDb().cases.add({ name, createdAt: Date.now(), updatedAt: Date.now(), settings: { ...defaultSettings(), detectionLevel: newCase.level }, storage: newCase.storage, serverKey })
     setCases(await getDb().cases.toArray())
     await switchCase(id)
     setNewCase(null)
@@ -436,7 +444,7 @@ export default function App() {
             </option>
           ))}
         </select>
-        <button className="btn sm ghost" onClick={() => setNewCase({ name: '', storage: 'browser' })}>
+        <button className="btn sm ghost" onClick={() => setNewCase({ name: '', storage: 'browser', level: DEFAULT_DETECTION_LEVEL })}>
           + case
         </button>
         <span className="title">{NAV.find((n) => n.id === view)?.label ?? ''}</span>
@@ -520,6 +528,10 @@ export default function App() {
                 </span>
               </label>
             )}
+          </div>
+          <div className="col" style={{ gap: 4 }}>
+            <b className="small">Detection level</b>
+            <DetectionLevelPicker value={newCase.level} onChange={(level) => setNewCase({ ...newCase, level })} />
           </div>
           <div className="hint">
             {browserOnly

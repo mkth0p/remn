@@ -70,3 +70,24 @@ describe('explicit finding severity reset', () => {
     expect(await db.kv.get('finding-reviews-1')).toBeUndefined()
   })
 })
+
+describe('the detection level when findings are replaced', () => {
+  const found = (key: string, severity: Finding['severity']) => ({
+    ...row({ key, severity, status: 'new', notes: undefined, decidedBy: undefined, reportExclude: undefined, severityOverride: undefined }),
+  })
+
+  it('keeps only the findings at or above their rule floor', async () => {
+    const n = await replaceFindings(1, ['replyto'], [found('a', 'low'), found('b', 'medium'), found('c', 'high')], undefined, { replyto: 2 })
+    expect(n).toBe(2)
+    expect((await db.findings.toArray()).map((f) => f.key).sort()).toEqual(['b', 'c'])
+  })
+
+  it('keeps a finding below the floor an analyst already decided on', async () => {
+    const decided = { ...found('a', 'low'), status: 'escalated' as const, decidedBy: 'analyst' as const }
+    const id = await db.findings.add(decided)
+    await rememberReviews(1, [{ ...decided, id }])
+    await replaceFindings(1, ['replyto'], [found('a', 'low'), found('z', 'low')], undefined, { replyto: 3 })
+    const kept = await db.findings.toArray()
+    expect(kept.map((f) => [f.key, f.status])).toEqual([['a', 'escalated']])
+  })
+})

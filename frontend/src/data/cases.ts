@@ -3,6 +3,7 @@
  * does), and starting one from there.
  */
 import { defaultSettings, getDb, newServerKey, type Case } from '../db/schema'
+import { DEFAULT_DETECTION_LEVEL } from './detectionLevel'
 
 /** The case the first visit creates, so the app always has one open. */
 export const FIRST_CASE_NAME = 'Case 1'
@@ -17,7 +18,7 @@ export async function casesWithEvidence(): Promise<Set<number>> {
  * Start a case. The first visit's case, still untouched (its default name, no evidence, the only
  * case there is), is taken over rather than left empty beside the new one.
  */
-export async function startCase(name: string, storage: 'browser' | 'server'): Promise<Case> {
+export async function startCase(name: string, storage: 'browser' | 'server', detectionLevel: number = DEFAULT_DETECTION_LEVEL): Promise<Case> {
   const db = getDb()
   const all = await db.cases.toArray()
   const first = all.length === 1 && all[0].name === FIRST_CASE_NAME ? all[0] : undefined
@@ -27,9 +28,16 @@ export async function startCase(name: string, storage: 'browser' | 'server'): Pr
   if (untouched && first?.id != null) {
     id = first.id
     const serverKey = storage === 'server' ? (first.serverKey ?? newServerKey()) : undefined
-    await db.cases.update(id, { name: title, storage, serverKey, updatedAt: Date.now() })
+    await db.cases.update(id, { name: title, storage, serverKey, settings: { ...defaultSettings(), ...first!.settings, detectionLevel }, updatedAt: Date.now() })
   } else {
-    id = await db.cases.add({ name: title, createdAt: Date.now(), updatedAt: Date.now(), settings: defaultSettings(), storage, serverKey: storage === 'server' ? newServerKey() : undefined })
+    id = await db.cases.add({
+      name: title,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      settings: { ...defaultSettings(), detectionLevel },
+      storage,
+      serverKey: storage === 'server' ? newServerKey() : undefined,
+    })
   }
   await db.kv.put({ key: 'lastCase', value: id })
   const c = (await db.cases.get(id))!

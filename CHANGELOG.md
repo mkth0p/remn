@@ -5,6 +5,14 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- A detection level per case, from 1 (fewest false positives) to 5 (every finding), set when the
+  case is started and changed on the Rules page. Each rule's findings are raised or not from its
+  measured noise on the clean machines of evtx-baseline and the finding's severity. The default,
+  3, detects more than raising every medium and higher finding did on attack_data, EVTX-to-MITRE-
+  Attack and EVTX-ATTACK-SAMPLES (239, 114 and 265 recordings against 235, 109 and 260) with 44%
+  fewer findings on clean machines; level 1 keeps 90% of the attack_data detections with 4% of the
+  noise. Findings an analyst decided on stay at any level. Cases started before keep every finding
+  until their level is set ([detection level](docs/detection.md#detection-level)).
 - A home page. REMN opens on it until a case holds evidence, and the wordmark leads back to it
   after that. It shows what the tool reads, how the rules are measured and what the measures
   show: the rule totals, recordings and clean-host baseline read live from `rules/measures.json`

@@ -240,7 +240,12 @@ custom rules, with an editor, the import buttons, and after a run the reason eve
 silent rule found nothing. Its "measured" column gives each rule's measure (detects, lead,
 misses its sample, fires on clean machines, changed, needs settings) with the sentences
 behind it on hover, and a filter lists the leads, the rules that miss their own test sample
-or those that fire on clean machines. The Indicators page lists the IPs, domains, URLs and hashes
+or those that fire on clean machines. Above the packs, the case's detection level (1, fewest false
+positives, to 5, every finding; see [detection level](detection.md#detection-level)) is a slider
+with what the level raises and what it was measured to detect and cost; moving it offers to rerun
+the rules at the new level, and the "level" column gives the lowest level at which each rule
+raises its findings. The new-case dialog on the home page and in the sidebar sets it too, at 3
+unless changed. The Indicators page lists the IPs, domains, URLs and hashes
 extracted from the evidence with their counts and, when external lookups are enabled
 for the case, their reputation; it exports STIX 2.1 and CSV. The STIX bundle carries every
 value as a cyber-observable and makes an indicator only of the values a reputation check

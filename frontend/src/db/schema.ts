@@ -36,6 +36,12 @@ export interface CaseSettings {
   parseEvtxInBrowser?: boolean
   /** a collection laid out like a drive: also read its $MFT and USN journal (default off; millions of rows, and slower) */
   readFileSystem?: boolean
+  /**
+   * which findings the rules raise, 1 (fewest false positives) to 5 (every finding), from each
+   * rule's measured noise on clean machines (data/detectionLevel.ts). A new case starts at 3; a
+   * case from before levels has none and raises every finding, as it always did.
+   */
+  detectionLevel?: number
 }
 
 export const defaultSettings = (): CaseSettings => ({
