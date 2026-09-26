@@ -148,7 +148,10 @@ async function saveDiagnostics(caseId: number, res: RuleRunSummary): Promise<voi
   await getDb().kv.put({ key: `ruleDiags-${caseId}`, value: { ts: Date.now(), byRule: res.byRule, diagnostics: res.diagnostics, errors: res.errors } })
   for (const d of res.diagnostics) {
     if (d.reason === 'missing_setting') log('warn', `${d.ruleId}: disarmed — ${d.detail}`)
+    if (d.reason === 'truncated') log('warn', `${d.ruleId}: ${d.detail}`)
   }
+  const cut = res.diagnostics.filter((d) => d.reason === 'truncated').length
+  if (cut) toast('warn', `${cut} rule(s) matched more than a run keeps and were cut short — see the Rules view`, 9000)
   const noData = res.diagnostics.filter((d) => d.reason === 'no_selector_match').length
   const needSettings = res.diagnostics.filter((d) => d.reason === 'missing_setting').length
   const notApplicable = res.diagnostics.filter((d) => d.reason === 'not_applicable').length

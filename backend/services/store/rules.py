@@ -135,7 +135,7 @@ def _where_sql(rule: dict[str, Any], settings: dict[str, Any], ctx: Ctx, ts_fiel
     return where
 
 
-def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any]) -> list[dict[str, Any]]:
+def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any], notes: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     source = rule["source"]
     ts_field = "date" if source == "mails" else "ts"
     ctx = Ctx(source=source, settings=settings)
@@ -174,14 +174,18 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any]) -
             grouped["group_by"] = [f for f in entity_fields if f in _GROUPABLE.get(source, entity_fields)] or entity_fields[:2]
             grouped["threshold"] = ">= 1"
             grouped["_collapsed"] = True
-            out = run_rule(store, grouped, settings)
+            out = run_rule(store, grouped, settings, notes)
             for f in out:
                 f["escalation"] = (f.get("escalation") or "") or f"collapsed: {total:,} matching rows"
             return out
         ents = _entity_exprs(entity_fields, ctx)
         cols = ", ".join(["id", q(ts_field)] + [f"{e} AS e{i}" for i, (_, e) in enumerate(ents)] + (["flags"] if source == "mails" else []))
-        cur.execute(f"SELECT {cols} FROM {source} WHERE {where} ORDER BY {q(ts_field)} NULLS LAST LIMIT {MAX_FINDINGS}", ctx.params)
-        for rec in cur.fetchall():
+        cur.execute(f"SELECT {cols} FROM {source} WHERE {where} ORDER BY {q(ts_field)} NULLS LAST LIMIT {MAX_FINDINGS + 1}", ctx.params)
+        recs = cur.fetchall()
+        if len(recs) > MAX_FINDINGS:
+            recs = recs[:MAX_FINDINGS]
+            _note_cut(notes, f"kept the first {MAX_FINDINGS:,} matching rows in time order")
+        for rec in recs:
             rid, ts = rec[0], rec[1]
             ev = _clean_entities([(ents[i][0], rec[2 + i]) for i in range(len(ents))])
             sev = base["severity"]
@@ -239,9 +243,17 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any]) -
             having.append("NOT (" + " AND ".join(f"{k} = ''" for k in gkeys) + ")")
         gb = f"GROUP BY {', '.join(gkeys)}" if gkeys else ""
         hv = f"HAVING {' AND '.join(having)}" if having else ""
-        cur.execute(f"SELECT {', '.join(select)} FROM {source} WHERE {where} {gb} {hv} ORDER BY count(*) DESC LIMIT {MAX_FINDINGS}", ctx.params)
+        # Past MAX_FINDINGS groups, which ones to keep: a rule counting up to a threshold (a burst, a
+        # spray) is about its biggest groups, anything else about its rarest, the ones a hunt is after.
+        biggest = bool(threshold) and ((threshold[0] == ">=" and threshold[1] > 1) or (threshold[0] == ">" and threshold[1] >= 1))
+        order = f"count(*) {'DESC' if biggest else 'ASC'}" + (f", {', '.join(gkeys)}" if gkeys else "")
+        cur.execute(f"SELECT {', '.join(select)} FROM {source} WHERE {where} {gb} {hv} ORDER BY {order} LIMIT {MAX_FINDINGS + 1}", ctx.params)
         ng = len(gexprs)
-        for rec in cur.fetchall():
+        recs = cur.fetchall()
+        if len(recs) > MAX_FINDINGS:
+            recs = recs[:MAX_FINDINGS]
+            _note_cut(notes, f"kept the {MAX_FINDINGS:,} {'largest' if biggest else 'rarest'} groups")
+        for rec in recs:
             keyvals = rec[:ng]
             disp = rec[ng : 2 * ng]
             n, d, first, last, ids, dvals, _anyok = rec[2 * ng : 2 * ng + 7]
@@ -380,6 +392,8 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any]) -
                 break
         if cur_key is not None:
             flush_group()
+        if len(findings) >= MAX_FINDINGS:
+            _note_cut(notes, f"stopped at {MAX_FINDINGS:,} bursts, in the order of the grouped fields")
         findings = findings[:MAX_FINDINGS]
 
     # follow-up ("then")
@@ -387,11 +401,7 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any]) -
     if then.get("where") and findings:
         within = parse_duration(then.get("within")) or 0
         join = list(then.get("join") or group_by)
-        checked = 0
         for f in findings:
-            if checked >= 500:
-                break
-            checked += 1
             tctx = Ctx(source=source, settings=settings)
             cond = compile_cond(then["where"], tctx)
             end = f.get("tsEnd") or f.get("ts") or 0
@@ -421,6 +431,12 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any]) -
                 f["refs"] = list(f["refs"]) + [hit[0]]
                 f["tsEnd"] = max(end, int(hit[1] or 0))
     return findings
+
+
+def _note_cut(notes: dict[str, Any] | None, how: str) -> None:
+    """Record that a rule produced more findings than a run keeps, and which ones it kept."""
+    if notes is not None:
+        notes["truncated"] = f"more than {MAX_FINDINGS:,} findings; {how}"
 
 
 def _rule_event_ids(cond: dict[str, Any] | None) -> list[int] | None:
@@ -617,14 +633,26 @@ def run_rules(
                 if progress:
                     progress({"index": i + 1, "total": len(rules), "ruleId": rule.get("id"), "findings": 0, "ms": 0})
                 continue
+        notes: dict[str, Any] = {}
         try:
-            found = run_rule(store, rule, settings)
+            found = run_rule(store, rule, settings, notes)
         except Exception as exc:  # noqa: BLE001
             errors.append({"ruleId": rule.get("id", "?"), "error": str(exc)[:300]})
             found = []
             failed = True
         by_rule[rule.get("id", "?")] = len(found)
         all_findings.extend(found)
+        if notes.get("truncated"):
+            diagnostics.append(
+                {
+                    "ruleId": rule.get("id", "?"),
+                    "reason": "truncated",
+                    "detail": notes["truncated"],
+                    "matched": len(found),
+                    "afterExclude": len(found),
+                    "afterTime": len(found),
+                }
+            )
         if not found and not failed:
             try:
                 diagnostics.append(diagnose_zero(store, rule, settings))

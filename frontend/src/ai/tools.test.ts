@@ -1,9 +1,18 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultSettings, RemnDB, setDb, type Case, type EventRow } from '../db/schema'
 import { SeenSet } from './evidence'
 import { loadBoard } from './hypotheses'
 import { loadInbox } from './inbox'
 import { runTool, toolNamesFor, TOOL_GROUPS } from './tools'
+
+const lookups = vi.hoisted(() => [] as unknown[])
+vi.mock('../api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/client')>()),
+  lookupReputation: async (items: unknown) => {
+    lookups.push(items)
+    return { summary: {}, results: [] }
+  },
+}))
 
 let db: RemnDB
 const kase = { id: 1, name: 'c', settings: defaultSettings(), storage: 'browser', createdAt: 1, updatedAt: 1 } as Case
@@ -142,5 +151,24 @@ describe('which tools a case gets', () => {
     expect(server).toEqual(expect.arrayContaining(['sql', 'lookup_ioc', 'get_chain', ...TOOL_GROUPS.mails]))
     expect(server).not.toContain('search_events')
     expect(server).not.toContain('propose_decision')
+  })
+})
+
+describe('lookup_ioc', () => {
+  const online = { ...kase, settings: { ...kase.settings, networkAllowed: true } } as Case
+  beforeEach(() => {
+    lookups.length = 0
+  })
+
+  it('looks up an indicator the evidence holds', async () => {
+    const out = await runTool('lookup_ioc', { kind: 'ip', value: '10.0.0.5' }, { kase: online, seen: new SeenSet() })
+    expect(out.content).not.toContain('does not appear')
+    expect(lookups).toHaveLength(1)
+  })
+
+  it('refuses a value that is not in the case, so nothing from the case can be smuggled into a lookup', async () => {
+    const out = await runTool('lookup_ioc', { kind: 'domain', value: 'ws01-admin-hunter2.example.net' }, { kase: online, seen: new SeenSet() })
+    expect(out.content).toContain('does not appear in this case')
+    expect(lookups).toHaveLength(0)
   })
 })
