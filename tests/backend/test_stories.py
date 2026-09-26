@@ -200,6 +200,113 @@ def test_a_sign_in_from_a_joined_device_happened_on_that_host():
     assert step["host"] == "ws-004" and "from the Entra device WS-004 (Hybrid Azure AD joined)" in step["notes"]
 
 
+def _phished():
+    """A password-reset lure whose link Daniel follows; the phisher's RDP logon with his password, a
+    credential dump and a scheduled task in that session, explicit credentials towards a server, the
+    admin share and a service there. Around it, his own day: an interactive logon with a flagged tool
+    in it, programs of the phisher's session with no finding, and his own task on another host later."""
+    ws, fs = "WS-004.northstar.example", "FS-001.northstar.example"
+    sysmon = {"provider": "Microsoft-Windows-Sysmon", "channel": "Microsoft-Windows-Sysmon/Operational"}
+    me = dict(subjectUser="daniel.roy", subjectDomain="NORTHSTAR")
+    mail = {
+        "id": 1,
+        "date": T0,
+        "fromAddr": "it-desk@northstar-sso.example",
+        "subject": "Your password expires today",
+        "to": [{"addr": DANIEL}],
+        "risk": 80,
+        "urls": [{"url": "https://login.northstar-sso.example/reset", "host": "login.northstar-sso.example", "domain": "northstar-sso.example"}],
+    }
+    events = [
+        ev(1, -60, eventId=4624, computer=ws, targetUser="daniel.roy", targetDomain="NORTHSTAR", targetLogonId="0x7001", logonType=2),
+        ev(2, -30, eventId=4688, computer=ws, newProcessId="0x50", processName="C:\\Tools\\anydesk.exe", subjectLogonId="0x7001", **me),
+        ev(3, 3, base=sysmon, eventId=22, computer=ws, query="login.northstar-sso.example", user="NORTHSTAR\\daniel.roy", **me),
+        ev(10, 60, eventId=4624, computer=ws, targetUser="daniel.roy", targetDomain="NORTHSTAR", targetLogonId="0x9a01", logonType=10, ipAddress="203.0.113.69"),
+        ev(11, 62, eventId=4688, computer=ws, newProcessId="0x100", processName="C:\\Windows\\System32\\rundll32.exe",
+           commandLine="rundll32.exe comsvcs.dll MiniDump 624 C:\\Users\\Public\\l.dmp full", subjectLogonId="0x9a01", **me),
+        *[ev(20 + i, 63 + i, eventId=4688, computer=ws, newProcessId=hex(0x200 + i), processName="C:\\Windows\\System32\\whoami.exe", subjectLogonId="0x9a01", **me) for i in range(5)],
+        ev(12, 70, eventId=4698, computer=ws, taskName="\\Updater", subjectLogonId="0x9a01", **me),
+        ev(13, 74, eventId=4648, computer=ws, targetServer="FS-001", targetUser="daniel.roy", targetDomain="NORTHSTAR", subjectLogonId="0x9a01", **me),
+        ev(14, 75, eventId=4624, computer=fs, targetUser="daniel.roy", targetDomain="NORTHSTAR", targetLogonId="0x5501", logonType=3, workstation="WS-004", ipAddress="10.0.0.14"),
+        ev(15, 75.2, eventId=5140, computer=fs, subjectLogonId="0x5501", ipAddress="10.0.0.14", shareName="\\\\*\\ADMIN$", **me),
+        ev(16, 76, base=SCM, eventId=7045, computer=fs, serviceName="NSUpdater", serviceFile="C:\\Windows\\x.exe"),
+        ev(17, 180, eventId=4698, computer="WS-009.northstar.example", taskName="\\Backup", subjectLogonId="0x3003", **me),
+    ]  # fmt: skip
+    findings = [
+        finding("mail-credential-phishing", "high", [1], source="mails", tags=["phishing"], attack=["T1566.002"]),
+        finding("win-rdp-logon-external", "high", [10], tags=["lateral-movement"], attack=["T1021.001"], ipAddress="203.0.113.69"),
+        finding("win-lsass-dump-comsvcs", "critical", [11], tags=["credential-access"], attack=["T1003.001"]),
+        finding("win-scheduled-task-suspicious-content", "high", [12], tags=["persistence"], attack=["T1053.005"]),
+        finding("win-admin-share-access", "medium", [15], tags=["lateral-movement"], attack=["T1021.002"]),
+        finding("win-service-installed-suspicious", "high", [16], tags=["persistence"], attack=["T1543.003"]),
+        finding("win-remote-admin-tool", "medium", [2], tags=["command-and-control"], attack=["T1219"]),
+        finding("win-scheduled-task-created", "medium", [17], tags=["persistence"], attack=["T1053.005"]),
+    ]
+    return events, [mail], findings
+
+
+def test_the_spine_runs_from_the_way_in_to_what_followed_and_leaves_the_rest_to_the_timeline():
+    events, mails, findings = _phished()
+    [story] = build_stories(events, mails, findings, SETTINGS)["stories"]
+    ids = {s["id"] for s in story["steps"]}
+    # the noise is in the story, not in its spine
+    assert {"event:1", "event:2", "event:3", "event:17", "event:20"} <= ids
+    # phishing -> logon -> process -> persistence -> lateral: the mail, the phisher's RDP logon with the
+    # password it took, the dump and the task in that session, the credentials towards the server, the
+    # server's logon, its admin share and the service
+    assert story["spine"] == ["mail:1", "event:10", "event:11", "event:12", "event:13", "event:14", "event:15", "event:16"]
+    basis = story["spineBasis"]
+    assert basis["anchor"] == "event:11" and basis["wayIn"] == ["mail:1"] and basis["tied"] and basis["cut"] == 0
+    assert basis["text"].startswith("Anchored on win lsass dump comsvcs on ws-004. The story's ties lead back from it to the way in: Mail from it-desk@")
+    # each step of the spine keeps the tie that put it in the story
+    by_id = {s["id"]: s for s in story["steps"]}
+    assert by_id["event:14"]["tie"]["kind"] == "session" and by_id["event:13"]["tie"]["kind"] == "identity"
+    # the same rows give the same spine
+    assert build_stories(events, mails, findings, SETTINGS)["stories"][0]["spine"] == story["spine"]
+
+
+def test_a_spine_with_no_way_in_starts_at_the_earliest_flag_and_says_so():
+    events, mails, findings = _phished()
+    # his own interactive session only: a tool, then a dump and a task in it, and no mail or outside logon
+    host = "WS-004.northstar.example"
+    me = dict(subjectUser="daniel.roy", subjectDomain="NORTHSTAR", subjectLogonId="0x7001")
+    events = [e for e in events if e["id"] in (1, 2, 20, 21)] + [
+        ev(30, 10, eventId=4688, computer=host, newProcessId="0x300", processName="C:\\Users\\Public\\mimikatz.exe", **me),
+        ev(31, 11, eventId=4688, computer=host, newProcessId="0x301", callerProcessId="0x300", processName="C:\\Windows\\System32\\cmd.exe", **me),
+        ev(32, 40, eventId=4698, computer=host, taskName="\\Updater", **me),
+    ]
+    findings = [
+        finding("win-remote-admin-tool", "medium", [2], tags=["command-and-control"], attack=["T1219"]),
+        finding("win-mimikatz", "critical", [30], tags=["credential-access"], attack=["T1003.001"]),
+        finding("win-scheduled-task-suspicious-content", "high", [32], tags=["persistence"], attack=["T1053.005"]),
+    ]
+    [story] = build_stories(events, [], findings, SETTINGS)["stories"]
+    assert not any(s["phase"] == "initial-access" for s in story["steps"])
+    # from the earliest flag, through the dump, to the task its session holds; the logon before it and
+    # the program the dump started with no finding stay in the timeline
+    assert story["spine"] == ["event:2", "event:30", "event:32"]
+    basis = story["spineBasis"]
+    assert basis["anchor"] == "event:30" and basis["wayIn"] == [] and not basis["tied"]
+    assert "The way in is not in the evidence: the spine starts at the earliest flag" in basis["text"]
+
+
+def test_a_spine_past_its_cap_keeps_the_way_in_the_anchor_and_the_worst_and_says_how_many_it_left():
+    events, mails, findings = _phished()
+    ws = "WS-004.northstar.example"
+    me = dict(subjectUser="daniel.roy", subjectDomain="NORTHSTAR", subjectLogonId="0x9a01")
+    # twenty more flagged programs in the phisher's session
+    events += [
+        ev(40 + i, 64 + i * 0.1, eventId=4688, computer=ws, newProcessId=hex(0x400 + i), processName=f"C:\\Users\\Public\\t{i}.exe", **me) for i in range(20)
+    ]
+    findings += [finding(f"rule-{i}", "medium", [40 + i], tags=["discovery"], attack=["T1082"]) for i in range(20)]
+    [story] = build_stories(events, mails, findings, SETTINGS)["stories"]
+    assert len(story["spine"]) == 15 and story["spineBasis"]["cut"] == 13
+    # the way in, the anchor, the foothold and the way to the server stay; seven of the twenty programs do
+    assert {"mail:1", "event:10", "event:11", "event:12", "event:13", "event:14", "event:15", "event:16"} <= set(story["spine"])
+    assert story["spine"] == sorted(story["spine"], key=[s["id"] for s in story["steps"]].index)
+    assert story["spineBasis"]["text"].endswith("13 more steps on these paths are in the full timeline.")
+
+
 def test_a_flag_on_a_host_that_names_no_one_is_a_host_story_and_false_positives_are_left_out():
     events = [
         ev(1, 0, base=SCM, eventId=7045, computer="FS-002.northstar.example", serviceName="evil", serviceFile="C:\\x.exe"),

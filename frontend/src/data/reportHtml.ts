@@ -1,6 +1,7 @@
 import type { Case, CaseNote, Evidence, Finding, Ioc, Severity } from '../db/schema'
 import type { Chain, ChainStep } from './chains'
 import { storyCoverageWarnings, storyOwnGaps, type ReportStory, type StoryResult } from './stories'
+import { spineBasis, spineSteps } from './storyExport'
 import type { ChainReview, ReportSettings } from './review'
 import { chainSeverity, effectiveSeverity, stepVisible } from './review'
 import type { Incident } from '../rules/incidents'
@@ -489,7 +490,36 @@ const PHASE_WORDS: Record<string, string> = {
   impact: 'Impact',
 }
 
-/** A story: its phases in the order they happened, what marks each (its worst findings, else its first step), and where its evidence stops. */
+/**
+ * A story's spine (docs/stories.md, "Spine"): the steps that carry it from the way in to the worst of
+ * it, in time order, each with the tie that put it in the story, and how the spine was drawn. Nothing
+ * for a story built before spines.
+ */
+function storySpine(s: ReportStory['story']): string {
+  const steps = spineSteps(s)
+  if (!steps?.length) return ''
+  const basis = spineBasis(s)
+  const ways = new Set(basis?.wayIn ?? [])
+  const marks = (id: string) => (ways.has(id) ? ' ' + chip('way in') : '') + (id === basis?.anchor ? ' ' + chip('anchor') : '')
+  const worst = (st: (typeof steps)[number]) => [...st.findings].sort((a, b) => rank(b.severity) - rank(a.severity))[0]
+  return `<div class="story-part">Spine: ${n(steps.length)} of ${n(s.steps.length)} steps</div>
+${table(
+  ['when (UTC)', 'phase', 'step', 'why it is in the story'],
+  steps.map((st) => {
+    const f = worst(st)
+    return [
+      `<span class="nowrap">${span(st.ts, st.tsEnd)}</span>`,
+      `${f ? pill(f.severity) + ' ' : ''}${h(st.phase ? (PHASE_WORDS[st.phase] ?? st.phase) : 'context')}`,
+      `${h(st.title)}${st.host ? ` <span class="dim">on</span> <code>${h(st.host)}</code>` : ''}${marks(st.id)}${f ? `<span class="sub">${h(f.title)}${st.findings.length > 1 ? ` +${n(st.findings.length - 1)}` : ''}</span>` : ''}`,
+      `${h(st.tie.confidence)}: ${h(st.tie.basis)}`,
+    ]
+  }),
+)}
+${basis ? `<div class="cap">${h(basis.text)}</div>` : ''}
+<div class="story-part">Phases</div>`
+}
+
+/** A story: its spine, its phases in the order they happened, what marks each (its worst findings, else its first step), and where its evidence stops. */
 function storyCard({ story: s, key, note }: ReportStory, d: ReportData): string {
   // the build's own limits are printed once, above the stories
   const gaps = storyOwnGaps(s)
@@ -508,6 +538,7 @@ function storyCard({ story: s, key, note }: ReportStory, d: ReportData): string 
 <div class="card-head">${pill(s.severity)}<h3>${h(s.title)}</h3>${chip(`${s.confidence} ties`)}</div>
 <div class="card-meta">${who} ${h(s.subject.label)} · ${span(s.start, s.end)} · ${n(s.records)} record(s) in ${n(s.steps.length)} step(s)${where.length ? ' · ' + where.join(' · ') : ''}</div>
 ${note ? `<div class="narr">${md(note)}</div><div class="cap">the analyst's reading of the story</div>${textNote(`story:${key}`, d.claims)}` : `<div class="narr"><p>${h(s.summary || s.headline)}</p></div>`}
+${storySpine(s)}
 ${table(
   ['phase', 'when (UTC)', 'steps', 'what marks it'],
   s.phases.map((p) => [`${p.severity ? pill(p.severity) + ' ' : ''}${h(PHASE_WORDS[p.phase] ?? p.label)}`, `<span class="nowrap">${span(p.first, p.last)}</span>`, n(p.steps), marks(p.phase)]),
@@ -845,6 +876,7 @@ span.warn{color:var(--medium);font-weight:600}.ribbon.ok i{background:var(--acce
 .narr p{margin:0 0 6px}.narr p:last-child{margin:0}
 .narr strong{color:var(--ink)}
 .cap{font-size:10px;color:var(--ink-3);margin-top:4px}
+.story-part{font-weight:600;color:var(--ink-2);text-transform:uppercase;letter-spacing:.06em;font-size:9px;margin:10px 0 4px;break-after:avoid}
 .cap.ai{color:var(--violet)}.cap.warn{color:var(--medium);font-weight:600}.claim.unsupported{color:var(--medium)}.claim.contradicted{color:var(--critical);font-weight:600}
 .note{background:var(--surface-2);padding:8px 12px;border-radius:6px;margin:6px 0 8px;font-size:12px}
 .note p{margin:0 0 6px}.note p:last-child{margin:0}

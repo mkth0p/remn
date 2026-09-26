@@ -958,7 +958,7 @@ def _story(
         )
     anchor = min((r for s in steps if s["tie"]["kind"] in ("flag", "chain") for r in s["refs"]), default=str(start))
     headline, summary = _describe(subject, steps, phases, attacker, hosts, shared)
-    return {
+    story = {
         "id": "story-" + _hid(kind, subject["id"], anchor),
         "kind": kind,
         "subject": subject,
@@ -986,6 +986,9 @@ def _story(
         "stepsTruncated": cut,
         "lineage": {"sessions": lineage["sessions"], "hops": lineage["hops"], "processes": lineage["processes"]},
     }
+    # the few steps a reader takes in at a glance: from the way in to the worst of it
+    story.update(_spine(case, story, chains))
+    return story
 
 
 def _describe(
@@ -1024,6 +1027,242 @@ def _describe(
     if hosts:
         lines.append(f"Hosts: {', '.join(hosts[:5])}{' and more' if len(hosts) > 5 else ''}.")
     return headline[:300], " ".join(lines)[:900]
+
+
+# --- spine ----------------------------------------------------------------------------------------
+
+# the steps a spine keeps at most: a sequence read at a glance, the full timeline holds the rest
+SPINE_MAX = 15
+
+
+def _spine(case: _Case, story: dict[str, Any], chains: list[dict[str, Any]]) -> dict[str, Any]:
+    """The story's spine: the few steps that carry it from the way in to the worst of it.
+
+    DEPIMPACT (USENIX Security 2022) cuts a provenance graph down to what joins an alert to the
+    ways into the system, and RapSheet keeps a skeleton of the alerts and what connects them; the
+    spine does the same over the story's own steps and ties (_spine_ties). From the step of its
+    worst finding the ties are walked back to the way in, an initial access step; from the way in
+    they are walked forward to the story's flagged steps. The spine is the steps on those paths,
+    reached both back from a flag and forward from the way in, a flag repeated on its host (the
+    same findings again) once, at most SPINE_MAX in time order; each keeps the tie that put it in
+    the story. When the ties reach no way in, the spine starts at the story's earliest flag and
+    follows from there, from the anchor and from as far back as the anchor's ties go, and says
+    the way in is not in the evidence."""
+    steps = story["steps"]
+    if not steps:
+        return {"spine": [], "spineBasis": None}
+    by_id = {s["id"]: s for s in steps}
+    order = {s["id"]: i for i, s in enumerate(steps)}  # the steps are in time order
+    edges = _spine_ties(case, story, chains)
+    back: dict[str, set[str]] = defaultdict(set)
+    for a, bs in edges.items():
+        for b in bs:
+            back[b].add(a)
+
+    def reach(start: Iterable[str], graph: dict[str, set[str]]) -> set[str]:
+        seen = set(start)
+        todo = list(seen)
+        while todo:
+            for y in graph.get(todo.pop(), ()):
+                if y not in seen:
+                    seen.add(y)
+                    todo.append(y)
+        return seen
+
+    def way_in(st: dict[str, Any]) -> bool:
+        return st["phase"] == "initial-access"
+
+    def worst(st: dict[str, Any]) -> int:
+        return max((_sev(f["severity"]) for f in st["findings"]), default=0)
+
+    flags = [s for s in steps if _flag_step(s)] or [s for s in steps if s["tie"]["kind"] in ("flag", "chain")] or steps
+    # the anchor: the worst finding; of equal ones, what was done once in (not a way in itself), then
+    # what changes what an intruder holds, then the first; of the ten first, one whose ties lead back
+    # to a way in
+    ranked = sorted(flags, key=lambda s: (-worst(s), way_in(s), s["phase"] not in _KEEP_FIRST, order[s["id"]]))
+    anchor, behind = ranked[0], reach([ranked[0]["id"]], back)
+    for st in ranked[:10]:
+        b = reach([st["id"]], back)
+        if any(way_in(by_id[x]) for x in b):
+            anchor, behind = st, b
+            break
+    ways = sorted((x for x in behind if way_in(by_id[x])), key=order.__getitem__)
+    if ways:
+        # forward from the ways in; the first are those no other way in the ties reach leads to
+        start, walk = ways[0], ways
+        firsts = [w for w in ways if not (reach([w], back) - {w}) & set(ways)]
+    else:
+        start = min(flags, key=lambda s: order[s["id"]])["id"]
+        walk = [start, anchor["id"], *(x for x in behind if not back.get(x, set()) & behind)]
+        firsts = []
+    ahead = reach(walk, edges)
+    targets = {anchor["id"]} | {x for x in ahead if _flag_step(by_id[x])}
+    must = {start, anchor["id"]}
+    paths = sorted(must | {x for x in ahead & reach(targets, back) if order[x] >= order[start]}, key=order.__getitem__)
+    # a flag repeated on its host (the same findings: the service installed each time PsExec ran) is read once
+    keep, seen = [], set()
+    for x in paths:
+        st = by_id[x]
+        if _flag_step(st):
+            again = (st["host"] or st["origin"], st["phase"], tuple(sorted({f["ruleId"] or "" for f in st["findings"]})))
+            if again in seen and x not in must:
+                continue
+            seen.add(again)
+        keep.append(x)
+    # past SPINE_MAX it keeps the way in and the anchor; the flags that change what an intruder holds
+    # and the steps that lead to them; then the other flags; then what else joins them
+    core = must | {x for x in keep if _flag_step(by_id[x]) and by_id[x]["phase"] in _KEEP_FIRST}
+    to_core = set(keep) & reach(core, back)
+
+    def rank(x: str) -> tuple[int, int, int]:
+        kind = 0 if x in must else 1 if x in core else 2 if x in to_core else 3 if _flag_step(by_id[x]) else 4
+        return kind, -worst(by_id[x]), order[x]
+
+    chosen: list[str] = []
+    for x in sorted(keep, key=rank):
+        if len(chosen) == SPINE_MAX:
+            break
+        # a step that only joins others is kept when what it leads to is
+        if x in must or _flag_step(by_id[x]) or reach([x], edges) & set(chosen):
+            chosen.append(x)
+    spine = sorted(chosen, key=order.__getitem__)
+    return {
+        "spine": spine,
+        "spineBasis": _spine_basis(anchor, [by_id[x] for x in firsts], by_id[start], any(way_in(s) for s in steps), len(paths) - len(spine)),
+    }
+
+
+def _spine_ties(case: _Case, story: dict[str, Any], chains: list[dict[str, Any]]) -> dict[str, set[str]]:
+    """What led to what among a story's steps, by its ties: a logon before what happened in its
+    session, a program before those it started, the first record of a hop before the rest of it and
+    the source host's session before the hop, the way in from an attacker's address before what else
+    came from it, the phishing mail before what its link or attachment reached and before a way in
+    from an address the story's findings name. A record none of these reaches, on a host where its
+    person had a session open then, follows that session's logon (the engine's tie by time and place)."""
+    from .chains import is_link
+
+    steps = story["steps"]
+    lin = case.lineage
+    by_id = {s["id"]: s for s in steps}
+    order = {s["id"]: i for i, s in enumerate(steps)}
+    of_ref = {r: s["id"] for s in steps for r in s["refs"]}
+    attacker = set(story["attackerAddresses"])
+    edges: dict[str, set[str]] = defaultdict(set)
+
+    def tie(a: str | None, b: str | None) -> None:
+        if a and b and a != b:
+            edges[a].add(b)
+
+    # sessions: the logon (both logons of a split token), else the session's first step, before the rest
+    heads: dict[str, str] = {}
+    for st in steps:
+        s = lin.sessions.get(st["session"] or "")
+        if not s:
+            continue
+        if s["id"] not in heads:
+            heads[s["id"]] = of_ref.get(s.get("logonRef") or "") or st["id"]
+        tie(heads[s["id"]], st["id"])
+        other = lin.sessions.get(s.get("linked") or "")
+        if other:
+            tie(of_ref.get(other.get("logonRef") or ""), st["id"])
+    who = {sid: case.account(lin.sessions[sid].get("user"), lin.sessions[sid].get("domain"), lin.sessions[sid].get("sid")) for sid in heads}
+
+    def open_on(host: str, ts: int) -> list[dict[str, Any]]:
+        """The story's sessions open on a host at a time."""
+        out = []
+        for sid in heads:
+            s = lin.sessions[sid]
+            if s["host"] == host and s["start"] <= ts and (s["end"] is None or ts <= s["end"]):
+                out.append(s)
+        return out
+
+    # process trees: the nearest ancestor the story holds the creation of
+    def created(p: dict[str, Any]) -> str | None:
+        return next((of_ref[r] for r in p["refs"] if r in of_ref), None)
+
+    for st in steps:
+        p = lin.processes.get(st["process"] or "")
+        if not p:
+            continue
+        q = lin.processes.get(p.get("parent") or "") if created(p) == st["id"] else p
+        depth = 0
+        while q and depth < 6:
+            if (c := created(q)) and c != st["id"]:
+                tie(c, st["id"])
+                break
+            q = lin.processes.get(q.get("parent") or "")
+            depth += 1
+    # hops, and where each came from: the source host's session open then (the hop's person's first)
+    in_hop: dict[str, list[str]] = defaultdict(list)
+    for st in steps:
+        for hid in st["hops"]:
+            in_hop[hid].append(st["id"])
+    for hid, ids in in_hop.items():
+        first = min(ids, key=order.__getitem__)
+        for x in ids:
+            tie(first, x)
+        h = lin.hops.get(hid)
+        src = h["from"].get("host") if h else None
+        if not h or not src or src == h["to"]:
+            continue
+        mine = case.account(h.get("user"), h.get("domain"))
+        there = open_on(src, h["ts"])
+        if there:
+            tie(heads[max(there, key=lambda s: (bool(mine) and who[s["id"]] == mine, s["start"]))["id"]], first)
+        else:
+            tie(next((x["id"] for x in reversed(steps) if x["host"] == src and x["ts"] <= h["ts"] and _flag_step(x)), None), first)
+    # an attacker's address
+    for ip in attacker:
+        mine_ip = [st for st in steps if st["ip"] == ip]
+        for i, a in enumerate(mine_ip):
+            if a["phase"] == "initial-access":
+                for b in mine_ip[i + 1 :]:
+                    tie(a["id"], b["id"])
+    # a phishing chain
+    for c in chains:
+        seed = of_ref.get(f"mail:{c['seed']['id']}")
+        if not seed:
+            continue
+        for cst in c.get("steps", []):
+            prefix = "mail" if cst.get("source") == "mails" else "event"
+            for r in cst.get("refs") or ([cst["id"]] if cst.get("id") is not None else []):
+                x = by_id.get(of_ref.get(f"{prefix}:{r}") or "")
+                if not x or order[x["id"]] < order[seed]:
+                    continue
+                if any(is_link(a) for a in cst.get("artifacts") or []) or (x["phase"] == "initial-access" and x["ip"] in attacker):
+                    tie(seed, x["id"])
+    # last, time and place: a host record none of the above reaches, of the person of a session open there
+    reached = {b for bs in edges.values() for b in bs}
+    for st in steps:
+        if st["id"] in reached or st["session"] or st["origin"] != "host" or not st["host"]:
+            continue
+        there = [s for s in open_on(st["host"], st["ts"]) if who[s["id"]] and who[s["id"]] in st["accounts"]]
+        if there:
+            tie(heads[max(there, key=lambda s: s["start"])["id"]], st["id"])
+    return edges
+
+
+def _flag_step(st: dict[str, Any]) -> bool:
+    """A step with a finding of medium or more: what raises a flag in a story."""
+    return any(_sev(f["severity"]) >= 2 for f in st["findings"])
+
+
+def _spine_basis(anchor: dict[str, Any], ways: list[dict[str, Any]], first: dict[str, Any], any_way: bool, cut: int) -> dict[str, Any]:
+    """What a spine was anchored on and where it starts, in words for the page and the report."""
+    top = max(anchor["findings"], key=lambda f: _sev(f["severity"]), default=None)
+    what = str(top.get("title") or top.get("ruleId")) if top else anchor["title"]
+    text = f"Anchored on {what[:120]}{' on ' + anchor['host'] if anchor.get('host') else ''}."
+    if ways and ways[0] is anchor:
+        text += " It is the way in: the spine follows the story's ties forward from it to its flagged steps."
+    elif ways:
+        text += f" The story's ties lead back from it to the way in: {ways[0]['title'][:120]}."
+    elif any_way:
+        text += f" Its ties lead back to none of the story's initial access steps: the spine starts at the earliest flag, {first['title'][:120]}."
+    else:
+        text += f" The way in is not in the evidence: the spine starts at the earliest flag, {first['title'][:120]}."
+    if cut:
+        text += f" {cut} more step{'s' if cut != 1 else ''} on these paths {'are' if cut != 1 else 'is'} in the full timeline."
+    return {"anchor": anchor["id"], "wayIn": [w["id"] for w in ways], "tied": bool(ways), "cut": cut, "text": text}
 
 
 def _campaigns(case: _Case, stories: list[dict[str, Any]], unstoried: dict[str, str], gap: int) -> list[dict[str, Any]]:

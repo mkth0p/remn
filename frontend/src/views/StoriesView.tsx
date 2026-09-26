@@ -3,7 +3,8 @@ import { AddToTimeline } from '../components/AddToTimeline'
 import { EventDetail, MailDetail } from '../components/Detail'
 import { Explorer, ExploreList, LinkList } from '../components/Explore'
 import { recordLinks, useRelationshipGraph, type RelationshipGraph } from '../components/useRelationshipGraph'
-import { IconAi, IconCloud, IconHost, IconMail, IconPlay, IconUser } from '../components/Icons'
+import { IconAi, IconCloud, IconDownload, IconHost, IconMail, IconPlay, IconUser } from '../components/Icons'
+import { StorySpine } from '../components/StorySpine'
 import { Badge, Dot, Sev, Spinner, Tabs } from '../components/ui'
 import { checkText, readRows, type TextCheck } from '../data/claims'
 import { loadEvidenceGaps, type GapStatement } from '../data/evidenceGaps'
@@ -44,6 +45,7 @@ import {
   type StoryResult,
   type StoryStep,
 } from '../data/stories'
+import { downloadAttackFlow, downloadCampaignGrouping, spineSteps } from '../data/storyExport'
 import { getDb, type EventRow, type MailRow, type Severity } from '../db/schema'
 import { toast, useStore } from '../state/store'
 import { fmtNum, fmtTs } from '../util/format'
@@ -731,7 +733,19 @@ function CampaignList({ campaigns, stories, active, onSelect }: { campaigns: Cam
   )
 }
 
-function CampaignDetail({ campaign, stories, onStory, onOpenRefs }: { campaign: Campaign; stories: Map<string, Story>; onStory: (id: string) => void; onOpenRefs: (refs: string[]) => void }) {
+function CampaignDetail({
+  campaign,
+  stories,
+  onStory,
+  onOpenRefs,
+  onExport,
+}: {
+  campaign: Campaign
+  stories: Map<string, Story>
+  onStory: (id: string) => void
+  onOpenRefs: (refs: string[]) => void
+  onExport: () => void
+}) {
   const setEntity = useStore((s) => s.setEntity)
   const members = campaign.stories.map((s) => stories.get(s)).filter((s): s is Story => !!s)
   return (
@@ -743,6 +757,15 @@ function CampaignDetail({ campaign, stories, onStory, onOpenRefs }: { campaign: 
         <div className="small muted">
           {campaign.labelKind.replace('-', ' ')} · {fmtTs(campaign.start)} → {fmtTs(campaign.end)} · {members.length} {members.length === 1 ? 'story' : 'stories'} · {fmtNum(campaign.targets.length)}{' '}
           other account(s) reached
+        </div>
+        <div className="row" style={{ marginTop: 8 }}>
+          <button
+            className="btn sm"
+            onClick={onExport}
+            title="the campaign as a STIX 2.1 grouping (suspicious activity): the Attack Flow of each story, the infrastructure they share, the accounts reached"
+          >
+            <IconDownload /> Download STIX grouping
+          </button>
         </div>
       </div>
       {members.length > 0 && (
@@ -847,6 +870,7 @@ export function StoriesView() {
   const [storyId, setStoryId] = useState<string | null>(null)
   const [stepId, setStepId] = useState<string | null>(null)
   const [phase, setPhase] = useState<string | null>(null)
+  const [full, setFull] = useState(false)
   const [tab, setTab] = useState<Tab>('story')
   const [campaignId, setCampaignId] = useState<string | null>(null)
   const [query, setQuery] = useState('')
@@ -975,6 +999,9 @@ export function StoriesView() {
   const identity = story?.kind === 'person' ? res?.identities.find((i) => i.id === story.subject.id) : undefined
   // what a note on the open story is checked for: its hosts, its accounts and the addresses it came from
   const noteNames = useMemo(() => (story ? [...story.hosts, ...story.accounts.map((a) => labels.get(a) ?? a), ...story.attackerAddresses] : []), [story, labels])
+  // a story opens on its spine; the full timeline when asked, when a phase filters it, when the step open is off the spine
+  const spine = useMemo(() => (story ? spineSteps(story) : null), [story])
+  const showAll = full || !!phase || !spine?.length || (!!stepId && !spine.some((s) => s.id === stepId))
 
   // j / k move between the steps of the open story
   useEffect(() => {
@@ -982,13 +1009,13 @@ export function StoriesView() {
       const el = e.target as HTMLElement | null
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return
       if (mode !== 'stories' || !story || (e.key !== 'j' && e.key !== 'k')) return
-      const steps = phase ? story.steps.filter((s) => s.phase === phase) : story.steps
+      const steps = !showAll && spine ? spine : phase ? story.steps.filter((s) => s.phase === phase) : story.steps
       const i = stepId ? steps.findIndex((s) => s.id === stepId) : -1
       setStepId(steps[e.key === 'j' ? Math.min(steps.length - 1, i + 1) : Math.max(0, i - 1)]?.id ?? null)
     }
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
-  }, [mode, story, stepId, phase])
+  }, [mode, story, stepId, phase, showAll, spine])
 
   if (!kase) return null
   const openRow = async (source: 'events' | 'mails', id: number) => {
@@ -1171,7 +1198,13 @@ export function StoriesView() {
           {mode === 'explore' && <Explorer g={g} selected={explored} onSelect={setExplored} onOpen={(ref) => ref.id != null && openRow(ref.source, ref.id)} />}
           {mode === 'campaigns' &&
             (campaign ? (
-              <CampaignDetail campaign={campaign} stories={byStory} onStory={selectStory} onOpenRefs={openRefs} />
+              <CampaignDetail
+                campaign={campaign}
+                stories={byStory}
+                onStory={selectStory}
+                onOpenRefs={openRefs}
+                onExport={() => downloadCampaignGrouping(kase, campaign, [...byStory.values()], res?.identities ?? []).catch((e) => setError((e as Error).message))}
+              />
             ) : (
               <div className="muted" style={{ padding: 24 }}>
                 {res?.campaigns.length ? 'select a campaign' : ''}
@@ -1213,6 +1246,13 @@ export function StoriesView() {
                   <AddToTimeline ts={story.start} text={`Story ${story.title}: ${story.headline}`} link={{ source: 'stories', id: story.id, label: story.title }} severity={story.severity} />
                   <button className="btn sm" onClick={() => ask(story)}>
                     <IconAi /> ask the analyst
+                  </button>
+                  <button
+                    className="btn sm"
+                    onClick={() => downloadAttackFlow(kase, story, res?.identities ?? []).catch((e) => setError((e as Error).message))}
+                    title="the story as a MITRE Attack Flow: a STIX 2.1 bundle, one action per step of its spine"
+                  >
+                    <IconDownload /> Download Attack Flow
                   </button>
                 </div>
                 <div className="row wrap small" style={{ gap: 6, marginTop: 8 }}>
@@ -1273,7 +1313,20 @@ export function StoriesView() {
               {tab === 'story' && (
                 <div className="pane" style={{ flex: 1, height: 'auto', borderTop: 0, gridTemplateColumns: step ? '1fr 380px' : '1fr' }}>
                   <div className="pane-main" style={{ overflow: 'auto' }}>
-                    <Timeline story={story} phase={phase} selected={stepId} onSelect={setStepId} readings={readings} labels={labels} />
+                    <StorySpine
+                      story={story}
+                      full={showAll}
+                      onFull={(on) => {
+                        setFull(on)
+                        if (on) return
+                        setPhase(null)
+                        if (stepId && !spine?.some((s) => s.id === stepId)) setStepId(null)
+                      }}
+                      selected={stepId}
+                      onSelect={setStepId}
+                      labels={labels}
+                    />
+                    {showAll && <Timeline story={story} phase={phase} selected={stepId} onSelect={setStepId} readings={readings} labels={labels} />}
                   </div>
                   {step && (
                     <StepPane
