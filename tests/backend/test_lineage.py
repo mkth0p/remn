@@ -76,6 +76,38 @@ def test_activity_whose_logon_is_missing_makes_a_session_marked_as_such_but_not_
     assert lin.session_of("event:3") is None
 
 
+def test_a_logon_id_reused_after_a_reboot_is_another_session():
+    host = "WS-001.northstar.example"
+    events = [
+        ev(1, 4624, host, 0, targetUser="alice.martin", targetDomain="NORTHSTAR", targetLogonId="0x5a3f1", logonType=2),
+        ev(2, 4634, host, 60, targetUser="alice.martin", targetDomain="NORTHSTAR", targetLogonId="0x5a3f1"),
+        # three days later the same id is bob's, whose logon is not in the evidence
+        ev(3, 4698, host, 3 * 1440, subjectUser="bob.leroy", subjectDomain="NORTHSTAR", subjectLogonId="0x5a3f1", taskName="\\evil"),
+        ev(4, 4688, host, 3 * 1440 - 1, subjectUser="bob.leroy", subjectLogonId="0x5a3f1", processName="C:\\x.exe", newProcessId="0x10"),
+        # activity two hours before the only logon of an id is not that logon's session
+        ev(5, 5140, host, 0, subjectUser="mallory", subjectDomain="NORTHSTAR", subjectLogonId="0x777", shareName="\\\\*\\C$", ipAddress="10.0.0.9"),
+        ev(6, 4624, host, 120, targetUser="carla.morel", targetDomain="NORTHSTAR", targetLogonId="0x777", logonType=3, ipAddress="10.0.0.5"),
+        # an open session whose logoff is not in the evidence: another account's activity under its id is not in it
+        ev(7, 4624, host, 0, targetUser="farah.benali", targetDomain="NORTHSTAR", targetLogonId="0x888", logonType=2),
+        ev(8, 4720, host, 2 * 1440, subjectUser="dave", subjectDomain="NORTHSTAR", subjectLogonId="0x888", targetUser="svc.new"),
+        # a record written a moment after its logoff is still in its session
+        ev(9, 4624, host, 200, targetUser="carla.morel", targetDomain="NORTHSTAR", targetLogonId="0x999", logonType=3, ipAddress="10.0.0.5"),
+        ev(10, 4634, host, 201, targetUser="carla.morel", targetLogonId="0x999"),
+        ev(11, 5140, host, 201.05, subjectUser="carla.morel", subjectLogonId="0x999", shareName="\\\\*\\IPC$"),
+    ]
+    lin = build_lineage(events)
+    alice, bob = lin.session_of("event:1"), lin.session_of("event:3")
+    assert alice["end"] == T0 + 3_600_000 and alice["activity"] == 0
+    assert bob is not alice and bob["user"] == "bob.leroy" and not bob["logonSeen"] and bob["logonId"] == "0x5a3f1"
+    # a process bob started just before his first other record is in his session, not alice's
+    assert lin.process_of("event:4")["session"] == bob["id"]
+    mallory = lin.session_of("event:5")
+    assert mallory["user"] == "mallory" and not mallory["logonSeen"] and mallory is not lin.session_of("event:6")
+    dave = lin.session_of("event:8")
+    assert dave["user"] == "dave" and dave is not lin.session_of("event:7")
+    assert lin.session_of("event:11") is lin.session_of("event:9")
+
+
 def test_psexec_admin_share_pipe_and_service_make_one_hop_from_the_named_workstation():
     host = "FS-001.northstar.example"
     events = [
@@ -96,9 +128,11 @@ def test_psexec_admin_share_pipe_and_service_make_one_hop_from_the_named_worksta
         "logon 0x77 (network) from 10.0.0.21",
         "opened the admin share ADMIN$",
         "opened the svcctl pipe",
-        "service PSEXESVC installed 0 min after (7045)",
+        "service PSEXESVC installed 0 min after (7045), the svcctl pipe opened in that connection",
     ]
     assert set(hop["refs"]) == {"event:1", "event:4"} and lin.hops_of("event:4") == [hop]
+    # the service manager's pipe opened in that connection ties the service to it, not time alone
+    assert hop["confidence"] == STRONG and lin.hop_tie(hop, "event:4") == STRONG
 
 
 def test_an_admin_share_without_its_logon_is_a_hop_from_the_address_the_share_record_names():
@@ -107,9 +141,39 @@ def test_an_admin_share_without_its_logon_is_a_hop_from_the_address_the_share_re
         ev(1, 5140, host, 0, subjectUser="daniel.roy", subjectDomain="NORTHSTAR", ipAddress="203.0.113.69", shareName="\\\\*\\ADMIN$"),
         ev(2, 7045, host, 1, base=SCM, serviceName="NSLabUpdater-S04"),
     ]
-    [hop] = build_lineage(events).hops.values()
+    lin = build_lineage(events)
+    [hop] = lin.hops.values()
     assert hop["kind"] == "remote-service" and hop["from"]["ip"] == "203.0.113.69" and hop["from"]["external"]
-    assert hop["evidence"] == ["service NSLabUpdater-S04 installed 1 min after (7045)"] and hop["confidence"] == STRONG
+    # nothing but time ties the service to the share: the share is surely part of the way in, the service medium
+    assert hop["evidence"] == ["service NSLabUpdater-S04 installed 1 min after (7045), by time only"] and hop["confidence"] == MEDIUM
+    assert lin.hop_tie(hop, "event:1") == STRONG and lin.hop_tie(hop, "event:2") == MEDIUM
+
+
+def test_a_service_after_an_admin_share_is_strong_when_its_program_came_through_the_share_or_its_logon_id_installed_it():
+    host = "FS-001.northstar.example"
+    share = {"subjectUser": "lab.admin", "subjectDomain": "NORTHSTAR", "ipAddress": "10.0.0.21"}
+    events = [
+        # the service's program written through ADMIN$ by the connection before it
+        ev(1, 5145, host, 0, **share, subjectLogonId="0x71", shareName="\\\\*\\ADMIN$", relativeTargetName="svc-8f2a.exe"),
+        ev(2, 7045, host, 1, base=SCM, serviceName="svc-8f2a", serviceFile='"%SystemRoot%\\svc-8f2a.exe" -k run'),
+        # another host: the service installed under the logon id of the connection that opened C$ (4697)
+        ev(3, 5140, "FS-002", 0, **share, subjectLogonId="0x72", shareName="\\\\*\\C$"),
+        ev(4, 4697, "FS-002", 2, subjectUser="lab.admin", subjectDomain="NORTHSTAR", subjectLogonId="0x72", serviceName="upd", serviceFile="C:\\upd.exe"),
+        # a third: a program of another name written, then a service: time only
+        ev(5, 5145, "FS-003", 0, **share, subjectLogonId="0x73", shareName="\\\\*\\ADMIN$", relativeTargetName="notes.txt"),
+        ev(6, 7045, "FS-003", 1, base=SCM, serviceName="upd", serviceFile="C:\\Windows\\upd.exe"),
+    ]
+    lin = build_lineage(events)
+    by_host = {h["to"]: h for h in lin.hops.values()}
+    assert {k: (h["kind"], h["confidence"]) for k, h in by_host.items()} == {
+        "fs-001": ("remote-service", STRONG),
+        "fs-002": ("remote-service", STRONG),
+        "fs-003": ("remote-service", MEDIUM),
+    }
+    assert by_host["fs-001"]["evidence"][-1].endswith("its program svc-8f2a.exe written through the admin share")
+    assert by_host["fs-002"]["evidence"][-1].endswith("under the logon id of that connection")
+    assert lin.hop_tie(by_host["fs-001"], "event:2") == lin.hop_tie(by_host["fs-002"], "event:4") == STRONG
+    assert lin.hop_tie(by_host["fs-003"], "event:6") == MEDIUM
 
 
 def test_explicit_credentials_towards_a_host_are_confirmed_by_the_logon_there():
@@ -205,6 +269,30 @@ def test_process_trees_from_4688_ids_and_sysmon_guids_are_one_tree():
     assert lin.processes[lin.process_of("event:7")["parent"]]["name"] == "notepad.exe"
 
 
+def test_a_4688_parent_must_be_the_program_the_record_names():
+    host = "WS-002.northstar.example"
+    events = [
+        ev(1, 4688, host, 0, processName="C:\\Windows\\System32\\notepad.exe", newProcessId="0x1a2c", callerProcessId="0x400", subjectLogonId="0x9001"),
+        # two days later the id is explorer's, whose creation is not in the evidence: notepad is not the parent
+        ev(2, 4688, host, 2 * 1440, processName="C:\\Users\\bob\\evil.exe", newProcessId="0x2b00", callerProcessId="0x1a2c",
+           parentProcessName="C:\\Windows\\explorer.exe", subjectLogonId="0x9002"),
+        # a program that runs for days: named and matching, its creation three days before is the parent
+        ev(3, 4688, host, 0, processName="C:\\Windows\\explorer.exe", newProcessId="0x5000", callerProcessId="0x410", subjectLogonId="0x9001"),
+        ev(4, 4688, host, 3 * 1440, processName="C:\\Windows\\System32\\cmd.exe", newProcessId="0x3000", callerProcessId="0x5000",
+           parentProcessName="C:\\Windows\\EXPLORER.EXE", subjectLogonId="0x9001"),
+        # the parser's own guess at the parent's name is no statement: only the id ties them, for a day at most
+        ev(5, 4688, host, 3 * 1440, processName="C:\\Windows\\System32\\calc.exe", newProcessId="0x3100", callerProcessId="0x5000",
+           parentProcessName="C:\\Windows\\explorer.exe", enriched="parentProcessName from the 4688 that created the parent process id"),
+        ev(6, 4688, host, 3 * 1440 + 60, processName="C:\\Windows\\System32\\whoami.exe", newProcessId="0x3200", callerProcessId="0x3100"),
+    ]  # fmt: skip
+    lin = build_lineage(events)
+    evil = lin.process_of("event:2")
+    assert evil["parent"] is None and evil["parentImage"] == "C:\\Windows\\explorer.exe"
+    assert lin.process_of("event:4")["parent"] == lin.process_of("event:3")["id"]
+    assert lin.process_of("event:5")["parent"] is None
+    assert lin.process_of("event:6")["parent"] == lin.process_of("event:5")["id"]
+
+
 def test_each_host_says_what_its_evidence_cannot_show():
     events = [
         ev(1, 4688, "WS-001", 0, processName="C:\\x.exe", newProcessId="0x10", callerProcessId="0x4"),
@@ -278,6 +366,10 @@ def test_wmi_and_winrm_execution_on_the_target_are_hops_of_their_own_kind():
     assert (timed["kind"], timed["confidence"]) == ("wmi", MEDIUM) and "ran a program through WMI (by time)" in timed["basis"]
     [shell] = lin.hops_of("event:6")
     assert shell["kind"] == "winrm" and lin.session_of("event:7")["logonId"] == "0x10fd11"
+    # each record keeps its own tie: the program by its logon id strong, the one by time and the shell medium
+    assert lin.hop_tie(strong, "event:3") == STRONG and lin.session_tie("event:3") == STRONG
+    assert lin.hops_of("event:5") == [timed] and lin.hop_tie(timed, "event:5") == MEDIUM and lin.hop_tie(timed, "event:4") == STRONG
+    assert lin.session_tie("event:7") == MEDIUM and lin.hop_tie(shell, "event:7") == MEDIUM
 
 
 def test_remote_execution_named_on_the_source_is_a_hop_confirmed_by_the_logon_there():
@@ -348,3 +440,227 @@ def test_an_entra_device_named_like_a_host_of_the_case_is_that_host():
     assert lin.hosts["ws-004"]["devices"] == ["b1c2"]
     assert lin.device_of(events[2])["host"] is None
     assert [d["key"] for d in lin.to_dict(refs=["event:2"])["devices"]] == ["ws-004"]
+
+
+RCM = {
+    "provider": "Microsoft-Windows-TerminalServices-RemoteConnectionManager",
+    "channel": "Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational",
+}
+
+
+def test_the_lookups_of_each_record_do_not_read_every_session(monkeypatch):
+    """A WMI program's logon, WinRM's shell, the logon a 4648 led to and an RDP record's session are looked
+    up among the sessions of their host (and account) by time: the work grows with the case, not with its square."""
+    from services.analysis import lineage
+
+    reads = {"n": 0}
+
+    class Sessions(dict):
+        def values(self):
+            reads["n"] += 1
+            return super().values()
+
+    init = lineage.Lineage.__init__
+
+    def counting(self):
+        init(self)
+        self.sessions = Sessions()
+
+    monkeypatch.setattr(lineage.Lineage, "__init__", counting)
+
+    def build(n):
+        reads["n"] = 0
+        events = []
+        for i in range(n):
+            t, k = i * 10, 10 * i
+            events += [
+                _admin_logon(k + 1, "FS-001", t, hex(0x1000 + i), ws="PC01"),
+                ev(k + 2, 4688, "FS-001", t + 0.1, subjectUser="FS-001$", subjectLogonId="0x3e4", processName="C:\\Windows\\System32\\cmd.exe",
+                   parentProcessName="C:\\Windows\\System32\\wbem\\WmiPrvSE.exe", newProcessId=hex(0x500 + i)),
+                ev(k + 3, 91, "FS-001", t + 0.2, base=WINRM),
+                ev(k + 4, 4648, "PC01", t, subjectUser="Administrator", targetUser="Administrator", targetServer="FS-001", processName="C:\\Windows\\System32\\wbem\\WMIC.exe"),
+                ev(k + 5, 4624, "WS-004", t, targetUser="daniel", targetDomain="EXAMPLE", targetLogonId=hex(0x9000 + i), logonType=10, ipAddress="203.0.113.69"),
+                ev(k + 6, 1149, "WS-004", t + 0.1, base=RCM, targetUser="daniel", ipAddress="203.0.113.69"),
+            ]  # fmt: skip
+        lin = build_lineage(events)
+        # each record found its session: the WMI program's by time, the shell's, the 4648's, the 1149's
+        assert all(lin.hop_tie(h, f"event:{10 * i + 2}") == MEDIUM for i in range(n) for h in lin.hops_of(f"event:{10 * i + 2}"))
+        assert lin.session_of("event:3") is lin.session_of("event:1") and lin.session_tie("event:3") == MEDIUM
+        assert lin.session_of("event:6") is lin.session_of("event:5") and lin.session_tie("event:6") == MEDIUM
+        assert any(h["kind"] == "wmi" and h["confidence"] == STRONG for h in lin.hops_of("event:4"))
+        return reads["n"]
+
+    assert build(40) == build(3)
+
+
+# --- the domain controllers' records and other credentials ------------------------------------------------
+
+DC = "DC-01.northstar.example"
+G = "{5b482e77-15dd-f684-f093-e11c7ed66e%02d}"
+
+
+def _ticket(n, minutes, user, service, ip, guid=None, status="0x0", eid=4769):
+    return ev(n, eid, DC, minutes, targetUser=user, targetDomain="NORTHSTAR.EXAMPLE", serviceName=service, ipAddress=ip, logonGuid=guid, status=status)
+
+
+def _net_logon(n, host, minutes, user, lid, ip=None, ws=None, guid=None, pkg="Kerberos"):
+    return ev(n, 4624, host, minutes, targetUser=user, targetDomain="NORTHSTAR", targetLogonId=lid, logonType=3, ipAddress=ip, workstation=ws,
+              logonGuid=guid, authPackage=pkg)  # fmt: skip
+
+
+def test_a_service_ticket_with_the_logons_guid_names_its_source_and_the_service_asked_for():
+    fs = "FS-001.northstar.example"
+    events = [
+        # the logon names neither its address nor its workstation, as a Kerberos logon often does not
+        _net_logon(1, fs, 0, "lab.admin", "0x77", guid=G % 1),
+        ev(2, 5140, fs, 0.1, subjectUser="lab.admin", subjectLogonId="0x77", shareName="\\\\*\\ADMIN$"),
+        # the domain controller issued its ticket, for the server's own account, to the client's address
+        _ticket(3, -0.02, "lab.admin@NORTHSTAR.EXAMPLE", "FS-001$", "10.0.0.21", G % 1),
+        # and explicit credentials on WS-001 carried the same logon GUID as their target's
+        ev(4, 4648, "WS-001.northstar.example", -0.03, subjectUser="alice.martin", targetUser="lab.admin", targetDomain="NORTHSTAR",
+           targetServer="FS-001", data={"TargetLogonGuid": G % 1}),
+        # a ticket refused names nothing
+        _ticket(5, -0.01, "lab.admin@NORTHSTAR.EXAMPLE", "FS-001$", "10.0.0.66", G % 1, status="0x12"),
+    ]  # fmt: skip
+    lin = build_lineage(events)
+    s = lin.session_of("event:1")
+    assert s["from"] == "ws-001" and "explicit credentials used on ws-001 carried its logon GUID (4648)" in s["fromBasis"]
+    assert [(a["kind"], a["ref"], a["confidence"]) for a in s["auth"]] == [("explicit-credentials", "event:4", STRONG), ("kerberos", "event:3", STRONG)]
+    [share] = [h for h in lin.hops_of("event:1") if h["kind"] == "admin-share"]
+    assert (share["from"]["host"], share["from"]["ip"], share["confidence"]) == ("ws-001", "10.0.0.21", STRONG)
+    # the way in says which service was asked for, and the ticket is part of it
+    assert share["basis"].endswith("with a Kerberos ticket for FS-001$ from dc-01 (4769)")
+    assert "event:3" in share["refs"] and lin.hop_tie(share, "event:3") == STRONG
+    assert "dc-01 issued a Kerberos ticket for FS-001$ to 10.0.0.21 (the same logon GUID, 4769)" in share["evidence"]
+    assert "event:5" not in {a["ref"] for a in s["auth"]} and not lin.hops_of("event:5")
+    # the explicit credentials' hop: their target logon GUID is the logon's
+    [explicit] = lin.hops_of("event:4")
+    assert (explicit["kind"], explicit["to"], explicit["confidence"]) == ("explicit-credentials", "fs-001", STRONG)
+    assert explicit["basis"].endswith("and the logon there carried their logon GUID")
+
+
+def test_a_tickets_client_address_is_the_source_when_the_case_knows_whose_it_is():
+    fs = "FS-001.northstar.example"
+    events = [
+        _net_logon(1, fs, 0, "lab.admin", "0x77", guid=G % 1),
+        ev(2, 5140, fs, 0.1, subjectUser="lab.admin", subjectLogonId="0x77", shareName="\\\\*\\ADMIN$"),
+        _ticket(3, -0.02, "lab.admin@NORTHSTAR.EXAMPLE", "FS-001$", "10.0.0.21", G % 1),
+        # the machine account's own ticket-granting ticket went to WS-001's address
+        _ticket(4, -300, "WS-001$", "krbtgt", "10.0.0.21", eid=4768),
+    ]
+    lin = build_lineage(events)
+    assert lin.host_of_ip("10.0.0.21") == "ws-001" and "own account a Kerberos ticket" in lin.ip_hosts["10.0.0.21"]["basis"]
+    [hop] = lin.hops_of("event:1")
+    # the source host is as sure as the address attribution: medium, and it says where it comes from
+    assert (hop["from"]["host"], hop["from"]["ip"], hop["confidence"]) == ("ws-001", "10.0.0.21", MEDIUM)
+    assert hop["from"]["basis"].startswith("the address 10.0.0.21 dc-01 issued its Kerberos ticket to (4769)")
+    assert lin.hop_tie(hop, "event:3") == STRONG
+    assert lin.hosts["dc-01"]["coverage"]["kerberos"] == 2
+
+
+def test_a_ticket_for_the_hosts_own_account_just_before_a_network_logon_is_its_ticket_by_time():
+    fs = "FS-002.northstar.example"
+    events = [
+        # the logon's GUID is not the ticket's: the ticket for FS-002$ from its address 20 s before is, by time
+        _net_logon(1, fs, 0, "lab.admin", "0x81", ip="10.0.0.22", guid=G % 2),
+        ev(2, 5140, fs, 0.1, subjectUser="lab.admin", subjectLogonId="0x81", shareName="\\\\*\\C$"),
+        _ticket(3, -20 / 60, "lab.admin@NORTHSTAR.EXAMPLE", "FS-002$", "10.0.0.22", G % 3),
+        # a later logon that carries the same logon GUID came with the same ticket
+        _net_logon(4, fs, 0.2, "lab.admin", "0x82", ip="10.0.0.22", guid=G % 2),
+        # not another account's, another host's, one from another address, nor one two minutes before
+        _ticket(5, -0.1, "carla.morel@NORTHSTAR.EXAMPLE", "FS-002$", "10.0.0.22", G % 4),
+        _ticket(6, -0.1, "lab.admin@NORTHSTAR.EXAMPLE", "FS-003$", "10.0.0.22", G % 5),
+        _ticket(7, -0.1, "lab.admin@NORTHSTAR.EXAMPLE", "FS-002$", "10.0.0.66", G % 6),
+        _net_logon(8, fs, 10, "lab.admin", "0x83", ip="10.0.0.22", guid=G % 7),
+        _ticket(9, 8, "lab.admin@NORTHSTAR.EXAMPLE", "FS-002$", "10.0.0.22", G % 8),
+    ]
+    lin = build_lineage(events)
+    first, again, late = lin.session_of("event:1"), lin.session_of("event:4"), lin.session_of("event:8")
+    assert [(a["ref"], a["confidence"], a["basis"]) for a in first["auth"]] == [("event:3", MEDIUM, "by account, service, address and time")]
+    assert [a["ref"] for a in again["auth"]] == ["event:3"] and late["auth"] == []
+    [hop] = lin.hops_of("event:1")
+    assert "event:3" in hop["refs"] and lin.hop_tie(hop, "event:3") == MEDIUM
+    assert all(not lin.hops_of(f"event:{n}") for n in (5, 6, 7, 9))
+
+
+def test_an_ntlm_validation_names_the_workstation_of_a_network_logon_that_names_none():
+    fs = "FS-001.northstar.example"
+    events = [
+        _net_logon(1, fs, 0, "carla.morel", "0x91", ip="10.0.0.23", pkg="NTLM"),
+        ev(2, 5140, fs, 0.1, subjectUser="carla.morel", subjectLogonId="0x91", shareName="\\\\*\\ADMIN$"),
+        ev(3, 4776, DC, -10 / 60, targetUser="carla.morel", workstation="WS-003", status="0x0"),
+        # a failed validation names nothing
+        ev(4, 4776, DC, -5 / 60, targetUser="carla.morel", workstation="WS-666", status="0xc000006a"),
+        # two workstations in the same minute: which one was this logon's is not known
+        _net_logon(5, fs, 60, "dave", "0x92", ip="10.0.0.24", pkg="NTLM"),
+        ev(6, 5140, fs, 60.1, subjectUser="dave", subjectLogonId="0x92", shareName="\\\\*\\ADMIN$"),
+        ev(7, 4776, DC, 60 - 10 / 60, targetUser="dave", workstation="WS-004", status="0x0"),
+        ev(8, 4776, DC, 60 - 20 / 60, targetUser="dave", workstation="WS-005", status="0x0"),
+        # a domain controller is a host that issues tickets
+        _ticket(9, -300, "WS-009$", "krbtgt", "10.0.0.99", eid=4768),
+    ]
+    lin = build_lineage(events)
+    carla, dave = lin.session_of("event:1"), lin.session_of("event:5")
+    assert carla["from"] == "ws-003" and "NTLM validation of the account from WS-003" in carla["fromBasis"]
+    assert [(a["kind"], a["ref"], a["confidence"]) for a in carla["auth"]] == [("ntlm", "event:3", MEDIUM)]
+    [hop] = lin.hops_of("event:1")
+    assert (hop["from"]["host"], hop["confidence"]) == ("ws-003", MEDIUM) and lin.hop_tie(hop, "event:3") == MEDIUM
+    assert dave["from"] is None and dave["auth"] == []
+    assert lin.hosts["dc-01"]["coverage"]["ntlm"] == 4
+
+
+def test_a_new_credentials_logon_ties_the_account_it_used_on_the_network_to_its_session():
+    ws, fs = "WS-004.northstar.example", "FS-001.northstar.example"
+    netonly = {"targetUser": "daniel.roy", "targetDomain": "NORTHSTAR", "logonType": 9, "logonProcess": "seclogo"}
+    events = [
+        ev(1, 4624, ws, 0, **netonly, targetLogonId="0x9901", targetOutboundUser="admin.bob", targetOutboundDomain="NORTHSTAR"),
+        # admin.bob logs on to FS-001 from WS-004 half an hour later, and opens ADMIN$
+        _net_logon(2, fs, 30, "admin.bob", "0x77", ip="10.0.0.4", ws="WS-004", pkg="NTLM"),
+        ev(3, 5140, fs, 30.1, subjectUser="admin.bob", subjectLogonId="0x77", shareName="\\\\*\\ADMIN$"),
+        ev(4, 4634, ws, 60, targetUser="daniel.roy", targetLogonId="0x9901"),
+        # after the session ended, and from another host, admin.bob's logons are not its
+        _net_logon(5, fs, 90, "admin.bob", "0x78", ip="10.0.0.4", ws="WS-004", pkg="NTLM"),
+        _net_logon(6, "FS-002", 31, "admin.bob", "0x79", ip="10.0.0.9", ws="WS-009", pkg="NTLM"),
+        # runas /netonly as oneself sets no other account
+        ev(7, 4624, ws, 0, **netonly, targetLogonId="0x9902", targetOutboundUser="daniel.roy", targetOutboundDomain="NORTHSTAR.EXAMPLE"),
+    ]
+    lin = build_lineage(events)
+    s = lin.session_of("event:1")
+    assert s["network"] == "NORTHSTAR\\admin.bob" and "used other credentials (NORTHSTAR\\admin.bob) for the network" in s["actions"]
+    assert lin.session_of("event:7")["network"] is None
+    [hop] = lin.hops_of("event:1")
+    assert (hop["kind"], hop["from"]["host"], hop["to"], hop["account"], hop["confidence"]) == (
+        "explicit-credentials",
+        "ws-004",
+        "fs-001",
+        "NORTHSTAR\\admin.bob",
+        MEDIUM,
+    )
+    assert "(4624 type 9)" in hop["basis"] and hop["refs"] == ["event:1", "event:2"]
+    # the logon on FS-001 is part of that way in, as surely as account, source and time tie it
+    assert hop in lin.hops_of("event:2") and lin.hop_tie(hop, "event:2") == MEDIUM
+    assert all(hop not in lin.hops_of(f"event:{n}") for n in (5, 6))
+
+
+def test_a_hosts_clock_against_the_domain_controllers_is_noted_and_the_ties_by_time_allow_for_it():
+    fs = "FS-005.northstar.example"
+    skew = 7  # minutes the member server's clock is ahead
+    events = [
+        # three logons matched to their tickets by logon GUID, each 7 minutes after its ticket
+        *[_net_logon(n, fs, 60 * n + skew, "lab.admin", hex(0x100 + n), ip="10.0.0.21", guid=G % n) for n in (1, 2, 3)],
+        *[_ticket(10 + n, 60 * n - 0.01, "lab.admin@NORTHSTAR.EXAMPLE", "FS-005$", "10.0.0.21", G % n) for n in (1, 2, 3)],
+        # a logon whose GUID is not its ticket's: 7 minutes after the ticket is just after it on the domain controller's clock
+        _net_logon(4, fs, 300 + skew, "carla.morel", "0x200", ip="10.0.0.23", guid=G % 40),
+        _ticket(14, 300 - 0.1, "carla.morel@NORTHSTAR.EXAMPLE", "FS-005$", "10.0.0.23", G % 41),
+        # a host whose logons follow their tickets by a second has no skew to note
+        _net_logon(5, "FS-006", 1, "lab.admin", "0x300", ip="10.0.0.21", guid=G % 50),
+        _net_logon(6, "FS-006", 2, "lab.admin", "0x301", ip="10.0.0.21", guid=G % 51),
+        _ticket(15, 1 - 1 / 60, "lab.admin@NORTHSTAR.EXAMPLE", "FS-006$", "10.0.0.21", G % 50),
+        _ticket(16, 2 - 1 / 60, "lab.admin@NORTHSTAR.EXAMPLE", "FS-006$", "10.0.0.21", G % 51),
+    ]
+    lin = build_lineage(events)
+    host = lin.hosts["fs-005"]
+    assert host["clock"]["matches"] == 3 and abs(host["clock"]["offsetMs"] - skew * 60_000) < 1_000
+    assert "FS-005.northstar.example's clock reads 7 min ahead of the domain controller's" in host["limits"][-1]
+    assert [a["ref"] for a in lin.session_of("event:4")["auth"]] == ["event:14"]
+    assert "clock" not in lin.hosts["fs-006"]

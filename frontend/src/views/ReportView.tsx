@@ -25,7 +25,8 @@ import { loadEvidenceGaps, type GapStatement } from '../data/evidenceGaps'
 import { loadRules, settingsForRules } from '../data/rules'
 import { measuredOn, readMeasure, type MeasureReading } from '../data/ruleMeasures'
 import { loadReportClaims, type ReportClaims } from '../data/claims'
-import { loadStories, loadStoryNotes, reportStories, storyRowIds, type Story, type StoryNotes } from '../data/stories'
+import { buildStories, loadStories, loadStoryNotes, storiesStaleness, storyInputs, storyRowIds, type StoryNotes, type StoryResult } from '../data/stories'
+import { loadStoryDecisions, storiesForReport, type StoryDecisions } from '../data/storyDecisions'
 import type { Rule } from '../rules/engine'
 
 const ORDER = ['critical', 'high', 'medium', 'low', 'info']
@@ -42,9 +43,13 @@ export function ReportView() {
   const [evidence, setEvidence] = useState<Evidence[]>([])
   const [findings, setFindings] = useState<Finding[]>([])
   const [chains, setChains] = useState<Chain[]>([])
-  /** the case's stories and the analyst's notes on them */
-  const [stories, setStories] = useState<Story[]>([])
+  /** the case's stories, the analyst's notes on them, and why the stories no longer read the case as it is */
+  const [storyResult, setStoryResult] = useState<StoryResult | null>(null)
   const [storyNotes, setStoryNotes] = useState<StoryNotes>({})
+  /** the analyst's decisions on the stories (data/storyDecisions.ts), applied to them as the Stories page applies them */
+  const [storyDecisions, setStoryDecisions] = useState<StoryDecisions>({})
+  const [storiesStale, setStoriesStale] = useState<string[]>([])
+  const [rebuilding, setRebuilding] = useState(false)
   const [coverageWarnings, setCoverageWarnings] = useState<string[]>([])
   const [reviews, setReviews] = useState<Record<string, ChainReview>>({})
   const [relationships, setRelationships] = useState<RelationshipReview[]>([])
@@ -117,14 +122,24 @@ export function ReportView() {
       setChains(r?.chains ?? [])
       setCoverageWarnings(chainCoverageWarnings(r?.stats))
     })
-    loadStories(kase.id).then((r) => setStories(r?.stories ?? []))
+    loadStories(kase.id).then(async (r) => {
+      setStoryResult(r)
+      setStoriesStale(r ? storiesStaleness(r, await storyInputs(kase)) : [])
+    })
     loadStoryNotes(kase.id).then(setStoryNotes)
+    loadStoryDecisions(kase.id).then(setStoryDecisions)
     loadChainReviews(kase.id).then(setReviews)
     reportRelationships(kase.id).then(setRelationships)
     loadReportSettings(kase.id).then(setSettings)
   }, [kase, rulesVersion])
   const selection = useMemo(() => (settings ? selectForReport(findings, chains, reviews, settings) : { findings: [], chains: [] }), [findings, chains, reviews, settings])
-  const printedStories = useMemo(() => (settings ? reportStories(stories, storyNotes, settings.minSeverity, settings.onlyReviewed) : { stories: [], left: 0 }), [stories, storyNotes, settings])
+  const printedStories = useMemo(
+    () =>
+      settings
+        ? storiesForReport(storyResult, storyNotes, storyDecisions, findings, settings.minSeverity, settings.onlyReviewed, 20)
+        : { stories: [], left: 0, orphans: 0, dismissed: 0, decided: [], decisionsOrphaned: 0 },
+    [storyResult, storyNotes, storyDecisions, findings, settings],
+  )
   // graph pictures for the report, drawn off-screen from the same models as the Chains page
   const [graphs, setGraphs] = useState<Record<string, string>>({})
   useEffect(() => {
@@ -183,6 +198,8 @@ export function ReportView() {
   // same unit as the Review page: incidents without a decision plus chains without a verdict
   const undecided = buildIncidents(findings, { chains }).filter((i) => (i.kind === 'chain' && i.chain ? !reviews[i.chain.id]?.verdict : i.status === 'new')).length
   const hiddenConfirmed = unprintedConfirmed(findings, chains, reviews, selection)
+  // a confirmed story the report leaves out (below the floor, past the first twenty) is a confirmed item not printed too
+  const hiddenStories = printedStories.decided.filter((s) => s.verdict === 'confirmed' && !s.printed).length
   const printedChecks = shown.map((f) => (f.id != null ? claims?.findings[f.id] : undefined)).filter((c) => !!c)
   const claimSummary = claims && {
     checked: printedChecks.length,
@@ -198,8 +215,20 @@ export function ReportView() {
     }),
     ...(claims?.texts ?? []).filter((t) => t.check.status !== 'verified').map((t) => ({ what: t.what, status: t.check.status, reasons: t.check.reasons })),
   ]
-  const checks = preflightChecks({ evidence, rules: rulesState, undecided, aiDecided: aiDecided(findings), unprintedConfirmed: hiddenConfirmed.length, claims: claimSummary })
+  const checks = preflightChecks({ evidence, rules: rulesState, undecided, aiDecided: aiDecided(findings), unprintedConfirmed: hiddenConfirmed.length + hiddenStories, claims: claimSummary })
   const status = issueStatus(checks, issue)
+  /** The stories read again from the case as it is now; the page reloads what it prints once they are. */
+  const rebuildStories = async () => {
+    setRebuilding(true)
+    try {
+      await buildStories(kase)
+      useStore.getState().bumpRules()
+    } catch (e) {
+      toast('err', `the stories could not be built: ${(e as Error).message}`)
+    } finally {
+      setRebuilding(false)
+    }
+  }
   const updateIssue = (next: ReportIssue) => {
     setIssue(next)
     void saveReportIssue(kase.id!, next)
@@ -262,6 +291,13 @@ export function ReportView() {
     claims,
     stories: printedStories.stories,
     storiesLeft: printedStories.left,
+    storyIncidents: storyResult?.incidents,
+    storyStats: storyResult?.stats,
+    storiesStale,
+    storyNotesOrphaned: printedStories.orphans,
+    decidedStories: printedStories.decided,
+    storiesDismissed: printedStories.dismissed,
+    storyDecisionsOrphaned: printedStories.decisionsOrphaned,
   })
   const html = (generatedAt?: number) => buildReportHtml(reportData(generatedAt))
   const fileBase = kase.name.replace(/[^a-z0-9_-]+/gi, '_')
@@ -349,6 +385,16 @@ export function ReportView() {
             <span className="spacer" />
             <button className="btn xs" onClick={() => setView('review')}>
               go to Review
+            </button>
+          </div>
+        )}
+        {storiesStale.length > 0 && storyResult && (
+          <div className="bulkbar" role="status" style={{ background: 'var(--sev-medium-bg)', borderColor: 'rgba(217,130,43,0.35)', color: 'var(--sev-medium)', borderRadius: 'var(--radius)' }}>
+            <b>The stories are out of date.</b>
+            <span>{storiesStale.join('; ')}. The report says so until they are built again.</span>
+            <span className="spacer" />
+            <button className="btn xs" onClick={rebuildStories} disabled={rebuilding}>
+              {rebuilding ? <Spinner /> : null} rebuild stories
             </button>
           </div>
         )}
