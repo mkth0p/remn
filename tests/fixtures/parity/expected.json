@@ -179,25 +179,25 @@
  "errors": [],
  "findings": {
   "collection-encoded-execution": [
-   "collection-encoded-execution|238"
+   "collection-encoded-execution|242"
   ],
   "collection-persistence-user-path": [
-   "collection-persistence-user-path|237"
+   "collection-persistence-user-path|241"
   ],
   "collection-prefetch-script-execution": [
-   "collection-prefetch-script-execution|241"
+   "collection-prefetch-script-execution|245"
   ],
   "collection-remote-service": [
-   "collection-remote-service|237"
+   "collection-remote-service|241"
   ],
   "collection-script-host-connection": [
-   "collection-script-host-connection|239"
+   "collection-script-host-connection|243"
   ],
   "collection-service-unquoted-path": [
-   "collection-service-unquoted-path|242"
+   "collection-service-unquoted-path|246"
   ],
   "m365-app-consent": [
-   "m365-app-consent|235"
+   "m365-app-consent|239"
   ],
   "m365-inbox-rule-any": [
    "m365-inbox-rule-any|80"
@@ -209,16 +209,16 @@
    "m365-inbox-rule-hiding|80"
   ],
   "m365-mailbox-forwarding": [
-   "m365-mailbox-forwarding|233"
+   "m365-mailbox-forwarding|237"
   ],
   "m365-mailitemsaccessed-burst": [
    "m365-mailitemsaccessed-burst|alice@contoso.com\u0001185.220.101.44|29804245"
   ],
   "m365-privileged-role-assigned": [
-   "m365-privileged-role-assigned|236"
+   "m365-privileged-role-assigned|240"
   ],
   "m365-role-assigned-any": [
-   "m365-role-assigned-any|236"
+   "m365-role-assigned-any|240"
   ],
   "m365-signin-bruteforce-account": [
    "m365-signin-bruteforce-account|alice@contoso.com|29804234"
@@ -230,13 +230,13 @@
    "m365-signin-password-spray|185.220.101.44|29804230"
   ],
   "m365-signin-risky": [
-   "m365-signin-risky|234"
+   "m365-signin-risky|238"
   ],
   "m365-signin-two-countries-24h": [
    "m365-signin-two-countries-24h|alice@contoso.com|29804070"
   ],
   "m365-signin-unexpected-country": [
-   "m365-signin-unexpected-country|234",
+   "m365-signin-unexpected-country|238",
    "m365-signin-unexpected-country|46"
   ],
   "mail-attachment-disguised": [
@@ -389,6 +389,9 @@
   ],
   "win-defender-control-tool": [
    "win-defender-control-tool|173"
+  ],
+  "win-discovery-burst": [
+   "win-discovery-burst|ws01\u0001c:\\users\\public\\agent.exe|29804258"
   ],
   "win-dns-server-logging-changed": [
    "win-dns-server-logging-changed|dc01\u0001eventloglevel"
@@ -751,6 +754,7 @@
   "win-defender-detection",
   "win-defender-disabled",
   "win-directinput-from-user-folder",
+  "win-discovery-burst",
   "win-dns-server-logging-changed",
   "win-dns-server-plugin-dll-set",
   "win-dns-wildcard-or-wpad-record",

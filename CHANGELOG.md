@@ -38,6 +38,10 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   protection and Defender tampering, EFI boot files, credential stores and known attacker tools.
   They add 46 attack_data detections, which does not count as held out for them, fire on none of
   the clean machines, and add no detection on the two other libraries yet.
+- `win-discovery-burst`: one program starting four or more different discovery commands (whoami,
+  net, nltest, ipconfig and others) within ten minutes. Written from ATT&CK before any recording
+  was read, so every library is held out for it: it adds two attack_data detections and raises
+  one finding across the evtx-baseline clean machines.
 - A home page. REMN opens on it until a case holds evidence, and the wordmark leads back to it
   after that. It shows what the tool reads, how the rules are measured and what the measures
   show: the rule totals, recordings and clean-host baseline read live from `rules/measures.json`

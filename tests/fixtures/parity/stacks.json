@@ -43,8 +43,8 @@
    "order": "rare",
    "stack": {
     "blank": 202,
-    "distinct": 20,
-    "events": 43,
+    "distinct": 24,
+    "events": 47,
     "field": "image",
     "hosts": 3,
     "order": "rare",
@@ -179,6 +179,16 @@
      },
      {
       "count": 1,
+      "first": 1788255530000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255530000,
+      "value": "C:\\Windows\\System32\\ipconfig.exe"
+     },
+     {
+      "count": 1,
       "first": 1788255434000,
       "hostList": [
        "ws01"
@@ -199,6 +209,26 @@
      },
      {
       "count": 1,
+      "first": 1788255560000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255560000,
+      "value": "C:\\Windows\\System32\\net.exe"
+     },
+     {
+      "count": 1,
+      "first": 1788255590000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255590000,
+      "value": "C:\\Windows\\System32\\nltest.exe"
+     },
+     {
+      "count": 1,
       "first": 1788255428000,
       "hostList": [
        "ws01"
@@ -206,6 +236,16 @@
       "hosts": 1,
       "last": 1788255428000,
       "value": "C:\\Windows\\System32\\ntdsutil.exe"
+     },
+     {
+      "count": 1,
+      "first": 1788255500000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255500000,
+      "value": "C:\\Windows\\System32\\whoami.exe"
      },
      {
       "count": 3,
@@ -260,8 +300,8 @@
    "order": "rare",
    "stack": {
     "blank": 216,
-    "distinct": 29,
-    "events": 29,
+    "distinct": 33,
+    "events": 33,
     "field": "commandLine",
     "hosts": 1,
     "order": "rare",
@@ -516,6 +556,16 @@
      },
      {
       "count": 1,
+      "first": 1788255530000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255530000,
+      "value": "ipconfig"
+     },
+     {
+      "count": 1,
       "first": 1788255424000,
       "hostList": [
        "ws01"
@@ -523,6 +573,26 @@
       "hosts": 1,
       "last": 1788255424000,
       "value": "msdtc.exe -a"
+     },
+     {
+      "count": 1,
+      "first": 1788255560000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255560000,
+      "value": "net"
+     },
+     {
+      "count": 1,
+      "first": 1788255590000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255590000,
+      "value": "nltest"
      },
      {
       "count": 1,
@@ -553,6 +623,16 @@
       "hosts": 1,
       "last": 1788255100000,
       "value": "rundll32.exe javascript:\"\\..\\mshtml,RunHTMLApplication\""
+     },
+     {
+      "count": 1,
+      "first": 1788255500000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255500000,
+      "value": "whoami"
      }
     ],
     "truncated": false
@@ -563,7 +643,7 @@
    "filter": null,
    "order": "common",
    "stack": {
-    "blank": 215,
+    "blank": 219,
     "distinct": 30,
     "events": 30,
     "field": "serviceName",
@@ -875,7 +955,7 @@
    "filter": null,
    "order": "rare",
    "stack": {
-    "blank": 120,
+    "blank": 124,
     "distinct": 31,
     "events": 125,
     "field": "targetUser",
@@ -1239,7 +1319,7 @@
    "stack": {
     "blank": 88,
     "distinct": 43,
-    "events": 157,
+    "events": 161,
     "field": "providerEventId",
     "hosts": 5,
     "order": "rare",
@@ -1615,16 +1695,6 @@
       "value": "Microsoft-Windows-Sysmon / 11"
      },
      {
-      "count": 8,
-      "first": 1788255100000,
-      "hostList": [
-       "ws01"
-      ],
-      "hosts": 1,
-      "last": 1788255434000,
-      "value": "Microsoft-Windows-Sysmon / 1"
-     },
-     {
       "count": 10,
       "first": 1788255150000,
       "hostList": [
@@ -1653,6 +1723,16 @@
       "hosts": 1,
       "last": 1788255055000,
       "value": "Microsoft-Windows-Security-Auditing / 4625"
+     },
+     {
+      "count": 12,
+      "first": 1788255100000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255590000,
+      "value": "Microsoft-Windows-Sysmon / 1"
      },
      {
       "count": 16,
