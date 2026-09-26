@@ -2,7 +2,7 @@
 
 The pages follow the order of an investigation. Evidence goes in on the Evidence page;
 Events and Mails are the two tables with their search bar, and the Timeline draws both;
-Findings, Stories, Rules and Indicators are what the detection produced; the AI analyst,
+Findings, Stories, Graph, Rules and Indicators are what the detection produced; the AI analyst,
 Review and Case notes are where the analyst works the case; Report prints it; Settings
 holds the case context the rules and the model read. This page describes each, the
 keyboard, the review workflow and the report, and closes with the tests that cover the
@@ -147,6 +147,17 @@ accounts outside them that the same sources reached; flagged mails and failed lo
 story are grouped by sender domain and address. **Explore** browses the relationship graph:
 its build controls, the entities with a search and a type filter, the neighbours of the
 selected one and its links with their review.
+
+## Graph
+
+The Graph page draws the attack chains that building the stories keeps. The left list
+ranks the chains, each with its severity, identity, seed, span, score and step count.
+**this chain** lays the selected chain out as a swimlane, time left to right and one lane
+per source, with routine runs folded into one node; **all chains** draws every chain against
+the sender addresses, link domains, IPs and hosts they share, and a chain clicked there opens
+in its own graph. A step clicked in the graph opens its pane: source, time, rows, what ties
+it to the seed and its findings, and **Open** takes it to its mail or events. `j` and `k`
+move between steps. A case with no chains yet points to Stories, which builds them.
 
 ## Rules and Indicators
 
