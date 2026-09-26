@@ -1,6 +1,8 @@
 import type { Case, CaseNote, Evidence, Finding, Ioc, Severity } from '../db/schema'
 import type { Chain, ChainStep } from './chains'
-import type { ReportStory } from './stories'
+import { groupByIncident, storyCoverageWarnings, storyOwnGaps, type ReportStory, type StoryIncident, type StoryResult } from './stories'
+import { STORY_VERDICT_LABEL, type DecidedStory } from './storyDecisions'
+import { spineBasis, spineSteps } from './storyFlow'
 import type { ChainReview, ReportSettings } from './review'
 import { chainSeverity, effectiveSeverity, stepVisible } from './review'
 import type { Incident } from '../rules/incidents'
@@ -89,6 +91,24 @@ export interface ReportData {
   stories?: ReportStory[]
   /** the case's stories not printed: below the severity floor, without a note when only reviewed items print, or past the first twenty */
   storiesLeft?: number
+  /** the story build's incidents: the printed stories of one are printed together, under one heading */
+  storyIncidents?: StoryIncident[]
+  /** the stats of the story build: what it could not read (data/stories.ts storyCoverageWarnings) */
+  storyStats?: StoryResult['stats']
+  /** why the stories no longer read the case as it is (data/stories.ts storiesStaleness); empty or absent when they do */
+  storiesStale?: string[]
+  /** analyst notes whose story the build no longer holds (listed on the Stories page) */
+  storyNotesOrphaned?: number
+  /**
+   * Every story of the case the analyst decided (data/storyDecisions.ts storiesForReport), printed or
+   * not: a confirmed story counts in the verdict as a confirmed incident does, a reviewed one as a
+   * reviewed item, a benign or false positive one as a false positive.
+   */
+  decidedStories?: DecidedStory[]
+  /** stories decided benign or false positive: not printed */
+  storiesDismissed?: number
+  /** decisions on stories the build no longer holds (listed on the Stories page) */
+  storyDecisionsOrphaned?: number
 }
 
 /** The model's part in the case, as the report prints it. */
@@ -150,8 +170,28 @@ const rows = (xs: string[][]) => xs.map((r) => `<tr>${r.map((c) => `<td>${c}</td
 /** a table whose header row repeats on every printed page */
 const table = (head: string[], body: string[][]) => `<table><thead><tr>${head.map((x) => `<th>${x}</th>`).join('')}</tr></thead><tbody>${rows(body)}</tbody></table>`
 /** only a PNG data URL this app produced itself is embedded */
-const img = (src: string | undefined, alt: string, caption?: string) =>
-  src && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(src) ? `<figure><img src="${src}" alt="${h(alt)}">${caption ? `<figcaption>${h(caption)}</figcaption>` : ''}</figure>` : ''
+/** a graph legend entry: the shape (a CSS class of the report) and the colour the graph draws it in */
+type KeyItem = [shape: 'diamond' | 'box' | 'dot' | 'ring' | 'line', color: string, label: string]
+const CHAIN_KEY: KeyItem[] = [
+  ['diamond', 'var(--critical)', 'seed mail'],
+  ['box', 'var(--high)', 'step, coloured by its worst finding'],
+  ['ring', 'var(--ink-3)', 'folded routine steps'],
+  ['line', 'var(--accent)', 'tie to the mail'],
+]
+const CAMPAIGN_KEY: KeyItem[] = [
+  ['box', 'var(--high)', 'person, coloured by the chain'],
+  ['dot', 'var(--high)', 'shared sender or domain'],
+  ['dot', 'var(--low)', 'shared machine or IP'],
+  ['dot', 'var(--ink-3)', 'in one chain only'],
+]
+const img = (src: string | undefined, alt: string, caption?: string, key?: KeyItem[]) =>
+  src && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(src)
+    ? `<figure><img src="${src}" alt="${h(alt)}">${
+        caption || key
+          ? `<figcaption>${key ? key.map(([shape, color, label]) => `<span class="gk"><i class="gk-${shape}" style="--k:${color}"></i>${h(label)}</span>`).join('') : ''}${caption ? h(caption) : ''}</figcaption>`
+          : ''
+      }</figure>`
+    : ''
 const span = (from: number | null | undefined, to: number | null | undefined) => (from && to && to !== from ? `${fmtTs(from)} <span class="dim">to</span> ${fmtTs(to)}` : fmtTs(from))
 const firstSentence = (text: string | undefined) => {
   const t = (text ?? '').replace(/\s+/g, ' ').trim()
@@ -181,22 +221,41 @@ const isUnwanted = (f: Finding) => /(^|-)(pua|adware|unwanted)($|-)/i.test(f.rul
 /** a finding that only says the user ran something (ATT&CK T1204) below high: the runs of an unwanted program, not a second threat */
 const userExecution = (f: Finding) => rank(effectiveSeverity(f)) < rank('high') && f.attack.length > 0 && f.attack.every((t) => t.toUpperCase().startsWith('T1204'))
 
-/** What the review concluded, from the decisions on chains and incidents. Findings decide nothing on their own. */
+/**
+ * What the review concluded, from the decisions on chains, incidents and stories. Findings decide
+ * nothing on their own. The one place the verdict is read: the report's cover and the Review page's
+ * both come from here.
+ */
 export function computeVerdict(d: ReportData): Verdict {
   const confirmedChains = d.chains.filter((c) => d.reviews[c.id]?.verdict === 'confirmed')
   const escalated = d.incidents.filter((i) => i.status === 'escalated')
-  const reviewed = d.chains.filter((c) => d.reviews[c.id]?.verdict === 'unsure').length + d.incidents.filter((i) => i.status === 'reviewed').length
-  const falsePositives = d.falsePositives ?? d.incidents.filter((i) => i.status === 'false_positive').length
+  // a story the analyst decided counts as an incident with the same decision would
+  const stories = d.decidedStories ?? []
+  const confirmedStories = stories.filter((s) => s.verdict === 'confirmed')
+  const reviewed =
+    d.chains.filter((c) => d.reviews[c.id]?.verdict === 'unsure').length + d.incidents.filter((i) => i.status === 'reviewed').length + stories.filter((s) => s.verdict === 'reviewed').length
+  const falsePositives = (d.falsePositives ?? d.incidents.filter((i) => i.status === 'false_positive').length) + stories.filter((s) => s.verdict === 'benign' || s.verdict === 'false_positive').length
   // a confirmed item the print settings leave out is still confirmed: a presentation filter must not
   // turn "Compromise confirmed" into "Nothing confirmed"
   const unprinted = d.unprintedConfirmed ?? []
-  const confirmed = confirmedChains.length + escalated.length + unprinted.length
+  const confirmed = confirmedChains.length + escalated.length + unprinted.length + confirmedStories.length
   const base = { confirmed, reviewed, falsePositives }
-  const notPrinted = unprinted.length ? ` ${unprinted.length} of them ${unprinted.length === 1 ? 'is' : 'are'} not printed (below the severity floor or left out).` : ''
+  const hidden = unprinted.length + confirmedStories.filter((s) => !s.printed).length
+  const notPrinted = hidden ? ` ${hidden} of them ${hidden === 1 ? 'is' : 'are'} not printed (below the severity floor or left out).` : ''
   if (confirmed) {
-    const sevs = [...confirmedChains.map((c) => chainSeverity(c, d.reviews[c.id])), ...escalated.map((i) => i.severity), ...unprinted.map((u) => u.severity)]
+    const sevs = [
+      ...confirmedChains.map((c) => chainSeverity(c, d.reviews[c.id])),
+      ...escalated.map((i) => i.severity),
+      ...unprinted.map((u) => u.severity),
+      ...confirmedStories.map((s) => s.severity),
+    ]
     const severity = worstOf(sevs)
-    const confirmedFindings = [...escalated.flatMap((i) => i.findings), ...confirmedChains.flatMap((c) => d.membersOf.get(c.id) ?? []), ...unprinted.flatMap((u) => u.findings)]
+    const confirmedFindings = [
+      ...escalated.flatMap((i) => i.findings),
+      ...confirmedChains.flatMap((c) => d.membersOf.get(c.id) ?? []),
+      ...unprinted.flatMap((u) => u.findings),
+      ...confirmedStories.flatMap((s) => s.findings),
+    ]
     // unwanted software is the verdict when a confirmed item names it and nothing confirmed rises above medium:
     // the runs of the same browser from a user profile are the same thing, not a second threat
     const unwantedPresent = confirmedFindings.some(isUnwanted)
@@ -349,6 +408,7 @@ export function threatProfile(d: ReportData): BadgeState[] {
   const confirmedIds = new Set<number>()
   for (const i of d.incidents) if (i.status === 'escalated') for (const f of i.findings) if (f.id != null) confirmedIds.add(f.id)
   for (const c of d.chains) if (d.reviews[c.id]?.verdict === 'confirmed') for (const f of d.membersOf.get(c.id) ?? []) if (f.id != null) confirmedIds.add(f.id)
+  for (const s of d.decidedStories ?? []) if (s.verdict === 'confirmed') for (const f of s.findings) if (f.id != null) confirmedIds.add(f.id)
   const printed = d.findings.filter((f) => f.status !== 'false_positive')
   return BADGES.map((def) => {
     const mine = printed.filter((f) => badgesOf(f).includes(def))
@@ -439,7 +499,7 @@ function chainCard(c: Chain, d: ReportData): string {
 <div class="card-head">${pill(sev)}<h3>${h(c.identityLabel)}</h3>${verdictPill(r?.verdict)}${meter(c)}</div>
 <div class="card-meta">Seed ${c.seed.source === 'events' ? 'event' : 'mail'} “${h(c.seed.subject)}” from <code>${h(c.seed.fromAddr ?? '')}</code> at ${fmtTs(c.seed.ts)} (risk ${c.seed.risk}) · ${c.steps.length} steps from ${fmtTs(c.start)} to ${fmtTs(c.end)} · ${c.artifactLinks} artifact tie(s)${c.entities.attackerAddresses.length ? ` · attacker <code>${h(c.entities.attackerAddresses.join(', '))}</code>` : ''}${c.entities.ips.length ? ` · IPs <code>${h(c.entities.ips.join(', '))}</code>` : ''}${c.entities.hosts.length ? ` · hosts <code>${h(c.entities.hosts.join(', '))}</code>` : ''}</div>
 ${narrative}
-${d.settings.includeGraphs ? img(d.graphs[c.id], `graph of the chain for ${c.identityLabel}`, 'Steps by lane and time: diamond = seed mail, box = step (size = weight, colour = worst finding), grey dot = folded routine steps, green edges = ties to the mail.') : ''}
+${d.settings.includeGraphs ? img(d.graphs[c.id], `graph of the chain for ${c.identityLabel}`, 'Steps by lane, time left to right.', CHAIN_KEY) : ''}
 ${table(
   ['time (UTC)', 'offset', 'source', 'step', 'ties to the mail / findings'],
   printed.map((f) => {
@@ -483,10 +543,59 @@ const PHASE_WORDS: Record<string, string> = {
   impact: 'Impact',
 }
 
-/** A story: its phases in the order they happened, what marks each (its worst findings, else its first step), and where its evidence stops. */
-function storyCard({ story: s, key, note }: ReportStory, d: ReportData): string {
+/** The analyst's decisions on a story, one line each: the decision and its reason, what was merged, split, taken out and disputed. */
+function storyDecisionLines(dec: ReportStory['decisions']): string {
+  if (!dec) return ''
+  const lines = [
+    dec.call ? `The analyst decided it ${h(STORY_VERDICT_LABEL[dec.call.verdict])}${dec.call.reason ? `: ${h(dec.call.reason)}` : '.'}` : '',
+    ...dec.merged.map((m) => `Merged into it by the analyst: the story of ${h(m.title)}${m.orgs ? ` (another organisation, ${h(m.orgs.join(' and '))})` : ''}: ${h(m.reason)}`),
+    dec.split ? `${dec.part === 'second' ? 'The second part of a story the analyst split' : 'Split by the analyst'} at “${h(dec.split.title)}” (${fmtTs(dec.split.ts)}): ${h(dec.split.reason)}` : '',
+    ...dec.out.map((o) => `Taken out by the analyst: “${h(o.title)}” (${n(o.count)} record${o.count === 1 ? '' : 's'}): ${h(o.reason)}`),
+    ...dec.disputed.map((x) => `Disputed by the analyst and left out of its phases and severity: “${h(x.title)}” (${fmtTs(x.ts)})${x.reason ? `: ${h(x.reason)}` : ''}`),
+    dec.confirmedSteps ? `${n(dec.confirmedSteps)} step${dec.confirmedSteps === 1 ? '' : 's'} confirmed by the analyst.` : '',
+  ].filter(Boolean)
+  return lines.map((l) => `<div class="cap">${l}</div>`).join('')
+}
+
+const STORY_PILL: Record<string, string> = { confirmed: 'confirmed', reviewed: 'unsure' }
+
+/**
+ * A story's spine (docs/stories.md, "Spine"): the steps that carry it from the way in to the worst of
+ * it, in time order, each with the tie that put it in the story, and how the spine was drawn. Nothing
+ * for a story built before spines.
+ */
+function storySpine(s: ReportStory['story']): string {
+  const steps = spineSteps(s)
+  if (!steps?.length) return ''
+  const basis = spineBasis(s)
+  const ways = new Set(basis?.wayIn ?? [])
+  const marks = (id: string) => (ways.has(id) ? ' ' + chip('way in') : '') + (id === basis?.anchor ? ' ' + chip('anchor') : '')
+  const worst = (st: (typeof steps)[number]) => [...st.findings].sort((a, b) => rank(b.severity) - rank(a.severity))[0]
+  return `<div class="story-part">Spine: ${n(steps.length)} of ${n(s.steps.length)} steps</div>
+${table(
+  ['when (UTC)', 'phase', 'step', 'why it is in the story'],
+  steps.map((st) => {
+    const f = worst(st)
+    return [
+      `<span class="nowrap">${span(st.ts, st.tsEnd)}</span>`,
+      `${f ? pill(f.severity) + ' ' : ''}${h(st.phase ? (PHASE_WORDS[st.phase] ?? st.phase) : 'context')}`,
+      `${h(st.title)}${st.host ? ` <span class="dim">on</span> <code>${h(st.host)}</code>` : ''}${marks(st.id)}${f ? `<span class="sub">${h(f.title)}${st.findings.length > 1 ? ` +${n(st.findings.length - 1)}` : ''}</span>` : ''}`,
+      `${h(st.tie.confidence)}: ${h(st.tie.basis)}`,
+    ]
+  }),
+)}
+${basis ? `<div class="cap">${h(basis.text)}</div>` : ''}
+<div class="story-part">Phases</div>`
+}
+
+/** A story: its spine, its phases in the order they happened, what marks each (its worst findings, else its first step), the analyst's decisions on it, and where its evidence stops. */
+function storyCard({ story: s, key, note, decisions: dec }: ReportStory, d: ReportData): string {
+  // the build's own limits are printed once, above the stories
+  const gaps = storyOwnGaps(s)
+  // a step the analyst disputed marks no phase
+  const disputed = new Set((dec?.disputed ?? []).map((x) => x.id))
   const marks = (phase: string) => {
-    const steps = s.steps.filter((st) => st.phase === phase)
+    const steps = s.steps.filter((st) => st.phase === phase && !disputed.has(st.id))
     const found = steps.flatMap((st) => st.findings).sort((a, b) => rank(b.severity) - rank(a.severity))
     const titles = [...new Set(found.map((f) => f.title))].slice(0, 2)
     return titles.length ? h(titles.join('; ')) + (new Set(found.map((f) => f.title)).size > 2 ? ' …' : '') : `<span class="dim">${h(steps[0]?.title ?? '')}</span>`
@@ -497,15 +606,71 @@ function storyCard({ story: s, key, note }: ReportStory, d: ReportData): string 
     s.attackerAddresses.length ? `from <code>${h(s.attackerAddresses.slice(0, 6).join(', '))}</code>` : '',
   ].filter(Boolean)
   return `<div class="card chain ${h(s.severity)}">
-<div class="card-head">${pill(s.severity)}<h3>${h(s.title)}</h3>${chip(`${s.confidence} ties`)}</div>
+<div class="card-head">${pill(s.severity)}<h3>${h(s.title)}${dec?.part === 'second' ? ' (second part)' : dec?.part === 'first' ? ' (first part)' : ''}</h3>${dec?.call ? `<span class="pill verdict-${STORY_PILL[dec.call.verdict] ?? 'benign'}">${h(STORY_VERDICT_LABEL[dec.call.verdict])}</span>` : ''}${chip(`${s.confidence} ties`)}</div>
 <div class="card-meta">${who} ${h(s.subject.label)} · ${span(s.start, s.end)} · ${n(s.records)} record(s) in ${n(s.steps.length)} step(s)${where.length ? ' · ' + where.join(' · ') : ''}</div>
 ${note ? `<div class="narr">${md(note)}</div><div class="cap">the analyst's reading of the story</div>${textNote(`story:${key}`, d.claims)}` : `<div class="narr"><p>${h(s.summary || s.headline)}</p></div>`}
+${storySpine(s)}
 ${table(
   ['phase', 'when (UTC)', 'steps', 'what marks it'],
   s.phases.map((p) => [`${p.severity ? pill(p.severity) + ' ' : ''}${h(PHASE_WORDS[p.phase] ?? p.label)}`, `<span class="nowrap">${span(p.first, p.last)}</span>`, n(p.steps), marks(p.phase)]),
 )}
-${s.gaps.length ? `<div class="cap">Where it stops: ${s.gaps.map((g) => h(g)).join(' ')}</div>` : ''}
+${storyDecisionLines(dec)}
+${gaps.length ? `<div class="cap">Where it stops: ${gaps.map((g) => h(g)).join(' ')}</div>` : ''}
 </div>`
+}
+
+/**
+ * The printed stories, each incident's together under one heading that says why they read as one
+ * intrusion (the strong and medium links between them) and what of it is not printed.
+ */
+function storyCards(d: ReportData): string {
+  return groupByIncident(d.stories ?? [], (r) => r.story, d.storyIncidents)
+    .map(({ incident: i, items }) => {
+      const cards = items.map((st) => storyCard(st, d)).join('\n')
+      if (!i) return cards
+      const inside = new Set(items.map((r) => r.story.id))
+      const why = new Map<string, string>()
+      for (const { story } of items)
+        for (const l of story.links ?? []) if (l.confidence !== 'weak' && inside.has(l.story)) why.set([story.id, l.story].sort().join('|'), `${l.basis} (${l.confidence})`)
+      const bases = [...why.values()]
+      const unprinted = i.stories.length - items.length
+      return `<div class="story-inc">
+<div class="card-head">${pill(i.severity)}<h3>One intrusion: ${h(i.label)}</h3>${chip(`${n(i.stories.length)} stories`)}</div>
+<div class="card-meta">${span(i.start, i.end)}${i.hosts.length ? ` · hosts <code>${h(i.hosts.slice(0, 6).join(', '))}</code>${i.hosts.length > 6 ? ` +${i.hosts.length - 6}` : ''}` : ''}</div>
+${
+  bases.length
+    ? `<div class="cap">Why they read as one: ${bases
+        .slice(0, 4)
+        .map((b) => h(b))
+        .join('; ')}${bases.length > 4 ? ` and ${bases.length - 4} more` : ''}.</div>`
+    : ''
+}${
+        unprinted > 0
+          ? `<div class="cap">${n(unprinted)} more of its stories ${unprinted === 1 ? 'is' : 'are'} not printed: below the severity floor, without a note, or past the first twenty.</div>`
+          : ''
+      }${i.cut ? `<div class="cap warn">${n(i.cut)} more linked ${i.cut === 1 ? 'story is' : 'stories are'} left out of it: an incident holds twenty stories at most.</div>` : ''}
+${cards}
+</div>`
+    })
+    .join('\n')
+}
+
+/** What the reader of the Stories section must know before any story: that they are out of date, and where the build stopped. */
+function storiesCaveats(d: ReportData): string {
+  const stale = d.storiesStale ?? []
+  const cut = storyCoverageWarnings(d.storyStats)
+  const orphaned = d.storyNotesOrphaned ?? 0
+  const lostDecisions = d.storyDecisionsOrphaned ?? 0
+  return [
+    stale.length ? `<div class="cap warn">Out of date: ${h(stale.join('; '))}. These stories read the case as it was then: build them again on the Stories page before relying on them.</div>` : '',
+    cut.length ? `<div class="cap warn">Incomplete: ${cut.map((w) => h(w)).join(' ')} An absent step or story is not a negative result.</div>` : '',
+    orphaned
+      ? `<div class="cap">${n(orphaned)} analyst note${orphaned === 1 ? ' is' : 's are'} on a story this build no longer holds: the Stories page lists ${orphaned === 1 ? 'it' : 'them'} to attach again.</div>`
+      : '',
+    lostDecisions
+      ? `<div class="cap warn">${n(lostDecisions)} analyst decision${lostDecisions === 1 ? ' is' : 's are'} on a story this build no longer holds: the Stories page lists ${lostDecisions === 1 ? 'it' : 'them'} to attach again, and the report does not count ${lostDecisions === 1 ? 'it' : 'them'}.</div>`
+      : '',
+  ].join('')
 }
 
 // ---------------------------------------------------------------------------
@@ -661,7 +826,7 @@ interface Moment {
   decision: string
   entities: string[]
   note: string
-  kind: 'chain' | 'incident'
+  kind: 'chain' | 'incident' | 'story'
 }
 
 /** The decided items in time order: what a reader should know happened, in the order it happened. */
@@ -695,6 +860,20 @@ export function moments(d: ReportData): { items: Moment[]; decided: boolean; tot
       entities: Object.values(i.entities).slice(0, 3).map(String),
       note: firstSentence(i.lead.notes || i.lead.aiReason),
       kind: 'incident',
+    })
+  }
+  // a printed story the analyst confirmed or reviewed, with the analyst's reason
+  for (const st of d.decidedStories ?? []) {
+    if (!st.printed || (st.verdict !== 'confirmed' && st.verdict !== 'reviewed')) continue
+    out.push({
+      ts: st.start,
+      end: st.end,
+      severity: st.severity,
+      title: `Story of ${st.title}`,
+      decision: st.verdict,
+      entities: st.hosts.slice(0, 3),
+      note: firstSentence(st.reason),
+      kind: 'story',
     })
   }
   const decided = out.length > 0
@@ -816,6 +995,7 @@ span.warn{color:var(--medium);font-weight:600}.ribbon.ok i{background:var(--acce
 .card-head{break-after:avoid;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .card-head h3{font-size:14px;font-weight:600;margin:0;flex:1;min-width:200px}
 .card-meta{font-size:11px;color:var(--ink-2);margin:6px 0 8px}
+.story-inc{border-left:2px solid var(--line-2);padding-left:12px;margin:0 0 14px}
 .meter{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:10.5px;color:var(--ink-2)}
 .meter .bar{display:flex;width:120px;height:8px;border-radius:4px;overflow:hidden;background:var(--surface-3)}
 .meter .bar span{display:block;height:100%}
@@ -823,12 +1003,15 @@ span.warn{color:var(--medium);font-weight:600}.ribbon.ok i{background:var(--acce
 .narr p{margin:0 0 6px}.narr p:last-child{margin:0}
 .narr strong{color:var(--ink)}
 .cap{font-size:10px;color:var(--ink-3);margin-top:4px}
-.cap.ai{color:var(--violet)}.claim.unsupported{color:var(--medium)}.claim.contradicted{color:var(--critical);font-weight:600}
+.story-part{font-weight:600;color:var(--ink-2);text-transform:uppercase;letter-spacing:.06em;font-size:9px;margin:10px 0 4px;break-after:avoid}
+.cap.ai{color:var(--violet)}.cap.warn{color:var(--medium);font-weight:600}.claim.unsupported{color:var(--medium)}.claim.contradicted{color:var(--critical);font-weight:600}
 .note{background:var(--surface-2);padding:8px 12px;border-radius:6px;margin:6px 0 8px;font-size:12px}
 .note p{margin:0 0 6px}.note p:last-child{margin:0}
 figure{margin:8px 0 10px;break-inside:avoid}
-figure img{width:100%;max-height:120mm;object-fit:contain;border:1px solid var(--line);border-radius:6px}
-figure figcaption{font-size:10px;color:var(--ink-3);margin-top:3px}
+figure img{width:100%;max-height:120mm;object-fit:contain;border:1px solid var(--line);border-radius:8px;background:#fff;padding:6px;box-sizing:border-box}
+figure figcaption{font-size:10px;color:var(--ink-3);margin-top:4px;display:flex;flex-wrap:wrap;align-items:center;gap:3px 14px}
+.gk{display:inline-flex;align-items:center;gap:5px;color:var(--ink-2)}.gk i{display:inline-block;width:9px;height:9px;background:var(--k);-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.gk-dot,.gk-ring{border-radius:50%}.gk-box{border-radius:2px}.gk-diamond{transform:rotate(45deg) scale(.85)}.gk-ring{background:#fff!important;border:1.5px dashed var(--k)}.gk-line{width:14px!important;height:2px!important}
 /* tables */
 table{border-collapse:collapse;width:100%;font-size:11px;margin:4px 0 8px}
 th{font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);text-align:left;font-weight:600;padding:5px 7px;border-bottom:1px solid var(--line-2);background:var(--surface-2)}
@@ -940,7 +1123,7 @@ function method(d: ReportData, v: Verdict, conf: Confidence): string {
           `of those rules, ${n(detects)} fire${detects === 1 ? 's' : ''} on recorded attacks of what ${detects === 1 ? 'it looks' : 'they look'} for and ${n(leads)} ${leads === 1 ? 'was' : 'were'} never seen to (their findings are marked lead)${d.measuredOn ? `. ${h(d.measuredOn)}` : ''}`,
         ]
       : []),
-    `findings below ${h(d.settings.minSeverity)} severity are not printed${d.settings.onlyReviewed ? '; only reviewed items are printed' : ''}${d.settings.includeFp ? '; false positives are printed' : '; false positives are not printed'}`,
+    `findings below ${h(d.settings.minSeverity)} severity are not printed${d.settings.onlyReviewed ? '; only reviewed items are printed' : ''}${d.settings.includeFp ? '; false positives are printed' : '; false positives are not printed'}${d.storiesDismissed ? `; ${n(d.storiesDismissed)} ${d.storiesDismissed === 1 ? 'story' : 'stories'} decided benign or false positive ${d.storiesDismissed === 1 ? 'is' : 'are'} not printed` : ''}`,
     `${v.confirmed} confirmed, ${v.reviewed} reviewed or unsure, ${v.falsePositives} false positive${v.falsePositives === 1 ? '' : 's'}, ${d.undecided} undecided`,
     aiTexts
       ? `${aiTexts} text${aiTexts === 1 ? '' : 's'} in this report ${aiTexts === 1 ? 'was' : 'were'} drafted by the analyst model and are labelled as such; decisions are the analyst's`
@@ -963,6 +1146,8 @@ function method(d: ReportData, v: Verdict, conf: Confidence): string {
     'Times are UTC. Rules and timelines describe what the evidence records; the absence of a finding is not evidence of absence.',
     'Collection snapshots record when an artefact was collected, not when it was created or run.',
     ...(d.coverageWarnings ?? []).map((w) => `Chain analysis incomplete: ${w}`),
+    ...(d.stories?.length && d.storiesStale?.length ? [`Stories out of date: ${d.storiesStale.join('; ')}.`] : []),
+    ...(d.stories?.length ? storyCoverageWarnings(d.storyStats).map((w) => `Stories incomplete: ${w}`) : []),
     ...issues.slice(0, 6).map((x) => `Package coverage: ${x}`),
     d.iocsChecked
       ? `${d.iocsChecked} of ${d.iocsTotal ?? d.iocsChecked} indicators were checked against reputation services.`
@@ -1011,17 +1196,18 @@ export function buildReportHtml(d: ReportData): string {
   })
   if (d.stories?.length) {
     const left = d.storiesLeft ?? 0
+    const dismissedStories = d.storiesDismissed ?? 0
     sections.push({
       id: 'stories',
       title: 'Stories',
       count: d.stories.length,
-      body: `<p class="intro">A story is what happened to one person, or on one host, in one incident: the records around what raised a flag, read along the tactics of ATT&amp;CK in the order they happened, each record tied to the story by its account, its logon session, the way into the host or the process that started it. A story is how the case reads, not a decision: the decisions are the chains' and the incidents'. Each says where its evidence stops.</p>${d.stories.map((st) => storyCard(st, d)).join('\n')}${left ? `<div class="cap">${n(left)} more ${left === 1 ? 'story is' : 'stories are'} not printed: below the severity floor${settings.onlyReviewed ? ', without a note (reviewed items only)' : ''} or past the first twenty.</div>` : ''}`,
+      body: `<p class="intro">A story is what happened to one person, or on one host, in one incident: the records around what raised a flag, read along the tactics of ATT&amp;CK in the order they happened, each record tied to the story by its account, its logon session, the way into the host or the process that started it. A story the analyst decided says so: a confirmed story counts in the verdict as a confirmed incident does, a story decided benign or false positive is not printed, and a step the analyst disputed is left out of its story's phases and severity and listed under it. Each says where its evidence stops.</p>${storiesCaveats(d)}${storyCards(d)}${left ? `<div class="cap">${n(left)} more ${left === 1 ? 'story is' : 'stories are'} not printed: below the severity floor${settings.onlyReviewed ? ', without a note or a decision (reviewed items only)' : ''} or past the first twenty.</div>` : ''}${dismissedStories ? `<div class="cap">${n(dismissedStories)} ${dismissedStories === 1 ? 'story' : 'stories'} decided benign or false positive by the analyst ${dismissedStories === 1 ? 'is' : 'are'} not printed.</div>` : ''}`,
     })
   }
   if (d.chains.length) {
     const campaign =
       settings.includeGraphs && d.chains.length > 1 && d.graphs.campaign
-        ? `<div class="card"><div class="card-head"><h3>Shared between chains</h3></div>${img(d.graphs.campaign, 'campaign graph', 'Chains and the senders, domains, IPs and hosts they share.')}<div class="cap">${d.campaignInsights.length ? d.campaignInsights.map((x) => h(x)).join(' · ') : 'no sender, domain, IP or host is shared between the chains'}</div></div>`
+        ? `<div class="card"><div class="card-head"><h3>Shared between chains</h3></div>${img(d.graphs.campaign, 'campaign graph', 'People in the middle, the senders and domains that reached them on the left, the machines and IPs they touched on the right.', CAMPAIGN_KEY)}<div class="cap">${d.campaignInsights.length ? d.campaignInsights.map((x) => h(x)).join(' · ') : 'no sender, domain, IP or host is shared between the chains'}</div></div>`
         : ''
     sections.push({
       id: 'chains',

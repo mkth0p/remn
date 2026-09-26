@@ -116,7 +116,7 @@ it('reads provenance out of a mail row using its own fields', () => {
 })
 
 it('an existing version-3 case opens on the current version without losing a row', async () => {
-  // The upgrades add a table and an index and rewrite no row, so they need no upgrade function. This opens a real v3 database and then the current schema.
+  // The upgrades add a table and an index and rewrite no evidence row; the one upgrade function (version 7) only gives findings their record keys. This opens a real v3 database and then the current schema.
   const { default: Dexie } = await import('dexie')
   const name = `upgrade-${Math.random()}`
   const old = new Dexie(name)
@@ -136,7 +136,7 @@ it('an existing version-3 case opens on the current version without losing a row
   const upgraded = new RemnDB(name)
   setDb(upgraded)
   await upgraded.open()
-  expect(upgraded.verno).toBe(6)
+  expect(upgraded.verno).toBe(7)
   // nothing was rewritten or lost
   expect((await upgraded.events.where('caseId').equals(1).toArray()).map((e) => e.id)).toEqual([1])
   expect((await upgraded.kv.get('chains-1'))?.value).toEqual({ chains: [] })

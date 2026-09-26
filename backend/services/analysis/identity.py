@@ -9,16 +9,20 @@ says why:
 - **strong**: one record states both (a logon's account name and SID, a sign-in's UPN and
   object id), or renames one to the other (4781);
 - **medium**: the organisation rules of the chains say they are one account: CONTOSO\\alice and
-  alice@contoso.com when CONTOSO is the first label of contoso.com or of an internal domain, or
-  when the case showed the two side by side; CN=alice,DC=contoso,DC=com and alice@contoso.com;
-  a bare account name when only one account of that name is in the case;
+  alice@contoso.com when the case showed the two side by side, when CONTOSO is the first label
+  of an internal domain, or when contoso.com is the one organisation's domain of the case CONTOSO
+  is the first label of (never contoso.co, a lookalike, beside it); CN=alice,DC=contoso,DC=com
+  and alice@contoso.com; a bare account name when only one account of that name is in the case
+  and it is not another organisation's;
 - **weak**: only a display name, or a bare name several accounts share, matches. It reads
   "possibly the same" and never merges two identities.
 
 Accounts of two organisations never join: alice@other-tenant.example is not
 alice@contoso.com, whatever else matches; the resolver names it a namesake, kept apart. A machine
 account (NAME$) never joins a user account unless one record renames one to the other, which is
-then said. Built-in accounts and well-known SIDs are identities of their own kind.
+then said. Built-in accounts and well-known SIDs are identities of their own kind; a SID in a
+name field is a SID. A record names the account its System header's SID is (the user a script
+block ran as) when that is a user's SID.
 
 The resolver reads identity records, not whole rows: the few fields an event or a mail names
 accounts by. A server-store case gives it the distinct combinations from SQL, so millions of
@@ -42,7 +46,11 @@ GROUP_TARGET_EVENTS = frozenset(
     {4727, 4728, 4729, 4730, 4731, 4732, 4733, 4734, 4735, 4737, *range(4744, 4765), 4799},
 )
 RENAME_EVENT = 4781
+_SID = re.compile(r"^s-1-\d+(?:-\d+)+$")
 _DOMAIN_SID = re.compile(r"^s-1-5-21-\d+-\d+-\d+-(\d+)$")
+# the null SID and the accounts Windows runs its own services as: every machine account's
+# records name them, so they would join all of those accounts into one
+_NO_ACCOUNT_SIDS = frozenset({"s-1-0-0", "s-1-5-18", "s-1-5-19", "s-1-5-20"})
 _GUID = re.compile(r"^\{?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\}?$")
 # the realms Windows writes its own accounts under, in English and French
 _BUILTIN_REALMS = frozenset(
@@ -71,7 +79,7 @@ _BUILTIN_NAMES = frozenset(
 _SERVICE_PREFIXES = ("svc", "healthmailbox", "msol_", "aad_", "sm_", "$", "iusr_", "iwam_")
 _EMPTY = frozenset({"", "-", "n/a", "unknown", "null", "none", "%%1793"})
 _SCOPED = frozenset({"addr", "netbios", "dn", "object", "sid"})
-_ROLE_RANK = {"subject": 0, "target": 1, "member": 2, "user": 3, "sender": 4, "reply-to": 5, "recipient": 6}
+_ROLE_RANK = {"subject": 0, "target": 1, "member": 2, "network": 3, "user": 4, "sender": 5, "reply-to": 6, "recipient": 7}
 
 
 def _clean(v: Any) -> str:
@@ -106,6 +114,8 @@ class Record:
     renames: list[tuple[Form, Form]] = field(default_factory=list)
     # how many records this one stands for (a distinct combination read from the server store)
     weight: int = 1
+    # the DNS domain of the host that logged it (ws-001.contoso.com gives contoso.com)
+    domain: str | None = None
 
 
 # --- the forms a record names ---------------------------------------------------------------------
@@ -115,17 +125,21 @@ def account_forms(user: Any, domain: Any = None, sid: Any = None) -> list[Form]:
     """
     The forms of one account as a record writes it: 'CONTOSO\\alice' or ('alice', 'CONTOSO') gives
     netbios contoso\\alice; 'alice@contoso.com', or ('alice', 'contoso.com'), gives addr; a bare
-    'alice' gives name; a SID gives sid.
+    'alice' gives name; a SID gives sid, in the SID field or in the name's (a firewall rule's
+    ModifyingUser), and is never a name.
     """
     raw = _clean(user).lower()
     dom = _clean(domain).lower()
     out: list[Form] = []
+    sids = [_clean(sid).lower()]
     if raw not in _EMPTY:
         base = raw.rsplit("\\", 1)[1].strip() if "\\" in raw else raw
         prefix = raw.rsplit("\\", 1)[0].strip() if "\\" in raw else dom
         realm, kind = identity_realm(raw, domain)
         if not base or base in _EMPTY:
             pass
+        elif _SID.match(base):
+            sids.insert(0, base)
         elif "@" in base:
             out.append(Form("addr", base))
         elif prefix in _BUILTIN_REALMS:
@@ -136,10 +150,26 @@ def account_forms(user: Any, domain: Any = None, sid: Any = None) -> list[Form]:
             out.append(Form("addr", f"{base}@{realm}"))
         else:
             out.append(Form("name", base))
-    s = _clean(sid).lower()
-    if s.startswith("s-1-") and s not in ("s-1-0-0", "s-1-5-18", "s-1-5-19", "s-1-5-20"):
-        out.append(Form("sid", s))
+    for s in dict.fromkeys(sids):
+        if _SID.match(s) and s not in _NO_ACCOUNT_SIDS:
+            out.append(Form("sid", s))
     return out
+
+
+def header_forms(sid: Any) -> list[Form]:
+    """
+    The account an event was logged under, from its System header (UserID): a script block, and
+    many operational logs, name their user only there. Windows' own and well-known SIDs name no one.
+    """
+    return [f for f in account_forms(None, None, sid) if kind_of(f) is None]
+
+
+def host_domain(computer: Any) -> str | None:
+    """The DNS domain of a host's name: contoso.com for WS-001.contoso.com, None for WS-001 or an address."""
+    c = _clean(computer).lower().strip(".")
+    if "." not in c or re.fullmatch(r"[\d.]+", c):
+        return None
+    return c.split(".", 1)[1] or None
 
 
 def dn_domain(dn: str) -> str | None:
@@ -221,6 +251,9 @@ def event_record(ev: dict[str, Any]) -> Record:
     # an address in the User field is read with the cloud fields below
     if user and ("\\" in user or "@" not in user):
         add(account_forms(user), "user")
+    # the account the event was logged under (its System header), a group of its own: the header
+    # does not say which of the accounts the record names it is
+    add(header_forms(ev.get("userSid")), "user")
     if eid == RENAME_EVENT:
         dom = data.get("TargetDomainName") or ev.get("targetDomain")
         old, new = account_forms(data.get("OldTargetUserName"), dom), account_forms(data.get("NewTargetUserName"), dom)
@@ -233,6 +266,8 @@ def event_record(ev: dict[str, Any]) -> Record:
     else:
         target = account_forms(ev.get("targetUser"), ev.get("targetDomain"), ev.get("targetSid"))
         add(target, "target")
+        # a NewCredentials logon (4624 type 9) names the account its session uses on the network, as explicit credentials (4648) name theirs
+        add(account_forms(ev.get("targetOutboundUser"), ev.get("targetOutboundDomain")), "network")
         shown = _clean(ev.get("displayName") or data.get("DisplayName"))
         if target and shown.lower() not in _EMPTY and eid in (4720, 4738, 4741, 4742):
             displays.append((shown.lower(), target[0], False))
@@ -256,7 +291,7 @@ def event_record(ev: dict[str, Any]) -> Record:
     if display and len(actor) == 1:
         displays.append((display.lower(), actor[0], False))
     groups, roles = _coalesce(groups, roles)
-    return Record(groups, roles, _ref(ev), displays, renames)
+    return Record(groups, roles, _ref(ev), displays, renames, domain=host_domain(ev.get("computer")))
 
 
 def mail_record(m: dict[str, Any]) -> Record:
@@ -304,10 +339,13 @@ _RECORD_COLUMNS = (
     "targetUser",
     "targetDomain",
     "targetSid",
+    "targetOutboundUser",
+    "targetOutboundDomain",
     "memberName",
     "memberSid",
     "upn",
     "displayName",
+    "userSid",
 )
 _RECORD_DATA = (
     "UserId",
@@ -332,8 +370,14 @@ def records_for_store(store: Any, limit: int = 200_000) -> tuple[list[Record], l
 
     cols = ", ".join(f'"{c}"' for c in _RECORD_COLUMNS)
     datas = ", ".join(f'json_extract_string(data, \'$."{k}"\') AS "d_{k}"' for k in _RECORD_DATA)
+    # the host's domain rather than its name (host_domain's reading): a bare name is read against
+    # it, and a case has few of them
+    domain = (
+        "CASE WHEN strpos(computer, '.') > 0 AND NOT regexp_matches(computer, '^[0-9.]+$') "
+        "THEN trim(lower(substr(computer, strpos(computer, '.') + 1)), '.') END AS \"hostDomain\""
+    )
     cur = store.cursor()
-    cur.execute(f"SELECT {cols}, {datas}, count(*) AS n, min(id) AS first FROM events GROUP BY ALL ORDER BY n DESC LIMIT {limit + 1}")
+    cur.execute(f"SELECT {cols}, {datas}, {domain}, count(*) AS n, min(id) AS first FROM events GROUP BY ALL ORDER BY n DESC LIMIT {limit + 1}")
     rows = rows_to_dicts(cur)
     truncated = len(rows) > limit
     records: list[Record] = []
@@ -344,6 +388,7 @@ def records_for_store(store: Any, limit: int = 200_000) -> tuple[list[Record], l
         ev["id"] = row.get("first")
         rec = event_record(ev)
         rec.weight = max(1, int(row.get("n") or 1))
+        rec.domain = row.get("hostDomain") or None
         records.append(rec)
         pairs.update(netbios_hints(ev))
     cur.execute(
@@ -468,10 +513,14 @@ def resolve(
         if first_ref.get(f) is None:
             first_ref[f] = ref
 
+    # the domains of the hosts each bare name was seen on
+    name_domains: dict[Form, set[str]] = {}
     for rec in recs:
         for g in rec.groups:
             for f in g:
                 see(f, rec.ref, rec.weight)
+                if f.kind == "name" and rec.domain:
+                    name_domains.setdefault(f, set()).add(rec.domain)
             scoped = [f for f in g if f.kind in _SCOPED]
             for i, a in enumerate(scoped):
                 for b in scoped[i + 1 :]:
@@ -485,23 +534,42 @@ def resolve(
             elif _name_tokens(name) != _name_tokens(base_name(form)):
                 display_of.setdefault(form, set()).add(name)
 
-    # medium: a NetBIOS form and an address, a DN and an address, by the organisation rules
+    # medium: a NetBIOS form and an address, a DN and an address, by the organisation rules. CONTOSO
+    # names the domain the case shows it beside, else the internal domain it is the first label of,
+    # else the one organisation of the case whose domain it is the first label of: beside
+    # contoso.com, alice@contoso.co (a lookalike an attacker can register) leaves CONTOSO\alice
+    # joined to neither address, only possibly either
     by_local: dict[str, list[Form]] = {}
+    domains: set[str] = set(internal)
     for f in seen:
         if f.kind == "addr":
             by_local.setdefault(f.value.split("@", 1)[0], []).append(f)
+            domains.add(f.value.split("@", 1)[1])
+        elif f.kind == "dn" and (d := dn_domain(f.value)):
+            domains.add(d)
+    by_label: dict[str, list[str]] = {}
+    for d in sorted(domains):
+        orgs_of_label = by_label.setdefault(d.split(".")[0], [])
+        if not any(same_org_domain(d, o, internal) for o in orgs_of_label):
+            orgs_of_label.append(d)
+    # (NetBIOS form, address, why they are not joined, whether they may be one account)
+    doubts: list[tuple[Form, Form, str, bool]] = []
     for f in list(seen):
         if f.kind == "netbios":
             dom, user = f.value.rsplit("\\", 1)
             if dom in _BUILTIN_REALMS:
                 continue
+            said = sorted(netbios_map.get(dom) or {d for d in internal if d.split(".")[0] == dom})
+            homes = said or by_label.get(dom, [])
             for a in by_local.get(user, []):
                 adom = a.value.split("@", 1)[1]
-                labels = {adom.split(".")[0]} | {d.split(".")[0] for d in internal if same_org_domain(d, adom, internal)}
-                side = any(same_org_domain(adom, d, internal) for d in netbios_map.get(dom, set()))
-                foreign = bool(netbios_map.get(dom)) and not side
-                if (dom in labels or side) and not foreign:
+                home = any(same_org_domain(adom, d, internal) for d in homes)
+                if home and (said or len(homes) == 1):
                     add_join(f, a, "the same account in its organisation (the NetBIOS name of its domain)", MEDIUM, first_ref.get(f))
+                elif home:
+                    doubts.append((f, a, f"{dom.upper()} is the first label of {' and '.join(homes)}, and the case does not say which one it names", True))
+                elif adom.split(".")[0] == dom:
+                    doubts.append((f, a, f"{adom} starts with {dom.upper()}, but {dom.upper()} is the NetBIOS name of {' and '.join(homes)}", False))
         elif f.kind == "dn":
             dom = dn_domain(f.value)
             for a in by_local.get(dn_cn(f.value), []):
@@ -567,22 +635,42 @@ def resolve(
         for f in fs:
             if f.kind in ("addr", "netbios", "dn"):
                 scoped_by_name.setdefault(base_name(f), set()).add(root)
+
+    def at_home(root: Form, homes: set[str]) -> bool:
+        """Is the account of the organisation of these domains (the internal ones, those of the hosts a bare name was seen on)? Unknown is not foreign."""
+        where = orgs.get(find(root)) or set()
+        labels = {h.split(".")[0] for h in homes}
+        return (
+            not where
+            or any(same_org_domain(o, h, internal) for o in where for h in homes)
+            or any(x.kind == "netbios" and x.value.rsplit("\\", 1)[0] in labels for x in comps[root])
+        )
+
     ambiguous: dict[Form, set[Form]] = {}
+    abroad: list[tuple[Form, Form, str]] = []
     for fs in list(comps.values()):
         if any(f.kind in ("addr", "netbios", "dn", "object") for f in fs):
             continue
         for f in fs:
             if f.kind != "name":
                 continue
-            roots = {find(r) for r in scoped_by_name.get(f.value, set())}
-            if len(roots) == 1:
-                target = next(iter(roots))
+            # the scoped accounts' own components: a bare name joins one, it never merges two
+            cands = scoped_by_name.get(f.value, set())
+            if len(cands) == 1:
+                target = next(iter(cands))
                 anchor = min((x for x in comps[target] if x.kind in ("addr", "netbios", "dn")), key=lambda x: (_RANK[x.kind], x.value))
+                homes = internal | name_domains.get(f, set())
+                # another organisation's account is never the one a bare name means: possibly, at most
+                if homes and not at_home(target, homes):
+                    where = min(orgs.get(find(target)) or {""})
+                    why = f"the bare name {f.value} is that account's name, but {where} is neither internal nor the domain of a host it was seen on"
+                    abroad.append((f, anchor, why))
+                    continue
                 j = _Join(f, anchor, "the only account of that name in the case", MEDIUM, first_ref.get(f))
                 if try_union(j):
                     kept.append(j)
-            elif len(roots) > 1:
-                ambiguous[f] = roots
+            elif len(cands) > 1:
+                ambiguous[f] = cands
 
     comps = {}
     for f in seen:
@@ -642,12 +730,29 @@ def resolve(
                 f"written both as a machine account ({as_machine[0].value}) and without the $ ({as_user[0].value}): renaming a machine account "
                 "to a name without its $ is how sAMAccountName spoofing (CVE-2021-42278) begins"
             )
+        # one name stated with two SIDs of one domain: a SID is never reused, so these are two accounts
+        by_domain: dict[str, list[str]] = {}
+        for f in fs:
+            if f.kind == "sid" and (m := _DOMAIN_SID.match(f.value)):
+                by_domain.setdefault(f.value[: m.start(1) - 1], []).append(f.value)
+        for sids in by_domain.values():
+            if len(sids) > 1:
+                by_id[by_form[root]]["notes"].append(
+                    f"{len(sids)} SIDs of one domain under one name ({', '.join(sorted(sids)[:3])}{', ...' if len(sids) > 3 else ''}): the account was "
+                    "deleted and created again, or accounts of that name followed each other, and their records are read as one account's"
+                )
     possibly: dict[Form, list[str]] = {}
     for f, roots in ambiguous.items():
         others = sorted({by_form[r] for r in roots})
         possibly[f] = others
         for o in others:
             _relate(by_id, by_form[f], o, f"the bare name {f.value} is written the same by {len(others)} accounts", first_ref.get(f))
+    # a name the organisation rules would join, but to another organisation's account or to one of
+    # several: possibly the same, or a namesake, never merged
+    for f, other, why, maybe in [*((f, a, why, True) for f, a, why in abroad), *doubts]:
+        if maybe and by_form[other] not in (by_form[f], *possibly.get(f, [])):
+            possibly.setdefault(f, []).append(by_form[other])
+        _relate(by_id, by_form[f], by_form[other], why, first_ref.get(f))
     # a display name, or a mail header's, that is another account's name: possibly the same, and
     # in another organisation a namesake (never merged either way)
     by_tokens: dict[tuple[str, ...], set[str]] = {}

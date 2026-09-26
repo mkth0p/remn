@@ -6,7 +6,7 @@ import uuid
 
 import pytest
 
-from services.analysis.identity import MEDIUM, STRONG, WEAK, Form, event_record, kind_of, records_for_store, resolve
+from services.analysis.identity import MEDIUM, STRONG, WEAK, Form, account_forms, event_record, header_forms, kind_of, records_for_store, resolve
 from services.store.casestore import StoreRegistry
 from services.store.writers import EventWriter, MailWriter
 
@@ -174,6 +174,137 @@ def test_a_renamed_machine_account_stays_one_identity_and_says_so():
     assert r.of_form(Form("netbios", "offsec\\rootdc1")) == acct["id"]
     assert any(j["basis"] == "renamed from offsec\\compnay-88$ to offsec\\rootdc1" for j in acct["joins"])
     assert any("sAMAccountName spoofing" in n for n in acct["notes"])
+
+
+def test_the_sid_an_event_was_logged_under_names_its_account():
+    """A script block (4104) names its user only in its System header (UserID); a logon joins that SID to the account."""
+    host = "WS-001.northstar.example"
+    events = [
+        _logon(1, "alice.martin", "NORTHSTAR", ALICE_SID, host=host),
+        {"id": 2, "eventId": 4104, "computer": host, "userSid": ALICE_SID, "scriptBlockText": "IEX (New-Object Net.WebClient)"},
+        # Sysmon logs as SYSTEM: its header names no one, its User field does
+        {"id": 3, "eventId": 1, "computer": host, "userSid": "S-1-5-18", "user": "NORTHSTAR\\alice.martin"},
+        # nor does a service's own SID
+        {"id": 4, "eventId": 2004, "computer": host, "userSid": "S-1-5-80-3088073201-1464728630-1879813800-1107566885-823218052"},
+    ]
+    r = resolve(events, (), SETTINGS)
+    alice = _ident(r, "netbios", "northstar\\alice.martin")
+    assert [(iid, role) for iid, role, _ in r.of_event(events[1])] == [(alice["id"], "user")]
+    assert [iid for iid, _, _ in r.of_event(events[2])] == [alice["id"]]
+    assert r.of_event(events[3]) == []
+    # the header does not say which of a record's accounts it is: it is joined to none of them
+    rec = event_record({"eventId": 4104, "userSid": ALICE_SID, "subjectUser": "bob", "subjectDomain": "NORTHSTAR"})
+    assert rec.groups == [[Form("netbios", "northstar\\bob")], [Form("sid", ALICE_SID.lower())]]
+    assert header_forms("S-1-5-21-111-222-333-500") == [Form("sid", "s-1-5-21-111-222-333-500")]
+
+
+def test_a_new_credentials_logon_names_the_account_it_uses_on_the_network():
+    """runas /netonly (4624 type 9) keeps the account's own name and uses another on the network: the record names both, as explicit credentials (4648) do."""
+    rec = event_record(
+        {
+            "eventId": 4624,
+            "logonType": 9,
+            "targetUser": "daniel.roy",
+            "targetDomain": "NORTHSTAR",
+            "targetOutboundUser": "admin.bob",
+            "targetOutboundDomain": "NORTHSTAR",
+        }
+    )
+    assert list(zip(rec.groups, rec.roles, strict=True)) == [
+        ([Form("netbios", "northstar\\daniel.roy")], "target"),
+        ([Form("netbios", "northstar\\admin.bob")], "network"),
+    ]
+    # the same account on the network is one group, at its surer role
+    same = event_record(
+        {
+            "eventId": 4624,
+            "logonType": 9,
+            "targetUser": "daniel.roy",
+            "targetDomain": "NORTHSTAR",
+            "targetOutboundUser": "daniel.roy",
+            "targetOutboundDomain": "NORTHSTAR",
+        }
+    )
+    assert same.roles == ["target"]
+
+
+@pytest.mark.parametrize(
+    "sid",
+    [
+        "S-1-5-80-3088073201-1464728630-1879813800-1107566885-823218052",  # a service's (the firewall's)
+        "S-1-5-82-3006700770-424185619-1745488364-794895919-4004696415",  # an IIS application pool's
+        "S-1-5-83-1-1234567890-1234567890-1234567890-1234567890",  # a virtual machine's
+        "S-1-5-90-0-1",  # Window Manager's
+        "S-1-5-96-0-1",  # the font driver host's
+        "S-1-5-32-544",  # BUILTIN\Administrators
+        "S-1-5-21-111-222-333-512",  # the domain's admins
+    ],
+)
+def test_a_sid_written_where_a_name_goes_is_a_sid_of_no_person(sid):
+    """A firewall rule's ModifyingUser is a SID: it is read as one, and a service's SID is no one a story is about."""
+    assert account_forms(sid) == [Form("sid", sid.lower())]
+    assert account_forms(sid, None, sid) == [Form("sid", sid.lower())]
+    assert kind_of(Form("sid", sid.lower())) == "builtin" and header_forms(sid) == []
+    r = resolve([{"id": 1, "eventId": 2004, "computer": "WS-001", "subjectUser": sid}], (), SETTINGS)
+    ident = _ident(r, "sid", sid.lower())
+    assert ident["kind"] == "builtin" and [f["kind"] for f in ident["forms"]] == ["sid"]
+    assert r.of_form(Form("name", sid.lower())) is None
+
+
+def test_a_netbios_name_joins_the_one_domain_it_starts_never_a_lookalike():
+    """With no internal domain set, CONTOSO is the first label of contoso.com and of contoso.co, an attacker's lookalike."""
+    events = [_logon(1, "alice", "CONTOSO", host="WS-001")]
+    lookalike = {"id": 1, "fromAddr": "alice@contoso.co", "to": [{"addr": "bob@contoso.com"}]}
+    real = {"id": 2, "fromAddr": "bob@contoso.com", "to": [{"addr": "alice@contoso.com"}]}
+    # the lookalike alone beside the organisation's own mail, then both addresses
+    for mails, maybe in (([lookalike], {"alice@contoso.co"}), ([lookalike, real], {"alice@contoso.co", "alice@contoso.com"})):
+        r = resolve(events, mails, {})
+        alice = _ident(r, "netbios", "contoso\\alice")
+        assert [f["value"] for f in alice["forms"]] == ["contoso\\alice"], mails
+        assert {p["label"] for p in alice["possibly"]} == maybe
+        assert all("the case does not say which one it names" in p["basis"] for p in alice["possibly"])
+    # the record names contoso\alice, and each address only possibly
+    assert sorted(c for _, _, c in r.of_event(events[0])) == [STRONG, WEAK, WEAK]
+    # one domain of the case starts with CONTOSO: that is its domain
+    r = resolve(events, [real], {})
+    assert _ident(r, "netbios", "contoso\\alice")["label"] == "alice@contoso.com"
+    # the internal domain says which: the lookalike is a namesake, kept apart
+    r = resolve(events, [lookalike, real], {"internal_domains": ["contoso.com"]})
+    alice = _ident(r, "netbios", "contoso\\alice")
+    assert alice["label"] == "alice@contoso.com" and not alice["possibly"]
+    assert [n["label"] for n in alice["namesakes"]] == ["alice@contoso.co"] and "kept apart" in alice["namesakes"][0]["basis"]
+
+
+def test_a_bare_name_never_joins_another_organisations_account():
+    events = [
+        # a guess from outside names the bare account on a Northstar host
+        {"id": 1, "eventId": 4625, "computer": "WS-001.northstar.example", "targetUser": "alice.martin", "ipAddress": "203.0.113.9", "logonType": 3},
+        _signin(2, "alice.martin@other-tenant.example", "7c1b2a90-0000-4000-8000-000000000002"),
+    ]
+    r = resolve(events, (), SETTINGS)
+    bare, other = _ident(r, "name", "alice.martin"), _ident(r, "addr", "alice.martin@other-tenant.example")
+    assert bare["id"] != other["id"]
+    assert [p["id"] for p in bare["possibly"]] == [other["id"]] and "neither internal nor the domain of a host" in bare["possibly"][0]["basis"]
+    assert {r.by_id[i]["label"]: c for i, _, c in r.of_event(events[0])} == {"alice.martin": STRONG, "alice.martin@other-tenant.example": WEAK}
+    # seen on a host of that organisation, the bare name is its account
+    events[0]["computer"] = "OTHER-WS-001.other-tenant.example"
+    r = resolve(events, (), SETTINGS)
+    assert r.of_form(Form("name", "alice.martin")) == r.of_form(Form("addr", "alice.martin@other-tenant.example"))
+
+
+def test_one_name_under_two_sids_of_its_domain_is_noted():
+    """SIDs are never reused: bob deleted and created again is a new account under the old name."""
+    events = [
+        _logon(1, "bob", "NORTHSTAR", "S-1-5-21-111-222-333-1105"),
+        _logon(2, "bob", "NORTHSTAR", "S-1-5-21-111-222-333-2231"),
+        # an account migrated from another domain keeps its old SID beside its new one: no note
+        _logon(3, "carol", "NORTHSTAR", "S-1-5-21-111-222-333-1301"),
+        _logon(4, "carol", "NORTHSTAR", "S-1-5-21-777-888-999-1301"),
+    ]
+    r = resolve(events, (), SETTINGS)
+    [note] = _ident(r, "netbios", "northstar\\bob")["notes"]
+    assert note.startswith("2 SIDs of one domain under one name (s-1-5-21-111-222-333-1105, s-1-5-21-111-222-333-2231)") and "deleted and created again" in note
+    assert not _ident(r, "netbios", "northstar\\carol")["notes"]
 
 
 def test_the_server_store_gives_the_same_identities_as_the_rows(tmp_path):

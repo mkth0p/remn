@@ -8,10 +8,12 @@ import { buildIncidents } from '../rules/incidents'
 import { toast, useStore } from '../state/store'
 import { fmtNum, renderMarkdown } from '../util/format'
 import { downloadBlob, exportCaseBundle, importCaseBundle } from '../util/export'
+import { navigatorLayer, timelineRecords, toTimelineCsv, toTimesketchJsonl } from '../util/responderExports'
+import { buildReportDocx, DOCX_MIME } from '../data/reportDocx'
 import { Badge, Spinner } from '../components/ui'
 import { Dropzone } from '../components/Dropzone'
 import { renderGraphPng } from '../components/ChainGraph'
-import { buildReportHtml, loadReportFont, type AiUsage } from '../data/reportHtml'
+import { buildReportHtml, loadReportFont, type AiUsage, type ReportData } from '../data/reportHtml'
 import { summariseLedger } from '../ai/ledger'
 import { draftExecutiveSummary } from '../data/reportSummary'
 import { buildCampaignGraph } from '../data/chainGraph'
@@ -23,7 +25,8 @@ import { loadEvidenceGaps, type GapStatement } from '../data/evidenceGaps'
 import { loadRules, settingsForRules } from '../data/rules'
 import { measuredOn, readMeasure, type MeasureReading } from '../data/ruleMeasures'
 import { loadReportClaims, type ReportClaims } from '../data/claims'
-import { loadStories, loadStoryNotes, reportStories, storyRowIds, type Story, type StoryNotes } from '../data/stories'
+import { buildStories, loadStories, loadStoryNotes, storiesStaleness, storyInputs, storyRowIds, type StoryNotes, type StoryResult } from '../data/stories'
+import { loadStoryDecisions, storiesForReport, type StoryDecisions } from '../data/storyDecisions'
 import type { Rule } from '../rules/engine'
 
 const ORDER = ['critical', 'high', 'medium', 'low', 'info']
@@ -40,9 +43,13 @@ export function ReportView() {
   const [evidence, setEvidence] = useState<Evidence[]>([])
   const [findings, setFindings] = useState<Finding[]>([])
   const [chains, setChains] = useState<Chain[]>([])
-  /** the case's stories and the analyst's notes on them */
-  const [stories, setStories] = useState<Story[]>([])
+  /** the case's stories, the analyst's notes on them, and why the stories no longer read the case as it is */
+  const [storyResult, setStoryResult] = useState<StoryResult | null>(null)
   const [storyNotes, setStoryNotes] = useState<StoryNotes>({})
+  /** the analyst's decisions on the stories (data/storyDecisions.ts), applied to them as the Stories page applies them */
+  const [storyDecisions, setStoryDecisions] = useState<StoryDecisions>({})
+  const [storiesStale, setStoriesStale] = useState<string[]>([])
+  const [rebuilding, setRebuilding] = useState(false)
   const [coverageWarnings, setCoverageWarnings] = useState<string[]>([])
   const [reviews, setReviews] = useState<Record<string, ChainReview>>({})
   const [relationships, setRelationships] = useState<RelationshipReview[]>([])
@@ -115,14 +122,24 @@ export function ReportView() {
       setChains(r?.chains ?? [])
       setCoverageWarnings(chainCoverageWarnings(r?.stats))
     })
-    loadStories(kase.id).then((r) => setStories(r?.stories ?? []))
+    loadStories(kase.id).then(async (r) => {
+      setStoryResult(r)
+      setStoriesStale(r ? storiesStaleness(r, await storyInputs(kase)) : [])
+    })
     loadStoryNotes(kase.id).then(setStoryNotes)
+    loadStoryDecisions(kase.id).then(setStoryDecisions)
     loadChainReviews(kase.id).then(setReviews)
     reportRelationships(kase.id).then(setRelationships)
     loadReportSettings(kase.id).then(setSettings)
   }, [kase, rulesVersion])
   const selection = useMemo(() => (settings ? selectForReport(findings, chains, reviews, settings) : { findings: [], chains: [] }), [findings, chains, reviews, settings])
-  const printedStories = useMemo(() => (settings ? reportStories(stories, storyNotes, settings.minSeverity, settings.onlyReviewed) : { stories: [], left: 0 }), [stories, storyNotes, settings])
+  const printedStories = useMemo(
+    () =>
+      settings
+        ? storiesForReport(storyResult, storyNotes, storyDecisions, findings, settings.minSeverity, settings.onlyReviewed, 20)
+        : { stories: [], left: 0, orphans: 0, dismissed: 0, decided: [], decisionsOrphaned: 0 },
+    [storyResult, storyNotes, storyDecisions, findings, settings],
+  )
   // graph pictures for the report, drawn off-screen from the same models as the Chains page
   const [graphs, setGraphs] = useState<Record<string, string>>({})
   useEffect(() => {
@@ -181,6 +198,8 @@ export function ReportView() {
   // same unit as the Review page: incidents without a decision plus chains without a verdict
   const undecided = buildIncidents(findings, { chains }).filter((i) => (i.kind === 'chain' && i.chain ? !reviews[i.chain.id]?.verdict : i.status === 'new')).length
   const hiddenConfirmed = unprintedConfirmed(findings, chains, reviews, selection)
+  // a confirmed story the report leaves out (below the floor, past the first twenty) is a confirmed item not printed too
+  const hiddenStories = printedStories.decided.filter((s) => s.verdict === 'confirmed' && !s.printed).length
   const printedChecks = shown.map((f) => (f.id != null ? claims?.findings[f.id] : undefined)).filter((c) => !!c)
   const claimSummary = claims && {
     checked: printedChecks.length,
@@ -196,8 +215,20 @@ export function ReportView() {
     }),
     ...(claims?.texts ?? []).filter((t) => t.check.status !== 'verified').map((t) => ({ what: t.what, status: t.check.status, reasons: t.check.reasons })),
   ]
-  const checks = preflightChecks({ evidence, rules: rulesState, undecided, aiDecided: aiDecided(findings), unprintedConfirmed: hiddenConfirmed.length, claims: claimSummary })
+  const checks = preflightChecks({ evidence, rules: rulesState, undecided, aiDecided: aiDecided(findings), unprintedConfirmed: hiddenConfirmed.length + hiddenStories, claims: claimSummary })
   const status = issueStatus(checks, issue)
+  /** The stories read again from the case as it is now; the page reloads what it prints once they are. */
+  const rebuildStories = async () => {
+    setRebuilding(true)
+    try {
+      await buildStories(kase)
+      useStore.getState().bumpRules()
+    } catch (e) {
+      toast('err', `the stories could not be built: ${(e as Error).message}`)
+    } finally {
+      setRebuilding(false)
+    }
+  }
   const updateIssue = (next: ReportIssue) => {
     setIssue(next)
     void saveReportIssue(kase.id!, next)
@@ -218,50 +249,66 @@ export function ReportView() {
     }
   }
 
-  // the report made now (download, print, a tab), or at a given time (the preview, drawn during render)
-  const html = (generatedAt?: number) =>
-    buildReportHtml({
-      kase,
-      generatedAt,
-      settings,
-      summary,
-      summaryBy,
-      summaryAt,
-      falsePositives: buildIncidents(findings, { chains }).filter((i) => (i.kind === 'chain' && i.chain ? reviews[i.chain.id]?.verdict === 'benign' : i.status === 'false_positive')).length,
-      evidence,
-      chains: selection.chains,
-      reviews,
-      coverageWarnings,
-      relationships,
-      membersOf,
-      graphs,
-      campaignInsights:
-        settings.includeGraphs && selection.chains.length > 1
-          ? buildCampaignGraph(selection.chains)
-              .insights.slice(0, 8)
-              .map((x) => x.text)
-          : [],
-      incidents,
-      findings: shown,
-      iocs,
-      timeline: curated,
-      tasks,
-      notes: analystNotes,
-      undecided,
-      unprintedConfirmed: hiddenConfirmed,
-      issue: { status: status.status, finalAt: status.finalAt, open: status.open, waived: status.waived },
-      rules: rulesState,
-      iocsTotal: iocCounts.total,
-      iocsChecked: iocCounts.checked,
-      fontData,
-      ai: aiUsage,
-      gaps,
-      measures,
-      measuredOn: measuredOn(measureSources),
-      claims,
-      stories: printedStories.stories,
-      storiesLeft: printedStories.left,
-    })
+  // the report made now (download, print, a tab, Word), or at a given time (the preview, drawn during render)
+  const reportData = (generatedAt?: number): ReportData => ({
+    kase,
+    generatedAt,
+    settings,
+    summary,
+    summaryBy,
+    summaryAt,
+    falsePositives: buildIncidents(findings, { chains }).filter((i) => (i.kind === 'chain' && i.chain ? reviews[i.chain.id]?.verdict === 'benign' : i.status === 'false_positive')).length,
+    evidence,
+    chains: selection.chains,
+    reviews,
+    coverageWarnings,
+    relationships,
+    membersOf,
+    graphs,
+    campaignInsights:
+      settings.includeGraphs && selection.chains.length > 1
+        ? buildCampaignGraph(selection.chains)
+            .insights.slice(0, 8)
+            .map((x) => x.text)
+        : [],
+    incidents,
+    findings: shown,
+    iocs,
+    timeline: curated,
+    tasks,
+    notes: analystNotes,
+    undecided,
+    unprintedConfirmed: hiddenConfirmed,
+    issue: { status: status.status, finalAt: status.finalAt, open: status.open, waived: status.waived },
+    rules: rulesState,
+    iocsTotal: iocCounts.total,
+    iocsChecked: iocCounts.checked,
+    fontData,
+    ai: aiUsage,
+    gaps,
+    measures,
+    measuredOn: measuredOn(measureSources),
+    claims,
+    stories: printedStories.stories,
+    storiesLeft: printedStories.left,
+    storyIncidents: storyResult?.incidents,
+    storyStats: storyResult?.stats,
+    storiesStale,
+    storyNotesOrphaned: printedStories.orphans,
+    decidedStories: printedStories.decided,
+    storiesDismissed: printedStories.dismissed,
+    storyDecisionsOrphaned: printedStories.decisionsOrphaned,
+  })
+  const html = (generatedAt?: number) => buildReportHtml(reportData(generatedAt))
+  const fileBase = kase.name.replace(/[^a-z0-9_-]+/gi, '_')
+  // what a responder carries into their own tools: every finding but the false positives, and the analyst's timeline
+  const responderFindings = findings.filter((f) => f.status !== 'false_positive')
+  const exportTimeline = (format: 'jsonl' | 'csv') => {
+    const { records, untimed } = timelineRecords({ findings: responderFindings, notes: curated })
+    if (format === 'jsonl') downloadBlob(`${fileBase}-timeline.jsonl`, new Blob([toTimesketchJsonl(records)], { type: 'application/x-ndjson' }))
+    else downloadBlob(`${fileBase}-timeline.csv`, new Blob(['\ufeff' + toTimelineCsv(records)], { type: 'text/csv;charset=utf-8' }))
+    if (untimed) toast('ok', `${fmtNum(records.length)} line(s) exported; ${fmtNum(untimed)} item(s) without an event time left out`)
+  }
   /** The report in its own tab: the browser's own print-to-PDF, or to keep it open next to the case. */
   const openReport = () => {
     const url = URL.createObjectURL(new Blob([html()], { type: 'text/html' }))
@@ -313,8 +360,15 @@ export function ReportView() {
         <button className="btn sm" onClick={generateSummary} disabled={busy}>
           {busy ? <Spinner /> : <IconAi />} AI executive summary
         </button>
-        <button className="btn sm primary" onClick={() => downloadBlob(`${kase.name.replace(/[^a-z0-9_-]+/gi, '_')}-report.html`, new Blob([html()], { type: 'text/html' }))}>
+        <button className="btn sm primary" onClick={() => downloadBlob(`${fileBase}-report.html`, new Blob([html()], { type: 'text/html' }))}>
           <IconDownload /> download HTML
+        </button>
+        <button
+          className="btn sm"
+          title="the same report as a Word document to edit before it goes out (the graphs stay in the HTML report)"
+          onClick={() => downloadBlob(`${fileBase}-report.docx`, new Blob([buildReportDocx(reportData()) as BlobPart], { type: DOCX_MIME }))}
+        >
+          <IconDownload /> Word
         </button>
         <button className="btn sm" onClick={openReport}>
           open in a tab
@@ -331,6 +385,16 @@ export function ReportView() {
             <span className="spacer" />
             <button className="btn xs" onClick={() => setView('review')}>
               go to Review
+            </button>
+          </div>
+        )}
+        {storiesStale.length > 0 && storyResult && (
+          <div className="bulkbar" role="status" style={{ background: 'var(--sev-medium-bg)', borderColor: 'rgba(217,130,43,0.35)', color: 'var(--sev-medium)', borderRadius: 'var(--radius)' }}>
+            <b>The stories are out of date.</b>
+            <span>{storiesStale.join('; ')}. The report says so until they are built again.</span>
+            <span className="spacer" />
+            <button className="btn xs" onClick={rebuildStories} disabled={rebuilding}>
+              {rebuilding ? <Spinner /> : null} rebuild stories
             </button>
           </div>
         )}
@@ -433,6 +497,29 @@ export function ReportView() {
                 <Badge sev={settings.includeTimeline ? 'ok' : 'info'}>timeline {curated.length}</Badge>
                 <Badge sev={settings.includeTasks ? 'ok' : 'info'}>tasks {tasks.length}</Badge>
                 <Badge sev={settings.includeNotes ? 'ok' : 'info'}>notes {analystNotes.length}</Badge>
+              </div>
+            </div>
+            <div className="panel">
+              <div className="panel-h">responder exports</div>
+              <div className="panel-b col">
+                <div className="row wrap" style={{ gap: 8 }}>
+                  <button className="btn sm" onClick={() => exportTimeline('jsonl')}>
+                    <IconDownload /> timeline for Timesketch (.jsonl)
+                  </button>
+                  <button className="btn sm" onClick={() => exportTimeline('csv')}>
+                    <IconDownload /> timeline for Timeline Explorer (.csv)
+                  </button>
+                  <button
+                    className="btn sm"
+                    onClick={() => downloadBlob(`${fileBase}-attack-layer.json`, new Blob([JSON.stringify(navigatorLayer(kase, responderFindings), null, 2)], { type: 'application/json' }))}
+                  >
+                    <IconDownload /> ATT&amp;CK Navigator layer
+                  </button>
+                </div>
+                <div className="hint">
+                  Every finding except the false positives, whatever the report's floor, and the case timeline entries. Times are UTC. The layer colours each technique by the worst severity of its
+                  findings. The Events page exports its filtered rows as a timeline too.
+                </div>
               </div>
             </div>
             <div className="panel">

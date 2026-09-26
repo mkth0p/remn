@@ -43,4 +43,16 @@ describe('CaseView', () => {
     expect(screen.getByText('mails S01')).toBeTruthy()
     expect(screen.getByText(/2 timeline entries/)).toBeTruthy()
   })
+
+  it('opens a story step added to the timeline at that step, not only its story', async () => {
+    await addTimelineEntry(1, { ts: 3000, text: 'daniel: log cleared', link: { source: 'stories', id: 'story-1#event:2', label: 'daniel: log cleared' }, severity: 'high' })
+    useStore.setState({ focusChain: null })
+    await act(async () => {
+      render(<CaseView />)
+    })
+    await waitFor(() => expect(screen.getByText('daniel: log cleared')).toBeTruthy())
+    fireEvent.click(screen.getByTitle('open the linked row'))
+    expect(useStore.getState().focusChain).toBe('story-1#event:2')
+    expect(useStore.getState().view).toBe('stories')
+  })
 })
