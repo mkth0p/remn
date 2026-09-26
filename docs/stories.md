@@ -195,17 +195,44 @@ chunks, logs that start after the first finding, exports cut at a service limit)
 ## Notes and claim checks
 
 An analyst's note on a story is checked against the story's own records: every address, hash
-and case name it gives should be in them, and the page says which are not. A note is kept by
-what the story is about and the UTC day it starts, so it outlives a rebuild and a case export.
+and case name it gives should be in them, and the page says which are not, when the note is
+saved and each time it is shown again.
+
+A note holds on to what its story is about: the forms its person's account goes by (or the
+host's name) and the findings on its steps. New evidence can rename a story (an address form
+becomes its label), move its first day (an earlier logon) and change its id and its rows; a
+rebuild gives the note to the story of the same kind that keeps most of those forms and
+findings, as long as it shares a form other than a bare account name (a namesake in another
+organisation shares that) and one of the note's findings or a start within three days. Each
+story takes one note. Notes saved before notes held on to their story are still read, by the
+key they were saved under (the story's kind, label and UTC day of its start) or by a story of
+the same subject near that day. A note no story holds any more is not dropped: the page says
+so and lists it under the stories ("Notes whose story is gone"), to attach to the open story
+(after the note it has) or delete; the report counts it.
+
+The page asks before switching stories, leaving the Stories list or rebuilding throws away a
+note being typed, and a note is saved in one database transaction, so two tabs saving notes
+at once keep both.
+
+**Ask the analyst** hands a story to the AI view. The request is the analyst's words; what the
+story took from the records (the subject's name, step titles such as a mail's subject or a
+command line, the reasons, where it stops) goes between `<evidence>` markers as a tool result
+does, with REMN's notice when some of it addresses a model, so a record cannot speak as the
+analyst.
 
 ## In the report
 
 The report prints the stories at or above its severity floor, the highest-scoring first and at
 most twenty, before the chains: each with its phases in the order they happened, what marks
 each (its worst findings, else its first step), the analyst's note (checked against the
-story's records like a chain's narrative) and where its evidence stops. With "reviewed items
-only", a story prints when it has a note. A story is how the case reads, not a decision: the
-verdict on the cover still comes from the chains and incidents the review decided.
+story's records like a chain's narrative) and where its evidence stops: its hosts' coverage and
+a story no record shows starting (no initial access). Above the stories it says what the build
+could not read (every cut the page lists, below) and, when the stories no longer read the case
+as it is, that they are out of date and why; the Report page offers to rebuild them. The same
+lines go to "Where it stops" at the end, and the number of notes whose story is gone is
+printed too. With "reviewed items only", a story prints when it has a note. A story is how the
+case reads, not a decision: the verdict on the cover still comes from the chains and incidents
+the review decided.
 
 ## Explore
 
@@ -225,24 +252,44 @@ logons, sessions, processes, shares, services and tasks on the flagged hosts, wi
 (6, 91), WMI-Activity (5858) and DNS client (3008) events, the process creations and script
 blocks that reach another host, and their Sysmon DNS answers that give a private address (at
 most 20,000); the DHCP leases (at most 20,000, whatever their time, since the audit log's local
-times carry no zone and are kept without one); the high-risk mails and the mails the flagged
-people sent. A build reads at most 50,000 flagged records and
-50,000 records around them (a server case, 50,000 of each of the three kinds), and 5,000 of the
-mails the flagged people sent. A selection past its cap reads first the records that are
+times carry no zone and are kept without one); the mails the findings cite (at most 5,000), the
+300 riskiest others (a risk of 45 or more) and the mails the flagged people sent. A build reads
+the first 2,000 records each finding cites, at most 50,000 flagged records and 50,000 records
+around them (a browser case under one cap for the three kinds, a server case 50,000 of each),
+and 5,000 of the mails the flagged people sent; past 40 separate windows the flags are read as
+one span from the first to the last. A selection past its cap reads first the records that are
 something (a scheduled task, a service installed, an account or a group changed, a log cleared,
 explicit credentials, a mailbox rule or permission, a consent), then those nearest a flag in
 time, so what a cut loses is the routine far from every flag, not the late phases. A server case
 selects by at most 2,000 account names, 500 flagged hosts and 500 outside addresses, those the
-most flagged records name first. When a selection or its keys are cut the stats say which
-(`truncated`) and the page says so, and an absent step is then not a negative result. The
-browser posts only the fields the engine reads (`STORY_EVENT_FIELDS`, compared with
-the Python by a test). A build also returns the phishing chains of the same rows, kept for the
-review and the report as before.
+most flagged records name first, and the stats say which keys were cut (`truncated`).
 
-The snapshot is stored with the case and cleared with it when evidence is removed; it is not in
-a case export, since its references name this database's rows: the importing case reads its
-stories again when the page opens. A case with findings and no snapshot is read into stories
-when the page opens.
+Every cut is named, with what it left out when the page knows: the findings that cite more
+than 2,000 records, the flagged or high-risk mails with no date (no story can place them), the
+seeds past 300, the flag windows read as one, and, in a browser case, how many records of each
+kind the shared cap left out. When a selection is cut the page says so, and an absent step is
+then not a negative result. The browser posts only the fields the engine reads
+(`STORY_EVENT_FIELDS`, compared with the Python by a test), and at most 56 MiB, under the 64 MiB
+the server takes in one request: past it, the long text of each event (command lines, script
+blocks, summaries) is cut to 2,000 characters, then the records around the flags are left out,
+the last read first, and the page says how many. A build also returns the phishing chains of
+the same rows, kept for the review and the report as before.
+
+The snapshot is stored with the case, with a digest of what the build read: the findings (the
+key, rule, effective severity, rows and time of each, false positives left out), the evidence
+files and the case's settings. When those no longer match the case (a rule run, a finding
+marked false positive, a severity set by hand, evidence added or removed, settings changed),
+the stories are out of date: the page builds them again when it opens if the last build read
+at most 20,000 records and cut nothing, and otherwise says so with a button to rebuild; the
+report says so too. A snapshot built before builds kept their inputs counts as out of date. The
+snapshot is cleared with the case's findings when evidence is removed; it is not in a case
+export, since its references name this database's rows: the importing case reads its stories
+again when the page opens. A case with findings and no snapshot is read into stories when the
+page opens.
+
+A story or a step added to the case timeline opens that story, and that step, again from the
+timeline; when a rebuild no longer holds it, the page says so instead of opening another
+story. A rebuild keeps the open story open, found by what it shares when its id changed.
 
 ## How well it reads the lab
 

@@ -54,8 +54,8 @@ export function CaseView() {
       setFocus({ source: l.source, id: Number(l.id) })
       setView(l.source)
     } else if (l.source === 'chains' || l.source === 'stories') {
-      // a chain's note opens the story holding the chain; a story's, the story (its id before a '#step')
-      useStore.getState().setFocusChain(String(l.id).split('#')[0])
+      // a chain's note opens the story holding the chain; a story's, the story and, after a '#', its step
+      useStore.getState().setFocusChain(String(l.id))
       setView('stories')
     } else setView('findings')
   }

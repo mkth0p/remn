@@ -1,6 +1,6 @@
 import type { Case, CaseNote, Evidence, Finding, Ioc, Severity } from '../db/schema'
 import type { Chain, ChainStep } from './chains'
-import type { ReportStory } from './stories'
+import { storyCoverageWarnings, storyOwnGaps, type ReportStory, type StoryResult } from './stories'
 import type { ChainReview, ReportSettings } from './review'
 import { chainSeverity, effectiveSeverity, stepVisible } from './review'
 import type { Incident } from '../rules/incidents'
@@ -89,6 +89,12 @@ export interface ReportData {
   stories?: ReportStory[]
   /** the case's stories not printed: below the severity floor, without a note when only reviewed items print, or past the first twenty */
   storiesLeft?: number
+  /** the stats of the story build: what it could not read (data/stories.ts storyCoverageWarnings) */
+  storyStats?: StoryResult['stats']
+  /** why the stories no longer read the case as it is (data/stories.ts storiesStaleness); empty or absent when they do */
+  storiesStale?: string[]
+  /** analyst notes whose story the build no longer holds (listed on the Stories page) */
+  storyNotesOrphaned?: number
 }
 
 /** The model's part in the case, as the report prints it. */
@@ -485,6 +491,8 @@ const PHASE_WORDS: Record<string, string> = {
 
 /** A story: its phases in the order they happened, what marks each (its worst findings, else its first step), and where its evidence stops. */
 function storyCard({ story: s, key, note }: ReportStory, d: ReportData): string {
+  // the build's own limits are printed once, above the stories
+  const gaps = storyOwnGaps(s)
   const marks = (phase: string) => {
     const steps = s.steps.filter((st) => st.phase === phase)
     const found = steps.flatMap((st) => st.findings).sort((a, b) => rank(b.severity) - rank(a.severity))
@@ -504,8 +512,22 @@ ${table(
   ['phase', 'when (UTC)', 'steps', 'what marks it'],
   s.phases.map((p) => [`${p.severity ? pill(p.severity) + ' ' : ''}${h(PHASE_WORDS[p.phase] ?? p.label)}`, `<span class="nowrap">${span(p.first, p.last)}</span>`, n(p.steps), marks(p.phase)]),
 )}
-${s.gaps.length ? `<div class="cap">Where it stops: ${s.gaps.map((g) => h(g)).join(' ')}</div>` : ''}
+${gaps.length ? `<div class="cap">Where it stops: ${gaps.map((g) => h(g)).join(' ')}</div>` : ''}
 </div>`
+}
+
+/** What the reader of the Stories section must know before any story: that they are out of date, and where the build stopped. */
+function storiesCaveats(d: ReportData): string {
+  const stale = d.storiesStale ?? []
+  const cut = storyCoverageWarnings(d.storyStats)
+  const orphaned = d.storyNotesOrphaned ?? 0
+  return [
+    stale.length ? `<div class="cap warn">Out of date: ${h(stale.join('; '))}. These stories read the case as it was then: build them again on the Stories page before relying on them.</div>` : '',
+    cut.length ? `<div class="cap warn">Incomplete: ${cut.map((w) => h(w)).join(' ')} An absent step or story is not a negative result.</div>` : '',
+    orphaned
+      ? `<div class="cap">${n(orphaned)} analyst note${orphaned === 1 ? ' is' : 's are'} on a story this build no longer holds: the Stories page lists ${orphaned === 1 ? 'it' : 'them'} to attach again.</div>`
+      : '',
+  ].join('')
 }
 
 // ---------------------------------------------------------------------------
@@ -823,7 +845,7 @@ span.warn{color:var(--medium);font-weight:600}.ribbon.ok i{background:var(--acce
 .narr p{margin:0 0 6px}.narr p:last-child{margin:0}
 .narr strong{color:var(--ink)}
 .cap{font-size:10px;color:var(--ink-3);margin-top:4px}
-.cap.ai{color:var(--violet)}.claim.unsupported{color:var(--medium)}.claim.contradicted{color:var(--critical);font-weight:600}
+.cap.ai{color:var(--violet)}.cap.warn{color:var(--medium);font-weight:600}.claim.unsupported{color:var(--medium)}.claim.contradicted{color:var(--critical);font-weight:600}
 .note{background:var(--surface-2);padding:8px 12px;border-radius:6px;margin:6px 0 8px;font-size:12px}
 .note p{margin:0 0 6px}.note p:last-child{margin:0}
 figure{margin:8px 0 10px;break-inside:avoid}
@@ -963,6 +985,8 @@ function method(d: ReportData, v: Verdict, conf: Confidence): string {
     'Times are UTC. Rules and timelines describe what the evidence records; the absence of a finding is not evidence of absence.',
     'Collection snapshots record when an artefact was collected, not when it was created or run.',
     ...(d.coverageWarnings ?? []).map((w) => `Chain analysis incomplete: ${w}`),
+    ...(d.stories?.length && d.storiesStale?.length ? [`Stories out of date: ${d.storiesStale.join('; ')}.`] : []),
+    ...(d.stories?.length ? storyCoverageWarnings(d.storyStats).map((w) => `Stories incomplete: ${w}`) : []),
     ...issues.slice(0, 6).map((x) => `Package coverage: ${x}`),
     d.iocsChecked
       ? `${d.iocsChecked} of ${d.iocsTotal ?? d.iocsChecked} indicators were checked against reputation services.`
@@ -1015,7 +1039,7 @@ export function buildReportHtml(d: ReportData): string {
       id: 'stories',
       title: 'Stories',
       count: d.stories.length,
-      body: `<p class="intro">A story is what happened to one person, or on one host, in one incident: the records around what raised a flag, read along the tactics of ATT&amp;CK in the order they happened, each record tied to the story by its account, its logon session, the way into the host or the process that started it. A story is how the case reads, not a decision: the decisions are the chains' and the incidents'. Each says where its evidence stops.</p>${d.stories.map((st) => storyCard(st, d)).join('\n')}${left ? `<div class="cap">${n(left)} more ${left === 1 ? 'story is' : 'stories are'} not printed: below the severity floor${settings.onlyReviewed ? ', without a note (reviewed items only)' : ''} or past the first twenty.</div>` : ''}`,
+      body: `<p class="intro">A story is what happened to one person, or on one host, in one incident: the records around what raised a flag, read along the tactics of ATT&amp;CK in the order they happened, each record tied to the story by its account, its logon session, the way into the host or the process that started it. A story is how the case reads, not a decision: the decisions are the chains' and the incidents'. Each says where its evidence stops.</p>${storiesCaveats(d)}${d.stories.map((st) => storyCard(st, d)).join('\n')}${left ? `<div class="cap">${n(left)} more ${left === 1 ? 'story is' : 'stories are'} not printed: below the severity floor${settings.onlyReviewed ? ', without a note (reviewed items only)' : ''} or past the first twenty.</div>` : ''}`,
     })
   }
   if (d.chains.length) {
