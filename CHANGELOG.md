@@ -5,6 +5,24 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- The Stories page and the report no longer show stories the case has moved past as current: a
+  build keeps a digest of what it read (the findings with their effective severity, the
+  evidence files, the settings), and after a rule run, a false positive, a severity set by hand,
+  new evidence or a settings change the page builds the stories again when the last build was
+  small, or says they are out of date with a button to rebuild, and the report says so. An
+  analyst's note holds on to what its story is about (the account's forms or the host, and its
+  findings) instead of its label and first day, so new evidence that renames a story or moves its
+  start no longer hides the note from the page and the report; notes saved before are still
+  read, a note whose story is gone is listed to attach again or delete, a note's claim check is
+  shown again when it is opened, the page asks before a story switch throws away a note being
+  typed, and two tabs saving notes keep both. The report prints where a cut build stops (the
+  truncation warnings and a story with no initial access), and every cut says so: findings citing
+  more than 2,000 records, undated flagged mails, high-risk mails past the 300 riskiest (now
+  capped as on the server), more than 40 flag windows read as one span, and what the browser's
+  shared cap left out. A browser build stays under the server's 64 MiB request limit, cutting long
+  command lines and script blocks first and saying what it left out. "Ask the analyst" gives the
+  story's titles and reasons to the model as evidence, not as the analyst's words, and a story
+  step added to the case timeline opens at that step, or says its story is gone.
 - REMN's own rules raise 200 high and critical findings on the seven clean machines of
   evtx-baseline instead of 895, and detect every recording they detected before (342 recordings,
   435 rule detections, up from 340 and 433). A rule a busy machine matches over and over raises

@@ -122,7 +122,11 @@ no one, and per incident ([Stories](stories.md) explains how). The left list ran
 stories by score, each with its worst severity, its headline (the worst finding of each
 phase, in order), a strip of the fifteen ATT&CK tactics lit where it has steps, its span and
 its counts; a search and a people/hosts filter narrow it. A case with findings and no stories
-yet is read into stories when the page opens; **Rebuild stories** reads it again.
+yet is read into stories when the page opens; **Rebuild stories** reads it again. Stories the
+case has moved past (a rule run, a false positive, a severity set by hand, evidence or settings
+changed since) are built again when the page opens if the last build was small, and otherwise
+say they are out of date, with a button to rebuild. Notes whose story a rebuild no longer holds
+are listed under the stories, to attach to the open story or delete.
 
 The selected story opens with its subject (the account, whose forms and joins are one click
 away, or the host), its score, span and the confidence of its ties, a few plain sentences,
@@ -139,8 +143,10 @@ their review), and opens its records. **Lineage** lists the story's hops, logon 
 process trees; **Who is who** the forms of the account, how sure each join is, and the accounts
 kept apart (namesakes in other organisations, bare names several accounts share); **Where it
 stops** what its hosts' evidence cannot show and the case's own file gaps; **JSON** the story
-as data. A story or a step can go to the case timeline, and **ask the analyst** hands the story
-to the AI view.
+as data. A story or a step can go to the case timeline (its entry opens that step again, or says
+the story is gone), and **ask the analyst** hands the story to the AI view, with what the
+records wrote (step titles, names, reasons) between evidence markers, never as the analyst's
+own words.
 
 **Campaigns** groups the stories that share the attacker's infrastructure and lists the
 accounts outside them that the same sources reached; flagged mails and failed logons in no

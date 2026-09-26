@@ -479,6 +479,60 @@ describe('what the report claims about the case', () => {
     expect(buildReportHtml(data())).not.toContain('<h2>Stories</h2>')
   })
 
+  it('says where a cut build stops, a story no record shows starting, stories out of date and notes whose story is gone', () => {
+    const phase = (p: string, label: string) => ({ phase: p, label, first: 60_000, last: 120_000, steps: 1, records: 1, findings: 1, severity: 'high' })
+    const story = {
+      id: 'story-2',
+      kind: 'host',
+      subject: { kind: 'host', id: 'fs-001', label: 'FS-001', org: null },
+      title: 'FS-001',
+      headline: 'Service installed',
+      summary: 'A service was installed.',
+      start: 60_000,
+      end: 120_000,
+      severity: 'high',
+      score: 60,
+      confidence: 'strong',
+      phases: [phase('execution', 'Execution'), phase('persistence', 'Persistence')],
+      steps: [],
+      records: 2,
+      hosts: ['FS-001'],
+      accounts: [],
+      ips: [],
+      attackerAddresses: [],
+      chains: [],
+      findings: [],
+      campaigns: [],
+      gaps: [],
+      lineage: { sessions: [], hops: [], processes: [] },
+    } as never
+    const stats = { events: 50_000, truncated: ['context', 'refs'], cut: { context: 12, 'context-hosts': 12, refs: 3 } }
+    const html = buildReportHtml(
+      data({
+        stories: [{ story, key: 'story-2' }],
+        storyStats: stats,
+        storiesStale: ['the findings changed since they were built (a rule run, a false positive or a severity set by hand)'],
+        storyNotesOrphaned: 2,
+      }),
+    )
+    const section = html.slice(html.indexOf('<h2>Stories</h2>'), html.indexOf('<h2>', html.indexOf('<h2>Stories</h2>') + 1))
+    expect(section).toContain('Out of date: the findings changed since they were built')
+    expect(section).toContain('Incomplete: The records around the flags passed 50,000')
+    expect(section).toContain('and left out 12 on the flagged hosts.')
+    expect(section).toContain('3 finding(s) cite more than 2,000 records')
+    expect(section).toContain('An absent step or story is not a negative result.')
+    expect(section).toContain('2 analyst notes are on a story this build no longer holds')
+    // the story's own gap: no record shows how it started
+    expect(section).toContain('Where it stops: No record of the story shows how it started')
+    const limits = html.slice(html.indexOf('<h4>Where it stops</h4>'))
+    expect(limits).toContain('<li>Stories out of date: the findings changed since they were built')
+    expect(limits).toContain('<li>Stories incomplete: 3 finding(s) cite more than 2,000 records')
+    // a current, complete build says none of it
+    const clean = buildReportHtml(data({ stories: [{ story, key: 'story-2' }], storyStats: { events: 10, truncated: [] }, storiesStale: [] }))
+    expect(clean).not.toContain('Out of date:')
+    expect(clean).not.toContain('Stories incomplete')
+  })
+
   it('says indicators were checked only when a lookup ran', () => {
     const on = data({ kase: { ...kase, settings: { ...kase.settings, networkAllowed: true } } })
     expect(buildReportHtml(on)).toContain('No indicator was checked against a reputation service')

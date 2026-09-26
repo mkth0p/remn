@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AddToTimeline } from '../components/AddToTimeline'
 import { EventDetail, MailDetail } from '../components/Detail'
 import { Explorer, ExploreList, LinkList } from '../components/Explore'
@@ -12,25 +12,35 @@ import { readMeasure, type MeasureReading } from '../data/ruleMeasures'
 import { loadRules } from '../data/rules'
 import { getSource } from '../data/source'
 import {
+  attachStoryNote,
   buildStories,
+  cheapToRebuild,
+  deleteStoryNote,
+  findStory,
   loadStories,
   loadStoryNotes,
-  noteKey,
   PHASE_LABEL,
   PHASES,
   refRow,
   HOP_LABEL,
-  STORY_NOTES_KEY,
+  resolveStoryNotes,
+  saveStoryNote,
+  storiesStaleness,
   storyCoverageWarnings,
   storyGaps,
+  storyInputs,
+  storyQuestion,
   storyRowIds,
   type Campaign,
   type Confidence,
   type Hop,
   type Identity,
+  type NoteOnStory,
+  type OrphanNote,
   type Process,
   type Session,
   type Story,
+  type StoryNotes,
   type StoryResult,
   type StoryStep,
 } from '../data/stories'
@@ -49,6 +59,9 @@ import { fmtNum, fmtTs } from '../util/format'
 type Mode = 'stories' | 'campaigns' | 'explore'
 type Tab = 'story' | 'lineage' | 'identity' | 'gaps' | 'json'
 type Detail = { source: 'events'; row: EventRow } | { source: 'mails'; row: MailRow } | null
+
+/** What a build keeps open: the story that was (and its step), or the story a link asked for. */
+type Follow = ({ story: Story; identities: Identity[] } | { link: string }) & { step?: string }
 
 const SEV_ORDER: Severity[] = ['info', 'low', 'medium', 'high', 'critical']
 const ORIGIN_ICON = { mail: IconMail, cloud: IconCloud, host: IconHost } as const
@@ -426,33 +439,48 @@ function GapsPanel({ story, stats, caseGaps }: { story: Story; stats: StoryResul
   )
 }
 
-/** The analyst's note on a story, checked against the story's own rows: every address, hash and name it gives should be in them. */
-function StoryNote({ caseId, story, names }: { caseId: number; story: Story; names: string[] }) {
+/**
+ * The analyst's note on a story, checked against the story's own rows: every address, hash and name it
+ * gives should be in them. A saved note is checked again whenever it is shown, and the page asks
+ * before a story switch throws away what is typed and not saved.
+ */
+function StoryNote({
+  story,
+  entry,
+  names,
+  onSave,
+  onDirty,
+}: {
+  story: Story
+  entry: NoteOnStory | undefined
+  names: string[]
+  onSave: (text: string) => Promise<void>
+  onDirty: (dirty: boolean) => void
+}) {
   const kase = useStore((s) => s.currentCase)
-  const [text, setText] = useState('')
-  const [saved, setSaved] = useState('')
+  const saved = entry?.note.text ?? ''
+  // what the analyst is typing; null while the note shown is the saved one
+  const [draft, setDraft] = useState<string | null>(null)
   const [check, setCheck] = useState<TextCheck | null>(null)
+  const text = draft ?? saved
+  const dirty = draft !== null && draft !== saved
+  useEffect(() => onDirty(dirty), [dirty, onDirty])
   useEffect(() => {
-    loadStoryNotes(caseId).then((notes) => {
-      const v = notes[noteKey(story)]?.text ?? ''
-      setText(v)
-      setSaved(v)
-      setCheck(null)
-    })
-  }, [caseId, story])
-  const verify = async (value: string) => {
-    if (!kase || !value.trim()) return setCheck(null)
+    let alive = true
+    setCheck(null)
+    if (!kase || !saved.trim()) return
     const ds = getSource(kase)
     const ids = storyRowIds(story)
-    const [ev, ml] = await Promise.all([readRows(ds, 'events', ids.events), readRows(ds, 'mails', ids.mails)])
-    setCheck(checkText(value, [...ev.values(), ...ml.values()], names))
-  }
+    Promise.all([readRows(ds, 'events', ids.events), readRows(ds, 'mails', ids.mails)])
+      .then(([ev, ml]) => alive && setCheck(checkText(saved, [...ev.values(), ...ml.values()], names)))
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [kase, story, saved, names])
   const save = async () => {
-    const all = await loadStoryNotes(caseId)
-    all[noteKey(story)] = { text, updatedAt: Date.now() }
-    await getDb().kv.put({ key: STORY_NOTES_KEY(caseId), value: all })
-    setSaved(text)
-    await verify(text)
+    await onSave(text)
+    setDraft(null)
   }
   return (
     <div className="col" style={{ gap: 6 }}>
@@ -462,19 +490,50 @@ function StoryNote({ caseId, story, names }: { caseId: number; story: Story; nam
         rows={2}
         placeholder="Your reading of this story: it is checked against the story's own records"
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => setDraft(e.target.value)}
       />
       <div className="row" style={{ gap: 8 }}>
-        <button className="btn sm" disabled={text === saved} onClick={save}>
+        <button className="btn sm" disabled={!dirty} onClick={save}>
           Save note
         </button>
-        {check && (
+        {check && !dirty && (
           <span className="small" role="status">
             <Dot sev={check.status === 'verified' ? 'ok' : 'high'} />{' '}
             {check.status === 'verified' ? `every value it names is in the story's records (${check.named.length})` : check.reasons.join('; ')}
           </span>
         )}
       </div>
+    </div>
+  )
+}
+
+/** The notes whose story this build no longer holds: kept and listed, to put back on a story or delete. */
+function OrphanNotes({ orphans, story, onAttach, onDelete }: { orphans: OrphanNote[]; story: Story | null; onAttach: (o: OrphanNote) => void; onDelete: (o: OrphanNote) => void }) {
+  return (
+    <div className="section" role="region" aria-label="Notes whose story is gone" style={{ padding: '10px 14px', borderTop: '1px solid var(--line)' }}>
+      <h3>Notes whose story is gone ({orphans.length})</h3>
+      <div className="small muted" style={{ lineHeight: 1.5 }}>
+        The stories were built again and none of them holds what these notes were written on. They are kept: open the story a note belongs to and attach it there, or delete it.
+      </div>
+      {orphans.map((o) => (
+        <div key={o.key} className="col" style={{ gap: 3, marginTop: 10 }}>
+          <div className="small">
+            <strong>{o.title}</strong>
+            {o.start != null && <span className="muted"> · {day(o.start)}</span>}
+          </div>
+          <div className="small" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: 'var(--fg-2)' }}>
+            {o.note.text}
+          </div>
+          <div className="row" style={{ gap: 6 }}>
+            <button className="btn xs" disabled={!story} onClick={() => onAttach(o)} title={story ? `put this note on the story of ${story.title}` : 'open a story first'}>
+              attach to the open story
+            </button>
+            <button className="btn xs ghost" onClick={() => onDelete(o)}>
+              delete
+            </button>
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
@@ -774,10 +833,16 @@ export function StoriesView() {
   const setAiPrompt = useStore((s) => s.setAiPrompt)
   const setFocusChain = useStore((s) => s.setFocusChain)
   const bump = useStore((s) => s.bumpRules)
+  const rulesVersion = useStore((s) => s.rulesVersion)
   const [res, setRes] = useState<StoryResult | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  /** why the snapshot no longer reads the case as it is; empty when it does */
+  const [stale, setStale] = useState<string[]>([])
+  /** what the page could not open as asked: a story or step a link points to that the stories no longer hold */
+  const [notice, setNotice] = useState('')
+  const [notes, setNotes] = useState<StoryNotes>({})
   const [mode, setMode] = useState<Mode>('stories')
   const [storyId, setStoryId] = useState<string | null>(null)
   const [stepId, setStepId] = useState<string | null>(null)
@@ -791,43 +856,82 @@ export function StoriesView() {
   const [detail, setDetail] = useState<Detail>(null)
   const [explored, setExplored] = useState('')
   const g = useRelationshipGraph(kase)
+  // whether the open story's note holds text not saved yet (StoryNote says so as it changes)
+  const noteDirty = useRef(false)
+  const onNoteDirty = useCallback((d: boolean) => {
+    noteDirty.current = d
+  }, [])
+  /** True when the analyst keeps an unsaved note rather than let what they do next throw it away. */
+  const keepNote = () => noteDirty.current && !confirm('The note on this story is not saved. Discard it?')
 
-  const build = useCallback(async () => {
-    if (!kase) return
-    setBusy(true)
-    setError('')
-    try {
-      const r = await buildStories(kase)
-      setRes(r)
-      setStoryId((cur) => (cur && r.stories.some((s) => s.id === cur) ? cur : (r.stories[0]?.id ?? null)))
-      setStepId(null)
-      bump()
-      toast(
-        r.stories.length ? 'ok' : 'warn',
-        `${r.stories.length} ${r.stories.length === 1 ? 'story' : 'stories'} and ${r.campaigns.length} campaign(s) from ${fmtNum(Number(r.stats.events ?? 0))} event(s) and ${fmtNum(Number(r.stats.mails ?? 0))} mail(s)`,
-      )
-    } catch (e) {
-      setError((e as Error).message)
-    } finally {
-      setBusy(false)
-    }
-  }, [kase, bump])
+  /**
+   * Build the stories. What was open stays open: the story (followed by what it shares when its id
+   * changed) and its step, or the story a link asked for; the page says so when it is gone.
+   */
+  const build = useCallback(
+    async (follow?: Follow | null) => {
+      if (!kase) return
+      setBusy(true)
+      setError('')
+      try {
+        const r = await buildStories(kase)
+        setRes(r)
+        setStale([])
+        let next: Story | null = null
+        if (follow && 'link' in follow) {
+          next = r.stories.find((s) => s.id === follow.link || s.chains.includes(follow.link)) ?? null
+          if (next) setNotice('')
+        } else if (follow) {
+          next = findStory(follow.story, follow.identities, r.stories, r.identities)
+          if (!next) setNotice(`The story of ${follow.story.title} that was open is not among the stories built again: pick one from the list.`)
+        }
+        setStoryId(follow ? (next?.id ?? null) : (r.stories[0]?.id ?? null))
+        setStepId(follow?.step && next?.steps.some((s) => s.id === follow.step) ? follow.step : null)
+        bump()
+        toast(
+          r.stories.length ? 'ok' : 'warn',
+          `${r.stories.length} ${r.stories.length === 1 ? 'story' : 'stories'} and ${r.campaigns.length} campaign(s) from ${fmtNum(Number(r.stats.events ?? 0))} event(s) and ${fmtNum(Number(r.stats.mails ?? 0))} mail(s)`,
+        )
+      } catch (e) {
+        setError((e as Error).message)
+      } finally {
+        setBusy(false)
+      }
+    },
+    [kase, bump],
+  )
 
-  // the snapshot, the rule measures and the case's gaps; a case with findings and no snapshot is read into stories at once
+  // the snapshot, the notes, the rule measures and the case's gaps. A case with findings and no snapshot is read
+  // into stories at once, and so is an out-of-date snapshot when building it again is cheap.
   useEffect(() => {
     if (!kase?.id) return
     let alive = true
     setLoaded(false)
     setRes(null)
-    loadStories(kase.id).then(async (r) => {
+    setNotice('')
+    Promise.all([loadStories(kase.id), loadStoryNotes(kase.id)]).then(async ([r, n]) => {
       if (!alive) return
       setRes(r)
+      setNotes(n)
+      // a link from the case timeline or the review: a chain's story, or a story and, after '#', one of its steps
       const want = useStore.getState().focusChain
       if (want) setFocusChain(null)
-      const focus = want ? r?.stories.find((s) => s.chains.includes(want) || s.id === want) : null
-      setStoryId(focus?.id ?? r?.stories[0]?.id ?? null)
+      const wantId = want ? want.split('#')[0] : null
+      const wantStep = want && want.includes('#') ? want.slice(want.indexOf('#') + 1) : null
+      const focus = wantId ? (r?.stories.find((s) => s.chains.includes(wantId) || s.id === wantId) ?? null) : null
+      const focusStep = focus && wantStep ? (focus.steps.find((s) => s.id === wantStep) ?? null) : null
+      if (wantId && r && !focus) setNotice('The story this link points to is not among the stories: they were built again since it was added. Pick it from the list.')
+      else if (focus && wantStep && !focusStep) setNotice(`The step this link points to is no longer in the story of ${focus.title}: it was built again since the link was added.`)
+      setStoryId(focus?.id ?? (wantId ? null : (r?.stories[0]?.id ?? null)))
+      setStepId(focusStep?.id ?? null)
       setLoaded(true)
-      if (!r && (await getDb().findings.where('caseId').equals(kase.id!).count())) build()
+      if (!r) {
+        if (await getDb().findings.where('caseId').equals(kase.id!).count()) build()
+        return
+      }
+      const reasons = storiesStaleness(r, await storyInputs(kase))
+      const open = focus ?? (wantId ? null : (r.stories[0] ?? null))
+      if (alive && reasons.length && cheapToRebuild(r)) build(open ? { story: open, identities: r.identities, step: focusStep?.id } : wantId ? { link: wantId, step: wantStep ?? undefined } : null)
     })
     loadRules(kase.id)
       .then((rules) => alive && setReadings(new Map(rules.map((r) => [r.rule.id, readMeasure(r.measured, r.origin)]))))
@@ -842,8 +946,21 @@ export function StoriesView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kase?.id])
 
+  // does the snapshot still read the case as it is? Asked again after a rule run, a decision on a finding or a settings change
+  useEffect(() => {
+    if (!kase?.id || !res) return setStale([])
+    let alive = true
+    storyInputs(kase)
+      .then((now) => alive && setStale(storiesStaleness(res, now)))
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [kase, res, rulesVersion])
+
   const labels = useMemo(() => new Map((res?.identities ?? []).map((i) => [i.id, i.label])), [res])
   const byStory = useMemo(() => new Map((res?.stories ?? []).map((s) => [s.id, s])), [res])
+  const resolved = useMemo(() => resolveStoryNotes(res?.stories ?? [], res?.identities ?? [], notes), [res, notes])
   const shown = useMemo(
     () =>
       (res?.stories ?? []).filter(
@@ -856,6 +973,8 @@ export function StoriesView() {
   const step = story && stepId ? (story.steps.find((s) => s.id === stepId) ?? null) : null
   const campaign = res?.campaigns.find((c) => c.id === campaignId) ?? null
   const identity = story?.kind === 'person' ? res?.identities.find((i) => i.id === story.subject.id) : undefined
+  // what a note on the open story is checked for: its hosts, its accounts and the addresses it came from
+  const noteNames = useMemo(() => (story ? [...story.hosts, ...story.accounts.map((a) => labels.get(a) ?? a), ...story.attackerAddresses] : []), [story, labels])
 
   // j / k move between the steps of the open story
   useEffect(() => {
@@ -900,27 +1019,43 @@ export function StoriesView() {
     setView('events')
   }
   const selectStory = (id: string) => {
+    if (id !== storyId && keepNote()) return
     setMode('stories')
     setStoryId(id)
     setStepId(null)
     setPhase(null)
+    setNotice('')
+  }
+  // the note is shown in the Stories mode only: leaving it asks first, as a story switch does
+  const switchMode = (m: Mode) => {
+    if (m !== mode && mode === 'stories' && keepNote()) return
+    setMode(m)
   }
   const explore = (nodeId: string) => {
+    if (keepNote()) return
     setMode('explore')
     setExplored(nodeId)
   }
+  const rebuild = () => {
+    if (keepNote()) return
+    build(story ? { story, identities: res?.identities ?? [], step: stepId ?? undefined } : null)
+  }
+  // the request is the analyst's; what the story took from the records reaches the model as evidence
   const ask = (s: Story) => {
-    setAiPrompt(
-      `Walk me through story ${s.id} of ${s.title} (${s.severity}, ${s.steps.length} steps from ${new Date(s.start).toISOString()} to ${new Date(s.end).toISOString()}), read as ATT&CK phases: ${s.phases
-        .map((p) => p.label)
-        .join(' → ')}. Steps: ${s.steps
-        .slice(0, 30)
-        .map((st) => `${new Date(st.ts).toISOString()} [${st.phase ? PHASE_LABEL[st.phase] : 'context'}] ${st.title}${st.count > 1 ? ` ×${st.count}` : ''} (why: ${st.tie.basis})`)
-        .join(
-          ' | ',
-        )}. Where it stops: ${storyGaps(s, res?.stats).join(' ') || 'nothing noted'}. Which steps confirm compromise, which are routine, what is missing, and what should be checked or contained next?`,
-    )
+    setAiPrompt(storyQuestion(s, res?.stats))
     setView('ai')
+  }
+  const saveNote = async (text: string) => {
+    if (!story) return
+    setNotes(await saveStoryNote(kase.id!, story, res?.identities ?? [], text, resolved.byStory.get(story.id)?.key))
+  }
+  const attachNote = async (o: OrphanNote) => {
+    if (!story) return
+    setNotes(await attachStoryNote(kase.id!, o.key, story, res?.identities ?? [], resolved.byStory.get(story.id)?.key))
+  }
+  const dropNote = async (o: OrphanNote) => {
+    if (!confirm(`Delete the note written on the story of ${o.title}? It cannot be undone.`)) return
+    setNotes(await deleteStoryNote(kase.id!, o.key))
   }
   const sevCounts = (res?.stories ?? []).reduce<Record<string, number>>((m, s) => ((m[s.severity] = (m[s.severity] ?? 0) + 1), m), {})
   const warnings = storyCoverageWarnings(res?.stats)
@@ -946,7 +1081,7 @@ export function StoriesView() {
           </span>
         </div>
         <span className="spacer" />
-        <button className="btn sm primary" onClick={build} disabled={busy}>
+        <button className="btn sm primary" onClick={rebuild} disabled={busy}>
           {busy ? <Spinner /> : <IconPlay />} {res ? 'Rebuild stories' : 'Build stories'}
         </button>
       </div>
@@ -955,22 +1090,47 @@ export function StoriesView() {
           {error}
         </div>
       )}
+      {stale.length > 0 && !busy && (
+        <div className="panel row" role="status" aria-label="Stories out of date" style={{ margin: '6px 16px', padding: '6px 10px', gap: 10, borderColor: 'var(--sev-medium)' }}>
+          <span>
+            <strong>Out of date:</strong> {stale.join('; ')}. These stories read the case as it was then.
+          </span>
+          <span className="spacer" />
+          <button className="btn xs primary" onClick={rebuild}>
+            rebuild
+          </button>
+        </div>
+      )}
+      {notice && (
+        <div className="panel row" role="status" style={{ margin: '6px 16px', padding: '6px 10px', gap: 10 }}>
+          <span>{notice}</span>
+          <span className="spacer" />
+          <button className="btn xs ghost" onClick={() => setNotice('')}>
+            dismiss
+          </button>
+        </div>
+      )}
       {warnings.map((w) => (
         <div className="panel" role="status" key={w} style={{ margin: '6px 16px', padding: '6px 10px' }}>
           Incomplete: {w} An absent step or story is not a negative result.
         </div>
       ))}
+      {resolved.orphans.length > 0 && (
+        <div className="panel" role="status" style={{ margin: '6px 16px', padding: '6px 10px' }}>
+          {resolved.orphans.length === 1 ? 'A note is' : `${resolved.orphans.length} notes are`} on a story these stories no longer hold: listed under the stories, to attach again or delete.
+        </div>
+      )}
       <div className="split" style={{ gridTemplateColumns: '340px 1fr' }}>
         <div className="left">
           <div className="row" style={{ padding: '10px 14px', gap: 10, borderBottom: '1px solid var(--line)' }}>
             <div className="segmented">
-              <button className={mode === 'stories' ? 'active' : ''} onClick={() => setMode('stories')}>
+              <button className={mode === 'stories' ? 'active' : ''} onClick={() => switchMode('stories')}>
                 Stories
               </button>
-              <button className={mode === 'campaigns' ? 'active' : ''} onClick={() => setMode('campaigns')}>
+              <button className={mode === 'campaigns' ? 'active' : ''} onClick={() => switchMode('campaigns')}>
                 Campaigns
               </button>
-              <button className={mode === 'explore' ? 'active' : ''} onClick={() => setMode('explore')}>
+              <button className={mode === 'explore' ? 'active' : ''} onClick={() => switchMode('explore')}>
                 Explore
               </button>
             </div>
@@ -1001,6 +1161,7 @@ export function StoriesView() {
                 </div>
               )}
               <StoryList stories={shown} active={storyId} onSelect={selectStory} />
+              {resolved.orphans.length > 0 && <OrphanNotes orphans={resolved.orphans} story={story} onAttach={attachNote} onDelete={dropNote} />}
             </>
           )}
           {mode === 'campaigns' && <CampaignList campaigns={res?.campaigns ?? []} stories={byStory} active={campaignId} onSelect={setCampaignId} />}
@@ -1072,6 +1233,7 @@ export function StoriesView() {
                         key={c}
                         className="pill"
                         onClick={() => {
+                          if (keepNote()) return
                           setMode('campaigns')
                           setCampaignId(c)
                         }}
@@ -1094,7 +1256,7 @@ export function StoriesView() {
                     </span>
                   )}
                 </div>
-                <StoryNote caseId={kase.id!} story={story} names={[...story.hosts, ...story.accounts.map((a) => labels.get(a) ?? a), ...story.attackerAddresses]} />
+                <StoryNote key={story.id} story={story} entry={resolved.byStory.get(story.id)} names={noteNames} onSave={saveNote} onDirty={onNoteDirty} />
               </div>
               <PhaseRail story={story} active={phase} onPick={setPhase} />
               <Tabs
