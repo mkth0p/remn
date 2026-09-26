@@ -1,6 +1,6 @@
 name: Release
 
-# Tag a commit "vX.Y.Z" (matching VERSION in backend/api/views/health.py) and push the tag:
+# Tag a commit "vX.Y.Z" (matching VERSION in backend/forensic/build.py) and push the tag:
 # the frontend is built, the backend and rules are packed with it, and a GitHub release
 # carries the archive. Nothing else is published.
 on:
@@ -21,7 +21,7 @@ jobs:
       - name: Version matches the tag
         run: |
           tag="${GITHUB_REF_NAME#v}"
-          code=$(sed -n 's/^VERSION = "\(.*\)"/\1/p' backend/api/views/health.py)
+          code=$(sed -n 's/^VERSION = "\(.*\)"/\1/p' backend/forensic/build.py)
           echo "tag $tag, code $code"
           test "$tag" = "$code"
       - uses: actions/setup-node@v7

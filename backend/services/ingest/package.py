@@ -15,6 +15,7 @@ from collections.abc import Iterator
 from pathlib import PurePosixPath
 from typing import Any
 
+from forensic.build import VERSION
 from services.analysis import hayabusa
 from services.ingest.pipeline import SNIFF_BYTES, EvtxSource, MailSource, Member, detect_archive, looks_like_mail
 from services.ingest.reconcile import reconcile
@@ -151,7 +152,7 @@ class PackageSource:
             if str(row.get("parserVersion", "")).startswith("dissect-"):
                 row["sourceIndex"] = row_index
             row.setdefault("recordKind", "event")
-            row.setdefault("parserVersion", "remn/0.1.1")
+            row.setdefault("parserVersion", f"remn/{VERSION}")
             if kind == "event" and not row.get("computer") and self.context.get("host"):
                 row["computer"] = self.context["host"]
             entry["count"] += 1

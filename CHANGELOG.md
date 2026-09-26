@@ -5,6 +5,8 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+## 0.2.0 (2026-09-26)
+
 - A story's score favours weight and attack order over breadth: it follows the heaviest run of
   its findings whose phases come in ATT&CK's order as time goes (after RapSheet), each finding
   weighing its severity (critical 10, high 6, medium 3, low 1) times how far its rule's measure
