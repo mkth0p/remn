@@ -22,6 +22,7 @@ test('writes the demo case from the linked lab, as this app reads it', async ({ 
   // the streamed download, not the file picker a test cannot answer
   await page.addInitScript(() => Object.defineProperty(window, 'showSaveFilePicker', { value: undefined }))
   await page.goto('/')
+  await page.getByRole('button', { name: /^Open case/ }).click()
   await page
     .locator('.dropzone input[type=file]')
     .first()
@@ -48,7 +49,8 @@ test('the demo case opens in the browser, with nothing uploaded', async ({ page 
     if (/\/api\/(ingest|upload)/.test(r.url())) sent.push(r.url())
   })
   await page.goto('/')
-  await page.getByRole('button', { name: 'open the demo case' }).click()
+  // a first visit opens on the home page, which offers the demo case
+  await page.getByRole('button', { name: 'Open demo case' }).first().click()
   await expect(page.locator('.nav-item', { hasText: 'Events' })).toContainText('14,000', { timeout: 120_000 })
   await expect(page.locator('.nav-item', { hasText: 'Mails' })).toContainText('1,000')
   // restored with its findings and chains; its stories are read again from its rows as it opens

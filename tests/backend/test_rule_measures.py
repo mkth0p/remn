@@ -51,6 +51,13 @@ def test_the_hash_is_of_what_the_rule_matches_not_how_it_is_described():
     assert measures.logic_hash({**RULE, "threshold": ">= 2"}) != h
 
 
+def test_the_summary_counts_the_rules_measured_and_those_seen_to_detect(rules_dir):
+    write_measures(rules_dir, {"a": {"h": "x", "hits": 2, "of": 3}, "b": {"h": "y", "of": 4}, "c": {"h": "z", "fires": 1}})
+    s = measures.summary()
+    assert s["totals"] == {"rules": 3, "detect": 1}
+    assert s["measured"] == "2026-09-24" and "rules" not in s
+
+
 def test_a_measure_reaches_its_rule_and_a_changed_rule_is_said_to_have_changed(rules_dir):
     assert measures.for_rule(RULE) is None  # never measured
     write_measures(rules_dir, {RULE["id"]: {"h": measures.logic_hash(RULE), "hits": 2, "of": 3, "fires": 4}})
@@ -75,7 +82,12 @@ def test_meta_and_packs_carry_the_measures(rules_dir):
     meta = c.get("/api/meta", **HDR).json()
     core = next(r for r in meta["rules"] if r.get("rule", {}).get("id") == RULE["id"])
     assert core["measured"] == {"own": True, "hits": 1, "of": 1, "fires": 1}
-    assert meta["measures"] == {"version": 1, "measured": "2026-09-24", "sources": {"baseline": {"machines": 7, "events": 6611184}}}
+    assert meta["measures"] == {
+        "version": 1,
+        "measured": "2026-09-24",
+        "sources": {"baseline": {"machines": 7, "events": 6611184}},
+        "totals": {"rules": 2, "detect": 1},
+    }
     # the pack's cached payload is rebuilt with the new measures, its manifest hash unchanged
     served = c.get("/api/rules/packs/sigma-emerging-threats", **HDR).json()
     assert served["rules"][0]["measured"] == {"of": 2, "clean": {"findings": 0, "events": 0, "machines": 0, "scope": 5000, "of": 7}}

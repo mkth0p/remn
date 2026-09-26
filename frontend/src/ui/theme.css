@@ -27,6 +27,8 @@
   --fg-3: #8a95a3;
   --accent: #1b7f66;
   --accent-2: #15654f;
+  /* the fragment of the REMN mark (components/RemnMark.tsx) */
+  --remn-mark-accent: #2f5f93;
   --accent-fg: #ffffff;
   --accent-dim: rgba(27, 127, 102, 0.1);
   --accent-line: rgba(27, 127, 102, 0.35);
@@ -69,6 +71,7 @@
   --fg-3: #6b7786;
   --accent: #2fbf8f;
   --accent-2: #27a67b;
+  --remn-mark-accent: #7ea6d4;
   --accent-fg: #06110c;
   --accent-dim: rgba(47, 191, 143, 0.14);
   --accent-line: rgba(47, 191, 143, 0.4);
@@ -2625,12 +2628,9 @@ label.field > span {
 .app.sidebar-collapsed {
   --sidebar-w: 56px;
 }
-.brand .mark {
-  display: none;
-  font-family: var(--display);
-  font-size: 20px;
+.brand .remn-mark {
+  flex: none;
   color: var(--fg-1);
-  letter-spacing: 0;
 }
 .sidebar-collapsed .brand {
   padding: 0;
@@ -2638,9 +2638,6 @@ label.field > span {
 }
 .sidebar-collapsed .brand .wordmark {
   display: none;
-}
-.sidebar-collapsed .brand .mark {
-  display: inline;
 }
 .sidebar-collapsed .nav {
   padding: 8px 6px;
@@ -2699,60 +2696,12 @@ label.field > span {
   border-top: 0;
 }
 
-/* intro page behind the wordmark */
+/* the wordmark leads back to the home page */
 .brand.click {
   cursor: pointer;
 }
-.brand.click:hover .wordmark,
-.brand.click:hover .mark {
+.brand.click:hover .wordmark {
   color: var(--accent);
-}
-.intro {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  max-width: 640px;
-  padding: 56px 40px;
-}
-.intro .wordmark {
-  font-family: var(--display);
-  font-size: 56px;
-  letter-spacing: 0.22em;
-  color: var(--fg-1);
-  line-height: 1;
-}
-.intro .lead {
-  font-size: 15px;
-  line-height: 1.5;
-  color: var(--fg-1);
-  margin: 0;
-}
-.intro dl {
-  display: grid;
-  grid-template-columns: 60px 1fr;
-  gap: 8px 16px;
-  margin: 6px 0;
-  padding: 14px 0;
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-  font-size: 13px;
-  line-height: 1.5;
-}
-.intro dt {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--fg-3);
-  padding-top: 3px;
-}
-.intro dd {
-  margin: 0;
-  color: var(--fg);
-}
-.intro .foot {
-  font-size: 11px;
-  color: var(--fg-3);
-  line-height: 1.7;
-  margin-top: 8px;
 }
 
 /* chain graphs */
