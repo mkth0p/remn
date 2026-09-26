@@ -110,6 +110,23 @@ the linked lab, and runs the same in both engines. `tools/evtx_attack_samples.py
 job hold the detections in place: the job fails when a rule that identifies a sample's
 attack stops firing on it, or when the engines disagree on any sample.
 
+`other-products.yaml` reads the logs of server products that run on Windows. SQL Server's audit
+(33205) is parsed into its action, object class and name, the principal, the target and the
+client address (`eventType`, `objectType`, `objectName`, `subjectUser`, `targetUser`,
+`ipAddress`), and the rules flag audits altered or dropped, logins added to server roles or to
+powerful database roles, logins and users created, sa enabled, repeated failed logins from one
+client and failed logins as sa, as well as options that run code (xp_cmdshell, CLR, OLE
+Automation, 15457) and a start in single-user mode (17115). OpenSSH lines (OpenSSH/Operational
+4) give the account and the client, for password guessing against sshd. For Certificate
+Services, the rules flag requests carrying a subject alternative name (ESC1, ESC6), changes to
+CA permissions (ESC7) and to templates (ESC4), the CA audit filter changed, CA backups and
+certificate logons the KDC could not map strongly. On the DNS server's audit channel, they flag a
+plugin DLL set (DNSAdmins), logging lowered, and wildcard, WPAD or ISATAP records. For
+BitLocker, they flag a password protector added and encryption started. The pack was written for
+the product logs the default rules missed in EVTX-to-MITRE-Attack, so that library does not
+count as held out for it (`WRITTEN_AGAINST`); none of its rules fires on the clean machines of
+evtx-baseline, which include OpenSSH and DNS server logs.
+
 The rules that flooded the clean machines were cut down without losing a recorded detection
 (measured in [the noise review](reviews/2026-09-25-noise-and-held-out.md)). A rule a busy
 machine matches over and over raises one finding per program per machine: a program reading
