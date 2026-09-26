@@ -535,6 +535,12 @@ def flatten(event: dict[str, Any], record: dict[str, Any] | None = None, include
         row["serviceState"] = _str(data.get("param2"))
     if event_id in (21, 22, 23, 24, 25, 39, 40) and data.get("User") and not row.get("targetUser"):
         row["targetUser"] = _str(data.get("User"))
+    provider_l = (row.get("provider") or "").lower()
+    if event_id == 4103 and "powershell" in provider_l and data.get("Payload"):
+        _ps_command(row, str(_scalar(data.get("Payload"))), str(_scalar(data.get("ContextInfo")) or ""), None)
+    elif event_id == 800 and row.get("channel") == "Windows PowerShell" and isinstance(data.get("Data"), list) and len(data["Data"]) >= 3:
+        typed, context, payload = (str(_scalar(x)) if x is not None else "" for x in data["Data"][:3])
+        _ps_command(row, payload, context, typed)
     if row.get("user") and not row.get("subjectUser") and "sysmon" in (row.get("provider") or "").lower():
         u = row["user"]
         if "\\" in u:
@@ -566,6 +572,74 @@ def flatten(event: dict[str, Any], record: dict[str, Any] | None = None, include
     if include_raw:
         row["raw"] = json.dumps(ev, ensure_ascii=False, separators=(",", ":"))
     return row
+
+
+# PowerShell module logging (4103) and pipeline execution details (800) log each command of a
+# pipeline as CommandInvocation(name) followed by one ParameterBinding(name) line per parameter.
+_PS_INVOCATION = re.compile(r'^CommandInvocation\(([^)]*)\): "')
+_PS_ERROR = re.compile(r"^(?:Non)?TerminatingError\(")
+_PS_BINDING = re.compile(r'^ParameterBinding\(([^)]*)\): name="([^"]*)"; value="(.*)$')
+# what the host adds to every interactive pipeline, not what the user ran
+_PS_HOST_COMMANDS = frozenset({"out-default", "psconsolehostreadline"})
+
+
+def ps_pipeline(payload: str) -> str | None:
+    """The commands a 4103 / 800 payload records, written back as PowerShell: Get-ADGroupMember -Identity 'Administrators'."""
+    commands: list[tuple[str, list[list[str]]]] = []
+    in_value = False  # inside a parameter value that goes on over several lines
+    for raw in payload.split("\n"):
+        line = raw.rstrip("\r")
+        inv = _PS_INVOCATION.match(line)
+        if inv:
+            commands.append((inv.group(1), []))
+            in_value = False
+            continue
+        bind = _PS_BINDING.match(line)
+        if bind and commands:
+            value = bind.group(3)
+            in_value = not value.endswith('"')  # the closing quote ends the value
+            commands[-1][1].append([bind.group(2), value if in_value else value[:-1]])
+        elif _PS_ERROR.match(line):
+            in_value = False
+        elif in_value and commands and commands[-1][1]:
+            in_value = not line.endswith('"')
+            commands[-1][1][-1][1] += "\n" + (line if in_value else line[:-1])
+    parts = []
+    for name, bindings in commands:
+        if name.lower() in _PS_HOST_COMMANDS:
+            continue
+        words = [name]
+        for pname, value in bindings:
+            if pname and value == "True":
+                words.append(f"-{pname}")
+            elif pname:
+                words.append(f"-{pname} '" + value.replace("'", "''") + "'")
+            else:
+                words.append("'" + value.replace("'", "''") + "'")
+        parts.append(" ".join(words))
+    return " | ".join(parts) or None
+
+
+def _ps_command(row: dict[str, Any], payload: str, context: str, typed: str | None) -> None:
+    """The command a 4103 / 800 event records (as typed when 800 has it, else rebuilt), who ran it and from which script."""
+    fields: dict[str, str] = {}
+    for line in context.split("\n"):
+        name, sep, value = line.partition("=")
+        name = name.strip().replace(" ", "").lower()
+        if sep and name not in fields:
+            fields[name] = value.strip()
+    command = (typed or "").strip() or ps_pipeline(payload)
+    if command and not row.get("commandLine"):
+        row["commandLine"] = _str(command, LONG_LIMIT)
+    user = fields.get("user") or fields.get("userid") or ""
+    if user and not row.get("subjectUser"):
+        if "\\" in user:
+            row["subjectDomain"], row["subjectUser"] = (_str(x) for x in user.split("\\", 1))
+        else:
+            row["subjectUser"] = _str(user)
+    script = fields.get("scriptname") or ""
+    if script and not row.get("path"):
+        row["path"] = _str(script)
 
 
 def header_time(record: dict[str, Any] | None) -> str | None:

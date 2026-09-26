@@ -114,7 +114,7 @@
   "win-process-from-suspicious-path": "no_selector_match",
   "win-process-image-tampering": "no_selector_match",
   "win-process-sweep-unbacked-code": "not_applicable",
-  "win-ps800-download-cradle": "not_applicable",
+  "win-ps800-download-cradle": "no_selector_match",
   "win-psexec-pattern": "no_selector_match",
   "win-psexec-renamed-service-pipe": "not_applicable",
   "win-rdp-activex-unusual-host": "no_selector_match",
@@ -181,25 +181,25 @@
  "errors": [],
  "findings": {
   "collection-encoded-execution": [
-   "collection-encoded-execution|148"
+   "collection-encoded-execution|161"
   ],
   "collection-persistence-user-path": [
-   "collection-persistence-user-path|147"
+   "collection-persistence-user-path|160"
   ],
   "collection-prefetch-script-execution": [
-   "collection-prefetch-script-execution|151"
+   "collection-prefetch-script-execution|164"
   ],
   "collection-remote-service": [
-   "collection-remote-service|147"
+   "collection-remote-service|160"
   ],
   "collection-script-host-connection": [
-   "collection-script-host-connection|149"
+   "collection-script-host-connection|162"
   ],
   "collection-service-unquoted-path": [
-   "collection-service-unquoted-path|152"
+   "collection-service-unquoted-path|165"
   ],
   "m365-app-consent": [
-   "m365-app-consent|145"
+   "m365-app-consent|158"
   ],
   "m365-inbox-rule-any": [
    "m365-inbox-rule-any|80"
@@ -211,16 +211,16 @@
    "m365-inbox-rule-hiding|80"
   ],
   "m365-mailbox-forwarding": [
-   "m365-mailbox-forwarding|143"
+   "m365-mailbox-forwarding|156"
   ],
   "m365-mailitemsaccessed-burst": [
    "m365-mailitemsaccessed-burst|alice@contoso.com\u0001185.220.101.44|29804245"
   ],
   "m365-privileged-role-assigned": [
-   "m365-privileged-role-assigned|146"
+   "m365-privileged-role-assigned|159"
   ],
   "m365-role-assigned-any": [
-   "m365-role-assigned-any|146"
+   "m365-role-assigned-any|159"
   ],
   "m365-signin-bruteforce-account": [
    "m365-signin-bruteforce-account|alice@contoso.com|29804234"
@@ -232,13 +232,13 @@
    "m365-signin-password-spray|185.220.101.44|29804230"
   ],
   "m365-signin-risky": [
-   "m365-signin-risky|144"
+   "m365-signin-risky|157"
   ],
   "m365-signin-two-countries-24h": [
    "m365-signin-two-countries-24h|alice@contoso.com|29804070"
   ],
   "m365-signin-unexpected-country": [
-   "m365-signin-unexpected-country|144",
+   "m365-signin-unexpected-country|157",
    "m365-signin-unexpected-country|46"
   ],
   "mail-attachment-disguised": [
@@ -422,6 +422,42 @@
   ],
   "win-powershell-suspicious-scriptblock": [
    "win-powershell-suspicious-scriptblock|109"
+  ],
+  "win-ps-amsi-bypass-run": [
+   "win-ps-amsi-bypass-run|ws01\u0001alice"
+  ],
+  "win-ps-bits-transfer": [
+   "win-ps-bits-transfer|ws01\u0001alice"
+  ],
+  "win-ps-forest-or-trust-discovery": [
+   "win-ps-forest-or-trust-discovery|ws01\u0001alice"
+  ],
+  "win-ps-kerberos-ticket-requested-for-spn": [
+   "win-ps-kerberos-ticket-requested-for-spn|ws01\u0001alice"
+  ],
+  "win-ps-named-pipe-shell": [
+   "win-ps-named-pipe-shell|ws01\u0001alice"
+  ],
+  "win-ps-openssh-server-enabled": [
+   "win-ps-openssh-server-enabled|ws01\u0001alice"
+  ],
+  "win-ps-printer-port-to-file": [
+   "win-ps-printer-port-to-file|ws01\u0001alice"
+  ],
+  "win-ps-privileged-group-members-listed": [
+   "win-ps-privileged-group-members-listed|ws01\u0001alice"
+  ],
+  "win-ps-service-created": [
+   "win-ps-service-created|ws01\u0001alice\u0001new-service -name 'updater' -binarypathname 'c:\\users\\public\\svc.exe'"
+  ],
+  "win-ps-service-registry-path-changed": [
+   "win-ps-service-registry-path-changed|ws01\u0001alice"
+  ],
+  "win-ps-spn-accounts-searched": [
+   "win-ps-spn-accounts-searched|ws01\u0001alice"
+  ],
+  "win-ps-wmi-permanent-subscription": [
+   "win-ps-wmi-permanent-subscription|ws01\u0001alice"
   ],
   "win-rdp-logon-any": [
    "win-rdp-logon-any|2",
@@ -645,6 +681,18 @@
   "win-process-from-suspicious-path",
   "win-process-image-tampering",
   "win-process-sweep-unbacked-code",
+  "win-ps-amsi-bypass-run",
+  "win-ps-bits-transfer",
+  "win-ps-forest-or-trust-discovery",
+  "win-ps-kerberos-ticket-requested-for-spn",
+  "win-ps-named-pipe-shell",
+  "win-ps-openssh-server-enabled",
+  "win-ps-printer-port-to-file",
+  "win-ps-privileged-group-members-listed",
+  "win-ps-service-created",
+  "win-ps-service-registry-path-changed",
+  "win-ps-spn-accounts-searched",
+  "win-ps-wmi-permanent-subscription",
   "win-ps800-download-cradle",
   "win-psexec-pattern",
   "win-psexec-renamed-service-pipe",
