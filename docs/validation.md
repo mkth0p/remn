@@ -1,12 +1,13 @@
 # Validation and test data
 
-Three kinds of checks say how well REMN works. The test suites run on every push and
-cover the parsers, the rule engines, the API, the pages and the model's part in the
-review. The public-corpus harness measures the mail scoring against labelled phishing
-and legitimate mail, which is the only public ground truth that fits a drop-in. The
-synthetic lab generates a complete, linked case with known answers, for the chains and
-for anything that needs a realistic case without real data. This page describes all
-three and lists the public datasets that can be dropped into the tool as they are.
+Four kinds of checks say how well REMN works. The test suites run on every pull request
+and on `main`, and cover the parsers, the rule engines, the API, the pages and the model's
+part in the review. The public-corpus harness measures the mail scoring against labelled
+phishing and legitimate mail. The rule measures run every event rule on recorded attacks
+and on the logs of clean machines, weekly in CI ([Measured rules](detection.md#measured-rules)).
+The synthetic lab generates a complete, linked case with known answers, for the stories
+and chains and for anything that needs a realistic case without real data. This page
+describes them and lists the public datasets that can be dropped into the tool as they are.
 
 ## Test suites
 
@@ -17,8 +18,8 @@ cd frontend && npm test                 # filter language, rule engine, queries,
 
 The heavy tests, multi-gigabyte ingests and long runs, are opt-in: `pytest -m heavy -s`.
 Continuous integration runs both suites, the linters and formatters, the production
-build with a bundle budget, and builds, runs and scans the Docker image, on every push
-and pull request. Two fixtures pin contracts between the two sides: the engine parity
+build with a bundle budget, and builds, runs and scans the Docker image, on every pull
+request and every push to `main`. Two fixtures pin contracts between the two sides: the engine parity
 fixture (`tests/fixtures/parity/`, see the [detection page](detection.md)) and the prompt
 fixture (`tests/fixtures/ai_system_compose.json`), which fails when a prompt changes
 without the fixture being regenerated.
@@ -85,7 +86,11 @@ workstation. Every event rule is also measured on that library, the SigmaHQ regr
 EVTX-to-MITRE-Attack, the Microsoft 365, Entra and Windows datasets of Splunk attack_data and the
 clean machines of evtx-baseline (`tools/measure_rules.py`, [Measured rules](detection.md#measured-rules)),
 and a weekly CI job fails when a rule stops detecting a recording or a high or critical rule raises
-more findings on a clean machine. Microsoft
+more findings on a clean machine. Stories are checked on MITRE's APT29 evaluation as OTRF's
+Security-Datasets recorded it (NXLog JSON, MIT): `tools/apt29_stories.py` fetches it at a pinned
+commit, converts it to the rows an `.evtx` gives and reads it through the server path, and
+`tests/backend/test_apt29_stories.py` checks the stories when `REMN_APT29` names the folder
+([Stories](stories.md#how-well-it-reads-the-lab)). Microsoft
 365 detection was checked for parsing only: the Invictus IR Unified Audit Log set,
 9,608 records of real business email compromise, loads, and its inbox-rule and
 mailbox-permission rules fire. Re-run with

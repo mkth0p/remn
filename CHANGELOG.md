@@ -5,6 +5,200 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- A story's score favours weight and attack order over breadth: it follows the heaviest run of
+  its findings whose phases come in ATT&CK's order as time goes (after RapSheet), each finding
+  weighing its severity (critical 10, high 6, medium 3, low 1) times how far its rule's measure
+  says it can be believed (a lead, a rule never measured and one that fires on clean machines
+  weigh less), with the other techniques adding at most 20 points, each counted once however
+  many findings its rules raised, and a mail-led chain ten. An administrator's whoami, PsExec and
+  scheduled task (three medium findings) no longer outrank a critical shadow-copy deletion (16
+  against 24, where they scored 30 against 22), and a story is raised to high only by three
+  distinct techniques in three phases whose medium findings come from rules that are neither
+  leads nor noisy. The story says why (`scoreParts`, a sentence of its summary, the score's
+  tooltip). Low findings add up (Splunk's risk-based alerting): a person or host whose low
+  findings come from three rules of two tactics, or four rules, within seven days starts a story
+  (`startKind: "accumulated"`, each step tied by "findings of 3 rules on them within 7 days"),
+  with the thresholds as case settings. A step says how rare its parent and child programs, its
+  logon path or its outside domain are in the case ("seen on 1 of 40 hosts", `rarity`), and a
+  story past 400 steps keeps its rarest context first. On APT29's first day the stories keep
+  their order and the hosts not attacked that day fall further behind the intrusion (SCRANTON
+  74, pbeesly 55, NEWYORK 31, NASHUA 23, UTICA 22, where they scored 82, 64, 46, 28 and 28; with
+  the community packs NASHUA, where the intruder moved, scores 62 against NEWYORK's 31); the
+  lab's attacks stay critical and score 84 to 100.
+- The analyst can now decide on a story instead of only annotating it, and the decisions hold
+  after every rebuild and go with the case bundle. A story is decided open, reviewed, confirmed
+  incident, benign or false positive, with a reason: the report's verdict (and the Review page's,
+  read in the same place) counts a confirmed story as a confirmed incident, with its findings in
+  the threat profile and "What happened", a benign or false positive story is not printed and
+  counts with the false positives, and "reviewed items only" prints the decided stories. A step
+  can be confirmed or disputed with its tie: a disputed step is struck out on the page and left
+  out of the story's phases, severity and headline, and listed under its story in the report;
+  its finding changes only when the analyst also marks it false positive, through the findings
+  review. A step's records can be taken out of a story, a story merged into another or split at
+  a step, each with a reason, as overrides applied after each build: nothing is merged into a
+  story decided benign or false positive, and merging two organisations' stories is asked in the
+  page. Decisions hold on to their story as notes do and to their records inside it; those a
+  rebuild can no longer place are listed to attach again or delete, and the report counts them.
+  A story's timeline exports as CSV and JSON through the app's export helpers (a cell a
+  spreadsheet would read as a formula is neutralised) and as Markdown to paste into a report. A
+  case bundle now also renumbers the finding keys in the anchors of story notes on import.
+- One intrusion now reads as one story, or as a linked set of them. A flag that names no one (a
+  task Windows ran, a script block, a Sysmon handle) joins the one person who was on its host
+  then, whose console or RDP session was open or whose own flagged steps there are within fifteen
+  minutes, with a medium tie that says so; with two people or more on the host it stays the
+  host's and says who was on. Stories are linked when a hop or explicit credentials go from one
+  story's person or host to another's host or account, when a program of one descends from
+  another's, or when one record names both people (a password reset, an account enabled), each
+  link with its basis and confidence; the stories strong and medium links join are an incident
+  (`incidents` in the build, `incident` and `links` on each story), never through a finding
+  marked false positive, never across organisations, twenty stories at most with the rest named.
+  A host's own flags make a story only when one is critical, of a rule measured to detect and
+  quiet on clean machines, of medium or more in two phases from rules not seen firing on clean
+  machines, or linked to a person's story; otherwise they are listed as "a host's lone lead". The
+  Stories page lists an incident's stories together and shows a story's linked stories, and the
+  report prints an incident's stories under one heading. On the first day of the APT29
+  evaluation the five stories (pbeesly's and four hosts', all high) are now one, hers.
+- A story has a spine: the few steps, fifteen at most, that carry it from the way in to the worst
+  of it, found by walking the story's own ties (its sessions, process trees, hops and where they
+  came from, the attacker's address, the phishing chain) back from its worst finding to an
+  initial access step and forward to its flags, each step keeping its tie (`spine` and
+  `spineBasis` on each story). The Stories page opens a story on its spine, with a toggle to the
+  full timeline, and the report prints each story's spine before its phases. When the ties reach
+  no way in, the spine starts at the earliest flag and says the way in is not in the evidence. A
+  story downloads as a MITRE CTID Attack Flow (a STIX 2.1 bundle of scope incident, an action
+  per spine step with its ATT&CK technique and tactic and the confidence of its tie, its hosts,
+  accounts and addresses as assets), and a campaign as a STIX 2.1 grouping (suspicious activity)
+  of its stories' flows, its infrastructure and the accounts it reached.
+- Stories no longer lose what matters to routine activity or to their own caps. A program a
+  person ran with no finding joins their story only when it ran in the story's logon session or
+  process tree, not for naming them; past 400 steps a story keeps its flags, then its
+  persistence, privilege, credential and lateral steps, then its sessions and sources, cuts the
+  programs run with no finding and the routine records first, and says how many steps it cut
+  (`stepsTruncated`, in the story, its "where it stops" and the stats). The flags of the stories
+  past the 200 a case keeps, or cut from their story, are listed among the flags in no story
+  with the reason. Failed logons and mails received join the incident nearest them instead of
+  chaining two: a spray's daily failures no longer make one story of two intrusions three weeks
+  apart. An address most of the organisation's users sign in from (an office's NAT, a VPN's
+  egress) ties nothing to a story and joins no stories into a campaign, and a campaign lists the
+  accounts its sources reached within two days of its stories only. A selection past its cap,
+  in a server case or a browser case, reads the tasks, services, account and group changes, log
+  clears and mailbox rules first and then the records nearest a flag, instead of the earliest; a
+  server case says when the names, hosts or addresses it selects by were cut, and the page says
+  so; the API holds the story and step counts a caller asks for to 1,000 and 2,000.
+- The Stories page and the report no longer show stories the case has moved past as current: a
+  build keeps a digest of what it read (the findings with their effective severity, the
+  evidence files, the settings), and after a rule run, a false positive, a severity set by hand,
+  new evidence or a settings change the page builds the stories again when the last build was
+  small, or says they are out of date with a button to rebuild, and the report says so. An
+  analyst's note holds on to what its story is about (the account's forms or the host, and its
+  findings) instead of its label and first day, so new evidence that renames a story or moves its
+  start no longer hides the note from the page and the report; notes saved before are still
+  read, a note whose story is gone is listed to attach again or delete, a note's claim check is
+  shown again when it is opened, the page asks before a story switch throws away a note being
+  typed, and two tabs saving notes keep both. The report prints where a cut build stops (the
+  truncation warnings and a story with no initial access), and every cut says so: findings citing
+  more than 2,000 records, undated flagged mails, high-risk mails past the 300 riskiest (now
+  capped as on the server), more than 40 flag windows read as one span, and what the browser's
+  shared cap left out. A browser build stays under the server's 64 MiB request limit, cutting long
+  command lines and script blocks first and saying what it left out. "Ask the analyst" gives the
+  story's titles and reasons to the model as evidence, not as the analyst's words, and a story
+  step added to the case timeline opens at that step, or says its story is gone.
+- Carrier-grade NAT's shared addresses (100.64.0.0/10, a provider's or Tailscale's) are inside
+  the network for stories: an RDP logon from one is lateral movement, not initial access from
+  the internet, and a finding naming one does not make it the attacker's address.
+- Hops and sessions read the domain controllers' Kerberos and NTLM records, which stories used to
+  treat only as routine. A service ticket (4769) with a logon's GUID is that logon's ticket
+  (strong), and without it a ticket for the host's own account asked for within a minute before a
+  network logon of that account is its ticket by time (medium): the hop says which service was
+  asked for, holds the ticket, and comes from the ticket's client address when the logon names
+  no source. Explicit credentials (4648) reach the logon of their target GUID, or of its ticket,
+  instead of the next logon in time; an NTLM validation (4776) names the workstation of a
+  network logon that names none (medium); a machine account's ticket, and a 4648 and a 4769 of
+  one GUID, say whose address a client address is. A NewCredentials logon (4624 type 9, `runas
+  /netonly`) that uses another account on the network is a lateral-movement step that names both
+  accounts, so it joins both stories, and a way into the hosts that account then logged on to
+  from it. A host whose clock differs from the domain controller's by more than the ties by time
+  allow says so, with the median offset, and those ties allow for it. Server and browser cases
+  read the domain controllers' records of the flagged accounts, hosts and addresses in the flag
+  windows (at most 20,000, a cut named) though the domain controllers are not flagged. On MITRE's
+  APT29 day 1, five of NASHUA's network logons that named no source now come from SCRANTON by
+  their tickets, and the lateral movement from SCRANTON to NASHUA gains a hop; the same five
+  stories keep their scores. See "Sessions, hops and what ran" in `docs/stories.md`.
+- A record names the account its System header's SID is (the user PowerShell's script blocks
+  and many operational logs name only there) when it is a user's SID, joined to the account by
+  a logon of any day, so the flagged script blocks on a victim's host are steps of the victim's
+  story instead of a story of the host: on MITRE's APT29 day 1, the 31 flagged script blocks of
+  SCRANTON and NASHUA join pbeesly's story. A SID written where a name goes (a firewall rule's
+  `ModifyingUser`) is read as a SID; a service's, an IIS application pool's, a virtual
+  machine's or a group's SID is never a person, and the firewall service's no longer makes a
+  story. A machine account is never a story's subject: a service an SCCM site server installs
+  over `ADMIN$` is a story of its host. With no internal domain set, `CONTOSO\alice` no longer
+  joins an attacker's `alice@contoso.co` because it sorts before `contoso.com`: a NetBIOS name
+  that is the first label of two organisations' domains joins neither and is possibly either. A
+  bare name the case writes for one account only is possibly, not surely, that account when it
+  is another organisation's; one name under two SIDs of its domain (an account deleted and
+  created again) is noted. A server case reads who is who over the whole case rather than the
+  records selected around its flags. See "Who is who" in `docs/stories.md`.
+- Host lineage no longer puts one person's activity in another's session or ties by time what it
+  reports as sure. Windows hands logon ids out again after a reboot: a record after the session
+  of its logon id ended, before the first logon of that id, or of another account than the
+  session's is in a session of its own (marked as one whose logon is not in the evidence), where
+  it used to join the last session of that id as a strong tie. A record keeps the confidence of
+  its own tie into a story: a program WmiPrvSE or WinRM started, a WinRM shell or an RDP session
+  manager's record placed in a session by time, and a service installed after an admin share
+  with nothing but time between them (PsExec's pattern without the `svcctl` or `PSEXESVC` pipe,
+  the installing logon id or the service's program written through the share) are medium, and a
+  story whose flag rests on one of them is medium; they were all strong. A 4688 whose parent's
+  program is named no longer takes a creation of another program under the same process id as
+  its parent, and with the id alone a parent is looked for a day back instead of a week. Both
+  logons of a split token are the story's session. A synthetic case of 150,000 records with 6,000
+  remote executions builds its stories in 8 s instead of 40 s, and one of 300,000 with 12,000 in
+  17 s instead of 133 s: the per-record lookups read the sessions of one host by time instead of
+  every session, and each record's accounts are read once.
+- Stories are checked on a recorded intrusion, MITRE's APT29 evaluation as OTRF's Security-Datasets
+  recorded it (NXLog JSON, MIT, fetched on demand): `tools/apt29_stories.py` converts its records to
+  the rows an `.evtx` of them gives (NXLog's own fields back into the record's System, its local
+  time to UTC, and what it kept only in the rendered message read back), runs REMN's rules and
+  builds the stories through the server path, and prints each story with its checks;
+  `tests/backend/test_apt29_stories.py` runs them when `REMN_APT29` names the folder
+  (`pytest -m heavy`). On day 1 no story is about a SID or a service account, and pbeesly's story
+  holds the script blocks pbeesly ran and reaches NASHUA through its hops, the domain controller
+  and the host left alone raise no high story, and the intrusion reads as one story.
+- An .evtx file can be parsed in the browser and never uploaded: a case kept in the browser has a
+  setting, "parse .evtx files in this browser", off by default. The file is read 64 KiB chunk by
+  chunk by the server's own decoder, the Rust `evtx` crate, compiled to a 259 KB WebAssembly module
+  (`frontend/wasm/evtx`, rebuilt byte for byte in CI from a pinned toolchain), and flattened by a
+  TypeScript port of the server's flattening that makes the same rows: every row of the golden
+  corpus's five event logs and all 37,364 rows of EVTX-ATTACK-SAMPLES are identical, and so is each
+  file's ledger (record ranges and holes, clock steps, chunk checksums). The evidence says "parsed
+  in this browser", no size cap of the server applies, the upload notice is not shown, and the
+  digest of the bytes the parser read is checked against the file's SHA-256. Hayabusa does not run
+  on such a file; the rules run in the browser as for any other.
+- Responder exports. The Report page writes the report as a Word document (.docx) with the same
+  sections, verdict and confidence as the HTML report, as headings, paragraphs and tables a team
+  can edit before it goes out (the graphs stay in the HTML report). It also exports the case as a
+  timeline for Timesketch (JSONL with `message`, `datetime` and `timestamp_desc` on every line) or
+  Timeline Explorer (CSV): every finding except the false positives, with its severity, rule,
+  ATT&CK techniques, host, user and address, and the analyst's timeline entries. A third button
+  writes an ATT&CK Navigator layer (format 4.5) of the techniques the findings name, each coloured
+  and scored by its worst severity, with the count of findings, how many are confirmed and which
+  rules in its comment. The Events page exports its filtered rows as the same timeline.
+- The Graph page is back: it left with the Chains page when Stories replaced it, while the
+  report kept printing the same graphs. It lists the chains, draws one chain as a swimlane or
+  all chains against the senders, domains, IPs and hosts they share, and opens a clicked step's
+  rows. The graphs read better in the app and the report: nodes carry a ring and a soft shadow,
+  labels sit on their own background and take turns above and below when neighbours crowd,
+  only the ties to the mail are named on an edge, and the all-chains graph is three columns
+  (attacker side, people, machines and IPs) instead of a circle, folding each chain's unshared
+  entities into one node when a column runs long. Both carry a legend drawn with the graph's
+  own shapes and colours.
+- A decision on a finding raised on one row (false positive, escalated, a note, a new severity)
+  follows the record, not REMN's row id: removing evidence and adding the same file again, which
+  renumbers its rows, brings the finding back with its decision where it used to come back
+  undecided. Every finding keeps the record key of each row it cites (the file's SHA-256 and the
+  record's place in it) beside the row ids, a server case's findings included, and existing cases
+  and older case bundles get theirs when they open or are restored.
+
 - REMN's own rules raise 200 high and critical findings on the seven clean machines of
   evtx-baseline instead of 895, and detect every recording they detected before (342 recordings,
   435 rule detections, up from 340 and 433). A rule a busy machine matches over and over raises

@@ -1,0 +1,23 @@
+[package]
+name = "remn-evtx-wasm"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "The Rust evtx crate, compiled to WebAssembly, decoding one EVTX chunk at a time in REMN's ingest worker."
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# the decoder the server reads EVTX with (through pyevtx-rs); no threads, no evtx_dump
+evtx = { version = "=0.12.3", default-features = false }
+serde_json = { version = "1", features = ["preserve_order"] }
+getrandom = "0.3"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

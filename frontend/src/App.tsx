@@ -26,6 +26,7 @@ import {
   IconTimeline,
   IconPivot,
   IconLink,
+  IconGraph,
   IconFile,
   IconArrowLeft,
   IconCheck,
@@ -41,6 +42,7 @@ import { EventsView } from './views/EventsView'
 import { MailsView } from './views/MailsView'
 import { FindingsView } from './views/FindingsView'
 import { StoriesView } from './views/StoriesView'
+import { GraphView } from './views/GraphView'
 import { TimelineView } from './views/TimelineView'
 import { IocsView } from './views/IocsView'
 import { AiView } from './views/AiView'
@@ -61,6 +63,7 @@ const NAV: { id: View; label: string; icon: React.ComponentType; count?: 'events
   { id: 'timeline', label: 'Timeline', icon: IconTimeline },
   { id: 'findings', label: 'Findings', icon: IconFindings, count: 'findings', section: 'detect' },
   { id: 'stories', label: 'Stories', icon: IconLink },
+  { id: 'graph', label: 'Graph', icon: IconGraph },
   { id: 'rules', label: 'Rules', icon: IconRules },
   { id: 'iocs', label: 'Indicators', icon: IconIoc, count: 'iocs' },
   { id: 'ai', label: 'AI analyst', icon: IconAi, section: 'assist' },
@@ -445,6 +448,7 @@ export default function App() {
         {view === 'timeline' && <TimelineView />}
         {view === 'findings' && <FindingsView />}
         {view === 'stories' && <StoriesView key={kase?.id} />}
+        {view === 'graph' && <GraphView key={kase?.id} />}
         {view === 'rules' && <RulesView />}
         {view === 'iocs' && <IocsView />}
         {view === 'ai' && <AiView />}

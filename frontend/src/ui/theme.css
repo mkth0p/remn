@@ -2330,6 +2330,10 @@ label.field > span {
   padding: 12px 16px 10px;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
+  /* the summary, note, links and decisions scroll on their own, so the steps keep room on a laptop screen */
+  flex-shrink: 0;
+  max-height: 42vh;
+  overflow-y: auto;
 }
 .story-day {
   position: sticky;
@@ -2363,6 +2367,198 @@ label.field > span {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  color: var(--fg-3);
+  font-size: 11px;
+}
+/* the analyst's decisions on stories (views/StoryDecisions.tsx): a disputed step is struck out, a dismissed story greyed */
+.story .step.disputed {
+  opacity: 0.55;
+}
+.story .step.disputed .title,
+.story .step.disputed .sub {
+  text-decoration: line-through;
+}
+.step-call,
+.story-call {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--surface-3);
+  color: var(--fg-2);
+  font-size: 11px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+.step-call.confirmed,
+.story-call.reviewed {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.story-call.confirmed {
+  background: var(--sev-critical-bg);
+  color: var(--sev-critical);
+}
+.story-row.dismissed {
+  opacity: 0.6;
+}
+.story-decide {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.story-decide .lbl {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-2);
+}
+.story-decide .segmented button.active.confirmed {
+  color: var(--sev-critical);
+}
+.story-decide .segmented button.active.benign,
+.story-decide .segmented button.active.false_positive {
+  color: var(--fg-2);
+}
+
+/* ---------- a story's spine: the steps from the way in to the worst of it, above the full timeline ----------
+   A vertical line of knots, one per step, coloured by the step's worst finding; the way in is a diamond,
+   the anchor (the worst finding the spine was walked back from) a ringed knot. */
+.spine-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.spine-head .segmented {
+  margin-left: auto;
+}
+.spine-basis {
+  margin: 0;
+  padding: 10px 14px 2px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fg-2);
+  max-width: 900px;
+}
+.spine {
+  list-style: none;
+  margin: 0;
+  padding: 6px 8px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.spine-step {
+  display: grid;
+  grid-template-columns: 74px 16px 1fr;
+  gap: 0 10px;
+  padding: 0 6px;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.spine-step:hover {
+  background: var(--surface-2);
+}
+.spine-step.active {
+  background: var(--accent-dim);
+}
+.spine-step .when {
+  padding-top: 7px;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-3);
+}
+.spine-step .when .d {
+  display: block;
+  color: var(--fg-2);
+  font-weight: 600;
+}
+.spine-step .when .gap {
+  display: block;
+  font-size: 10px;
+}
+.spine-step .knot {
+  position: relative;
+}
+.spine-step .knot::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--line-2);
+}
+.spine-step:first-child .knot::before {
+  top: 14px;
+}
+.spine-step:last-child .knot::before {
+  bottom: auto;
+  height: 14px;
+}
+.spine-step .knot::after {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 9px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--sev-info);
+}
+.spine-step.low .knot::after {
+  background: var(--sev-low);
+}
+.spine-step.medium .knot::after {
+  background: var(--sev-medium);
+}
+.spine-step.high .knot::after {
+  background: var(--sev-high);
+}
+.spine-step.critical .knot::after {
+  background: var(--sev-critical);
+}
+.spine-step.way-in .knot::after {
+  border-radius: 2px;
+  transform: rotate(45deg) scale(0.9);
+}
+.spine-step.anchor .knot::after {
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 0 0 4px var(--fg-1);
+}
+.spine-step .what {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 0 9px;
+}
+.spine-step .title {
+  font-weight: 500;
+  color: var(--fg-1);
+}
+.spine-step .sub {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-2);
+}
+.spine-step .mark {
+  margin-left: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.spine-step .tie {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
   color: var(--fg-3);
   font-size: 11px;
 }
@@ -2579,9 +2775,48 @@ label.field > span {
   background: var(--surface-2);
 }
 .chain-graph-key {
-  padding: 4px 12px;
+  padding: 6px 12px;
   border-top: 1px solid var(--line);
   background: var(--surface-2);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+}
+.graph-key-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.graph-key-item i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  background: var(--k);
+  box-shadow: 0 0 0 1.5px var(--surface);
+}
+.graph-key-item .graph-key-dot {
+  border-radius: 50%;
+}
+.graph-key-item .graph-key-box {
+  border-radius: 3px;
+}
+.graph-key-item .graph-key-diamond {
+  transform: rotate(45deg) scale(0.85);
+}
+.graph-key-item .graph-key-ring {
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1.5px dashed var(--k);
+}
+.graph-key-item .graph-key-line {
+  width: 16px;
+  height: 2px;
+  border-radius: 1px;
+  box-shadow: none;
+}
+.graph-key-hint {
+  margin-left: auto;
 }
 
 /* review workflow */

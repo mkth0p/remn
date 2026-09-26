@@ -23,6 +23,20 @@ export function detectKind(file: File): 'evtx' | 'mail' | 'package' {
   return 'mail'
 }
 
+/**
+ * Whether this file is parsed in the browser rather than uploaded: an .evtx file, in a case kept
+ * in this browser that asked for it. The header is checked again when the file is read.
+ */
+export function parsedInBrowser(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package' = detectKind(file)): boolean {
+  return kase.storage !== 'server' && kase.settings.parseEvtxInBrowser === true && kind === 'evtx' && file.name.toLowerCase().endsWith('.evtx')
+}
+
+/** An EVTX file starts with "ElfFile\0". */
+export async function hasEvtxHeader(file: File): Promise<boolean> {
+  const head = new Uint8Array(await file.slice(0, 8).arrayBuffer())
+  return head.length === 8 && String.fromCharCode(...head) === 'ElfFile\0'
+}
+
 export function isArchive(file: File): boolean {
   return /\.(zip|tar|tgz|tar\.gz|tar\.bz2|tbz2|tar\.xz|txz)$/i.test(file.name)
 }
@@ -52,7 +66,8 @@ export function requestIngest(files: File[], kase: Case, kindOverride?: 'evtx' |
   // browser-only mode caps chunked uploads at the single-request limit; a full server stages up to maxChunkedGb
   const limitMb = health?.mode === 'browser-only' ? health.limits?.maxUploadMb : health?.limits?.maxChunkedGb ? health.limits.maxChunkedGb * 1024 : undefined
   if (kase.storage !== 'server' && limitMb) {
-    const over = files.filter((f) => f.size > limitMb * 1024 * 1024)
+    // a file parsed here is never uploaded, so the server's limit does not apply to it
+    const over = files.filter((f) => f.size > limitMb * 1024 * 1024 && !parsedInBrowser(f, kase, kindOverride ?? detectKind(f)))
     for (const f of over)
       toast(
         'err',
@@ -66,7 +81,9 @@ export function requestIngest(files: File[], kase: Case, kindOverride?: 'evtx' |
   // there means, so it asks first: a file dropped in the first moment, or while health failed,
   // used to go out without the notice.
   const notice = useStore.getState().dataNotice
-  if (!noticeRead && (notice === 'required' || (notice === 'unknown' && deployment(health).tier !== 'this-machine'))) {
+  // files that are all parsed here go nowhere, so there is nothing to be told about first
+  const uploads = files.some((f) => !parsedInBrowser(f, kase, kindOverride ?? detectKind(f)))
+  if (uploads && !noticeRead && (notice === 'required' || (notice === 'unknown' && deployment(health).tier !== 'this-machine'))) {
     useStore.getState().setPendingIngest({ files, kindOverride, reason: 'notice' })
     return
   }
@@ -206,11 +223,14 @@ async function importToBrowser(file: File, kase: Case, kind: 'evtx' | 'mail' | '
   log('info', `[${file.name}] added as evidence #${evidenceId} (${kind}), hashing…`)
 
   const worker = new Worker(new URL('../workers/ingest.worker.ts', import.meta.url), { type: 'module' })
+  const local = parsedInBrowser(file, kase, kind) && (await hasEvtxHeader(file))
+  if (parsedInBrowser(file, kase, kind) && !local) log('warn', `[${file.name}] no EVTX header: sent to the server to be parsed`)
+  if (local) log('info', `[${file.name}] parsed in this browser; the file is not uploaded`)
   // Beyond this, one request carrying the whole file is refused by proxies long before the
   // server's own limit, which is the 413 a browser-store case used to hit. The chunked path
   // sends fixed-size pieces instead and hashes on the way, so the file is read once.
   let upload: { uploadId: string; sha256Client: string } | undefined
-  if (file.size > CHUNK_ABOVE_BYTES) {
+  if (!local && file.size > CHUNK_ABOVE_BYTES) {
     try {
       useStore.getState().upsertJob({ id: jobId, phase: 'uploading', progress: 0 })
       upload = await chunkedUpload(file, (p) => useStore.getState().upsertJob({ id: jobId, phase: 'uploading', progress: p.uploaded / Math.max(1, p.total) }))
@@ -240,6 +260,7 @@ async function importToBrowser(file: File, kase: Case, kind: 'evtx' | 'mail' | '
       trustedArcSealers: kase.settings.trustedArcSealers ?? [],
     },
     token: API_HEADERS['X-Forensic-Client'],
+    parseInBrowser: local,
   }
   return new Promise<number>((resolve) => {
     worker.onmessage = (ev: MessageEvent<Record<string, unknown>>) => {
@@ -298,7 +319,7 @@ async function importToBrowser(file: File, kase: Case, kind: 'evtx' | 'mail' | '
             m.error ? 'warn' : 'ok',
             `[${file.name}] ${m.count} rows stored${dup ? `, ${dup} repeated record(s) not added again` : ''} - integrity ${integ}${m.error ? ' - server error: ' + m.error : ''}`,
           )
-          if (integ === 'mismatch') toast('err', `${file.name}: server hash differs from the browser hash!`, 0)
+          if (integ === 'mismatch') toast('err', local ? `${file.name}: the file changed while it was read!` : `${file.name}: server hash differs from the browser hash!`, 0)
           else toast(m.error ? 'warn' : 'ok', `${file.name}: ${m.count} rows ingested`)
           worker.terminate()
           setTimeout(() => useStore.getState().removeJob(jobId), 4000)

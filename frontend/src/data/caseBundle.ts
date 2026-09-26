@@ -185,7 +185,8 @@ async function restoreRecords(original: Case, records: () => AsyncGenerator<Reco
       if (['refs', 'unlink', 'unlinkedFindingIds'].includes(parent)) return value.map((id) => mapId(parent === 'refs' ? table : 'findings', id))
       return value.map((v) => remap(v, table, parent))
     }
-    if (!value || typeof value !== 'object') return typeof value === 'string' && ['id', 'key', 'target'].includes(parent) ? mapTarget(value) : value
+    // a string under `findings` is a finding's key: what a story note or decision holds on to (data/stories.ts StoryAnchor)
+    if (!value || typeof value !== 'object') return typeof value === 'string' && ['id', 'key', 'target', 'findings'].includes(parent) ? mapTarget(value) : value
     const row = value as TransferRow
     const source = typeof row.source === 'string' ? row.source : table
     const out: TransferRow = {}
@@ -239,6 +240,11 @@ async function restoreRecords(original: Case, records: () => AsyncGenerator<Reco
       }
     }
     await flush()
+    // a bundle from before findings carried record keys: give them theirs from the rows just restored
+    if (!kase.serverKey) {
+      const { anchorStoredFindings } = await import('./findingAnchors')
+      await anchorStoredFindings(db, [newId])
+    }
     return newId
   } catch (error) {
     await deleteCase(db, newId)

@@ -55,6 +55,12 @@ not copied into REMN. Their own licenses remain applicable.
 | Apache Tika test PST | https://github.com/apache/tika | Apache License 2.0 |
 | Microsoft 365 audit log samples | https://github.com/invictus-ir | As stated in the repository |
 
+## Public attack recordings (fetched on demand by the tools, not redistributed)
+
+| Corpus | Source | Licence |
+| --- | --- | --- |
+| OTRF Security-Datasets, MITRE's APT29 evaluation days 1 and 2 (`tools/apt29_stories.py`) | https://github.com/OTRF/Security-Datasets | MIT |
+
 ## Python packages (`backend/requirements*.txt`)
 
 | Package | Licence |
@@ -82,6 +88,13 @@ not copied into REMN. Their own licenses remain applicable.
 
 `extract-msg` is GPL-3.0. REMN imports it for `.msg` parsing only; anyone redistributing a
 combined build should read that licence first.
+
+## Rust crates compiled into the page (`frontend/wasm/evtx`, `frontend/src/parsers/evtx/evtx.wasm`)
+
+| Crate | Licence |
+| --- | --- |
+| evtx (the EVTX decoder, the same the server uses through pyevtx-rs) | MIT / Apache-2.0 |
+| its dependencies (serde_json, jiff, encoding, ahash, hashbrown, sonic-rs and others; `cargo metadata` lists them) | MIT, Apache-2.0, Unlicense, Zlib, BSD-2-Clause, CC0-1.0 or Unicode-3.0, each under a permissive licence; none GPL |
 
 ## JavaScript packages (`frontend/package.json`)
 
