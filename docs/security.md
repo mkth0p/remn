@@ -13,7 +13,8 @@ is [SECURITY.md](../SECURITY.md) at the repository root.
 In the browser store, rows live only in the analyst's browser; the server parses each
 file in a temporary location and keeps nothing. In the server store, rows live in a
 DuckDB file per case on the REMN host, unencrypted at rest. In both modes the browser
-keeps the case, the findings, the notes, the chains, the decisions and the AI sessions.
+keeps the case, the findings, the notes, the chains, the stories, the decisions and the AI
+sessions.
 Upload temporary files are deleted when the parse ends, including when the client goes away
 part-way through; a resumable chunked upload that is never completed is removed by the sweep
 described below. See [Storage modes](storage.md).
