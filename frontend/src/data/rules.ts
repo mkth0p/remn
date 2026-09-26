@@ -7,6 +7,8 @@ import type { SettingsLike } from '../rules/filter'
 import { enabledPackIds, getPackRules } from './packs'
 import type { RuleMeasure } from './ruleMeasures'
 import { replaceFindings } from './findingReviews'
+import type { RowLoader } from './findingAnchors'
+import type { DataSource } from './source'
 
 export interface LoadedRule {
   rule: Rule
@@ -117,8 +119,21 @@ export function settingsForRules(kase: Case): SettingsLike {
 }
 
 /** Replace the findings of the given rules, preserving analyst status/notes on findings whose key still exists. */
-export async function persistFindings(caseId: number, ruleIds: string[], findings: Record<string, unknown>[]): Promise<number> {
-  return replaceFindings(caseId, ruleIds, findings)
+export async function persistFindings(caseId: number, ruleIds: string[], findings: Record<string, unknown>[], load?: RowLoader): Promise<number> {
+  return replaceFindings(caseId, ruleIds, findings, load)
+}
+
+/** Read a server case's rows by id, for the record keys of its findings; none when the server cannot answer. */
+export function serverRowLoader(source: DataSource): RowLoader {
+  return async (table, ids) => {
+    try {
+      const filter = { conditions: [{ field: 'id', op: 'in' as const, value: ids }] }
+      const res = table === 'mails' ? await source.searchMails(filter, ids.length) : await source.searchEvents(filter, ids.length)
+      return new Map((res.rows as unknown as Record<string, unknown>[]).map((r) => [Number(r.id), r]))
+    } catch {
+      return new Map()
+    }
+  }
 }
 
 export interface RuleRunSummary {
@@ -158,6 +173,7 @@ export async function runRulesFor(kase: Case, rules: Rule[], onProgress?: (done:
       kase.id!,
       completed,
       r.findings.filter((f) => completed.includes(String(f.ruleId))),
+      serverRowLoader(getSource(kase)),
     )
     for (const e of r.errors) log('err', e)
     log('ok', `rules done: ${n} finding(s)`)
