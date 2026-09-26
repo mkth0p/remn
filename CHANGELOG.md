@@ -5,6 +5,17 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- The Events page stacks a field (least-frequency analysis): its "stack" button lists every
+  value of an image, parent image, process, command line, path, service, scheduled task,
+  object, file, user, workstation, address, DNS query or provider and event ID pair among
+  the events the filter keeps, the rarest first (on the fewest hosts, then in the fewest
+  events) or the most frequent, each with its events, "on 1 of N hosts" (naming them when
+  five or fewer) and its first and last time. Paths, programs, services and accounts group
+  without regard to case, and hosts count without their domain. A stack past 500 values says
+  how many there are, and clicking a value filters the events to it. The browser and server
+  stores give the same stack, held by the parity fixture (`stacks.json`), and the server
+  answers at `POST /api/store/<key>/stack`.
+
 ## 0.2.0 (2026-09-26)
 
 - A story's score favours weight and attack order over breadth: it follows the heaviest run of

@@ -1,4 +1,4 @@
-"""Read queries over a case store: search, count, aggregate, timeline, facets, pivot, summary, detail, IOCs, raw SQL."""
+"""Read queries over a case store: search, count, aggregate, stack, timeline, facets, pivot, summary, detail, IOCs, raw SQL."""
 
 from __future__ import annotations
 
@@ -191,6 +191,90 @@ def timeline(store: CaseStore, source: str, flt: dict[str, Any] | None, bucket: 
     cur = store.cursor()
     cur.execute(sql, ctx.params)
     return [{"t": int(t), "count": int(c)} for t, c in cur.fetchall()]
+
+
+# Stacking (least-frequency analysis): the fields an analyst stacks, the same list as STACK_FIELDS in
+# frontend/src/data/queries.ts. Windows names paths, programs, services and accounts without regard
+# to case, so those group case-insensitively; a command line keeps its case (an encoded argument is
+# case-sensitive). providerEventId is the pair "provider / event id".
+STACK_FIELDS = (
+    "image",
+    "parentImage",
+    "processName",
+    "parentProcessName",
+    "commandLine",
+    "parentCommandLine",
+    "path",
+    "serviceName",
+    "serviceFile",
+    "taskName",
+    "objectName",
+    "targetFilename",
+    "imageLoaded",
+    "subjectUser",
+    "targetUser",
+    "workstation",
+    "ipAddress",
+    "destinationIp",
+    "query",
+    "providerEventId",
+)
+STACK_CASE_SENSITIVE = {"commandLine", "parentCommandLine"}
+# a host as the stories count it (services/analysis/lineage.host_key): lower case, without its domain
+_STACK_HOST = (
+    "nullif(CASE WHEN regexp_full_match(lower(\"computer\"), '[0-9.]+') THEN lower(\"computer\") ELSE split_part(lower(\"computer\"), '.', 1) END, '')"
+)
+
+
+def stack(
+    store: CaseStore,
+    flt: dict[str, Any] | None,
+    field: str,
+    order: str = "rare",
+    limit: int = 500,
+    settings: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Every value of one event field among the rows the filter keeps, rarest first: on how few hosts
+    it was seen, then in how few events. Each value says its events, its hosts (named when five or
+    fewer) and its first and last time; the totals say how many values exist beyond the limit."""
+    if field not in STACK_FIELDS:
+        raise FilterError(f"cannot stack on {field!r}")
+    ctx = _ctx("events", settings)
+    where = compile_filter(flt, ctx)
+    if field == "providerEventId":
+        val = 'CASE WHEN nullif("provider", \'\') IS NOT NULL AND "eventId" IS NOT NULL THEN "provider" || \' / \' || CAST("eventId" AS VARCHAR) END'
+        key = val
+    else:
+        val = f"nullif(CAST({q(field)} AS VARCHAR), '')"
+        key = val if field in STACK_CASE_SENSITIVE else f"lower({val})"
+    limit = max(1, min(int(limit), 5000))
+    d = "DESC" if order == "common" else "ASC"
+    base = f"WITH s AS (SELECT {key} AS k, {val} AS v, {_STACK_HOST} AS h, ts FROM events WHERE {where})"
+    cur = store.cursor()
+    cur.execute(
+        f"{base} SELECT min(v) AS value, count(*) AS count, count(DISTINCT h) AS hosts, "
+        'CASE WHEN count(DISTINCT h) <= 5 THEN list_sort(list(DISTINCT h) FILTER (WHERE h IS NOT NULL)) END AS "hostList", '
+        f"min(ts) AS first, max(ts) AS last FROM s WHERE k IS NOT NULL GROUP BY k ORDER BY hosts {d}, count {d}, k LIMIT {limit}",
+        ctx.params,
+    )
+    rows = rows_to_dicts(cur)
+    for r in rows:
+        r["hostList"] = list(r["hostList"] or []) if r["hosts"] <= 5 else None
+    tot = cur.execute(
+        f"{base} SELECT count(*) FILTER (WHERE k IS NOT NULL), count(*) FILTER (WHERE k IS NULL), count(DISTINCT k), "
+        "count(DISTINCT h) FILTER (WHERE k IS NOT NULL) FROM s",
+        ctx.params,
+    ).fetchone()
+    return {
+        "field": field,
+        "order": "common" if order == "common" else "rare",
+        "rows": rows,
+        "events": int(tot[0]),
+        "blank": int(tot[1]),
+        "distinct": int(tot[2]),
+        "hosts": int(tot[3]),
+        "truncated": int(tot[2]) > len(rows),
+    }
 
 
 def facets(store: CaseStore, source: str, field: str, limit: int = 50) -> list[dict[str, Any]]:
