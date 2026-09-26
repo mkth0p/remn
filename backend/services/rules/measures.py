@@ -84,8 +84,11 @@ def for_rule(rule: Any) -> dict[str, Any] | None:
 
 
 def summary() -> dict[str, Any] | None:
-    """What the rules were measured on, for the pages that show a measure."""
+    """What the rules were measured on, for the pages that show a measure, and how many were measured
+    and seen to detect a recording of what they look for."""
     data = load()
     if not data:
         return None
-    return {k: v for k, v in data.items() if k != "rules"}
+    rules = data["rules"].values()
+    totals = {"rules": len(data["rules"]), "detect": sum(1 for m in rules if isinstance(m, dict) and m.get("hits"))}
+    return {**{k: v for k, v in data.items() if k != "rules"}, "totals": totals}

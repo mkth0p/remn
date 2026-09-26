@@ -11,6 +11,7 @@ import { deployment } from './data/deployment'
 import { setCaseInternalDomains } from './rules/incidents'
 import { repairInterruptedImports } from './data/interruptedImports'
 import { isAbort } from './data/queryClient'
+import { casesWithEvidence, FIRST_CASE_NAME } from './data/cases'
 import {
   IconAi,
   IconDashboard,
@@ -34,6 +35,7 @@ import {
 } from './components/Icons'
 import { ConsolePanel, Toasts } from './components/ConsolePanel'
 import { TokenGate } from './components/TokenGate'
+import { RemnMark } from './components/RemnMark'
 import { DataNotice } from './components/DataNotice'
 import { EntityPanel } from './components/EntityPanel'
 import { Modal, Progress, ThemeToggle } from './components/ui'
@@ -156,7 +158,7 @@ export default function App() {
       // one transaction, so two boots in flight (React runs effects twice in development) create one default case
       const all = await db.transaction('rw', db.cases, db.kv, async () => {
         if ((await db.cases.count()) === 0) {
-          const id = await db.cases.add({ name: 'Case 1', createdAt: Date.now(), updatedAt: Date.now(), settings: defaultSettings(), storage: 'browser' })
+          const id = await db.cases.add({ name: FIRST_CASE_NAME, createdAt: Date.now(), updatedAt: Date.now(), settings: defaultSettings(), storage: 'browser' })
           await db.kv.put({ key: 'lastCase', value: id })
         }
         return db.cases.toArray()
@@ -165,6 +167,8 @@ export default function App() {
       const last = (await db.kv.get('lastCase'))?.value as number | undefined
       const current = all.find((c) => c.id === last) ?? all[0]
       setCurrentCase({ ...current, settings: { ...defaultSettings(), ...current.settings } })
+      // the home page first, until some case holds evidence
+      useStore.getState().setView((await casesWithEvidence()).size ? 'dashboard' : 'home')
       setReady(true)
       // an import a closed or crashed tab left half-done: its rows go, and the evidence says it stopped
       repairInterruptedImports((st) => {
@@ -327,6 +331,14 @@ export default function App() {
         <div className="big">REMN</div>booting…
       </div>
     )
+  if (view === 'home')
+    return (
+      <>
+        <HomeView />
+        <Toasts />
+        {authRequired && <TokenGate />}
+      </>
+    )
   const busy = jobs.some((j) => j.phase !== 'done' && j.phase !== 'error')
   const isServer = kase.storage === 'server'
   const browserOnly = health?.mode === 'browser-only'
@@ -348,14 +360,14 @@ export default function App() {
           className="brand click"
           role="button"
           tabIndex={0}
-          title="about REMN"
+          title="REMN home"
           onClick={() => setView('home')}
           onKeyDown={(e) => {
             if (e.key === 'Enter' || e.key === ' ') setView('home')
           }}
         >
+          <RemnMark size={22} />
           <span className="wordmark">REMN</span>
-          <span className="mark">R</span>
         </div>
         <nav className="nav">
           {NAV.map((n) => (
@@ -428,7 +440,7 @@ export default function App() {
         <button className="btn sm ghost" onClick={() => setNewCase({ name: '', storage: 'browser' })}>
           + case
         </button>
-        <span className="title">{NAV.find((n) => n.id === view)?.label ?? (view === 'home' ? 'About' : '')}</span>
+        <span className="title">{NAV.find((n) => n.id === view)?.label ?? ''}</span>
         <span className="spacer" />
         <ThemeToggle />
         <div className="row" style={{ width: 420 }}>
@@ -444,7 +456,6 @@ export default function App() {
         </div>
       </header>
       <main className="main relative">
-        {view === 'home' && <HomeView />}
         {view === 'dashboard' && <Dashboard />}
         {view === 'evidence' && <EvidenceView />}
         {view === 'events' && <EventsView />}

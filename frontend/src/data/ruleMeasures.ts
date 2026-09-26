@@ -36,6 +36,8 @@ export interface MeasureSources {
     evtxToMitre?: { repo: string; sha: string; recordings: number }
     baseline?: { repo: string; tag: string; machines: number; events: number }
   }
+  /** the rules measured, and those seen to fire on a recording of what they look for */
+  totals?: { rules: number; detect: number }
 }
 
 export type MeasureVerdict = 'detects' | 'misses' | 'lead' | 'changed' | 'settings' | 'custom' | 'unmeasured'

@@ -17,9 +17,23 @@ and pivots on every entity value. Light is the default; the switch in the top ba
 the choice in this browser and both modes share the same tokens in
 `frontend/src/ui/theme.css`. The wordmark and view titles use
 [Gulax](https://velvetyne.fr/fonts/gulax/) by Morgan Gilbert (Velvetyne, SIL Open Font
-License 1.1; the licence and copyright files ship in `frontend/public/fonts/`). The
-wordmark opens a short intro page: one sentence, what goes in, what comes out, where it
-stays. The sidebar collapses to an icon rail with the button at its foot, remembered per
+License 1.1; the licence and copyright files ship in `frontend/public/fonts/`), beside
+the REMN mark (`frontend/src/components/RemnMark.tsx`), a block wearing away into dither
+with one fragment left.
+
+The app opens on a home page until some case in the browser holds evidence, and on the
+last case's dashboard after that; the wordmark leads back to the home page. It has its own
+type (IBM Plex Sans and Mono) and palette, apart from the case pages, and shows what REMN
+reads, how the rules are measured and what the measures show. The rule totals, the
+recordings, the clean-host baseline and the example rule's record come from
+`rules/measures.json` through `/api/meta`, so they follow every measurement; the
+comparisons with Hayabusa and Chainsaw, the held-out attack_data run, the evtx-baseline
+false positives and the mail corpora are the dated results of the reviews they cite
+(`frontend/src/data/landingFigures.ts`). New case names a case, picks its store and can
+take evidence as it is created; the first visit's case, while still untouched, is taken
+over rather than left empty. Open demo case opens the Northstar lab in the browser.
+
+The sidebar collapses to an icon rail with the button at its foot, remembered per
 browser.
 
 On every list, `j` and `k` move the selection and `/` focuses the search. The Review page
