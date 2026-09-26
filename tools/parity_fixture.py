@@ -5,7 +5,9 @@ row ever reaching the server; the SQL engine (services/store/rules.py) exists fo
 Both must produce the same findings for the same rules and rows. This script builds a small mixed
 scenario (Windows events, M365 rows, mails), runs every bundled rule on the DuckDB engine and writes
 the rows and the resulting finding keys to tests/fixtures/parity/. frontend/src/rules/parity.test.ts
-runs the browser engine on the same rows and fails on any difference.
+runs the browser engine on the same rows and fails on any difference. The stacks of a few fields
+over the same events (services/store/queries.stack) go to stacks.json for
+frontend/src/data/stack.parity.test.ts, which stacks them in the browser store.
 
     .venv\\Scripts\\python.exe tools\\parity_fixture.py        # rewrite the fixture after changing an engine or a rule
 """
@@ -32,11 +34,22 @@ from mail_calibration import examples, message  # noqa: E402
 from api.views.meta import load_rules  # noqa: E402
 from services.parsers import m365  # noqa: E402
 from services.parsers.mail.common import ParseContext, RawAttachment, build_row  # noqa: E402
+from services.store import queries as Q  # noqa: E402
 from services.store import rules as R  # noqa: E402
 from services.store.casestore import StoreRegistry  # noqa: E402
 from services.store.writers import EventWriter, MailWriter  # noqa: E402
 
 OUT = ROOT / "tests" / "fixtures" / "parity"
+# (field, filter, order): the stacks both stores must agree on
+STACKS: list[tuple[str, dict[str, Any] | None, str]] = [
+    ("image", None, "rare"),
+    ("commandLine", None, "rare"),
+    ("serviceName", None, "common"),
+    ("targetUser", None, "rare"),
+    ("ipAddress", {"conditions": [{"field": "eventId", "op": "in", "value": [4624, 4625]}]}, "rare"),
+    ("providerEventId", None, "rare"),
+    ("processName", {"text": "powershell"}, "rare"),
+]
 SETTINGS: dict[str, Any] = {
     "internal_domains": ["contoso.com", "interne.fr"],
     "expected_countries": ["FR"],
@@ -118,6 +131,10 @@ def main() -> None:
             {"artifactType": "defender", "message": "Threat detected: synthetic", "recordKind": "observation"},
             {"artifactType": "prefetch", "processName": "POWERSHELL.EXE", "ts": 1788948000000, "recordKind": "event"},
             {"artifactType": "service", "serviceName": "Expected", "serviceFile": r"C:\Program Files\Vendor\demo.exe", "recordKind": "observation"},
+            # the same programs on other hosts, spelled in other cases, for the stacks
+            {"artifactType": "process", "image": r"C:\Windows\System32\svchost.exe", "computer": "WS02.contoso.com", "recordKind": "observation"},
+            {"artifactType": "process", "image": r"c:\windows\system32\SVCHOST.EXE", "computer": "ws03", "recordKind": "observation"},
+            {"artifactType": "process", "image": r"C:\WINDOWS\explorer.exe", "computer": "WS02", "recordKind": "observation"},
         ]
     )
     ml_rows = mails()
@@ -139,6 +156,7 @@ def main() -> None:
                 stored_ev = store._con.execute('SELECT id, "eventId", ts FROM events ORDER BY id').fetchall()
                 stored_ml = store._con.execute("SELECT id, subject FROM mails ORDER BY id").fetchall()
             res = R.run_rules(store, bundled, SETTINGS)
+            stacks = [{"field": f, "filter": flt, "order": o, "stack": Q.stack(store, flt, f, o, 500, SETTINGS)} for f, flt, o in STACKS]
         finally:
             reg.close_all()
     # the writers assign ids in insertion order starting at 1: give the browser rows the same ids
@@ -169,6 +187,7 @@ def main() -> None:
         ),
         encoding="utf-8",
     )
+    (OUT / "stacks.json").write_text(json.dumps({"settings": SETTINGS, "stacks": stacks}, indent=1, sort_keys=True, default=str), encoding="utf-8")
     fired = len(expected)
     print(
         f"{len(ev_rows)} events, {len(ml_rows)} mails, {len(bundled)} bundled rules: {fired} fired, {sum(len(v) for v in expected.values())} findings, {len(res['errors'])} error(s)"

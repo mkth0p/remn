@@ -25,10 +25,13 @@ version. Original fields remain in `data`. Original archive bytes and unsupporte
 member contents are not retained by either store; keep the acquisition separately.
 Case migration, export/import and deletion include normalized rows and provenance.
 
-A structured export is parsed under a 64 MiB budget counted while reading, not checked against
-the file size. An export past it contributes every record read before the ceiling and is reported
-as an error member with the reason, rather than contributing nothing but a hash. The member and
-package byte budgets are unchanged.
+A delimited export (CSV, TSV) is read one row at a time and streamed to the case, so it is read
+to the 4 GiB member ceiling: MFTECmd's `$MFT` and `$J` output runs to gigabytes, and the 64 MiB
+ceiling it used to share with JSON kept only the first few percent of a volume. A JSON export,
+which is read whole, is parsed under a 64 MiB budget counted while reading, not checked against
+the file size. An export past its budget contributes every record read before the ceiling and is
+reported as an error member with the reason, rather than contributing nothing but a hash, and the
+report's "what the evidence cannot show" names every member read only in part.
 
 ## Triage collections
 
@@ -44,13 +47,42 @@ record cap, gets its own row in the coverage table as `triage!/<function>`, and 
 whether it ran, was absent from this collection, or was cut short. Registry hives inside such
 a collection are not walked raw, because the pass reads them for what they mean. Event logs
 and prefetch files still go through the member loop, with provenance per file. The `$MFT`
-and USN journal are not read by default; they run to millions of rows.
+and USN journal are read only when the case setting "read the $MFT and USN journal" is on
+(`fileSystem` in the store ingest options, `filesystem=1` on `/api/ingest/package`): they run to
+millions of records, so they run last in the pass, at most 500,000 records each, and share its
+300-second allowance with Hayabusa, which runs after it and is what a large volume would
+otherwise leave without time. Each MFT record is one time of one attribute (`SI created`,
+`FN modified`) and each USN record its change reasons.
 
 Exports written by other tools land in the same fields. The Zimmerman parsers are recognised
 by their headers wherever the file sits (EvtxECmd rows become events, PECmd prefetch,
 AmcacheParser and AppCompatCacheParser presence and execution evidence, RECmd registry values, LECmd,
-JLECmd, MFTECmd and SBECmd files and folders, SrumECmd network usage), so KAPE module output
-needs no renaming. Velociraptor result files are mapped by the artifact that produced them,
+JLECmd and SBECmd files and folders, MFTECmd `$MFT` entries and `$J` changes, SrumECmd network
+usage), so KAPE module output needs no renaming.
+
+Disk artifacts keep every time they record, each as its own row that says which time it is, so
+they sit on the timeline beside the event logs (a host super-timeline):
+
+- **MFTECmd `$MFT`** (`artifactType: mft`): one row per distinct time of the entry's
+  `$STANDARD_INFORMATION`, and one per `$FILE_NAME` time that differs from the `$SI` time of the
+  same kind. Times that coincide share a row. `description` says what the time is (`SI created,
+  modified`, `FN created`) and the summary carries the MACB mark (`SI M..B`). An entry whose
+  `$SI` creation time is earlier than its `$FN` one, or whose `$SI` times have no sub-second part
+  (or that MFTECmd flags `SI<FN` or `uSecZeros`), is marked as a possible timestomp in its
+  summary and in `data._timestompHints`: a lead, since archive extraction and some installers do
+  the same.
+- **MFTECmd `$J`** (`artifactType: usn`): the update time, the path (`ParentPath\Name`, or the
+  name alone when the journal was parsed without the `$MFT`), and the update reasons as
+  `operation` (`FileCreate|Close`), which rules and searches read.
+- **PECmd**: the last run and each earlier run (`PreviousRun0` to `PreviousRun6`) are execution
+  rows, `prefetch last run` and `prefetch earlier run`, as a raw `.pf` file gives one row per run.
+- **EvtxECmd**: the `Payload` column (the record's EventData or UserData as JSON) goes through
+  the native EVTX parser's own field mapping, so the command line, logon type, source address
+  and the rest fill the columns they fill for a `.evtx`, and the event's category, description
+  and summary are the native parser's. Velociraptor's EventData is mapped the same way.
+
+The event detail shows the time's meaning beside the time, and the Timesketch and Timeline
+Explorer exports write it as `timestamp_desc`. Velociraptor result files are mapped by the artifact that produced them,
 including its event log exports, which become events. DFIR-ORC archives are 7z, expanded once
 into the staging area within the package byte budget, and their `GetThis`, `NTFSInfo`,
 `USNInfo` and `RegInfo` CSVs are read by name. Timestamps these tools write without a zone
@@ -261,7 +293,7 @@ and have the same tested behavior in the browser and SQL engines.
 ## Limits and synthetic verification
 
 Packages allow 20,000 archive entries, 4 GiB per member and 16 GiB expanded data.
-Structured exports cap at 64 MiB per member, manifests at 64 KiB. Members stream to
+JSON exports cap at 64 MiB per member, delimited exports at the 4 GiB member ceiling, manifests at 64 KiB. Members stream to
 temporary files; archive paths are never used as extraction destinations. Links,
 encrypted members and traversal paths are skipped. Temporary files are cleaned up.
 An inventory cut short is marked incomplete.

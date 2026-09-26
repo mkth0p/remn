@@ -123,9 +123,58 @@ TECHNIQUE = re.compile(r"^T\d{4}(\.\d{3})?$")
 TECHNIQUE_FOLDER = re.compile(r"^(T\d{4})(?:\.(\d{3}))?", re.I)
 # rules written after studying a dataset's files: that dataset is not evidence for them
 WRITTEN_AGAINST: dict[str, frozenset[str]] = {
+    # rules/windows/other-products.yaml, written for the product logs (SQL Server, OpenSSH, AD CS, DNS
+    # server, BitLocker) the 2026-09-26 research found missed there
+    "win-mssql-audit-tampered": frozenset({"evtxToMitre"}),
+    "win-mssql-server-role-member-added": frozenset({"evtxToMitre"}),
+    "win-mssql-database-role-member-added": frozenset({"evtxToMitre"}),
+    "win-mssql-login-created": frozenset({"evtxToMitre"}),
+    "win-mssql-sa-enabled": frozenset({"evtxToMitre"}),
+    "win-mssql-failed-logins-from-one-client": frozenset({"evtxToMitre"}),
+    "win-mssql-sa-login-failed": frozenset({"evtxToMitre"}),
+    "win-mssql-dangerous-option-enabled": frozenset({"evtxToMitre"}),
+    "win-mssql-single-user-mode": frozenset({"evtxToMitre"}),
+    "win-sshd-password-guessing": frozenset({"evtxToMitre"}),
+    "win-adcs-request-with-san": frozenset({"evtxToMitre"}),
+    "win-adcs-ca-permissions-changed": frozenset({"evtxToMitre"}),
+    "win-adcs-template-changed": frozenset({"evtxToMitre"}),
+    "win-adcs-audit-filter-changed": frozenset({"evtxToMitre"}),
+    "win-adcs-ca-backup": frozenset({"evtxToMitre"}),
+    "win-kdc-certificate-weak-mapping": frozenset({"evtxToMitre"}),
+    "win-dns-server-plugin-dll-set": frozenset({"evtxToMitre"}),
+    "win-dns-server-logging-changed": frozenset({"evtxToMitre"}),
+    "win-dns-wildcard-or-wpad-record": frozenset({"evtxToMitre"}),
+    "win-bitlocker-password-protector-added": frozenset({"evtxToMitre"}),
+    "win-bitlocker-encryption-started": frozenset({"evtxToMitre"}),
     # written for the gaps the head-to-head of 2026-09-25 found on EVTX-to-MITRE-Attack
     "win-user-added-security-group": frozenset({"evtxToMitre"}),
     "win-explicit-credentials-unusual-process": frozenset({"evtxToMitre"}),
+    # rules/windows/directory.yaml, written for the directory changes the 2026-09-26 research found missed there
+    "win-account-security-weakened": frozenset({"evtxToMitre"}),
+    "win-account-delegation-enabled": frozenset({"evtxToMitre"}),
+    "win-password-never-expires-set": frozenset({"evtxToMitre"}),
+    "win-ad-acl-changed-domain-root-or-adminsdholder": frozenset({"evtxToMitre"}),
+    "win-ad-acl-changed": frozenset({"evtxToMitre"}),
+    "win-ad-extended-right-modified": frozenset({"evtxToMitre"}),
+    "win-ad-server-object-created": frozenset({"evtxToMitre"}),
+    "win-domain-policy-changed-by-user": frozenset({"evtxToMitre"}),
+    "win-special-groups-table-changed": frozenset({"evtxToMitre"}),
+    "win-sensitive-user-right-assigned": frozenset({"evtxToMitre"}),
+    "win-guest-account-enabled": frozenset({"evtxToMitre"}),
+    # rules/windows/powershell-commands.yaml, written for the PowerShell 4103 / 800 commands the 2026-09-26
+    # research found missed there
+    "win-ps-privileged-group-members-listed": frozenset({"evtxToMitre"}),
+    "win-ps-kerberos-ticket-requested-for-spn": frozenset({"evtxToMitre"}),
+    "win-ps-spn-accounts-searched": frozenset({"evtxToMitre"}),
+    "win-ps-forest-or-trust-discovery": frozenset({"evtxToMitre"}),
+    "win-ps-service-registry-path-changed": frozenset({"evtxToMitre"}),
+    "win-ps-service-created": frozenset({"evtxToMitre"}),
+    "win-ps-bits-transfer": frozenset({"evtxToMitre"}),
+    "win-ps-wmi-permanent-subscription": frozenset({"evtxToMitre"}),
+    "win-ps-printer-port-to-file": frozenset({"evtxToMitre"}),
+    "win-ps-amsi-bypass-run": frozenset({"evtxToMitre"}),
+    "win-ps-named-pipe-shell": frozenset({"evtxToMitre"}),
+    "win-ps-openssh-server-enabled": frozenset({"evtxToMitre"}),
 }
 
 

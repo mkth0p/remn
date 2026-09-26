@@ -98,7 +98,10 @@ EZ_SIGNATURES: tuple[tuple[frozenset[str], str], ...] = (
     (frozenset({"programid", "fullpath", "sha1"}), "amcache"),
     (frozenset({"programid", "installdate", "publisher"}), "program"),
     (frozenset({"cacheentryposition", "lastmodifiedtimeutc"}), "shimcache"),
-    (frozenset({"entrynumber", "parentpath", "created0x10"}), "file"),
+    # MFTECmd: the $MFT (one row per entry, $STANDARD_INFORMATION and $FILE_NAME times) and the
+    # $J change journal (one row per update, with the reasons it was written)
+    (frozenset({"entrynumber", "parentpath", "created0x10"}), "mft"),
+    (frozenset({"updatetimestamp", "updatereasons", "updatesequencenumber"}), "usn"),
     (frozenset({"hivepath", "keypath", "valuename", "valuedata"}), "registry"),
     (frozenset({"absolutepath", "shelltype", "lastwritetime"}), "shellbag"),
     (frozenset({"targetidabsolutepath"}), "file"),
@@ -218,11 +221,101 @@ def _flatten(raw: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+# Fields the event's own System block gives an exported row: the EventData mapping must not
+# override them with the empty values it computes without one.
+_SYSTEM_FIELDS = frozenset(
+    {
+        "recordId",
+        "ts",
+        "tsIso",
+        "eventId",
+        "qualifiers",
+        "version",
+        "level",
+        "levelName",
+        "task",
+        "opcode",
+        "keywords",
+        "provider",
+        "providerGuid",
+        "channel",
+        "computer",
+        "userSid",
+        "processId",
+        "threadId",
+        "activityId",
+        "data",
+        "raw",
+    }
+)
+
+
+def _unxml(value: Any) -> Any:
+    """An element as Json.NET serialises XML ({"@Attr": .., "#text": ..}) without its namespace
+    declarations, which say nothing about the event."""
+    if isinstance(value, dict):
+        return {k: _unxml(v) for k, v in value.items() if not k.startswith("@xmlns")}
+    if isinstance(value, list):
+        return [_unxml(v) for v in value]
+    return value
+
+
+def _evtxecmd_payload(text: str | None) -> dict[str, Any] | None:
+    """EvtxECmd's Payload column: the record's EventData (or UserData) as JSON, each <Data Name="X">
+    written as {"@Name": "X", "#text": value}. Returned shaped like the native parser's record, so
+    the same mapping reads it."""
+    if not text or not text.lstrip().startswith("{"):
+        return None
+    try:
+        doc = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(doc, dict):
+        return None
+    out: dict[str, Any] = {}
+    event_data = doc.get("EventData")
+    if isinstance(event_data, dict):
+        fields: dict[str, Any] = {}
+        unnamed: list[Any] = []
+        items = event_data.get("Data")
+        for item in items if isinstance(items, list) else [items] if items is not None else []:
+            if isinstance(item, dict) and "@Name" in item:
+                fields[str(item["@Name"])] = item.get("#text")
+            elif isinstance(item, dict):
+                unnamed.append(item.get("#text"))
+            else:
+                unnamed.append(item)
+        if unnamed:
+            fields["Data"] = unnamed if len(unnamed) > 1 else unnamed[0]
+        for k, v in event_data.items():
+            if k != "Data" and not k.startswith("@"):
+                fields[k] = _unxml(v)
+        out["EventData"] = fields
+    if isinstance(doc.get("UserData"), dict):
+        out["UserData"] = _unxml(doc["UserData"])
+    return out or None
+
+
+def _event_data_fields(event_id: Any, provider: Any, sections: dict[str, Any]) -> dict[str, Any]:
+    """The columns the native EVTX parser fills from a record's EventData or UserData, by the same
+    code (evtx_parser.flatten), so an exported record meets the rules on the same fields."""
+    from services.parsers import evtx_parser
+
+    event = {"System": {"EventID": event_id, "Provider": {"#attributes": {"Name": str(provider)}} if provider else None}, **sections}
+    flat = evtx_parser.flatten(event, include_raw=False)
+    fields = {k: v for k, v in flat.items() if k not in _SYSTEM_FIELDS and v not in (None, "")}
+    fields["_eventData"] = flat.get("data") or {}
+    return fields
+
+
 def _event_export(raw: dict[str, Any], fields: dict[str, Any], kind: str | None, name: str, index: int, context: dict[str, Any]) -> dict[str, Any] | None:
     """Event log records another tool exported become event rows, not observations.
 
-    EvtxECmd writes one flat CSV row per record; Velociraptor writes the record's System and
-    EventData objects as JSON. Both carry the same identity: channel, record id, event id, time.
+    EvtxECmd writes one flat CSV row per record, with the whole EventData as JSON in its Payload
+    column; Velociraptor writes the record's System and EventData objects as JSON. Both carry the
+    same identity: channel, record id, event id, time. The EventData goes through the native
+    parser's own mapping, so a command line, a logon type or a source address lands in the same
+    column it would have had if the .evtx itself had been read.
     """
     system = raw.get("System") if isinstance(raw.get("System"), dict) else None
     if system is None and kind != "event-export":
@@ -235,6 +328,7 @@ def _event_export(raw: dict[str, Any], fields: dict[str, Any], kind: str | None,
                 return str(v).strip()
         return None
 
+    sections: dict[str, Any] | None = None
     if system is not None:
         event_id = system.get("EventID")
         if isinstance(event_id, dict):
@@ -250,6 +344,11 @@ def _event_export(raw: dict[str, Any], fields: dict[str, Any], kind: str | None,
         payload = raw.get("EventData") if isinstance(raw.get("EventData"), dict) else {}
         if isinstance(payload, dict):
             user = payload.get("TargetUserName") or payload.get("SubjectUserName")
+        sections = {k: raw[k] for k in ("EventData", "UserData") if isinstance(raw.get(k), dict)} or None
+        execution = system.get("Execution") if isinstance(system.get("Execution"), dict) else {}
+        process_id, thread_id = execution.get("ProcessID"), execution.get("ThreadID")
+        security = system.get("Security") if isinstance(system.get("Security"), dict) else {}
+        user_sid = security.get("UserID")
     else:
         event_id, provider, when = get("EventId", "EventID"), get("Provider"), get("TimeCreated")
         channel, computer, record_id = get("Channel"), get("Computer"), get("EventRecordId", "RecordNumber")
@@ -258,10 +357,13 @@ def _event_export(raw: dict[str, Any], fields: dict[str, Any], kind: str | None,
         payload = " ".join(v for v in (get(f"PayloadData{i}") for i in range(1, 7)) if v)
         if payload:
             message = f"{message}: {payload}" if message else payload
+        sections = _evtxecmd_payload(get("Payload"))
+        process_id, thread_id, user_sid = get("ProcessId"), get("ThreadId"), get("UserId")
+    event_number = int(event_id) if str(event_id or "").strip().isdigit() else None
     row: dict[str, Any] = {
         "recordKind": "event",
         "artifactType": "event-export",
-        "eventId": int(event_id) if str(event_id or "").strip().isdigit() else None,
+        "eventId": event_number,
         "ts": timestamp(when) or timestamp_utc(when) if isinstance(when, str) else None,
         "observedAt": timestamp(context.get("collectedAt")) if context.get("collectedAt") else None,
         "sourceIndex": index,
@@ -270,6 +372,9 @@ def _event_export(raw: dict[str, Any], fields: dict[str, Any], kind: str | None,
         "channel": str(channel) if channel else None,
         "computer": (str(computer) if computer else None) or context.get("host"),
         "recordId": int(record_id) if str(record_id or "").strip().isdigit() else None,
+        "processId": int(process_id) if str(process_id or "").strip().isdigit() else None,
+        "threadId": int(thread_id) if str(thread_id or "").strip().isdigit() else None,
+        "userSid": str(user_sid) if user_sid else None,
         "category": "collection:event-export",
         "targetUser": str(user) if user else None,
         "message": str(message)[:4000] if message else None,
@@ -277,6 +382,20 @@ def _event_export(raw: dict[str, Any], fields: dict[str, Any], kind: str | None,
     }
     label = f"{row['provider'] or row['channel'] or 'event'} {row['eventId'] or ''}".strip()
     row["summary"] = f"{label}: {row['message'] or ''}".strip(": ")[:2000]
+    if sections:
+        mapped = _event_data_fields(event_number, row["provider"], sections)
+        event_data = mapped.pop("_eventData")
+        # the export's own message (EvtxECmd's map description and payload digest) is kept; the
+        # native parser only fills one from unnamed Data
+        if row["message"]:
+            mapped.pop("message", None)
+        if not mapped.get("description"):
+            # an event the reference does not describe keeps the export's category and summary
+            mapped.pop("category", None)
+            mapped.pop("summary", None)
+        row.update(mapped)
+        # EventData by name, as the native parser keeps it, beside the export's own columns
+        row["data"] = {**raw, **{k: v for k, v in event_data.items() if k not in raw}}
     return row
 
 
@@ -338,6 +457,12 @@ def _xml_records(path: str, name: str) -> Iterator[dict[str, Any]]:
 # Bytes a single structured export may be parsed from. Enforced while reading, not on the file
 # size, so the records parsed before the ceiling survive and the member is reported as partial.
 MAX_PARSE_BYTES = 64 * 1024**2
+# A delimited export is read one row at a time and each row leaves as soon as it is normalised, so
+# its size costs time, not memory. MFTECmd's $MFT and $J output runs to gigabytes, and cutting it at
+# 64 MiB kept the first few percent of the volume's files and changes and lost the rest. It is read
+# to the package's own per-member ceiling instead; a JSON document, which is read whole, keeps the
+# smaller one.
+MAX_STREAM_BYTES = 4 * 1024**3
 
 
 class _ByteBudget(io.RawIOBase):
@@ -371,7 +496,7 @@ class _ByteBudget(io.RawIOBase):
         n = self._raw.readinto(buffer) or 0
         self._read += n
         if self._read > self._limit:
-            raise ValueError(f"structured export exceeded the {self._limit // 1024**2} MiB parse limit; records beyond it were not read")
+            raise ValueError(f"structured export exceeded the {self._limit // 1024**2:,} MiB parse limit; records beyond it were not read")
         return n
 
 
@@ -678,7 +803,8 @@ def records(path: str, name: str, notes: dict[str, Any] | None = None) -> Iterat
             notes["encoding"] = encoding
         # Lenient because the encoding above is chosen, not guessed at random: what "replace"
         # covers here is a corrupt byte in one line, and losing the file over that helps nobody.
-        with io.TextIOWrapper(io.BufferedReader(_ByteBudget(raw, MAX_PARSE_BYTES)), encoding=encoding, errors="replace", newline="") as fh:
+        budget = MAX_STREAM_BYTES if name.lower().endswith((".csv", ".tsv")) else MAX_PARSE_BYTES
+        with io.TextIOWrapper(io.BufferedReader(_ByteBudget(raw, budget)), encoding=encoding, errors="replace", newline="") as fh:
             if category(name) == "defender" and name.lower().endswith((".txt", ".log")):
                 yield from _defender_records(fh, name, notes)
             elif category(name) == "dhcp":
@@ -826,18 +952,80 @@ def _dhcp_row(raw: dict[str, Any], index: int, context: dict[str, Any]) -> dict[
     }
 
 
+# The four times NTFS keeps per attribute, in MACB order: the letter, what it records, and the
+# stem of MFTECmd's column for it (0x10 = $STANDARD_INFORMATION, 0x30 = $FILE_NAME).
+MACB = (("M", "modified", "LastModified"), ("A", "accessed", "LastAccess"), ("C", "changed", "LastRecordChange"), ("B", "created", "Created"))
+_MACB_NAME = {letter: what for letter, what, _stem in MACB}
+_ZERO_FRACTION = re.compile(r"\.0+$")
+
+
+def macb_times(values: dict[str, dict[str, int | None]]) -> list[tuple[int, str, str]]:
+    """One (time, meaning, MACB) per distinct time of an MFT entry.
+
+    Every distinct $STANDARD_INFORMATION time is a row; a $FILE_NAME time is one only where it
+    differs from the $SI time of the same kind, since that difference is the point of reading it.
+    Times that coincide share a row, marked the way super-timelines do: "SI M..B" is the entry's
+    $SI modified and created time. The $SI row that holds the creation time comes first.
+    """
+    out: list[tuple[int, str, str]] = []
+    for attr in ("SI", "FN"):
+        groups: dict[int, list[str]] = {}
+        for letter, _what, _stem in MACB:
+            ms = values.get(attr, {}).get(letter)
+            if ms is None or (attr == "FN" and values.get("SI", {}).get(letter) == ms):
+                continue
+            groups.setdefault(ms, []).append(letter)
+        ordered = sorted(groups.items(), key=lambda item: ("B" not in item[1], item[0]))
+        for ms, letters in ordered:
+            meaning = f"{attr} " + ", ".join(_MACB_NAME[x] for x in "BMCA" if x in letters)
+            out.append((ms, meaning, f"{attr} " + "".join(x if x in letters else "." for x in "MACB")))
+    return out
+
+
+def timestomp_hints(si_created: int | None, fn_created: int | None, si_text: list[str | None], flags: tuple[bool, bool] = (False, False)) -> list[str]:
+    """What an MFT entry shows of its $SI times having been set by hand, as statements.
+
+    Tools that set file times write $STANDARD_INFORMATION through the documented API and cannot
+    reach $FILE_NAME, so a creation time earlier in $SI than in $FN is the classic sign; a $SI
+    time with no sub-second part at all is the other, since NTFS keeps 100 ns. Both have innocent
+    causes (archive extraction, some installers), so these are leads, not findings.
+    """
+    hints = []
+    if flags[0] or (si_created is not None and fn_created is not None and si_created < fn_created):
+        hints.append("$SI created is earlier than $FN created")
+    if flags[1] or any(t and _ZERO_FRACTION.search(t.strip()) for t in si_text):
+        hints.append("$SI times have no sub-second part")
+    return hints
+
+
 def normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, Any]) -> dict[str, Any]:
+    """The record as one row: for an artifact with several times, the row of its first."""
+    return _normalize(raw, name, index, context)[0]
+
+
+def normalize_rows(raw: dict[str, Any], name: str, index: int, context: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    """The record as rows, one per moment it records: an MFT entry's distinct MACB times, a
+    prefetch file's last and earlier runs. Every row is the same record (same source index and
+    data); only the time and what that time means differ."""
+    row, more = _normalize(raw, name, index, context)
+    yield row
+    for extra in more:
+        yield {**row, **extra}
+
+
+def _normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     if category(name) == "dhcp":
-        return _dhcp_row(raw, index, context)
+        return _dhcp_row(raw, index, context), []
     if category(name) == "deception":
         from services.parsers.deception import normalize as normalize_deception
 
-        return normalize_deception(raw, index, context)
+        return normalize_deception(raw, index, context), []
     raw = _flatten(raw)
     fields = {key(k): v for k, v in raw.items()}
     exported = _event_export(raw, fields, _ez_kind(fields) or category(name), name, index, context)
     if exported is not None:
-        return exported
+        return exported, []
+    more: list[dict[str, Any]] = []
 
     def get(*names: str) -> str | None:
         for n in names:
@@ -937,10 +1125,15 @@ def normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, Any
         "powershell-history",
         "registry",
         "file",
+        "mft",
+        "usn",
     ):
         candidate = get("FullPath", "Path", "AbsolutePath", "LocalPath", "TargetIDAbsolutePath", "FullName", "ExeInfo", "ImagePath", "FilePath")
-        if kind == "file" and not candidate and get("ParentPath") and get("FileName"):
-            candidate = get("ParentPath").rstrip("\\") + "\\" + get("FileName")
+        leaf = get("FileName") if kind != "usn" else get("Name")
+        if kind in ("file", "mft", "usn") and not candidate and leaf:
+            # MFTECmd writes the parent path apart, and leaves it empty in a $J read without the $MFT
+            parent = get("ParentPath")
+            candidate = parent.rstrip("\\") + "\\" + leaf if parent else leaf
         row["path"] = row.get("path") or candidate
         if kind in ("amcache", "shimcache", "userassist", "bam", "sru"):
             row["image"] = row.get("image") or candidate
@@ -974,8 +1167,34 @@ def normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, Any
         # A registry last-write time stays metadata, as it does for hives decoded natively. ShimCache
         # holds the file's own modification time and PowerShell history no time per line, so neither
         # is an event; the other exports carry a moment something happened.
-        if kind not in ("registry", "shimcache", "powershell-history"):
+        if kind not in ("registry", "shimcache", "powershell-history", "mft", "usn"):
             row["ts"] = row.get("ts") or timestamp_utc(when)
+        if kind == "usn":
+            # when the change was journaled, and what the change was: the reasons are the
+            # operation, as a UAL record's is ("FileCreate|Close", "DataExtend|DataOverwrite")
+            row["ts"] = timestamp_utc(get("UpdateTimestamp"))
+            row["name"] = row.get("name") or get("Name")
+            row["operation"] = get("UpdateReasons")
+            row["description"] = f"USN {row['operation'] or 'update'}"
+        if kind == "mft":
+            text = {attr: {letter: get(f"{stem}{code}") for letter, _what, stem in MACB} for attr, code in (("SI", "0x10"), ("FN", "0x30"))}
+            values = {attr: {letter: timestamp_utc(v) for letter, v in times.items()} for attr, times in text.items()}
+            times = macb_times(values)
+            hints = timestomp_hints(
+                values["SI"]["B"],
+                values["FN"]["B"],
+                [text["SI"]["B"], text["SI"]["M"]],
+                ((get("SI<FN") or "").lower() == "true", (get("uSecZeros") or "").lower() == "true"),
+            )
+            row["name"] = row.get("name") or get("FileName")
+            if hints:
+                # stamped on the record, so a rule or a search can find it as well as a reader
+                _mark(raw, list(raw), "_timestompHints", "; ".join(hints))
+            row["_timestomp"] = f"; possible timestomping: {'; '.join(hints)}" if hints else ""
+            rows = [{"ts": ms, "description": meaning, "_macb": macb} for ms, meaning, macb in times]
+            if rows:
+                row.update(rows[0])
+                more.extend(rows[1:])
         if row["ts"] is not None:
             row["recordKind"] = "event"
     hashes = []
@@ -994,6 +1213,10 @@ def normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, Any
         row["ts"] = timestamp(get("LastRunTime", "LastExecutionTime")) or timestamp_utc(get("LastRun"))
         if row["ts"] is not None:
             row["recordKind"] = "event"
+            # PECmd writes the last run and up to seven before it; each is an execution
+            earlier = sorted({ms for i in range(8) if (ms := timestamp_utc(get(f"PreviousRun{i}"))) is not None and ms != row["ts"]}, reverse=True)
+            row["description"] = "prefetch last run" if get("LastRun") and not get("LastRunTime", "LastExecutionTime") else "prefetch run"
+            more.extend({"ts": ms, "description": "prefetch earlier run"} for ms in earlier)
     label = row.get("taskName") or row.get("serviceName") or row.get("image") or row.get("path") or get("Name", "DisplayName", "UserName") or kind
     row["summary"] = f"{kind}: {label}"[:2000]
     if kind == "autorun" and row.get("targetObject"):
@@ -1001,7 +1224,16 @@ def normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, Any
         row["summary"] = f"autorun: {row['targetObject']}\\{row.get('name') or ''}{launches}"[:2000]
     if row.get("message"):
         row["summary"] = f"{kind}: {row['message']}"[:2000]
-    return row
+    if kind == "usn":
+        row["summary"] = f"usn: {row.get('path') or row.get('name') or 'entry'} ({row['operation'] or 'update'})"[:2000]
+    if kind == "mft":
+        # which of the entry's times this row is, on the line the timeline shows
+        label = row.get("path") or row.get("name") or "entry"
+        lead = row.pop("_timestomp", "")
+        for each in (row, *more):
+            macb = each.pop("_macb", None)
+            each["summary"] = (f"mft: {label} ({macb}){lead}" if macb else f"mft: {label}{lead}")[:2000]
+    return row, more
 
 
 def native_records(kind: str, path: str, name: str, context: dict, tmp_dir: str):

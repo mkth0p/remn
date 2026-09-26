@@ -97,7 +97,8 @@ export function EventDetail({ row: initial, onClose }: { row: EventRow; onClose:
     <Drawer
       title={
         <span className="mono">
-          <Badge sev="accent">{row.eventId}</Badge> {row.description || row.provider} · {fmtTs(row.ts)}
+          {/* a disk artifact has no event id: its type, and what its time is (SI created, USN FileCreate|Close, prefetch earlier run) */}
+          <Badge sev="accent">{row.eventId ?? row.artifactType}</Badge> {row.description || row.provider} · {fmtTs(row.ts)}
         </span>
       }
       onClose={onClose}

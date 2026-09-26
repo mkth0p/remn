@@ -50,6 +50,28 @@ they show; the time range is always entered in UTC. An entry added to the case t
 from a row that has no event time (a collection snapshot) says "no event time" rather
 than taking the time of the click.
 
+The Events table shows the first 3,000 rows of a search. Its CSV and JSON exports carry
+those rows; the Timesketch JSONL and Timeline Explorer CSV exports carry every event the
+search matches, read in time order, up to 250,000 per export, and say where they stopped
+when a search matches more.
+
+The Events page's "stack" button turns the table into a stack of one field, the
+least-frequency view: each distinct value among the events the current filter and search
+keep, with its number of events, the number of hosts it was seen on ("on 1 of 12 hosts",
+the hosts named when five or fewer) and its first and last time. The rarest come first,
+fewest hosts and then fewest events, or the most frequent on request. The fields are the
+image and parent image, process and parent process names, command line and parent command
+line, path, service name and file, scheduled task, object name, file created, image
+loaded, subject and target user, workstation, IP and destination IP, DNS query, and the
+provider and event ID pair. Paths, programs, services and accounts group without regard to
+case, as Windows names them (the value shown is one of its spellings); command lines keep
+their case. Hosts are counted by the computer name without its domain, as the stories count
+them, and N is the number of hosts among the events that have the field. The stack lists
+500 values and says how many exist when there are more (a button shows up to 5,000), and
+how many matching events have no value. Clicking a value filters the events to it and
+returns to the table. Both stores give the same stack; `tests/fixtures/parity/stacks.json`
+holds it.
+
 Selecting a mail opens a bottom pane: the message (text, or HTML in a sandbox), headers,
 hops, URLs, attachments, a Related tab (findings on the mail and the recipients' host and
 cloud events from 15 minutes before to 72 hours after delivery) and JSON, with an
@@ -97,6 +119,26 @@ map to them. A finding of a rule never seen to detect what it looks for on a rec
 is marked "lead" in the list, and the flyout says what the rule's measure shows: the
 recorded attacks it fires on, and how often it fires on the logs of clean machines (see
 [measured rules](detection.md#measured-rules)).
+
+The queue is sorted by priority unless the sort control says severity or newest: what to look
+at first, deterministic and explained, in the way THOR and Cyber Triage rank what they find
+(`frontend/src/data/findingPriority.ts`, where the weights sit in one table). A finding weighs
+its severity (the review override first: critical 10, high 6, medium 3, low 1), times its
+rule's confidence (medium 0.85, low 0.7), times how far its rule's measure says it can be
+believed (as the stories weigh it: a lead 0.6, an unmeasured rule 0.8, a quarter to half less
+for a rule that fires on clean machines), times 1.5 when its rule fired on one host of the
+case (or for one user, when it names no host) of at least three, or 0.75 when it fired on half
+of them or more. Other rules on the same host or for the same user within 24 hours add a
+point each and a point more for each other ATT&CK tactic among them, up to 6. The same rule on
+the same entities (what it found, such as the program, command line or service, not the host,
+account or address, unless the rule names nothing else) escalated by an analyst before, in this
+case or another case of this browser, adds 5; marked false positive before, the finding keeps
+a quarter of its score. The model's decisions do not count, and the memory never leaves the
+browser. Reviewed and false-positive findings sort below the others. The priority column shows
+the score and the reasons that moved it ("1 of 40 hosts", "+2 rules, 1 tactic", "false
+positive before"), its tooltip and the finding flyout say each in a sentence ("marked false
+positive in case Acme on 2026-08-14"), an incident ranks by its first finding to look at, and
+the CSV export carries the score.
 
 Findings with a saved review severity override show an asterisk and the original rule
 severity in their detail, and the incident uses the review severity too. "Reset to rule
@@ -282,8 +324,9 @@ in none of the files of one log (a missing archive), logs that start after the f
 finding (overwritten or not collected), Unified Audit Log exports of exactly 5,000 or
 50,000 records (cut at a service limit), event records read from an XML export (no record
 numbering to check them against), MailItemsAccessed throttled for a mailbox (item reads
-not recorded for 24 hours), and Entra sign-ins that start after the first finding (Entra
-keeps them 7 or 30 days). The first finding is the earliest one of medium severity
+not recorded for 24 hours), Entra sign-ins that start after the first finding (Entra
+keeps them 7 or 30 days), and package members read only in part (an export past the parse
+limit, a text log past 100,000 lines, a triage artifact at its record cap). The first finding is the earliest one of medium severity
 or above that is not a false positive.
 
 What the report says about rows is read back against the rows before it prints

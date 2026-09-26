@@ -29,6 +29,8 @@ export interface IngestRequest {
   uploadSha256?: string
   sourceName?: string
   includeRaw: boolean
+  /** a triage collection: also read its $MFT and USN journal */
+  readFileSystem?: boolean
   settings: { internalDomains: string[]; brands: string[]; vipNames: string[]; trustedSenders?: string[]; trustedArcSealers?: string[] }
   /** access token for remote deployments - the worker has its own api/client module instance */
   token?: string
@@ -302,6 +304,7 @@ async function ingest(req: IngestRequest): Promise<void> {
   else form.append('file', file, file.name)
   form.append('sourceName', req.sourceName ?? file.name)
   form.append('raw', req.includeRaw ? '1' : '0')
+  if (req.readFileSystem) form.append('filesystem', '1')
   if (kind !== 'evtx')
     form.append(
       'settings',

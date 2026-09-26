@@ -34,6 +34,8 @@ export interface CaseSettings {
   autoRunRules?: boolean
   /** browser store only: parse .evtx files in this browser, never uploading them (default off) */
   parseEvtxInBrowser?: boolean
+  /** a collection laid out like a drive: also read its $MFT and USN journal (default off; millions of rows, and slower) */
+  readFileSystem?: boolean
 }
 
 export const defaultSettings = (): CaseSettings => ({
@@ -326,6 +328,8 @@ export interface Finding {
   chainUnlinked?: boolean
   /** who made the last decision on this finding */
   decidedBy?: 'analyst' | 'ai'
+  /** when that decision was made (data/findingPriority.ts says it beside a past false positive) */
+  decidedAt?: number
   /** the model's reason when it decided (kept apart from the analyst's note) */
   aiReason?: string
   /** who wrote the note last (a note the model drafted is replaced by the next triage; the analyst's is kept) */

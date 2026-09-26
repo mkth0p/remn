@@ -107,6 +107,10 @@ class PackageSource:
         # by dissect as one target after the member loop; see _drain_triage.
         self.triage = False
         self.triage_summary: dict[str, Any] = {}
+        # Whether that pass also reads the $MFT and the USN journal. Off unless the analyst asks:
+        # on a real volume they are millions of records, and the pass shares its time allowance
+        # with the external engines that run after it, which would otherwise be the ones skipped.
+        self.filesystem = False
         # a 7z archive (DFIR-ORC) has no streaming member access, so it is extracted once
         self._extracted: str | None = None
         # External detection engines to run over the event logs this package carries. The event
@@ -337,7 +341,7 @@ class PackageSource:
             except OSError:
                 shutil.copyfile(target, staged)
             target = staged
-        run = triage.TriagePass(target, self.tmp_dir, self.context, deadline_s=remaining)
+        run = triage.TriagePass(target, self.tmp_dir, self.context, filesystem=self.filesystem, deadline_s=remaining)
         entries: dict[str, dict[str, Any]] = {}
         started = time.monotonic()
         try:
@@ -539,6 +543,7 @@ class PackageSource:
                             inherited_context=inherited,
                         )
                         nested.engines = list(self.engines)
+                        nested.filesystem = self.filesystem
                         nested_error = None
                         try:
                             for row in nested:
@@ -632,7 +637,9 @@ class PackageSource:
                         member.name if collection.category(member.name) else f"dhcp/{member.name}" if sniffed == "dhcp" else f"WdSupportLogs/{member.name}"
                     )
                     rows = (
-                        ("event", collection.normalize(r, parse_name, i, self.context)) for i, r in enumerate(collection.records(tmp_path, parse_name, notes))
+                        ("event", row)
+                        for i, r in enumerate(collection.records(tmp_path, parse_name, notes))
+                        for row in collection.normalize_rows(r, parse_name, i, self.context)
                     )
                 elif low.endswith((".eml", ".msg", ".mbox", ".mbx", ".pst", ".ost")) or looks_like_mail(head):
                     source = MailSource(member.name, tmp_path, None, self.ctx, self.tmp_dir)

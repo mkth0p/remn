@@ -62,6 +62,8 @@ export interface DataSource {
   countEvents(filter: Filter, signal?: AbortSignal): Promise<number>
   aggregateEvents(filter: Filter, field: string, limit: number, signal?: AbortSignal): Promise<Aggregation>
   timelineEvents(filter: Filter, bucket: local.Bucket, signal?: AbortSignal): Promise<{ t: number; count: number }[]>
+  /** every value of one event field, rarest first (hosts, then events) or most frequent first */
+  stackEvents(filter: Filter, field: string, order: 'rare' | 'common', limit: number, signal?: AbortSignal): Promise<local.Stack>
   searchMails(filter: Filter, limit: number, signal?: AbortSignal): Promise<SearchResult<MailRow>>
   countMails(filter: Filter, signal?: AbortSignal): Promise<number>
   aggregateMails(filter: Filter, field: string, limit: number, signal?: AbortSignal): Promise<Aggregation>
@@ -102,6 +104,9 @@ class BrowserSource implements DataSource {
   }
   timelineEvents(filter: Filter, bucket: local.Bucket, signal?: AbortSignal) {
     return runQuery('timelineEvents', [this.id, filter, bucket, this.settings], signal)
+  }
+  stackEvents(filter: Filter, field: string, order: 'rare' | 'common', limit: number, signal?: AbortSignal) {
+    return runQuery('stackEvents', [this.id, filter, field, order, limit, this.settings], signal)
   }
   searchMails(filter: Filter, limit: number, signal?: AbortSignal) {
     return runQuery('searchMails', [this.id, filter, { limit, settings: this.settings }], signal)
@@ -204,6 +209,9 @@ class ServerSource implements DataSource {
   }
   timelineEvents(filter: Filter, bucket: local.Bucket, signal?: AbortSignal) {
     return this.post<{ t: number; count: number }[]>('timeline', { source: 'events', filter, bucket, settings: this.settings }, signal)
+  }
+  stackEvents(filter: Filter, field: string, order: 'rare' | 'common', limit: number, signal?: AbortSignal) {
+    return this.post<local.Stack>('stack', { filter, field, order, limit, settings: this.settings }, signal)
   }
   searchMails(filter: Filter, limit: number, signal?: AbortSignal) {
     return this.search<MailRow>('mails', filter, limit, signal)

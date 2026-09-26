@@ -242,6 +242,31 @@ describe('what the evidence cannot show', () => {
     expect(gaps[1].text).toContain('audit.csv: exactly 50,000 Unified Audit Log records, the most a large-set search returns')
   })
 
+  it('says which package members were read only in part, and how far', () => {
+    const pkg = ev(
+      5,
+      'kape.zip',
+      {
+        files: [
+          { name: 'FileSystem/$MFT_Output.json', status: 'error', format: 'collection/1', count: 81234, reason: 'structured export exceeded the 64 MiB parse limit; records beyond it were not read' },
+          { name: 'WdSupportLogs/MPLog.log', status: 'parsed', format: 'collection/1', count: 100000, note: 'kept the first 100,000 lines; the file is longer than that' },
+          { name: 'triage!/mft.records', status: 'parsed', count: 500000, note: 'stopped at 500,000 records, the cap for this artifact' },
+          { name: 'Services/services.csv', status: 'error', count: 0, reason: 'missing or duplicate column names' },
+          { name: 'Processes/processes.csv', status: 'parsed', count: 12, note: '1 row(s) do not match the header and were kept with the mismatch marked' },
+        ],
+      },
+      'zip',
+    )
+    const gaps = evidenceGaps({ evidence: [pkg] })
+    expect(gaps.map((g) => [g.kind, g.severity, g.evidenceId])).toEqual([
+      ['read-in-part', 'high', 5],
+      ['read-in-part', 'medium', 5],
+      ['read-in-part', 'medium', 5],
+    ])
+    expect(gaps[0].text).toBe('FileSystem/$MFT_Output.json: read up to the parse limit and no further (81,234 rows kept). Records after that point in the file are not in the case.')
+    expect(gaps[2].text).toBe('triage!/mft.records: read in part (stopped at 500,000 records, the cap for this artifact). What the file holds after that point is not in the case.')
+  })
+
   it('says an XML export cannot show records deleted from its log, alone or in a package', () => {
     const pkg = ev(
       3,

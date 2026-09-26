@@ -332,3 +332,13 @@ def test_what_an_exporter_left_unescaped_in_event_xml_is_read_and_counted():
     assert rows[1]["commandLine"].startswith('powershell -c "<# note #> iex')
     assert rows[2]["taskContent"].startswith('<?xml version="1.0" encoding="UTF-16"?><Task>') and "u.exe</Command>" in rows[2]["taskContent"]
     assert stats.to_dict()["repaired"] == 3
+
+
+PRODUCT_FIELDS = Path(__file__).resolve().parents[1] / "fixtures" / "evtx" / "product-fields.json"
+
+
+@pytest.mark.parametrize("case", json.loads(PRODUCT_FIELDS.read_text(encoding="utf-8")), ids=lambda c: c["name"])
+def test_sql_audit_and_sshd_lines_give_who_and_from_where(case):
+    # frontend/src/parsers/evtx/productFields.test.ts reads the same cases through the browser parser
+    row = evtx_parser.flatten(case["event"], None, include_raw=False)
+    assert {k: row.get(k) for k in case["expect"]} == case["expect"]

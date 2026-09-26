@@ -7,7 +7,8 @@ import { Badge, Dot, Flyout, JsonView, Kpi, Progress, Sev, SevBar, Tabs } from '
 import { IconArrowLeft, IconCircle, IconFindings, IconInfo, IconPlay, IconSearch, IconTarget } from '../components/Icons'
 import { RescoreButton } from '../components/RescoreButton'
 import { loadRules, type LoadedRule } from '../data/rules'
-import { isLead, measuredOn, readMeasure, type MeasureReading } from '../data/ruleMeasures'
+import { isLead, measuredOn, readMeasure, ruleTrust, type MeasureReading } from '../data/ruleMeasures'
+import { byPriority, loadPastDecisions, scoreFindings, shortReasons, type PastDecision, type Priority } from '../data/findingPriority'
 import { findingsStaleness, runEnabledRules, type Staleness } from '../data/findingsState'
 import { resetFindingSeverityOverrides } from '../data/findingReviews'
 import { getSource } from '../data/source'
@@ -24,6 +25,8 @@ const ORDER: Severity[] = ['critical', 'high', 'medium', 'low', 'info']
 const STATUSES = ['new', 'reviewed', 'escalated', 'false_positive'] as const
 type Status = (typeof STATUSES)[number]
 type Group = 'incident' | '' | 'ruleId' | 'entity' | 'source'
+type Sort = 'priority' | 'severity' | 'time'
+const SORT_LABEL: Record<Sort, string> = { priority: 'priority', severity: 'severity', time: 'newest' }
 const REFS_OPEN = 2000
 
 const STATUS_LABEL: Record<Status, string> = { new: 'new', reviewed: 'reviewed', escalated: 'escalated', false_positive: 'false positive' }
@@ -52,6 +55,14 @@ const FindingSeverity = ({ finding }: { finding: Finding }) => (
     </Sev>
   </span>
 )
+/** A finding's priority score, with the reasons that moved it beside it and all of them in its title. */
+const PriorityCell = ({ p }: { p?: Priority }) =>
+  p ? (
+    <span className="ellipsis" title={p.reasons.map((r) => r.text).join('\n')}>
+      <span className={classNames('mono', p.decided && 'muted')}>{p.score}</span>
+      {shortReasons(p) ? <span className="small muted"> · {shortReasons(p)}</span> : null}
+    </span>
+  ) : null
 const OverrideLabel = ({ finding }: { finding: Finding }) => (finding.severityOverride ? <span className="small muted">review override; rule: {finding.severity}</span> : null)
 
 function SeverityOverrideNotice({ findings, busy, onReset, chain = false }: { findings: Finding[]; busy: boolean; onReset: () => void; chain?: boolean }) {
@@ -113,6 +124,9 @@ export function FindingsView() {
   const [showFp, setShowFp] = useState(false)
   const [q, setQ] = useState('')
   const [group, setGroup] = useState<Group>('incident')
+  const [sort, setSort] = useState<Sort>('priority')
+  // the analysts' false positives and escalations of every case in this browser, for the priority
+  const [memory, setMemory] = useState<PastDecision[]>([])
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set())
   const [tab, setTab] = useState<'findings' | 'attack'>('findings')
   const [selected, setSelected] = useState<Finding | null>(null)
@@ -159,6 +173,15 @@ export function FindingsView() {
     if (kase) loadRules(kase.id!).then(setRules)
   }, [kase, rulesVersion])
   useEffect(() => {
+    let alive = true
+    loadPastDecisions()
+      .then((m) => alive && setMemory(m))
+      .catch(() => alive && setMemory([]))
+    return () => {
+      alive = false
+    }
+  }, [all])
+  useEffect(() => {
     setSelected(null)
     setIncident(null)
     setParent(null)
@@ -175,19 +198,36 @@ export function FindingsView() {
   // false positives leave the queue and the counts unless asked for (status filter or the toggle)
   const active = useMemo(() => all.filter((f) => f.status !== 'false_positive'), [all])
   const fpCount = all.length - active.length
+  // what to look at first (data/findingPriority.ts): read from the whole case, the rules' measures and past decisions
+  const trust = useMemo(() => new Map(rules.map((r) => [r.rule.id, ruleTrust(r.measured)])), [rules])
+  const scores = useMemo(() => scoreFindings(all, { trust: (id) => trust.get(id), memory }), [all, trust, memory])
+  const sortFindings = useCallback(
+    (fs: Finding[]) => (sort === 'priority' ? [...fs].sort(byPriority(scores)) : sort === 'time' ? [...fs].sort((a, b) => (b.ts ?? 0) - (a.ts ?? 0)) : fs),
+    [sort, scores],
+  )
   const rows = useMemo(() => {
     const needle = q.toLowerCase()
     const base = status === 'false_positive' || showFp ? all : active
-    return base.filter(
+    const matching = base.filter(
       (f) =>
         (group === 'incident' || !sev || effectiveSeverity(f) === sev) &&
         (!status || f.status === status) &&
         (!source || f.source === source) &&
         (!needle || `${f.title} ${f.ruleId} ${JSON.stringify(f.entities)} ${f.attack.join(' ')}`.toLowerCase().includes(needle)),
     )
-  }, [all, active, sev, status, source, q, showFp, group])
+    return sortFindings(matching)
+  }, [all, active, sev, status, source, q, showFp, group, sortFindings])
   const incidentOpts = useMemo(() => ({ chains, severityOf: (c: Chain) => chainSeverity(c, chainReviews[c.id]) }), [chains, chainReviews])
-  const incidents = useMemo(() => (group === 'incident' ? buildIncidents(rows, incidentOpts).filter((i) => !sev || i.severity === sev) : []), [rows, group, incidentOpts, sev])
+  const incidents = useMemo(() => {
+    if (group !== 'incident') return []
+    const built = buildIncidents(rows, incidentOpts).filter((i) => !sev || i.severity === sev)
+    if (sort === 'time') return built.sort((a, b) => (b.ts ?? 0) - (a.ts ?? 0))
+    if (sort !== 'priority') return built
+    // an incident ranks by its first finding to look at
+    const first = byPriority(scores)
+    const top = new Map(built.map((i) => [i.id, [...i.findings].sort(first)[0]]))
+    return built.sort((a, b) => first(top.get(a.id)!, top.get(b.id)!))
+  }, [rows, group, incidentOpts, sev, sort, scores])
   const shownRows = useMemo(() => (group === 'incident' ? [...new Map(incidents.flatMap((i) => i.findings).map((f) => [f.id, f])).values()] : rows), [group, incidents, rows])
   const allIncidents = useMemo(() => buildIncidents(active, incidentOpts), [active, incidentOpts])
   const membership = useMemo(() => chainMembership(all, chains), [all, chains])
@@ -286,7 +326,7 @@ export function FindingsView() {
   }
   const setStatusFor = async (ids: number[], s: Status) => {
     const db = getDb()
-    await Promise.all(ids.map((id) => db.findings.update(id, { status: s })))
+    await Promise.all(ids.map((id) => db.findings.update(id, { status: s, decidedBy: 'analyst', decidedAt: Date.now() })))
     if (selected && ids.includes(selected.id!)) setSelected({ ...selected, status: s })
     if (incident) setIncident({ ...incident, status: s, findings: incident.findings.map((f) => (ids.includes(f.id!) ? { ...f, status: s } : f)) })
     setPicked(new Set())
@@ -355,6 +395,7 @@ export function FindingsView() {
   }
 
   const columns: Column<Finding>[] = [
+    { key: 'priority', label: 'priority', width: 170, render: (r) => <PriorityCell p={scores.get(r.key)} /> },
     { key: 'severity', label: 'severity', width: 104, render: (r) => <FindingSeverity finding={r} /> },
     {
       key: 'title',
@@ -414,6 +455,7 @@ export function FindingsView() {
     { key: 'status', label: 'status', width: 110, render: (r) => <StatusBadge s={r.status} /> },
   ]
   const incidentColumns: Column<Incident>[] = [
+    { key: 'priority', label: 'priority', width: 170, render: (r) => <PriorityCell p={scores.get([...r.findings].sort(byPriority(scores))[0]?.key ?? '')} /> },
     {
       key: 'severity',
       label: 'severity',
@@ -460,6 +502,16 @@ export function FindingsView() {
 
   const memberRow = (f: Finding, from: Incident | null) => (
     <tr key={f.id} onClick={() => openFinding(f, from)} style={{ cursor: 'pointer' }}>
+      <td
+        style={{ width: 60 }}
+        className="mono"
+        title={scores
+          .get(f.key)
+          ?.reasons.map((r) => r.text)
+          .join('\n')}
+      >
+        {scores.get(f.key)?.score}
+      </td>
       <td style={{ width: 100 }}>
         <FindingSeverity finding={f} />
       </td>
@@ -505,6 +557,7 @@ export function FindingsView() {
             exportCsv(
               'findings.csv',
               shownRows.map((f) => ({
+                priority: scores.get(f.key)?.score,
                 severity: f.severity,
                 severityOverride: f.severityOverride,
                 title: f.title,
@@ -643,6 +696,19 @@ export function FindingsView() {
                   <option value="mails">mails</option>
                 </select>
               </label>
+              <label
+                className={classNames('pill', sort !== 'priority' && 'active')}
+                title="priority: the findings to look at first, from their severity, their rule's measure, how rare they are in the case, the other rules around them and past decisions"
+              >
+                sort{' '}
+                <select value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
+                  {(Object.keys(SORT_LABEL) as Sort[]).map((k) => (
+                    <option key={k} value={k}>
+                      {SORT_LABEL[k]}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <div className="segmented" title="how the queue is grouped">
                 {(
                   [
@@ -765,7 +831,7 @@ export function FindingsView() {
                           {g.items.slice(0, 300).map((f) => memberRow(f, null))}
                           {g.items.length > 300 && (
                             <tr>
-                              <td colSpan={6} className="muted sans">
+                              <td colSpan={7} className="muted sans">
                                 {fmtNum(g.items.length - 300)} more - switch to the flat view with a filter
                               </td>
                             </tr>
@@ -849,7 +915,7 @@ export function FindingsView() {
                       : 'The status of the incident is set on every finding below; open one for its own detail.'}
                   </div>
                   <table className="table compact">
-                    <tbody>{incident.findings.map((f) => memberRow(f, incident))}</tbody>
+                    <tbody>{sortFindings(incident.findings).map((f) => memberRow(f, incident))}</tbody>
                   </table>
                 </div>
                 <div className="section">
@@ -979,6 +1045,20 @@ export function FindingsView() {
                 <SeverityOverrideNotice findings={[selected]} busy={resettingSeverity} onReset={() => resetSeverityFor([selected])} />
                 {flyTab === 'overview' && (
                   <>
+                    {scores.get(selected.key) && (
+                      <div className="section" data-priority>
+                        <h3>
+                          Priority <span className="mono">{scores.get(selected.key)!.score}</span>
+                        </h3>
+                        <ul className="small" style={{ margin: 0, paddingLeft: 18 }}>
+                          {scores.get(selected.key)!.reasons.map((r, i) => (
+                            <li key={i} className={r.tone === 'neutral' ? 'muted' : undefined} data-tone={r.tone}>
+                              {r.text}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                     <div className="section">
                       <h3>About</h3>
                       <div>{selected.description || <span className="muted">the rule has no description</span>}</div>

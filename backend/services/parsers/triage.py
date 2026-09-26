@@ -48,11 +48,16 @@ FUNCTIONS: tuple[tuple[str, str, int], ...] = (
     ("sru.network_data", "sru", 100_000),
     ("sru.application", "sru", 100_000),
 )
-# Millions of rows on a real disk. Opt-in, and capped hard even then.
+# Millions of rows on a real disk. Opt-in (the "read the $MFT and USN journal" ingest option),
+# and capped hard even then: they run last in the pass, after everything above, and share its
+# time and output allowance, which is also what the external engines are left with. dissect gives
+# one record per MFT time (four $SI, four per $FN name), so the MFT cap is about 60,000 files.
 FILESYSTEM_FUNCTIONS: tuple[tuple[str, str, int], ...] = (
-    ("mft.records", "file", 500_000),
-    ("usnjrnl", "file", 500_000),
+    ("usnjrnl", "usn", 500_000),
+    ("mft.records", "mft", 500_000),
 )
+# dissect's letter for each MFT time, and what it records
+_TS_TYPES = {"M": "modified", "A": "accessed", "C": "changed", "B": "created"}
 
 # A Windows system directory under a drive root, however the collector spelled the root:
 # C/, C:/, C%3A/ (Velociraptor), sysvol/ (acquire, tar), $rootfs$/.
@@ -124,6 +129,7 @@ def to_row(function: str, artifact: str, rec: dict[str, Any], index: int, contex
         "data": rec,
     }
     ts = None
+    macb = None
     if kind == "windows/service":
         image = _text(rec.get("imagepath"))
         args = _text(rec.get("imagepath_args"))
@@ -226,9 +232,19 @@ def to_row(function: str, artifact: str, rec: dict[str, Any], index: int, contex
     elif kind.startswith("filesystem/windows/sru/"):
         row.update(image=_text(rec.get("app")))
         ts = rec.get("ts")
-    elif kind.startswith("filesystem/ntfs/mft") or kind.startswith("filesystem/ntfs/usnjrnl") or "usnjrnl" in kind:
+    elif kind.startswith("filesystem/ntfs/mft"):
+        # one record per time: which attribute it is from and which of the four it is, stated
+        attr = "FN" if "/filename" in kind else "SI"
+        letter = str(rec.get("ts_type") or "")
         row.update(path=_text(_first(rec, "path", "filename")))
+        if letter in _TS_TYPES:
+            row["description"] = f"{attr} {_TS_TYPES[letter]}"
+            macb = f"{attr} " + "".join(x if x == letter else "." for x in "MACB")
         ts = _first(rec, "ts", "creation_time", "last_modification_time")
+    elif "usnjrnl" in kind:
+        reason = _text(rec.get("reason"))
+        row.update(path=_text(_first(rec, "path", "filename")), operation=reason, description=f"USN {reason or 'update'}")
+        ts = rec.get("ts")
     else:
         row.update(path=_text(rec.get("path")), image=_text(rec.get("image")), commandLine=_text(rec.get("command")))
         ts = rec.get("ts")
@@ -249,6 +265,10 @@ def to_row(function: str, artifact: str, rec: dict[str, Any], index: int, contex
         or kind
     )
     row["summary"] = f"{artifact}: {label}"[:2000]
+    if macb:
+        row["summary"] = f"mft: {label} ({macb})"[:2000]
+    if artifact == "usn":
+        row["summary"] = f"usn: {label} ({row.get('operation') or 'update'})"[:2000]
     if row.get("message") and artifact == "defender":
         row["summary"] = f"defender: {row['message']}"[:2000]
     return row

@@ -5,6 +5,69 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- Eleven rules for directory changes on a domain controller (`rules/windows/directory.yaml`):
+  accounts weakened for AS-REP roasting or offline cracking, Kerberos delegation granted
+  (including resource-based delegation), passwords set never to expire, permissions changed on
+  the domain root, AdminSDHolder or other objects, extended rights rewritten, DCShadow server
+  objects, domain policy changed by a user, the Special Groups table changed, sensitive user
+  rights assigned and the Guest account enabled. They catch about 20 files of
+  EVTX-to-MITRE-Attack the default rules missed and fire on none of the evtx-baseline machines.
+- Rules for the logs of server products (`rules/windows/other-products.yaml`): SQL Server audit
+  tampering, role membership, new logins, sa enabled, failed logins, options that run code and
+  single-user starts; password guessing against OpenSSH; Certificate Services requests with a
+  subject alternative name, CA permission, template and audit changes, CA backups and weak
+  certificate mappings; DNS plugin DLLs, logging changes and wildcard or WPAD records; BitLocker
+  password protectors and encryption starts. SQL Server audit records and sshd lines are now
+  parsed into who, what and from where, in the server and the browser parser alike. The rules
+  catch 27 files of EVTX-to-MITRE-Attack the default rules missed and fire on none of the
+  evtx-baseline machines.
+- PowerShell 4103 and 800 events now carry the command they record, rebuilt from its parameter
+  bindings or taken as typed, with the user and the script, in the server and the browser parser
+  alike. Twelve rules read those commands (`rules/windows/powershell-commands.yaml`):
+  privileged group listing, Kerberoasting from PowerShell, SPN and trust discovery, service path
+  and failure-command changes, New-Service, BITS transfers, permanent WMI subscriptions,
+  PrintDemon printer ports, AMSI bypasses, named pipe shells and OpenSSH enabled. They catch 15
+  files of EVTX-to-MITRE-Attack the default rules missed and fire on none of the evtx-baseline
+  machines, and no other bundled rule changes its findings.
+- The Events page stacks a field (least-frequency analysis): its "stack" button lists every
+  value of an image, parent image, process, command line, path, service, scheduled task,
+  object, file, user, workstation, address, DNS query or provider and event ID pair among
+  the events the filter keeps, the rarest first (on the fewest hosts, then in the fewest
+  events) or the most frequent, each with its events, "on 1 of N hosts" (naming them when
+  five or fewer) and its first and last time. Paths, programs, services and accounts group
+  without regard to case, and hosts count without their domain. A stack past 500 values says
+  how many there are, and clicking a value filters the events to it. The browser and server
+  stores give the same stack, held by the parity fixture (`stacks.json`), and the server
+  answers at `POST /api/store/<key>/stack`.
+- The Findings page sorts by priority, what to look at first, and says why: each finding
+  weighs its severity (the review override first) times its rule's confidence, times how far
+  its rule's measure says it can be believed (as the stories weigh it), times how rare its rule
+  is in the case (1.5 when it fired on one host of at least three, 0.75 when on half or more),
+  plus a point for each other rule on the same host or user within 24 hours and a point more
+  for each other tactic among them (at most 6). An analyst's earlier decision on the same rule
+  and the same entities, in this case or another case of this browser, counts too: escalated
+  adds 5, false positive keeps a quarter of the score, and the reason says where and when
+  ("marked false positive in case Acme on 2026-08-14"). Reviewed and false-positive findings
+  sort below the rest; severity and newest remain as sorts. A decision made on the Findings page
+  is now recorded as the analyst's, with its date.
+- Disk artifacts sit on the case timeline with what each of their times means, next to the
+  event logs. An MFTECmd `$MFT` entry becomes a row per distinct `$STANDARD_INFORMATION` time and
+  per `$FILE_NAME` time that differs from it, each saying which it is (`SI created, modified`,
+  `FN created`, with the MACB mark in the summary), where it used to keep only its `$SI` creation
+  time; an entry whose `$SI` creation time is earlier than its `$FN` one, or whose `$SI` times
+  have no sub-second part, is marked as a possible timestomp. An MFTECmd `$J` row has its update
+  time, its path and its reasons (`operation: FileCreate|Close`), where it had no time and no
+  path. PECmd's earlier runs are execution rows as well as the last one. EvtxECmd's `Payload`
+  goes through the EVTX parser's own mapping, so an exported 4624 or 4688 carries its logon type,
+  source address and command line as a `.evtx` does. The event detail and the Timesketch and
+  Timeline Explorer exports (`timestamp_desc`) say what each time is.
+- A CSV or TSV export is read whole, up to the 4 GiB member ceiling, instead of stopping at
+  64 MiB, which kept only the start of a volume's `$MFT` or `$J` output. JSON exports keep the
+  64 MiB budget, and every member read only in part (a parse limit, a line limit, a triage
+  record cap) is now also named in what the evidence cannot show.
+- A drive-layout collection's `$MFT` and USN journal can be read by dissect with the new setting
+  "read the $MFT and USN journal" (off by default: they run to millions of records and share
+  the package's decoding time with Hayabusa).
 - A case can be read as the questions an investigation has to answer. The new Questions page
   takes scenarios from DFIQ (Data Exfiltration, Suspicious DNS Query, Host Persistence Audit,
   Lateral Movement: 33 of DFIQ 1.0.1's questions, those REMN's evidence can answer, with their

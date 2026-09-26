@@ -45,6 +45,58 @@ export const PHASES: { id: string; label: string; short: string }[] = [
   { id: 'impact', label: 'Impact', short: 'IM' },
 ]
 export const PHASE_LABEL: Record<string, string> = Object.fromEntries(PHASES.map((p) => [p.id, p.label]))
+/** Rule tags that name a tactic, beyond the tactic's own name (mirror of stories._TAG_PHASE). */
+const TAG_PHASE: Record<string, string> = {
+  ...Object.fromEntries(PHASES.map((p) => [p.id, p.id])),
+  'defense-evasion': 'stealth',
+  evasion: 'stealth',
+  'log-tampering': 'defense-impairment',
+  phishing: 'initial-access',
+  'brute-force': 'credential-access',
+  mailbox: 'collection',
+  forwarding: 'collection',
+}
+/** Each technique's tactic, where a technique has several the one it plays in an intrusion (mirror of stories._TECHNIQUE_PHASE). */
+const TECHNIQUE_PHASE: Record<string, string> = Object.fromEntries(
+  Object.entries({
+    reconnaissance: 'T1589 T1590 T1591 T1592 T1593 T1594 T1595 T1596 T1597 T1598',
+    'resource-development': 'T1583 T1584 T1585 T1586 T1587 T1588 T1608 T1650',
+    'initial-access': 'T1078 T1091 T1133 T1189 T1190 T1195 T1199 T1200 T1566 T1659',
+    execution: 'T1047 T1059 T1072 T1106 T1129 T1203 T1204 T1559 T1569 T1609 T1610 T1648',
+    persistence: 'T1037 T1053 T1098 T1136 T1137 T1176 T1197 T1505 T1542 T1543 T1546 T1547 T1554 T1574',
+    'privilege-escalation': 'T1068 T1134 T1484 T1548 T1611',
+    stealth: 'T1006 T1014 T1027 T1036 T1055 T1070 T1112 T1127 T1140 T1202 T1207 T1211 T1216 T1218 T1220 T1221 T1222 T1480 T1497 T1553 T1564 T1599 T1600 T1601 T1620 T1622 T1684',
+    'defense-impairment': 'T1562 T1685 T1686 T1687 T1688 T1689 T1690',
+    'credential-access': 'T1003 T1040 T1056 T1110 T1111 T1187 T1212 T1528 T1539 T1552 T1555 T1556 T1557 T1558 T1606 T1621 T1649',
+    discovery: 'T1007 T1010 T1012 T1016 T1018 T1033 T1046 T1049 T1057 T1069 T1082 T1083 T1087 T1120 T1124 T1135 T1201 T1217 T1482 T1518 T1526 T1538 T1580 T1613 T1614 T1615 T1619 T1652',
+    'lateral-movement': 'T1021 T1080 T1210 T1534 T1550 T1563 T1570',
+    collection: 'T1005 T1025 T1039 T1074 T1113 T1114 T1115 T1119 T1123 T1125 T1185 T1213 T1530 T1560 T1602',
+    'command-and-control': 'T1001 T1008 T1071 T1090 T1092 T1095 T1102 T1104 T1105 T1132 T1205 T1219 T1568 T1571 T1572 T1573',
+    exfiltration: 'T1011 T1020 T1029 T1030 T1041 T1048 T1052 T1537 T1567',
+    impact: 'T1485 T1486 T1489 T1490 T1491 T1495 T1496 T1498 T1499 T1529 T1531 T1561 T1565 T1657',
+  }).flatMap(([phase, ids]) => ids.split(' ').map((t) => [t, phase])),
+)
+
+/** A finding's tactic: its rule's first tactic tag, else its first technique's tactic (mirror of stories.finding_phase). */
+export function findingPhase(f: Pick<Finding, 'attack' | 'tags'>): string | null {
+  let byTechnique: string | null = null
+  for (const t of f.attack ?? []) {
+    const m = /^(?:attack\.)?(t\d{4})/i.exec(String(t))
+    if (m && TECHNIQUE_PHASE[m[1].toUpperCase()]) {
+      byTechnique = TECHNIQUE_PHASE[m[1].toUpperCase()]
+      break
+    }
+  }
+  for (const t of f.tags ?? []) {
+    const tag = String(t).toLowerCase()
+    const p = TAG_PHASE[tag]
+    if (!p) continue
+    // ATT&CK v19 split Defense Evasion into Stealth and Defense Impairment: the technique says which
+    if ((tag === 'defense-evasion' || tag === 'evasion') && (byTechnique === 'stealth' || byTechnique === 'defense-impairment')) return byTechnique
+    return p
+  }
+  return byTechnique
+}
 
 export interface StoryFinding {
   ruleId: string
@@ -559,7 +611,7 @@ function ipOf(v: unknown): string {
   return /^[\d.]+$/.test(s) || s.includes(':') ? s : ''
 }
 /** ws-004 for WS-004.northstar.example, \\WS-004 and WS-004$; empty for an address (mirror of lineage.host_key). */
-function hostKey(v: unknown): string {
+export function hostKey(v: unknown): string {
   const s = String(v ?? '')
     .trim()
     .replace(/^\\+|\\+$/g, '')
