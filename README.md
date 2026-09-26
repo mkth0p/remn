@@ -4,11 +4,12 @@
 ![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)
 
 REMN is a local investigation tool for Windows event logs and mailboxes. Drop `.evtx`
-files, PST/OST/mbox/eml/msg mailboxes and Microsoft 365 or Entra exports into the
-browser; everything is hashed, parsed by a local API, searched, run through detection
-rules, read into stories, reviewed, and printed as a report. Evidence stays
-on the machines you choose: in the browser's own database, or in a DuckDB file on the
-server for gigabyte cases.
+files (or event records exported as XML), PST/OST/mbox/eml/msg mailboxes and Microsoft 365
+or Entra exports into the browser; everything is hashed, parsed by a local API, searched,
+run through detection rules, read into stories, reviewed, and printed as a report.
+Evidence stays on the machines you choose: in the browser's own database, or in a DuckDB
+file on the server for gigabyte cases. An instance open to the internet runs browser-only:
+the server parses each file and keeps none of it.
 
 ![Findings page](docs/images/findings.png)
 
@@ -21,13 +22,16 @@ server for gigabyte cases.
   across source files through shared digests, files, processes, URLs and accounts.
 - **Detect** with a YAML rule catalogue (Windows, mail, Microsoft 365) plus the SigmaHQ
   and Sublime Security community packs, two rule engines (browser and SQL) kept in
-  parity, and a calibrated mail risk score measured on public phishing corpora.
+  parity, and a calibrated mail risk score measured on public phishing corpora. Every
+  event rule is measured on recorded attacks and on clean machines, so a finding says
+  whether its rule has been shown to detect what it looks for, or is a lead.
 - **Read the case as stories**: one per person or host incident, read along ATT&CK's
   phases, each step saying why it belongs and how surely; the forms one account goes by
-  joined with a confidence per join, logon sessions, RDP and admin-share hops and process
-  trees drawn from the logs, what each host's evidence cannot show, and the campaigns that
-  share an attacker's infrastructure. A phishing mail is followed to what its recipient's
-  accounts and machines did afterwards.
+  joined with a confidence per join, logon sessions, RDP, admin-share, WMI and WinRM hops
+  and process trees drawn from the logs, addresses tied to hosts through DNS and DHCP,
+  cloud sign-ins placed on the machine they came from, what each host's evidence cannot
+  show, and the campaigns that share an attacker's infrastructure. A phishing mail is
+  followed to what its recipient's accounts and machines did afterwards.
 - **Review** every chain and incident in order, rescore, annotate, unlink, and let a
   model propose decisions, each applied or dismissed by the analyst.
 - **Report** as one self-contained HTML file, printable to PDF, with the stories, chain of
@@ -84,9 +88,15 @@ For development, run the API with `manage.py runserver` and the frontend with
 
 ## Where things stand
 
-Validated on public corpora (Nazario, Phishing Pot, SpamAssassin, Tika, Microsoft 365
-samples); numbers and dates are in [docs/validation.md](docs/validation.md). Not yet
-exercised on real multi-gigabyte acquisitions. Attachments are analysed statically;
+Mail scoring is validated on public corpora (Nazario, Phishing Pot, SpamAssassin, Tika,
+Microsoft 365 samples), and Windows detection on recorded attacks, including two libraries
+the rules were not written for: on EVTX-to-MITRE-Attack, REMN detected 109 of 279 at medium
+level and above where Hayabusa detected 86 and Chainsaw 52 (25 September 2026), and on the
+Windows datasets of Splunk attack_data it detects 227 of 535 (42%). On seven clean
+Windows machines its own rules raise 200 high and critical findings, and a weekly job
+fails when a rule stops detecting a recording or a high one gets noisier. Numbers, dates
+and method are in [docs/validation.md](docs/validation.md) and [docs/reviews/](docs/reviews/).
+Not yet exercised on real multi-gigabyte acquisitions. Attachments are analysed statically;
 nothing is opened or run. The remote mode uses one shared token and no encryption at
 rest. See [SECURITY.md](SECURITY.md).
 
