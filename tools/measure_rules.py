@@ -126,6 +126,18 @@ WRITTEN_AGAINST: dict[str, frozenset[str]] = {
     # written for the gaps the head-to-head of 2026-09-25 found on EVTX-to-MITRE-Attack
     "win-user-added-security-group": frozenset({"evtxToMitre"}),
     "win-explicit-credentials-unusual-process": frozenset({"evtxToMitre"}),
+    # rules/windows/directory.yaml, written for the directory changes the 2026-09-26 research found missed there
+    "win-account-security-weakened": frozenset({"evtxToMitre"}),
+    "win-account-delegation-enabled": frozenset({"evtxToMitre"}),
+    "win-password-never-expires-set": frozenset({"evtxToMitre"}),
+    "win-ad-acl-changed-domain-root-or-adminsdholder": frozenset({"evtxToMitre"}),
+    "win-ad-acl-changed": frozenset({"evtxToMitre"}),
+    "win-ad-extended-right-modified": frozenset({"evtxToMitre"}),
+    "win-ad-server-object-created": frozenset({"evtxToMitre"}),
+    "win-domain-policy-changed-by-user": frozenset({"evtxToMitre"}),
+    "win-special-groups-table-changed": frozenset({"evtxToMitre"}),
+    "win-sensitive-user-right-assigned": frozenset({"evtxToMitre"}),
+    "win-guest-account-enabled": frozenset({"evtxToMitre"}),
 }
 
 

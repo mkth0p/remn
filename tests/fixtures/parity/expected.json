@@ -176,30 +176,30 @@
   "win-winrm-remote-shell": "no_selector_match",
   "win-winsock-lsp-installed": "no_selector_match",
   "win-wmi-persistence": "not_applicable",
-  "win-zerologon-anonymous-account-change": "not_applicable"
+  "win-zerologon-anonymous-account-change": "no_selector_match"
  },
  "errors": [],
  "findings": {
   "collection-encoded-execution": [
-   "collection-encoded-execution|108"
+   "collection-encoded-execution|120"
   ],
   "collection-persistence-user-path": [
-   "collection-persistence-user-path|107"
+   "collection-persistence-user-path|119"
   ],
   "collection-prefetch-script-execution": [
-   "collection-prefetch-script-execution|111"
+   "collection-prefetch-script-execution|123"
   ],
   "collection-remote-service": [
-   "collection-remote-service|107"
+   "collection-remote-service|119"
   ],
   "collection-script-host-connection": [
-   "collection-script-host-connection|109"
+   "collection-script-host-connection|121"
   ],
   "collection-service-unquoted-path": [
-   "collection-service-unquoted-path|112"
+   "collection-service-unquoted-path|124"
   ],
   "m365-app-consent": [
-   "m365-app-consent|105"
+   "m365-app-consent|117"
   ],
   "m365-inbox-rule-any": [
    "m365-inbox-rule-any|80"
@@ -211,16 +211,16 @@
    "m365-inbox-rule-hiding|80"
   ],
   "m365-mailbox-forwarding": [
-   "m365-mailbox-forwarding|103"
+   "m365-mailbox-forwarding|115"
   ],
   "m365-mailitemsaccessed-burst": [
    "m365-mailitemsaccessed-burst|alice@contoso.com\u0001185.220.101.44|29804245"
   ],
   "m365-privileged-role-assigned": [
-   "m365-privileged-role-assigned|106"
+   "m365-privileged-role-assigned|118"
   ],
   "m365-role-assigned-any": [
-   "m365-role-assigned-any|106"
+   "m365-role-assigned-any|118"
   ],
   "m365-signin-bruteforce-account": [
    "m365-signin-bruteforce-account|alice@contoso.com|29804234"
@@ -232,13 +232,13 @@
    "m365-signin-password-spray|185.220.101.44|29804230"
   ],
   "m365-signin-risky": [
-   "m365-signin-risky|104"
+   "m365-signin-risky|116"
   ],
   "m365-signin-two-countries-24h": [
    "m365-signin-two-countries-24h|alice@contoso.com|29804070"
   ],
   "m365-signin-unexpected-country": [
-   "m365-signin-unexpected-country|104",
+   "m365-signin-unexpected-country|116",
    "m365-signin-unexpected-country|46"
   ],
   "mail-attachment-disguised": [
@@ -307,8 +307,27 @@
    "mail-replyto-diverted|5",
    "mail-replyto-diverted|9"
   ],
+  "win-account-delegation-enabled": [
+   "win-account-delegation-enabled|dc01\u0001\u0001cn=fs01,ou=servers,dc=corp,dc=local",
+   "win-account-delegation-enabled|dc01\u0001ws09$\u0001"
+  ],
   "win-account-lifecycle-short": [
    "win-account-lifecycle-short|backdoor"
+  ],
+  "win-account-security-weakened": [
+   "win-account-security-weakened|dc01\u0001roastme"
+  ],
+  "win-ad-acl-changed": [
+   "win-ad-acl-changed|dc01\u0001alice\u0001ou=servers,dc=corp,dc=local"
+  ],
+  "win-ad-acl-changed-domain-root-or-adminsdholder": [
+   "win-ad-acl-changed-domain-root-or-adminsdholder|dc01\u0001dc=corp,dc=local"
+  ],
+  "win-ad-extended-right-modified": [
+   "win-ad-extended-right-modified|dc01\u0001cn=user-force-change-password,cn=extended-rights,cn=configuration,dc=corp,dc=local"
+  ],
+  "win-ad-server-object-created": [
+   "win-ad-server-object-created|dc01\u0001cn=ws09,cn=servers,cn=default-first-site-name,cn=sites,cn=configuration,dc=corp,dc=local"
   ],
   "win-audit-log-cleared": [
    "win-audit-log-cleared|91"
@@ -318,6 +337,12 @@
   ],
   "win-bruteforce-4625-by-ip": [
    "win-bruteforce-4625-by-ip|203.0.113.9|29804250"
+  ],
+  "win-domain-policy-changed-by-user": [
+   "win-domain-policy-changed-by-user|dc01\u0001alice"
+  ],
+  "win-guest-account-enabled": [
+   "win-guest-account-enabled|ws01\u0001s-1-5-21-1-2-3-501"
   ],
   "win-logon-outside-business-hours": [
    "win-logon-outside-business-hours|2"
@@ -329,11 +354,14 @@
   "win-office-spawns-shell": [
    "win-office-spawns-shell|84"
   ],
+  "win-password-never-expires-set": [
+   "win-password-never-expires-set|dc01\u0001roastme"
+  ],
   "win-powershell-encoded-command": [
    "win-powershell-encoded-command|84"
   ],
   "win-powershell-suspicious-scriptblock": [
-   "win-powershell-suspicious-scriptblock|97"
+   "win-powershell-suspicious-scriptblock|109"
   ],
   "win-rdp-logon-any": [
    "win-rdp-logon-any|2",
@@ -343,11 +371,17 @@
    "win-rdp-logon-external|2",
    "win-rdp-logon-external|81"
   ],
+  "win-sensitive-user-right-assigned": [
+   "win-sensitive-user-right-assigned|dc01\u0001s-1-5-21-1-2-3-1201"
+  ],
   "win-service-installed-any": [
    "win-service-installed-any|93"
   ],
   "win-service-installed-suspicious": [
    "win-service-installed-suspicious|93"
+  ],
+  "win-special-groups-table-changed": [
+   "win-special-groups-table-changed|dc01"
   ],
   "win-sysmon-network-lolbin": [
    "win-sysmon-network-lolbin|88"
@@ -448,8 +482,14 @@
   "mail-vip-impersonation",
   "mail-yara-match",
   "win-accessibility-binary-shell",
+  "win-account-delegation-enabled",
   "win-account-lifecycle-short",
   "win-account-lockouts",
+  "win-account-security-weakened",
+  "win-ad-acl-changed",
+  "win-ad-acl-changed-domain-root-or-adminsdholder",
+  "win-ad-extended-right-modified",
+  "win-ad-server-object-created",
   "win-admin-share-access",
   "win-anonymous-logon",
   "win-applocker-codeintegrity-block",
@@ -473,6 +513,7 @@
   "win-defender-detection",
   "win-defender-disabled",
   "win-directinput-from-user-folder",
+  "win-domain-policy-changed-by-user",
   "win-event-log-cleared",
   "win-event-log-service-stopped",
   "win-eventlog-crash-after-remote-pipe",
@@ -480,6 +521,7 @@
   "win-executable-written-to-drive-share",
   "win-explicit-credentials-4648",
   "win-explicit-credentials-unusual-process",
+  "win-guest-account-enabled",
   "win-hacktool-privilege-enabled",
   "win-ieak-pending-gpo-persistence",
   "win-ipc-rpc-user-session-recon",
@@ -506,6 +548,7 @@
   "win-null-session-pipes-changed",
   "win-office-spawns-shell",
   "win-pass-the-hash-hint",
+  "win-password-never-expires-set",
   "win-password-reset-by-other",
   "win-password-spraying",
   "win-pca-cpl-user-path",
@@ -551,6 +594,7 @@
   "win-script-engine-selected-by-clsid",
   "win-script-host-remote-task-rpc",
   "win-sensitive-privilege-enabled",
+  "win-sensitive-user-right-assigned",
   "win-service-account-loopback-pipe",
   "win-service-account-spawns-system",
   "win-service-host-interactive-shell",
@@ -562,6 +606,7 @@
   "win-shim-accessibility-binary",
   "win-smb-coerced-connect-back",
   "win-smb-connection-sweep",
+  "win-special-groups-table-changed",
   "win-special-privileges-non-admin",
   "win-spooler-driver-dll",
   "win-spoolsv-unexpected-child",
