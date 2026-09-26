@@ -73,6 +73,16 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   remote executions builds its stories in 8 s instead of 40 s, and one of 300,000 with 12,000 in
   17 s instead of 133 s: the per-record lookups read the sessions of one host by time instead of
   every session, and each record's accounts are read once.
+- Stories are checked on a recorded intrusion, MITRE's APT29 evaluation as OTRF's Security-Datasets
+  recorded it (NXLog JSON, MIT, fetched on demand): `tools/apt29_stories.py` converts its records to
+  the rows an `.evtx` of them gives (NXLog's own fields back into the record's System, its local
+  time to UTC, and what it kept only in the rendered message read back), runs REMN's rules and
+  builds the stories through the server path, and prints each story with its checks;
+  `tests/backend/test_apt29_stories.py` runs them when `REMN_APT29` names the folder
+  (`pytest -m heavy`). On day 1 no story is about a SID or a service account, and pbeesly's story
+  holds the script blocks pbeesly ran and reaches NASHUA through its hops; the high host stories
+  of the domain controller and of the host left alone, and the intrusion told as three unlinked
+  stories, are expected failures until the work they wait for lands.
 - REMN's own rules raise 200 high and critical findings on the seven clean machines of
   evtx-baseline instead of 895, and detect every recording they detected before (342 recordings,
   435 rule detections, up from 340 and 433). A rule a busy machine matches over and over raises

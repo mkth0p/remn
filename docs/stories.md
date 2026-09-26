@@ -347,6 +347,24 @@ removed it says what ran on WS-004 is not in the evidence. The browser-only end-
 with no internal domain set and the default rule packs on, and finds the same six stories. These
 are synthetic scenarios: a regression benchmark, not a measured accuracy on field cases.
 
+The stories are also read on a recorded intrusion: MITRE's APT29 evaluation as OTRF's
+Security-Datasets recorded it (the Sysmon, Security and PowerShell logs of four hosts in NXLog
+JSON, MIT, fetched on demand and never committed). `tools/apt29_stories.py --data DIR` (`--fetch`
+downloads the pinned zips into DIR) converts the records to the rows an `.evtx` of them gives, runs
+REMN's own rules on a server store (`--packs` adds the default SigmaHQ packs), builds the stories
+as a server case does, and prints each story with the checks below;
+`REMN_APT29=DIR pytest -m heavy tests/backend/test_apt29_stories.py` runs the same checks, day 1 in
+about a minute. On day 1 (196,081 records: pbeesly's payload, UAC bypass, discovery, credential
+access and persistence on SCRANTON, then PsExec to NASHUA; NEWYORK is the domain controller and
+UTICA is left alone) REMN's own rules raise 258 findings and the build makes five stories in
+under four seconds. No story is about a SID or a service account, and pbeesly's story holds the
+31 flagged script blocks pbeesly ran on SCRANTON and NASHUA (their header names pbeesly's SID)
+and reaches NASHUA through the explicit credentials, the PsExec service and WinRM. Two checks
+still fail, and the test holds them as expected failures until the work they wait for lands:
+NEWYORK and UTICA are high host stories made of Windows' own scheduled tasks and DSC script
+blocks (a host story needs a minimum of evidence), and SCRANTON's and NASHUA's host stories hold
+flags of the same intrusion with nothing linking them to pbeesly's.
+
 ## Limits
 
 - A person is joined across forms only as the records and the naming rules allow: two

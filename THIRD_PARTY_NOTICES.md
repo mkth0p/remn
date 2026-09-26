@@ -55,6 +55,12 @@ not copied into REMN. Their own licenses remain applicable.
 | Apache Tika test PST | https://github.com/apache/tika | Apache License 2.0 |
 | Microsoft 365 audit log samples | https://github.com/invictus-ir | As stated in the repository |
 
+## Public attack recordings (fetched on demand by the tools, not redistributed)
+
+| Corpus | Source | Licence |
+| --- | --- | --- |
+| OTRF Security-Datasets, MITRE's APT29 evaluation days 1 and 2 (`tools/apt29_stories.py`) | https://github.com/OTRF/Security-Datasets | MIT |
+
 ## Python packages (`backend/requirements*.txt`)
 
 | Package | Licence |
