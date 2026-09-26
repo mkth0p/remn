@@ -5,6 +5,15 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- PowerShell 4103 and 800 events now carry the command they record, rebuilt from its parameter
+  bindings or taken as typed, with the user and the script, in the server and the browser parser
+  alike. Twelve rules read those commands (`rules/windows/powershell-commands.yaml`):
+  privileged group listing, Kerberoasting from PowerShell, SPN and trust discovery, service path
+  and failure-command changes, New-Service, BITS transfers, permanent WMI subscriptions,
+  PrintDemon printer ports, AMSI bypasses, named pipe shells and OpenSSH enabled. They catch 15
+  files of EVTX-to-MITRE-Attack the default rules missed and fire on none of the evtx-baseline
+  machines, and no other bundled rule changes its findings.
+
 ## 0.2.0 (2026-09-26)
 
 - A story's score favours weight and attack order over breadth: it follows the heaviest run of

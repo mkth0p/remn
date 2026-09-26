@@ -121,6 +121,20 @@ WRITTEN_AGAINST: dict[str, frozenset[str]] = {
     # written for the gaps the head-to-head of 2026-09-25 found on EVTX-to-MITRE-Attack
     "win-user-added-security-group": frozenset({"evtxToMitre"}),
     "win-explicit-credentials-unusual-process": frozenset({"evtxToMitre"}),
+    # rules/windows/powershell-commands.yaml, written for the PowerShell 4103 / 800 commands the 2026-09-26
+    # research found missed there
+    "win-ps-privileged-group-members-listed": frozenset({"evtxToMitre"}),
+    "win-ps-kerberos-ticket-requested-for-spn": frozenset({"evtxToMitre"}),
+    "win-ps-spn-accounts-searched": frozenset({"evtxToMitre"}),
+    "win-ps-forest-or-trust-discovery": frozenset({"evtxToMitre"}),
+    "win-ps-service-registry-path-changed": frozenset({"evtxToMitre"}),
+    "win-ps-service-created": frozenset({"evtxToMitre"}),
+    "win-ps-bits-transfer": frozenset({"evtxToMitre"}),
+    "win-ps-wmi-permanent-subscription": frozenset({"evtxToMitre"}),
+    "win-ps-printer-port-to-file": frozenset({"evtxToMitre"}),
+    "win-ps-amsi-bypass-run": frozenset({"evtxToMitre"}),
+    "win-ps-named-pipe-shell": frozenset({"evtxToMitre"}),
+    "win-ps-openssh-server-enabled": frozenset({"evtxToMitre"}),
 }
 
 

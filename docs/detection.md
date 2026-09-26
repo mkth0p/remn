@@ -110,6 +110,21 @@ the linked lab, and runs the same in both engines. `tools/evtx_attack_samples.py
 job hold the detections in place: the job fails when a rule that identifies a sample's
 attack stops firing on it, or when the engines disagree on any sample.
 
+PowerShell module logging (4103) and pipeline execution details (800) record each command a
+session runs, with its parameters, as `CommandInvocation` and `ParameterBinding` lines. The parser
+writes them back as the command (`Get-ADGroupMember -Identity 'Domain Admins'`) into
+`commandLine`, taking 800's command as typed when it has one and leaving out what the host adds
+to every interactive pipeline (Out-Default, PSConsoleHostReadline). It also takes the user into
+`subjectUser` and the script into `path`. `powershell-commands.yaml` reads those commands:
+privileged group members listed, Kerberos tickets requested from PowerShell (Kerberoasting),
+SPN accounts searched, forest and trust enumeration, a service's ImagePath or FailureCommand
+rewritten, New-Service, BITS transfers, permanent WMI subscriptions, printer ports pointing at a
+file (PrintDemon), AMSI bypasses, named pipe shells and the OpenSSH server enabled. These are
+commands that ran, as opposed to script text that 4104 logs when a module is loaded. The pack
+was written for the PowerShell files the default rules missed in EVTX-to-MITRE-Attack, so that
+library does not count as held out for it (`WRITTEN_AGAINST`). None of its rules fires on the
+4103 and 800 events of the evtx-baseline machines.
+
 The rules that flooded the clean machines were cut down without losing a recorded detection
 (measured in [the noise review](reviews/2026-09-25-noise-and-held-out.md)). A rule a busy
 machine matches over and over raises one finding per program per machine: a program reading
