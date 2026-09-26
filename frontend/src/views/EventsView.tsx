@@ -10,10 +10,11 @@ import type { StackField } from '../data/queries'
 import { loadRowMarks, markedRowIds } from '../data/rowMarks'
 import { EventDetail } from '../components/Detail'
 import { getSource } from '../data/source'
+import { timelineRows } from '../data/timelineRows'
 import type { EventRow, RowMark } from '../db/schema'
 import type { Condition, Filter } from '../rules/filter'
 import { toggleFacetValue } from '../data/facetToggle'
-import { useStore } from '../state/store'
+import { toast, useStore } from '../state/store'
 import { fmtTs } from '../util/format'
 import { downloadBlob, exportCsv, exportJson } from '../util/export'
 import { timelineRecords, toTimelineCsv, toTimesketchJsonl } from '../util/responderExports'
@@ -107,6 +108,27 @@ export function EventsView() {
   const [menu, setMenu] = useState(false)
   const [stacking, setStacking] = useState(false)
   const ds = useMemo(() => (kase ? getSource(kase) : null), [kase])
+  // a timeline export carries every event the filter matches, not the first rows on screen
+  const exportTimeline = useCallback(
+    async (format: 'jsonl' | 'csv') => {
+      if (!ds) return
+      toast('info', 'Reading every matching event for the timeline…')
+      try {
+        const { rows: all, cut } = await timelineRows(ds, filter)
+        const { records } = timelineRecords({ events: all })
+        if (format === 'jsonl') downloadBlob('events-timeline.jsonl', new Blob([toTimesketchJsonl(records)], { type: 'application/x-ndjson' }))
+        else downloadBlob('events-timeline.csv', new Blob(['\ufeff' + toTimelineCsv(records)], { type: 'text/csv;charset=utf-8' }))
+        toast(
+          cut ? 'warn' : 'ok',
+          cut ? `Timeline exported with ${records.length.toLocaleString('en-US')} events: ${cut}` : `Timeline exported with ${records.length.toLocaleString('en-US')} events`,
+          cut ? 12000 : 5000,
+        )
+      } catch (e) {
+        toast('err', `Timeline export failed: ${(e as Error).message}`)
+      }
+    },
+    [ds, filter],
+  )
   useEffect(() => {
     if (jobs.every((j) => j.phase === 'done' || j.phase === 'error')) setVersion((v) => v + 1)
   }, [jobs])
@@ -311,20 +333,20 @@ export function EventsView() {
                     </button>
                     <button
                       className="btn ghost sm"
-                      title="one JSON line per row with message, datetime and timestamp_desc, as Timesketch imports it; rows without a time are left out"
+                      title="every event the filter matches, not only the rows shown: one JSON line per row with message, datetime and timestamp_desc, as Timesketch imports it; rows without a time are left out"
                       onClick={() => {
-                        downloadBlob('events-timeline.jsonl', new Blob([toTimesketchJsonl(timelineRecords({ events: rows }).records)], { type: 'application/x-ndjson' }))
                         setMenu(false)
+                        void exportTimeline('jsonl')
                       }}
                     >
                       export Timesketch JSONL
                     </button>
                     <button
                       className="btn ghost sm"
-                      title="the same timeline as CSV, for Timeline Explorer"
+                      title="every event the filter matches as CSV, for Timeline Explorer"
                       onClick={() => {
-                        downloadBlob('events-timeline.csv', new Blob(['\ufeff' + toTimelineCsv(timelineRecords({ events: rows }).records)], { type: 'text/csv;charset=utf-8' }))
                         setMenu(false)
+                        void exportTimeline('csv')
                       }}
                     >
                       export timeline CSV

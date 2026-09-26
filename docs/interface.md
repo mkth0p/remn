@@ -50,6 +50,11 @@ they show; the time range is always entered in UTC. An entry added to the case t
 from a row that has no event time (a collection snapshot) says "no event time" rather
 than taking the time of the click.
 
+The Events table shows the first 3,000 rows of a search. Its CSV and JSON exports carry
+those rows; the Timesketch JSONL and Timeline Explorer CSV exports carry every event the
+search matches, read in time order, up to 250,000 per export, and say where they stopped
+when a search matches more.
+
 The Events page's "stack" button turns the table into a stack of one field, the
 least-frequency view: each distinct value among the events the current filter and search
 keep, with its number of events, the number of hosts it was seen on ("on 1 of 12 hosts",

@@ -56,6 +56,12 @@ time: { outside_business_hours: true, weekend: true }   # uses case settings
 exclude: { targetUser|in_setting: service_accounts }
 ```
 
+On the server store a run keeps at most 2,000 findings per rule (the browser engine keeps
+them all). Past that, a rule with a threshold of two or more keeps its largest groups (the
+bursts it counts), and any other grouped rule its rarest (the values a hunt is after); the
+Rules view marks the rule "cut short", with the count as `2000+`, and the run says how many
+rules were cut. A `then` follow-up is checked for every finding the rule keeps.
+
 Operators: `eq ne in nin contains not_contains contains_any contains_all startswith
 not_startswith endswith not_endswith re not_re gt gte lt lte exists empty in_setting
 nin_setting levenshtein length contains_cs startswith_cs endswith_cs`. The `_cs`
@@ -265,7 +271,9 @@ same day, gave 137, four of them REMN's own (Kerberoasting, password spraying, a
 query, a member added to a security group).
 
 **Re-measuring** takes the downloads listed in the tool's docstring (about 10 GB unpacked;
-`--datasets DIR --fetch` fetches them at their pinned versions) and about two hours on four cores;
+`--datasets DIR --fetch` fetches them at their pinned versions) and one to two hours on four
+cores. `--shard I/N --raw FILE` measures one of N shares of the recordings and clean machines,
+on as many machines as there are shares, and `--merge FILE...` makes the measure of the shares;
 re-run it after changing a rule or re-importing a pack, with `--detail rules/measures-detail.json`,
 and commit both files. A backend test warns while a rule has changed since it was measured.
 
@@ -274,7 +282,9 @@ detects a recording it detected when the committed detail was taken, a SigmaHQ r
 fires on its own sample, a recording is no longer read, or a high or critical rule raises more
 findings on a clean machine (all of its findings, when it was lower when measured).
 `.github/workflows/measure-rules.yml` runs it weekly, on demand, and on a pull request that
-touches the rules, the rule engine, the parsers or the tool, and uploads the measures it took. A
+touches the rules, the rule engine, the parsers or the tool, and uploads the measures it took. It
+takes the whole measure every time, shared over eight runners, and the gate fails unless every
+share measured all it was dealt. A
 change meant to lose a detection or add noise commits those measures, so the diff of the two files
 says what it changed. The weekly run also catches a new release of a dependency (the EVTX parser,
 DuckDB) that changes what the rules match.
