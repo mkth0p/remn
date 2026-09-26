@@ -129,7 +129,9 @@ Sysmon process GUID or a 4688 pid on a host), `logon_session` (the logon, what i
 did, the logoff); `list_findings` (by severity, source, status, rule or words),
 `get_finding` (a finding with the rows it matched), `get_chain`; `list_iocs`,
 `get_case_notes`, `facet_values`, `pivot`; `regex_test` (in a query worker with a
-three-second limit, so a pattern that backtracks cannot freeze the page); `lookup_ioc`;
+three-second limit, so a pattern that backtracks cannot freeze the page); `lookup_ioc`
+(only for a value the case holds, among its indicators or in the text of an event or a
+mail, so nothing else from the case can be sent out inside a lookup);
 `sql` (one read statement over the DuckDB tables); `search_rules` (the library by words or
 ATT&CK id, with the findings each has here) and `test_rule` (a draft YAML rule run on the
 case without storing anything).

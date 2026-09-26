@@ -32,6 +32,11 @@ a recording it detected when the committed detail was measured, a SigmaHQ rule n
 its own sample, a recording is no longer read, or a high or critical rule raises more findings on
 a clean machine. A change that means to do one of those commits the measures it takes.
 
+The measure can be shared out over machines: --shard I/N --raw FILE measures the I-th of N shares
+of the recordings and clean machines (a clean machine larger than a share is split by rules), and
+--merge FILE... makes the measure of the N files, as one run would, with --out, --detail and
+--gate. The workflow runs eight shares.
+
 Recorded attacks:
 - the SigmaHQ regression samples: one recording per rule, made by the rule's author;
 - EVTX-ATTACK-SAMPLES, with the rules reviewed as identifying each file
@@ -144,6 +149,18 @@ WRITTEN_AGAINST: dict[str, frozenset[str]] = {
     # written for the gaps the head-to-head of 2026-09-25 found on EVTX-to-MITRE-Attack
     "win-user-added-security-group": frozenset({"evtxToMitre"}),
     "win-explicit-credentials-unusual-process": frozenset({"evtxToMitre"}),
+    # rules/windows/directory.yaml, written for the directory changes the 2026-09-26 research found missed there
+    "win-account-security-weakened": frozenset({"evtxToMitre"}),
+    "win-account-delegation-enabled": frozenset({"evtxToMitre"}),
+    "win-password-never-expires-set": frozenset({"evtxToMitre"}),
+    "win-ad-acl-changed-domain-root-or-adminsdholder": frozenset({"evtxToMitre"}),
+    "win-ad-acl-changed": frozenset({"evtxToMitre"}),
+    "win-ad-extended-right-modified": frozenset({"evtxToMitre"}),
+    "win-ad-server-object-created": frozenset({"evtxToMitre"}),
+    "win-domain-policy-changed-by-user": frozenset({"evtxToMitre"}),
+    "win-special-groups-table-changed": frozenset({"evtxToMitre"}),
+    "win-sensitive-user-right-assigned": frozenset({"evtxToMitre"}),
+    "win-guest-account-enabled": frozenset({"evtxToMitre"}),
 }
 
 
@@ -182,6 +199,23 @@ class Recording:
     fired: set[str] = field(default_factory=set)
     # the rules that can read it: its event ids, channels and fields are the ones they need
     readable: set[str] = field(default_factory=set)
+    # attack_data files still to fetch into files (Git LFS pointers), and the bytes of its files
+    lfs: list[str] = field(default_factory=list)
+    size: int = 0
+
+    def meta(self) -> dict[str, Any]:
+        """What the measures need of a recording besides what the rules did on it (--raw, --merge)."""
+        return {
+            "dataset": self.dataset,
+            "name": self.name,
+            "techniques": sorted(self.techniques),
+            "credit": sorted(self.credit),
+            "owner": self.owner,
+        }
+
+    @classmethod
+    def from_meta(cls, m: dict[str, Any]) -> Recording:
+        return cls(m["dataset"], m["name"], [], frozenset(m["techniques"]), frozenset(m["credit"]), m["owner"])
 
 
 # --- recordings ---------------------------------------------------------------------------------
@@ -290,13 +324,22 @@ def attack_data_recordings(root: Path, cache: Path, max_bytes: int = ATTACK_DATA
             if dataset == "attackDataWindows" and sum(s or 0 for s in sizes) > max_bytes:
                 left_out[dataset]["overSize"] = left_out[dataset].get("overSize", 0) + 1
                 continue
-            wanted.append((dataset, desc, paths, tech))
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        fetched = list(pool.map(lambda item: [_fetch_lfs(root, cache, rel) for rel in item[2]], wanted))
+            wanted.append((dataset, desc, paths, tech, sum(s or 0 for s in sizes)))
+    # the files are fetched by fetch_recordings, for the recordings a run measures
     out = [
-        Recording(dataset, desc.parent.relative_to(root).as_posix(), files, tech) for (dataset, desc, _paths, tech), files in zip(wanted, fetched, strict=True)
+        Recording(dataset, desc.parent.relative_to(root).as_posix(), [root / rel for rel in paths], tech, lfs=paths, size=size)
+        for dataset, desc, paths, tech, size in wanted
     ]
     return out, left_out
+
+
+def fetch_recordings(recordings: list[Recording], root: Path, cache: Path) -> None:
+    """The attack_data files of the recordings, from the checkout or GitHub's media host (_fetch_lfs)."""
+    todo = [rec for rec in recordings if rec.lfs]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        fetched = list(pool.map(lambda rec: [_fetch_lfs(root, cache, rel) for rel in rec.lfs], todo))
+    for rec, files in zip(todo, fetched, strict=True):
+        rec.files, rec.lfs = files, []
 
 
 # --- running the rules (in worker processes) ------------------------------------------------------
@@ -348,7 +391,7 @@ def run_recording(files: list[str]) -> dict[str, Any]:
         if not n:
             return {"rows": 0, "unread": unread, "fired": [], "readable": [], "errors": []}
         R = _W["R"]
-        res = R.run_rules(store, _W["rules"], SETTINGS)
+        res = R.run_rules(store, _W["rules"], SETTINGS, diagnose=False)
         return {
             "rows": n,
             "unread": unread,
@@ -384,12 +427,17 @@ def readable_rules(R, store) -> list[str]:
     return out
 
 
-def run_machine(files: list[str]) -> dict[str, Any]:
-    """A clean machine: each rule's findings, the events they cover, and the events it reads."""
+def run_machine(files: list[str], part: int = 0, parts: int = 1) -> dict[str, Any]:
+    """
+    A clean machine: each rule's findings, the events they cover, and the events it reads. With
+    parts, the rules of one part of them (every parts-th rule from the part-th): a large machine is
+    measured in parts on several runners, each loading it.
+    """
     R = _W["R"]
+    rules = _W["rules"][part::parts]
     key, store, n, unread = _load([Path(f) for f in files])
     try:
-        res = R.run_rules(store, _W["rules"], SETTINGS)
+        res = R.run_rules(store, rules, SETTINGS, diagnose=False)
         found: dict[str, list[int]] = collections.defaultdict(lambda: [0, 0])
         for f in res["findings"]:
             found[f["ruleId"]][0] += 1
@@ -398,7 +446,7 @@ def run_machine(files: list[str]) -> dict[str, Any]:
         scopes = {}
         with store.lock:
             con = store._con
-            for rule in _W["rules"]:
+            for rule in rules:
                 if cloud_rule(rule):
                     continue
                 sql, params = scope_sql(R, rule)
@@ -492,6 +540,129 @@ def needs_settings(R, rule: dict[str, Any]) -> list[str]:
     req = rule.get("require_setting")
     names = [req] if req and R._setting_empty(SETTINGS, req) else []
     return names + [n for n in R._empty_positive_settings(rule.get("where"), SETTINGS) if n not in names]
+
+
+# --- sharing the work out ------------------------------------------------------------------------
+
+
+@dataclass
+class Unit:
+    """A recording, or a clean machine with one part of the rules, and the share of the work it falls to."""
+
+    kind: str
+    ref: Any  # the recording's index, the machine's directory
+    files: list[Path]
+    weight: int
+    part: int = 0
+    parts: int = 1
+    share: int = 1
+
+
+def plan(recordings: list[Recording], machines: list[Path], shares: int) -> list[Unit]:
+    """
+    The recordings and clean machines dealt out to the shares, largest first to the least loaded, by
+    the bytes of their files. A machine larger than a share is split into parts of the rules, each
+    loading the whole machine; the rules then take about half its time. Every share computes the
+    same plan from the same datasets.
+    """
+    units: list[Unit] = []
+    for m in machines:
+        files = sorted(m.rglob("*.evtx"))
+        units.append(Unit("machine", m.name, files, sum(f.stat().st_size for f in files)))
+    for i, rec in enumerate(recordings):
+        size = rec.size or sum(f.stat().st_size for f in rec.files if f.is_file())
+        units.append(Unit("recording", i, rec.files, size))
+    if shares > 1:
+        target = sum(u.weight for u in units) / shares
+        split = []
+        for u in units:
+            parts = min(shares, -(-u.weight // max(1, int(target)))) if u.kind == "machine" else 1
+            split += [Unit(u.kind, u.ref, u.files, int(u.weight * (0.5 + 0.5 / parts)), p, parts) for p in range(parts)] if parts > 1 else [u]
+        units = split
+    load = [0] * shares
+    for u in sorted(units, key=lambda u: (-u.weight, u.kind, str(u.ref), u.part)):
+        u.share = min(range(shares), key=lambda i: (load[i], i)) + 1
+        load[u.share - 1] += u.weight
+    return units
+
+
+def measure(units: list[Unit], recordings: list[Recording], jobs: int) -> tuple[dict[str, Any], list[str]]:
+    """The rules run on each unit: what they did on each recording, and on each part of each machine."""
+    results: dict[str, Any] = {"recordings": {}, "machines": {}}
+    problems: list[str] = []
+    tmp = tempfile.mkdtemp(prefix="remn-measure-")
+    with ProcessPoolExecutor(max_workers=jobs, initializer=_worker_init, initargs=(tmp,)) as pool:
+        # the largest first: the machines take longest
+        futures = {}
+        for u in sorted(units, key=lambda u: -u.weight):
+            files = [str(f) for f in (u.files if u.kind == "machine" else recordings[u.ref].files)]
+            fut = pool.submit(run_machine, files, u.part, u.parts) if u.kind == "machine" else pool.submit(run_recording, files)
+            futures[fut] = u
+        done = 0
+        for fut in as_completed(futures):
+            u = futures[fut]
+            out = fut.result()
+            problems += [f"{u.ref}: rule {e['ruleId']} failed: {e['error']}" for e in out["errors"]]
+            if u.kind == "machine":
+                results["machines"].setdefault(u.ref, {})[str(u.part)] = out
+                of = f" (rules part {u.part + 1} of {u.parts})" if u.parts > 1 else ""
+                print(f"  clean machine {u.ref}{of}: {out['rows']:,} events, {sum(v[0] for v in out['found'].values()):,} findings", flush=True)
+            else:
+                results["recordings"][str(u.ref)] = out
+            done += 1
+            if done % 100 == 0:
+                print(f"  {done} of {len(futures)}", flush=True)
+    return results, problems
+
+
+def apply_results(results: dict[str, Any], recordings: list[Recording]) -> dict[str, dict[str, Any]]:
+    """The results onto the recordings, and each clean machine's parts as one."""
+    for i, out in results["recordings"].items():
+        rec = recordings[int(i)]
+        rec.rows, rec.unread, rec.fired, rec.readable = out["rows"], out["unread"], set(out["fired"]), set(out["readable"])
+    clean: dict[str, dict[str, Any]] = {}
+    for name, parts in sorted(results["machines"].items()):
+        outs = [parts[k] for k in sorted(parts, key=int)]
+        clean[name] = {
+            "rows": outs[0]["rows"],
+            "unread": outs[0]["unread"],
+            "found": {rid: v for o in outs for rid, v in o["found"].items()},
+            "scopes": {rid: v for o in outs for rid, v in o["scopes"].items()},
+            "errors": [e for o in outs for e in o["errors"]],
+        }
+    return clean
+
+
+def merge(paths: list[Path]) -> tuple[list[Recording], dict[str, dict[str, Any]], dict[str, dict[str, int]], int, list[str]]:
+    """
+    The shares --shard wrote, as one measure. It fails unless every share of one plan is there once
+    and every recording and every part of every clean machine was measured: a share missing is
+    never a measure with less in it.
+    """
+    raws = [json.loads(p.read_text(encoding="utf-8")) for p in paths]
+    first = raws[0]
+    shares = sorted(r["share"] for r in raws)
+    if shares != list(range(1, first["shares"] + 1)) or any(r["shares"] != first["shares"] for r in raws):
+        sys.exit(f"--merge needs each of the {first['shares']} shares once, got shares {shares}")
+    for r in raws:
+        for k in ("units", "recordings", "leftOut", "maxMb"):
+            if r[k] != first[k]:
+                sys.exit(f"share {r['share']} was planned on other datasets than share {first['share']} ({k} differ)")
+    results: dict[str, Any] = {"recordings": {}, "machines": {}}
+    for r in raws:
+        results["recordings"].update(r["results"]["recordings"])
+        for name, parts in r["results"]["machines"].items():
+            results["machines"].setdefault(name, {}).update(parts)
+    missing = [
+        f"{kind} {ref}" + (f" part {part + 1}" if parts > 1 else "")
+        for kind, ref, part, parts in first["units"]
+        if (str(ref) not in results["recordings"] if kind == "recording" else str(part) not in results["machines"].get(ref, {}))
+    ]
+    if missing:
+        sys.exit(f"--merge: {len(missing)} unit(s) measured by no share: {', '.join(missing[:5])}")
+    recordings = [Recording.from_meta(m) for m in first["recordings"]]
+    clean = apply_results(results, recordings)
+    return recordings, clean, first["leftOut"], first["maxMb"], [p for r in raws for p in r["problems"]]
 
 
 # --- the measures -------------------------------------------------------------------------------
@@ -610,12 +781,25 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-dataset-mb", type=int, default=ATTACK_DATA_MAX_BYTES >> 20, help="the largest attack_data Windows dataset measured")
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 2)
     ap.add_argument("--limit", type=int, default=0, help="a trial run: the first N recordings of each dataset (no file is written unless --out is given)")
+    ap.add_argument("--shard", help="I/N: measure the I-th of N shares of the recordings and clean machines (1 <= I <= N) and write them to --raw")
+    ap.add_argument("--raw", type=Path, help="with --shard: where the share measured is written, for --merge")
+    ap.add_argument("--merge", type=Path, nargs="+", help="take the measures from the --raw files of every share instead of measuring")
     a = ap.parse_args(argv)
+    shard = None
+    if a.shard:
+        m = re.fullmatch(r"(\d+)/(\d+)", a.shard)
+        if not m or not 1 <= int(m.group(1)) <= int(m.group(2)):
+            ap.error("--shard is I/N, 1 <= I <= N")
+        if not a.raw:
+            ap.error("--shard needs --raw")
+        shard = (int(m.group(1)), int(m.group(2)))
+    if a.merge and (a.shard or a.fetch):
+        ap.error("--merge measures nothing: it takes no --shard or --fetch")
     if a.datasets and a.fetch:
         fetch(a.datasets)
     for key, name in LAYOUT.items():
         attr = DEST[key]
-        if getattr(a, attr) is None:
+        if getattr(a, attr) is None and not a.merge:
             if not a.datasets:
                 ap.error(f"--{attr.replace('_', '-')} or --datasets is required")
             setattr(a, attr, a.datasets / name)
@@ -631,39 +815,53 @@ def main(argv: list[str] | None = None) -> int:
     rule_tech = {rid: techniques(r.get("attack")) for rid, r in rules.items()}
     settings_needed = {rid: s for rid, r in rules.items() if (s := needs_settings(R, r))}
 
-    attack_data, left_out = attack_data_recordings(a.attack_data, a.cache, a.max_dataset_mb << 20)
-    recordings = (
-        sigma_recordings(a.sigma, rule_tech) + attack_sample_recordings(a.attack_samples, rule_tech) + attack_data + evtx_to_mitre_recordings(a.evtx_to_mitre)
-    )
-    if a.limit:
-        by_set = collections.defaultdict(list)
-        for rec in recordings:
-            by_set[rec.dataset].append(rec)
-        recordings = [rec for recs in by_set.values() for rec in recs[: a.limit]]
-    machines = sorted(p for p in a.baseline.iterdir() if p.is_dir() and any(p.rglob("*.evtx")))
-    print(f"{len(rules)} event rules; {len(recordings)} recordings; {len(machines)} clean machines", flush=True)
-
-    tmp = tempfile.mkdtemp(prefix="remn-measure-")
-    problems: list[str] = []
-    clean: dict[str, dict[str, Any]] = {}
-    with ProcessPoolExecutor(max_workers=a.jobs, initializer=_worker_init, initargs=(tmp,)) as pool:
-        # the machines first: they take longest
-        jobs = {pool.submit(run_machine, [str(p) for p in sorted(m.rglob("*.evtx"))]): ("machine", m.name) for m in machines}
-        jobs.update({pool.submit(run_recording, [str(f) for f in rec.files]): ("recording", i) for i, rec in enumerate(recordings)})
-        done = 0
-        for fut in as_completed(jobs):
-            kind, ref = jobs[fut]
-            out = fut.result()
-            problems += [f"{ref}: rule {e['ruleId']} failed: {e['error']}" for e in out["errors"]]
-            if kind == "machine":
-                clean[ref] = out
-                print(f"  clean machine {ref}: {out['rows']:,} events, {sum(v[0] for v in out['found'].values()):,} findings", flush=True)
-            else:
-                rec = recordings[ref]
-                rec.rows, rec.unread, rec.fired, rec.readable = out["rows"], out["unread"], set(out["fired"]), set(out["readable"])
-            done += 1
-            if done % 100 == 0:
-                print(f"  {done} of {len(jobs)}", flush=True)
+    if a.merge:
+        recordings, clean, left_out, max_mb, problems = merge(a.merge)
+        a.max_dataset_mb = max_mb
+        print(f"{len(rules)} event rules; {len(recordings)} recordings; {len(clean)} clean machines, from {len(a.merge)} shares", flush=True)
+    else:
+        attack_data, left_out = attack_data_recordings(a.attack_data, a.cache, a.max_dataset_mb << 20)
+        recordings = (
+            sigma_recordings(a.sigma, rule_tech)
+            + attack_sample_recordings(a.attack_samples, rule_tech)
+            + attack_data
+            + evtx_to_mitre_recordings(a.evtx_to_mitre)
+        )
+        if a.limit:
+            by_set = collections.defaultdict(list)
+            for rec in recordings:
+                by_set[rec.dataset].append(rec)
+            recordings = [rec for recs in by_set.values() for rec in recs[: a.limit]]
+        machines = sorted(p for p in a.baseline.iterdir() if p.is_dir() and any(p.rglob("*.evtx")))
+        print(f"{len(rules)} event rules; {len(recordings)} recordings; {len(machines)} clean machines", flush=True)
+        units = plan(recordings, machines, shard[1] if shard else 1)
+        mine = [u for u in units if u.share == (shard[0] if shard else 1)]
+        fetch_recordings([recordings[u.ref] for u in mine if u.kind == "recording"], a.attack_data, a.cache)
+        if shard:
+            print(
+                f"share {shard[0]} of {shard[1]}: {len(mine)} of {len(units)} units, {sum(u.weight for u in mine) / 1e9:.2f} of {sum(u.weight for u in units) / 1e9:.2f} GB",
+                flush=True,
+            )
+        results, problems = measure(mine, recordings, a.jobs)
+        if shard:
+            a.raw.write_text(
+                json.dumps(
+                    {
+                        "share": shard[0],
+                        "shares": shard[1],
+                        "units": [[u.kind, u.ref, u.part, u.parts] for u in units],
+                        "recordings": [rec.meta() for rec in recordings],
+                        "leftOut": left_out,
+                        "maxMb": a.max_dataset_mb,
+                        "results": results,
+                        "problems": problems,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            print(f"wrote {a.raw}: share {shard[0]} of {shard[1]}; merge the shares with --merge")
+            return 0
+        clean = apply_results(results, recordings)
 
     read = [r for r in recordings if r.rows]
     measures: dict[str, dict[str, Any]] = {}

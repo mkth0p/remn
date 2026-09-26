@@ -50,6 +50,11 @@ they show; the time range is always entered in UTC. An entry added to the case t
 from a row that has no event time (a collection snapshot) says "no event time" rather
 than taking the time of the click.
 
+The Events table shows the first 3,000 rows of a search. Its CSV and JSON exports carry
+those rows; the Timesketch JSONL and Timeline Explorer CSV exports carry every event the
+search matches, read in time order, up to 250,000 per export, and say where they stopped
+when a search matches more.
+
 Selecting a mail opens a bottom pane: the message (text, or HTML in a sandbox), headers,
 hops, URLs, attachments, a Related tab (findings on the mail and the recipients' host and
 cloud events from 15 minutes before to 72 hours after delivery) and JSON, with an

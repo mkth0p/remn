@@ -276,6 +276,48 @@ def test_rule_diagnostics_explain_silent_rules(store):
     assert "ok" not in d and res["byRule"]["ok"] == 3
 
 
+def test_rules_past_the_finding_cap_keep_the_rarest_groups_and_say_so(store, monkeypatch):
+    monkeypatch.setattr(R, "MAX_FINDINGS", 3)
+    w = EventWriter(store, 1)
+    n = 0
+    # five accounts failing 1, 2, 3, 4 and 5 times
+    for k, user in enumerate(("u1", "u2", "u3", "u4", "u5"), 1):
+        for _ in range(k):
+            w.add(_event(n, eventId=4625, targetUser=user))
+            n += 1
+    w.flush()
+    settings = {"internal_ips": [], "service_accounts": []}
+    rare = {"id": "rare", "title": "r", "severity": "low", "source": "events", "where": {"eventId": 4625}, "group_by": ["targetUser"]}
+    burst = {**rare, "id": "burst", "threshold": ">= 2"}
+    res = R.run_rules(store, [rare, burst], settings)
+    got = {rid: {f["entities"]["targetUser"] for f in res["findings"] if f["ruleId"] == rid} for rid in ("rare", "burst")}
+    # a hunt keeps the accounts seen least, a threshold rule the ones seen most
+    assert got["rare"] == {"u1", "u2", "u3"}
+    assert got["burst"] == {"u3", "u4", "u5"}
+    cut = {d["ruleId"]: d for d in res["diagnostics"] if d["reason"] == "truncated"}
+    assert "rarest" in cut["rare"]["detail"] and "largest" in cut["burst"]["detail"]
+
+
+def test_then_is_checked_for_every_finding(store):
+    w = EventWriter(store, 1)
+    # 600 accounts each fail once then log on: the follow-up must reach the last of them too
+    for i in range(600):
+        w.add(_event(i * 10, eventId=4625, targetUser=f"user{i}"))
+        w.add(_event(i * 10 + 1, eventId=4624, targetUser=f"user{i}"))
+    w.flush()
+    rule = {
+        "id": "fail-then-ok",
+        "title": "f",
+        "severity": "low",
+        "source": "events",
+        "where": {"eventId": 4625},
+        "group_by": ["targetUser"],
+        "then": {"where": {"eventId": 4624}, "join": ["targetUser"], "within": "5m", "severity": "high", "title": "logged on"},
+    }
+    f = R.run_rule(store, rule, {"internal_ips": [], "service_accounts": []})
+    assert len(f) == 600 and all(x["severity"] == "high" for x in f)
+
+
 def test_sql_compiler_edge_cases():
     ctx = Ctx(source="events", settings={})
     sql = compile_condition("eventId", "in", "4624, 4625", ctx)

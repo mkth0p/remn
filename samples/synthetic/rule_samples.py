@@ -224,6 +224,87 @@ def build() -> list[dict[str, Any]]:
     )
     rows.append(ev(4720, SEC, {"TargetUserName": "backdoor", "SubjectUserName": "alice", "SubjectDomainName": "CORP"}, ts=t + 130_000))
     rows.append(ev(4732, SEC, {"MemberName": "CN=backdoor,CN=Users,DC=corp", "TargetUserName": "Administrators", "SubjectUserName": "alice"}, ts=t + 131_000))
+    # directory changes, as a domain controller logs them
+    dc = "DC01"
+    adm = {"SubjectUserName": "alice", "SubjectDomainName": "CORP", "SubjectUserSid": "S-1-5-21-1-2-3-1104"}
+    uac = {"TargetUserName": "roastme", "TargetSid": "S-1-5-21-1-2-3-1201", "AllowedToDelegateTo": "-", **adm}
+    rows.append(ev(4738, SEC, {**uac, "UserAccountControl": "%%2096"}, ts=t + 132_000, computer=dc))
+    rows.append(ev(4738, SEC, {**uac, "UserAccountControl": "%%2089"}, ts=t + 132_500, computer=dc))
+    rows.append(ev(4742, SEC, {**uac, "TargetUserName": "WS09$", "UserAccountControl": "%%2093"}, ts=t + 133_000, computer=dc))
+    ds = {"OpCorrelationID": "{1}", "AttributeSyntaxOID": "2.5.5.12", "OperationType": "%%14674", **adm}
+    rows.append(
+        ev(
+            5136,
+            SEC,
+            {
+                **ds,
+                "ObjectDN": "CN=FS01,OU=Servers,DC=corp,DC=local",
+                "ObjectClass": "computer",
+                "AttributeLDAPDisplayName": "msDS-AllowedToActOnBehalfOfOtherIdentity",
+                "AttributeValue": "O:BAD:(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;S-1-5-21-1-2-3-1301)",
+            },
+            ts=t + 133_500,
+            computer=dc,
+        )
+    )
+    rows.append(
+        ev(
+            5136,
+            SEC,
+            {
+                **ds,
+                "ObjectDN": "DC=corp,DC=local",
+                "ObjectClass": "domainDNS",
+                "AttributeLDAPDisplayName": "nTSecurityDescriptor",
+                "AttributeValue": "O:DAG:DAD:(A;;CR;;;S-1-5-21-1-2-3-1201)",
+            },
+            ts=t + 134_000,
+            computer=dc,
+        )
+    )
+    rows.append(
+        ev(
+            5136,
+            SEC,
+            {
+                **ds,
+                "ObjectDN": "OU=Servers,DC=corp,DC=local",
+                "ObjectClass": "organizationalUnit",
+                "AttributeLDAPDisplayName": "nTSecurityDescriptor",
+                "AttributeValue": "O:DAG:DAD:(A;;GA;;;S-1-5-21-1-2-3-1201)",
+            },
+            ts=t + 134_500,
+            computer=dc,
+        )
+    )
+    rows.append(
+        ev(
+            5136,
+            SEC,
+            {
+                **ds,
+                "ObjectDN": "CN=User-Force-Change-Password,CN=Extended-Rights,CN=Configuration,DC=corp,DC=local",
+                "ObjectClass": "controlAccessRight",
+                "AttributeLDAPDisplayName": "localizationDisplayId",
+                "AttributeValue": "42",
+            },
+            ts=t + 135_000,
+            computer=dc,
+        )
+    )
+    rows.append(
+        ev(
+            5137,
+            SEC,
+            {**ds, "ObjectDN": "CN=WS09,CN=Servers,CN=Default-First-Site-Name,CN=Sites,CN=Configuration,DC=corp,DC=local", "ObjectClass": "server"},
+            ts=t + 135_500,
+            computer=dc,
+        )
+    )
+    rows.append(ev(4739, SEC, {**adm, "DomainPolicyChanged": "Lockout Policy", "LockoutThreshold": "0"}, ts=t + 136_000, computer=dc))
+    rows.append(ev(4908, SEC, {**adm, "SidList": "-"}, ts=t + 136_500, computer=dc))
+    rows.append(ev(4704, SEC, {**adm, "TargetSid": "S-1-5-21-1-2-3-1201", "PrivilegeList": "SeDebugPrivilege"}, ts=t + 137_000, computer=dc))
+    rows.append(ev(4722, SEC, {**adm, "TargetUserName": "Guest", "TargetSid": "S-1-5-21-1-2-3-501"}, ts=t + 137_500))
     # server products: SQL Server, OpenSSH, Certificate Services, the DNS server, BitLocker
     sq = t + 150_000
     rows.append(

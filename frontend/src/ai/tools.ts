@@ -247,6 +247,21 @@ function checkCites(list: unknown, seen: SeenSet, fallback?: 'ev' | 'mail' | 'fi
   return { ok, unseen, bad }
 }
 
+/**
+ * Whether an indicator appears in the case as written: among its extracted indicators, or in the
+ * text of an event or a mail. A lookup sends the value to a third party, and the model could
+ * otherwise put anything in it (a host name joined to a password, say).
+ */
+async function valueInCase(kase: Case, kind: string, value: string, signal?: AbortSignal): Promise<boolean> {
+  const v = value.trim().toLowerCase()
+  if (v.length < 4) return false
+  const iocs = await getDb().iocs.where('[caseId+kind]').equals([kase.id!, kind]).toArray()
+  if (iocs.some((i) => i.value.trim().toLowerCase() === v)) return true
+  const ds = getSource(kase)
+  if ((await ds.countEvents({ text: v }, signal)) > 0) return true
+  return (await ds.countMails({ text: v }, signal)) > 0
+}
+
 const fail = (error: string): ToolOutput => ({ content: JSON.stringify({ error }), refs: [], suspects: [], error: true })
 
 async function withTotal<T>(ds: DataSource, source: 'events' | 'mails', filter: Filter, res: { rows: T[]; truncated: boolean }, signal?: AbortSignal) {
@@ -501,6 +516,8 @@ async function read(name: string, args: Record<string, unknown>, ctx: ToolContex
       const kind = str(args.kind)
       const value = str(args.value)
       if (!['ip', 'domain', 'url', 'hash'].includes(kind) || !value) return { error: 'kind must be ip|domain|url|hash and value non-empty' }
+      // Only a value the case holds leaves the machine, so evidence cannot be encoded into a lookup
+      if (!(await valueInCase(kase, kind, value, signal))) return { error: `"${value.slice(0, 80)}" does not appear in this case; only indicators found in the evidence can be looked up` }
       const resp = await lookupReputation([{ kind, value }], kase.settings.providers?.length ? kase.settings.providers : undefined)
       return { summary: resp.summary[`${kind}:${value}`] ?? null, verdicts: resp.results.map((r) => ({ provider: r.provider, verdict: r.verdict, score: r.score, tags: r.tags, details: r.details })) }
     }
