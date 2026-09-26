@@ -74,7 +74,20 @@ export interface StoryStep {
   session: string | null
   process: string | null
   hops: string[]
+  /** how common its parent and child programs, logon path or outside domain are in the case ("seen on 1 of 40 hosts") */
+  rarity?: { kind: 'process' | 'logon' | 'domain'; value: string; seen: number; of: number; unit: string; text: string } | null
   routine: boolean
+}
+/** Why a story scores what it does: its heaviest run of findings in ATT&CK's order, the other techniques, a mail-led chain. */
+export interface ScoreParts {
+  run: { phase: string; technique: string | null; ruleId: string; severity: Severity; verdict: string; precision: number; weight: number; step: string }[]
+  runPoints: number
+  techniques: number
+  others: number
+  otherPoints: number
+  chainPoints: number
+  /** techniques whose findings all come from leads, unmeasured rules or rules noisy on clean machines */
+  weighedDown: number
 }
 export interface StoryPhase {
   phase: string
@@ -208,6 +221,9 @@ export interface Story {
   end: number
   severity: Severity
   score: number
+  scoreParts?: ScoreParts
+  /** what started it: a flag, or low findings of several rules within a week that add up */
+  startKind?: 'flag' | 'accumulated'
   confidence: Confidence
   phases: StoryPhase[]
   steps: StoryStep[]
