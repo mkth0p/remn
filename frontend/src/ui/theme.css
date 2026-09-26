@@ -2366,6 +2366,57 @@ label.field > span {
   color: var(--fg-3);
   font-size: 11px;
 }
+/* the analyst's decisions on stories (views/StoryDecisions.tsx): a disputed step is struck out, a dismissed story greyed */
+.story .step.disputed {
+  opacity: 0.55;
+}
+.story .step.disputed .title,
+.story .step.disputed .sub {
+  text-decoration: line-through;
+}
+.step-call,
+.story-call {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--surface-3);
+  color: var(--fg-2);
+  font-size: 11px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+.step-call.confirmed,
+.story-call.reviewed {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.story-call.confirmed {
+  background: var(--sev-critical-bg);
+  color: var(--sev-critical);
+}
+.story-row.dismissed {
+  opacity: 0.6;
+}
+.story-decide {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.story-decide .lbl {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-2);
+}
+.story-decide .segmented button.active.confirmed {
+  color: var(--sev-critical);
+}
+.story-decide .segmented button.active.benign,
+.story-decide .segmented button.active.false_positive {
+  color: var(--fg-2);
+}
 .badge .measure {
   font-weight: 400;
   opacity: 0.8;

@@ -4,6 +4,7 @@ import type { Chain } from './chains'
 import { buildIncidents } from '../rules/incidents'
 import { DEFAULT_REPORT } from './review'
 import { bottomLine, buildReportHtml, computeConfidence, computeVerdict, foldSteps, groupByRule, MAX_MOMENTS, MAX_STEP_ROWS, moments, threatProfile, type ReportData } from './reportHtml'
+import type { DecidedStory } from './storyDecisions'
 import { setLocalTime } from '../util/format'
 import { readMeasure } from './ruleMeasures'
 import type { ChainStep } from './chains'
@@ -556,6 +557,124 @@ describe('what the report claims about the case', () => {
     } finally {
       setLocalTime(false)
     }
+  })
+})
+
+describe('stories the analyst decided', () => {
+  const decidedStory = (over: Partial<DecidedStory> = {}): DecidedStory => ({
+    title: 'daniel.roy@corp.test',
+    verdict: 'confirmed',
+    reason: 'the RDP logon from outside is the way in',
+    severity: 'high',
+    start: 60_000,
+    end: 120_000,
+    hosts: ['WS-004'],
+    findings: [],
+    printed: true,
+    ...over,
+  })
+  // a case with nothing decided but its stories
+  const bare = (over: Partial<ReportData> = {}) => data({ chains: [], reviews: {}, incidents: [], findings: [], membersOf: new Map(), ...over })
+
+  it('count in the verdict as incidents with the same decision would, printed or not', () => {
+    expect(computeVerdict(bare()).kind).toBe('clean')
+    expect(computeVerdict(bare({ decidedStories: [decidedStory()] }))).toMatchObject({ kind: 'compromise', label: 'Compromise confirmed', confirmed: 1, severity: 'high' })
+    expect(computeVerdict(bare({ decidedStories: [decidedStory({ severity: 'medium' })] })).kind).toBe('suspicious')
+    // left out of the report by its settings, still confirmed, and the cover says it is not printed
+    const hidden = computeVerdict(bare({ decidedStories: [decidedStory({ printed: false })] }))
+    expect(hidden).toMatchObject({ kind: 'compromise', confirmed: 1 })
+    expect(hidden.detail).toContain('1 of them is not printed')
+    // a confirmed story whose findings are only unwanted software reads as that
+    const pua = f({ ruleId: 'collection-defender-pua', severity: 'medium', title: 'Defender recorded a potentially unwanted application' })
+    expect(computeVerdict(bare({ decidedStories: [decidedStory({ severity: 'medium', findings: [pua] })] })).kind).toBe('unwanted')
+    // reviewed reads as reviewed; benign and false positive as false positives, with the case's own
+    expect(computeVerdict(bare({ decidedStories: [decidedStory({ verdict: 'reviewed' })] }))).toMatchObject({ kind: 'unconfirmed', reviewed: 1 })
+    expect(computeVerdict(bare({ falsePositives: 2, decidedStories: [decidedStory({ verdict: 'benign' }), decidedStory({ verdict: 'false_positive' })] }))).toMatchObject({
+      kind: 'clean',
+      falsePositives: 4,
+    })
+    // a confirmed story's findings fill its tactics on the cover, and it is one of the moments of What happened
+    const rdp = f({ ruleId: 'win-rdp-logon-external', severity: 'high', attack: ['T1133'], source: 'events' })
+    const d = bare({ findings: [rdp], decidedStories: [decidedStory({ findings: [rdp] })] })
+    expect(threatProfile(d).find((b) => b.def.id === 'initial-access')?.state).toBe('confirmed')
+    const m = moments(d)
+    expect(m.items).toMatchObject([{ title: 'Story of daniel.roy@corp.test', decision: 'confirmed', kind: 'story', note: 'the RDP logon from outside is the way in' }])
+  })
+
+  it("print each decision on the story's card, leave a disputed step out of what marks its phase, and say how many stories were dismissed", () => {
+    const step = (id: string, title: string, finding?: string) => ({
+      id,
+      refs: [id],
+      source: 'events',
+      ts: 60_000,
+      tsEnd: 60_000,
+      count: 1,
+      title,
+      host: 'WS-004',
+      ip: null,
+      origin: 'host',
+      phase: 'initial-access',
+      phaseBasis: '',
+      findings: finding ? [{ ruleId: finding, title: finding, severity: 'high', key: finding }] : [],
+      severity: finding ? 'high' : null,
+      tie: { kind: 'flag', basis: '', confidence: 'strong' },
+      notes: [],
+      accounts: [],
+      session: null,
+      process: null,
+      hops: [],
+      routine: false,
+    })
+    const story = {
+      id: 'story-1',
+      kind: 'person',
+      subject: { kind: 'person', id: 'id:1', label: 'daniel.roy@corp.test', org: 'corp.test' },
+      title: 'daniel.roy@corp.test',
+      headline: 'RDP logon from outside',
+      summary: '',
+      start: 60_000,
+      end: 120_000,
+      severity: 'high',
+      score: 70,
+      confidence: 'strong',
+      phases: [{ phase: 'initial-access', label: 'Initial access', first: 60_000, last: 60_000, steps: 1, records: 1, findings: 1, severity: 'high' }],
+      steps: [step('event:1', 'vpn logon', 'VPN logon from a new country'), step('event:2', 'rdp <logon>', 'RDP logon from outside')],
+      records: 2,
+      hosts: ['WS-004'],
+      accounts: [],
+      ips: [],
+      attackerAddresses: [],
+      chains: [],
+      findings: ['RDP logon from outside'],
+      campaigns: [],
+      gaps: [],
+      lineage: { sessions: [], hops: [], processes: [] },
+    } as never
+    const decisions = {
+      call: { verdict: 'confirmed' as const, reason: 'came in over <RDP>', decidedAt: 1 },
+      part: 'first' as const,
+      split: { title: 'service installed', ts: 180_000, reason: 'a second intrusion' },
+      merged: [{ title: 'ws-009', reason: 'the same session', orgs: ['corp.test', 'other.test'] }],
+      out: [{ title: 'failed logons', count: 3, reason: 'another user mistyping' }],
+      disputed: [{ id: 'event:1', title: 'vpn logon', ts: 60_000, reason: 'the travelling CFO' }],
+      confirmedSteps: 1,
+    }
+    const html = buildReportHtml(data({ stories: [{ story, key: 'story-1', decisions }], storiesDismissed: 2, storiesLeft: 1, settings: { ...DEFAULT_REPORT, onlyReviewed: true } }))
+    const section = html.slice(html.indexOf('<h2>Stories</h2>'), html.indexOf('<h2>Attack chains</h2>'))
+    expect(section).toContain('daniel.roy@corp.test (first part)</h3><span class="pill verdict-confirmed">confirmed incident</span>')
+    expect(section).toContain('The analyst decided it confirmed incident: came in over &lt;RDP&gt;')
+    expect(section).toContain('Merged into it by the analyst: the story of ws-009 (another organisation, corp.test and other.test): the same session')
+    expect(section).toContain('Split by the analyst at “service installed”')
+    expect(section).toContain('Taken out by the analyst: “failed logons” (3 records): another user mistyping')
+    expect(section).toContain('Disputed by the analyst and left out of its phases and severity: “vpn logon” (1970-01-01 00:01:00Z): the travelling CFO')
+    expect(section).toContain('1 step confirmed by the analyst.')
+    // the disputed step's finding no longer marks the phase
+    const phases = section.slice(section.indexOf('<table>'), section.indexOf('</table>'))
+    expect(phases).toContain('RDP logon from outside')
+    expect(phases).not.toContain('VPN logon from a new country')
+    expect(section).toContain('1 more story is not printed: below the severity floor, without a note or a decision (reviewed items only)')
+    expect(section).toContain('2 stories decided benign or false positive by the analyst are not printed.')
+    expect(html).toContain('2 stories decided benign or false positive are not printed')
   })
 })
 
