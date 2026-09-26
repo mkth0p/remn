@@ -45,7 +45,7 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 - A record names the account its System header's SID is (the user PowerShell's script blocks
   and many operational logs name only there) when it is a user's SID, joined to the account by
   a logon of any day, so the flagged script blocks on a victim's host are steps of the victim's
-  story instead of a story of the host: on MITRE's APT29 day 1, the 35 flagged script blocks of
+  story instead of a story of the host: on MITRE's APT29 day 1, the 31 flagged script blocks of
   SCRANTON and NASHUA join pbeesly's story. A SID written where a name goes (a firewall rule's
   `ModifyingUser`) is read as a SID; a service's, an IIS application pool's, a virtual
   machine's or a group's SID is never a person, and the firewall service's no longer makes a
