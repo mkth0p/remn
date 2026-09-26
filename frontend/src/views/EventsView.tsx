@@ -13,7 +13,8 @@ import type { Condition, Filter } from '../rules/filter'
 import { toggleFacetValue } from '../data/facetToggle'
 import { useStore } from '../state/store'
 import { fmtTs } from '../util/format'
-import { exportCsv, exportJson } from '../util/export'
+import { downloadBlob, exportCsv, exportJson } from '../util/export'
+import { timelineRecords, toTimelineCsv, toTimesketchJsonl } from '../util/responderExports'
 import { Badge } from '../components/ui'
 
 const FACETS: FacetDef[] = [
@@ -279,6 +280,26 @@ export function EventsView() {
                       }}
                     >
                       export JSON ({rows.length})
+                    </button>
+                    <button
+                      className="btn ghost sm"
+                      title="one JSON line per row with message, datetime and timestamp_desc, as Timesketch imports it; rows without a time are left out"
+                      onClick={() => {
+                        downloadBlob('events-timeline.jsonl', new Blob([toTimesketchJsonl(timelineRecords({ events: rows }).records)], { type: 'application/x-ndjson' }))
+                        setMenu(false)
+                      }}
+                    >
+                      export Timesketch JSONL
+                    </button>
+                    <button
+                      className="btn ghost sm"
+                      title="the same timeline as CSV, for Timeline Explorer"
+                      onClick={() => {
+                        downloadBlob('events-timeline.csv', new Blob(['\ufeff' + toTimelineCsv(timelineRecords({ events: rows }).records)], { type: 'text/csv;charset=utf-8' }))
+                        setMenu(false)
+                      }}
+                    >
+                      export timeline CSV
                     </button>
                   </div>
                 )}
