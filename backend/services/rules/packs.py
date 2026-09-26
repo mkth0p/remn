@@ -6,7 +6,13 @@ The community packs (SigmaHQ, Sublime Security - written by tools/import_communi
 are ~3,000 rules and several megabytes of YAML, so they are listed in /api/meta from their
 manifests only and served on demand by GET /api/rules/packs/<id> when an analyst enables them.
 Parsed packs are cached in-process and invalidated when any file in the pack changes.
+
+rules/community/levels.json changes the level of pack rules measured too noisy or too quiet at the
+upstream level (tools/measure_rules.py: detections on the recorded attacks, findings on the clean
+machines). It is kept apart from the packs so that a re-import does not undo it; each entry keeps
+the upstream level and the reason.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -41,13 +47,29 @@ def is_pack_path(path: Path, rules_dir: Path) -> bool:
         return False
 
 
+def levels_path() -> Path:
+    return community_dir() / "levels.json"
+
+
 def _signature(pack_dir: Path) -> str:
     h = hashlib.sha1()
-    for p in sorted(pack_dir.iterdir()):
-        if p.suffix in (".yaml", ".yml", ".json"):
+    for p in [*sorted(pack_dir.iterdir()), levels_path()]:
+        if p.suffix in (".yaml", ".yml", ".json") and p.is_file():
             st = p.stat()
             h.update(f"{p.name}:{st.st_size}:{st.st_mtime_ns}\n".encode())
     return h.hexdigest()[:16]
+
+
+def _levels() -> dict[str, str]:
+    """Rule id -> level from rules/community/levels.json ({} when absent or invalid)."""
+    try:
+        data = json.loads(levels_path().read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as exc:
+        log.warning("invalid %s: %s", levels_path(), exc)
+        return {}
+    return {str(rid): str(e["severity"]) for rid, e in (data.get("levels") or {}).items() if isinstance(e, dict) and e.get("severity")}
 
 
 def _manifest(pack_dir: Path) -> dict[str, Any] | None:
@@ -86,6 +108,7 @@ def list_packs() -> list[dict[str, Any]]:
 
 def _parse_pack(pack_dir: Path) -> list[dict[str, Any]]:
     rules: list[dict[str, Any]] = []
+    levels = _levels()
     for path in sorted(pack_dir.glob("*.y*ml")):
         rel = f"community/{pack_dir.name}/{path.name}"
         try:
@@ -95,6 +118,8 @@ def _parse_pack(pack_dir: Path) -> list[dict[str, Any]]:
             rules.append({"file": rel, "error": str(exc)[:200], "yaml": ""})
             continue
         for i, d in enumerate(docs):
+            if d.get("id") in levels:
+                d["severity"] = levels[d["id"]]
             entry = {"file": f"{rel}#{i}", "rule": d}  # no yaml text: the client re-dumps a rule when it is copied
             measured = measures.for_rule(d)
             if measured is not None:

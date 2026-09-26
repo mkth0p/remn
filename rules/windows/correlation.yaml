@@ -148,7 +148,7 @@ threshold: ">= 5"
 id: win-rdp-connect-then-run-dialog
 title: Run-dialog command typed seconds after an inbound RDP connection (SharpRDP-style)
 description: An inbound RDP connection (Sysmon 3 on port 3389) and a new entry in the Run dialog history (RunMRU written by explorer.exe, Sysmon 13) on the same host within ten seconds of each other. SharpRDP and similar tools execute commands by opening an automated RDP session and typing them into the Run dialog, so each connection is followed a few seconds later by a RunMRU write; several findings in a row, each with a new command, mean automation. The commands themselves can look harmless (notepad, cmd, powershell). Benign causes are an administrator who reconnects to an existing session and immediately runs something with Win+R, and busy terminal servers, where one user's connection and another user's Run command can fall in the same ten seconds; the rule cannot tell which user wrote the RunMRU entry, so a single finding is weak and a series of them is what matters.
-severity: low
+severity: medium
 source: events
 attack: [T1021.001]
 tags: [lateral-movement, rdp, correlation]
@@ -190,7 +190,7 @@ threshold: ">= 2"
 id: win-smb-coerced-connect-back
 title: Host connects back over SMB to a peer that has just connected to it (coerced authentication)
 description: The kernel accepts an SMB connection from a peer and, within five seconds, opens an SMB connection to port 445 of that same peer (Sysmon 3, image System). Coercion tricks such as the printer bug (SpoolSample), PetitPotam and DFSCoerce make the victim authenticate back to the address the attacker chooses, usually to relay or capture its machine account. The peer can only be matched when Sysmon records the inbound connection with the local port 445 as its source, as the Sysmon versions of 2019 did in the logs examined; the 2020 and later logs put the peer in the source fields, and the rule language cannot compare a source address with a destination address, so on such logs the rule stays silent. Sysmon writes network events in batches, so two connections milliseconds apart can be logged seconds apart. The evidence is two ordinary connections, so confirm it with a 5145 on spoolss, efsrpc, lsarpc or netdfs from the peer, or with the host's machine account logging on at the peer. Benign causes are a server that opens its own shares through its own name or address (both sides of that one connection are logged), print servers that open the MS-RPRN change-notification channel back to their clients - the channel the printer bug abuses; newer clients mostly use the asynchronous print protocols, which do not connect back - and two servers that access each other's shares at the same moment.
-severity: low
+severity: medium
 source: events
 attack: [T1187]
 tags: [credential-access, coercion, smb, correlation]
