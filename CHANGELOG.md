@@ -14,6 +14,22 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   writes an ATT&CK Navigator layer (format 4.5) of the techniques the findings name, each coloured
   and scored by its worst severity, with the count of findings, how many are confirmed and which
   rules in its comment. The Events page exports its filtered rows as the same timeline.
+- The Graph page is back: it left with the Chains page when Stories replaced it, while the
+  report kept printing the same graphs. It lists the chains, draws one chain as a swimlane or
+  all chains against the senders, domains, IPs and hosts they share, and opens a clicked step's
+  rows. The graphs read better in the app and the report: nodes carry a ring and a soft shadow,
+  labels sit on their own background and take turns above and below when neighbours crowd,
+  only the ties to the mail are named on an edge, and the all-chains graph is three columns
+  (attacker side, people, machines and IPs) instead of a circle, folding each chain's unshared
+  entities into one node when a column runs long. Both carry a legend drawn with the graph's
+  own shapes and colours.
+- A decision on a finding raised on one row (false positive, escalated, a note, a new severity)
+  follows the record, not REMN's row id: removing evidence and adding the same file again, which
+  renumbers its rows, brings the finding back with its decision where it used to come back
+  undecided. Every finding keeps the record key of each row it cites (the file's SHA-256 and the
+  record's place in it) beside the row ids, a server case's findings included, and existing cases
+  and older case bundles get theirs when they open or are restored.
+
 - REMN's own rules raise 200 high and critical findings on the seven clean machines of
   evtx-baseline instead of 895, and detect every recording they detected before (342 recordings,
   435 rule detections, up from 340 and 433). A rule a busy machine matches over and over raises
