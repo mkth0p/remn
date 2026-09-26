@@ -1,6 +1,6 @@
 """
 Server-store endpoints (DuckDB case store for gigabyte-scale cases): ingestion
-jobs, bulk import, search / aggregate / timeline / facets / detail / pivot,
+jobs, bulk import, search / aggregate / stack / timeline / facets / detail / pivot,
 IOCs and reputation, rule runs, read-only SQL, deletion.
 """
 
@@ -452,6 +452,17 @@ def aggregate(request: HttpRequest, key: str):
         key,
         lambda st, b: Q.aggregate(
             st, str(b.get("source") or "events"), b.get("filter"), str(b.get("field") or "eventId"), int(b.get("limit") or 25), b.get("settings")
+        ),
+    )
+
+
+@require_POST
+def stack(request: HttpRequest, key: str):
+    return _query(
+        request,
+        key,
+        lambda st, b: Q.stack(
+            st, b.get("filter"), str(b.get("field") or "image"), str(b.get("order") or "rare"), int(b.get("limit") or 500), b.get("settings")
         ),
     )
 

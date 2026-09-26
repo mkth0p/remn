@@ -401,6 +401,51 @@ export function headerTime(t: string | null | undefined): string | null {
 const IP_KEYS = new Set(['ipAddress', 'sourceIp', 'destinationIp'])
 const SERVICE_EVENTS = [7036, 7040, 7035, 7000, 7031, 7034, 7023, 7024]
 const RDP_USER_EVENTS = [21, 22, 23, 24, 25, 39, 40]
+
+// SQL Server audit (33205) writes the whole audit record as "name:value" lines in one string.
+const SQL_AUDIT_LOGIN = /Login failed for user '([^']*)'/
+const SQL_AUDIT_ADDRESS = /<address>([^<]+)<\/address>/
+// sshd's lines name the account and the client: "Invalid user x from 10.0.0.9 port 60096",
+// "Failed password for x from ...", "Connection closed by authenticating user x 10.0.0.9 port ...".
+const SSHD_LINE = /(?:Invalid user|Failed \S+ for(?: invalid user)?|Accepted \S+ for|authenticating user|invalid user) (\S*) (?:from )?([0-9A-Fa-f.:]+) port ([0-9]+)/
+
+/** Lift who did what to which object out of a SQL Server audit record (33205). */
+function sqlAudit(row: Row): void {
+  const fields = new Map<string, string>()
+  for (const line of pyStr(row.message).split('\n')) {
+    const i = line.indexOf(':')
+    if (i >= 0 && !fields.has(line.slice(0, i))) fields.set(line.slice(0, i), strip(line.slice(i + 1)))
+  }
+  const field = (k: string) => fields.get(k) || ''
+  row.eventType = field('action_id') || null
+  row.objectType = field('class_type') || null
+  row.objectName = str(field('object_name') || null)
+  const principal = field('server_principal_name') || field('session_server_principal_name')
+  if (principal && !truthy(row.subjectUser)) {
+    const i = principal.indexOf('\\')
+    if (i >= 0) {
+      row.subjectDomain = str(principal.slice(0, i))
+      row.subjectUser = str(principal.slice(i + 1))
+    } else row.subjectUser = str(principal)
+  }
+  let target = field('target_server_principal_name') || field('target_database_principal_name')
+  const login = SQL_AUDIT_LOGIN.exec(field('statement'))
+  if (!target && login) target = login[1]
+  if (target && !truthy(row.targetUser)) row.targetUser = str(target)
+  let address = field('client_ip')
+  const found = SQL_AUDIT_ADDRESS.exec(field('additional_information'))
+  if (!address && found) address = found[1]
+  if (address && !truthy(row.ipAddress) && address !== 'local machine' && address !== '<local machine>') row.ipAddress = or(normalizeIp(address), str(address, 100))
+}
+
+/** The account and client address an sshd line names (OpenSSH/Operational 4). */
+function sshd(row: Row, payload: string): void {
+  const m = SSHD_LINE.exec(payload)
+  if (!m) return
+  if (m[1] && !truthy(row.targetUser)) row.targetUser = str(m[1])
+  if (!truthy(row.ipAddress)) row.ipAddress = or(normalizeIp(m[2]), str(m[2], 100))
+  if (row.ipPort === null || row.ipPort === undefined) row.ipPort = toInt(m[3])
+}
 const KERBEROS_EVENTS = [4768, 4769, 4771, 4772, 4773]
 
 export interface RecordHeader {
@@ -409,6 +454,77 @@ export interface RecordHeader {
 }
 
 /** One event (the decoder's JSON) to one row, as the server's flatten() makes it. */
+// PowerShell module logging (4103) and pipeline execution details (800) log each command of a
+// pipeline as CommandInvocation(name) followed by one ParameterBinding(name) line per parameter.
+const PS_INVOCATION = /^CommandInvocation\(([^)]*)\): "/
+const PS_ERROR = /^(?:Non)?TerminatingError\(/
+const PS_BINDING = /^ParameterBinding\(([^)]*)\): name="([^"]*)"; value="(.*)$/s
+// what the host adds to every interactive pipeline, not what the user ran
+const PS_HOST_COMMANDS = new Set(['out-default', 'psconsolehostreadline'])
+
+/** The commands a 4103 / 800 payload records, written back as PowerShell: Get-ADGroupMember -Identity 'Administrators'. */
+export function psPipeline(payload: string): string | null {
+  const commands: [string, [string, string][]][] = []
+  let inValue = false // inside a parameter value that goes on over several lines
+  for (const raw of payload.split('\n')) {
+    const line = raw.replace(/\r+$/, '')
+    const inv = PS_INVOCATION.exec(line)
+    if (inv) {
+      commands.push([inv[1], []])
+      inValue = false
+      continue
+    }
+    const bind = PS_BINDING.exec(line)
+    const last = commands.length ? commands[commands.length - 1][1] : null
+    if (bind && last) {
+      const value = bind[3]
+      inValue = !value.endsWith('"') // the closing quote ends the value
+      last.push([bind[2], inValue ? value : value.slice(0, -1)])
+    } else if (PS_ERROR.test(line)) {
+      inValue = false
+    } else if (inValue && last && last.length) {
+      inValue = !line.endsWith('"')
+      last[last.length - 1][1] += '\n' + (inValue ? line : line.slice(0, -1))
+    }
+  }
+  const quote = (v: string) => "'" + v.replaceAll("'", "''") + "'"
+  const parts: string[] = []
+  for (const [name, bindings] of commands) {
+    if (PS_HOST_COMMANDS.has(name.toLowerCase())) continue
+    const words = [name]
+    for (const [pname, value] of bindings) {
+      if (pname && value === 'True') words.push(`-${pname}`)
+      else if (pname) words.push(`-${pname} ${quote(value)}`)
+      else words.push(quote(value))
+    }
+    parts.push(words.join(' '))
+  }
+  return parts.join(' | ') || null
+}
+
+/** The command a 4103 / 800 event records (as typed when 800 has it, else rebuilt), who ran it and from which script. */
+function psCommand(row: Row, payload: string, context: string, typed: string | null): void {
+  const fields = new Map<string, string>()
+  for (const line of context.split('\n')) {
+    const i = line.indexOf('=')
+    if (i < 0) continue
+    const name = strip(line.slice(0, i)).replaceAll(' ', '').toLowerCase()
+    if (!fields.has(name)) fields.set(name, strip(line.slice(i + 1)))
+  }
+  const command = strip(typed || '') || psPipeline(payload)
+  if (command && !truthy(row.commandLine)) row.commandLine = str(command, LONG_LIMIT)
+  const user = fields.get('user') || fields.get('userid') || ''
+  if (user && !truthy(row.subjectUser)) {
+    const i = user.indexOf('\\')
+    if (i >= 0) {
+      row.subjectDomain = str(user.slice(0, i))
+      row.subjectUser = str(user.slice(i + 1))
+    } else row.subjectUser = str(user)
+  }
+  const script = fields.get('scriptname') || ''
+  if (script && !truthy(row.path)) row.path = str(script)
+}
+
 export function flatten(event: Json, record: RecordHeader | null = null, includeRaw = true): Row {
   const ev = (isDict(event) && Object.hasOwn(event, 'Event') ? event.Event : event) as Json
   const system = (or(get(ev, 'System'), {}) as Json) ?? {}
@@ -530,6 +646,14 @@ export function flatten(event: Json, record: RecordHeader | null = null, include
     row.serviceState = str(d('param2'))
   }
   if (eid !== null && RDP_USER_EVENTS.includes(eid) && truthy(d('User')) && !truthy(row.targetUser)) row.targetUser = str(d('User'))
+  const providerL = ((row.provider as string | null) || '').toLowerCase()
+  const dataList = d('Data')
+  if (eid === 4103 && providerL.includes('powershell') && truthy(d('Payload'))) {
+    psCommand(row, pyStr(scalar(d('Payload'))), truthy(scalar(d('ContextInfo'))) ? pyStr(scalar(d('ContextInfo'))) : '', null)
+  } else if (eid === 800 && row.channel === 'Windows PowerShell' && Array.isArray(dataList) && dataList.length >= 3) {
+    const [typed, context, payload] = dataList.slice(0, 3).map((x) => (x === null || x === undefined ? '' : pyStr(scalar(x))))
+    psCommand(row, payload, context, typed)
+  }
   if (truthy(row.user) && !truthy(row.subjectUser) && ((row.provider as string | null) || '').toLowerCase().includes('sysmon')) {
     const u = row.user as string
     const i = u.indexOf('\\')
@@ -538,6 +662,8 @@ export function flatten(event: Json, record: RecordHeader | null = null, include
       row.subjectUser = u.slice(i + 1)
     } else row.subjectUser = u
   }
+  if (eid === 33205 && ((row.provider as string | null) || '').toLowerCase().includes('mssql') && truthy(row.message)) sqlAudit(row)
+  if (eid === 4 && row.channel === 'OpenSSH/Operational' && truthy(d('payload'))) sshd(row, pyStr(d('payload')))
   if ((row.logonType === null || row.logonType === undefined) && d('LogonType') !== null && d('LogonType') !== undefined) row.logonType = toInt(d('LogonType'))
 
   const desc = describe(row.provider as string | null, eventId)

@@ -1,7 +1,7 @@
 import { getDb, type Finding } from '../db/schema'
 import { reviewKey, tableRows, withRecordKeys, type RowLoader } from './findingAnchors'
 
-type Review = Pick<Finding, 'status' | 'notes' | 'createdAt' | 'severityOverride' | 'reportExclude' | 'chainUnlinked' | 'decidedBy' | 'aiReason' | 'notesBy'> &
+type Review = Pick<Finding, 'status' | 'notes' | 'createdAt' | 'severityOverride' | 'reportExclude' | 'chainUnlinked' | 'decidedBy' | 'decidedAt' | 'aiReason' | 'notesBy'> &
   Partial<Pick<Finding, 'source' | 'refs' | 'recordKeys' | 'ruleId' | 'key'>>
 
 const decided = (f: Finding) => f.status !== 'new' || !!f.notes || !!f.severityOverride || !!f.reportExclude || !!f.chainUnlinked || !!f.aiReason
@@ -43,9 +43,10 @@ export async function decideFindings(caseId: number, keys: string[], status: Fin
       ...f,
       status,
       decidedBy: 'analyst' as const,
+      decidedAt: Date.now(),
       ...(why?.trim() ? { notes: [f.notes?.trim(), why.trim()].filter(Boolean).join('\n\n'), notesBy: 'analyst' as const } : {}),
     }))
-    for (const f of decidedRows) await db.findings.update(f.id!, { status: f.status, decidedBy: f.decidedBy, notes: f.notes, notesBy: f.notesBy })
+    for (const f of decidedRows) await db.findings.update(f.id!, { status: f.status, decidedBy: f.decidedBy, decidedAt: f.decidedAt, notes: f.notes, notesBy: f.notesBy })
     await rememberReviews(caseId, decidedRows)
     return decidedRows.length
   })
@@ -83,6 +84,7 @@ export async function rememberReviews(caseId: number, findings: Finding[]): Prom
       reportExclude: f.reportExclude,
       chainUnlinked: f.chainUnlinked,
       decidedBy: f.decidedBy,
+      decidedAt: f.decidedAt,
       aiReason: f.aiReason,
       notesBy: f.notesBy,
     }
@@ -124,6 +126,7 @@ export async function replaceFindings(caseId: number, ruleIds: string[], found: 
         reportExclude: prev?.reportExclude,
         chainUnlinked: prev?.chainUnlinked,
         decidedBy: prev?.decidedBy,
+        decidedAt: prev?.decidedAt,
         aiReason: prev?.aiReason,
         notesBy: prev?.notesBy,
       } as Finding

@@ -185,7 +185,7 @@ export const chainMembers = (inc: Incident | undefined): Finding[] => (inc?.kind
 export async function applyChainVerdict(caseId: number, chain: Chain, members: Finding[], verdict: Verdict, by: 'analyst' | 'ai' = 'analyst', aiReason?: string): Promise<Record<string, ChainReview>> {
   const db = getDb()
   const status = verdictStatus(verdict)
-  await Promise.all(members.filter((f) => f.id != null).map((f) => db.findings.update(f.id!, { status, decidedBy: by, ...(by === 'ai' && aiReason ? { aiReason } : {}) })))
+  await Promise.all(members.filter((f) => f.id != null).map((f) => db.findings.update(f.id!, { status, decidedBy: by, decidedAt: Date.now(), ...(by === 'ai' && aiReason ? { aiReason } : {}) })))
   return saveChainReview(caseId, chain.id, { verdict, by, ...(by === 'ai' ? { aiReason } : { aiReason: undefined }) })
 }
 

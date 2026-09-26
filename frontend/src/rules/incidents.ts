@@ -53,9 +53,9 @@ export interface IncidentOptions {
 
 export const ORDER: Severity[] = ['critical', 'high', 'medium', 'low', 'info']
 export const DEFAULT_GAP_MS = 6 * 3_600_000
-const USER_FIELDS = ['targetUser', 'subjectUser', 'user', 'upn', 'memberName', 'userPrincipalName']
-const HOST_FIELDS = ['computer', 'host', 'workstation']
-const IP_FIELDS = ['ipAddress', 'sourceIp', 'clientIp', 'ip']
+export const USER_FIELDS = ['targetUser', 'subjectUser', 'user', 'upn', 'memberName', 'userPrincipalName']
+export const HOST_FIELDS = ['computer', 'host', 'workstation']
+export const IP_FIELDS = ['ipAddress', 'sourceIp', 'clientIp', 'ip']
 const MAX_REFS = 5000
 /** a finding with more rows than this describes a pattern, not steps of a chain */
 const MAX_MEMBER_REFS = 500

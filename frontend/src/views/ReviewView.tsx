@@ -296,7 +296,7 @@ export function ReviewView() {
   const setStatus = useCallback(
     async (inc: Incident, s: Status) => {
       const db = getDb()
-      await Promise.all(inc.findings.map((f) => db.findings.update(f.id!, { status: s, decidedBy: 'analyst' })))
+      await Promise.all(inc.findings.map((f) => db.findings.update(f.id!, { status: s, decidedBy: 'analyst', decidedAt: Date.now() })))
       reload()
     },
     [reload],

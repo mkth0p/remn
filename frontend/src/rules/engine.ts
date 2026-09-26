@@ -200,10 +200,13 @@ export function timePred(rule: Rule, settings: SettingsLike | undefined, tsField
   }
 }
 
-/** Why a rule produced zero findings (emitted through RunOptions.onDiag). */
+/**
+ * Why a rule produced zero findings (emitted through RunOptions.onDiag), or, from the SQL engine,
+ * that it produced more findings than a run keeps (`truncated`, with the ones kept in `detail`).
+ */
 export interface RuleDiag {
   ruleId: string
-  reason: 'missing_setting' | 'no_selector_match' | 'all_excluded' | 'outside_time_window' | 'below_threshold' | 'not_applicable'
+  reason: 'missing_setting' | 'no_selector_match' | 'all_excluded' | 'outside_time_window' | 'below_threshold' | 'not_applicable' | 'truncated'
   detail?: string
   matched: number
   afterExclude: number
