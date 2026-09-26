@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 
+from django.conf import settings as conf
 from django.http import HttpRequest, JsonResponse
 from django.views.decorators.http import require_POST
 
@@ -24,6 +25,8 @@ def rescore(request: HttpRequest):
             raise ValueError("expected an object and settings object")
         settings = body.get("settings") or {}
         if body.get("storeKey"):
+            if conf.FORENSIC_BROWSER_ONLY:
+                return JsonResponse({"error": "server stores are unavailable in browser-only mode", "code": "browserOnly"}, status=403)
             st = registry.get(str(body["storeKey"]), create=False)
             if any(j["status"] in ("queued", "running") for j in manager.list(st.key)):
                 return JsonResponse({"error": "Wait for this case's current jobs to finish before rescoring."}, status=409)
@@ -49,6 +52,8 @@ def mails(request: HttpRequest):
     settings = body.get("settings") or {}
     try:
         if body.get("storeKey"):
+            if conf.FORENSIC_BROWSER_ONLY:
+                return JsonResponse({"error": "server stores are unavailable in browser-only mode", "code": "browserOnly"}, status=403)
             try:
                 st = registry.get(str(body["storeKey"]), create=False)
             except (ValueError, FileNotFoundError):
