@@ -45,6 +45,8 @@ not copied into REMN. Their own licenses remain applicable.
 | --- | --- | --- |
 | Gulax (wordmark; embedded in printed reports) | `frontend/public/fonts/` | SIL Open Font License 1.1 (see `Gulax-LICENSE.txt` and `Gulax-COPYRIGHT.md` there) |
 | Inter Variable | `@fontsource-variable/inter` | SIL Open Font License 1.1 |
+| IBM Plex Sans (home page) | `@fontsource/ibm-plex-sans` | SIL Open Font License 1.1 |
+| IBM Plex Mono (home page) | `@fontsource/ibm-plex-mono` | SIL Open Font License 1.1 |
 | JetBrains Mono Variable | `@fontsource-variable/jetbrains-mono` | SIL Open Font License 1.1 |
 
 ## Reference data (downloaded by the operator, not redistributed)

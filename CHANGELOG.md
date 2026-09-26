@@ -5,6 +5,15 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- A home page. REMN opens on it until a case holds evidence, and the wordmark leads back to it
+  after that. It shows what the tool reads, how the rules are measured and what the measures
+  show: the rule totals, recordings and clean-host baseline read live from `rules/measures.json`
+  (the server's `/api/meta` now carries how many rules were measured and how many were seen to
+  detect), the head-to-head with Hayabusa and Chainsaw on EVTX-to-MITRE-Attack, the held-out
+  attack_data run, the evtx-baseline false positives and the mail corpora, each dated to the
+  review it comes from. New case starts a case (taking over the untouched first one) and can
+  import evidence as it is created; Open demo case opens the Northstar lab. The REMN mark, a block
+  wearing away into dither, replaces the R in the sidebar.
 - Eleven rules for directory changes on a domain controller (`rules/windows/directory.yaml`):
   accounts weakened for AS-REP roasting or offline cracking, Kerberos delegation granted
   (including resource-based delegation), passwords set never to expire, permissions changed on

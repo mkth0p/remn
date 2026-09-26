@@ -7,6 +7,7 @@ test('built app hashes and ingests mail, detects it, reviews it and restores its
     Object.defineProperty(window, 'showSaveFilePicker', { value: undefined })
   })
   await page.goto('/')
+  await page.getByRole('button', { name: /^Open case/ }).click()
   await page.getByText('Evidence', { exact: true }).first().click()
   const mail = [
     'From: Supplier <reports@vendor.example>',

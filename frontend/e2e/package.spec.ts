@@ -7,6 +7,7 @@ test('mixed package coverage and evidence-backed relationships explored in the b
   const python = process.env.REMN_TEST_PYTHON ?? (process.platform === 'win32' ? '../.venv/Scripts/python.exe' : '../.venv/bin/python')
   execFileSync(python, ['../samples/synthetic/make_package.py', '--out', target])
   await page.goto('/')
+  await page.getByRole('button', { name: /^Open case/ }).click()
   await page.getByText('Evidence', { exact: true }).first().click()
   await page.locator('input[type=file]').first().setInputFiles(target)
   await expect(page.getByText('what is inside the archive(s)?')).toBeVisible()
