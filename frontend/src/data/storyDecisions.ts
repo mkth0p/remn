@@ -303,6 +303,26 @@ function describe(steps: StoryStep[], phases: StoryPhase[], attacker: string[], 
   return { headline: headline.slice(0, 300), summary: lines.join(' ').slice(0, 900) }
 }
 
+/** Three techniques or more matched one to one to three phases or more (mirror of stories._three_in_three). */
+function threeInThree(firm: { key: string; phase: string }[]): boolean {
+  const phasesOf = new Map<string, Set<string>>()
+  for (const f of firm) phasesOf.set(f.key, (phasesOf.get(f.key) ?? new Set()).add(f.phase))
+  const owner = new Map<string, string>()
+  const assign = (key: string, tried: Set<string>): boolean => {
+    for (const p of [...(phasesOf.get(key) ?? [])].sort()) {
+      if (tried.has(p)) continue
+      tried.add(p)
+      const had = owner.get(p)
+      if (had === undefined || assign(had, tried)) {
+        owner.set(p, key)
+        return true
+      }
+    }
+    return false
+  }
+  return [...phasesOf.keys()].sort().filter((key) => assign(key, new Set())).length >= 3
+}
+
 const byIdOnce = <T extends { id: string }>(xs: T[]) => [...new Map(xs.map((x) => [x.id, x])).values()]
 
 /**
@@ -316,8 +336,12 @@ function restate(base: Story, steps: StoryStep[], calls: Map<string, StepCall>, 
   const kept = steps.filter((s) => calls.get(s.id)?.verdict !== 'disputed')
   const phases = phasesOf(kept)
   let severity = SEV_NAME[topOf(kept)] ?? 'low'
-  // three phases or more, each with a finding of medium or more, is an intrusion however each rule reads alone
-  if (phases.filter((p) => weight(p.severity) >= 2).length >= 3 && weight(severity) < 4) severity = 'high'
+  // three techniques in three phases, each with a finding of medium or more from a rule that can be
+  // believed, is an intrusion however each rule reads alone (a story built before the engine said
+  // which findings those are falls back on three phases with a finding of medium or more)
+  const keptIds = new Set(kept.map((s) => s.id))
+  const raises = all.every((s) => s.firm) ? threeInThree(all.flatMap((s) => s.firm ?? []).filter((f) => keptIds.has(f.step))) : phases.filter((p) => weight(p.severity) >= 2).length >= 3
+  if (raises && weight(severity) < 4) severity = 'high'
   const flags = kept.filter((s) => s.tie.kind === 'flag' || s.tie.kind === 'chain')
   const confidence: Confidence = flags.every((s) => s.tie.confidence === 'strong' || calls.get(s.id)?.verdict === 'confirmed') ? 'strong' : 'medium'
   const hosts = uniq(steps.map((s) => s.host).filter((h): h is string => !!h)).sort()

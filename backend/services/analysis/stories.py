@@ -1075,14 +1075,28 @@ def _score(case: _Case, steps: list[dict[str, Any]], chains: list[dict[str, Any]
     return min(100, run_points + other_points + chain_points), parts, weighed
 
 
-def _three_in_three(weighed: list[dict[str, Any]]) -> bool:
-    """Three distinct techniques or more, in three phases or more, each with a finding of medium or
-    more from a rule that is neither a lead nor noisy on clean machines: techniques matched to
-    phases one to one (augmenting paths; a story has a few dozen techniques at most)."""
-    phases_of: dict[str, set[str]] = defaultdict(set)
+def _firm(weighed: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The findings that can raise a story to high: medium or more, in a phase, from a rule that is
+    neither a lead nor noisy on clean machines; once per technique, phase and step (the page
+    restates a story's severity from these when the analyst disputes a step or merges stories)."""
+    seen: set[tuple[str, str, str]] = set()
+    out: list[dict[str, Any]] = []
     for w in weighed:
         if w["phase"] and SEV_WEIGHT[w["severity"]] >= 2 and w["verdict"] not in ("lead", "misses") and not w["noisy"]:
-            phases_of[w["key"]].add(w["phase"])
+            k = (w["key"], w["phase"], w["step"])
+            if k not in seen:
+                seen.add(k)
+                out.append({"key": w["key"], "phase": w["phase"], "step": w["step"]})
+    return out
+
+
+def _three_in_three(firm: list[dict[str, Any]]) -> bool:
+    """Three distinct techniques or more, in three phases or more, each with a finding of medium or
+    more from a rule that is neither a lead nor noisy on clean machines (`_firm`): techniques matched
+    to phases one to one (augmenting paths; a story has a few dozen techniques at most)."""
+    phases_of: dict[str, set[str]] = defaultdict(set)
+    for w in firm:
+        phases_of[w["key"]].add(w["phase"])
     owner: dict[str, str] = {}
 
     def assign(key: str, tried: set[str]) -> bool:
@@ -1409,7 +1423,8 @@ def _story(
     severity = _SEV_NAME.get(top) or "low"
     # three techniques in three phases, each with a finding of medium or more from a rule that can be
     # believed, is an intrusion however each rule reads alone
-    if SEV_WEIGHT[severity] < 4 and _three_in_three(weighed):
+    firm = _firm(weighed)
+    if SEV_WEIGHT[severity] < 4 and _three_in_three(firm):
         severity = "high"
     confidence = STRONG if all(s["tie"]["confidence"] == STRONG for s in steps if s["tie"]["kind"] in ("flag", "chain")) else MEDIUM
     hosts = sorted({s["host"] for s in steps if s["host"]})
@@ -1437,6 +1452,8 @@ def _story(
         "score": score,
         # why the score is what it is: the run of phases in ATT&CK's order, the other techniques, a mail-led chain
         "scoreParts": parts,
+        # the findings that can raise it to high, by technique, phase and step
+        "firm": firm,
         # what started it: a flag (a finding of medium or more, a phishing mail acted on) or low findings that add up
         "startKind": "flag",
         "confidence": confidence,

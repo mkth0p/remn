@@ -158,6 +158,31 @@ describe('decisions on a step', () => {
   })
 })
 
+describe('the severity a decision restates', () => {
+  it('follows the engine: three techniques in three phases from rules that can be believed raise a story to high, not any three phases', () => {
+    const steps = [
+      step(1, 0, { phase: 'discovery', findings: flag('whoami|1', 'whoami', 'medium') }),
+      step(2, 5, { phase: 'lateral-movement', findings: flag('psexec|2', 'PsExec', 'medium') }),
+      step(3, 9, { phase: 'persistence', findings: flag('task|3', 'Scheduled task', 'medium') }),
+      step(4, 12, { phase: 'execution', findings: flag('lead|4', 'A lead rule', 'medium') }),
+    ]
+    const firm = [
+      { key: 'T1033', phase: 'discovery', step: 'event:1' },
+      { key: 'T1569.002', phase: 'lateral-movement', step: 'event:2' },
+      { key: 'T1053.005', phase: 'persistence', step: 'event:3' },
+    ]
+    const res = { ...build(), stories: [story('story-x', { kind: 'person', id: 'id:daniel', label: 'daniel.roy@northstar.example', org: 'northstar.example' }, steps, { severity: 'high', firm })] }
+    // disputing the lead's step leaves the three believed techniques: still high
+    const lead = on(res, 'story-x', (d) => setStepCall(d, stepOf(res, 'story-x', 'event:4'), 'disputed'))
+    expect(applyStoryDecisions(res, lead).views[0].story.severity).toBe('high')
+    // disputing one of them leaves three phases of medium findings, one of them the lead's: medium
+    const task = on(res, 'story-x', (d) => setStepCall(d, stepOf(res, 'story-x', 'event:3'), 'disputed'))
+    const [x] = applyStoryDecisions(res, task).views
+    expect(x.story.phases).toHaveLength(3)
+    expect(x.story.severity).toBe('medium')
+  })
+})
+
 describe('after a rebuild', () => {
   it('finds each decision again by what its story is about and by its records, whatever the ids and the label became', () => {
     const first = build()

@@ -482,6 +482,9 @@ def test_a_critical_finding_outranks_three_mediums_of_an_admins_day():
     assert admin["summary"].count(f"Score {admin['score']}: discovery → lateral movement in ATT&CK's order") == 1
     # three techniques in three phases from rules never measured still read as an intrusion...
     assert admin["severity"] == "high"
+    # ...and the story names the findings that raise it, for the page to restate after a dispute
+    assert sorted(f["phase"] for f in admin["firm"]) == ["discovery", "lateral-movement", "persistence"]
+    assert {f["step"] for f in admin["firm"]} <= {s["id"] for s in admin["steps"]}
     # ...but not when one of them fires on clean machines, or is a lead
     for measure in (NOISY, LEAD):
         [again] = [
@@ -489,7 +492,7 @@ def test_a_critical_finding_outranks_three_mediums_of_an_admins_day():
             for s in build_stories(events, [], findings, SETTINGS, measures={"whoami": measure})["stories"]
             if s["kind"] == "person" and "it-admin" in s["title"]
         ]
-        assert again["severity"] == "medium"
+        assert again["severity"] == "medium" and len(again["firm"]) == 2
 
 
 def test_the_score_weighs_attack_order_and_what_each_rule_is_worth():

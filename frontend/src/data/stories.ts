@@ -223,6 +223,8 @@ export interface Story {
   severity: Severity
   score: number
   scoreParts?: ScoreParts
+  /** the findings that can raise it to high (medium or more, from a rule that is neither a lead nor noisy), by technique, phase and step */
+  firm?: { key: string; phase: string; step: string }[]
   /** what started it: a flag, or low findings of several rules within a week that add up */
   startKind?: 'flag' | 'accumulated'
   confidence: Confidence
