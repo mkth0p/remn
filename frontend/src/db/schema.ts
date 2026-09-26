@@ -326,6 +326,11 @@ export interface Finding {
   notes?: string
   createdAt: number
   escalation?: string
+  /**
+   * how many findings of the rule on this host this one stands for, when the case's detection level
+   * folded them into one (data/detectionLevel.ts); absent for a finding raised on its own
+   */
+  folded?: number
   /** analyst rescoring (Review page); the rule severity stays in `severity` */
   severityOverride?: Severity
   /** kept out of the report whatever its severity */

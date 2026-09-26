@@ -1,30 +1,33 @@
 /**
- * The case's detection level: which findings the rules raise, from fewest false positives (1) to
- * every finding (5). A level is a budget of findings per clean machine. Each rule's noise is what
- * its measure says it raised on the clean Windows machines of evtx-baseline, per machine that logs
- * what it reads (rules/measures.json), and a finding is raised when that noise fits the budget of
- * its severity: the budget doubles with each severity step, so a critical finding may come from a
- * rule four times noisier than a medium one. Level 4 also raises every medium and higher finding
- * whatever its rule's noise, as REMN did before levels, so it detects at least what that did. A rule no clean machine could measure (mail, Microsoft
- * 365, other products' logs, a rule changed since it was measured) raises its findings from medium
- * up below the last level, as every rule did before levels; the analyst's own rules are always
- * raised.
+ * The case's detection level: which findings stand on their own in the queue, from the fewest lines
+ * (1) to every finding on its own (5). No level drops a finding: a finding below its rule's floor
+ * is folded with the other findings of its rule on the same host into one, so every level detects
+ * what the rules detect and the level only decides how many lines the analyst reads.
+ *
+ * A level is a budget of findings per clean machine. Each rule's noise is what its measure says it
+ * raised on the clean Windows machines of evtx-baseline, per machine that logs what it reads
+ * (rules/measures.json), and a finding stands on its own when that noise fits the budget of its
+ * severity: the budget doubles with each severity step, so a critical finding may come from a rule
+ * four times noisier than a medium one. Level 4 also keeps every medium and higher finding on its
+ * own, as REMN raised them before levels. A rule no clean machine could measure (mail, Microsoft
+ * 365, other products' logs, a rule changed since it was measured) keeps its findings from medium
+ * up on their own below the last level; the analyst's own rules are never folded.
  *
  * The levels were chosen and measured on 2026-09-26 with every rule's findings on every recording
- * and clean machine the rule measure uses. The noise of each clean machine was counted with the
+ * and clean machine the rule measure uses. The lines of each clean machine were counted with the
  * rules' noise taken from the six other machines, so the figures below are held out for noise; the
  * levels never read the attack libraries, so they are held out for detection too
  * (docs/detection.md#detection-level).
  */
-import type { Severity } from '../db/schema'
+import type { Finding, Severity } from '../db/schema'
 import type { RuleMeasure } from './ruleMeasures'
 import { fmtNum } from '../util/format'
 
 export type DetectionLevel = 1 | 2 | 3 | 4 | 5
 
 /** A new case's level. */
-export const DEFAULT_DETECTION_LEVEL: DetectionLevel = 3
-/** A case created before there were levels raised every finding, and keeps doing so until it is set. */
+export const DEFAULT_DETECTION_LEVEL: DetectionLevel = 2
+/** A case created before there were levels keeps every finding on its own until its level is set. */
 export const LEGACY_DETECTION_LEVEL: DetectionLevel = 5
 /** The severity floor of a rule no clean machine could measure, below the last level: medium. */
 export const UNMEASURED_FLOOR = 2
@@ -34,60 +37,63 @@ export interface LevelInfo {
   label: string
   /** findings per clean machine a medium rule may raise; doubled per severity step above, halved below */
   budget: number
-  /** a severity rank raised whatever its rule's noise (level 4 raises every medium and higher finding) */
+  /** a severity rank kept on its own whatever its rule's noise (level 4 keeps every medium and higher finding) */
   always?: number
-  /** in a sentence, what the level raises */
+  /** in a sentence, what the level keeps on its own */
   text: string
-  /** measured: recordings detected (a finding of the recording's technique) and findings per clean machine */
-  measured: { attackData: number; evtxToMitre: number; attackSamples: number; perCleanMachine: number }
+  /** measured, per clean machine: findings on their own, and lines (those plus one per rule and host folded) */
+  measured: { alone: number; perCleanMachine: number }
 }
 
 export const MEASURED_ON = { attackData: 535, evtxToMitre: 279, attackSamples: 278, cleanMachines: 7, date: '2026-09-26' }
 
+/** What every level detects, since none drops a finding: recordings with a finding of their technique. */
+export const DETECTED = { attackData: 249, evtxToMitre: 123, attackSamples: 266 }
+
 export const DETECTION_LEVELS: LevelInfo[] = [
   {
     level: 1,
-    label: 'fewest false positives',
+    label: 'compact',
     budget: 0.1,
-    text: 'Only rules that stayed silent on the clean machines that log what they read.',
-    measured: { attackData: 222, evtxToMitre: 91, attackSamples: 227, perCleanMachine: 11 },
+    text: 'Only rules that stayed silent on the clean machines raise findings on their own; the findings of every other rule are folded into one per host.',
+    measured: { alone: 11, perCleanMachine: 73 },
   },
   {
     level: 2,
-    label: 'quiet',
+    label: 'balanced',
     budget: 0.5,
-    text: 'Adds rules that fired a few times across all the clean machines.',
-    measured: { attackData: 231, evtxToMitre: 100, attackSamples: 253, perCleanMachine: 40 },
+    text: 'Also rules that fired a few times across all the clean machines.',
+    measured: { alone: 40, perCleanMachine: 92 },
   },
   {
     level: 3,
-    label: 'balanced',
+    label: 'detailed',
     budget: 5,
-    text: 'Rules that fire up to a few times per clean machine at medium, more at high and critical, and low findings of rules quiet there.',
-    measured: { attackData: 239, evtxToMitre: 114, attackSamples: 265, perCleanMachine: 164 },
+    text: 'Also rules that fire up to a few times per clean machine at medium, more at high and critical.',
+    measured: { alone: 164, perCleanMachine: 186 },
   },
   {
     level: 4,
     label: 'broad',
     budget: 5,
     always: 2,
-    text: 'Every medium and higher finding, as before levels, and the low findings of rules quiet on the clean machines.',
-    measured: { attackData: 248, evtxToMitre: 118, attackSamples: 266, perCleanMachine: 314 },
+    text: 'Every medium and higher finding on its own, as before levels, and the low findings of rules quiet on the clean machines.',
+    measured: { alone: 314, perCleanMachine: 330 },
   },
   {
     level: 5,
     label: 'every finding',
     budget: Infinity,
-    text: 'Every finding of every enabled rule, low and informational included.',
-    measured: { attackData: 249, evtxToMitre: 123, attackSamples: 266, perCleanMachine: 587 },
+    text: 'Every finding of every enabled rule on its own, low and informational included; nothing is folded.',
+    measured: { alone: 587, perCleanMachine: 587 },
   },
 ]
 
-/** Raising every medium and higher finding, as REMN did before levels (measured the same way, with the rule levels of 2026-09-26). */
+/** Raising every medium and higher finding and nothing else, the measure's reference before levels (measured the same way, with the rule levels of 2026-09-26). */
 export const BEFORE_LEVELS = { attackData: 245, evtxToMitre: 112, attackSamples: 264, perCleanMachine: 241 }
 
 const RANK: Record<Severity, number> = { info: 0, low: 1, medium: 2, high: 3, critical: 4 }
-/** No severity of the rule is raised. */
+/** No severity of the rule stands on its own. */
 export const NEVER = 5
 
 export function levelInfo(level: number | undefined): LevelInfo {
@@ -145,12 +151,12 @@ export function severityFloors(rules: LevelRule[], level: DetectionLevel): Recor
   return out
 }
 
-/** Whether a rule can raise anything at the level. */
+/** Whether any finding of the rule can stand on its own at the level. */
 export function ruleRaises(r: LevelRule, floors: Record<string, number>): boolean {
   return (floors[r.rule.id] ?? 0) <= RANK[ruleTopSeverity(r.rule)]
 }
 
-/** Whether a finding is raised under these floors (a rule without a floor keeps all). */
+/** Whether a finding stands on its own under these floors (a rule without a floor keeps all). */
 export function raised(f: { ruleId?: unknown; severity?: unknown }, floors: Record<string, number> | undefined): boolean {
   if (!floors) return true
   const floor = floors[String(f.ruleId ?? '')]
@@ -162,5 +168,67 @@ const pct = (n: number, of: number) => `${Math.round((n / of) * 100)}%`
 /** What a level detected and cost when it was measured, in a sentence. */
 export function levelMeasured(level: DetectionLevel): string {
   const m = levelInfo(level).measured
-  return `Detected ${pct(m.attackData, MEASURED_ON.attackData)}, ${pct(m.evtxToMitre, MEASURED_ON.evtxToMitre)} and ${pct(m.attackSamples, MEASURED_ON.attackSamples)} of the attack_data, EVTX-to-MITRE-Attack and EVTX-ATTACK-SAMPLES recordings, with about ${fmtNum(m.perCleanMachine)} findings per clean machine (every medium and higher finding: ${fmtNum(BEFORE_LEVELS.perCleanMachine)}).`
+  return `Every level detected ${pct(DETECTED.attackData, MEASURED_ON.attackData)}, ${pct(DETECTED.evtxToMitre, MEASURED_ON.evtxToMitre)} and ${pct(DETECTED.attackSamples, MEASURED_ON.attackSamples)} of the attack_data, EVTX-to-MITRE-Attack and EVTX-ATTACK-SAMPLES recordings (every medium and higher finding: ${pct(BEFORE_LEVELS.attackData, MEASURED_ON.attackData)}, ${pct(BEFORE_LEVELS.evtxToMitre, MEASURED_ON.evtxToMitre)} and ${pct(BEFORE_LEVELS.attackSamples, MEASURED_ON.attackSamples)}). This one gave about ${fmtNum(m.perCleanMachine)} lines per clean machine, ${fmtNum(m.alone)} of them findings on their own (every medium and higher finding: ${fmtNum(BEFORE_LEVELS.perCleanMachine)}).`
+}
+
+const MAX_FOLDED_REFS = 5000
+
+/** The host a finding is about, for folding: its computer, host or workstation, lowercased. */
+const foldHost = (f: Pick<Finding, 'entities'>) => String(f.entities?.computer || f.entities?.host || f.entities?.workstation || '').toLowerCase()
+
+/**
+ * Fold the findings below their rule's floor: the findings of one rule on one host become one,
+ * led by the most severe (then the earliest), with their count, time span and the rows they cite
+ * (up to 5,000), and `folded` set to how many it stands for. A finding `keep` says so stays on its
+ * own (one an analyst decided on). Findings at or above the floor are returned as they are.
+ */
+export function foldBelowLevel<F extends Finding>(findings: F[], floors: Record<string, number> | undefined, keep: (f: F) => boolean = () => false): F[] {
+  if (!floors) return findings
+  const out: F[] = []
+  const groups = new Map<string, F[]>()
+  for (const f of findings) {
+    if (raised(f, floors) || keep(f)) out.push(f)
+    else {
+      const k = `${f.ruleId}\u0000${foldHost(f)}`
+      const g = groups.get(k)
+      if (g) g.push(f)
+      else groups.set(k, [f])
+    }
+  }
+  for (const g of groups.values()) {
+    const lead = g.reduce((a, b) => (severityRank(b.severity) > severityRank(a.severity) || (severityRank(b.severity) === severityRank(a.severity) && (b.ts ?? Infinity) < (a.ts ?? Infinity)) ? b : a))
+    if (g.length === 1) {
+      out.push({ ...lead, folded: 1 })
+      continue
+    }
+    const host = foldHost(lead)
+    let first: number | null = null
+    let last: number | null = null
+    for (const f of g) {
+      if (f.ts != null && (first == null || f.ts < first)) first = f.ts
+      const end = f.tsEnd ?? f.ts
+      if (end != null && (last == null || end > last)) last = end
+    }
+    const refs: number[] = []
+    const recordKeys: string[] = []
+    const withKeys = g.every((f) => Array.isArray(f.recordKeys))
+    for (const f of g) {
+      for (let i = 0; i < (f.refs?.length ?? 0) && refs.length < MAX_FOLDED_REFS; i++) {
+        refs.push(f.refs[i])
+        if (withKeys) recordKeys.push(f.recordKeys![i] ?? '')
+      }
+    }
+    out.push({
+      ...lead,
+      key: `${lead.ruleId}|folded|${host}`,
+      title: `${lead.title} (${fmtNum(g.length)} findings${host ? ` on ${host}` : ''}, folded at this detection level)`,
+      count: g.reduce((n, f) => n + (f.count || 1), 0),
+      ts: first ?? lead.ts,
+      tsEnd: last ?? lead.tsEnd ?? null,
+      refs,
+      ...(withKeys ? { recordKeys } : {}),
+      folded: g.length,
+    })
+  }
+  return out
 }

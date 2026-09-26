@@ -5,15 +5,14 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
-- A detection level per case, from 1 (fewest false positives) to 5 (every finding), set when the
-  case is started and changed on the Rules page. Each rule's findings are raised or not from its
-  measured noise on the clean machines of evtx-baseline and the finding's severity. The default,
-  3, has a third fewer findings on clean machines than raising every medium and higher finding,
-  with 239, 114 and 265 attack_data, EVTX-to-MITRE-Attack and EVTX-ATTACK-SAMPLES recordings
-  detected against 245, 112 and 264; level 4 raises every medium and higher finding too and
-  detects 248, 118 and 266; level 1 keeps 91% of the attack_data detections with a twentieth of
-  the noise. Findings an analyst decided on stay at any level. Cases started before keep every finding
-  until their level is set ([detection level](docs/detection.md#detection-level)).
+- A detection level per case, from 1 (fewest lines) to 5 (every finding on its own), set when the
+  case is started (2 by default) and changed on the Rules page. No level drops a finding: the
+  findings of a rule that fired too often on the evtx-baseline clean machines for its severity are
+  folded into one per rule and host. Every level detects 249, 123 and 266 attack_data,
+  EVTX-to-MITRE-Attack and EVTX-ATTACK-SAMPLES recordings, against 245, 112 and 264 with every
+  medium and higher finding raised and nothing else, and the default gives 92 lines per clean
+  machine against 241. Findings an analyst decided on stay on their own. Cases started before keep
+  every finding on its own until their level is set ([detection level](docs/detection.md#detection-level)).
 - The priority of a finding divides by 1 + ln n when its rule raised n findings on the same host
   or for the same user, so one loud rule no longer fills the top of the queue. The first finding of
   an attack reached the top ten in 38% of EVTX-to-MITRE-Attack recordings and 76% of

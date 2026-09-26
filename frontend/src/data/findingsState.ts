@@ -2,7 +2,7 @@ import { getDb, type Case } from '../db/schema'
 import type { DetectionLevel } from './detectionLevel'
 import { sevCounts } from '../rules/incidents'
 import { log, toast, useStore } from '../state/store'
-import { pruneOrphanFindings, replaceFindings } from './findingReviews'
+import { pruneOrphanFindings } from './findingReviews'
 import { loadRules, rulesAtLevel, runRulesFor } from './rules'
 
 /**
@@ -57,8 +57,8 @@ export async function runEnabledRules(kase: Case, reason: RulesRun['reason'] = '
   }
   const caseId = kase.id!
   const rules = await loadRules(caseId)
-  const { run: enabled, idle, floors } = rulesAtLevel(kase, rules)
-  if (!enabled.length && !idle.length) {
+  const { run: enabled, floors } = rulesAtLevel(kase, rules)
+  if (!enabled.length) {
     if (reason === 'manual') toast('warn', 'no enabled rules')
     return false
   }
@@ -67,8 +67,6 @@ export async function runEnabledRules(kase: Case, reason: RulesRun['reason'] = '
   const before = sevCounts((await db.findings.where('caseId').equals(caseId).toArray()).filter((f) => f.status !== 'false_positive'))
   useStore.getState().setRulesRun({ done: 0, total: enabled.length, rule: '', reason })
   try {
-    // the rules the case's detection level raises nothing of do not run; their findings go, but for those an analyst decided on
-    if (idle.length) await replaceFindings(caseId, idle, [], undefined, floors)
     const res = await runRulesFor(kase, enabled, (done, total, rule) => useStore.getState().setRulesRun({ done, total, rule, reason }), floors)
     const pruned = await pruneOrphanFindings(
       caseId,

@@ -147,7 +147,8 @@ has each of them divided by 1 + ln n, n being that count: the tenth finding of o
 host tells less than the first finding of another, which is how stacking works. With it, the
 first finding of an attack came into the top ten of a case built from clean hosts with one
 recording added in 47%, 38% and 76% of the attack_data, EVTX-to-MITRE-Attack and
-EVTX-ATTACK-SAMPLES recordings, against 46%, 31% and 60% without, at detection level 3.
+EVTX-ATTACK-SAMPLES recordings, against 46%, 31% and 60% without, at detection level 3. A
+finding folded below the case's detection level counts as the findings it stands for.
 Other rules on the same host or for the same user within 24 hours add a
 point each and a point more for each other ATT&CK tactic among them, up to 6. The same rule on
 the same entities (what it found, such as the program, command line or service, not the host,
@@ -246,12 +247,13 @@ custom rules, with an editor, the import buttons, and after a run the reason eve
 silent rule found nothing. Its "measured" column gives each rule's measure (detects, lead,
 misses its sample, fires on clean machines, changed, needs settings) with the sentences
 behind it on hover, and a filter lists the leads, the rules that miss their own test sample
-or those that fire on clean machines. Above the packs, the case's detection level (1, fewest false
-positives, to 5, every finding; see [detection level](detection.md#detection-level)) is a slider
-with what the level raises and what it was measured to detect and cost; moving it offers to rerun
-the rules at the new level, and the "level" column gives the lowest level at which each rule
-raises its findings. The new-case dialog on the home page and in the sidebar sets it too, at 3
-unless changed. The Indicators page lists the IPs, domains, URLs and hashes
+or those that fire on clean machines. Above the packs, the case's detection level (1, fewest
+lines, to 5, every finding on its own; see [detection level](detection.md#detection-level)) is a
+slider with what the level keeps on its own and how many lines it was measured to give; moving it
+offers to rerun the rules at the new level, and the "level" column gives the lowest level at which
+each rule's findings stand on their own. Below that level they are folded, one per rule and host,
+and a folded finding's title says how many it stands for. The new-case dialog on the home page and
+in the sidebar sets the level too, at 2 unless changed. The Indicators page lists the IPs, domains, URLs and hashes
 extracted from the evidence with their counts and, when external lookups are enabled
 for the case, their reputation; it exports STIX 2.1 and CSV. The STIX bundle carries every
 value as a cyber-observable and makes an indicator only of the values a reputation check

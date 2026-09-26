@@ -1,5 +1,5 @@
 import { getDb, type Finding } from '../db/schema'
-import { raised } from './detectionLevel'
+import { foldBelowLevel } from './detectionLevel'
 import { reviewKey, tableRows, withRecordKeys, type RowLoader } from './findingAnchors'
 
 type Review = Pick<Finding, 'status' | 'notes' | 'createdAt' | 'severityOverride' | 'reportExclude' | 'chainUnlinked' | 'decidedBy' | 'decidedAt' | 'aiReason' | 'notesBy'> &
@@ -100,8 +100,9 @@ export async function rememberReviews(caseId: number, findings: Finding[]): Prom
 /**
  * Commit a completed rule evaluation atomically, including archived reviews. The rows the findings
  * cite are read first for their record keys, from this browser unless `load` reads them elsewhere
- * (a server case's store). With `floors` (the case's detection level, detectionLevel.ts) a finding
- * below its rule's severity floor is not kept, unless an analyst already decided on it.
+ * (a server case's store). With `floors` (the case's detection level, detectionLevel.ts) the
+ * findings below their rule's severity floor are folded into one per rule and host, but for any an
+ * analyst already decided on, which stays on its own.
  */
 export async function replaceFindings(caseId: number, ruleIds: string[], found: Record<string, unknown>[], load?: RowLoader, floors?: Record<string, number>): Promise<number> {
   const db = getDb()
@@ -114,10 +115,14 @@ export async function replaceFindings(caseId: number, ruleIds: string[], found: 
     const reviews = await rememberReviews(caseId, await current.toArray())
     await current.delete()
     const now = Date.now()
-    const rows = findings.flatMap((f) => {
-      // the record's key first: after a re-ingest the row-id key names no decision
-      const prev = reviews.get(reviewKey(f)) ?? reviews.get(String(f.key))
-      if (!raised(f, floors) && !(prev && decided(prev as Finding))) return []
+    // the record's key first: after a re-ingest the row-id key names no decision
+    const prevOf = (f: Finding) => reviews.get(reviewKey(f)) ?? reviews.get(String(f.key))
+    const kept = foldBelowLevel(findings, floors, (f) => {
+      const prev = prevOf(f)
+      return !!prev && decided(prev as Finding)
+    })
+    const rows = kept.map((f) => {
+      const prev = prevOf(f)
       return {
         ...f,
         id: undefined,

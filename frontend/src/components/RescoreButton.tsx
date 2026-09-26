@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { rescoreMails } from '../data/enrich'
-import { replaceFindings } from '../data/findingReviews'
 import { loadRules, rulesAtLevel, runRulesFor } from '../data/rules'
 import { refreshCounts } from '../data/ingest'
 import { getDb } from '../db/schema'
@@ -33,15 +32,10 @@ export function RescoreButton() {
     try {
       const summary = await rescoreMails(kase, setProgress)
       setProgress('Refreshing mail findings…')
-      const {
-        run: rules,
-        idle,
-        floors,
-      } = rulesAtLevel(
+      const { run: rules, floors } = rulesAtLevel(
         kase,
         (await loadRules(kase.id!, true)).filter((r) => r.rule.source === 'mails'),
       )
-      if (idle.length) await replaceFindings(kase.id!, idle, [], undefined, floors)
       const result = await runRulesFor(kase, rules, undefined, floors)
       if (result.errors.length) throw new Error(`Scores updated; ${result.errors.length} rule(s) failed. See Rules diagnostics and retry.`)
       await getDb().kv.put({ key: `mail-calibration-${kase.id}`, value: { state: 'done', at: Date.now(), summary } })

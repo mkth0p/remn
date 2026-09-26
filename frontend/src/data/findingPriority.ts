@@ -205,7 +205,8 @@ export function scoreFindings(findings: Finding[], opts: PriorityOptions = {}): 
   for (const f of findings) {
     if (f.ruleId === 'chain') continue
     const k = placeOf(f)
-    if (k) perPlace.set(k, (perPlace.get(k) ?? 0) + 1)
+    // a finding folded below the case's detection level stands for all the findings it folds
+    if (k) perPlace.set(k, (perPlace.get(k) ?? 0) + (f.folded ?? 1))
   }
   const peers = peersBy(findings)
   const memory = new Map<string, PastDecision[]>()

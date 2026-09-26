@@ -4,7 +4,7 @@ import { validateRule, type Rule, type RuleDiag } from '../rules/engine'
 import { log, toast, useStore } from '../state/store'
 import type { DryFinding, RunRequest } from '../workers/rules.worker'
 import type { SettingsLike } from '../rules/filter'
-import { caseLevel, ruleRaises, severityFloors } from './detectionLevel'
+import { caseLevel, severityFloors } from './detectionLevel'
 import { enabledPackIds, getPackRules } from './packs'
 import type { RuleMeasure } from './ruleMeasures'
 import { replaceFindings } from './findingReviews'
@@ -104,19 +104,12 @@ export async function loadRules(caseId: number | null, strict = false): Promise<
 }
 
 /**
- * The rules a run at the case's detection level needs, the floors that keep only what the level
- * raises, and the enabled rules that raise nothing at it (their findings are cleared, not run).
+ * The enabled rules and the floors of the case's detection level: every enabled rule runs, and the
+ * findings below their rule's floor are folded into one per rule and host (detectionLevel.ts).
  */
-export function rulesAtLevel(kase: Case, rules: LoadedRule[]): { run: Rule[]; idle: string[]; floors: Record<string, number> } {
+export function rulesAtLevel(kase: Case, rules: LoadedRule[]): { run: Rule[]; floors: Record<string, number> } {
   const enabled = rules.filter((r) => r.enabled && !r.error)
-  const floors = severityFloors(enabled, caseLevel(kase.settings))
-  const run: Rule[] = []
-  const idle: string[] = []
-  for (const r of enabled) {
-    if (ruleRaises(r, floors)) run.push(r.rule)
-    else idle.push(r.rule.id)
-  }
-  return { run, idle, floors }
+  return { run: enabled.map((r) => r.rule), floors: severityFloors(enabled, caseLevel(kase.settings)) }
 }
 
 export function settingsForRules(kase: Case): SettingsLike {

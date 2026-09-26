@@ -276,8 +276,8 @@ export function RulesView() {
         <div className="row" style={{ gap: 8, alignItems: 'baseline', marginBottom: 6 }}>
           <strong>Detection level</strong>
           <span className="small muted">
-            which findings this case raises, from each rule&apos;s measured false positives on clean machines. {fmtNum(raising)} of {fmtNum(enabledRules.length)} enabled rules raise findings at level{' '}
-            {shownLevel}; the others do not run.
+            which findings stand on their own, from each rule&apos;s measured false positives on clean machines; the others are folded into one per rule and host, so no finding is lost.{' '}
+            {fmtNum(raising)} of {fmtNum(enabledRules.length)} enabled rules raise findings on their own at level {shownLevel}.
           </span>
           <span className="spacer" />
           {pendingLevel != null && pendingLevel !== level && (
@@ -435,7 +435,7 @@ export function RulesView() {
                   {(() => {
                     const from = lowestLevel(ruleTopSeverity(r.rule), ruleNoise(r.measured), r.origin)
                     return (
-                      <span className={from > shownLevel ? 'muted' : undefined} title={from > shownLevel ? `not raised at level ${shownLevel}` : `raised at level ${shownLevel}`}>
+                      <span className={from > shownLevel ? 'muted' : undefined} title={from > shownLevel ? `folded at level ${shownLevel}` : `on its own at level ${shownLevel}`}>
                         from {from}
                       </span>
                     )

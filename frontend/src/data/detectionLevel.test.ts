@@ -46,9 +46,10 @@ describe('the detection level', () => {
       for (let l = 1; l < 5; l++) expect(severityFloor((l + 1) as 2 | 3 | 4 | 5, noise)).toBeLessThanOrEqual(severityFloor(l as 1 | 2 | 3 | 4, noise))
     const figures = DETECTION_LEVELS.map((l) => l.measured)
     for (let i = 1; i < figures.length; i++) {
-      expect(figures[i].attackData).toBeGreaterThanOrEqual(figures[i - 1].attackData)
+      expect(figures[i].alone).toBeGreaterThan(figures[i - 1].alone)
       expect(figures[i].perCleanMachine).toBeGreaterThan(figures[i - 1].perCleanMachine)
     }
+    for (const f of figures) expect(f.perCleanMachine).toBeGreaterThanOrEqual(f.alone)
   })
 
   it('gives the lowest level a rule raises its top severity at, its follow-up included', () => {
