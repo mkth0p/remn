@@ -27,6 +27,7 @@ const DIAG_LABEL: Record<RuleDiag['reason'], { label: string; sev: string }> = {
   outside_time_window: { label: 'time filter', sev: 'info' },
   below_threshold: { label: 'below threshold', sev: 'info' },
   not_applicable: { label: 'not applicable', sev: 'info' },
+  truncated: { label: 'cut short', sev: 'medium' },
 }
 
 const MEASURE_SEV: Record<MeasureVerdict, string> = { detects: 'ok', misses: 'medium', lead: 'info', changed: 'info', settings: 'info', custom: 'accent', unmeasured: 'info' }
@@ -364,10 +365,11 @@ export function RulesView() {
                   {(() => {
                     if (!lastRun) return <span className="muted small">—</span>
                     const n = lastRun.byRule?.[r.rule.id]
+                    const cut = lastRun.diagnostics.find((x) => x.ruleId === r.rule.id && x.reason === 'truncated')
                     if (n && n > 0)
                       return (
-                        <Badge sev="ok" title={`${n} finding(s) in the last run`}>
-                          {n}
+                        <Badge sev={cut ? DIAG_LABEL.truncated.sev : 'ok'} title={cut ? `${n} finding(s) kept: ${cut.detail}` : `${n} finding(s) in the last run`}>
+                          {cut ? `${n}+` : n}
                         </Badge>
                       )
                     const d = lastRun.diagnostics.find((x) => x.ruleId === r.rule.id)

@@ -219,3 +219,59 @@ def test_the_committed_detail_is_the_detail_of_the_committed_measures():
         assert d.get("own") == m.get("own"), rid
         assert sum(d.get("clean", {}).values()) == m.get("clean", {}).get("findings", 0), rid
     assert set(detail["rules"]) <= set(data["rules"])
+
+
+def test_the_shares_deal_out_every_recording_and_every_part_of_a_large_machine_once(tmp_path):
+    """--shard: the plan every share computes gives each recording to one share, and a clean machine
+    larger than a share to several, each running its part of the rules."""
+    M = _measure_tool()
+    recs = []
+    for i, size in enumerate([5, 40, 3, 12, 7]):
+        f = tmp_path / f"r{i}.evtx"
+        f.write_bytes(b"x" * size)
+        recs.append(M.Recording("sigma", f"r{i}", [f], frozenset()))
+    machines = []
+    for name, size in (("big", 200), ("small", 20)):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "a.evtx").write_bytes(b"x" * size)
+        machines.append(tmp_path / name)
+
+    units = M.plan(recs, machines, 3)
+    assert [(u.kind, u.ref, u.part, u.share) for u in units] == [(u.kind, u.ref, u.part, u.share) for u in M.plan(recs, machines, 3)]
+    assert sorted(u.ref for u in units if u.kind == "recording") == list(range(5))
+    big = [u for u in units if u.ref == "big"]
+    assert len(big) > 1 and sorted(u.part for u in big) == list(range(big[0].parts)) and len({u.share for u in big}) == len(big)
+    assert [u.parts for u in units if u.ref == "small"] == [1]
+    assert {u.share for u in M.plan(recs, machines, 1)} == {1}
+
+
+def test_the_merge_fails_unless_every_share_measured_all_it_was_dealt(tmp_path):
+    M = _measure_tool()
+    out = {"rows": 1, "unread": 0, "fired": [], "readable": [], "errors": []}
+    machine = {"rows": 9, "unread": 0, "found": {"a": [1, 2]}, "scopes": {"a": 9}, "errors": []}
+
+    def share(i: int, results: dict) -> Path:
+        raw = {
+            "share": i,
+            "shares": 2,
+            "units": [["recording", 0, 0, 1], ["machine", "m", 0, 2], ["machine", "m", 1, 2]],
+            "recordings": [{"dataset": "sigma", "name": "r0", "techniques": [], "credit": ["x"], "owner": "x"}],
+            "leftOut": {},
+            "maxMb": 20,
+            "results": results,
+            "problems": [],
+        }
+        p = tmp_path / f"share-{i}.json"
+        p.write_text(json.dumps(raw), encoding="utf-8")
+        return p
+
+    one = share(1, {"recordings": {"0": out}, "machines": {"m": {"0": machine}}})
+    with pytest.raises(SystemExit, match="each of the 2 shares"):
+        M.merge([one])
+    two = share(2, {"recordings": {}, "machines": {}})
+    with pytest.raises(SystemExit, match="machine m part 2"):
+        M.merge([one, two])
+    two = share(2, {"recordings": {}, "machines": {"m": {"1": {**machine, "found": {"b": [3, 3]}, "scopes": {"b": 4}}}}})
+    recs, clean, _, _, problems = M.merge([one, two])
+    assert recs[0].owner == "x" and recs[0].rows == 1 and not problems
+    assert clean["m"]["found"] == {"a": [1, 2], "b": [3, 3]} and clean["m"]["scopes"] == {"a": 9, "b": 4}

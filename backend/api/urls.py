@@ -40,6 +40,7 @@ urlpatterns = [
     path("store/<str:key>/search", store.search),
     path("store/<str:key>/count", store.count),
     path("store/<str:key>/aggregate", store.aggregate),
+    path("store/<str:key>/stack", store.stack),
     path("store/<str:key>/timeline", store.timeline),
     path("store/<str:key>/facets", store.facets),
     path("store/<str:key>/row", store.row),

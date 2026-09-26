@@ -1,0 +1,246 @@
+# Detections on the commands PowerShell module logging (4103) and pipeline execution details (800) record, rebuilt by the parser into commandLine: what was run, with its parameters, as opposed to the script text 4104 logs.
+id: win-ps-privileged-group-members-listed
+title: Members of a privileged group listed with PowerShell
+description: >-
+  A PowerShell command listed the members of an administrative group (Get-ADGroupMember,
+  Get-LocalGroupMember or the PowerView equivalents on Administrators, Domain Admins, Enterprise
+  Admins, Schema Admins, Account Operators, Backup Operators or DnsAdmins), as module logging (4103)
+  or pipeline execution details (800) recorded it. Finding out who the administrators are is one of
+  the first things an intruder does after landing on a machine. Benign causes: administrators and
+  audit scripts reviewing group membership, which repeat from known accounts and hosts.
+severity: medium
+source: events
+attack: [T1069.001, T1069.002]
+tags: [discovery, powershell]
+entities: [computer, subjectUser, commandLine]
+where:
+  eventId|in: [4103, 800]
+  provider|contains: PowerShell
+  all_of:
+    - commandLine|contains_any: [Get-ADGroupMember, Get-LocalGroupMember, Get-NetGroupMember, Get-NetLocalGroupMember, Get-DomainGroupMember]
+    - commandLine|contains_any: [admin, operators]
+group_by: [computer, subjectUser]
+threshold: ">= 1"
+---
+id: win-ps-kerberos-ticket-requested-for-spn
+title: Kerberos service ticket requested from PowerShell (Kerberoasting)
+description: >-
+  A PowerShell command created a KerberosRequestorSecurityToken, which asks the domain for a service
+  ticket for a given SPN and keeps it in memory. That is how Invoke-Kerberoast and the manual
+  Kerberoasting one-liners obtain tickets encrypted with a service account's password to crack them
+  offline. Legitimate scripts almost never request tickets this way.
+severity: high
+source: events
+attack: [T1558.003]
+tags: [credential-access, kerberos, powershell]
+entities: [computer, subjectUser, commandLine]
+where:
+  eventId|in: [4103, 800]
+  provider|contains: PowerShell
+  commandLine|contains: KerberosRequestorSecurityToken
+group_by: [computer, subjectUser]
+threshold: ">= 1"
+---
+id: win-ps-spn-accounts-searched
+title: Accounts with a service principal name searched from PowerShell
+description: >-
+  A PowerShell command searched the directory for accounts that have a servicePrincipalName
+  (Get-ADUser or Get-ADObject with an SPN filter, a DirectorySearcher on servicePrincipalName, setspn
+  -Q). Listing SPN accounts is the step before Kerberoasting: user accounts with an SPN are the ones
+  whose tickets can be cracked. Benign causes: administrators auditing service accounts.
+severity: medium
+source: events
+attack: [T1087.002, T1558.003]
+tags: [discovery, kerberos, powershell]
+entities: [computer, subjectUser, commandLine]
+where:
+  eventId|in: [4103, 800]
+  provider|contains: PowerShell
+  commandLine|contains: serviceprincipalname
+  commandLine|contains_any: [Get-ADUser, Get-ADObject, Get-ADComputer, DirectorySearcher, setspn, Get-DomainUser, Get-NetUser]
+group_by: [computer, subjectUser]
+threshold: ">= 1"
+---
+id: win-ps-forest-or-trust-discovery
+title: Forest, domain or trust enumeration from PowerShell
+description: >-
+  A PowerShell command enumerated the forest, its domains, sites or trusts (the
+  System.DirectoryServices.ActiveDirectory Forest and Domain classes, GetAllTrustRelationships,
+  Get-ADTrust, Get-ADForest, PowerView's Get-DomainTrust or Get-ForestTrust, nltest
+  /domain_trusts). Intruders map the trusts to find a path into other domains. Benign causes:
+  administrators and inventory scripts documenting the directory.
+severity: medium
+source: events
+attack: [T1482]
+tags: [discovery, active-directory, powershell]
+entities: [computer, subjectUser, commandLine]
+where:
+  eventId|in: [4103, 800]
+  provider|contains: PowerShell
+  commandLine|contains_any: ["ActiveDirectory.Forest]", "ActiveDirectory.Domain]::", GetAllTrustRelationships, Get-ADTrust, Get-ADForest, Get-DomainTrust, Get-ForestTrust, Get-NetForest, "nltest /domain_trusts", "nltest.exe /domain_trusts"]
+group_by: [computer, subjectUser]
+threshold: ">= 1"
+---
+id: win-ps-service-registry-path-changed
+title: A service's ImagePath or FailureCommand changed with PowerShell
+description: >-
+  A PowerShell command wrote the ImagePath or FailureCommand value of a service's registry key
+  (Set-ItemProperty or New-ItemProperty under CurrentControlSet\Services). Pointing an existing
+  service at another program, or giving it a command to run when it fails, runs that program as
+  the service's account (usually SYSTEM) without creating a new service. Benign causes: an
+  installer or an administrator repairing a service path, which is rare outside setup.
+severity: high
+source: events
+attack: [T1543.003, T1574.011]
+tags: [persistence, privilege-escalation, powershell]
+entities: [computer, subjectUser, commandLine]
+where:
+  eventId|in: [4103, 800]
+  provider|contains: PowerShell
+  commandLine|contains: \services\
+  all_of:
+    - commandLine|contains_any: [Set-ItemProperty, New-ItemProperty, "sp ", "Set-Item "]
+    - commandLine|contains_any: [ImagePath, FailureCommand]
+group_by: [computer, subjectUser]
+threshold: ">= 1"
+---
+id: win-ps-service-created
+title: Service created with PowerShell New-Service
+description: >-
+  A PowerShell command created a service (New-Service). A new service runs its binary as SYSTEM at
+  every start, which makes it a common way to persist and to run a payload remotely. Benign causes:
+  software installs and administrators; compare the binary path with the vendor's.
+severity: medium
+source: events
+attack: [T1543.003]
+tags: [persistence, powershell]
+entities: [computer, subjectUser, commandLine]
+where:
+  eventId|in: [4103, 800]
+  provider|contains: PowerShell
+  commandLine|contains: New-Service
+group_by: [computer, subjectUser, commandLine]
+threshold: ">= 1"
+---
+id: win-ps-bits-transfer
+title: BITS transfer started from PowerShell
+description: >-
+  A PowerShell command started or changed a BITS transfer (Start-BitsTransfer, Add-BitsFile,
+  Set-BitsTransfer). BITS downloads in the background with the system's proxy settings, survives
+  reboots and can run a command when the job completes, which is why attackers use it to fetch
+  tools and to persist. Benign causes: update and deployment scripts; check the source URL and the
+  destination.
+severity: medium
+source: events
+attack: [T1197, T1105]
+tags: [persistence, command-and-control, powershell]
+entities: [computer, subjectUser, commandLine]
+where:
+  eventId|in: [4103, 800]
+  provider|contains: PowerShell
+  commandLine|contains_any: [Start-BitsTransfer, Add-BitsFile, Set-BitsTransfer, Resume-BitsTransfer]
+  commandLine|not_contains: ["Export-ModuleMember"]
+group_by: [computer, subjectUser]
+threshold: ">= 1"
+---
+id: win-ps-wmi-permanent-subscription
+title: Permanent WMI event subscription created with PowerShell
+description: >-
+  A PowerShell command created an __EventFilter, a CommandLineEventConsumer or
+  ActiveScriptEventConsumer, or the binding between them (Set-WmiInstance, New-CimInstance or the
+  PowerLurk and Empire helpers). Together they make WMI run a command whenever the filter's event
+  happens, as SYSTEM and without a file on disk: persistence that survives reboots. Benign causes:
+  rare; some monitoring and management agents register consumers, from known software.
+severity: high
+source: events
+attack: [T1546.003]
+tags: [persistence, wmi, powershell]
+entities: [computer, subjectUser, commandLine]
+where:
+  eventId|in: [4103, 800]
+  provider|contains: PowerShell
+  all_of:
+    - commandLine|contains_any: [__EventFilter, CommandLineEventConsumer, ActiveScriptEventConsumer, __FilterToConsumerBinding]
+    - commandLine|contains_any: [Set-WmiInstance, New-CimInstance, Register-WmiEvent, "::CreateInstance", Put(]
+group_by: [computer, subjectUser]
+threshold: ">= 1"
+---
+id: win-ps-printer-port-to-file
+title: Printer port added that points at a file (PrintDemon, CVE-2020-1048)
+description: >-
+  A PowerShell command added a printer port whose name is a file path (Add-PrinterPort -Name
+  C:\... or .\...). The print spooler writes whatever is printed to that port into the file as
+  SYSTEM, which PrintDemon (CVE-2020-1048) uses to drop a DLL into a system folder and load it.
+  Printer ports named after files have no everyday use.
+severity: high
+source: events
+attack: [T1068, T1574]
+tags: [privilege-escalation, persistence, powershell]
+entities: [computer, subjectUser, commandLine]
+where:
+  eventId|in: [4103, 800]
+  provider|contains: PowerShell
+  commandLine|re: 'add-printerport\s.*-name\s+''?(\.\\|[a-z]:\\|\\\\)'
+group_by: [computer, subjectUser]
+threshold: ">= 1"
+---
+id: win-ps-amsi-bypass-run
+title: AMSI bypass run in PowerShell
+description: >-
+  A command PowerShell ran reached into the AMSI internals (AmsiUtils, amsiInitFailed,
+  AmsiScanBuffer, or [Ref].Assembly.GetType used to load them by a pieced-together name). Turning
+  AMSI off in the session is what offensive tooling does before loading scripts that antivirus would
+  otherwise block: CrackMapExec's and Empire's launchers start this way. There is no benign use.
+severity: high
+source: events
+attack: [T1685, T1059.001]
+tags: [defense-evasion, powershell]
+entities: [computer, subjectUser, commandLine]
+where:
+  eventId|in: [4103, 800]
+  provider|contains: PowerShell
+  commandLine|contains_any: [AmsiUtils, amsiInitFailed, AmsiScanBuffer, "[Ref].Assembly.GetType"]
+group_by: [computer, subjectUser]
+threshold: ">= 1"
+---
+id: win-ps-named-pipe-shell
+title: PowerShell opened a named pipe server or client
+description: >-
+  A PowerShell command created a NamedPipeServerStream or NamedPipeClientStream. Pipe shells
+  (Invoke-PipeShell and the C2 pivots built the same way) pass commands and output between
+  machines over SMB named pipes, which blends with ordinary file-sharing traffic. Administrative
+  scripts seldom open pipes themselves. Benign causes: developer tooling and some management
+  agents.
+severity: medium
+source: events
+attack: [T1059.001, T1090.001]
+tags: [execution, command-and-control, powershell]
+entities: [computer, subjectUser, commandLine]
+where:
+  eventId|in: [4103, 800]
+  provider|contains: PowerShell
+  commandLine|contains_any: [NamedPipeServerStream, NamedPipeClientStream]
+group_by: [computer, subjectUser]
+threshold: ">= 1"
+---
+id: win-ps-openssh-server-enabled
+title: OpenSSH server installed or enabled from PowerShell
+description: >-
+  A PowerShell command installed the OpenSSH server capability, or started it or set it to start
+  automatically (Add-WindowsCapability OpenSSH.Server, Start-Service sshd, Set-Service sshd). An SSH
+  server gives an intruder a remote shell and tunnels (port forwarding) that do not go through RDP
+  or WinRM. Benign causes: administrators enabling SSH for management, usually on servers and
+  through configuration management.
+severity: medium
+source: events
+attack: [T1021.004, T1133]
+tags: [lateral-movement, persistence, ssh, powershell]
+entities: [computer, subjectUser, commandLine]
+where:
+  eventId|in: [4103, 800]
+  provider|contains: PowerShell
+  any_of:
+    - commandLine|contains: OpenSSH.Server
+    - { commandLine|contains_any: [Start-Service, Set-Service], commandLine|contains: sshd }
+group_by: [computer, subjectUser]
+threshold: ">= 1"

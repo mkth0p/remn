@@ -1,0 +1,243 @@
+# Directory changes: account control flags, delegation, access control on sensitive Active Directory objects, rogue domain controllers and domain policy, read for what they mean from the domain controller's Security log (4738, 4742, 5136, 5137, 4739, 4908, 4704, 4722).
+id: win-account-security-weakened
+title: Account security weakened (no password required, reversible encryption, DES only or no Kerberos pre-authentication)
+description: >-
+  A user or computer account was changed (4738, 4742) to allow an empty password, to store its password with
+  reversible encryption, to use DES keys only, or to skip Kerberos pre-authentication. Each flag makes the
+  account's password easier to recover: without pre-authentication anyone can request an AS-REP for the account
+  and crack it offline (AS-REP roasting), DES and reversibly stored passwords give way to offline attacks, and
+  "password not required" lets the account hold an empty password. Attackers set them on an account they
+  control to keep a way back in, or on a target before roasting it. Benign causes: a legacy application that
+  needs DES or reversible encryption (CHAP, Digest authentication), and accounts provisioned by a script that
+  sets "password not required"; each should be rare and known to the domain's administrators.
+severity: high
+source: events
+attack: [T1098, T1558.004]
+tags: [persistence, credential-access, active-directory]
+entities: [computer, targetUser, subjectUser]
+where:
+  eventId|in: [4738, 4742]
+  userAccountControl|contains_any: ["%%2082", "%%2091", "%%2095", "%%2096"]
+group_by: [computer, targetUser]
+threshold: ">= 1"
+---
+id: win-account-delegation-enabled
+title: Kerberos delegation granted to an account
+description: >-
+  An account was trusted for Kerberos delegation (4738 or 4742 with "Trusted For Delegation" or "Trusted To
+  Authenticate For Delegation" enabled, or a list of services it may delegate to), or a computer object's
+  resource-based delegation or delegation list was written (5136 on msDS-AllowedToActOnBehalfOfOtherIdentity or
+  msDS-AllowedToDelegateTo). An account trusted for unconstrained delegation receives the ticket-granting ticket
+  of everyone who authenticates to it; constrained delegation with protocol transition lets it obtain a ticket
+  as any user to the listed services; resource-based delegation written by an attacker lets a machine account
+  they control impersonate any user to the target (the RBCD attack). Benign causes: an administrator
+  configuring delegation for a web front end, a SQL Server or a file server; such changes are rare and planned.
+severity: high
+source: events
+attack: [T1098, T1134.001]
+tags: [persistence, privilege-escalation, active-directory]
+entities: [computer, targetUser, subjectUser, objectDn]
+where:
+  any_of:
+    - eventId|in: [4738, 4742]
+      userAccountControl|contains_any: ["%%2093", "%%2098"]
+    - eventId|in: [4738, 4742]
+      allowedToDelegateTo|exists: true
+    - eventId: 5136
+      attributeName|in: [msDS-AllowedToActOnBehalfOfOtherIdentity, msDS-AllowedToDelegateTo]
+group_by: [computer, targetUser, objectDn]
+threshold: ">= 1"
+---
+id: win-password-never-expires-set
+title: Password set never to expire on an account
+description: >-
+  An account was changed so that its password never expires (4738 or 4742 with "Don't Expire Password" enabled).
+  An attacker who created or took over an account sets it so the password they know keeps working. It is also a
+  common, if discouraged, administrative habit for service accounts, so the finding is a lead to read beside who
+  made the change and when. Windows setup does the same to the local accounts it creates, as the machine
+  account, which is not reported.
+severity: low
+source: events
+attack: [T1098]
+tags: [persistence, active-directory]
+entities: [computer, targetUser, subjectUser]
+where:
+  eventId|in: [4738, 4742]
+  userAccountControl|contains: "%%2089"
+  # Windows setup marks the local accounts it creates this way, as the machine account
+  not:
+    subjectUser|endswith: "$"
+group_by: [computer, targetUser]
+threshold: ">= 1"
+---
+id: win-ad-acl-changed-domain-root-or-adminsdholder
+title: Permissions changed on the domain root or AdminSDHolder
+description: >-
+  The security descriptor of the domain object itself or of AdminSDHolder was written (5136 on
+  nTSecurityDescriptor). Rights granted on the domain root include the replication rights DCSync needs; the
+  permissions on AdminSDHolder are copied every hour onto every protected account and group (Domain Admins,
+  Administrators, krbtgt), so a right added there is a backdoor that returns after it is removed from the
+  accounts themselves. Benign causes: an Exchange or Azure AD Connect installation granting its service account
+  the rights it needs, and a deliberate change by the domain's administrators.
+severity: high
+source: events
+attack: [T1222.001, T1484, T1003.006]
+tags: [persistence, privilege-escalation, active-directory]
+entities: [computer, subjectUser, objectDn]
+where:
+  eventId: 5136
+  attributeName: nTSecurityDescriptor
+  any_of:
+    - objectClass: domainDNS
+    - objectDn|startswith: "CN=AdminSDHolder,CN=System,"
+group_by: [computer, objectDn]
+threshold: ">= 1"
+---
+id: win-ad-acl-changed
+title: Permissions or owner changed on an Active Directory object
+description: >-
+  The security descriptor of an organizational unit, a Group Policy object, a user, a group or another directory
+  object was written (5136 on nTSecurityDescriptor), which changes who may read, write or take it over, or its
+  owner. Attackers grant themselves rights on an OU (to control every object below it), on a GPO (to run code on
+  every machine it applies to) or on an account (to reset its password or write its attributes). Delegating
+  administration by OU is also everyday work, so the finding names who changed what, to read against the change
+  records of the domain.
+severity: medium
+source: events
+attack: [T1222.001, T1484.001]
+tags: [persistence, defense-evasion, active-directory]
+entities: [computer, subjectUser, objectDn]
+where:
+  eventId: 5136
+  attributeName: nTSecurityDescriptor
+  not:
+    any_of:
+      - objectClass: domainDNS
+      - objectDn|startswith: "CN=AdminSDHolder,CN=System,"
+group_by: [computer, subjectUser, objectDn]
+threshold: ">= 1"
+---
+id: win-ad-extended-right-modified
+title: An extended right's definition changed in the Configuration partition
+description: >-
+  An object under CN=Extended-Rights in the Configuration partition was modified (5136). These objects define
+  what the control-access rights (User-Force-Change-Password, DS-Replication-Get-Changes and the others) are;
+  they are set when the forest is built and changed only by schema updates. Rewriting one, for example its
+  localizationDisplayId or rightsGuid, is a way to hide a backdoor ACE behind a right whose name no longer
+  matches what it grants.
+severity: high
+source: events
+attack: [T1222.001, T1484]
+tags: [persistence, defense-evasion, active-directory]
+entities: [computer, subjectUser, objectDn]
+where:
+  eventId: 5136
+  objectDn|contains: ",CN=Extended-Rights,CN=Configuration,"
+group_by: [computer, objectDn]
+threshold: ">= 1"
+---
+id: win-ad-server-object-created
+title: A domain controller server object created in the sites container
+description: >-
+  A server object was created under CN=Sites in the Configuration partition (5137). Promoting a real domain
+  controller does this, and so does DCShadow, which registers a workstation as a domain controller for the few
+  seconds it needs to push changes into the directory by replication, where no 5136 records them. A server
+  object created from a machine that is not being promoted, or by an account that does not promote domain
+  controllers, is DCShadow.
+severity: high
+source: events
+attack: [T1207]
+tags: [defense-evasion, active-directory]
+entities: [computer, subjectUser, objectDn]
+where:
+  eventId: 5137
+  objectClass|in: [server, nTDSDSA]
+  objectDn|contains: ",CN=Sites,CN=Configuration,"
+group_by: [computer, objectDn]
+threshold: ">= 1"
+---
+id: win-domain-policy-changed-by-user
+title: Domain password or lockout policy changed by a user account
+description: >-
+  The domain's password, lockout or Kerberos policy was changed (4739) with a user account as the subject.
+  Weakening the lockout threshold or the password length prepares password spraying and brute force; the change
+  normally reaches the domain through the Default Domain Policy, applied by the domain controller itself.
+  Benign cause: an administrator editing the policy directly, which should be a planned change.
+severity: medium
+source: events
+attack: [T1484, T1556]
+tags: [defense-evasion, active-directory]
+entities: [computer, subjectUser]
+where:
+  eventId: 4739
+  subjectUser|exists: true
+  not:
+    any_of:
+      - subjectUser|endswith: "$"
+      - subjectSid|in: [S-1-5-18, S-1-5-19, S-1-5-20]
+group_by: [computer, subjectUser]
+threshold: ">= 1"
+---
+id: win-special-groups-table-changed
+title: Special Groups logon table changed
+description: >-
+  The Special Groups table, the list of groups whose logons Windows reports with 4964, was changed (4908).
+  Removing a group from it stops those logons from being flagged, so an attacker who wants their use of a
+  privileged group to pass unnoticed edits it. It is set once by the administrators who configure the auditing
+  and rarely changes.
+severity: medium
+source: events
+attack: [T1685.001]
+tags: [defense-evasion]
+entities: [computer, subjectUser]
+where:
+  eventId: 4908
+group_by: [computer]
+threshold: ">= 1"
+---
+id: win-sensitive-user-right-assigned
+title: A sensitive user right assigned to an account
+description: >-
+  A user right that amounts to control of the machine was assigned to an account (4704): create a token, act as
+  part of the operating system, debug programs, load drivers, back up or restore files, take ownership,
+  impersonate a client, replace a process token, or enable delegation. Any one of them is enough to become
+  SYSTEM or read every secret on the host, which is why attackers grant them to an account they keep. Benign
+  causes: a Group Policy that assigns them to administrators or to a backup product's service account, applied
+  when the policy changes.
+severity: medium
+source: events
+attack: [T1134, T1098]
+tags: [privilege-escalation, persistence]
+entities: [computer, subjectUser, targetSid]
+where:
+  eventId: 4704
+  privilegeList|contains_any:
+    - SeCreateTokenPrivilege
+    - SeTcbPrivilege
+    - SeDebugPrivilege
+    - SeLoadDriverPrivilege
+    - SeBackupPrivilege
+    - SeRestorePrivilege
+    - SeTakeOwnershipPrivilege
+    - SeImpersonatePrivilege
+    - SeAssignPrimaryTokenPrivilege
+    - SeEnableDelegationPrivilege
+group_by: [computer, targetSid]
+threshold: ">= 1"
+---
+id: win-guest-account-enabled
+title: The built-in Guest account enabled
+description: >-
+  The built-in Guest account (relative id 501) was enabled (4722). Windows ships it disabled; enabled, it gives a
+  logon with no password on a machine where Guest has not been locked down, and attackers enable it as a quiet
+  way back in. Benign cause: a deliberate choice on a kiosk or a lab machine.
+severity: high
+source: events
+attack: [T1078.001, T1098]
+tags: [persistence]
+entities: [computer, targetUser, subjectUser]
+where:
+  eventId: 4722
+  targetSid|endswith: "-501"
+group_by: [computer, targetSid]
+threshold: ">= 1"
