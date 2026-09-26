@@ -156,6 +156,30 @@ commands that ran, as opposed to script text that 4104 logs when a module is loa
 was written for the PowerShell files the default rules missed in EVTX-to-MITRE-Attack, so that
 library does not count as held out for it (`WRITTEN_AGAINST`). None of its rules fires on the
 4103 and 800 events of the evtx-baseline machines.
+`technique-gaps.yaml` covers techniques the default rules did not detect in attack_data: a GPO
+disabled or unlinked, the built-in Administrator renamed, RC4 Kerberos tickets for users and for
+computer services, one client asking tickets for many computers, impacket's output files on
+ADMIN$, PowerShell delegation, `[adsisearcher]` and Kerberoasting queries, PowerUp checks,
+WinRM TrustedHosts and credential roaming attributes written, command lines built from
+environment-variable substrings or broken up with empty quotes, ftype and assoc hijacks, the
+mock `C:\Windows \` folder, LSA protection turned off, EFI boot files written, Defender Control,
+browser extension and update policies, Python startup hooks and PYTHONPATH, the RRAS router
+manager DLL, an MMC console opened against another host, mail stores and cloud tokens read,
+saved WinSCP and PuTTY secrets read, AD snapshots mounted, and known tools (NetSupport outside
+Program Files, NirSoft password tools, network scanners, packet capture, gdrive and rclone-style
+upload clients, msdtc started by another program). It was written after studying those
+recordings, so attack_data does not count as held out for it (`WRITTEN_AGAINST`); its rules
+fire on none of the evtx-baseline machines and, so far, on no recording of EVTX-to-MITRE-Attack
+or EVTX-ATTACK-SAMPLES that the other rules miss.
+
+The SigmaHQ packs keep their upstream levels except where `rules/community/levels.json`
+changes them, which the pack loader applies and a re-import leaves alone. 110 low or
+informational rules that raise nothing on the evtx-baseline machines, which log what they read,
+are raised to medium, and nine medium or high rules whose only findings in the measure are on
+those machines are lowered to low; REMN's own rules were changed the same way in their files
+(six raised to medium, the off-hours logon lowered to low). Together they add 10 detections on
+attack_data, 3 on EVTX-to-MITRE-Attack and 4 on EVTX-ATTACK-SAMPLES, and remove about a fifth of
+the medium and higher findings on the clean machines (2,134 to 1,684).
 
 The rules that flooded the clean machines were cut down without losing a recorded detection
 (measured in [the noise review](reviews/2026-09-25-noise-and-held-out.md)). A rule a busy

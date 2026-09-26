@@ -150,7 +150,7 @@ then:
 id: win-password-reset-by-other
 title: Password reset by another account (4724)
 description: An account's password was reset by a different account. Review outside of helpdesk activity.
-severity: low
+severity: medium
 source: events
 attack: [T1098]
 tags: [account]

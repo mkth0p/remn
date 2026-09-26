@@ -1,0 +1,719 @@
+{
+ "about": "Level changes for rules of the community packs, applied by services/rules/packs.py when a pack is loaded. upstream is the level the pack gives the rule. Measured with tools/measure_rules.py data on 2026-09-26: rules with no finding on the clean machines raised to medium, rules that only produced findings on the clean machines lowered to low.",
+ "levels": {
+  "sigma-0b7889b4-5577-4521-a60a-3376ee7f9f7b": {
+   "severity": "low",
+   "upstream": "medium",
+   "title": "WMI Persistence",
+   "why": "26 findings on 5 of the 7 evtx-baseline clean machines and no detection on the recorded attacks (measured 2026-09-26)"
+  },
+  "sigma-162ab1e4-6874-4564-853c-53ec3ab8be01": {
+   "severity": "low",
+   "upstream": "medium",
+   "title": "TeamViewer Remote Session",
+   "why": "9 findings on 3 of the 7 evtx-baseline clean machines and no detection on the recorded attacks (measured 2026-09-26)"
+  },
+  "sigma-96f697b0-b499-4e5d-9908-a67bec11cdb6": {
+   "severity": "low",
+   "upstream": "medium",
+   "title": "Removal of Potential COM Hijacking Registry Keys",
+   "why": "191 findings on 5 of the 7 evtx-baseline clean machines and no detection on the recorded attacks (measured 2026-09-26)"
+  },
+  "sigma-9ae01559-cf7e-4f8e-8e14-4c290a1b4784": {
+   "severity": "low",
+   "upstream": "medium",
+   "title": "CredUI.DLL Loaded By Uncommon Process",
+   "why": "14 findings on 1 of the 7 evtx-baseline clean machines and no detection on the recorded attacks (measured 2026-09-26)"
+  },
+  "sigma-bef0bc5a-b9ae-425d-85c6-7b2d705980c6": {
+   "severity": "low",
+   "upstream": "medium",
+   "title": "Python Initiated Connection",
+   "why": "7 findings on 2 of the 7 evtx-baseline clean machines and no detection on the recorded attacks (measured 2026-09-26)"
+  },
+  "sigma-d29ada0f-af45-4f27-8f32-f7b77c3dbc4e": {
+   "severity": "low",
+   "upstream": "high",
+   "title": "HackTool - SysmonEnte Execution",
+   "why": "33 findings on 3 of the 7 evtx-baseline clean machines and no detection on the recorded attacks (measured 2026-09-26)"
+  },
+  "sigma-dae8171c-5ec6-4396-b210-8466585b53e9": {
+   "severity": "low",
+   "upstream": "medium",
+   "title": "SCM Database Privileged Operation",
+   "why": "78 findings on 1 of the 7 evtx-baseline clean machines and no detection on the recorded attacks (measured 2026-09-26)"
+  },
+  "sigma-df9a0e0e-fedb-4d6c-8668-d765dfc92aa7": {
+   "severity": "low",
+   "upstream": "medium",
+   "title": "Suspicious Non PowerShell WSMAN COM Provider",
+   "why": "22 findings on 3 of the 7 evtx-baseline clean machines and no detection on the recorded attacks (measured 2026-09-26)"
+  },
+  "sigma-fdbf0b9d-0182-4c43-893b-a1eaab92d085": {
+   "severity": "low",
+   "upstream": "medium",
+   "title": "Potential Persistence Via Custom Protocol Handler",
+   "why": "58 findings on 4 of the 7 evtx-baseline clean machines and no detection on the recorded attacks (measured 2026-09-26)"
+  },
+  "sigma-0022869c-49f7-4ff2-ba03-85ac42ddac58": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "System Information Discovery via Registry Queries",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-04936b66-3915-43ad-a8e5-809eadfd1141": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Insensitive Subfolder Search Via Findstr.EXE",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-098d7118-55bc-4912-a836-dc6483a8d150": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Access To ADMIN$ Network Share",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-0afecb6e-6223-4a82-99fb-bf5b981e92a5": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Remote Access Tool - ScreenConnect Temporary File",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-0e29e3a7-1ad8-40aa-b691-9f82ecd33d66": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Office Macro File Download",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-0e6a9e62-627e-496c-aef5-bfa39da29b5e": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "MaxMpxCt Registry Value Changed",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-0ef56343-059e-4cb6-adc1-4c3c967c5e46": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Suspicious Execution of Systeminfo",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-0f63e1ef-1eb9-4226-9d54-8927ca08520a": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Admin User Remote Logon",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-11d00fff-5dc3-428c-8184-801f292faec0": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Service Registry Key Read Access Request",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-164eda96-11b2-430b-85ff-6a265c15bf32": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Local Groups Reconnaissance Via Wmic.EXE",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-1883444f-084b-419b-ac62-e0d0c5b3693f": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Suspicious Connection to Remote Account",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-195626f3-5f1b-4403-93b7-e6cfd4d6a078": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Suspicious SSL Connection",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-198effb6-6c98-4d0c-9ea3-451fa143c45c": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Run Once Task Execution as Configured in Registry",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-1c67a717-32ba-409b-a45d-0fb704a73a81": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "System Network Connections Discovery Via Net.EXE",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-1cbbeaaf-3c8c-4e4c-9d72-49485b6a176b": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "DNS Query To Ufile.io",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-1ff315dc-2a3a-4b71-8dde-873818d25d39": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "New BITS Job Created Via Bitsadmin",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-259e5a6a-b8d2-4c38-86e2-26c5e651361d": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "PsExec Service File Creation",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-26d3f0a2-f514-4a3f-a8a7-e7e48a8d9160": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "PUA - Adidnsdump Execution",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-29e1c216-6408-489d-8a06-ee9d151ef819": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Suspicious Mount-DiskImage",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-2a072a96-a086-49fa-bcb5-15cc5a619093": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Start Windows Service Via Net.EXE",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-3236fcd0-b7e3-4433-b4f8-86ad61a9af2d": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "PowerShell Download Via Net.WebClient - PowerShell Classic",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-36bed6b2-e9a0-4fff-beeb-413a92b86138": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Active Directory Computers Enumeration With Get-AdComputer",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-3b4e950b-a3ea-44d3-877e-432071990709": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Notepad Password Files Discovery",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-3d3aa6cd-6272-44d6-8afc-7e88dfef7061": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Change Default File Association Via Assoc",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-3d7679bd-0c00-440c-97b0-3f204273e6c7": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "New Process Created Via Taskmgr.EXE",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-4096a49c-7de4-4da0-a230-c66ccd56ea5a": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Suspicious PowerShell Get Current User",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-418a3163-3247-4b7b-9933-dcfcb7c52ea9": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Compressed File Creation Via Tar.EXE",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-4f6edb78-5c21-42ab-a558-fd2a6fc1fd57": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Potential 7za.DLL Sideloading",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-50f852e6-af22-4c78-9ede-42ef36aa3453": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Potential Azure Browser SSO Abuse",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-52788a70-f1da-40dd-8fbd-73b5865d6568": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "JScript Compiler Execution",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-576426ad-0131-4001-ae01-be175da0c108": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "PowerShell Script Dropped Via PowerShell.EXE",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-5af54681-df95-4c26-854f-2565e13cfab0": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Successful Account Login Via WMI",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-5f60740a-f57b-4e76-82a1-15b6ff2cb134": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Registry Modification Via Regini.EXE",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-5fdce3ac-e7f9-4ecd-a3aa-a4d78ebbf0af": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Mstsc.EXE Execution With Local RDP File",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-634b00d5-ccc3-4a06-ae3b-0ec8444dd51b": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Malicious Windows Script Components File Execution by TAEF Detection",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-63de06b9-a385-40b5-8b32-73f2b9ef84b6": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Fsutil Drive Enumeration",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-651f87f7-12db-47f9-84c5-f27b081b94b6": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "RegAsm.EXE Execution Without CommandLine Flags or Files",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-68c8acb4-1b60-4890-8e82-3ddf7a6dba84": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "HH.EXE Execution",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-6942bd25-5970-40ab-af49-944247103358": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Suspicious Get Information for SMB Share - PowerShell Module",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-6c0ce3b6-85e2-49d4-9c3f-6e008ce9796e": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Suspicious Deno File Written from Remote Source",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-6db5eaf9-88f7-4ed9-af7d-9ef2ad12f236": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Winget Admin Settings Modification",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-6f3e2987-db24-4c78-a860-b4f4095a7095": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Files Added To An Archive Using Rar.EXE",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-725a9768-0f5e-4cb3-aec2-bc5719c6831a": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Suspicious Where Execution",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-72cd00d6-490c-4650-86ff-1d11f491daa1": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Vulnerable Driver Load By Name",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-7be5fb68-f9ef-476d-8b51-0256ebece19e": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Suspicious Execution of Hostname",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-7c9340a9-e2ee-4e43-94c5-c54ebbea1006": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "File And SubFolder Enumeration Via Dir Command",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-7f2376f9-42ee-4dfc-9360-fecff9a88fc8": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "BitLockerTogo.EXE Execution",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-815bfc17-7fc6-4908-a55e-2f37b98cedb4": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "AD Groups Or Users Enumeration Using PowerShell - PoshModule",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-81bcb81b-5b1f-474b-b373-52c871aaa7b1": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Stop Windows Service Via Sc.EXE",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-882e858a-3233-4ba8-855e-2f3d3575803d": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "DNS Query Request By QuickAssist.EXE",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-88f0884b-331d-403d-a3a1-b668cf035603": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "AD Groups Or Users Enumeration Using PowerShell - ScriptBlock",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-8c3a6607-b7dc-4f0d-a646-ef38c00b76ee": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Active Directory Group Enumeration With Get-AdGroup",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-903076ff-f442-475a-b667-4f246bcc203b": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Nltest.EXE Execution",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-90f342e1-1aaa-4e43-b092-39fda57ed11e": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "ETW Logging Disabled For rpcrt4.dll",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-91174a41-dc8f-401b-be89-7bfc140612a0": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Office Macro File Creation",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-91903aba-1088-42ee-b680-d6d94fe002b0": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Windows Defender Submit Sample Feature Disabled",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-95f0643a-ed40-467c-806b-aac9542ec5ab": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Suspicious Get Information for SMB Share",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-96036718-71cc-4027-a538-d1587e0006a7": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Windows Processes Suspicious Parent Directory",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-96cd126d-f970-49c4-848a-da3a09f55c55": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Potential PowerShell Obfuscation Using Alias Cmdlets",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-99eccc2b-7182-442f-8806-b76cc36d866b": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "SNAKE Malware Installer Name Indicators",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-9b111d8e-92e0-4153-88bc-daefc1333aba": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "DMSA Link Attributes Modified",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-9c8afa4d-0022-48f0-9456-3712466f9701": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Tap Driver Installation - Security",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-a21bcd7e-38ec-49ad-b69a-9ea17e69509e": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "DNS Server Discovery Via LDAP Query",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-a29c1813-ab1f-4dde-b489-330b952e91ae": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Suspicious Network Command",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-ab70c354-d9ac-4e11-bbb6-ec8e3b153357": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Remote Access Tool - Team Viewer Session Started On Windows Host",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-af5732ed-764e-489d-826d-0447c8b36242": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Windows MSIX Package Support Framework AI_STUBS Execution",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-aff815cc-e400-4bf0-a47a-5d8a2407d4e1": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Use Get-NetTCPConnection - PowerShell Module",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-b1decb61-ed83-4339-8e95-53ea51901720": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "TeamViewer Log File Deleted",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-b1e0b3f5-b62e-41be-886a-daffde446ad4": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "No Suitable Encryption Key Found For Generating Kerberos Ticket",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-b1f73849-6329-4069-bc8f-78a604bb8b23": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Remote Access Tool - ScreenConnect Remote Command Execution",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-b243b280-65fe-48df-ba07-6ddea7646427": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Discovery of a System Time",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-b26647de-4feb-4283-af6b-6117661283c5": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Powershell Suspicious Win32_PnPEntity",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-b366adb4-d63d-422d-8a2c-186463b5ded0": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Use Get-NetTCPConnection",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-b4dc61f5-6cce-468e-a608-b48b469feaa2": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "DirLister Execution",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-b97cd4b1-30b8-4a9d-bd72-6293928d52bc": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Indirect Command Execution By Program Compatibility Wizard",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-ba3874b9-0fae-465f-836c-eb5d071a1789": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "NodeJS Execution of JavaScript File",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-bab049ca-7471-4828-9024-38279a4c04da": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Virtualbox Driver Installation or Starting of VMs",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-bbb9495b-58fc-4016-b9df-9a3a1b67ca82": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Password Policy Discovery With Get-AdDefaultDomainPasswordPolicy",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-bf361876-6620-407a-812f-bfe11e51e924": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Compressed File Extraction Via Tar.EXE",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-c02e96b7-c63a-4c47-bd83-4a9f74afcfb2": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "New Service Creation Using PowerShell",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-c3bd6c55-d495-4c34-918e-e03e8828c074": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "CVE-2023-40477 Potential Exploitation - .REV File Creation",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-c49c5062-0966-4170-9efd-9968c913a6cf": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Stop Windows Service Via PowerShell Stop-Service",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-c5ac6a1e-9407-45f5-a0ce-ca9a0806a287": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Replace Desktop Wallpaper by Powershell",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-cae80281-ef23-44c5-873b-fd48d2666f49": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "PowerShell Script Change Permission Via Set-Acl - PsScript",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-cb7c4a03-2871-43c0-9bbb-18bbdb079896": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Unmount Share Via Net.EXE",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-cbb56d62-4060-40f7-9466-d8aaf3123f83": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Python Image Load By Non-Python Process",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-cdf05894-89e7-4ead-b2b0-0a5f97a90f2f": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Potential Encoded PowerShell Patterns In CommandLine",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-cef24b90-dddc-4ae1-a09a-8764872f69fc": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Suspicious Get Local Groups Information",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-d29a20b2-be4b-4827-81f2-3d8a59eab5fc": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Sysinternals Tools AppX Versions Execution",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-d2e3f2f6-7e09-4bf2-bc5d-90186809e7fb": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "PowerShell Script With File Upload Capabilities",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-ddeff553-5233-4ae9-bbab-d64d2bd634be": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Data Copied To Clipboard Via Clip.EXE",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-def8b624-e08f-4ae1-8612-1ba21190da6b": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Outgoing Logon with New Credentials",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-df68f791-ad95-447f-a271-640a0dab9cf8": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "DNS Query Request To OneLaunch Update Service",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-e0565f5d-d420-4e02-8a68-ac00d864f9cf": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Automated Collection Bookmarks Using Get-ChildItem PowerShell",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-e20b5b14-ce93-4230-88af-981983ef6e74": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "QuickAssist Execution",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-e36941d0-c0f0-443f-bc6f-cb2952eb69ea": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "PowerShell Module File Created",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-e4a74e34-ecde-4aab-b2fb-9112dd01aed0": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Dynamic CSharp Compile Artefact",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-e8314f79-564d-4f79-bc13-fbc0bf2660d8": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Potential PowerShell Obfuscation Using Character Join",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-e83e8899-c9b2-483b-b355-5decc942b959": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Interesting Service Enumeration Via Sc.EXE",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-eb2fd349-ec67-4caa-9143-d79c7fb34441": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Suspicious GPO Discovery With Get-GPO",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-f0e53e89-8d22-46ea-9db5-9d4796ee2f8a": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Exports Registry Key To a File",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-f117933c-980c-4f78-b384-e3d838111165": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Windows Share Mount Via Net.EXE",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-f14b1e99-5e53-4598-98dc-6f20ad7b35e0": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "PowerShell AppLocker Policy Discovery Via Get-AppLockerPolicy",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-f512acbf-e662-4903-843e-97ce4652b740": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Volume Shadow Copy Mount",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-f5240972-3938-4e56-8e4b-e33893176c1f": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Suspicious Query of MachineGUID",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-f69a87ea-955e-4fb4-adb2-bb9fd6685632": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "External Disk Drive Or USB Storage Device Was Recognized By The System",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-fa6a5a45-3ee2-4529-aa14-ee5edc9e29cb": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Suspicious Get Local Groups Information - PowerShell",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-faa031b5-21ed-4e02-8881-2591f98d82ed": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Unauthorized System Time Modification",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-fc06e655-d98c-412f-ac76-05c2698b1cb2": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "Outlook Task/Note Reminder Received",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  },
+  "sigma-fe3a2d49-f255-4d10-935c-bda7391108eb": {
+   "severity": "medium",
+   "upstream": "low",
+   "title": "New BITS Job Created Via PowerShell",
+   "why": "no finding on the 7 evtx-baseline clean machines, which log what it reads (measured 2026-09-26)"
+  }
+ }
+}
