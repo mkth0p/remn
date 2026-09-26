@@ -193,7 +193,7 @@ jobs:
           EVTX_ATTACK_OUT: ${{ runner.temp }}/attack
       - name: EVTX parsed in the browser, row for row against the server's parser
         run: |
-          python samples/synthetic/make_linked_lab.py --quick-only --out "$RUNNER_TEMP/lab"
+          python ../samples/synthetic/make_linked_lab.py --quick-only --out "$RUNNER_TEMP/lab"
           REMN_EVTX_LAB="$RUNNER_TEMP/lab/quick-start" npx vitest run src/parsers/evtx
         working-directory: frontend
         env:
