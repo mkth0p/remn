@@ -5,6 +5,14 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- Eleven rules for directory changes on a domain controller (`rules/windows/directory.yaml`):
+  accounts weakened for AS-REP roasting or offline cracking, Kerberos delegation granted
+  (including resource-based delegation), passwords set never to expire, permissions changed on
+  the domain root, AdminSDHolder or other objects, extended rights rewritten, DCShadow server
+  objects, domain policy changed by a user, the Special Groups table changed, sensitive user
+  rights assigned and the Guest account enabled. They catch about 20 files of
+  EVTX-to-MITRE-Attack the default rules missed and fire on none of the evtx-baseline machines.
+
 ## 0.2.0 (2026-09-26)
 
 - A story's score favours weight and attack order over breadth: it follows the heaviest run of

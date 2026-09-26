@@ -110,6 +110,17 @@ the linked lab, and runs the same in both engines. `tools/evtx_attack_samples.py
 job hold the detections in place: the job fails when a rule that identifies a sample's
 attack stops firing on it, or when the engines disagree on any sample.
 
+`directory.yaml` reads what a domain controller's Security log says about the directory itself:
+account control flags that weaken an account (no password required, reversible encryption,
+DES only, no Kerberos pre-authentication) or grant delegation, resource-based delegation
+written on a computer object, permissions changed on the domain root, AdminSDHolder or any
+other object, extended rights rewritten, server objects created under Sites (DCShadow), the
+domain policy changed by a user, the Special Groups table changed, sensitive user rights
+assigned and the Guest account enabled (4738, 4742, 5136, 5137, 4739, 4908, 4704, 4722). It
+was written for the directory changes the default rules missed in EVTX-to-MITRE-Attack, so
+that library does not count as held out for it (`WRITTEN_AGAINST` in
+`tools/measure_rules.py`); none of its rules fires on the clean machines of evtx-baseline.
+
 The rules that flooded the clean machines were cut down without losing a recorded detection
 (measured in [the noise review](reviews/2026-09-25-noise-and-held-out.md)). A rule a busy
 machine matches over and over raises one finding per program per machine: a program reading
