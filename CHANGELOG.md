@@ -5,6 +5,15 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- Responder exports. The Report page writes the report as a Word document (.docx) with the same
+  sections, verdict and confidence as the HTML report, as headings, paragraphs and tables a team
+  can edit before it goes out (the graphs stay in the HTML report). It also exports the case as a
+  timeline for Timesketch (JSONL with `message`, `datetime` and `timestamp_desc` on every line) or
+  Timeline Explorer (CSV): every finding except the false positives, with its severity, rule,
+  ATT&CK techniques, host, user and address, and the analyst's timeline entries. A third button
+  writes an ATT&CK Navigator layer (format 4.5) of the techniques the findings name, each coloured
+  and scored by its worst severity, with the count of findings, how many are confirmed and which
+  rules in its comment. The Events page exports its filtered rows as the same timeline.
 - The Graph page is back: it left with the Chains page when Stories replaced it, while the
   report kept printing the same graphs. It lists the chains, draws one chain as a swimlane or
   all chains against the senders, domains, IPs and hosts they share, and opens a clicked step's
