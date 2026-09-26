@@ -84,6 +84,11 @@ export function EvidenceView() {
                 </td>
                 <td>
                   <Badge sev="accent">{e.format || e.kind}</Badge>
+                  {e.parsedIn === 'browser' && (
+                    <Badge sev="ok" title="parsed in this browser: the file was never uploaded">
+                      parsed in this browser
+                    </Badge>
+                  )}
                 </td>
                 <td>{fmtBytes(e.size)}</td>
                 <td>{fmtNum(e.count)}</td>
@@ -136,7 +141,7 @@ export function EvidenceView() {
               {detail.sha256Client} {detail.sha256Client && <CopyButton text={detail.sha256Client} />}
             </div>
             <div className="k">sha-256 server</div>
-            <div className="v">{detail.sha256Server ?? '—'}</div>
+            <div className="v">{detail.parsedIn === 'browser' ? 'never uploaded: parsed in this browser, from the bytes this digest identifies' : (detail.sha256Server ?? '—')}</div>
             <div className="k">integrity</div>
             <div className="v">{detail.integrity}</div>
             <div className="k">size</div>

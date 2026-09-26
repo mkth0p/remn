@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { defaultSettings, getDb, RemnDB, setDb, type Case } from '../db/schema'
+import { defaultSettings, deleteCase, getDb, RemnDB, setDb, type Case } from '../db/schema'
 import { restoreCaseBundle, writeCaseBundle } from './caseBundle'
 import { migrateCaseToServer } from './migrate'
 
@@ -237,4 +237,43 @@ it('carries the AI inbox, the hypothesis board and the AI ledger, with row refs 
   const board = ((await db.kv.get(`ai-hypotheses-${id}`))?.value as { items: Record<string, unknown>[] }).items
   expect(board[0]).toMatchObject({ id: 'h1', support: [{ source: 'mails', id: mail.id }], against: [{ source: 'events', id: event.id }] })
   expect(await verifyLedger(id)).toMatchObject({ entries: 4, intact: true }) // two proposals, the run, the tool call
+})
+
+it('carries the story notes and decisions, with their records and findings renumbered, and clears them with the case', async () => {
+  const anchor = { kind: 'person', subject: ['addr:alice@example.com'], findings: ['mail-test|70'], title: 'alice@example.com', start: 1 }
+  await db.kv.bulkPut([
+    { key: 'story-notes-1', value: { 'story-a': { text: 'Alice opened the invoice.', updatedAt: 1, anchor } } },
+    {
+      key: 'story-decisions-1',
+      value: {
+        'story-a': {
+          anchor,
+          updatedAt: 1,
+          call: { verdict: 'confirmed', reason: 'she ran it', decidedAt: 1 },
+          steps: [{ verdict: 'disputed', reason: 'r', decidedAt: 1, rows: [{ source: 'events', id: 80 }], title: 'logon', ts: 1 }],
+          out: [{ rows: [{ source: 'mails', id: 70 }], reason: 'not hers', decidedAt: 1, title: 'mail', ts: 1 }],
+          split: { from: { source: 'events', id: 80 }, title: 'logon', ts: 1, reason: 'two incidents', decidedAt: 1 },
+          merge: { into: anchor, reason: 'same', decidedAt: 1 },
+        },
+      },
+    },
+  ])
+  const id = await restoreCaseBundle(await backup())
+  const event = (await db.events.where('caseId').equals(id).toArray())[0]
+  const mail = (await db.mails.where('caseId').equals(id).toArray())[0]
+  const moved = { ...anchor, findings: [`mail-test|${mail.id}`] }
+  expect((await db.kv.get(`story-notes-${id}`))?.value).toEqual({ 'story-a': { text: 'Alice opened the invoice.', updatedAt: 1, anchor: moved } })
+  expect((await db.kv.get(`story-decisions-${id}`))?.value).toMatchObject({
+    'story-a': {
+      anchor: moved,
+      call: { verdict: 'confirmed', reason: 'she ran it' },
+      steps: [{ rows: [{ source: 'events', id: event.id }] }],
+      out: [{ rows: [{ source: 'mails', id: mail.id }] }],
+      split: { from: { source: 'events', id: event.id } },
+      merge: { into: moved },
+    },
+  })
+  await deleteCase(db, id)
+  expect(await db.kv.get(`story-decisions-${id}`)).toBeUndefined()
+  expect((await db.kv.get('story-decisions-1'))?.value).toBeTruthy()
 })

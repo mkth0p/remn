@@ -140,3 +140,25 @@ def test_s04_shows_the_session_the_hop_and_what_the_hosts_cannot_show(lab):
     no_sysmon = [e for e in lab["events"] if e["_file"] != "Sysmon.evtx"]
     [again] = [s for s in build_stories(no_sysmon, lab["mails"], lab["findings"], lab["settings"])["stories"] if s["subject"]["label"] == lab["victims"]["S04"]]
     assert any(g.startswith("What ran on WS-004") for g in again["gaps"])
+
+
+def test_s04s_spine_runs_from_the_rdp_logon_through_its_session_to_the_service_on_fs_001(lab):
+    res = build_stories(lab["events"], lab["mails"], lab["findings"], lab["settings"])
+    [s04] = [s for s in res["stories"] if s["subject"]["label"] == lab["victims"]["S04"]]
+    [session] = [x for x in s04["lineage"]["sessions"] if x["rdp"]]
+    spine = [st for st in s04["steps"] if st["id"] in s04["spine"]]
+    assert [st["id"] for st in spine] == s04["spine"] and len(spine) <= 15
+    at = {st["id"]: i for i, st in enumerate(spine)}
+    # anchored on the log cleared in the RDP session, whose ties lead back to the phishing mail
+    cleared = next(st for st in spine if st["phase"] == "defense-impairment")
+    basis = s04["spineBasis"]
+    assert cleared["session"] == session["id"] and basis["anchor"] == cleared["id"] and basis["tied"] and basis["wayIn"][0].startswith("mail:")
+    # the RDP logon, then the log cleared and the credential access, the admin share and the service on FS-001
+    rdp = at[session["logonRef"]]
+    share = next(i for i, st in enumerate(spine) if st["host"] == "fs-001" and st["phase"] == "lateral-movement")
+    service = next(i for i, st in enumerate(spine) if st["host"] == "fs-001" and st["phase"] == "persistence")
+    access = [i for i, st in enumerate(spine) if st["phase"] == "credential-access"]
+    assert rdp < at[cleared["id"]] and rdp < share < service and access and min(access) > rdp
+    # not the password spray before the way in, nor Daniel's own sign-ins from his usual address
+    assert not any(st["ip"] == "198.51.100.10" for st in spine)
+    assert len(s04["steps"]) - len(spine) >= 10

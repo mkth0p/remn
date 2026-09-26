@@ -8,7 +8,7 @@ export interface EntityRef {
   value: string
 }
 
-export type View = 'home' | 'dashboard' | 'evidence' | 'events' | 'mails' | 'findings' | 'stories' | 'timeline' | 'iocs' | 'ai' | 'review' | 'case' | 'report' | 'rules' | 'settings'
+export type View = 'home' | 'dashboard' | 'evidence' | 'events' | 'mails' | 'findings' | 'stories' | 'graph' | 'timeline' | 'iocs' | 'ai' | 'review' | 'case' | 'report' | 'rules' | 'settings'
 
 export interface ConsoleLine {
   id: number
@@ -69,7 +69,7 @@ interface State {
   /** progress of the rule run in flight (manual, or automatic after ingest) */
   rulesRun: { done: number; total: number; rule: string; reason: 'manual' | 'ingest' } | null
   setRulesRun: (r: State['rulesRun']) => void
-  /** chain to open when the Chains page mounts (Review page hand-off) */
+  /** what the Stories page opens when it mounts: the story holding a chain, or a story, with '#<step id>' for one of its steps */
   focusChain: string | null
   setFocusChain: (id: string | null) => void
   /** finding to open when the Findings page mounts (a citation in an AI answer) */

@@ -94,4 +94,83 @@ describe('ReviewView', () => {
     },
     TEST_TIMEOUT,
   )
+
+  it(
+    'counts a story the analyst confirmed on the Stories page in the verdict, as the report does',
+    async () => {
+      await db.findings.toCollection().modify({ status: 'reviewed' })
+      const step = {
+        id: 'event:1',
+        refs: ['event:1'],
+        source: 'events',
+        ts: T0,
+        tsEnd: T0,
+        count: 1,
+        title: 'task created',
+        host: 'ws-1',
+        ip: null,
+        origin: 'host',
+        phase: 'persistence',
+        phaseBasis: '',
+        findings: [{ ruleId: 'win-scheduled-task-suspicious-content', title: 'Scheduled task with suspicious command', severity: 'high', key: 'win-scheduled-task-suspicious-content|1' }],
+        severity: 'high',
+        tie: { kind: 'flag', basis: '', confidence: 'strong' },
+        notes: [],
+        accounts: [],
+        session: null,
+        process: null,
+        hops: [],
+        routine: false,
+      }
+      const story = {
+        id: 'story-1',
+        kind: 'host',
+        subject: { kind: 'host', id: 'ws-1', label: 'ws-1', org: null },
+        title: 'ws-1',
+        headline: '',
+        summary: '',
+        start: T0,
+        end: T0,
+        severity: 'high',
+        score: 40,
+        confidence: 'strong',
+        phases: [],
+        steps: [step],
+        records: 1,
+        hosts: ['ws-1'],
+        accounts: [],
+        ips: [],
+        attackerAddresses: [],
+        chains: [],
+        findings: ['win-scheduled-task-suspicious-content|1'],
+        campaigns: [],
+        gaps: [],
+        lineage: { sessions: [], hops: [], processes: [] },
+      }
+      await db.kv.put({ key: 'stories-1', value: { version: 1, stories: [story], campaigns: [], chains: { chains: [], stats: {} }, identities: [], hosts: [], unstoried: [], stats: {} } })
+      await act(async () => {
+        render(<ReviewView />)
+      })
+      // the incident was reviewed, nothing confirmed
+      await waitFor(() => expect(document.querySelector('.verdict-bar .seal.unconfirmed')).toBeTruthy(), WAIT)
+      cleanup()
+      await db.kv.put({
+        key: 'story-decisions-1',
+        value: {
+          'story-1': {
+            anchor: { kind: 'host', subject: ['host:ws-1'], findings: [], title: 'ws-1', start: T0 },
+            updatedAt: 1,
+            call: { verdict: 'confirmed', reason: 'the task is theirs', decidedAt: 1 },
+          },
+        },
+      })
+      await act(async () => {
+        render(<ReviewView />)
+      })
+      await waitFor(() => expect(document.querySelector('.verdict-bar .seal.compromise')).toBeTruthy(), WAIT)
+      // its finding fills the persistence badge as a confirmed incident's would
+      expect(document.querySelector('.verdict-badges .hex.confirmed')).toBeTruthy()
+    },
+    TEST_TIMEOUT,
+  )
 })

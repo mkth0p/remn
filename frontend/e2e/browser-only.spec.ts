@@ -58,7 +58,38 @@ test('a public browser-only instance says where evidence goes and reads the link
   await page.getByRole('button', { name: 'Story daniel.roy@northstar.example', exact: true }).click()
   const rail = page.getByRole('list', { name: 'ATT&CK phases of the story' })
   for (const phase of ['Initial access', 'Credential access', 'Lateral movement', 'Defense impairment']) await expect(rail.getByRole('listitem').filter({ hasText: phase })).toBeEnabled()
+  // the story opens on its spine, the way in first; the full timeline is a toggle away
+  await expect(page.locator('.spine .spine-step').filter({ hasText: 'RemoteInteractive' }).first()).toBeVisible()
+  await page.getByRole('group', { name: 'what the story shows' }).getByRole('button', { name: 'Full timeline' }).click()
   await expect(page.locator('.story .step').filter({ hasText: 'RemoteInteractive' }).first()).toBeVisible()
 
   expect(probes, 'a page served from another host must not probe the visitor’s localhost on its own').toEqual([])
+})
+
+test('an EVTX file parsed in the browser never leaves it, on the public instance', async ({ page }) => {
+  test.setTimeout(600_000)
+  const EVTX = FILES.filter((n) => n.endsWith('.evtx'))
+  // every request that could carry evidence: an upload, a parse, a staged chunk
+  const carried: string[] = []
+  page.on('request', (r) => {
+    const u = new URL(r.url())
+    if (r.method() !== 'GET' && u.pathname.startsWith('/api/')) carried.push(`${r.method()} ${u.pathname}`)
+  })
+  await page.goto('/')
+  await page.locator('.nav-item', { hasText: 'Settings' }).click()
+  await page.locator('label.row', { hasText: 'parse .evtx files in this browser' }).locator('.toggle').click()
+  await expect(page.locator('label.row', { hasText: 'parse .evtx files in this browser' }).locator('.toggle')).toHaveAttribute('aria-checked', 'true')
+
+  await page.locator('.nav-item', { hasText: 'Evidence' }).click()
+  await page
+    .locator('.dropzone input[type=file]')
+    .first()
+    .setInputFiles(EVTX.map((n) => path.join(LAB, n)))
+  // nothing is uploaded, so there is nothing to be told about first
+  await expect(page.locator('tr').filter({ hasText: 'parsed in this browser' }).filter({ hasText: 'verified' })).toHaveCount(EVTX.length, { timeout: 300_000 })
+  await expect(page.getByText('Before you add evidence to remn.localhost')).toHaveCount(0)
+  await expect(page.locator('.nav-item', { hasText: 'Events' })).toContainText('10,000')
+  // the rules run in the browser on the rows parsed there
+  await expect(page.getByText(/finding\(s\) from \d+ rule\(s\)/).first()).toBeVisible({ timeout: 300_000 })
+  expect(carried, 'no request may carry evidence when EVTX is parsed in the browser').toEqual([])
 })

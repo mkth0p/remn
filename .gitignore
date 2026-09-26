@@ -42,3 +42,6 @@ backend/data/claude-cwd/
 frontend/test-results/
 frontend/playwright-report/
 frontend/.e2e-tmp/
+
+# Rust (the EVTX decoder built to WebAssembly)
+frontend/wasm/evtx/target/

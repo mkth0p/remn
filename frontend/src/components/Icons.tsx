@@ -170,6 +170,14 @@ export const IconLink = (p: P) => (
     <path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />
   </svg>
 )
+export const IconGraph = (p: P) => (
+  <svg {...base(p)}>
+    <circle cx="5" cy="12" r="2.5" />
+    <circle cx="18" cy="5" r="2.5" />
+    <circle cx="18" cy="19" r="2.5" />
+    <path d="m7.2 10.8 8.6-4.6M7.2 13.2l8.6 4.6" />
+  </svg>
+)
 export const IconSave = (p: P) => (
   <svg {...base(p)}>
     <path d="M5 3h11l3 3v15H5z" />

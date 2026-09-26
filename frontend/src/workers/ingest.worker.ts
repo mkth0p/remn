@@ -1,7 +1,9 @@
 /// <reference lib="webworker" />
 /**
  * Ingestion worker: hashes the file (SHA-256, streaming), uploads it, parses
- * the NDJSON stream and writes rows / facets / IOCs into IndexedDB.
+ * the NDJSON stream and writes rows / facets / IOCs into IndexedDB. An EVTX file can instead be
+ * parsed here, in the browser, by the WebAssembly build of the server's decoder: it is then
+ * never sent anywhere.
  */
 import { createSHA256 } from 'hash-wasm'
 import { refKey, resolveEngineRefs, type EngineFinding } from '../data/engineFindings'
@@ -9,6 +11,10 @@ import { getDb, type AttachmentRow, type EventRow, type Facet, type Ioc, type Ma
 import { setApiToken, streamNdjson } from '../api/client'
 import { isPublicIp } from '../util/format'
 import { duplicateEvidence } from '../data/duplicateEvidence'
+import { loadEvtxDecoder } from '../parsers/evtx/load'
+import { Stats } from '../parsers/evtx/ledger'
+import { BigInteger } from '../parsers/evtx/py'
+import { blobSource, readEvtx, type ByteSource } from '../parsers/evtx/readEvtx'
 
 export interface IngestRequest {
   cmd: 'ingest'
@@ -26,6 +32,8 @@ export interface IngestRequest {
   settings: { internalDomains: string[]; brands: string[]; vipNames: string[]; trustedSenders?: string[]; trustedArcSealers?: string[] }
   /** access token for remote deployments - the worker has its own api/client module instance */
   token?: string
+  /** parse an EVTX file in this worker instead of uploading it (the file must start with an EVTX header) */
+  parseInBrowser?: boolean
 }
 export interface HashRequest {
   cmd: 'hash'
@@ -286,9 +294,9 @@ async function ingest(req: IngestRequest): Promise<void> {
     post({ type: 'duplicate', evidenceId: duplicate.id, skippedEngines })
     return
   }
-  await db.evidence.update(evidenceId, { sha256Client: sha256, status: 'uploading' })
+  await db.evidence.update(evidenceId, { sha256Client: sha256, status: req.parseInBrowser ? 'parsing' : 'uploading' })
 
-  post({ type: 'phase', phase: 'uploading' })
+  if (!req.parseInBrowser) post({ type: 'phase', phase: 'uploading' })
   const form = new FormData()
   if (req.uploadId) form.append('uploadId', req.uploadId)
   else form.append('file', file, file.name)
@@ -397,10 +405,10 @@ async function ingest(req: IngestRequest): Promise<void> {
     if (type === 'meta') {
       st.meta = row
       post({ type: 'meta', meta: row })
-      if (kind === 'evtx' && Array.isArray(row.engines) && (row.engines as unknown[]).length === 0) {
+      if (kind === 'evtx' && !req.parseInBrowser && Array.isArray(row.engines) && (row.engines as unknown[]).length === 0) {
         post({ type: 'log', level: 'info', text: 'no detection engine on this server (Hayabusa not installed); only the rules run from the browser apply' })
       }
-      await db.evidence.update(evidenceId, { status: 'parsing', format: String(row.format ?? ''), sha256Server: String(row.sha256 ?? '') })
+      await db.evidence.update(evidenceId, { status: 'parsing', format: String(row.format ?? ''), sha256Server: req.parseInBrowser ? undefined : String(row.sha256 ?? '') })
       post({ type: 'phase', phase: 'parsing' })
       return
     }
@@ -452,7 +460,8 @@ async function ingest(req: IngestRequest): Promise<void> {
   }
 
   try {
-    await streamNdjson(`/api/ingest/${kind}`, form, onRow, { onBytes: (n) => post({ type: 'bytes', bytes: n }) })
+    if (req.parseInBrowser) st.done = await parseHere(req, onRow)
+    else await streamNdjson(`/api/ingest/${kind}`, form, onRow, { onBytes: (n) => post({ type: 'bytes', bytes: n }) })
     if (!st.done) throw new Error('Ingestion stream ended before its completion record; imported rows may be partial')
     // the server counts the rows it sent; a stream that lost some on the way is not a complete import
     const emitted = Number(st.done.emitted)
@@ -468,9 +477,12 @@ async function ingest(req: IngestRequest): Promise<void> {
     await flushFacets(caseId, 'events', fc)
     await flushFacets(caseId, 'mails', mailFc)
     await flushIocs(caseId, ic)
-    const serverHash = (st.done?.sha256 as string) || (st.meta?.sha256 as string) || ''
-    const integrity = serverHash ? (serverHash === sha256 ? 'verified' : 'mismatch') : 'pending'
+    // parsed here: the digest of the bytes the parser read stands where the server's would
+    const serverHash = req.parseInBrowser ? '' : (st.done?.sha256 as string) || (st.meta?.sha256 as string) || ''
+    const parsedHash = req.parseInBrowser ? String(st.done?.sha256 ?? '') : serverHash
+    const integrity = parsedHash ? (parsedHash === sha256 ? 'verified' : 'mismatch') : 'pending'
     await db.evidence.update(evidenceId, {
+      parsedIn: req.parseInBrowser ? 'browser' : 'server',
       status: st.errorMsg ? 'error' : 'done',
       error: st.errorMsg ?? undefined,
       count: inserted,
@@ -506,6 +518,80 @@ async function ingest(req: IngestRequest): Promise<void> {
     await db.evidence.update(evidenceId, { status: 'error', error: msg, count: inserted })
     post({ type: 'error', error: msg, count: inserted })
   }
+}
+
+/** An integer past 2^53 is stored as the number the server path stores; `raw` keeps its digits. */
+function storable(v: unknown): unknown {
+  if (v instanceof BigInteger) return Number(v.digits)
+  if (Array.isArray(v)) return v.map(storable)
+  if (v && typeof v === 'object') {
+    for (const k of Object.keys(v)) (v as Record<string, unknown>)[k] = storable((v as Record<string, unknown>)[k])
+  }
+  return v
+}
+
+/**
+ * The whole file read once more, in order, into a second digest: the rows then come from exactly
+ * the bytes whose SHA-256 identifies the evidence (the file on disk could change in between).
+ */
+function hashing(src: ByteSource, update: (b: Uint8Array) => void): ByteSource & { next: number } {
+  const out = {
+    size: src.size,
+    next: 0,
+    read: async (start: number, end: number) => {
+      const b = await src.read(start, end)
+      if (start !== out.next) throw new Error('the EVTX reader skipped bytes: the file cannot be verified')
+      update(b)
+      out.next = start + b.length
+      return b
+    },
+  }
+  return out
+}
+
+/** Parse an EVTX file here and feed its rows to onRow as the server's stream would; returns its "done" record. */
+async function parseHere(req: IngestRequest, onRow: (row: Record<string, unknown>) => Promise<void>): Promise<Record<string, unknown>> {
+  const name = req.sourceName ?? req.file.name
+  const decoder = await loadEvtxDecoder()
+  const hasher = await createSHA256()
+  hasher.init()
+  const src = hashing(blobSource(req.file), (b) => hasher.update(b))
+  const stats = new Stats()
+  await onRow({ type: 'meta', format: 'evtx', name, size: req.file.size, includeRaw: req.includeRaw, engines: [], parser: 'browser' })
+  post({ type: 'log', level: 'info', text: 'parsed in this browser: the file is not uploaded; server-side engines (Hayabusa) do not run on it' })
+  let emitted = 0
+  let lastBytes = 0
+  try {
+    for await (const row of readEvtx(src, decoder, {
+      sourceFile: name,
+      stats,
+      includeRaw: req.includeRaw,
+      onBytes: (done) => {
+        const now = Date.now()
+        if (now - lastBytes > 200) {
+          lastBytes = now
+          post({ type: 'bytes', bytes: done })
+        }
+      },
+    })) {
+      await onRow({ ...(storable(row) as Record<string, unknown>), type: 'event' })
+      emitted++
+    }
+  } catch (e) {
+    // the file is not an event log the decoder reads: said as the server says it, with what was read
+    stats.errors++
+    await onRow({ type: 'error', error: (e as Error).message, emitted })
+  }
+  if (src.next < src.size)
+    hasher.update(
+      await req.file
+        .slice(src.next)
+        .arrayBuffer()
+        .then((b) => new Uint8Array(b)),
+    )
+  const out = stats.toDict()
+  out.files = [] as unknown[]
+  return { type: 'done', format: 'evtx', stats: out, emitted, sha256: hasher.digest('hex'), parser: 'browser' }
 }
 
 ctx.onmessage = async (ev: MessageEvent<WorkerRequest>) => {

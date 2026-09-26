@@ -6,6 +6,7 @@
  * The worker builds that index while it inserts the rows and resolves the refs here.
  */
 import { getDb, type Finding } from '../db/schema'
+import { tableRows, withRecordKeys } from './findingAnchors'
 
 export const ENGINE_RULE_PREFIX = 'engine:'
 
@@ -37,6 +38,8 @@ export async function persistEngineFindings(caseId: number, evidenceId: number, 
   const db = getDb()
   const evidenceTag = `evidence:${evidenceId}`
   const prefix = `${ENGINE_RULE_PREFIX}${engine}:`
+  const evidence = await db.evidence.where('caseId').equals(caseId).toArray()
+  const keyed = await withRecordKeys(findings, evidence, tableRows(db))
   return db.transaction('rw', [db.findings], async () => {
     const previous = await db.findings
       .where('caseId')
@@ -46,7 +49,7 @@ export async function persistEngineFindings(caseId: number, evidenceId: number, 
     const reviews = new Map(previous.map((f) => [f.key, f]))
     if (previous.length) await db.findings.bulkDelete(previous.map((f) => f.id!))
     const now = Date.now()
-    const rows = findings.map((f) => {
+    const rows = keyed.map((f) => {
       const prev = reviews.get(f.key)
       const { refKeys: _drop, ...rest } = f
       return {

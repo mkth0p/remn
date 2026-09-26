@@ -20,6 +20,8 @@ import {
   type TriageRun,
 } from '../data/aiReview'
 import { loadChains, type Chain } from '../data/chains'
+import { loadStories, loadStoryNotes, type StoryNotes, type StoryResult } from '../data/stories'
+import { loadStoryDecisions, storiesForReport, type StoryDecisions } from '../data/storyDecisions'
 import { computeConfidence, computeVerdict, groupByRule, threatProfile, type ReportData } from '../data/reportHtml'
 import {
   applyChainVerdict,
@@ -174,6 +176,8 @@ export function ReviewView() {
   const [chains, setChains] = useState<Chain[]>([])
   const [reviews, setReviews] = useState<Record<string, ChainReview>>({})
   const [settings, setSettings] = useState<ReportSettings | null>(null)
+  /** the stories with the analyst's notes and decisions: a decided story counts in the verdict (data/storyDecisions.ts) */
+  const [stories, setStories] = useState<{ result: StoryResult | null; notes: StoryNotes; decisions: StoryDecisions }>({ result: null, notes: {}, decisions: {} })
   const [suggestions, setSuggestions] = useState<Record<string, Suggestion>>({})
   const [lastRun, setLastRun] = useState<TriageRun | null>(null)
   const [showRun, setShowRun] = useState(false)
@@ -201,6 +205,7 @@ export function ReviewView() {
     loadChains(caseId).then((r) => setChains(r?.chains ?? []))
     loadChainReviews(caseId).then(setReviews)
     loadReportSettings(caseId).then(setSettings)
+    Promise.all([loadStories(caseId), loadStoryNotes(caseId), loadStoryDecisions(caseId)]).then(([result, notes, decisions]) => setStories({ result, notes, decisions }))
     loadTriageRun(caseId).then(setLastRun)
     setIdx(0)
   }, [caseId, rulesVersion, reload])
@@ -257,9 +262,10 @@ export function ReviewView() {
       notes: [],
       undecided,
       unprintedConfirmed: unprintedConfirmed(findings, chains, reviews, selection),
+      decidedStories: storiesForReport(stories.result, stories.notes, stories.decisions, findings, settings.minSeverity, settings.onlyReviewed).decided,
     }
     return { data, verdict: computeVerdict(data), confidence: computeConfidence(data), profile: threatProfile(data) }
-  }, [kase, settings, findings, chains, reviews, evidence, undecided])
+  }, [kase, settings, findings, chains, reviews, evidence, undecided, stories])
   /** what the verdict becomes if the current incident gets this status, or the current chain this verdict */
   const effectOf = useCallback(
     (decision: string): string | null => {

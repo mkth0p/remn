@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AddToTimeline } from '../components/AddToTimeline'
 import { EventDetail, MailDetail } from '../components/Detail'
 import { Explorer, ExploreList, LinkList } from '../components/Explore'
 import { recordLinks, useRelationshipGraph, type RelationshipGraph } from '../components/useRelationshipGraph'
-import { IconAi, IconCloud, IconHost, IconMail, IconPlay, IconUser } from '../components/Icons'
+import { IconAi, IconCloud, IconDownload, IconHost, IconMail, IconPlay, IconUser } from '../components/Icons'
+import { StorySpine } from '../components/StorySpine'
 import { Badge, Dot, Sev, Spinner, Tabs } from '../components/ui'
 import { checkText, readRows, type TextCheck } from '../data/claims'
 import { loadEvidenceGaps, type GapStatement } from '../data/evidenceGaps'
@@ -11,32 +12,71 @@ import type { RelationshipRef } from '../data/relationships'
 import { readMeasure, type MeasureReading } from '../data/ruleMeasures'
 import { loadRules } from '../data/rules'
 import { getSource } from '../data/source'
+import { decideFindings } from '../data/findingReviews'
 import {
+  applyStoryDecisions,
+  attachStoryDecision,
+  decideStory,
+  decisionCount,
+  deleteStoryDecision,
+  dismissed,
+  dropStepCall,
+  loadStoryDecisions,
+  mergeInto,
+  putBack,
+  setCall,
+  setStepCall,
+  splitAt,
+  splitId,
+  takeOut,
+  type DecisionSource,
+  type StepCall,
+  type StoryDecision,
+  type StoryDecisions,
+  type StoryView,
+} from '../data/storyDecisions'
+import {
+  attachStoryNote,
   buildStories,
+  cheapToRebuild,
+  deleteStoryNote,
+  findStory,
+  groupByIncident,
+  LINK_LABEL,
   loadStories,
   loadStoryNotes,
-  noteKey,
   PHASE_LABEL,
   PHASES,
   refRow,
   HOP_LABEL,
-  STORY_NOTES_KEY,
+  resolveStoryNotes,
+  saveStoryNote,
+  storiesStaleness,
   storyCoverageWarnings,
   storyGaps,
+  storyInputs,
+  storyQuestion,
+  storyAnchor,
   storyRowIds,
   type Campaign,
   type Confidence,
   type Hop,
   type Identity,
+  type NoteOnStory,
+  type OrphanNote,
   type Process,
   type Session,
   type Story,
+  type StoryIncident,
+  type StoryNotes,
   type StoryResult,
   type StoryStep,
 } from '../data/stories'
+import { downloadAttackFlow, downloadCampaignGrouping, spineSteps } from '../data/storyFlow'
 import { getDb, type EventRow, type MailRow, type Severity } from '../db/schema'
 import { toast, useStore } from '../state/store'
 import { fmtNum, fmtTs } from '../util/format'
+import { DecisionsPanel, OrphanDecisions, StepCallTag, StepDecisionPanel, StoryCallBar, StoryCallTag, StoryTools } from './StoryDecisions'
 
 /**
  * Stories: one per person or host incident (backend/services/analysis/stories.py). The left list
@@ -47,8 +87,11 @@ import { fmtNum, fmtTs } from '../util/format'
  */
 
 type Mode = 'stories' | 'campaigns' | 'explore'
-type Tab = 'story' | 'lineage' | 'identity' | 'gaps' | 'json'
+type Tab = 'story' | 'lineage' | 'identity' | 'gaps' | 'decisions' | 'json'
 type Detail = { source: 'events'; row: EventRow } | { source: 'mails'; row: MailRow } | null
+
+/** What a build keeps open: the story that was (and its step), or the story a link asked for. */
+type Follow = ({ story: Story; identities: Identity[] } | { link: string }) & { step?: string }
 
 const SEV_ORDER: Severity[] = ['info', 'low', 'medium', 'high', 'critical']
 const ORIGIN_ICON = { mail: IconMail, cloud: IconCloud, host: IconHost } as const
@@ -70,6 +113,9 @@ function spanText(ms: number): string {
   return m < 1 ? 'under a minute' : m < 90 ? `${Math.round(m)} min` : m < 48 * 60 ? `${(m / 60).toFixed(1)} h` : `${(m / 1440).toFixed(1)} d`
 }
 const day = (ts: number) => fmtTs(ts, { date: true }).slice(0, 10)
+/** What a story's score is made of, for its tooltip (the summary says it in a sentence). */
+const scoreTitle = ({ scoreParts: p }: Story) =>
+  p ? `${p.runPoints} for its run in ATT&CK's order, ${p.otherPoints} for ${p.others} other technique(s), ${p.chainPoints} for a phishing chain` : undefined
 
 /** A tiny strip of the fifteen phases, filled where the story has one: the shape of an intrusion at a glance. */
 function PhaseStrip({ story }: { story: Story }) {
@@ -111,11 +157,55 @@ function PhaseRail({ story, active, onPick }: { story: Story; active: string | n
   )
 }
 
-function StoryList({ stories, active, onSelect }: { stories: Story[]; active: string | null; onSelect: (id: string) => void }) {
+/** The stories, the highest-scoring first; those of one incident together, under a line that says so. */
+function StoryList({
+  stories,
+  incidents,
+  active,
+  onSelect,
+  views,
+}: {
+  stories: Story[]
+  incidents?: StoryIncident[]
+  active: string | null
+  onSelect: (id: string) => void
+  views?: Map<string, StoryView>
+}) {
+  return (
+    <>
+      {groupByIncident(stories, (s) => s, incidents).map(({ incident, items }) =>
+        incident ? (
+          <div key={incident.id} role="group" aria-label={`Incident ${incident.label}`} style={{ borderLeft: '2px solid var(--line-2)', margin: '6px 0 6px 8px' }}>
+            <div
+              className="small"
+              style={{ padding: '4px 10px', color: 'var(--fg-2)' }}
+              title="stories that read as one intrusion: a strong or medium link joins each to another (open one to see why)"
+            >
+              <Dot sev={incident.severity} /> one intrusion · {items.length} stories{incident.stories.length > items.length ? ` of ${incident.stories.length} shown` : ''} ·{' '}
+              {spanText(incident.end - incident.start)}
+              {incident.cut > 0 && <span style={{ color: 'var(--sev-medium)' }}> · {incident.cut} linked left out (twenty at most)</span>}
+            </div>
+            <StoryRows stories={items} active={active} onSelect={onSelect} views={views} />
+          </div>
+        ) : (
+          <StoryRows key={items[0].id} stories={items} active={active} onSelect={onSelect} views={views} />
+        ),
+      )}
+    </>
+  )
+}
+
+function StoryRows({ stories, active, onSelect, views }: { stories: Story[]; active: string | null; onSelect: (id: string) => void; views?: Map<string, StoryView> }) {
   return (
     <>
       {stories.map((s) => (
-        <div key={s.id} className={'story-row' + (active === s.id ? ' active' : '')} onClick={() => onSelect(s.id)} role="button" aria-label={`Story ${s.title}`}>
+        <div
+          key={s.id}
+          className={'story-row' + (active === s.id ? ' active' : '') + (dismissed(views?.get(s.id)?.call?.verdict) ? ' dismissed' : '')}
+          onClick={() => onSelect(s.id)}
+          role="button"
+          aria-label={`Story ${s.title}${views?.get(s.id)?.part === 'split' ? ' (second part)' : ''}`}
+        >
           <Dot sev={s.severity} />
           <div style={{ minWidth: 0 }}>
             <div className="ellipsis name">
@@ -136,10 +226,43 @@ function StoryList({ stories, active, onSelect }: { stories: Story[]; active: st
             <span className={s.confidence === 'strong' ? 'bridged' : ''} title="the weakest tie of a flagged step">
               {s.confidence} ties
             </span>
+            <StoryCallTag view={views?.get(s.id)} />
           </div>
         </div>
       ))}
     </>
+  )
+}
+
+/** What a host story stands on, and the stories this one reads as one intrusion with: each link's kind, how surely and why. */
+function StoryLinks({ story, stories, onStory }: { story: Story; stories: Map<string, Story>; onStory: (id: string) => void }) {
+  const links = story.links ?? []
+  if (!links.length && !story.standing) return null
+  return (
+    <div className="small" style={{ marginTop: 8, color: 'var(--fg-2)' }}>
+      {story.standing && <div title="what makes this host's flags a story of their own">Stands on {story.standing}.</div>}
+      {links.length > 0 && (
+        <div role="list" aria-label="Linked stories" style={{ marginTop: story.standing ? 4 : 0 }}>
+          <strong style={{ color: 'var(--fg-1)' }}>Linked stories</strong>
+          {links.map((l) => {
+            const other = stories.get(l.story)
+            return (
+              <div key={l.story} role="listitem" style={{ marginTop: 2 }}>
+                <Dot sev={CONFIDENCE_SEV[l.confidence]} title={`${l.confidence} link`} />{' '}
+                {other ? (
+                  <span className="click" style={{ cursor: 'pointer', color: 'var(--fg-1)' }} onClick={() => onStory(other.id)}>
+                    {other.title}
+                  </span>
+                ) : (
+                  <span className="muted">a story this build does not list</span>
+                )}{' '}
+                · {LINK_LABEL[l.kind] ?? l.kind}, {l.confidence}: {l.basis}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -161,6 +284,7 @@ function Timeline({
   onSelect,
   readings,
   labels,
+  calls,
 }: {
   story: Story
   phase: string | null
@@ -168,6 +292,8 @@ function Timeline({
   onSelect: (id: string) => void
   readings: Map<string, MeasureReading>
   labels: Map<string, string>
+  /** the analyst's call on each step: a disputed step is struck out */
+  calls?: Map<string, StepCall>
 }) {
   const steps = phase ? story.steps.filter((s) => s.phase === phase) : story.steps
   return (
@@ -185,7 +311,10 @@ function Timeline({
         return (
           <div key={s.id}>
             {header && <div className="story-day">{d}</div>}
-            <div className={'step' + (selected === s.id ? ' active' : '') + (s.routine ? ' routine' : '')} onClick={() => onSelect(s.id)}>
+            <div
+              className={'step' + (selected === s.id ? ' active' : '') + (s.routine ? ' routine' : '') + (calls?.get(s.id)?.verdict === 'disputed' ? ' disputed' : '')}
+              onClick={() => onSelect(s.id)}
+            >
               <span className="t">
                 {fmtTs(s.ts).slice(11, 19) || fmtTs(s.ts)}
                 <br />
@@ -216,6 +345,7 @@ function Timeline({
                   <span className="tie" title={s.tie.basis}>
                     <Dot sev={CONFIDENCE_SEV[s.tie.confidence]} /> {TIE_LABEL[s.tie.kind]}
                   </span>
+                  <StepCallTag call={calls?.get(s.id)} />
                 </div>
               </span>
             </div>
@@ -426,33 +556,48 @@ function GapsPanel({ story, stats, caseGaps }: { story: Story; stats: StoryResul
   )
 }
 
-/** The analyst's note on a story, checked against the story's own rows: every address, hash and name it gives should be in them. */
-function StoryNote({ caseId, story, names }: { caseId: number; story: Story; names: string[] }) {
+/**
+ * The analyst's note on a story, checked against the story's own rows: every address, hash and name it
+ * gives should be in them. A saved note is checked again whenever it is shown, and the page asks
+ * before a story switch throws away what is typed and not saved.
+ */
+function StoryNote({
+  story,
+  entry,
+  names,
+  onSave,
+  onDirty,
+}: {
+  story: Story
+  entry: NoteOnStory | undefined
+  names: string[]
+  onSave: (text: string) => Promise<void>
+  onDirty: (dirty: boolean) => void
+}) {
   const kase = useStore((s) => s.currentCase)
-  const [text, setText] = useState('')
-  const [saved, setSaved] = useState('')
+  const saved = entry?.note.text ?? ''
+  // what the analyst is typing; null while the note shown is the saved one
+  const [draft, setDraft] = useState<string | null>(null)
   const [check, setCheck] = useState<TextCheck | null>(null)
+  const text = draft ?? saved
+  const dirty = draft !== null && draft !== saved
+  useEffect(() => onDirty(dirty), [dirty, onDirty])
   useEffect(() => {
-    loadStoryNotes(caseId).then((notes) => {
-      const v = notes[noteKey(story)]?.text ?? ''
-      setText(v)
-      setSaved(v)
-      setCheck(null)
-    })
-  }, [caseId, story])
-  const verify = async (value: string) => {
-    if (!kase || !value.trim()) return setCheck(null)
+    let alive = true
+    setCheck(null)
+    if (!kase || !saved.trim()) return
     const ds = getSource(kase)
     const ids = storyRowIds(story)
-    const [ev, ml] = await Promise.all([readRows(ds, 'events', ids.events), readRows(ds, 'mails', ids.mails)])
-    setCheck(checkText(value, [...ev.values(), ...ml.values()], names))
-  }
+    Promise.all([readRows(ds, 'events', ids.events), readRows(ds, 'mails', ids.mails)])
+      .then(([ev, ml]) => alive && setCheck(checkText(saved, [...ev.values(), ...ml.values()], names)))
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [kase, story, saved, names])
   const save = async () => {
-    const all = await loadStoryNotes(caseId)
-    all[noteKey(story)] = { text, updatedAt: Date.now() }
-    await getDb().kv.put({ key: STORY_NOTES_KEY(caseId), value: all })
-    setSaved(text)
-    await verify(text)
+    await onSave(text)
+    setDraft(null)
   }
   return (
     <div className="col" style={{ gap: 6 }}>
@@ -462,19 +607,50 @@ function StoryNote({ caseId, story, names }: { caseId: number; story: Story; nam
         rows={2}
         placeholder="Your reading of this story: it is checked against the story's own records"
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => setDraft(e.target.value)}
       />
       <div className="row" style={{ gap: 8 }}>
-        <button className="btn sm" disabled={text === saved} onClick={save}>
+        <button className="btn sm" disabled={!dirty} onClick={save}>
           Save note
         </button>
-        {check && (
+        {check && !dirty && (
           <span className="small" role="status">
             <Dot sev={check.status === 'verified' ? 'ok' : 'high'} />{' '}
             {check.status === 'verified' ? `every value it names is in the story's records (${check.named.length})` : check.reasons.join('; ')}
           </span>
         )}
       </div>
+    </div>
+  )
+}
+
+/** The notes whose story this build no longer holds: kept and listed, to put back on a story or delete. */
+function OrphanNotes({ orphans, story, onAttach, onDelete }: { orphans: OrphanNote[]; story: Story | null; onAttach: (o: OrphanNote) => void; onDelete: (o: OrphanNote) => void }) {
+  return (
+    <div className="section" role="region" aria-label="Notes whose story is gone" style={{ padding: '10px 14px', borderTop: '1px solid var(--line)' }}>
+      <h3>Notes whose story is gone ({orphans.length})</h3>
+      <div className="small muted" style={{ lineHeight: 1.5 }}>
+        The stories were built again and none of them holds what these notes were written on. They are kept: open the story a note belongs to and attach it there, or delete it.
+      </div>
+      {orphans.map((o) => (
+        <div key={o.key} className="col" style={{ gap: 3, marginTop: 10 }}>
+          <div className="small">
+            <strong>{o.title}</strong>
+            {o.start != null && <span className="muted"> · {day(o.start)}</span>}
+          </div>
+          <div className="small" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: 'var(--fg-2)' }}>
+            {o.note.text}
+          </div>
+          <div className="row" style={{ gap: 6 }}>
+            <button className="btn xs" disabled={!story} onClick={() => onAttach(o)} title={story ? `put this note on the story of ${story.title}` : 'open a story first'}>
+              attach to the open story
+            </button>
+            <button className="btn xs ghost" onClick={() => onDelete(o)}>
+              delete
+            </button>
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
@@ -489,6 +665,7 @@ function StepPane({
   onOpenAll,
   onExplore,
   onClose,
+  children,
 }: {
   story: Story
   step: StoryStep
@@ -499,6 +676,8 @@ function StepPane({
   onOpenAll: (step: StoryStep) => void
   onExplore: (nodeId: string) => void
   onClose: () => void
+  /** the analyst's decision on the step (StoryDecisions.tsx) */
+  children?: React.ReactNode
 }) {
   const setEntity = useStore((s) => s.setEntity)
   const session = story.lineage.sessions.find((s) => s.id === step.session)
@@ -566,12 +745,14 @@ function StepPane({
           <div className="small">
             <Dot sev={CONFIDENCE_SEV[step.tie.confidence]} /> <strong>{step.tie.confidence}</strong>: {step.tie.basis}
           </div>
+          {step.rarity && <div className="small muted">In this case: {step.rarity.text}</div>}
           {step.notes.map((n, i) => (
             <div key={i} className="small muted">
               {n}
             </div>
           ))}
         </div>
+        {children}
         {step.findings.length > 0 && (
           <div className="section">
             <h3>Findings, and what their rules are worth</h3>
@@ -672,9 +853,22 @@ function CampaignList({ campaigns, stories, active, onSelect }: { campaigns: Cam
   )
 }
 
-function CampaignDetail({ campaign, stories, onStory, onOpenRefs }: { campaign: Campaign; stories: Map<string, Story>; onStory: (id: string) => void; onOpenRefs: (refs: string[]) => void }) {
+function CampaignDetail({
+  campaign,
+  stories,
+  onStory,
+  onOpenRefs,
+  onExport,
+}: {
+  campaign: Campaign
+  stories: Map<string, Story>
+  onStory: (id: string) => void
+  onOpenRefs: (refs: string[]) => void
+  onExport: () => void
+}) {
   const setEntity = useStore((s) => s.setEntity)
-  const members = campaign.stories.map((s) => stories.get(s)).filter((s): s is Story => !!s)
+  // a story merged into another reads as that one: listed once
+  const members = [...new Set(campaign.stories.map((s) => stories.get(s)).filter((s): s is Story => !!s))]
   return (
     <div className="view-body col" style={{ gap: 14 }}>
       <div className="section">
@@ -684,6 +878,15 @@ function CampaignDetail({ campaign, stories, onStory, onOpenRefs }: { campaign: 
         <div className="small muted">
           {campaign.labelKind.replace('-', ' ')} · {fmtTs(campaign.start)} → {fmtTs(campaign.end)} · {members.length} {members.length === 1 ? 'story' : 'stories'} · {fmtNum(campaign.targets.length)}{' '}
           other account(s) reached
+        </div>
+        <div className="row" style={{ marginTop: 8 }}>
+          <button
+            className="btn sm"
+            onClick={onExport}
+            title="the campaign as a STIX 2.1 grouping (suspicious activity): the Attack Flow of each story, the infrastructure they share, the accounts reached"
+          >
+            <IconDownload /> Download STIX grouping
+          </button>
         </div>
       </div>
       {members.length > 0 && (
@@ -774,14 +977,28 @@ export function StoriesView() {
   const setAiPrompt = useStore((s) => s.setAiPrompt)
   const setFocusChain = useStore((s) => s.setFocusChain)
   const bump = useStore((s) => s.bumpRules)
+  const rulesVersion = useStore((s) => s.rulesVersion)
   const [res, setRes] = useState<StoryResult | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  /** why the snapshot no longer reads the case as it is; empty when it does */
+  const [stale, setStale] = useState<string[]>([])
+  /** what the page could not open as asked: a story or step a link points to that the stories no longer hold */
+  const [notice, setNotice] = useState('')
+  const [notes, setNotes] = useState<StoryNotes>({})
+  /** the analyst's decisions on the stories, applied to every build (data/storyDecisions.ts) */
+  const [decisions, setDecisions] = useState<StoryDecisions>({})
+  // what a build applies to the stories it returns, read when it returns
+  const decisionsRef = useRef<StoryDecisions>({})
+  useEffect(() => {
+    decisionsRef.current = decisions
+  }, [decisions])
   const [mode, setMode] = useState<Mode>('stories')
   const [storyId, setStoryId] = useState<string | null>(null)
   const [stepId, setStepId] = useState<string | null>(null)
   const [phase, setPhase] = useState<string | null>(null)
+  const [full, setFull] = useState(false)
   const [tab, setTab] = useState<Tab>('story')
   const [campaignId, setCampaignId] = useState<string | null>(null)
   const [query, setQuery] = useState('')
@@ -791,43 +1008,90 @@ export function StoriesView() {
   const [detail, setDetail] = useState<Detail>(null)
   const [explored, setExplored] = useState('')
   const g = useRelationshipGraph(kase)
+  // whether the open story's note holds text not saved yet (StoryNote says so as it changes)
+  const noteDirty = useRef(false)
+  const onNoteDirty = useCallback((d: boolean) => {
+    noteDirty.current = d
+  }, [])
+  /** True when the analyst keeps an unsaved note rather than let what they do next throw it away. */
+  const keepNote = () => noteDirty.current && !confirm('The note on this story is not saved. Discard it?')
 
-  const build = useCallback(async () => {
-    if (!kase) return
-    setBusy(true)
-    setError('')
-    try {
-      const r = await buildStories(kase)
-      setRes(r)
-      setStoryId((cur) => (cur && r.stories.some((s) => s.id === cur) ? cur : (r.stories[0]?.id ?? null)))
-      setStepId(null)
-      bump()
-      toast(
-        r.stories.length ? 'ok' : 'warn',
-        `${r.stories.length} ${r.stories.length === 1 ? 'story' : 'stories'} and ${r.campaigns.length} campaign(s) from ${fmtNum(Number(r.stats.events ?? 0))} event(s) and ${fmtNum(Number(r.stats.mails ?? 0))} mail(s)`,
-      )
-    } catch (e) {
-      setError((e as Error).message)
-    } finally {
-      setBusy(false)
-    }
-  }, [kase, bump])
+  /**
+   * Build the stories. What was open stays open: the story (followed by what it shares when its id
+   * changed) and its step, or the story a link asked for; the page says so when it is gone.
+   */
+  const build = useCallback(
+    async (follow?: Follow | null) => {
+      if (!kase) return
+      setBusy(true)
+      setError('')
+      try {
+        const r = await buildStories(kase)
+        setRes(r)
+        setStale([])
+        // the analyst's decisions apply to the new build as to the last: what was open is found among the stories as they show
+        const decided = applyStoryDecisions(r, decisionsRef.current)
+        let next: StoryView | null = null
+        if (follow && 'link' in follow) {
+          next = decided.views.find((v) => v.story.id === follow.link || v.story.chains.includes(follow.link)) ?? decided.byId.get(follow.link) ?? null
+          if (next) setNotice('')
+        } else if (follow) {
+          const found = findStory(follow.story, follow.identities, r.stories, r.identities)
+          next = found ? (decided.byId.get(found.id) ?? null) : null
+          // the second part of a split story that was open stays open
+          if (next && follow.story.id.endsWith('~2')) next = decided.byId.get(splitId(next.base.id)) ?? next
+          if (!next) setNotice(`The story of ${follow.story.title} that was open is not among the stories built again: pick one from the list.`)
+        }
+        setStoryId(follow ? (next?.story.id ?? null) : (decided.views[0]?.story.id ?? null))
+        setStepId(follow?.step && next?.story.steps.some((s) => s.id === follow.step) ? follow.step : null)
+        bump()
+        toast(
+          r.stories.length ? 'ok' : 'warn',
+          `${r.stories.length} ${r.stories.length === 1 ? 'story' : 'stories'} and ${r.campaigns.length} campaign(s) from ${fmtNum(Number(r.stats.events ?? 0))} event(s) and ${fmtNum(Number(r.stats.mails ?? 0))} mail(s)`,
+        )
+      } catch (e) {
+        setError((e as Error).message)
+      } finally {
+        setBusy(false)
+      }
+    },
+    [kase, bump],
+  )
 
-  // the snapshot, the rule measures and the case's gaps; a case with findings and no snapshot is read into stories at once
+  // the snapshot, the notes, the rule measures and the case's gaps. A case with findings and no snapshot is read
+  // into stories at once, and so is an out-of-date snapshot when building it again is cheap.
   useEffect(() => {
     if (!kase?.id) return
     let alive = true
     setLoaded(false)
     setRes(null)
-    loadStories(kase.id).then(async (r) => {
+    setNotice('')
+    Promise.all([loadStories(kase.id), loadStoryNotes(kase.id), loadStoryDecisions(kase.id)]).then(async ([r, n, d]) => {
       if (!alive) return
       setRes(r)
+      setNotes(n)
+      setDecisions(d)
+      decisionsRef.current = d
+      // a link from the case timeline or the review: a chain's story, or a story and, after '#', one of its steps
       const want = useStore.getState().focusChain
       if (want) setFocusChain(null)
-      const focus = want ? r?.stories.find((s) => s.chains.includes(want) || s.id === want) : null
-      setStoryId(focus?.id ?? r?.stories[0]?.id ?? null)
+      const wantId = want ? want.split('#')[0] : null
+      const wantStep = want && want.includes('#') ? want.slice(want.indexOf('#') + 1) : null
+      const decided = applyStoryDecisions(r, d)
+      const focus = wantId ? (decided.views.find((v) => v.story.chains.includes(wantId) || v.story.id === wantId)?.story ?? decided.byId.get(wantId)?.story ?? null) : null
+      const focusStep = focus && wantStep ? (focus.steps.find((s) => s.id === wantStep) ?? null) : null
+      if (wantId && r && !focus) setNotice('The story this link points to is not among the stories: they were built again since it was added. Pick it from the list.')
+      else if (focus && wantStep && !focusStep) setNotice(`The step this link points to is no longer in the story of ${focus.title}: it was built again since the link was added.`)
+      setStoryId(focus?.id ?? (wantId ? null : (decided.views[0]?.story.id ?? null)))
+      setStepId(focusStep?.id ?? null)
       setLoaded(true)
-      if (!r && (await getDb().findings.where('caseId').equals(kase.id!).count())) build()
+      if (!r) {
+        if (await getDb().findings.where('caseId').equals(kase.id!).count()) build()
+        return
+      }
+      const reasons = storiesStaleness(r, await storyInputs(kase))
+      const open = focus ?? (wantId ? null : (decided.views[0]?.story ?? null))
+      if (alive && reasons.length && cheapToRebuild(r)) build(open ? { story: open, identities: r.identities, step: focusStep?.id } : wantId ? { link: wantId, step: wantStep ?? undefined } : null)
     })
     loadRules(kase.id)
       .then((rules) => alive && setReadings(new Map(rules.map((r) => [r.rule.id, readMeasure(r.measured, r.origin)]))))
@@ -842,20 +1106,43 @@ export function StoriesView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kase?.id])
 
+  // does the snapshot still read the case as it is? Asked again after a rule run, a decision on a finding or a settings change
+  useEffect(() => {
+    if (!kase?.id || !res) return setStale([])
+    let alive = true
+    storyInputs(kase)
+      .then((now) => alive && setStale(storiesStaleness(res, now)))
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [kase, res, rulesVersion])
+
   const labels = useMemo(() => new Map((res?.identities ?? []).map((i) => [i.id, i.label])), [res])
-  const byStory = useMemo(() => new Map((res?.stories ?? []).map((s) => [s.id, s])), [res])
+  // the stories as the page shows them: the build with the analyst's decisions applied
+  const decided = useMemo(() => applyStoryDecisions(res, decisions), [res, decisions])
+  const byStory = useMemo(() => new Map([...decided.byId].map(([id, v]) => [id, v.story])), [decided])
+  const resolved = useMemo(() => resolveStoryNotes(res?.stories ?? [], res?.identities ?? [], notes), [res, notes])
   const shown = useMemo(
     () =>
-      (res?.stories ?? []).filter(
-        (s) =>
-          (!kind || s.kind === kind) && (!query || `${s.title} ${s.headline} ${s.hosts.join(' ')} ${s.attackerAddresses.join(' ')} ${s.ips.join(' ')}`.toLowerCase().includes(query.toLowerCase())),
-      ),
-    [res, kind, query],
+      decided.views
+        .map((v) => v.story)
+        .filter(
+          (s) =>
+            (!kind || s.kind === kind) && (!query || `${s.title} ${s.headline} ${s.hosts.join(' ')} ${s.attackerAddresses.join(' ')} ${s.ips.join(' ')}`.toLowerCase().includes(query.toLowerCase())),
+        ),
+    [decided, kind, query],
   )
-  const story = storyId ? (byStory.get(storyId) ?? null) : null
+  const view = storyId ? (decided.byId.get(storyId) ?? null) : null
+  const story = view?.story ?? null
   const step = story && stepId ? (story.steps.find((s) => s.id === stepId) ?? null) : null
   const campaign = res?.campaigns.find((c) => c.id === campaignId) ?? null
   const identity = story?.kind === 'person' ? res?.identities.find((i) => i.id === story.subject.id) : undefined
+  // what a note on the open story is checked for: its hosts, its accounts and the addresses it came from
+  const noteNames = useMemo(() => (story ? [...story.hosts, ...story.accounts.map((a) => labels.get(a) ?? a), ...story.attackerAddresses] : []), [story, labels])
+  // a story opens on its spine; the full timeline when asked, when a phase filters it, when the step open is off the spine
+  const spine = useMemo(() => (story ? spineSteps(story) : null), [story])
+  const showAll = full || !!phase || !spine?.length || (!!stepId && !spine.some((s) => s.id === stepId))
 
   // j / k move between the steps of the open story
   useEffect(() => {
@@ -863,13 +1150,13 @@ export function StoriesView() {
       const el = e.target as HTMLElement | null
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return
       if (mode !== 'stories' || !story || (e.key !== 'j' && e.key !== 'k')) return
-      const steps = phase ? story.steps.filter((s) => s.phase === phase) : story.steps
+      const steps = !showAll && spine ? spine : phase ? story.steps.filter((s) => s.phase === phase) : story.steps
       const i = stepId ? steps.findIndex((s) => s.id === stepId) : -1
       setStepId(steps[e.key === 'j' ? Math.min(steps.length - 1, i + 1) : Math.max(0, i - 1)]?.id ?? null)
     }
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
-  }, [mode, story, stepId, phase])
+  }, [mode, story, stepId, phase, showAll, spine])
 
   if (!kase) return null
   const openRow = async (source: 'events' | 'mails', id: number) => {
@@ -900,29 +1187,83 @@ export function StoriesView() {
     setView('events')
   }
   const selectStory = (id: string) => {
+    if (id !== storyId && keepNote()) return
     setMode('stories')
     setStoryId(id)
     setStepId(null)
     setPhase(null)
+    setNotice('')
+  }
+  // the note is shown in the Stories mode only: leaving it asks first, as a story switch does
+  const switchMode = (m: Mode) => {
+    if (m !== mode && mode === 'stories' && keepNote()) return
+    setMode(m)
   }
   const explore = (nodeId: string) => {
+    if (keepNote()) return
     setMode('explore')
     setExplored(nodeId)
   }
+  const rebuild = () => {
+    if (keepNote()) return
+    build(story ? { story, identities: res?.identities ?? [], step: stepId ?? undefined } : null)
+  }
+  // the request is the analyst's; what the story took from the records reaches the model as evidence
   const ask = (s: Story) => {
-    setAiPrompt(
-      `Walk me through story ${s.id} of ${s.title} (${s.severity}, ${s.steps.length} steps from ${new Date(s.start).toISOString()} to ${new Date(s.end).toISOString()}), read as ATT&CK phases: ${s.phases
-        .map((p) => p.label)
-        .join(' → ')}. Steps: ${s.steps
-        .slice(0, 30)
-        .map((st) => `${new Date(st.ts).toISOString()} [${st.phase ? PHASE_LABEL[st.phase] : 'context'}] ${st.title}${st.count > 1 ? ` ×${st.count}` : ''} (why: ${st.tie.basis})`)
-        .join(
-          ' | ',
-        )}. Where it stops: ${storyGaps(s, res?.stats).join(' ') || 'nothing noted'}. Which steps confirm compromise, which are routine, what is missing, and what should be checked or contained next?`,
-    )
+    setAiPrompt(storyQuestion(s, res?.stats))
     setView('ai')
   }
-  const sevCounts = (res?.stories ?? []).reduce<Record<string, number>>((m, s) => ((m[s.severity] = (m[s.severity] ?? 0) + 1), m), {})
+  const saveNote = async (text: string) => {
+    if (!story) return
+    setNotes(await saveStoryNote(kase.id!, story, res?.identities ?? [], text, resolved.byStory.get(story.id)?.key))
+  }
+  const attachNote = async (o: OrphanNote) => {
+    if (!story) return
+    setNotes(await attachStoryNote(kase.id!, o.key, story, res?.identities ?? [], resolved.byStory.get(story.id)?.key))
+  }
+  const dropNote = async (o: OrphanNote) => {
+    if (!confirm(`Delete the note written on the story of ${o.title}? It cannot be undone.`)) return
+    setNotes(await deleteStoryNote(kase.id!, o.key))
+  }
+  // the analyst's decisions: each written to the engine story it is about, the one that holds the step for a step's
+  const identities = res?.identities ?? []
+  const decide = async (target: DecisionSource, change: (d: StoryDecision) => void) => {
+    try {
+      setDecisions(await decideStory(kase.id!, target, identities, change))
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+  const ownerOf = (v: StoryView, st: StoryStep) => v.sources.find((src) => src.story.steps.some((x) => x.id === st.id)) ?? v.sources[0]
+  const decideStep = async (v: StoryView, st: StoryStep, verdict: StepCall['verdict'] | null, reason: string, alsoFalsePositive: boolean) => {
+    await decide(ownerOf(v, st), (d) => setStepCall(d, st, verdict, reason))
+    // disputing a step leaves its findings as they are, unless the analyst asks: then through the findings' own review
+    if (verdict !== 'disputed' || !alsoFalsePositive) return
+    const why = `False positive: the analyst disputed the step "${st.title}" of the story of ${v.story.title}${reason.trim() ? `: ${reason.trim()}` : '.'}`
+    const n = await decideFindings(kase.id!, st.findings.map((f) => f.key ?? '').filter(Boolean), 'false_positive', why)
+    bump()
+    toast('ok', `${n} finding(s) marked false positive: the stories are out of date until they are built again`)
+  }
+  const stepOut = async (v: StoryView, st: StoryStep, reason: string) => {
+    await decide(ownerOf(v, st), (d) => takeOut(d, st, reason))
+    setStepId(null)
+  }
+  const split = async (v: StoryView, st: StoryStep, reason: string) => {
+    await decide(v.sources[0], (d) => splitAt(d, st, reason))
+    setStoryId(splitId(v.base.id))
+  }
+  const merge = async (v: StoryView, target: StoryView, reason: string, orgs?: string[]) => {
+    await decide(v.sources[0], (d) => mergeInto(d, storyAnchor(target.base, identities), reason, orgs))
+    setStoryId(target.story.id)
+    setStepId(null)
+  }
+  const attachDecision = async (key: string) => {
+    if (view) setDecisions(await attachStoryDecision(kase.id!, key, view.sources[0], identities))
+  }
+  const dropDecision = async (key: string) => setDecisions(await deleteStoryDecision(kase.id!, key))
+  // the notes of the stories merged into the open one, which read as part of it
+  const mergedNotes = view?.part === 'story' ? view.merged.flatMap((m) => (resolved.byStory.has(m.story.id) ? [{ title: m.story.title, text: resolved.byStory.get(m.story.id)!.note.text }] : [])) : []
+  const sevCounts = decided.views.reduce<Record<string, number>>((m, v) => ((m[v.story.severity] = (m[v.story.severity] ?? 0) + 1), m), {})
   const warnings = storyCoverageWarnings(res?.stats)
   return (
     <div className="view">
@@ -931,7 +1272,7 @@ export function StoriesView() {
           <h1>Stories</h1>
           <span className="sub">
             {res
-              ? `${res.stories.length} ${res.stories.length === 1 ? 'story' : 'stories'} · ${
+              ? `${decided.views.length} ${decided.views.length === 1 ? 'story' : 'stories'} · ${
                   SEV_ORDER.slice()
                     .reverse()
                     .filter((k) => sevCounts[k])
@@ -946,7 +1287,7 @@ export function StoriesView() {
           </span>
         </div>
         <span className="spacer" />
-        <button className="btn sm primary" onClick={build} disabled={busy}>
+        <button className="btn sm primary" onClick={rebuild} disabled={busy}>
           {busy ? <Spinner /> : <IconPlay />} {res ? 'Rebuild stories' : 'Build stories'}
         </button>
       </div>
@@ -955,22 +1296,53 @@ export function StoriesView() {
           {error}
         </div>
       )}
+      {stale.length > 0 && !busy && (
+        <div className="panel row" role="status" aria-label="Stories out of date" style={{ margin: '6px 16px', padding: '6px 10px', gap: 10, borderColor: 'var(--sev-medium)' }}>
+          <span>
+            <strong>Out of date:</strong> {stale.join('; ')}. These stories read the case as it was then.
+          </span>
+          <span className="spacer" />
+          <button className="btn xs primary" onClick={rebuild}>
+            rebuild
+          </button>
+        </div>
+      )}
+      {notice && (
+        <div className="panel row" role="status" style={{ margin: '6px 16px', padding: '6px 10px', gap: 10 }}>
+          <span>{notice}</span>
+          <span className="spacer" />
+          <button className="btn xs ghost" onClick={() => setNotice('')}>
+            dismiss
+          </button>
+        </div>
+      )}
       {warnings.map((w) => (
         <div className="panel" role="status" key={w} style={{ margin: '6px 16px', padding: '6px 10px' }}>
           Incomplete: {w} An absent step or story is not a negative result.
         </div>
       ))}
+      {resolved.orphans.length > 0 && (
+        <div className="panel" role="status" style={{ margin: '6px 16px', padding: '6px 10px' }}>
+          {resolved.orphans.length === 1 ? 'A note is' : `${resolved.orphans.length} notes are`} on a story these stories no longer hold: listed under the stories, to attach again or delete.
+        </div>
+      )}
+      {decided.orphans.length > 0 && (
+        <div className="panel" role="status" style={{ margin: '6px 16px', padding: '6px 10px' }}>
+          {decided.orphans.length === 1 ? 'The decisions on a story are' : `The decisions on ${decided.orphans.length} stories are`} kept for a story these stories no longer hold: listed under the
+          stories, to attach again or delete. Until then the report does not count them.
+        </div>
+      )}
       <div className="split" style={{ gridTemplateColumns: '340px 1fr' }}>
         <div className="left">
           <div className="row" style={{ padding: '10px 14px', gap: 10, borderBottom: '1px solid var(--line)' }}>
             <div className="segmented">
-              <button className={mode === 'stories' ? 'active' : ''} onClick={() => setMode('stories')}>
+              <button className={mode === 'stories' ? 'active' : ''} onClick={() => switchMode('stories')}>
                 Stories
               </button>
-              <button className={mode === 'campaigns' ? 'active' : ''} onClick={() => setMode('campaigns')}>
+              <button className={mode === 'campaigns' ? 'active' : ''} onClick={() => switchMode('campaigns')}>
                 Campaigns
               </button>
-              <button className={mode === 'explore' ? 'active' : ''} onClick={() => setMode('explore')}>
+              <button className={mode === 'explore' ? 'active' : ''} onClick={() => switchMode('explore')}>
                 Explore
               </button>
             </div>
@@ -1000,7 +1372,9 @@ export function StoriesView() {
                   {res.unstoried.length ? ` ${res.unstoried.length} flag(s) stand outside any story; Campaigns groups them by sender and address.` : ''}
                 </div>
               )}
-              <StoryList stories={shown} active={storyId} onSelect={selectStory} />
+              <StoryList stories={shown} incidents={res?.incidents} active={storyId} onSelect={selectStory} views={decided.byId} />
+              {resolved.orphans.length > 0 && <OrphanNotes orphans={resolved.orphans} story={story} onAttach={attachNote} onDelete={dropNote} />}
+              {decided.orphans.length > 0 && <OrphanDecisions orphans={decided.orphans} story={view} onAttach={attachDecision} onDelete={dropDecision} />}
             </>
           )}
           {mode === 'campaigns' && <CampaignList campaigns={res?.campaigns ?? []} stories={byStory} active={campaignId} onSelect={setCampaignId} />}
@@ -1010,7 +1384,13 @@ export function StoriesView() {
           {mode === 'explore' && <Explorer g={g} selected={explored} onSelect={setExplored} onOpen={(ref) => ref.id != null && openRow(ref.source, ref.id)} />}
           {mode === 'campaigns' &&
             (campaign ? (
-              <CampaignDetail campaign={campaign} stories={byStory} onStory={selectStory} onOpenRefs={openRefs} />
+              <CampaignDetail
+                campaign={campaign}
+                stories={byStory}
+                onStory={selectStory}
+                onOpenRefs={openRefs}
+                onExport={() => downloadCampaignGrouping(kase, campaign, [...byStory.values()], res?.identities ?? []).catch((e) => setError((e as Error).message))}
+              />
             ) : (
               <div className="muted" style={{ padding: 24 }}>
                 {res?.campaigns.length ? 'select a campaign' : ''}
@@ -1021,7 +1401,7 @@ export function StoriesView() {
               {res?.stories.length ? 'select a story' : ''}
             </div>
           )}
-          {mode === 'stories' && story && (
+          {mode === 'stories' && story && view && (
             <>
               <div className="story-head">
                 <div className="row" style={{ gap: 10, alignItems: 'flex-start' }}>
@@ -1036,9 +1416,10 @@ export function StoriesView() {
                       >
                         {story.title}
                       </span>
+                      {view.part === 'split' && <span className="muted"> (second part)</span>}
                       <span className="muted" style={{ fontWeight: 400 }}>
                         {' '}
-                        · score {story.score} · {story.steps.length} steps, {fmtNum(story.records)} records over {spanText(story.end - story.start)} ·{' '}
+                        · <span title={scoreTitle(story)}>score {story.score}</span> · {story.steps.length} steps, {fmtNum(story.records)} records over {spanText(story.end - story.start)} ·{' '}
                         <span title="the weakest tie of a flagged step: strong when records state it, medium when naming rules or time and place join it">{story.confidence} ties</span>
                       </span>
                     </div>
@@ -1052,6 +1433,13 @@ export function StoriesView() {
                   <AddToTimeline ts={story.start} text={`Story ${story.title}: ${story.headline}`} link={{ source: 'stories', id: story.id, label: story.title }} severity={story.severity} />
                   <button className="btn sm" onClick={() => ask(story)}>
                     <IconAi /> ask the analyst
+                  </button>
+                  <button
+                    className="btn sm"
+                    onClick={() => downloadAttackFlow(kase, story, res?.identities ?? []).catch((e) => setError((e as Error).message))}
+                    title="the story as a MITRE Attack Flow: a STIX 2.1 bundle, one action per step of its spine"
+                  >
+                    <IconDownload /> Download Attack Flow
                   </button>
                 </div>
                 <div className="row wrap small" style={{ gap: 6, marginTop: 8 }}>
@@ -1072,6 +1460,7 @@ export function StoriesView() {
                         key={c}
                         className="pill"
                         onClick={() => {
+                          if (keepNote()) return
                           setMode('campaigns')
                           setCampaignId(c)
                         }}
@@ -1094,7 +1483,23 @@ export function StoriesView() {
                     </span>
                   )}
                 </div>
-                <StoryNote caseId={kase.id!} story={story} names={[...story.hosts, ...story.accounts.map((a) => labels.get(a) ?? a), ...story.attackerAddresses]} />
+                <StoryLinks story={story} stories={byStory} onStory={selectStory} />
+                {view.part === 'story' ? (
+                  <StoryNote key={story.id} story={story} entry={resolved.byStory.get(story.id)} names={noteNames} onSave={saveNote} onDirty={onNoteDirty} />
+                ) : (
+                  <div className="small muted">The note on this story is on its first part.</div>
+                )}
+                {mergedNotes.map((m) => (
+                  <div key={m.title} className="small" style={{ whiteSpace: 'pre-wrap', color: 'var(--fg-2)' }}>
+                    <span className="muted">Note on the story of {m.title}, merged into this one:</span> {m.text}
+                  </div>
+                ))}
+                <StoryCallBar
+                  key={`call:${story.id}:${view.call?.decidedAt ?? 0}`}
+                  view={view}
+                  onDecide={(verdict, reason) => decide(view.sources[0], (d) => setCall(d, view.part, verdict, reason))}
+                />
+                <StoryTools key={`tools:${story.id}`} view={view} views={decided.views} labels={labels} onMerge={(target, reason, orgs) => merge(view, target, reason, orgs)} />
               </div>
               <PhaseRail story={story} active={phase} onPick={setPhase} />
               <Tabs
@@ -1103,6 +1508,7 @@ export function StoriesView() {
                   { id: 'lineage' as const, label: `Lineage (${story.lineage.sessions.length + story.lineage.hops.length + story.lineage.processes.length})` },
                   { id: 'identity' as const, label: 'Who is who' },
                   { id: 'gaps' as const, label: `Where it stops (${storyGaps(story, res?.stats).length + caseGaps.length})` },
+                  { id: 'decisions' as const, label: `Decisions (${decisionCount(view)})` },
                   { id: 'json' as const, label: 'JSON' },
                 ]}
                 active={tab}
@@ -1111,7 +1517,20 @@ export function StoriesView() {
               {tab === 'story' && (
                 <div className="pane" style={{ flex: 1, height: 'auto', borderTop: 0, gridTemplateColumns: step ? '1fr 380px' : '1fr' }}>
                   <div className="pane-main" style={{ overflow: 'auto' }}>
-                    <Timeline story={story} phase={phase} selected={stepId} onSelect={setStepId} readings={readings} labels={labels} />
+                    <StorySpine
+                      story={story}
+                      full={showAll}
+                      onFull={(on) => {
+                        setFull(on)
+                        if (on) return
+                        setPhase(null)
+                        if (stepId && !spine?.some((s) => s.id === stepId)) setStepId(null)
+                      }}
+                      selected={stepId}
+                      onSelect={setStepId}
+                      labels={labels}
+                    />
+                    {showAll && <Timeline story={story} phase={phase} selected={stepId} onSelect={setStepId} readings={readings} labels={labels} calls={view.steps} />}
                   </div>
                   {step && (
                     <StepPane
@@ -1124,13 +1543,40 @@ export function StoriesView() {
                       onOpenAll={(s) => openRefs(s.refs)}
                       onExplore={explore}
                       onClose={() => setStepId(null)}
-                    />
+                    >
+                      <StepDecisionPanel
+                        key={step.id}
+                        view={view}
+                        step={step}
+                        onCall={(verdict, reason, alsoFalsePositive) => decideStep(view, step, verdict, reason, alsoFalsePositive)}
+                        onOut={(reason) => stepOut(view, step, reason)}
+                        onSplit={(reason) => split(view, step, reason)}
+                      />
+                    </StepPane>
                   )}
                 </div>
               )}
               {tab === 'lineage' && <LineagePanel story={story} highlight={step?.process} />}
               {tab === 'identity' && <IdentityPanel identity={identity} />}
               {tab === 'gaps' && <GapsPanel story={story} stats={res?.stats} caseGaps={caseGaps} />}
+              {tab === 'decisions' && (
+                <DecisionsPanel
+                  view={view}
+                  onOpenStep={(id) => {
+                    setTab('story')
+                    setStepId(id)
+                  }}
+                  onUndoCall={() => decide(view.sources[0], (d) => setCall(d, view.part, 'open', ''))}
+                  onUndoStep={(st) => decide(ownerOf(view, st), (d) => setStepCall(d, st, null))}
+                  onDropLost={(l) => decide(l.source, (d) => dropStepCall(d, l.call))}
+                  onPutBack={(o) => decide(o.source, (d) => putBack(d, o.out))}
+                  onUnsplit={() => {
+                    void decide(view.sources[0], (d) => delete d.split)
+                    setStoryId(view.base.id)
+                  }}
+                  onUnmerge={(m) => decide(m ?? view.sources[0], (d) => delete d.merge)}
+                />
+              )}
               {tab === 'json' && (
                 <div className="view-body">
                   <pre className="codeblock">{JSON.stringify(story, null, 2)}</pre>
