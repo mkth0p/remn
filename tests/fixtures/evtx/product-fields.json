@@ -1,0 +1,235 @@
+[
+ {
+  "name": "a login added to sysadmin",
+  "event": {
+   "Event": {
+    "System": {
+     "Provider": {
+      "#attributes": {
+       "Name": "MSSQL$PROD"
+      }
+     },
+     "EventID": {
+      "#attributes": {
+       "Qualifiers": 16384
+      },
+      "#text": 33205
+     },
+     "Level": 0,
+     "Task": 5,
+     "Keywords": "0xa0000000000000",
+     "TimeCreated": {
+      "#attributes": {
+       "SystemTime": "2026-09-01T09:10:00.000000Z"
+      }
+     },
+     "EventRecordID": 101,
+     "Channel": "Application",
+     "Computer": "sql01.corp.local",
+     "Security": null
+    },
+    "EventData": {
+     "Data": "audit_schema_version:1\nevent_time:2026-09-01 09:10:00.0000000\nsequence_number:1\naction_id:APRL\nsucceeded:true\nis_column_permission:false\nsession_id:54\nserver_principal_id:2\nclass_type:SG\nsession_server_principal_name:CORP\\dba1\nserver_principal_name:CORP\\dba1\ntarget_server_principal_name:backdoor\ndatabase_name:\nobject_name:sysadmin\nstatement:ALTER SERVER ROLE [sysadmin] ADD MEMBER [backdoor]\nadditional_information:"
+    }
+   }
+  },
+  "expect": {
+   "eventType": "APRL",
+   "objectType": "SG",
+   "objectName": "sysadmin",
+   "subjectDomain": "CORP",
+   "subjectUser": "dba1",
+   "targetUser": "backdoor"
+  }
+ },
+ {
+  "name": "a failed login, the address in the action info",
+  "event": {
+   "Event": {
+    "System": {
+     "Provider": {
+      "#attributes": {
+       "Name": "MSSQL$PROD"
+      }
+     },
+     "EventID": {
+      "#attributes": {
+       "Qualifiers": 16384
+      },
+      "#text": 33205
+     },
+     "Level": 0,
+     "Task": 5,
+     "Keywords": "0xa0000000000000",
+     "TimeCreated": {
+      "#attributes": {
+       "SystemTime": "2026-09-01T09:10:00.000000Z"
+      }
+     },
+     "EventRecordID": 101,
+     "Channel": "Application",
+     "Computer": "sql01.corp.local",
+     "Security": null
+    },
+    "EventData": {
+     "Data": "audit_schema_version:1\nevent_time:2026-09-01 09:10:00.0000000\nsequence_number:1\naction_id:LGIF\nsucceeded:false\nis_column_permission:false\nsession_id:54\nserver_principal_id:2\nclass_type:LX\nsession_server_principal_name:\nserver_principal_name:sa\ntarget_server_principal_name:\ndatabase_name:\nobject_name:\nstatement:Login failed for user 'sa'. Reason: Password did not match that for the login provided. [CLIENT: 203.0.113.9]\nadditional_information:<action_info xmlns=\"http://schemas.microsoft.com/sqlserver/2008/sqlaudit_data\"><pooled_connection>0</pooled_connection><error>0x00004818</error><state>8</state><address>203.0.113.9</address></action_info>"
+    }
+   }
+  },
+  "expect": {
+   "eventType": "LGIF",
+   "objectType": "LX",
+   "objectName": null,
+   "subjectUser": "sa",
+   "targetUser": "sa",
+   "ipAddress": "203.0.113.9"
+  }
+ },
+ {
+  "name": "sshd, an unknown user",
+  "event": {
+   "Event": {
+    "System": {
+     "Provider": {
+      "#attributes": {
+       "Name": "OpenSSH",
+       "Guid": "C4B57D35-0636-4BC3-A262-370F249F9802"
+      }
+     },
+     "EventID": 4,
+     "Version": 0,
+     "Level": 4,
+     "Task": 0,
+     "Opcode": 0,
+     "Keywords": "0x4000000000000000",
+     "TimeCreated": {
+      "#attributes": {
+       "SystemTime": "2026-09-01T09:12:00.000000Z"
+      }
+     },
+     "EventRecordID": 7,
+     "Execution": {
+      "#attributes": {
+       "ProcessID": 5848,
+       "ThreadID": 4412
+      }
+     },
+     "Channel": "OpenSSH/Operational",
+     "Computer": "fs01.corp.local",
+     "Security": {
+      "#attributes": {
+       "UserID": "S-1-5-18"
+      }
+     }
+    },
+    "EventData": {
+     "process": "sshd",
+     "payload": "Invalid user admin from 203.0.113.7 port 60096"
+    }
+   }
+  },
+  "expect": {
+   "targetUser": "admin",
+   "ipAddress": "203.0.113.7",
+   "ipPort": 60096
+  }
+ },
+ {
+  "name": "sshd, a known user giving up",
+  "event": {
+   "Event": {
+    "System": {
+     "Provider": {
+      "#attributes": {
+       "Name": "OpenSSH",
+       "Guid": "C4B57D35-0636-4BC3-A262-370F249F9802"
+      }
+     },
+     "EventID": 4,
+     "Version": 0,
+     "Level": 4,
+     "Task": 0,
+     "Opcode": 0,
+     "Keywords": "0x4000000000000000",
+     "TimeCreated": {
+      "#attributes": {
+       "SystemTime": "2026-09-01T09:12:00.000000Z"
+      }
+     },
+     "EventRecordID": 7,
+     "Execution": {
+      "#attributes": {
+       "ProcessID": 5848,
+       "ThreadID": 4412
+      }
+     },
+     "Channel": "OpenSSH/Operational",
+     "Computer": "fs01.corp.local",
+     "Security": {
+      "#attributes": {
+       "UserID": "S-1-5-18"
+      }
+     }
+    },
+    "EventData": {
+     "process": "sshd",
+     "payload": "Connection closed by authenticating user alice 203.0.113.7 port 56589 [preauth]"
+    }
+   }
+  },
+  "expect": {
+   "targetUser": "alice",
+   "ipAddress": "203.0.113.7",
+   "ipPort": 56589
+  }
+ },
+ {
+  "name": "sshd, a line naming no one",
+  "event": {
+   "Event": {
+    "System": {
+     "Provider": {
+      "#attributes": {
+       "Name": "OpenSSH",
+       "Guid": "C4B57D35-0636-4BC3-A262-370F249F9802"
+      }
+     },
+     "EventID": 4,
+     "Version": 0,
+     "Level": 4,
+     "Task": 0,
+     "Opcode": 0,
+     "Keywords": "0x4000000000000000",
+     "TimeCreated": {
+      "#attributes": {
+       "SystemTime": "2026-09-01T09:12:00.000000Z"
+      }
+     },
+     "EventRecordID": 7,
+     "Execution": {
+      "#attributes": {
+       "ProcessID": 5848,
+       "ThreadID": 4412
+      }
+     },
+     "Channel": "OpenSSH/Operational",
+     "Computer": "fs01.corp.local",
+     "Security": {
+      "#attributes": {
+       "UserID": "S-1-5-18"
+      }
+     }
+    },
+    "EventData": {
+     "process": "sshd",
+     "payload": "Server listening on :: port 22."
+    }
+   }
+  },
+  "expect": {
+   "targetUser": null,
+   "ipAddress": null,
+   "ipPort": null
+  }
+ }
+]

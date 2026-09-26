@@ -1,0 +1,415 @@
+# Detections on the logs of server products running on Windows: SQL Server's audit (33205) and configuration events, the OpenSSH server, Active Directory Certificate Services, the DNS server's audit channel and BitLocker.
+id: win-mssql-audit-tampered
+title: SQL Server audit or audit specification altered, dropped or stopped
+description: >-
+  SQL Server's own audit recorded a change to an audit or an audit specification (33205 with ALTER or
+  DROP on a server audit, a server audit specification or a database audit specification), or an audit
+  session stopping or being destroyed. An attacker with sysadmin disables or drops the audit before
+  working in the database, so the rest of what they do leaves no 33205 behind. Benign causes: the
+  database administrators or an auditor reworking the audit configuration, which is rare and planned.
+severity: high
+source: events
+attack: [T1685.001]
+tags: [defense-evasion, mssql]
+entities: [computer, subjectUser, objectName]
+where:
+  eventId: 33205
+  provider|contains: MSSQL
+  any_of:
+    - { eventType|in: [AL, DR], objectType|in: [A, SA, DA] }
+    - { eventType: AUSC, message|contains_any: ["event disabled", destroyed] }
+group_by: [computer, subjectUser, objectName]
+threshold: ">= 1"
+---
+id: win-mssql-server-role-member-added
+title: Login added to a SQL Server server role
+description: >-
+  A login was added to a fixed or user-defined server role (33205, ADD MEMBER on a server role), most
+  often sysadmin. Membership of sysadmin, securityadmin or serveradmin is control of the instance and,
+  through xp_cmdshell or CLR, of the machine under the SQL Server service account; attackers add a
+  login they own to keep that control. Benign causes: a database administrator granting rights, which
+  should match a change request.
+severity: high
+source: events
+attack: [T1098]
+tags: [persistence, privilege-escalation, mssql]
+entities: [computer, subjectUser, targetUser, objectName]
+where:
+  eventId: 33205
+  provider|contains: MSSQL
+  eventType: APRL
+  objectType: SG
+group_by: [computer, targetUser, objectName]
+threshold: ">= 1"
+---
+id: win-mssql-database-role-member-added
+title: User added to a powerful SQL Server database role
+description: >-
+  A database user was added to db_owner, db_securityadmin, db_accessadmin, db_ddladmin or
+  db_backupoperator (33205, ADD MEMBER on a database role). These roles let the user grant access,
+  change the schema or take backups of the database, which is what an attacker needs to read or
+  exfiltrate it and to keep access. Benign causes: application deployments and administrators
+  granting rights, usually from a known account.
+severity: medium
+source: events
+attack: [T1098]
+tags: [persistence, privilege-escalation, mssql]
+entities: [computer, subjectUser, targetUser, objectName]
+where:
+  eventId: 33205
+  provider|contains: MSSQL
+  eventType: APRL
+  objectType: RL
+  objectName|in: [db_owner, db_securityadmin, db_accessadmin, db_ddladmin, db_backupoperator]
+group_by: [computer, targetUser, objectName]
+threshold: ">= 1"
+---
+id: win-mssql-login-created
+title: SQL Server login or database user created
+description: >-
+  A SQL Server login or a database user mapped to a login was created (33205, CREATE on a login or a
+  user). A new SQL login is an account that lives outside Active Directory, so it survives password
+  resets and account reviews there; attackers create one, then add it to a role. Benign causes:
+  application installs and administrators provisioning access, which repeat from known accounts.
+severity: medium
+source: events
+attack: [T1136, T1098]
+tags: [persistence, mssql]
+entities: [computer, subjectUser, objectName]
+where:
+  eventId: 33205
+  provider|contains: MSSQL
+  eventType: CR
+  objectType|in: [SL, SU]
+group_by: [computer, subjectUser, objectName]
+threshold: ">= 1"
+---
+id: win-mssql-sa-enabled
+title: The SQL Server sa login enabled
+description: >-
+  The built-in sa login was enabled (33205, ALTER LOGIN [sa] ENABLE). Hardening guides disable sa
+  because it is the login every brute-force tool tries first; enabling it again, usually with a new
+  password, gives an attacker a sysadmin login that no directory account ties to them. Benign cause:
+  an administrator recovering access to an instance, which should be followed by disabling it again.
+severity: high
+source: events
+attack: [T1098, T1078.001]
+tags: [persistence, mssql]
+entities: [computer, subjectUser, objectName]
+where:
+  eventId: 33205
+  provider|contains: MSSQL
+  eventType: LGEA
+  objectName: sa
+group_by: [computer, subjectUser]
+threshold: ">= 1"
+---
+id: win-mssql-failed-logins-from-one-client
+title: Repeated failed SQL Server logins from one client (SQL audit)
+description: >-
+  SQL Server's audit recorded five or more failed logins (33205, LGIF) from one client address on one
+  instance within ten minutes. Password guessing against SQL logins (sa, admin and lists of common
+  names) shows up here when the instance audits failed logins to the Application log; the finding
+  names the client and the logins tried. Benign causes: an application or a scheduled job still using
+  an old password after a rotation, which repeats one login from one server.
+severity: high
+source: events
+attack: [T1110]
+tags: [credential-access, brute-force, mssql]
+entities: [computer, ipAddress, targetUser]
+where:
+  eventId: 33205
+  provider|contains: MSSQL
+  eventType: LGIF
+group_by: [computer, ipAddress]
+window: 10m
+threshold: ">= 5"
+---
+id: win-mssql-sa-login-failed
+title: Failed SQL Server login as sa
+description: >-
+  A login as sa failed (33205, LGIF). sa is disabled or unused on a hardened instance, so a failed
+  logon as sa is almost always someone trying it: a brute-force tool, a scanner or an attacker with a
+  guessed password. Benign causes: an old application or connection string still configured with sa.
+severity: medium
+source: events
+attack: [T1110, T1078.001]
+tags: [credential-access, mssql]
+entities: [computer, ipAddress, targetUser]
+where:
+  eventId: 33205
+  provider|contains: MSSQL
+  eventType: LGIF
+  targetUser: sa
+group_by: [computer, ipAddress]
+threshold: ">= 1"
+---
+id: win-mssql-dangerous-option-enabled
+title: SQL Server option that runs code enabled (xp_cmdshell, CLR, OLE Automation)
+description: >-
+  SQL Server logged a configuration change (15457) that turned on xp_cmdshell, CLR integration, OLE
+  Automation procedures, ad hoc distributed queries or external scripts. Each lets a query run code on
+  the server as the SQL Server service account, which attackers use to reach the operating system,
+  move laterally with a CLR assembly or pull files. Benign causes: an application that needs CLR or a
+  maintenance job enabling xp_cmdshell, both known to the database administrators.
+severity: high
+source: events
+attack: [T1505.001, T1059.003]
+tags: [execution, persistence, mssql]
+entities: [computer, provider]
+where:
+  eventId: 15457
+  provider|contains: MSSQL
+  message|startswith: [xp_cmdshell, clr enabled, clr strict security, Ole Automation Procedures, Ad Hoc Distributed Queries, external scripts enabled]
+  message|endswith: "\n1"
+group_by: [computer, provider, message]
+threshold: ">= 1"
+---
+id: win-mssql-single-user-mode
+title: SQL Server started in single-user or minimal mode
+description: >-
+  SQL Server started with -m (single-user mode) or -f (minimal configuration) among its startup
+  parameters (17115). In single-user mode any member of the local Administrators group connects as
+  sysadmin, which is the documented way to recover a lost sa password and an attacker's way to take
+  over an instance they have local administrator on. Benign cause: a database administrator recovering
+  access or repairing the instance.
+severity: medium
+source: events
+attack: [T1505.001, T1078.003]
+tags: [privilege-escalation, mssql]
+entities: [computer, provider]
+where:
+  eventId: 17115
+  provider|contains: MSSQL
+  message|contains_any: ["\t -m", "\t-m", "\t -f", "\t-f"]
+group_by: [computer, provider]
+threshold: ">= 1"
+---
+id: win-sshd-password-guessing
+title: Repeated failed OpenSSH logons from one client
+description: >-
+  The Windows OpenSSH server logged five or more failed or abandoned authentications (OpenSSH/Operational
+  4: invalid user, failed password, connection closed by an authenticating user) from one address
+  within ten minutes. That is password guessing against the SSH service, with unknown user names when
+  the attacker is still looking for accounts. Benign causes: a user or a script retrying with a wrong
+  key or password, which repeats one account.
+severity: high
+source: events
+attack: [T1110]
+tags: [credential-access, brute-force, ssh]
+entities: [computer, ipAddress, targetUser]
+where:
+  eventId: 4
+  channel: OpenSSH/Operational
+  data.payload|contains_any: ["Invalid user", "Failed password", "Failed keyboard-interactive", "authenticating user", "maximum authentication attempts"]
+group_by: [computer, ipAddress]
+window: 10m
+threshold: ">= 5"
+---
+id: win-adcs-request-with-san
+title: Certificate requested with a subject alternative name the requester supplied (ESC1, ESC6)
+description: >-
+  Certificate Services received or issued a request (4886, 4887) whose attributes carry a SAN: the
+  requester named the identity the certificate is for. On a template that lets the enrollee supply the
+  subject (ESC1) or a CA with EDITF_ATTRIBUTESUBJECTALTNAME2 set (ESC6), any user can request a
+  certificate for a domain administrator and log on as them with PKINIT. Compare the SAN with the
+  requester in the finding. Benign causes: web server or device templates where the requester
+  legitimately names the host, which repeat from the same requesters and templates.
+severity: high
+source: events
+attack: [T1649]
+tags: [credential-access, privilege-escalation, adcs]
+entities: [computer, data.Requester, data.CertificateTemplate]
+where:
+  eventId|in: [4886, 4887]
+  data.Attributes|contains: "SAN:"
+group_by: [computer, data.Requester, data.CertificateTemplate]
+threshold: ">= 1"
+---
+id: win-adcs-ca-permissions-changed
+title: Certificate authority permissions changed
+description: >-
+  The security settings of a certificate authority were changed (4882). Granting an account "CA
+  Administrator" or "Certificate Manager" lets it approve pending requests, change the CA's
+  configuration and turn on SAN attributes (ESC7), which leads to certificates for any user. Benign
+  causes: PKI administrators delegating CA roles, a rare and planned change.
+severity: high
+source: events
+attack: [T1649, T1222.001]
+tags: [persistence, privilege-escalation, adcs]
+entities: [computer, subjectUser]
+where:
+  eventId: 4882
+  provider|contains: Security-Auditing
+group_by: [computer, subjectUser]
+threshold: ">= 1"
+---
+id: win-adcs-template-changed
+title: Certificate template changed or its permissions changed
+description: >-
+  A certificate template or its security settings were updated on the CA (4899, 4900). Write access
+  to a template lets an attacker make it vulnerable (ESC4): enrollee-supplied subject, client
+  authentication, no manager approval, then request a certificate for a domain administrator. Benign
+  causes: PKI administrators publishing or editing templates.
+severity: medium
+source: events
+attack: [T1649, T1484]
+tags: [persistence, privilege-escalation, adcs]
+entities: [computer, subjectUser]
+where:
+  eventId|in: [4899, 4900]
+  provider|contains: Security-Auditing
+group_by: [computer, subjectUser]
+threshold: ">= 1"
+---
+id: win-adcs-audit-filter-changed
+title: Certificate authority audit filter changed
+description: >-
+  The audit filter of a certificate authority was changed (4885), which decides which CA events
+  (requests, issuance, configuration and security changes) are logged at all. Lowering it hides the
+  requests of an ESC attack. Benign cause: PKI administrators configuring CA auditing.
+severity: medium
+source: events
+attack: [T1685.001]
+tags: [defense-evasion, adcs]
+entities: [computer, subjectUser]
+where:
+  eventId: 4885
+  provider|contains: Security-Auditing
+group_by: [computer, subjectUser]
+threshold: ">= 1"
+---
+id: win-adcs-ca-backup
+title: Certificate authority backup started
+description: >-
+  A backup of Certificate Services was started (4876). A CA backup can include the CA's private key,
+  and with that key anyone can forge a certificate for any user (a golden certificate) that stays valid
+  after passwords are reset. Benign causes: scheduled CA backups and PKI administrators, which repeat on
+  a known schedule from known accounts.
+severity: medium
+source: events
+attack: [T1649, T1552.004]
+tags: [credential-access, adcs]
+entities: [computer, subjectUser]
+where:
+  eventId: 4876
+  provider|contains: Security-Auditing
+group_by: [computer, subjectUser]
+threshold: ">= 1"
+---
+id: win-kdc-certificate-weak-mapping
+title: Certificate logon that could not be strongly mapped to the account
+description: >-
+  The KDC accepted a certificate for a logon that it could not map to the account in a strong way (39,
+  40, 41 from Kerberos-Key-Distribution-Center): no SID in the certificate, a certificate older than
+  the account, or a SID that does not match. Certificates obtained through ESC1, ESC6 or ESC9-style
+  abuses often look like this, because they were issued for another identity than the one they log
+  on as. Benign causes: older certificates issued before the May 2022 strong-mapping change, devices
+  and smart cards enrolled with templates that do not include the SID.
+severity: medium
+source: events
+attack: [T1649, T1550]
+tags: [credential-access, adcs, kerberos]
+entities: [computer, targetUser, serviceAccount]
+where:
+  eventId|in: [39, 40, 41]
+  provider|contains: Kerberos-Key-Distribution-Center
+group_by: [computer, serviceAccount]
+threshold: ">= 1"
+---
+id: win-dns-server-plugin-dll-set
+title: DNS server set to load a plugin DLL (DNSAdmins)
+description: >-
+  A DNS server setting named ServerLevelPluginDll was changed (DNS Server audit 541). The DNS service
+  loads that DLL as SYSTEM on the next start, which is how a member of DnsAdmins takes over a domain
+  controller. There is almost no legitimate use.
+severity: high
+source: events
+attack: [T1574.002, T1543.003]
+tags: [privilege-escalation, persistence, dns]
+entities: [computer, data.Setting, newValue]
+where:
+  eventId: 541
+  provider|contains: DNSServer
+  data.Setting: ServerLevelPluginDll
+group_by: [computer]
+threshold: ">= 1"
+---
+id: win-dns-server-logging-changed
+title: DNS server logging or auditing settings changed
+description: >-
+  A DNS server setting that controls its logging was changed (DNS Server audit 541: EventLogLevel,
+  LogLevel, the debug log settings). Lowering them removes the record of queries and zone changes an
+  investigation relies on. Benign cause: administrators tuning DNS logging, rare and usually planned.
+severity: medium
+source: events
+attack: [T1685.001]
+tags: [defense-evasion, dns]
+entities: [computer, data.Setting, newValue]
+where:
+  eventId: 541
+  provider|contains: DNSServer
+  data.Setting|in: [EventLogLevel, LogLevel, LogFilePath, LogFileMaxSize, LogIPFilterList]
+group_by: [computer, data.Setting]
+threshold: ">= 1"
+---
+id: win-dns-wildcard-or-wpad-record
+title: Wildcard, WPAD or ISATAP record created in a DNS zone
+description: >-
+  A DNS record was created (DNS Server audit 515) whose name is a wildcard (*.), wpad or isatap. Any
+  authenticated user can add records to an AD-integrated zone by default, and a wildcard or WPAD record
+  pointing at an attacker's host sends name lookups and proxy discovery there, for relaying or
+  intercepting credentials (ADIDNS spoofing). Benign causes: rare; a deliberately published WPAD or a
+  wildcard in a zone administrators manage by hand.
+severity: high
+source: events
+attack: [T1557]
+tags: [credential-access, collection, dns]
+entities: [computer, data.NAME, data.Zone]
+where:
+  eventId: 515
+  provider|contains: DNSServer
+  any_of:
+    - data.NAME|startswith: "*."
+    - data.NAME|in: [wpad, isatap]
+    - data.NAME|startswith: [wpad., isatap.]
+group_by: [computer, data.Zone, data.NAME]
+threshold: ">= 1"
+---
+id: win-bitlocker-password-protector-added
+title: BitLocker password protector added to a volume
+description: >-
+  A password protector was added to a BitLocker volume (775 with protector type 0x8). Managed
+  fleets protect the system drive with the TPM and a recovery key held in the directory; a password
+  set by hand is what ransomware that abuses BitLocker (ShrinkLocker, LockBit's BitLocker mode) does
+  before it removes the other protectors and deletes the recovery keys. Benign causes: data drives or
+  unmanaged machines protected by a user's own password.
+severity: medium
+source: events
+attack: [T1486]
+tags: [impact, bitlocker]
+entities: [computer, data.VolumeMountPoint]
+where:
+  eventId: 775
+  provider|contains: BitLocker
+  data.ProtectorType: "0x8"
+group_by: [computer, data.VolumeMountPoint]
+threshold: ">= 1"
+---
+id: win-bitlocker-encryption-started
+title: BitLocker encryption started on a volume
+description: >-
+  BitLocker started encrypting a volume (768). On a managed machine this is the deployment of disk
+  encryption; outside a rollout, and next to other signs of intrusion, it can be ransomware turning
+  BitLocker on to lock the owner out. It is a lead to read beside the protectors added (775) and the
+  account that ran manage-bde.
+severity: low
+source: events
+attack: [T1486]
+tags: [impact, bitlocker]
+entities: [computer, data.VolumeMountPoint]
+where:
+  eventId: 768
+  provider|contains: BitLocker
+group_by: [computer, data.VolumeMountPoint]
+threshold: ">= 1"

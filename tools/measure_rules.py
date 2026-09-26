@@ -123,6 +123,29 @@ TECHNIQUE = re.compile(r"^T\d{4}(\.\d{3})?$")
 TECHNIQUE_FOLDER = re.compile(r"^(T\d{4})(?:\.(\d{3}))?", re.I)
 # rules written after studying a dataset's files: that dataset is not evidence for them
 WRITTEN_AGAINST: dict[str, frozenset[str]] = {
+    # rules/windows/other-products.yaml, written for the product logs (SQL Server, OpenSSH, AD CS, DNS
+    # server, BitLocker) the 2026-09-26 research found missed there
+    "win-mssql-audit-tampered": frozenset({"evtxToMitre"}),
+    "win-mssql-server-role-member-added": frozenset({"evtxToMitre"}),
+    "win-mssql-database-role-member-added": frozenset({"evtxToMitre"}),
+    "win-mssql-login-created": frozenset({"evtxToMitre"}),
+    "win-mssql-sa-enabled": frozenset({"evtxToMitre"}),
+    "win-mssql-failed-logins-from-one-client": frozenset({"evtxToMitre"}),
+    "win-mssql-sa-login-failed": frozenset({"evtxToMitre"}),
+    "win-mssql-dangerous-option-enabled": frozenset({"evtxToMitre"}),
+    "win-mssql-single-user-mode": frozenset({"evtxToMitre"}),
+    "win-sshd-password-guessing": frozenset({"evtxToMitre"}),
+    "win-adcs-request-with-san": frozenset({"evtxToMitre"}),
+    "win-adcs-ca-permissions-changed": frozenset({"evtxToMitre"}),
+    "win-adcs-template-changed": frozenset({"evtxToMitre"}),
+    "win-adcs-audit-filter-changed": frozenset({"evtxToMitre"}),
+    "win-adcs-ca-backup": frozenset({"evtxToMitre"}),
+    "win-kdc-certificate-weak-mapping": frozenset({"evtxToMitre"}),
+    "win-dns-server-plugin-dll-set": frozenset({"evtxToMitre"}),
+    "win-dns-server-logging-changed": frozenset({"evtxToMitre"}),
+    "win-dns-wildcard-or-wpad-record": frozenset({"evtxToMitre"}),
+    "win-bitlocker-password-protector-added": frozenset({"evtxToMitre"}),
+    "win-bitlocker-encryption-started": frozenset({"evtxToMitre"}),
     # written for the gaps the head-to-head of 2026-09-25 found on EVTX-to-MITRE-Attack
     "win-user-added-security-group": frozenset({"evtxToMitre"}),
     "win-explicit-credentials-unusual-process": frozenset({"evtxToMitre"}),
