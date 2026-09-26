@@ -6,6 +6,10 @@ name: Rule measures
 # a recording is no longer read, or a high or critical rule raises more findings on a clean
 # machine. Weekly, and on a change to what a measure depends on. A change that means to do one of
 # those commits the measures this run uploads (rules/measures.json and rules/measures-detail.json).
+#
+# The whole measure is taken on every run, shared out over SHARES runners (--shard): each measures
+# its share of the recordings and clean machines, and the gate job merges the shares (--merge),
+# which fails unless every share measured all it was dealt.
 on:
   schedule:
     - cron: "17 4 * * 1"
@@ -33,11 +37,18 @@ concurrency:
   group: measure-rules-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  SHARES: 8
+
 jobs:
-  measure:
-    name: measure the rules, gate on the committed measures
+  share:
+    name: measure share ${{ matrix.share }} of 8
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        share: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -48,15 +59,43 @@ jobs:
       - run: pip install -r backend/requirements.txt
       # the clean machines alone are 8 GB unpacked: the runner's second disk holds the datasets
       - run: sudo mkdir -p /mnt/remn && sudo chown "$USER" /mnt/remn
-      - name: Fetch the datasets at their pinned versions, measure, gate
+      - name: Fetch the datasets at their pinned versions, measure this share
         run: >
           python tools/measure_rules.py --datasets /mnt/remn/datasets --fetch --cache /mnt/remn/cache
-          --out /mnt/remn/measures.json --detail /mnt/remn/measures-detail.json --gate rules/measures-detail.json
+          --shard ${{ matrix.share }}/${{ env.SHARES }} --raw /mnt/remn/share-${{ matrix.share }}.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rule-measures-share-${{ matrix.share }}
+          path: /mnt/remn/share-${{ matrix.share }}.json
+          retention-days: 7
+
+  measure:
+    name: measure the rules, gate on the committed measures
+    needs: share
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r backend/requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rule-measures-share-*
+          path: shares
+          merge-multiple: true
+      - name: Merge the shares, gate
+        run: >
+          python tools/measure_rules.py --merge shares/share-*.json
+          --out measures.json --detail measures-detail.json --gate rules/measures-detail.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: rule-measures
           path: |
-            /mnt/remn/measures.json
-            /mnt/remn/measures-detail.json
+            measures.json
+            measures-detail.json
           if-no-files-found: ignore
