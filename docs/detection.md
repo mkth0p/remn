@@ -271,7 +271,9 @@ same day, gave 137, four of them REMN's own (Kerberoasting, password spraying, a
 query, a member added to a security group).
 
 **Re-measuring** takes the downloads listed in the tool's docstring (about 10 GB unpacked;
-`--datasets DIR --fetch` fetches them at their pinned versions) and about two hours on four cores;
+`--datasets DIR --fetch` fetches them at their pinned versions) and one to two hours on four
+cores. `--shard I/N --raw FILE` measures one of N shares of the recordings and clean machines,
+on as many machines as there are shares, and `--merge FILE...` makes the measure of the shares;
 re-run it after changing a rule or re-importing a pack, with `--detail rules/measures-detail.json`,
 and commit both files. A backend test warns while a rule has changed since it was measured.
 
@@ -280,7 +282,9 @@ detects a recording it detected when the committed detail was taken, a SigmaHQ r
 fires on its own sample, a recording is no longer read, or a high or critical rule raises more
 findings on a clean machine (all of its findings, when it was lower when measured).
 `.github/workflows/measure-rules.yml` runs it weekly, on demand, and on a pull request that
-touches the rules, the rule engine, the parsers or the tool, and uploads the measures it took. A
+touches the rules, the rule engine, the parsers or the tool, and uploads the measures it took. It
+takes the whole measure every time, shared over eight runners, and the gate fails unless every
+share measured all it was dealt. A
 change meant to lose a detection or add noise commits those measures, so the diff of the two files
 says what it changed. The weekly run also catches a new release of a dependency (the EVTX parser,
 DuckDB) that changes what the rules match.

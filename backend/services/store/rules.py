@@ -607,7 +607,9 @@ def run_rules(
     settings: dict[str, Any],
     progress: Callable[[dict[str, Any]], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
+    diagnose: bool = True,
 ) -> dict[str, Any]:
+    """Every enabled rule on the store. diagnose=False leaves out why a rule found nothing (a second scan per such rule), for a caller that only wants the findings."""
     all_findings: list[dict[str, Any]] = []
     by_rule: dict[str, int] = {}
     errors: list[dict[str, str]] = []
@@ -653,7 +655,7 @@ def run_rules(
                     "afterTime": len(found),
                 }
             )
-        if not found and not failed:
+        if not found and not failed and diagnose:
             try:
                 diagnostics.append(diagnose_zero(store, rule, settings))
             except Exception as exc:  # noqa: BLE001
