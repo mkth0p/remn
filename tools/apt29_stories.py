@@ -461,21 +461,21 @@ def quiet_hosts(result: dict[str, Any], hosts: Iterable[str] = UNTOUCHED) -> Che
         f"{' and '.join(h.upper() for h in sorted(hosts))} raise no high story",
         not bad,
         ", ".join(bad) or "none",
-        later="a minimum evidence bar for host stories",
     )
 
 
 def one_intrusion(result: dict[str, Any], hosts: Iterable[str] = ATTACKED) -> Check:
-    """The flagged steps on the attacked hosts are in one story, or in stories one campaign links."""
+    """The flagged steps on the attacked hosts are in one story, or in stories one incident or one campaign links."""
     hosts = set(hosts)
     holding = [s for s in result["stories"] if any(st["host"] in hosts and st["tie"]["kind"] in ("flag", "chain") for st in s["steps"])]
+    incident = bool(holding) and len({s.get("incident") for s in holding}) == 1 and holding[0].get("incident") is not None
     linked = bool(holding) and bool(set.intersection(*(set(s.get("campaigns") or []) for s in holding)))
     labels = ", ".join(f"{s['subject']['label']} ({s['kind']})" for s in holding)
+    how = " in one incident" if incident else " in one campaign" if linked else ", not linked" if len(holding) > 1 else ""
     return Check(
         f"the intrusion on {' and '.join(h.upper() for h in sorted(hosts))} reads as one story or linked stories",
-        len(holding) == 1 or linked,
-        f"{len(holding)} stories{' in one campaign' if linked else ', not linked' if len(holding) > 1 else ''}: {labels}",
-        later="linked stories",
+        len(holding) == 1 or incident or linked,
+        f"{len(holding)} {'story' if len(holding) == 1 else 'stories'}{how}: {labels}",
     )
 
 

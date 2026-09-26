@@ -269,11 +269,14 @@ def test_the_checks_name_what_is_wrong():
     subjects = A.system_subjects(result)
     assert not subjects.ok and "s-1-5-80-" in subjects.detail and "NT SERVICE\\mpssvc" in subjects.detail and "alice" not in subjects.detail
     quiet = A.quiet_hosts(result, ("dc-01",))
-    assert not quiet.ok and quiet.detail == "DC-01.example.test (high)" and quiet.later
+    assert not quiet.ok and quiet.detail == "DC-01.example.test (high)"
     split = A.one_intrusion(result, ("ws-01", "ws-02"))
     assert not split.ok and split.detail.startswith("2 stories, not linked")
     for s in result["stories"][::4]:
-        s["campaigns"] = ["campaign-1"]
+        s["incident"] = "incident-1"
+    assert A.one_intrusion(result, ("ws-01", "ws-02")).detail.startswith("2 stories in one incident")
+    for s in result["stories"][::4]:
+        s["incident"], s["campaigns"] = None, ["campaign-1"]
     assert A.one_intrusion(result, ("ws-01", "ws-02")).ok
     assert not A.reaches_through_hop(result, "alice", "ws-02").ok
     result["stories"][0]["lineage"]["hops"] = [{"kind": "rdp", "from": {"host": "ws-01"}, "to": "ws-02"}]
@@ -347,14 +350,12 @@ def test_day1_pbeesly_reaches_nashua_through_a_hop(day1):
 
 @pytest.mark.heavy
 @needs_day1
-@pytest.mark.xfail(strict=False, reason="later work: a minimum evidence bar for host stories (built-in scheduled tasks, DSC script blocks)")
 def test_day1_newyork_and_utica_raise_no_high_story(day1):
     _check(A.quiet_hosts(day1["result"]))
 
 
 @pytest.mark.heavy
 @needs_day1
-@pytest.mark.xfail(strict=False, reason="later work: stories of one intrusion are linked")
 def test_day1_reads_as_one_intrusion(day1):
     _check(A.one_intrusion(day1["result"]))
 
