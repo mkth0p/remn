@@ -335,6 +335,7 @@ def ingest_package(request: HttpRequest):
     )
 
     package.engines = hayabusa.engines() if request.POST.get("engines", "1") != "0" else []
+    package.filesystem = request.POST.get("filesystem") == "1"
 
     def gen() -> Iterator[bytes]:
         rows = iter(package)

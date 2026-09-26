@@ -135,6 +135,7 @@ def ingest(request: HttpRequest, key: str):
     ctx = _ctx_from(options.get("settings"))
     include_raw = bool(options.get("includeRaw", True))
     keep_bodies = bool(options.get("keepBodies", True))
+    read_filesystem = options.get("fileSystem") is True
     tmp_dir = str(settings.FILE_UPLOAD_TEMP_DIR)
 
     st.upsert_evidence(
@@ -163,6 +164,7 @@ def ingest(request: HttpRequest, key: str):
             if kind == "package":
                 package = PackageSource(name, str(path), None, tmp_dir, ctx, include_raw, str(meta.get("sha256") or ""))
                 package.engines = hayabusa.engines()
+                package.filesystem = read_filesystem
                 ew = EventWriter(st, evidence_id, include_raw=include_raw)
                 pmw = MailWriter(st, evidence_id, keep_bodies=keep_bodies)
                 try:

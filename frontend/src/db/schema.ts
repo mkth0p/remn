@@ -34,6 +34,8 @@ export interface CaseSettings {
   autoRunRules?: boolean
   /** browser store only: parse .evtx files in this browser, never uploading them (default off) */
   parseEvtxInBrowser?: boolean
+  /** a collection laid out like a drive: also read its $MFT and USN journal (default off; millions of rows, and slower) */
+  readFileSystem?: boolean
 }
 
 export const defaultSettings = (): CaseSettings => ({

@@ -168,6 +168,7 @@ export async function ingestToServer(file: File, kase: Case, kind: 'evtx' | 'mai
       options: {
         includeRaw: kase.settings.includeRaw !== false,
         keepBodies: kase.settings.keepBodies !== false,
+        fileSystem: kase.settings.readFileSystem === true,
         settings: {
           internalDomains: kase.settings.internalDomains,
           brands: kase.settings.brands,
@@ -252,6 +253,7 @@ async function importToBrowser(file: File, kase: Case, kind: 'evtx' | 'mail' | '
     kind,
     sourceName: file.webkitRelativePath || file.name,
     includeRaw: kase.settings.includeRaw !== false,
+    readFileSystem: kase.settings.readFileSystem === true,
     settings: {
       internalDomains: kase.settings.internalDomains,
       brands: kase.settings.brands,
