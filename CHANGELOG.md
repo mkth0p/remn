@@ -42,6 +42,24 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 - Carrier-grade NAT's shared addresses (100.64.0.0/10, a provider's or Tailscale's) are inside
   the network for stories: an RDP logon from one is lateral movement, not initial access from
   the internet, and a finding naming one does not make it the attacker's address.
+- Hops and sessions read the domain controllers' Kerberos and NTLM records, which stories used to
+  treat only as routine. A service ticket (4769) with a logon's GUID is that logon's ticket
+  (strong), and without it a ticket for the host's own account asked for within a minute before a
+  network logon of that account is its ticket by time (medium): the hop says which service was
+  asked for, holds the ticket, and comes from the ticket's client address when the logon names
+  no source. Explicit credentials (4648) reach the logon of their target GUID, or of its ticket,
+  instead of the next logon in time; an NTLM validation (4776) names the workstation of a
+  network logon that names none (medium); a machine account's ticket, and a 4648 and a 4769 of
+  one GUID, say whose address a client address is. A NewCredentials logon (4624 type 9, `runas
+  /netonly`) that uses another account on the network is a lateral-movement step that names both
+  accounts, so it joins both stories, and a way into the hosts that account then logged on to
+  from it. A host whose clock differs from the domain controller's by more than the ties by time
+  allow says so, with the median offset, and those ties allow for it. Server and browser cases
+  read the domain controllers' records of the flagged accounts, hosts and addresses in the flag
+  windows (at most 20,000, a cut named) though the domain controllers are not flagged. On MITRE's
+  APT29 day 1, five of NASHUA's network logons that named no source now come from SCRANTON by
+  their tickets, and the lateral movement from SCRANTON to NASHUA gains a hop; the same five
+  stories keep their scores. See "Sessions, hops and what ran" in `docs/stories.md`.
 - A record names the account its System header's SID is (the user PowerShell's script blocks
   and many operational logs name only there) when it is a user's SID, joined to the account by
   a logon of any day, so the flagged script blocks on a victim's host are steps of the victim's

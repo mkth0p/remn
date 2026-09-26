@@ -45,7 +45,7 @@ from typing import Any
 
 from .chains import _IDENT_SQL, authentication_outcome, build_chains, mail_recipients, netbios_hints, same_org_domain
 from .identity import CONFIDENCE_RANK, MEDIUM, STRONG, WEAK, Form, Record, Resolver, account_forms, base_name, event_record, kind_of, mail_record, resolve
-from .lineage import Lineage, build_lineage, host_key, ip_of, is_internal_ip
+from .lineage import Lineage, build_lineage, host_key, ip_of, is_internal_ip, other_credentials
 
 VERSION = 1
 # ATT&CK v19's tactics in the order an intrusion reads (Defense Evasion is now Stealth and Defense Impairment)
@@ -207,6 +207,9 @@ def record_phase(row: dict[str, Any], source: str, attacker: set[str]) -> tuple[
         return hit if hit else (None, op or "a cloud record")
     if eid == 4625:
         return "credential-access", "a failed logon"
+    if eid == 4624 and (other := other_credentials(row)):
+        # runas /netonly, pass-the-hash tooling: the account used on the network is another, as with explicit credentials
+        return "lateral-movement", f"used other credentials ({other}) for the network"
     if eid == 4624:
         lt = int(row.get("logonType") or 0)
         if lt in (10, 12):
@@ -655,7 +658,7 @@ def _person_story(
         conf = case.named[ref][iid][0]
         if ip and ip in attacker:
             members.take(ref, "address", MEDIUM, f"it came from {ip}, a source the story's findings name")
-        elif phase and _eid(row) not in (4624, 4625) and not _is_routine_cloud(row):
+        elif phase and (_eid(row) not in (4624, 4625) or other_credentials(row)) and not _is_routine_cloud(row):
             if _is_process_creation(row) and not case.f_by_ref.get(ref):
                 # a person's name alone does not make every program of their day part of the incident
                 how = _in_story_tree(case, ref, sessions, procs)
@@ -1222,6 +1225,11 @@ REMOTE_SCRIPT = r"-computername|-cn\s|enter-pssession|/node:"
 PRIVATE_ANSWER = r"(^|;)\s*(::ffff:)?(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)"
 DNS_CAP = 20_000
 DHCP_CAP = 20_000
+# the domain controllers' records a selection reads around the flags (a ticket-granting ticket, a
+# service ticket, an NTLM validation), for the accounts, hosts and client addresses of the flags
+# (dc_selection_keys): hops and sessions read which ticket a logon came with and from where
+DC_AUTH_EVENT_IDS = (4768, 4769, 4776)
+DC_CAP = 20_000
 # the account names, flagged hosts and outside addresses a selection reads around the flags
 NAME_KEYS = 2_000
 HOST_KEYS = 500
@@ -1281,11 +1289,9 @@ def selection_keys(
     hosts: Counter[str] = Counter()
     ips: Counter[str] = Counter()
     for row in rows:
+        # with the account a NewCredentials logon uses on the network (event_record's "network" group)
         for g in event_record(row).groups:
-            for f in g:
-                n = base_name(f)
-                if n and not n.endswith("$") and len(n) > 1 and kind_of(f) not in ("builtin", "machine"):
-                    names[n] += 1
+            names.update(_account_names(g))
         if row.get("computer"):
             hosts[str(row["computer"]).lower()] += 1
         ip = ip_of(row.get("ipAddress"))
@@ -1308,6 +1314,78 @@ def selection_keys(
     out = {key: top(c, most) for key, _, c, most in kinds}
     out["cut"] = [cut for _, cut, c, most in kinds if len(c) > most]
     return out
+
+
+def _account_names(forms: Iterable[Any]) -> list[str]:
+    """The account names a selection reads by: no machine account, no Windows' own."""
+    out = []
+    for f in forms:
+        n = base_name(f)
+        if n and not n.endswith("$") and len(n) > 1 and kind_of(f) not in ("builtin", "machine"):
+            out.append(n)
+    return out
+
+
+def dc_selection_keys(rows: Iterable[dict[str, Any]], keys: dict[str, list[str]]) -> dict[str, list[str]]:
+    """What to read of the domain controllers' records (DC_AUTH_EVENT_IDS) around the flags, from the
+    rows selected so far: the accounts (the flagged people's, those that logged on to a flagged host
+    over the network, the network account of a NewCredentials logon), the flagged hosts (a ticket for
+    a host's own account, an NTLM validation from it) and the client addresses (the outside addresses
+    the findings name, a flagged host's own, those its network logons came from). The domain
+    controllers need not be flagged: they are the hosts that write these records."""
+    hosts = {host_key(h) for h in keys.get("hosts") or []} - {""}
+    names, ips = set(keys.get("names") or []), set(keys.get("ips") or [])
+    for row in rows:
+        eid = _eid(row)
+        on = host_key(row.get("computer")) in hosts
+        ip = ip_of(row.get("ipAddress"))
+        if eid == 4624:
+            if on and str(row.get("logonType") or "") in ("3", "8"):
+                names.update(_account_names(account_forms(row.get("targetUser"), row.get("targetDomain"))))
+                if ip:
+                    ips.add(ip)
+            if ip and is_internal_ip(ip) and host_key(row.get("workstation")) in hosts:
+                ips.add(ip)
+            names.update(_account_names(account_forms(row.get("targetOutboundUser"), row.get("targetOutboundDomain"))))
+        elif on and eid == 3 and "sysmon" in str(row.get("provider") or "").lower() and str(row.get("initiated") or "").lower() in ("true", "1"):
+            src = ip_of(row.get("sourceIp"))
+            if src and is_internal_ip(src):
+                ips.add(src)
+        elif row.get("artifactType") == "dhcp" and ip:
+            data = row.get("data") if isinstance(row.get("data"), dict) else {}
+            if host_key(row.get("workstation") or data.get("Host Name")) in hosts:
+                ips.add(ip)
+    return {"names": sorted(names), "hosts": sorted(hosts), "ips": sorted(ips)}
+
+
+# a workstation name as host_key reads it, in SQL: WS-001 for \\WS-001, ws-001.northstar.example and WS-001$
+_WORKSTATION_SQL = "split_part(rtrim(trim(lower(coalesce(\"workstation\", '')), '\\ '), '$'), '.', 1)"
+
+
+def _dc_where(dc: dict[str, list[str]]) -> tuple[str, list[Any], str, list[Any]]:
+    """The SQL of the domain controllers' records a selection reads (dc_selection_keys), with its
+    parameters, and the order that reads those naming a flagged account or host before those only
+    from a client address."""
+    keyed: list[str] = []
+    params: list[Any] = []
+
+    def ph(values: list[str]) -> str:
+        return ", ".join("?" for _ in values)
+
+    if dc["names"]:
+        keyed.append(_IDENT_SQL.format(col='"targetUser"') + f" IN ({ph(dc['names'])})")
+        params += dc["names"]
+    if dc["hosts"]:
+        keyed.append(f'lower("serviceName") IN ({ph(dc["hosts"])})')
+        params += [h + "$" for h in dc["hosts"]]
+        keyed.append(f'("eventId" = 4776 AND {_WORKSTATION_SQL} IN ({ph(dc["hosts"])}))')
+        params += dc["hosts"]
+    if not keyed and not dc["ips"]:
+        return "", [], "", []
+    key = " OR ".join(keyed) or "FALSE"
+    addr = f'"ipAddress" IN ({ph(dc["ips"])})' if dc["ips"] else "FALSE"
+    where = f'"eventId" IN ({", ".join(str(i) for i in DC_AUTH_EVENT_IDS)}) AND (({key}) OR {addr})'
+    return where, params + dc["ips"], f"CASE WHEN {key} THEN 0 ELSE 1 END", params
 
 
 def _sql_str(s: str) -> str:
@@ -1432,6 +1510,19 @@ def stories_for_store(store: Any, settings: dict[str, Any] | None, findings: lis
                     except ValueError:
                         pass
                 events[r["id"]] = r
+        # the domain controllers' Kerberos and NTLM records of the flagged people and hosts, by what
+        # the rows read so far name: those naming an account or a host first, then the nearest a flag
+        dc_where, dc_params, dc_first, dc_first_params = _dc_where(dc_selection_keys(events.values(), keys))
+        if dc_where:
+            sql = _nearest_first("events", "ts", f"({when}) AND ({dc_where})", dc_first)
+            for r in fetch(sql, [flag_times, *wparams, *dc_params, *dc_first_params], DC_CAP, "dc"):
+                if r["id"] not in events:
+                    if isinstance(r.get("data"), str):
+                        try:
+                            r["data"] = _json.loads(r["data"])
+                        except ValueError:
+                            pass
+                    events[r["id"]] = r
         # replies: mails the flagged people sent in the windows
         mph = ", ".join("?" for _ in names)
         sender = _IDENT_SQL.format(col='"fromAddr"')

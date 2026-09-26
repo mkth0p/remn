@@ -184,6 +184,47 @@ describe('the rows a browser case posts', () => {
     expect(storyCoverageWarnings({ truncated })).toEqual([expect.stringContaining('then those nearest the flags')])
   })
 
+  it('reads the domain controllers’ tickets and NTLM validations of the flagged host, of the accounts that logged on to it and of their addresses', async () => {
+    const minute = 60_000
+    const fs = 'FS-001.northstar.example'
+    const dc = { computer: 'DC-01.northstar.example', status: '0x0' }
+    await db.events.bulkAdd([
+      event(1, T0, { computer: fs, targetUser: 'lab.admin', targetDomain: 'NORTHSTAR', targetLogonId: '0x77', logonType: 3, ipAddress: '10.0.0.21' }),
+      event(2, T0 + 6_000, { eventId: 5140, computer: fs, subjectUser: 'lab.admin', subjectLogonId: '0x77', shareName: '\\\\*\\ADMIN$' }),
+      event(3, T0 + minute, { eventId: 7045, computer: fs, serviceName: 'upd', serviceFile: 'C:\\Windows\\upd.exe' }),
+      // the domain controller: lab.admin's ticket for FS-001, another account's, an NTLM validation from FS-001, the ticket of the machine at lab.admin's address
+      event(10, T0 - 1_000, { ...dc, eventId: 4769, targetUser: 'lab.admin@NORTHSTAR.EXAMPLE', serviceName: 'FS-001$', ipAddress: '10.0.0.21' }),
+      event(11, T0 + 5 * minute, { ...dc, eventId: 4769, targetUser: 'svc.backup@NORTHSTAR.EXAMPLE', serviceName: 'FS-001$', ipAddress: '10.0.0.30' }),
+      event(12, T0 + 10 * minute, { ...dc, eventId: 4776, targetUser: 'svc.scan', workstation: 'FS-001' }),
+      event(13, T0 - 30 * minute, { ...dc, eventId: 4768, targetUser: 'WS-001$', ipAddress: '10.0.0.21' }),
+      // neither someone else's ticket nor lab.admin's ten days later
+      event(14, T0 + 2 * minute, { ...dc, eventId: 4769, targetUser: 'zoe@NORTHSTAR.EXAMPLE', serviceName: 'FS-009$', ipAddress: '10.0.0.77' }),
+      event(15, T0 + 10 * DAY, { ...dc, eventId: 4769, targetUser: 'lab.admin@NORTHSTAR.EXAMPLE', serviceName: 'FS-001$', ipAddress: '10.0.0.21' }),
+    ] as never)
+    const findings = [finding(1, [3])].map((f) => slimFinding(f as never))
+    const whole = await selectRows(1, findings)
+    expect(whole.events.map((e) => e.id).sort((a, b) => Number(a) - Number(b))).toEqual([1, 2, 3, 10, 11, 12, 13])
+    expect(whole.truncated).toEqual([])
+    // past its cap, the records naming a flagged account or host before those only from an address
+    const { events, truncated } = await selectRows(1, findings, { dcCap: 3 })
+    expect(events.map((e) => e.id).sort((a, b) => Number(a) - Number(b))).toEqual([1, 2, 3, 10, 11, 12])
+    expect(truncated).toEqual(['dc'])
+    expect(storyCoverageWarnings({ truncated })).toEqual([expect.stringContaining('Kerberos and NTLM records')])
+  })
+
+  it('reads around a NewCredentials logon the account it used on the network', async () => {
+    await db.events.bulkAdd([
+      event(1, T0, { computer: 'WS-004', targetUser: 'daniel.roy', targetDomain: 'NORTHSTAR', logonType: 9, targetOutboundUser: 'admin.bob', targetOutboundDomain: 'NORTHSTAR' }),
+      event(2, T0 + 600_000, { computer: 'FS-001', targetUser: 'admin.bob', targetDomain: 'NORTHSTAR', logonType: 3, workstation: 'WS-004' }),
+    ] as never)
+    const { events } = await selectRows(
+      1,
+      [finding(1, [1])].map((f) => slimFinding(f as never)),
+    )
+    expect(events.map((e) => e.id).sort()).toEqual([1, 2])
+    expect(events.find((e) => e.id === 1)).toMatchObject({ targetOutboundUser: 'admin.bob', targetOutboundDomain: 'NORTHSTAR' })
+  })
+
   it('posts the effective severity, tags, techniques and entities of each finding and leaves false positives out', async () => {
     await db.events.add(event(1, T0, { targetUser: 'daniel.roy' }) as never)
     await db.findings.bulkAdd([

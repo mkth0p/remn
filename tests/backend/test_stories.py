@@ -443,6 +443,72 @@ def test_carrier_grade_nat_is_not_the_internet():
     assert record_phase({**SEC, "eventId": 4624, "logonType": 10, "ipAddress": "100.128.0.1"}, "events", set())[0] == "initial-access"
 
 
+DC = "DC-01.northstar.example"
+GUID = "{5b482e77-15dd-f684-f093-e11c7ed66eb8}"
+
+
+def _dc_intrusion():
+    """A service installed on FS-001 by a network logon that names neither its address nor its
+    workstation; the domain controller's ticket and WS-001's explicit credentials carry its GUID."""
+    fs = "FS-001.northstar.example"
+    events = [
+        ev(1, 0, eventId=4624, computer=fs, targetUser="lab.admin", targetDomain="NORTHSTAR", targetLogonId="0x77", logonType=3, logonGuid=GUID, authPackage="Kerberos"),
+        ev(2, 0.1, eventId=5140, computer=fs, subjectUser="lab.admin", subjectLogonId="0x77", shareName="\\\\*\\ADMIN$"),
+        ev(3, 1, eventId=4697, computer=fs, subjectUser="lab.admin", subjectDomain="NORTHSTAR", subjectLogonId="0x77", serviceName="upd",
+           serviceFile="C:\\Windows\\upd.exe"),
+        ev(4, -0.02, eventId=4769, computer=DC, targetUser="lab.admin@NORTHSTAR.EXAMPLE", targetDomain="NORTHSTAR.EXAMPLE", serviceName="FS-001$",
+           ipAddress="10.0.0.21", logonGuid=GUID, status="0x0"),
+        ev(5, -0.03, eventId=4648, computer="WS-001.northstar.example", subjectUser="alice.martin", subjectDomain="NORTHSTAR", targetUser="lab.admin",
+           targetDomain="NORTHSTAR", targetServer="FS-001", data={"TargetLogonGuid": GUID}),
+    ]  # fmt: skip
+    return events, [finding("win-service-installed-suspicious", "high", [3], tags=["persistence"])]
+
+
+def test_a_hop_reads_where_it_came_from_and_which_service_it_asked_for_in_the_domain_controllers_records():
+    events, findings = _dc_intrusion()
+    [story] = build_stories(events, [], findings, SETTINGS)["stories"]
+    assert story["kind"] == "person" and "lab.admin" in story["subject"]["label"]
+    by_ref = {r: s for s in story["steps"] for r in s["refs"]}
+    # the domain controller's ticket is a step of the way in, and says which service was asked for
+    ticket = by_ref["event:4"]
+    assert ticket["host"] == "dc-01" and ticket["tie"]["kind"] == "hop" and ticket["tie"]["confidence"] == STRONG
+    assert "with a Kerberos ticket for FS-001$ from dc-01 (4769)" in ticket["tie"]["basis"]
+    [hop] = [h for h in story["lineage"]["hops"] if h["to"] == "fs-001" and h["kind"] == "remote-service"]
+    assert hop["from"]["host"] == "ws-001" and "(4648)" in hop["from"]["basis"]
+    [session] = [s for s in story["lineage"]["sessions"] if s["host"] == "fs-001"]
+    assert session["from"] == "ws-001" and [a["kind"] for a in session["auth"]] == ["explicit-credentials", "kerberos"]
+
+
+def test_other_credentials_set_for_the_network_are_a_step_tying_the_two_accounts():
+    ws, fs = "WS-004.northstar.example", "FS-001.northstar.example"
+    me = dict(subjectUser="daniel.roy", subjectDomain="NORTHSTAR", subjectLogonId="0x9a01")
+    events = [
+        ev(1, 0, eventId=4624, computer=ws, targetUser="daniel.roy", targetDomain="NORTHSTAR", targetLogonId="0x9a01", logonType=2),
+        ev(2, 5, eventId=4698, computer=ws, taskName="\\Updater", **me),
+        # runas /netonly: daniel's session uses admin.bob's credentials on the network, and admin.bob logs on to FS-001 from WS-004
+        ev(3, 10, eventId=4624, computer=ws, targetUser="daniel.roy", targetDomain="NORTHSTAR", targetLogonId="0x9a02", logonType=9,
+           logonProcess="seclogo", targetOutboundUser="admin.bob", targetOutboundDomain="NORTHSTAR"),
+        ev(4, 20, eventId=4624, computer=fs, targetUser="admin.bob", targetDomain="NORTHSTAR", targetLogonId="0x77", logonType=3, workstation="WS-004",
+           ipAddress="10.0.0.4"),
+        ev(5, 20.1, eventId=5140, computer=fs, subjectUser="admin.bob", subjectDomain="NORTHSTAR", subjectLogonId="0x77", shareName="\\\\*\\ADMIN$"),
+        ev(6, 21, base=SCM, eventId=7045, computer=fs, serviceName="upd", serviceFile="C:\\Windows\\upd.exe"),
+    ]  # fmt: skip
+    findings = [
+        finding("win-scheduled-task-suspicious-content", "high", [2], tags=["persistence"]),
+        finding("win-service-installed-suspicious", "high", [6], tags=["persistence"]),
+    ]
+    stories = {s["subject"]["label"]: s for s in build_stories(events, [], findings, SETTINGS)["stories"]}
+    daniel, bob = stories["northstar\\daniel.roy"], stories["northstar\\admin.bob"]
+    # in daniel's story, by his name, a step as explicit credentials are, with the way it opened to FS-001
+    step = {r: s for s in daniel["steps"] for r in s["refs"]}["event:3"]
+    assert (step["phase"], step["phaseBasis"]) == ("lateral-movement", "used other credentials (NORTHSTAR\\admin.bob) for the network")
+    assert step["tie"]["kind"] == "identity" and step["hops"]
+    assert any(h["to"] == "fs-001" and h["account"] == "NORTHSTAR\\admin.bob" and h["kind"] == "explicit-credentials" for h in daniel["lineage"]["hops"])
+    # and the story of the account used on the network holds the logon that set it, by its name there
+    assert {r: s for s in bob["steps"] for r in s["refs"]}["event:3"]["tie"]["kind"] == "identity"
+    assert record_phase({**SEC, "eventId": 4624, "logonType": 9, "targetUser": "x", "targetOutboundUser": "x"}, "events", set())[0] is None
+
+
 # --- the API ------------------------------------------------------------------------------------------
 
 import json  # noqa: E402
@@ -536,6 +602,53 @@ def test_a_cut_server_selection_reads_the_foothold_and_what_is_nearest_the_flag_
     assert {"identities", "hosts", "name-keys"} <= set(res["stats"]["truncated"])
 
 
+def test_a_server_case_reads_the_domain_controllers_records_of_the_flagged_host_and_its_logons(registry, monkeypatch):
+    """A service flagged on FS-001: the domain controller is not flagged, and its tickets and NTLM
+    validations of FS-001, of the accounts that logged on to it and of their addresses are read."""
+    from services.analysis import stories as S
+
+    fs = "FS-001.northstar.example"
+    events = [
+        ev(1, 0, eventId=4624, computer=fs, targetUser="lab.admin", targetDomain="NORTHSTAR", targetLogonId="0x77", logonType=3, ipAddress="10.0.0.21",
+           authPackage="Kerberos"),
+        ev(2, 0.1, eventId=5140, computer=fs, subjectUser="lab.admin", subjectDomain="NORTHSTAR", subjectLogonId="0x77", shareName="\\\\*\\ADMIN$"),
+        ev(3, 1, base=SCM, eventId=7045, computer=fs, serviceName="upd", serviceFile="C:\\Windows\\upd.exe"),
+        # the domain controller: lab.admin's ticket for FS-001, another account's, an NTLM validation from FS-001 ...
+        ev(10, -0.02, eventId=4769, computer=DC, targetUser="lab.admin@NORTHSTAR.EXAMPLE", serviceName="FS-001$", ipAddress="10.0.0.21", status="0x0"),
+        ev(11, 5, eventId=4769, computer=DC, targetUser="svc.backup@NORTHSTAR.EXAMPLE", serviceName="FS-001$", ipAddress="10.0.0.30", status="0x0"),
+        ev(12, 10, eventId=4776, computer=DC, targetUser="svc.scan", workstation="FS-001", status="0x0"),
+        # ... the ticket of the machine at lab.admin's address, which says whose address it is ...
+        ev(13, -30, eventId=4768, computer=DC, targetUser="WS-001$", targetDomain="NORTHSTAR.EXAMPLE", ipAddress="10.0.0.21", status="0x0"),
+        # ... and neither someone else's ticket nor lab.admin's ten days later
+        ev(14, 2, eventId=4769, computer=DC, targetUser="zoe@NORTHSTAR.EXAMPLE", serviceName="FS-009$", ipAddress="10.0.0.77", status="0x0"),
+        ev(15, 10 * 24 * 60, eventId=4769, computer=DC, targetUser="lab.admin@NORTHSTAR.EXAMPLE", serviceName="FS-001$", ipAddress="10.0.0.21", status="0x0"),
+    ]  # fmt: skip
+    store = registry.get(str(uuid.uuid4()))
+    writer = EventWriter(store, 1, preserve_ids=True)
+    for e in events:
+        writer.add({**e, "recordKey": None})
+    writer.flush()
+    read: list[list[int]] = []
+    build = S.build_stories
+
+    def spy(rows, *a, **kw):
+        read.append(sorted(r["id"] for r in rows))
+        return build(rows, *a, **kw)
+
+    monkeypatch.setattr(S, "build_stories", spy)
+    findings = [finding("win-service-installed-suspicious", "high", [3], tags=["persistence"])]
+    res = S.stories_for_store(store, SETTINGS, findings)
+    assert read[-1] == [1, 2, 3, 10, 11, 12, 13] and res["stats"]["truncated"] == []
+    # the machine's ticket names the address's host: the way into FS-001 came from WS-001, with lab.admin's ticket
+    hops = [h for s in res["stories"] for h in s["lineage"]["hops"] if h["to"] == "fs-001"]
+    assert hops and all(h["from"]["host"] == "ws-001" for h in hops)
+    assert any("event:10" in h["refs"] for h in hops)
+    # past its cap, the records naming a flagged account or host are read before those only from an address
+    monkeypatch.setattr(S, "DC_CAP", 3)
+    res = S.stories_for_store(store, SETTINGS, findings)
+    assert read[-1] == [1, 2, 3, 10, 11, 12] and res["stats"]["truncated"] == ["dc"]
+
+
 def test_the_api_holds_the_sizes_it_is_asked_for_to_bounds():
     from api.views.stories import _opts
 
@@ -614,6 +727,10 @@ def test_the_browser_sends_every_field_the_story_engine_reads():
 
     block = ts[ts.index("export const LINEAGE_EVENT_IDS") :]
     assert {int(x) for x in re.findall(r"\d+", block[: block.index("]")])} == set(LINEAGE_EVENT_IDS)
+    from services.analysis.stories import DC_AUTH_EVENT_IDS
+
+    block = ts[ts.index("export const DC_AUTH_EVENT_IDS") :]
+    assert [int(x) for x in re.findall(r"\d+", block[: block.index("]")])] == list(DC_AUTH_EVENT_IDS)
     from services.analysis.stories import LINEAGE_CHANNEL_EVENTS, PRIVATE_ANSWER, REMOTE_SCRIPT
 
     block = ts[ts.index("export const LINEAGE_CHANNEL_EVENTS") :]
