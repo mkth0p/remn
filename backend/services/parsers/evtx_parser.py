@@ -378,6 +378,59 @@ def _int(value: Any) -> int | None:
         return None
 
 
+# SQL Server audit (33205) writes the whole audit record as "name:value" lines in one string.
+_SQL_AUDIT_LOGIN = re.compile(r"Login failed for user '([^']*)'")
+_SQL_AUDIT_ADDRESS = re.compile(r"<address>([^<]+)</address>")
+# sshd's lines name the account and the client: "Invalid user x from 10.0.0.9 port 60096",
+# "Failed password for x from ...", "Connection closed by authenticating user x 10.0.0.9 port ...".
+_SSHD_LINE = re.compile(
+    r"(?:Invalid user|Failed \S+ for(?: invalid user)?|Accepted \S+ for|authenticating user|invalid user) (\S*) (?:from )?([0-9A-Fa-f.:]+) port ([0-9]+)"
+)
+
+
+def _sql_audit(row: dict[str, Any]) -> None:
+    """Lift who did what to which object out of a SQL Server audit record (33205)."""
+    fields: dict[str, str] = {}
+    for line in str(row["message"]).split("\n"):
+        name, sep, value = line.partition(":")
+        if sep and name not in fields:
+            fields[name] = value.strip()
+    row["eventType"] = fields.get("action_id") or None
+    row["objectType"] = fields.get("class_type") or None
+    row["objectName"] = _str(fields.get("object_name") or None)
+    principal = fields.get("server_principal_name") or fields.get("session_server_principal_name")
+    if principal and not row.get("subjectUser"):
+        if "\\" in principal:
+            row["subjectDomain"], row["subjectUser"] = (_str(x) for x in principal.split("\\", 1))
+        else:
+            row["subjectUser"] = _str(principal)
+    target = fields.get("target_server_principal_name") or fields.get("target_database_principal_name")
+    login = _SQL_AUDIT_LOGIN.search(fields.get("statement") or "")
+    if not target and login:
+        target = login.group(1)
+    if target and not row.get("targetUser"):
+        row["targetUser"] = _str(target)
+    address = fields.get("client_ip") or ""
+    found = _SQL_AUDIT_ADDRESS.search(fields.get("additional_information") or "")
+    if not address and found:
+        address = found.group(1)
+    if address and not row.get("ipAddress") and address not in ("local machine", "<local machine>"):
+        row["ipAddress"] = normalize_ip(address) or _str(address, 100)
+
+
+def _sshd(row: dict[str, Any], payload: str) -> None:
+    """The account and client address an sshd line names (OpenSSH/Operational 4)."""
+    m = _SSHD_LINE.search(payload)
+    if not m:
+        return
+    if m.group(1) and not row.get("targetUser"):
+        row["targetUser"] = _str(m.group(1))
+    if not row.get("ipAddress"):
+        row["ipAddress"] = normalize_ip(m.group(2)) or _str(m.group(2), 100)
+    if row.get("ipPort") is None:
+        row["ipPort"] = _int(m.group(3))
+
+
 def flatten(event: dict[str, Any], record: dict[str, Any] | None = None, include_raw: bool = True) -> dict[str, Any]:
     ev = event.get("Event", event)
     system = ev.get("System", {}) or {}
@@ -494,6 +547,10 @@ def flatten(event: dict[str, Any], record: dict[str, Any] | None = None, include
             row["subjectDomain"], row["subjectUser"] = u.split("\\", 1)
         else:
             row["subjectUser"] = u
+    if event_id == 33205 and "mssql" in (row.get("provider") or "").lower() and row.get("message"):
+        _sql_audit(row)
+    if event_id == 4 and row.get("channel") == "OpenSSH/Operational" and data.get("payload"):
+        _sshd(row, str(data.get("payload")))
     if row.get("logonType") is None and data.get("LogonType") is not None:
         row["logonType"] = _int(data.get("LogonType"))
 

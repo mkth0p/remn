@@ -56,6 +56,12 @@ time: { outside_business_hours: true, weekend: true }   # uses case settings
 exclude: { targetUser|in_setting: service_accounts }
 ```
 
+On the server store a run keeps at most 2,000 findings per rule (the browser engine keeps
+them all). Past that, a rule with a threshold of two or more keeps its largest groups (the
+bursts it counts), and any other grouped rule its rarest (the values a hunt is after); the
+Rules view marks the rule "cut short", with the count as `2000+`, and the run says how many
+rules were cut. A `then` follow-up is checked for every finding the rule keeps.
+
 Operators: `eq ne in nin contains not_contains contains_any contains_all startswith
 not_startswith endswith not_endswith re not_re gt gte lt lte exists empty in_setting
 nin_setting levenshtein length contains_cs startswith_cs endswith_cs`. The `_cs`
@@ -110,6 +116,32 @@ the linked lab, and runs the same in both engines. `tools/evtx_attack_samples.py
 job hold the detections in place: the job fails when a rule that identifies a sample's
 attack stops firing on it, or when the engines disagree on any sample.
 
+`directory.yaml` reads what a domain controller's Security log says about the directory itself:
+account control flags that weaken an account (no password required, reversible encryption,
+DES only, no Kerberos pre-authentication) or grant delegation, resource-based delegation
+written on a computer object, permissions changed on the domain root, AdminSDHolder or any
+other object, extended rights rewritten, server objects created under Sites (DCShadow), the
+domain policy changed by a user, the Special Groups table changed, sensitive user rights
+assigned and the Guest account enabled (4738, 4742, 5136, 5137, 4739, 4908, 4704, 4722). It
+was written for the directory changes the default rules missed in EVTX-to-MITRE-Attack, so
+that library does not count as held out for it (`WRITTEN_AGAINST` in
+`tools/measure_rules.py`); none of its rules fires on the clean machines of evtx-baseline.
+`other-products.yaml` reads the logs of server products that run on Windows. SQL Server's audit
+(33205) is parsed into its action, object class and name, the principal, the target and the
+client address (`eventType`, `objectType`, `objectName`, `subjectUser`, `targetUser`,
+`ipAddress`), and the rules flag audits altered or dropped, logins added to server roles or to
+powerful database roles, logins and users created, sa enabled, repeated failed logins from one
+client and failed logins as sa, as well as options that run code (xp_cmdshell, CLR, OLE
+Automation, 15457) and a start in single-user mode (17115). OpenSSH lines (OpenSSH/Operational
+4) give the account and the client, for password guessing against sshd. For Certificate
+Services, the rules flag requests carrying a subject alternative name (ESC1, ESC6), changes to
+CA permissions (ESC7) and to templates (ESC4), the CA audit filter changed, CA backups and
+certificate logons the KDC could not map strongly. On the DNS server's audit channel, they flag a
+plugin DLL set (DNSAdmins), logging lowered, and wildcard, WPAD or ISATAP records. For
+BitLocker, they flag a password protector added and encryption started. The pack was written for
+the product logs the default rules missed in EVTX-to-MITRE-Attack, so that library does not
+count as held out for it (`WRITTEN_AGAINST`); none of its rules fires on the clean machines of
+evtx-baseline, which include OpenSSH and DNS server logs.
 PowerShell module logging (4103) and pipeline execution details (800) record each command a
 session runs, with its parameters, as `CommandInvocation` and `ParameterBinding` lines. The parser
 writes them back as the command (`Get-ADGroupMember -Identity 'Domain Admins'`) into
@@ -280,7 +312,9 @@ same day, gave 137, four of them REMN's own (Kerberoasting, password spraying, a
 query, a member added to a security group).
 
 **Re-measuring** takes the downloads listed in the tool's docstring (about 10 GB unpacked;
-`--datasets DIR --fetch` fetches them at their pinned versions) and about two hours on four cores;
+`--datasets DIR --fetch` fetches them at their pinned versions) and one to two hours on four
+cores. `--shard I/N --raw FILE` measures one of N shares of the recordings and clean machines,
+on as many machines as there are shares, and `--merge FILE...` makes the measure of the shares;
 re-run it after changing a rule or re-importing a pack, with `--detail rules/measures-detail.json`,
 and commit both files. A backend test warns while a rule has changed since it was measured.
 
@@ -289,7 +323,9 @@ detects a recording it detected when the committed detail was taken, a SigmaHQ r
 fires on its own sample, a recording is no longer read, or a high or critical rule raises more
 findings on a clean machine (all of its findings, when it was lower when measured).
 `.github/workflows/measure-rules.yml` runs it weekly, on demand, and on a pull request that
-touches the rules, the rule engine, the parsers or the tool, and uploads the measures it took. A
+touches the rules, the rule engine, the parsers or the tool, and uploads the measures it took. It
+takes the whole measure every time, shared over eight runners, and the gate fails unless every
+share measured all it was dealt. A
 change meant to lose a detection or add noise commits those measures, so the diff of the two files
 says what it changed. The weekly run also catches a new release of a dependency (the EVTX parser,
 DuckDB) that changes what the rules match.

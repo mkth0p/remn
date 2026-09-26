@@ -401,6 +401,51 @@ export function headerTime(t: string | null | undefined): string | null {
 const IP_KEYS = new Set(['ipAddress', 'sourceIp', 'destinationIp'])
 const SERVICE_EVENTS = [7036, 7040, 7035, 7000, 7031, 7034, 7023, 7024]
 const RDP_USER_EVENTS = [21, 22, 23, 24, 25, 39, 40]
+
+// SQL Server audit (33205) writes the whole audit record as "name:value" lines in one string.
+const SQL_AUDIT_LOGIN = /Login failed for user '([^']*)'/
+const SQL_AUDIT_ADDRESS = /<address>([^<]+)<\/address>/
+// sshd's lines name the account and the client: "Invalid user x from 10.0.0.9 port 60096",
+// "Failed password for x from ...", "Connection closed by authenticating user x 10.0.0.9 port ...".
+const SSHD_LINE = /(?:Invalid user|Failed \S+ for(?: invalid user)?|Accepted \S+ for|authenticating user|invalid user) (\S*) (?:from )?([0-9A-Fa-f.:]+) port ([0-9]+)/
+
+/** Lift who did what to which object out of a SQL Server audit record (33205). */
+function sqlAudit(row: Row): void {
+  const fields = new Map<string, string>()
+  for (const line of pyStr(row.message).split('\n')) {
+    const i = line.indexOf(':')
+    if (i >= 0 && !fields.has(line.slice(0, i))) fields.set(line.slice(0, i), strip(line.slice(i + 1)))
+  }
+  const field = (k: string) => fields.get(k) || ''
+  row.eventType = field('action_id') || null
+  row.objectType = field('class_type') || null
+  row.objectName = str(field('object_name') || null)
+  const principal = field('server_principal_name') || field('session_server_principal_name')
+  if (principal && !truthy(row.subjectUser)) {
+    const i = principal.indexOf('\\')
+    if (i >= 0) {
+      row.subjectDomain = str(principal.slice(0, i))
+      row.subjectUser = str(principal.slice(i + 1))
+    } else row.subjectUser = str(principal)
+  }
+  let target = field('target_server_principal_name') || field('target_database_principal_name')
+  const login = SQL_AUDIT_LOGIN.exec(field('statement'))
+  if (!target && login) target = login[1]
+  if (target && !truthy(row.targetUser)) row.targetUser = str(target)
+  let address = field('client_ip')
+  const found = SQL_AUDIT_ADDRESS.exec(field('additional_information'))
+  if (!address && found) address = found[1]
+  if (address && !truthy(row.ipAddress) && address !== 'local machine' && address !== '<local machine>') row.ipAddress = or(normalizeIp(address), str(address, 100))
+}
+
+/** The account and client address an sshd line names (OpenSSH/Operational 4). */
+function sshd(row: Row, payload: string): void {
+  const m = SSHD_LINE.exec(payload)
+  if (!m) return
+  if (m[1] && !truthy(row.targetUser)) row.targetUser = str(m[1])
+  if (!truthy(row.ipAddress)) row.ipAddress = or(normalizeIp(m[2]), str(m[2], 100))
+  if (row.ipPort === null || row.ipPort === undefined) row.ipPort = toInt(m[3])
+}
 const KERBEROS_EVENTS = [4768, 4769, 4771, 4772, 4773]
 
 export interface RecordHeader {
@@ -617,6 +662,8 @@ export function flatten(event: Json, record: RecordHeader | null = null, include
       row.subjectUser = u.slice(i + 1)
     } else row.subjectUser = u
   }
+  if (eid === 33205 && ((row.provider as string | null) || '').toLowerCase().includes('mssql') && truthy(row.message)) sqlAudit(row)
+  if (eid === 4 && row.channel === 'OpenSSH/Operational' && truthy(d('payload'))) sshd(row, pyStr(d('payload')))
   if ((row.logonType === null || row.logonType === undefined) && d('LogonType') !== null && d('LogonType') !== undefined) row.logonType = toInt(d('LogonType'))
 
   const desc = describe(row.provider as string | null, eventId)

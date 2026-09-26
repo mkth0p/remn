@@ -42,8 +42,9 @@ Everything else is a short-lived branch for one pull request, deleted once it is
   `tools/parity_fixture.py` when the change is intentional.
 - **Rules are measured.** A change to a rule, a pack, the rule engine or the EVTX parser is
   measured again before it is merged: `tools/measure_rules.py --datasets DIR --fetch --out
-  rules/measures.json --detail rules/measures-detail.json` (about two hours on four cores),
-  and both files are committed with the change. The rule-measures workflow fails a pull
+  rules/measures.json --detail rules/measures-detail.json` (one to two hours on four cores,
+  or `--shard` it over several machines and `--merge` the shares), and both files are
+  committed with the change. The rule-measures workflow fails a pull
   request that makes a rule stop detecting a recording or a high or critical rule noisier
   on the clean machines; when that is intended, the committed measures say so.
 - **Prompts live in Python.** `backend/services/ai/prompts.py` is the source; the
