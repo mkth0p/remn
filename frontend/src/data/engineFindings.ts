@@ -64,6 +64,7 @@ export async function persistEngineFindings(caseId: number, evidenceId: number, 
         reportExclude: prev?.reportExclude,
         chainUnlinked: prev?.chainUnlinked,
         decidedBy: prev?.decidedBy,
+        decidedAt: prev?.decidedAt,
         aiReason: prev?.aiReason,
         notesBy: prev?.notesBy,
       } as Finding

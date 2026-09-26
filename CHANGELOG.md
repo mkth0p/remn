@@ -5,6 +5,18 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- The Findings page sorts by priority, what to look at first, and says why: each finding
+  weighs its severity (the review override first) times its rule's confidence, times how far
+  its rule's measure says it can be believed (as the stories weigh it), times how rare its rule
+  is in the case (1.5 when it fired on one host of at least three, 0.75 when on half or more),
+  plus a point for each other rule on the same host or user within 24 hours and a point more
+  for each other tactic among them (at most 6). An analyst's earlier decision on the same rule
+  and the same entities, in this case or another case of this browser, counts too: escalated
+  adds 5, false positive keeps a quarter of the score, and the reason says where and when
+  ("marked false positive in case Acme on 2026-08-14"). Reviewed and false-positive findings
+  sort below the rest; severity and newest remain as sorts. A decision made on the Findings page
+  is now recorded as the analyst's, with its date.
+
 ## 0.2.0 (2026-09-26)
 
 - A story's score favours weight and attack order over breadth: it follows the heaviest run of
