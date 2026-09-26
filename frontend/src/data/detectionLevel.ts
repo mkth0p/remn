@@ -4,7 +4,8 @@
  * its measure says it raised on the clean Windows machines of evtx-baseline, per machine that logs
  * what it reads (rules/measures.json), and a finding is raised when that noise fits the budget of
  * its severity: the budget doubles with each severity step, so a critical finding may come from a
- * rule four times noisier than a medium one. A rule no clean machine could measure (mail, Microsoft
+ * rule four times noisier than a medium one. Level 4 also raises every medium and higher finding
+ * whatever its rule's noise, as REMN did before levels, so it detects at least what that did. A rule no clean machine could measure (mail, Microsoft
  * 365, other products' logs, a rule changed since it was measured) raises its findings from medium
  * up below the last level, as every rule did before levels; the analyst's own rules are always
  * raised.
@@ -33,6 +34,8 @@ export interface LevelInfo {
   label: string
   /** findings per clean machine a medium rule may raise; doubled per severity step above, halved below */
   budget: number
+  /** a severity rank raised whatever its rule's noise (level 4 raises every medium and higher finding) */
+  always?: number
   /** in a sentence, what the level raises */
   text: string
   /** measured: recordings detected (a finding of the recording's technique) and findings per clean machine */
@@ -47,28 +50,29 @@ export const DETECTION_LEVELS: LevelInfo[] = [
     label: 'fewest false positives',
     budget: 0.1,
     text: 'Only rules that stayed silent on the clean machines that log what they read.',
-    measured: { attackData: 211, evtxToMitre: 87, attackSamples: 221, perCleanMachine: 13 },
+    measured: { attackData: 222, evtxToMitre: 91, attackSamples: 227, perCleanMachine: 11 },
   },
   {
     level: 2,
     label: 'quiet',
     budget: 0.5,
     text: 'Adds rules that fired a few times across all the clean machines.',
-    measured: { attackData: 231, evtxToMitre: 100, attackSamples: 253, perCleanMachine: 52 },
+    measured: { attackData: 231, evtxToMitre: 100, attackSamples: 253, perCleanMachine: 40 },
   },
   {
     level: 3,
     label: 'balanced',
     budget: 5,
     text: 'Rules that fire up to a few times per clean machine at medium, more at high and critical, and low findings of rules quiet there.',
-    measured: { attackData: 239, evtxToMitre: 114, attackSamples: 265, perCleanMachine: 172 },
+    measured: { attackData: 239, evtxToMitre: 114, attackSamples: 265, perCleanMachine: 164 },
   },
   {
     level: 4,
     label: 'broad',
-    budget: 20,
-    text: 'Also rules that fire tens of times on a clean machine: more to read, a few more attacks found.',
-    measured: { attackData: 243, evtxToMitre: 117, attackSamples: 265, perCleanMachine: 337 },
+    budget: 5,
+    always: 2,
+    text: 'Every medium and higher finding, as before levels, and the low findings of rules quiet on the clean machines.',
+    measured: { attackData: 248, evtxToMitre: 118, attackSamples: 266, perCleanMachine: 314 },
   },
   {
     level: 5,
@@ -79,8 +83,8 @@ export const DETECTION_LEVELS: LevelInfo[] = [
   },
 ]
 
-/** Raising every medium and higher finding, as REMN did before levels (measured the same way). */
-export const BEFORE_LEVELS = { attackData: 235, evtxToMitre: 109, attackSamples: 260, perCleanMachine: 305 }
+/** Raising every medium and higher finding, as REMN did before levels (measured the same way, with the rule levels of 2026-09-26). */
+export const BEFORE_LEVELS = { attackData: 245, evtxToMitre: 112, attackSamples: 264, perCleanMachine: 241 }
 
 const RANK: Record<Severity, number> = { info: 0, low: 1, medium: 2, high: 3, critical: 4 }
 /** No severity of the rule is raised. */
@@ -104,11 +108,11 @@ export function ruleNoise(m: RuleMeasure | undefined): number | null {
 
 /** The lowest severity rank (0 info to 4 critical) whose findings the level raises, NEVER when none. */
 export function severityFloor(level: DetectionLevel, noise: number | null, origin?: 'bundled' | 'pack' | 'custom'): number {
-  const budget = levelInfo(level).budget
+  const { budget, always = NEVER } = levelInfo(level)
   if (origin === 'custom' || budget === Infinity) return 0
-  if (noise == null) return UNMEASURED_FLOOR
+  if (noise == null) return Math.min(UNMEASURED_FLOOR, always)
   const s = Math.max(0, Math.ceil(2 + Math.log2(noise / budget) - 1e-9))
-  return s > 4 ? NEVER : s
+  return Math.min(s > 4 ? NEVER : s, always)
 }
 
 export const severityRank = (s: unknown): number => RANK[String(s ?? '').toLowerCase() as Severity] ?? RANK.medium

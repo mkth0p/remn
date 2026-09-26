@@ -147,7 +147,8 @@ has each of them divided by 1 + ln n, n being that count: the tenth finding of o
 host tells less than the first finding of another, which is how stacking works. With it, the
 first finding of an attack came into the top ten of a case built from clean hosts with one
 recording added in 47%, 38% and 76% of the attack_data, EVTX-to-MITRE-Attack and
-EVTX-ATTACK-SAMPLES recordings, against 46%, 31% and 60% without, at detection level 3. Other rules on the same host or for the same user within 24 hours add a
+EVTX-ATTACK-SAMPLES recordings, against 46%, 31% and 60% without, at detection level 3.
+Other rules on the same host or for the same user within 24 hours add a
 point each and a point more for each other ATT&CK tactic among them, up to 6. The same rule on
 the same entities (what it found, such as the program, command line or service, not the host,
 account or address, unless the rule names nothing else) escalated by an analyst before, in this

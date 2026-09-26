@@ -1402,7 +1402,7 @@ export function buildReportHtml(d: ReportData): string {
   const generated = new Date(d.generatedAt ?? Date.now()).toISOString().replace('T', ' ').slice(0, 19) + 'Z'
   const seen = profile.filter((b) => b.state !== 'none')
   const confirmedBadges = profile.filter((b) => b.state === 'confirmed')
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>REMN report · ${h(kase.name)}</title><style>${font}${CSS}</style></head><body>
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'"><meta name="viewport" content="width=device-width"><title>REMN report · ${h(kase.name)}</title><style>${font}${CSS}</style></head><body>
 <div class="cover-page">
 <div class="cover${d.issue?.status === 'draft' ? ' draft' : ''}">
 <div class="brand"><div class="l"><span class="wordmark">REMN</span><span class="tag">forensic analysis report</span></div><div class="r">${generated}<br>${kase.analyst ? `analyst ${h(kase.analyst)}` : 'analyst not set'}${d.issue ? `<br><span class="issue ${d.issue.status}">${d.issue.status === 'final' && d.issue.finalAt ? `final · issued ${h(new Date(d.issue.finalAt).toISOString().replace('T', ' ').slice(0, 19))}Z` : 'draft · not issued'}</span>` : ''}</div></div>

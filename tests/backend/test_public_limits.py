@@ -184,3 +184,52 @@ def test_the_log_filter_keeps_evidence_text_out():
     # records from elsewhere are left alone
     other = logging.LogRecord("django.request", logging.WARNING, __file__, 1, "Not Found: %s", ("/x",), None)
     assert RedactEvidence().filter(other) and other.getMessage() == "Not Found: /x"
+
+
+def _init_upload(client, size):
+    return client.post("/api/upload/init", json.dumps({"name": "e.evtx", "size": size}), content_type="application/json", **HDR)
+
+
+def test_an_oversized_chunk_is_refused_before_its_body_is_read(tmp_path, monkeypatch):
+    from api.views import upload
+
+    with override_settings(FILE_UPLOAD_TEMP_DIR=tmp_path):
+        c = Client()
+        upload_id = _init_upload(c, 4096).json()["uploadId"]
+        monkeypatch.setattr(upload, "MAX_CHUNK", 16)
+        read_sizes: list = []
+        real_read = __import__("django.http", fromlist=["HttpRequest"]).HttpRequest.read
+
+        def spy(self, *args):
+            read_sizes.append(args[0] if args else None)
+            return real_read(self, *args)
+
+        monkeypatch.setattr("django.http.HttpRequest.read", spy)
+        r = c.put(f"/api/upload/{upload_id}/chunk?offset=0", b"x" * 64, content_type="application/octet-stream", **HDR)
+        assert r.status_code == 413 and read_sizes == []
+        # within the limit the read itself is bounded
+        r = c.put(f"/api/upload/{upload_id}/chunk?offset=0", b"x" * 8, content_type="application/octet-stream", **HDR)
+        assert r.status_code == 200 and read_sizes == [17]
+
+
+def test_announced_uploads_reserve_their_room_in_the_staging_budget(tmp_path):
+    """Two inits that each fit an empty staging area must not both pass: the first one's announced
+    size is reserved before any of its chunks arrive."""
+    with override_settings(FILE_UPLOAD_TEMP_DIR=tmp_path, FORENSIC_TMP_MAX_GB=1, FORENSIC_MAX_CHUNKED_GB=64, FORENSIC_BROWSER_ONLY=False):
+        c = Client()
+        assert _init_upload(c, 600 * 1024**2).status_code == 200
+        second = _init_upload(c, 600 * 1024**2)
+        assert second.status_code == 507 and second.json()["code"] == "staging-full"
+
+
+@override_settings(FORENSIC_BROWSER_ONLY=True)
+def test_browser_only_refuses_server_stores_on_the_open_analysis_paths():
+    c = Client()
+    key = "0" * 32
+    for path, body in (
+        ("/api/chains/build", {"storeKey": key}),
+        ("/api/enrich/mails", {"storeKey": key}),
+        ("/api/enrich/mails/rescore", {"storeKey": key}),
+    ):
+        r = c.post(path, json.dumps(body), content_type="application/json", **HDR)
+        assert r.status_code == 403 and r.json()["code"] == "browserOnly", (path, r.status_code)

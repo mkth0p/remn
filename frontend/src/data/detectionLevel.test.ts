@@ -26,7 +26,13 @@ describe('the detection level', () => {
     expect(severityFloor(3, 5)).toBe(2)
     expect(severityFloor(3, 20)).toBe(4)
     expect(severityFloor(3, 21)).toBe(NEVER)
-    expect(severityFloor(4, 21)).toBe(3)
+    expect(severityFloor(4, 21)).toBe(2)
+  })
+
+  it('raises every medium and higher finding at level 4, as before levels, and low ones of quiet rules', () => {
+    expect(severityFloor(4, 5000)).toBe(2)
+    expect(severityFloor(4, null)).toBe(2)
+    expect(severityFloor(4, ruleNoise(clean(0)))).toBe(0)
   })
 
   it('raises what no clean machine could measure from medium up, and the analyst own rules always', () => {
@@ -48,7 +54,8 @@ describe('the detection level', () => {
   it('gives the lowest level a rule raises its top severity at, its follow-up included', () => {
     const rule = { id: 'r', severity: 'medium' as const, then: { severity: 'critical' as const } }
     expect(ruleTopSeverity(rule)).toBe('critical')
-    expect(lowestLevel('medium', 57)).toBe(5)
+    expect(lowestLevel('medium', 57)).toBe(4)
+    expect(lowestLevel('low', 57)).toBe(5)
     expect(lowestLevel('critical', 57)).toBe(4)
     expect(lowestLevel('high', ruleNoise(clean(0)))).toBe(1)
   })

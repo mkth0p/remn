@@ -24,9 +24,12 @@ export function toCsv(rows: Record<string, unknown>[], columns?: string[]): stri
     const s = typeof v === 'object' ? JSON.stringify(v) : String(v)
     // Neutralise formula injection when the CSV is opened in Excel
     const safe = /^[=+\-@\t\r]/.test(s) ? "'" + s : s
-    return /[",\n\r]/.test(safe) ? '"' + safe.replace(/"/g, '""') + '"' : safe
+    // A semicolon is quoted as well as a comma: Excel in French and other locales splits a CSV on
+    // semicolons, and an unquoted "x;=HYPERLINK(...)" would put a formula at the start of a cell.
+    return /[",;\t\n\r]/.test(safe) ? '"' + safe.replace(/"/g, '""') + '"' : safe
   }
-  const lines = [cols.join(',')]
+  // column names come from row keys, which in an event export come from the evidence
+  const lines = [cols.map(esc).join(',')]
   for (const r of rows) lines.push(cols.map((c) => esc(r[c])).join(','))
   return lines.join('\r\n')
 }

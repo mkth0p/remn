@@ -8,15 +8,36 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 - A detection level per case, from 1 (fewest false positives) to 5 (every finding), set when the
   case is started and changed on the Rules page. Each rule's findings are raised or not from its
   measured noise on the clean machines of evtx-baseline and the finding's severity. The default,
-  3, detects more than raising every medium and higher finding did on attack_data, EVTX-to-MITRE-
-  Attack and EVTX-ATTACK-SAMPLES (239, 114 and 265 recordings against 235, 109 and 260) with 44%
-  fewer findings on clean machines; level 1 keeps 90% of the attack_data detections with 4% of the
-  noise. Findings an analyst decided on stay at any level. Cases started before keep every finding
+  3, has a third fewer findings on clean machines than raising every medium and higher finding,
+  with 239, 114 and 265 attack_data, EVTX-to-MITRE-Attack and EVTX-ATTACK-SAMPLES recordings
+  detected against 245, 112 and 264; level 4 raises every medium and higher finding too and
+  detects 248, 118 and 266; level 1 keeps 91% of the attack_data detections with a twentieth of
+  the noise. Findings an analyst decided on stay at any level. Cases started before keep every finding
   until their level is set ([detection level](docs/detection.md#detection-level)).
 - The priority of a finding divides by 1 + ln n when its rule raised n findings on the same host
   or for the same user, so one loud rule no longer fills the top of the queue. The first finding of
   an attack reached the top ten in 38% of EVTX-to-MITRE-Attack recordings and 76% of
   EVTX-ATTACK-SAMPLES recordings, up from 31% and 60%.
+- CSV exports quote any value holding a semicolon or a tab, and put column names through the
+  same escaping, so a value from the evidence cannot start a formula in Excel builds that split
+  CSV on semicolons. The HTML report carries its own content security policy (no script, no
+  remote loads), and the build's source link is only ever an http(s) URL.
+- Public instance limits: a chunk upload over 64 MiB is refused before it is read (by Caddy and by
+  the server), unfinished uploads reserve the size they announced in the staging budget, and the
+  chains and mail enrichment paths refuse a server case key in browser-only mode, as stories and
+  relationships already did. A non-ASCII access token is a 401 rather than a server error.
+- Levels measured rather than inherited: 116 low rules that raise nothing on the evtx-baseline
+  clean machines are now medium, and ten rules whose only findings are on those machines are now
+  low (SigmaHQ rules through `rules/community/levels.json`, which a re-import keeps; REMN's own
+  in their files). Detections go from 235 to 245 of 535 attack_data recordings, 109 to 112 of 279
+  EVTX-to-MITRE-Attack files and 260 to 264 of 278 EVTX-ATTACK-SAMPLES files, and medium and
+  higher findings on the clean machines from 2,134 to 1,684.
+- 39 rules for techniques the default rules missed in attack_data
+  (`rules/windows/technique-gaps.yaml`): directory and Kerberos abuse, PowerShell discovery and
+  tooling, obfuscated command lines, registry, Python and browser-policy persistence, LSA
+  protection and Defender tampering, EFI boot files, credential stores and known attacker tools.
+  They add 46 attack_data detections, which does not count as held out for them, fire on none of
+  the clean machines, and add no detection on the two other libraries yet.
 - A home page. REMN opens on it until a case holds evidence, and the wordmark leads back to it
   after that. It shows what the tool reads, how the rules are measured and what the measures
   show: the rule totals, recordings and clean-host baseline read live from `rules/measures.json`
