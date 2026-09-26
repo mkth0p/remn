@@ -295,6 +295,55 @@ in three phases or more, each carry a finding of medium or more from a rule that
 lead nor noisy on clean machines (a rule never measured counts). Three phases of an
 administrator's routine from rules that fire on clean machines are not an intrusion.
 
+## Spine
+
+A story's spine is the few steps a reader takes in at a glance: from the way in to the worst of
+it, each keeping the tie that put it in the story. It is DEPIMPACT's cut (USENIX Security 2022:
+keep what joins an alert to the ways into the system) and RapSheet's skeleton (the alerts and
+what connects them), over the story's own steps. What led to what, among the steps:
+
+- a logon before what happened in its session (both logons of a split token), else the
+  session's first step before the rest;
+- a program before those it started: the nearest ancestor whose creation the story holds, six
+  generations up at most;
+- a hop's first record before the rest of it, and the session open on the source host at the
+  hop's time (the hop's person's first) before the hop, else the source host's last flag before it;
+- a way in from an address the story's findings name before what else came from that address;
+- a phishing mail before what its link or attachment reached (a chain step tied to the mail by
+  an artifact) and before a way in from an address the findings name;
+- last, a host record none of these reaches, naming the person of a session open on that host
+  then, after that session's logon (the engine's tie by time and place).
+
+The anchor is the step of the worst finding: of equal ones, one that is not a way in itself,
+then one that changes what an intruder holds, then the first; of the ten worst, the first
+whose ties lead back to a way in (a step of initial access). The ties are walked back from the
+anchor to the ways in, then forward from the ways in; the spine is the steps on both walks that
+lead to the anchor or to another flag, from the first way in on, in time order. A flag
+repeated on its host (the same phase and rules: the service PsExec installs each time it runs)
+is kept once. A spine holds fifteen steps at most: past them it keeps the way in and the
+anchor, then the flags that change what an intruder holds and the steps that lead to them, then
+the other flags, then what joins them, and a step kept only for joining others stays only when
+something it leads to stays.
+
+When the anchor's ties reach no way in, the spine starts at the story's earliest flag and runs
+forward from it, from the anchor and from as far back as the anchor's ties go. It says the way
+in is not in the evidence or, when the story has initial access steps its ties do not reach,
+that they lead back to none of them.
+
+A story carries `spine` (the step ids, in time order) and `spineBasis`: `anchor` (a step id),
+`wayIn` (the ways in the ties reach first, empty when none), `tied`, `cut` (the steps on those
+paths left to the full timeline) and `text`, the sentence the page and the report print
+("Anchored on … The story's ties lead back from it to the way in: …"). A story with no step
+has an empty spine and no basis.
+
+The page opens a story on its spine, the first thing of its Story tab under the phase rail:
+the basis, then the steps as a line of knots coloured by their worst finding, the way in and
+the anchor marked, each with its time, how long after the step before, its phase, its worst
+finding and its tie. "Full timeline" shows every step; picking a phase or opening a step off
+the spine (from the case timeline) shows it too, and "Spine" goes back. j and k move along
+what shows. A story built before spines opens on its timeline: build the stories again for its
+spine.
+
 ## Measured marks
 
 A finding on a step carries its rule's measure ([REMN's rules, measured](reviews/2026-09-24-measured-rules.md)):
@@ -469,8 +518,10 @@ a column (web addresses print defanged, `hxxp://`).
 
 The report prints the stories at or above its severity floor, the highest-scoring first and at
 most twenty, before the chains, as the Stories page shows them with the analyst's decisions
-applied: each with its phases in the order they happened, what marks each (its worst findings,
-else its first step), the analyst's note (checked against the story's records like a chain's
+applied: each with its spine (a row per step: when, its phase with its worst finding's
+severity, the step and that finding, the way in and the anchor marked, and why it is in the
+story, then how the spine was drawn), its phases in the order they happened, what marks each
+(its worst findings, else its first step), the analyst's note (checked against the story's records like a chain's
 narrative), the analyst's decision and its reason, what the analyst merged into it, split off it
 or took out of it (each with its reason), and where its evidence stops: its hosts' coverage and
 a story no record shows starting (no initial access). A step the analyst disputed is left out of
@@ -494,6 +545,33 @@ the same way; a confirmed story the report does not print (below the floor, past
 twenty) still counts and the cover says it is not printed. With "reviewed items only", a story
 prints when it has a note or a decision other than open. An undecided story decides nothing:
 the verdict comes from the chains, incidents and stories the analyst decided.
+
+## Export
+
+A story downloads as a MITRE CTID Attack Flow ("Download Attack Flow" in its head): a STIX 2.1
+bundle with the Attack Flow extension (`extension-definition--fb9c968a-745b-4ade-9b25-c324172197f4`,
+schema 2.0.0, its definition in the bundle), one `attack-flow` of scope `incident`, and an
+`attack-action` per step of the spine, in its order, each leading to the next (`effect_refs`),
+the first in the flow's `start_refs`. An action is named by its step's worst finding (one with
+an ATT&CK technique first), with its technique (`technique_id`, from the finding's ATT&CK tags;
+none when the rule has none), its tactic (`tactic_id`, the step's phase), its time, why it is in
+the story, and the confidence of its tie: strong 90, medium 70. The hosts, accounts and
+addresses a step touches are `attack-asset`s; an account's refers to an `identity` (individual,
+or system for a service account), an address's to `infrastructure` that consists of the address
+(`ipv4-addr` or `ipv6-addr`, with STIX's own id for it). The flow's description is the spine's
+basis and the story's summary. A story built before spines exports its flagged steps, fifteen
+at most.
+
+A campaign downloads as a STIX 2.1 `grouping` of context `suspicious-activity` ("Download STIX
+grouping"): the Attack Flow of each of its stories, its infrastructure (addresses as
+infrastructure, sender and link domains as `domain-name`, attachment digests as `file`,
+forwarding addresses as `email-addr`, consented applications as `software`) and the accounts
+its sources reached, as identities whose description says nothing shows they were compromised.
+
+Both are marked TLP:AMBER and authored by the case's identity, as the indicator export is.
+Every id but the bundle's comes from the case and the content, so the same export twice gives
+the same objects. An action is named by its finding's title: REMN ships no table of ATT&CK's
+technique names.
 
 ## Explore
 
@@ -572,7 +650,11 @@ lure raise none. S04 reads as initial access,
 credential access, execution, persistence, lateral movement, collection and defense
 impairment, with its RDP session from 203.0.113.69 on WS-004, the log cleared inside that
 session, and the admin share and the service installed a minute later on FS-001; with Sysmon
-removed it says what ran on WS-004 is not in the evidence. The browser-only end-to-end test
+removed it says what ran on WS-004 is not in the evidence. Its spine, anchored on the log
+cleared, runs from the phishing mail through the RDP logon and its session (the credential
+access, the log cleared) to the admin share and the service installed on FS-001, and leaves
+the rest of the story (the victim's own sign-ins from his usual address among them) to the full
+timeline. The browser-only end-to-end test
 (`frontend/e2e/browser-only.spec.ts`) reads the same lab as a visitor would, in a browser case
 with no internal domain set and the default rule packs on, and finds the same six stories. These
 are synthetic scenarios: a regression benchmark, not a measured accuracy on field cases.
@@ -598,6 +680,9 @@ account on SCRANTON she enabled (one record names both).
 
 ## Limits
 
+- A spine's way in is a step whose phase is initial access: a logon a rule tags valid accounts
+  (T1078), out of hours or with special privileges, reads as one. The spine starts at a way in
+  only when the ties reach it; its basis says when they do not.
 - A person is joined across forms only as the records and the naming rules allow: two
   accounts one person uses (an admin account beside a user account) are two identities.
 - A DHCP lease has no time: the audit log writes the server's local time without its zone,

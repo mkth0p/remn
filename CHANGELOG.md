@@ -58,6 +58,17 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   Stories page lists an incident's stories together and shows a story's linked stories, and the
   report prints an incident's stories under one heading. On the first day of the APT29
   evaluation the five stories (pbeesly's and four hosts', all high) are now one, hers.
+- A story has a spine: the few steps, fifteen at most, that carry it from the way in to the worst
+  of it, found by walking the story's own ties (its sessions, process trees, hops and where they
+  came from, the attacker's address, the phishing chain) back from its worst finding to an
+  initial access step and forward to its flags, each step keeping its tie (`spine` and
+  `spineBasis` on each story). The Stories page opens a story on its spine, with a toggle to the
+  full timeline, and the report prints each story's spine before its phases. When the ties reach
+  no way in, the spine starts at the earliest flag and says the way in is not in the evidence. A
+  story downloads as a MITRE CTID Attack Flow (a STIX 2.1 bundle of scope incident, an action
+  per spine step with its ATT&CK technique and tactic and the confidence of its tie, its hosts,
+  accounts and addresses as assets), and a campaign as a STIX 2.1 grouping (suspicious activity)
+  of its stories' flows, its infrastructure and the accounts it reached.
 - Stories no longer lose what matters to routine activity or to their own caps. A program a
   person ran with no finding joins their story only when it ran in the story's logon session or
   process tree, not for naming them; past 400 steps a story keeps its flags, then its

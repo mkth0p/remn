@@ -44,7 +44,7 @@ const lit = (v: string) => `'${v.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
 const HASH_NAME: Record<number, string> = { 64: 'SHA-256', 40: 'SHA-1', 32: 'MD5' }
 
 /** The STIX cyber-observable for an indicator value, and the pattern that matches it. */
-function stixObservable(kind: string, v: string): { sco: Record<string, unknown>; pattern: string } | null {
+export function stixObservable(kind: string, v: string): { sco: Record<string, unknown>; pattern: string } | null {
   if (kind === 'ip') {
     const type = v.includes(':') ? 'ipv6-addr' : 'ipv4-addr'
     return { sco: { type, value: v }, pattern: `[${type}:value = ${lit(v)}]` }
@@ -60,7 +60,7 @@ function stixObservable(kind: string, v: string): { sco: Record<string, unknown>
 }
 
 /** UUID version 5 (RFC 9562), as STIX 2.1 defines deterministic identifiers. */
-async function uuid5(namespace: string, name: string): Promise<string> {
+export async function uuid5(namespace: string, name: string): Promise<string> {
   const ns = namespace.replace(/-/g, '')
   const bytes = new Uint8Array([...(ns.match(/../g) ?? []).map((x) => parseInt(x, 16)), ...new TextEncoder().encode(name)])
   const h = await createSHA1()
@@ -73,12 +73,12 @@ async function uuid5(namespace: string, name: string): Promise<string> {
   return `${x.slice(0, 8)}-${x.slice(8, 12)}-${x.slice(12, 16)}-${x.slice(16, 20)}-${x.slice(20)}`
 }
 /** the namespace STIX 2.1 gives for cyber-observable ids */
-const STIX_SCO_NS = '00abedb4-aa42-466c-9c01-fed23315a9b7'
+export const STIX_SCO_NS = '00abedb4-aa42-466c-9c01-fed23315a9b7'
 /** REMN's own namespace for the indicator and identity ids it derives, so an export re-imports without duplicates */
-const REMN_NS = '5b3c6e0e-8f0e-5a6f-9d2c-2f1d7c9e4a10'
+export const REMN_NS = '5b3c6e0e-8f0e-5a6f-9d2c-2f1d7c9e4a10'
 /** TLP:AMBER, a STIX 2.1 predefined marking: case indicators are for the recipient's organisation */
-const TLP_AMBER = 'marking-definition--f88d31f6-486f-44da-b317-01333bde0b82'
-const canonical = (o: Record<string, unknown>): string =>
+export const TLP_AMBER = 'marking-definition--f88d31f6-486f-44da-b317-01333bde0b82'
+export const canonical = (o: Record<string, unknown>): string =>
   JSON.stringify(o, (_, v) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.localeCompare(b))) : v))
 
 /**
