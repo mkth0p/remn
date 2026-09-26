@@ -260,9 +260,10 @@ record put in later), clocks set back (the times either side do not give the ord
 events), chunks that fail their checksum, record numbers
 in none of the files of one log (a missing archive), logs that start after the first
 finding (overwritten or not collected), Unified Audit Log exports of exactly 5,000 or
-50,000 records (cut at a service limit), MailItemsAccessed throttled for a mailbox (item
-reads not recorded for 24 hours), and Entra sign-ins that start after the first finding
-(Entra keeps them 7 or 30 days). The first finding is the earliest one of medium severity
+50,000 records (cut at a service limit), event records read from an XML export (no record
+numbering to check them against), MailItemsAccessed throttled for a mailbox (item reads
+not recorded for 24 hours), and Entra sign-ins that start after the first finding (Entra
+keeps them 7 or 30 days). The first finding is the earliest one of medium severity
 or above that is not a false positive.
 
 What the report says about rows is read back against the rows before it prints
