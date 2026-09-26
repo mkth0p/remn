@@ -339,6 +339,7 @@ export const STORY_EVENT_FIELDS = [
   'parentCommandLine',
   'processName',
   'parentProcessName',
+  'enriched',
   'newProcessId',
   'callerProcessId',
   'parentProcessId',

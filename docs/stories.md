@@ -67,23 +67,30 @@ accounts from SQL, with their counts, so millions of events are a few thousand r
 Host lineage reads, for each host:
 
 - **logon sessions**: a logon (4624) and its logoff (4634, 4647), keyed by host and logon id,
-  holding every event that names that logon id as its subject (4688, 4698, 4720, 4732, 5140,
-  1102 ...); special privileges (4672) and split tokens are noted. Activity whose logon is not
-  in the evidence still makes a session, marked as such, except a machine account's or
-  Windows' own;
+  holding every event that names that logon id as its subject between the two, give or take
+  five seconds (4688, 4698, 4720, 4732, 5140, 1102 ...); special privileges (4672) and split
+  tokens are noted. Windows hands logon ids out again after a reboot, so a record after its
+  id's session ended, before the first logon of that id, or of another account than the
+  session's is not in that session. Activity whose logon is not in the evidence still makes a
+  session, marked as such, except a machine account's or Windows' own;
 - **hops**, how an account came to a host: an RDP logon (4624 type 10, and 4778, 1149 or the
   session manager's 21 and 25), a network session that opened an admin share or an execution
   pipe (`svcctl`, `atsvc`, `PSEXESVC`), created a task or a service or ran a program; a
-  service installed within five minutes of an admin share being opened (PsExec's pattern);
+  service installed within five minutes of an admin share being opened (PsExec's pattern),
+  medium when time is all that ties them and strong when the service manager's or the tool's
+  pipe (`svcctl`, `PSEXESVC`) was opened in that connection, the service was installed under
+  its logon id (4697) or its program was written through the share (5145);
   explicit credentials used towards another host (4648), strong when the logon there follows,
   and read as WMI, WinRM or RDP by the program that used them (`wmic.exe`, `winrs.exe`,
   `mstsc.exe`); a Sysmon connection to a remote-access port of another host of the case;
 - **WMI and WinRM hops**: on the target, a program started by `WmiPrvSE.exe` or by the WinRM
   plug-in host (`wsmprovhost.exe`) belongs to the network logon of a person just before it
   (medium: tied by time, since neither logs the logon id it runs under), and a WinRM shell
-  started there (WinRM 91) marks the network session it came in on; on the source, a command
-  that reaches another host (`wmic /node:`, `Invoke-Command -ComputerName`, `Enter-PSSession`,
-  `winrs -r:`, `Invoke-WmiMethod -ComputerName`, in a process's command line or a script block),
+  started there (WinRM 91) marks the network session it came in on (by time too, so medium);
+  such a program keeps its medium tie in a hop that the logon's other records make strong; on
+  the source, a command that reaches another host (`wmic /node:`,
+  `Invoke-Command -ComputerName`, `Enter-PSSession`, `winrs -r:`,
+  `Invoke-WmiMethod -ComputerName`, in a process's command line or a script block),
   the WinRM client's own connection (WinRM 6), strong when the network logon on the named host
   follows, and a WMI query refused by a remote host (WMI-Activity 5858, medium). A hop's source
   is a host when the case names it (the workstation name of the logon) or shows whose address it
@@ -101,7 +108,9 @@ Host lineage reads, for each host:
   be one;
 - **process trees**: Sysmon 1 by process GUID, 4688 by process id and creator id on one host
   (the latest creation of that id before the child, since ids are reused), a process both
-  logged read as one, each placed in its logon session;
+  logged read as one, each placed in its logon session. When the 4688 names its parent's
+  program, that creation must be of it (otherwise the parent started before the evidence and
+  its id went to another program since) and may be up to a week old; with the id alone, a day;
 - **what the evidence cannot show**: a host without Sysmon 1 has only 4688's view of what ran
   (parents by process id, no GUIDs or hashes, and no command lines when the audit policy left
   them out); one with neither has none; one without 4624 does not say who logged on; a cleared
@@ -113,10 +122,10 @@ Every record of a story is a step, or folded into one, and every step says why i
 
 | tie | the record | confidence |
 |---|---|---|
-| flagged | carries a finding, and names the person | as sure as the form it names them by |
+| flagged | carries a finding, and names the person, or (naming no one) is part of their session, process tree or way in | as sure as the form it names them by, or as lineage ties it: medium for a program WMI or WinRM started, a WinRM shell or an RDP session manager's record placed in the session by time, or a service tied to an admin share by time only |
 | phishing chain | is a step of the person's mail-led chain | strong with a link to the mail, else medium |
-| same session | is the logon of a session in which a flagged record happened | strong |
-| same way in | is part of the same hop (the service after the admin share) | strong |
+| same session | is the logon of a session in which a flagged record happened, or the other logon of its split token | strong, medium when time alone placed the flagged record in the session |
+| same way in | is part of the same hop (the service after the admin share) | strong, medium when this record or the flagged one is part of the hop by time only |
 | process tree | started a flagged process | strong |
 | same source | came from an address the story's findings name, or is that address trying another account | medium |
 | same person | names the person and is something (a task, a rule, a group change) | as sure as the form |
