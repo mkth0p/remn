@@ -13,6 +13,10 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   fewer findings on clean machines; level 1 keeps 90% of the attack_data detections with 4% of the
   noise. Findings an analyst decided on stay at any level. Cases started before keep every finding
   until their level is set ([detection level](docs/detection.md#detection-level)).
+- The priority of a finding divides by 1 + ln n when its rule raised n findings on the same host
+  or for the same user, so one loud rule no longer fills the top of the queue. The first finding of
+  an attack reached the top ten in 38% of EVTX-to-MITRE-Attack recordings and 76% of
+  EVTX-ATTACK-SAMPLES recordings, up from 31% and 60%.
 - A home page. REMN opens on it until a case holds evidence, and the wordmark leads back to it
   after that. It shows what the tool reads, how the rules are measured and what the measures
   show: the rule totals, recordings and clean-host baseline read live from `rules/measures.json`

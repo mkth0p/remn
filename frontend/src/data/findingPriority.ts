@@ -4,7 +4,7 @@
  * Deterministic and explainable, in the way THOR and Cyber Triage rank what they find: no model,
  * only the finding, its rule's measure and the rest of the case. A finding weighs
  *
- *   severity points x confidence x rule trust x rarity  + corroboration + escalated before
+ *   severity points x confidence x rule trust x rarity / repetition  + corroboration + escalated before
  *
  * and a finding whose same rule and same entities an analyst marked false positive before (in this
  * case or another one of this browser) keeps a quarter of that. Findings already decided (reviewed,
@@ -29,6 +29,12 @@ export const PRIORITY = {
   common: 0.75,
   commonShare: 0.5,
   rarityMin: 3,
+  /**
+   * a rule that raised n findings on the same host (or for the same user) divides each by
+   * 1 + repeat x ln n: what fires over and over on a machine is its background, what fires once
+   * is an event (stacking, least frequency of occurrence)
+   */
+  repeat: 1,
   /** other rules on the same host or for the same user within this long of the finding */
   windowMs: 24 * 3_600_000,
   /** points per other rule, and more per other tactic among them, up to the cap */
@@ -42,7 +48,7 @@ export const PRIORITY = {
 }
 
 export interface PriorityReason {
-  kind: 'severity' | 'confidence' | 'trust' | 'rarity' | 'corroboration' | 'memory' | 'decided'
+  kind: 'severity' | 'confidence' | 'trust' | 'rarity' | 'repeat' | 'corroboration' | 'memory' | 'decided'
   /** whether it raised the score, lowered it, or only says what the score started from */
   tone: 'up' | 'down' | 'neutral'
   /** a word or two for the list */
@@ -189,6 +195,18 @@ export function scoreFindings(findings: Finding[], opts: PriorityOptions = {}): 
       ;(ruleUsers.get(f.ruleId) ?? ruleUsers.set(f.ruleId, new Set()).get(f.ruleId)!).add(u)
     }
   }
+  // how many findings each rule raised on each host (or for each user, when a finding names no host)
+  const perPlace = new Map<string, number>()
+  const placeOf = (f: Finding) => {
+    const h = hostOf(f)
+    const u = h ? '' : usersOf(f)[0]
+    return h ? `${f.ruleId}\u0000h:${h}` : u ? `${f.ruleId}\u0000u:${u}` : null
+  }
+  for (const f of findings) {
+    if (f.ruleId === 'chain') continue
+    const k = placeOf(f)
+    if (k) perPlace.set(k, (perPlace.get(k) ?? 0) + 1)
+  }
   const peers = peersBy(findings)
   const memory = new Map<string, PastDecision[]>()
   for (const d of opts.memory ?? []) (memory.get(d.signature) ?? memory.set(d.signature, []).get(d.signature)!).push(d)
@@ -232,6 +250,16 @@ export function scoreFindings(findings: Finding[], opts: PriorityOptions = {}): 
         weight *= W.common
         reasons.push({ kind: 'rarity', tone: 'down', short: `${seen} of ${of} ${unit}s`, text: `Its rule fired ${on} ${seen} of the ${of} ${unit}s of the case's findings: x${num(W.common)}.` })
       }
+    }
+
+    // a rule that fires over and over on the same host is that host's background
+    const place = f.ruleId === 'chain' ? null : placeOf(f)
+    const repeats = place ? (perPlace.get(place) ?? 1) : 1
+    if (repeats > 1 && W.repeat) {
+      const by = 1 + W.repeat * Math.log(repeats)
+      weight /= by
+      const where = h ? `on ${h}` : `for ${users[0]}`
+      reasons.push({ kind: 'repeat', tone: 'down', short: `${repeats} ${where}`, text: `Its rule raised ${repeats} findings ${where}: /${num(by)}.` })
     }
 
     // other rules on the same host or for the same user around it, more of other tactics
