@@ -3,3 +3,4 @@ node_modules
 public
 package-lock.json
 src/parsers/evtx/reference.gen.ts
+src/data/questions/dfiq.gen.json

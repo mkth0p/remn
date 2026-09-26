@@ -30,6 +30,7 @@ import {
   IconFile,
   IconArrowLeft,
   IconCheck,
+  IconQuestion,
 } from './components/Icons'
 import { ConsolePanel, Toasts } from './components/ConsolePanel'
 import { TokenGate } from './components/TokenGate'
@@ -48,6 +49,7 @@ import { IocsView } from './views/IocsView'
 import { AiView } from './views/AiView'
 import { ReportView } from './views/ReportView'
 import { CaseView } from './views/CaseView'
+import { QuestionsView } from './views/QuestionsView'
 import { ReviewView } from './views/ReviewView'
 import { HomeView } from './views/HomeView'
 import { RulesView } from './views/RulesView'
@@ -69,6 +71,7 @@ const NAV: { id: View; label: string; icon: React.ComponentType; count?: 'events
   { id: 'ai', label: 'AI analyst', icon: IconAi, section: 'assist' },
   { id: 'review', label: 'Review', icon: IconCheck },
   { id: 'case', label: 'Case notes', icon: IconFile },
+  { id: 'questions', label: 'Questions', icon: IconQuestion },
   { id: 'report', label: 'Report', icon: IconReport },
   { id: 'settings', label: 'Settings', icon: IconSettings },
 ]
@@ -454,6 +457,7 @@ export default function App() {
         {view === 'ai' && <AiView />}
         {view === 'review' && <ReviewView />}
         {view === 'case' && <CaseView />}
+        {view === 'questions' && <QuestionsView key={kase?.id} />}
         {view === 'report' && <ReportView />}
         {view === 'settings' && <SettingsView />}
         <EntityPanel />

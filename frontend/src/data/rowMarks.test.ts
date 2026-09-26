@@ -116,7 +116,7 @@ it('reads provenance out of a mail row using its own fields', () => {
 })
 
 it('an existing version-3 case opens on the current version without losing a row', async () => {
-  // The upgrades add a table and an index and rewrite no evidence row; the one upgrade function (version 7) only gives findings their record keys. This opens a real v3 database and then the current schema.
+  // The upgrades add a table and an index and rewrite no evidence row; the one upgrade function (version 7) only gives findings their record keys; version 8 adds the answers table. This opens a real v3 database and then the current schema.
   const { default: Dexie } = await import('dexie')
   const name = `upgrade-${Math.random()}`
   const old = new Dexie(name)
@@ -136,13 +136,16 @@ it('an existing version-3 case opens on the current version without losing a row
   const upgraded = new RemnDB(name)
   setDb(upgraded)
   await upgraded.open()
-  expect(upgraded.verno).toBe(7)
+  expect(upgraded.verno).toBe(8)
   // nothing was rewritten or lost
   expect((await upgraded.events.where('caseId').equals(1).toArray()).map((e) => e.id)).toEqual([1])
   expect((await upgraded.kv.get('chains-1'))?.value).toEqual({ chains: [] })
   // and the new table is usable straight away
   await markRows(1, 'events', [event(1)], { verdict: 'relevant', addTags: ['carried over'] })
   expect((await rowMarkSummary(1)).total).toBe(1)
+  // and so is the table of answers to the case's questions (version 8)
+  await upgraded.questionAnswers.add({ caseId: 1, questionId: 'Q1074', status: 'open', text: '', citations: [], createdAt: 1, updatedAt: 1 })
+  expect(await upgraded.questionAnswers.where('[caseId+questionId]').equals([1, 'Q1074']).count()).toBe(1)
   // the record-key index holds the keyed rows added since, and none of the rows from before
   await upgraded.events.add({ ...event(2), recordKey: 'ual:1' })
   expect(
