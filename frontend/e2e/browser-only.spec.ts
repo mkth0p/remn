@@ -58,6 +58,9 @@ test('a public browser-only instance says where evidence goes and reads the link
   await page.getByRole('button', { name: 'Story daniel.roy@northstar.example', exact: true }).click()
   const rail = page.getByRole('list', { name: 'ATT&CK phases of the story' })
   for (const phase of ['Initial access', 'Credential access', 'Lateral movement', 'Defense impairment']) await expect(rail.getByRole('listitem').filter({ hasText: phase })).toBeEnabled()
+  // the story opens on its spine, the way in first; the full timeline is a toggle away
+  await expect(page.locator('.spine .spine-step').filter({ hasText: 'RemoteInteractive' }).first()).toBeVisible()
+  await page.getByRole('group', { name: 'what the story shows' }).getByRole('button', { name: 'Full timeline' }).click()
   await expect(page.locator('.story .step').filter({ hasText: 'RemoteInteractive' }).first()).toBeVisible()
 
   expect(probes, 'a page served from another host must not probe the visitor’s localhost on its own').toEqual([])

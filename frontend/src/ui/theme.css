@@ -2330,6 +2330,10 @@ label.field > span {
   padding: 12px 16px 10px;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
+  /* the summary, note, links and decisions scroll on their own, so the steps keep room on a laptop screen */
+  flex-shrink: 0;
+  max-height: 42vh;
+  overflow-y: auto;
 }
 .story-day {
   position: sticky;
