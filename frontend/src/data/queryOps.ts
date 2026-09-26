@@ -18,6 +18,7 @@ export const QUERY_OPS = {
   searchEvents: q.searchEvents,
   countEvents: q.countEvents,
   aggregateEvents: q.aggregateEvents,
+  stackEvents: q.stackEvents,
   timelineEvents: q.timelineEvents,
   searchMails: q.searchMails,
   countMails: q.countMails,

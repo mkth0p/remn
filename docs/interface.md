@@ -55,6 +55,23 @@ those rows; the Timesketch JSONL and Timeline Explorer CSV exports carry every e
 search matches, read in time order, up to 250,000 per export, and say where they stopped
 when a search matches more.
 
+The Events page's "stack" button turns the table into a stack of one field, the
+least-frequency view: each distinct value among the events the current filter and search
+keep, with its number of events, the number of hosts it was seen on ("on 1 of 12 hosts",
+the hosts named when five or fewer) and its first and last time. The rarest come first,
+fewest hosts and then fewest events, or the most frequent on request. The fields are the
+image and parent image, process and parent process names, command line and parent command
+line, path, service name and file, scheduled task, object name, file created, image
+loaded, subject and target user, workstation, IP and destination IP, DNS query, and the
+provider and event ID pair. Paths, programs, services and accounts group without regard to
+case, as Windows names them (the value shown is one of its spellings); command lines keep
+their case. Hosts are counted by the computer name without its domain, as the stories count
+them, and N is the number of hosts among the events that have the field. The stack lists
+500 values and says how many exist when there are more (a button shows up to 5,000), and
+how many matching events have no value. Clicking a value filters the events to it and
+returns to the table. Both stores give the same stack; `tests/fixtures/parity/stacks.json`
+holds it.
+
 Selecting a mail opens a bottom pane: the message (text, or HTML in a sandbox), headers,
 hops, URLs, attachments, a Related tab (findings on the mail and the recipients' host and
 cloud events from 15 minutes before to 72 hours after delivery) and JSON, with an

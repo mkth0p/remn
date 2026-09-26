@@ -5,6 +5,8 @@ import { TimeHistogram } from '../components/TimeHistogram'
 import { IconMore } from '../components/Icons'
 import { VirtualTable, type Column } from '../components/VirtualTable'
 import { RowMarkBar } from '../components/RowMarkBar'
+import { StackPanel } from '../components/StackPanel'
+import type { StackField } from '../data/queries'
 import { loadRowMarks, markedRowIds } from '../data/rowMarks'
 import { EventDetail } from '../components/Detail'
 import { getSource } from '../data/source'
@@ -104,6 +106,7 @@ export function EventsView() {
   const [marksVersion, setMarksVersion] = useState(0)
   const [version, setVersion] = useState(0)
   const [menu, setMenu] = useState(false)
+  const [stacking, setStacking] = useState(false)
   const ds = useMemo(() => (kase ? getSource(kase) : null), [kase])
   // a timeline export carries every event the filter matches, not the first rows on screen
   const exportTimeline = useCallback(
@@ -209,6 +212,24 @@ export function EventsView() {
     [setFilter],
   )
 
+  // a stacked value opens its events: the field is set to that value (a provider / event ID pair sets both)
+  const pickStacked = useCallback(
+    (field: StackField, value: string) => {
+      let set: Condition[] = [{ field, op: 'eq', value }]
+      if (field === 'providerEventId') {
+        const at = value.lastIndexOf(' / ')
+        set = [
+          { field: 'provider', op: 'eq', value: value.slice(0, at) },
+          { field: 'eventId', op: 'eq', value: Number(value.slice(at + 3)) },
+        ]
+      }
+      const fields = new Set(set.map((c) => c.field))
+      setFilter((prev: Filter) => ({ ...prev, conditions: [...(prev.conditions ?? []).filter((c) => !(fields.has(c.field) && (c.op === 'eq' || c.op === 'in'))), ...set] }))
+      setStacking(false)
+    },
+    [setFilter],
+  )
+
   const columns: Column<EventRow>[] = useMemo(
     () => [
       { key: 'ts', label: 'event time', width: 160, render: (r) => (r.recordKind === 'observation' ? <span title={`Collected: ${fmtTs(r.observedAt)}`}>snapshot (no event time)</span> : fmtTs(r.ts)) },
@@ -248,6 +269,13 @@ export function EventsView() {
             loading={loading}
             extra={
               <span className="row relative" style={{ gap: 4 }}>
+                <button
+                  className={stacking ? 'btn xs primary' : 'btn xs ghost'}
+                  title="Stack a field: its values among the matching events, the rarest first (fewest hosts, then fewest events)"
+                  onClick={() => setStacking((on) => !on)}
+                >
+                  stack
+                </button>
                 <button className={markedOnly ? 'btn xs primary' : 'btn xs ghost'} title="Show only the rows you marked" onClick={() => setMarkedOnly((on) => !on)}>
                   marked
                 </button>
@@ -328,65 +356,70 @@ export function EventsView() {
               </span>
             }
           />
-          <TimeHistogram
-            ds={ds}
-            source="events"
-            filter={filter}
-            version={version}
-            onRange={(from, to) => setFilter({ ...filter, timeRange: { from: new Date(from).toISOString(), to: new Date(to).toISOString() } })}
-          />
-          {(truncated || error) && (
-            <div className="row small dim" style={{ padding: '3px 16px', gap: 12, borderBottom: '1px solid var(--line)' }}>
-              {truncated && !sampledFrom && <span className="mono">showing the first {LIMIT.toLocaleString('en-US')} rows - narrow the filter or change the sort</span>}
-              {sampledFrom && (
-                <span className="mono" style={{ color: 'var(--warn)' }}>
-                  sorted among the first {sampledFrom.toLocaleString('en-US')} matches in time order, not all of them - narrow the filter or the time range for an exact sort
-                </span>
+          {stacking && <StackPanel ds={ds} filter={filter} version={version} onPick={pickStacked} />}
+          {!stacking && (
+            <>
+              <TimeHistogram
+                ds={ds}
+                source="events"
+                filter={filter}
+                version={version}
+                onRange={(from, to) => setFilter({ ...filter, timeRange: { from: new Date(from).toISOString(), to: new Date(to).toISOString() } })}
+              />
+              {(truncated || error) && (
+                <div className="row small dim" style={{ padding: '3px 16px', gap: 12, borderBottom: '1px solid var(--line)' }}>
+                  {truncated && !sampledFrom && <span className="mono">showing the first {LIMIT.toLocaleString('en-US')} rows - narrow the filter or change the sort</span>}
+                  {sampledFrom && (
+                    <span className="mono" style={{ color: 'var(--warn)' }}>
+                      sorted among the first {sampledFrom.toLocaleString('en-US')} matches in time order, not all of them - narrow the filter or the time range for an exact sort
+                    </span>
+                  )}
+                  {error && <span style={{ color: 'var(--danger)' }}>{error}</span>}
+                </div>
               )}
-              {error && <span style={{ color: 'var(--danger)' }}>{error}</span>}
-            </div>
+              {kase?.id != null && (
+                <RowMarkBar
+                  caseId={kase.id}
+                  source="events"
+                  rows={rows as unknown as Record<string, unknown>[]}
+                  picked={picked}
+                  onClear={() => setPicked(new Set())}
+                  onChanged={() => setMarksVersion((v) => v + 1)}
+                />
+              )}
+              <VirtualTable
+                rows={rows}
+                columns={columns}
+                rowKey={(r) => r.id!}
+                onRowClick={setSelected}
+                selectedKey={selected?.id ?? null}
+                selectedKeys={picked}
+                onToggleSelect={(k) =>
+                  setPicked((prev) => {
+                    const next = new Set(prev)
+                    if (next.has(k)) next.delete(k)
+                    else next.add(k)
+                    return next
+                  })
+                }
+                onToggleAll={(on) => setPicked(on ? new Set(rows.map((r) => r.id!)) : new Set())}
+                sort={sort}
+                onSort={(field) => setFilter({ ...filter, sort: { field, dir: sort.field === field && sort.dir === 'desc' ? 'asc' : 'desc' } })}
+                rowClass={(r) =>
+                  marks.get(r.id!)?.verdict === 'noise'
+                    ? 'row-noise'
+                    : marks.get(r.id!)
+                      ? 'row-marked'
+                      : r.category === 'log-tampering' || r.category === 'defender-tampering'
+                        ? 'sev-critical'
+                        : r.eventId === 4625 || r.category === 'defender'
+                          ? 'sev-medium'
+                          : undefined
+                }
+                empty={loading ? 'loading…' : 'no events match - load an EVTX file in Evidence or relax the filter'}
+              />
+            </>
           )}
-          {kase?.id != null && (
-            <RowMarkBar
-              caseId={kase.id}
-              source="events"
-              rows={rows as unknown as Record<string, unknown>[]}
-              picked={picked}
-              onClear={() => setPicked(new Set())}
-              onChanged={() => setMarksVersion((v) => v + 1)}
-            />
-          )}
-          <VirtualTable
-            rows={rows}
-            columns={columns}
-            rowKey={(r) => r.id!}
-            onRowClick={setSelected}
-            selectedKey={selected?.id ?? null}
-            selectedKeys={picked}
-            onToggleSelect={(k) =>
-              setPicked((prev) => {
-                const next = new Set(prev)
-                if (next.has(k)) next.delete(k)
-                else next.add(k)
-                return next
-              })
-            }
-            onToggleAll={(on) => setPicked(on ? new Set(rows.map((r) => r.id!)) : new Set())}
-            sort={sort}
-            onSort={(field) => setFilter({ ...filter, sort: { field, dir: sort.field === field && sort.dir === 'desc' ? 'asc' : 'desc' } })}
-            rowClass={(r) =>
-              marks.get(r.id!)?.verdict === 'noise'
-                ? 'row-noise'
-                : marks.get(r.id!)
-                  ? 'row-marked'
-                  : r.category === 'log-tampering' || r.category === 'defender-tampering'
-                    ? 'sev-critical'
-                    : r.eventId === 4625 || r.category === 'defender'
-                      ? 'sev-medium'
-                      : undefined
-            }
-            empty={loading ? 'loading…' : 'no events match - load an EVTX file in Evidence or relax the filter'}
-          />
           {selected && <EventDetail row={selected} onClose={() => setSelected(null)} />}
         </div>
       </div>

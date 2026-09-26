@@ -213,6 +213,121 @@ export async function aggregateEvents(caseId: number, filter: Filter, field: str
   return { groups: groups.slice(0, limit), total, distinct: map.size }
 }
 
+/**
+ * Stacking (least-frequency analysis): the event fields an analyst stacks, the same list as
+ * STACK_FIELDS in backend/services/store/queries.py. Windows names paths, programs, services and
+ * accounts without regard to case, so those group case-insensitively; a command line keeps its case
+ * (an encoded argument is case-sensitive). providerEventId is the pair "provider / event id".
+ */
+export const STACK_FIELDS = [
+  'image',
+  'parentImage',
+  'processName',
+  'parentProcessName',
+  'commandLine',
+  'parentCommandLine',
+  'path',
+  'serviceName',
+  'serviceFile',
+  'taskName',
+  'objectName',
+  'targetFilename',
+  'imageLoaded',
+  'subjectUser',
+  'targetUser',
+  'workstation',
+  'ipAddress',
+  'destinationIp',
+  'query',
+  'providerEventId',
+] as const
+export type StackField = (typeof STACK_FIELDS)[number]
+const STACK_CASE_SENSITIVE = new Set<string>(['commandLine', 'parentCommandLine'])
+
+export interface StackRow {
+  /** the value as the evidence spells it (the first spelling in sort order when case is folded) */
+  value: string
+  count: number
+  /** distinct hosts it was seen on */
+  hosts: number
+  /** those hosts, when five or fewer */
+  hostList: string[] | null
+  first: number | null
+  last: number | null
+}
+export interface Stack {
+  field: string
+  order: 'rare' | 'common'
+  rows: StackRow[]
+  /** events with a value in the field, and those without */
+  events: number
+  blank: number
+  /** every value, not only those returned */
+  distinct: number
+  /** hosts among the events with a value: the N of "on 1 of N hosts" */
+  hosts: number
+  truncated: boolean
+}
+
+/** A host as the stories count it (lineage.host_key): lower case, without its domain; an address stays whole. */
+function stackHost(v: unknown): string | null {
+  if (v == null || v === '') return null
+  const h = String(v).toLowerCase()
+  const k = /^[0-9.]+$/.test(h) ? h : h.split('.')[0]
+  return k || null
+}
+
+function stackValue(r: EventRow, field: string): string | null {
+  if (field === 'providerEventId') return r.provider != null && r.provider !== '' && r.eventId != null ? `${r.provider} / ${r.eventId}` : null
+  const v = r[field]
+  return v == null || v === '' ? null : String(v)
+}
+
+/** Binary order, as DuckDB sorts text: the two stores return the same rows in the same order. */
+const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
+
+export async function stackEvents(caseId: number, filter: Filter, field: string, order: 'rare' | 'common' = 'rare', limit = 500, settings?: SettingsLike): Promise<Stack> {
+  if (!(STACK_FIELDS as readonly string[]).includes(field)) throw new Error(`cannot stack on '${field}'`)
+  const fold = field !== 'providerEventId' && !STACK_CASE_SENSITIVE.has(field)
+  const groups = new Map<string, { value: string; count: number; hosts: Set<string>; first: number | null; last: number | null }>()
+  const allHosts = new Set<string>()
+  let events = 0
+  const total = await eachEvent(caseId, filter, settings, (r) => {
+    const v = stackValue(r, field)
+    if (v == null) return
+    events++
+    const key = fold ? v.toLowerCase() : v
+    const h = stackHost(r.computer)
+    const ts = r.ts ?? null
+    let g = groups.get(key)
+    if (!g) {
+      g = { value: v, count: 0, hosts: new Set(), first: ts, last: ts }
+      groups.set(key, g)
+    } else if (v < g.value) g.value = v
+    g.count++
+    if (h) {
+      g.hosts.add(h)
+      allHosts.add(h)
+    }
+    if (ts != null) {
+      g.first = g.first == null ? ts : Math.min(g.first, ts)
+      g.last = g.last == null ? ts : Math.max(g.last, ts)
+    }
+  })
+  const dir = order === 'common' ? -1 : 1
+  const sorted = Array.from(groups.entries()).sort(([ka, a], [kb, b]) => (a.hosts.size - b.hosts.size) * dir || (a.count - b.count) * dir || cmp(ka, kb))
+  const n = Math.max(1, Math.min(Math.floor(limit), 5000))
+  const rows = sorted.slice(0, n).map(([, g]) => ({
+    value: g.value,
+    count: g.count,
+    hosts: g.hosts.size,
+    hostList: g.hosts.size <= 5 ? Array.from(g.hosts).sort(cmp) : null,
+    first: g.first,
+    last: g.last,
+  }))
+  return { field, order: order === 'common' ? 'common' : 'rare', rows, events, blank: total - events, distinct: groups.size, hosts: allHosts.size, truncated: groups.size > rows.length }
+}
+
 export type Bucket = 'minute' | 'hour' | 'day'
 const bucketMs: Record<Bucket, number> = { minute: 60_000, hour: 3_600_000, day: 86_400_000 }
 
