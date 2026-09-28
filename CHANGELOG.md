@@ -5,6 +5,14 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- Each case adapts to its own machines and to the analyst's review. After every run, a rule that
+  stands on its own on at least half the case's hosts is folded per host as that network's
+  background, whatever the clean machines said, and each finding of a rule the analyst marks false
+  positive halves the priority of the rule's other findings on that host and takes a fifth off
+  elsewhere. On cases built from clean hosts with one recording merged in, at level 2, the lines
+  per clean host fell from 81 to 69, and an analyst dismissing benign lines from the top read 30%,
+  32% and 21% fewer lines before the first finding of the attack on attack_data,
+  EVTX-to-MITRE-Attack and EVTX-ATTACK-SAMPLES ([detection level](docs/detection.md#detection-level)).
 - A detection level per case, from 1 (fewest lines) to 5 (every finding on its own), set when the
   case is started (2 by default) and changed on the Rules page. No level drops a finding: the
   findings of a rule that fired too often on the evtx-baseline clean machines for its severity are

@@ -1,5 +1,5 @@
 import { getDb, type Finding } from '../db/schema'
-import { foldBelowLevel } from './detectionLevel'
+import { foldBelowLevel, foldWidespread } from './detectionLevel'
 import { reviewKey, tableRows, withRecordKeys, type RowLoader } from './findingAnchors'
 
 type Review = Pick<Finding, 'status' | 'notes' | 'createdAt' | 'severityOverride' | 'reportExclude' | 'chainUnlinked' | 'decidedBy' | 'decidedAt' | 'aiReason' | 'notesBy'> &
@@ -141,6 +141,28 @@ export async function replaceFindings(caseId: number, ruleIds: string[], found: 
     })
     for (let i = 0; i < rows.length; i += 2000) await db.findings.bulkAdd(rows.slice(i, i + 2000))
     return rows.length
+  })
+}
+
+/**
+ * After a run at the case's detection level, fold the rules that fire on most of the case's own
+ * hosts (detectionLevel.foldWidespread); a finding an analyst touched stays as it is. Returns how
+ * many rows the pass removed.
+ */
+export async function refoldWidespread(caseId: number, floors: Record<string, number> | undefined): Promise<number> {
+  if (!floors) return 0
+  const db = getDb()
+  return db.transaction('rw', [db.findings], async () => {
+    const all = await db.findings.where('caseId').equals(caseId).toArray()
+    const next = foldWidespread(all, floors, decided)
+    const same = new Set(next)
+    const gone = all.filter((f) => !same.has(f)).map((f) => f.id!)
+    if (!gone.length) return 0
+    const before = new Set(all)
+    const added = next.filter((f) => !before.has(f)).map((f) => ({ ...f, id: undefined }))
+    await db.findings.bulkDelete(gone)
+    for (let i = 0; i < added.length; i += 2000) await db.findings.bulkAdd(added.slice(i, i + 2000))
+    return gone.length - added.length
   })
 }
 
