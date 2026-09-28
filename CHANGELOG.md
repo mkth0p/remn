@@ -17,6 +17,13 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   or for the same user, so one loud rule no longer fills the top of the queue. The first finding of
   an attack reached the top ten in 38% of EVTX-to-MITRE-Attack recordings and 76% of
   EVTX-ATTACK-SAMPLES recordings, up from 31% and 60%.
+- The Graph page draws a chain at its real size rather than squeezed into the pane: labels wrap
+  to the room their column leaves (a long path is cut down to its file name) and no longer run
+  over nodes, other labels or the next lane, steps keep their shape instead of stretching, and
+  the tie names that were printed along the lines, rotated and stacked, show when a line is
+  hovered. A chain wider than the pane scrolls sideways, by drag or wheel, with the lane names
+  pinned at the left, and the selected step is scrolled into view. The report's chain pictures
+  use the same layout within the 1,700 pixels they had, with titles on up to three lines.
 - CSV exports quote any value holding a semicolon or a tab, and put column names through the
   same escaping, so a value from the evidence cannot start a formula in Excel builds that split
   CSV on semicolons. The HTML report carries its own content security policy (no script, no

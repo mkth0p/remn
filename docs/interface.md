@@ -234,9 +234,12 @@ selected one and its links with their review.
 The Graph page draws the attack chains that building the stories keeps. The left list
 ranks the chains, each with its severity, identity, seed, span, score and step count.
 **this chain** lays the selected chain out as a swimlane, time left to right and one lane
-per source, with routine runs folded into one node; **all chains** draws every chain against
-the sender addresses, link domains, IPs and hosts they share, and a chain clicked there opens
-in its own graph. A step clicked in the graph opens its pane: source, time, rows, what ties
+per source, with routine runs folded into one node. Each label wraps to the room its column
+leaves it, a long path shortened to its file name, and no label covers a node or another
+label; a chain wider than the pane scrolls sideways (drag it, or use the wheel) with the lane
+names held at the left, and hovering a line says what ties its two ends. **all chains** draws
+every chain against the sender addresses, link domains, IPs and hosts they share, and a chain
+clicked there opens in its own graph. A step clicked in the graph opens its pane: source, time, rows, what ties
 it to the seed and its findings, and **Open** takes it to its mail or events. `j` and `k`
 move between steps. A case with no chains yet points to Stories, which builds them.
 

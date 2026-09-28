@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import * as echarts from 'echarts/core'
 import { GraphChart } from 'echarts/charts'
 import { LegendComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import type { Chain } from '../data/chains'
-import { buildCampaignGraph, buildChainGraph, LANE_LABEL, LANES, type GNode, type Graph, type Lane } from '../data/chainGraph'
+import { buildCampaignGraph, buildChainGraph, type GNode, type Graph, type Lane } from '../data/chainGraph'
 import type { EntityRef } from '../state/store'
 import { escapeHtml, fmtTs } from '../util/format'
+import { LANE_PILL, layoutCampaign, layoutLanes, type GraphLayout, type LabelFonts } from './graphLayout'
 
 echarts.use([GraphChart, TooltipComponent, LegendComponent, CanvasRenderer])
 
@@ -63,24 +64,11 @@ function tokens(): GraphTokens {
   }
 }
 
-const trunc = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…' : s)
-
-/** where the lane names sit and where column 0 starts in the chain layout */
-const GUTTER = 190
-/** vertical room for one node in a column of the campaign layout */
-const ROW = 46
-const CHAIN_ROW = 84
-const CAMPAIGN_COLS: { lane: Lane; title: string }[] = [
-  { lane: 'attacker', title: 'attacker side' },
-  { lane: 'identity', title: 'people' },
-  { lane: 'infra', title: 'machines & IPs' },
-]
-
-/** height the campaign layout needs so no column is squeezed below one row per node */
-function campaignHeight(graph: Graph): number {
-  const count = (l: Lane) => graph.nodes.filter((n) => n.lane === l).length
-  return Math.max(420, 90 + Math.max(count('attacker') * ROW, count('infra') * ROW, count('identity') * CHAIN_ROW))
-}
+/** label type in the app, and larger in the report, whose picture is shrunk to the page */
+const fontsFor = (t: GraphTokens, print: boolean): LabelFonts =>
+  print
+    ? { sans: t.sans, mono: t.mono, title: 13, titleLine: 17, sub: 11, subLine: 15, padX: 5, padY: 2 }
+    : { sans: t.sans, mono: t.mono, title: 11, titleLine: 14, sub: 9.5, subLine: 13, padX: 5, padY: 2 }
 
 /** a side column longer than this folds the entities only one chain touches into one node per chain */
 const FOLD_ABOVE = 12
@@ -127,37 +115,45 @@ function foldCampaign(graph: Graph): Graph {
   return { ...graph, nodes, edges }
 }
 
-/** Campaign positions: attacker entities left, the chains (people) in the middle, machines and IPs right, each column ordered to keep edges short. */
-function campaignLayout(graph: Graph, W: number, H: number): { pos: Map<string, [number, number]>; titleY: number } {
-  const pos = new Map<string, [number, number]>()
-  let titleY = H
-  const chains = graph.nodes.filter((n) => n.kind === 'chain').sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
-  const place = (nodes: GNode[], x: number, row: number) => {
-    const top = 60 + Math.max(0, (H - 90 - nodes.length * row) / 2)
-    if (nodes.length) titleY = Math.min(titleY, top - 24)
-    nodes.forEach((n, i) => pos.set(n.id, [x, top + i * row + row / 2]))
-  }
-  place(chains, W / 2, CHAIN_ROW)
-  const rank = new Map(chains.map((c, i) => [c.id, i]))
-  const bary = (n: GNode) => {
-    const r = graph.edges.filter((e) => e.target === n.id || e.source === n.id).map((e) => rank.get(e.source === n.id ? e.target : e.source) ?? 0)
-    return r.length ? r.reduce((a, b) => a + b, 0) / r.length : 0
-  }
-  for (const [lane, x] of [
-    ['attacker', W * 0.2],
-    ['infra', W * 0.8],
-  ] as const) {
-    const col = graph.nodes
-      .filter((n) => n.lane === lane)
-      .map((n) => ({ n, b: bary(n) }))
-      .sort((a, b) => a.b - b.b || (b.n.degree ?? 0) - (a.n.degree ?? 0) || a.n.label.localeCompare(b.n.label))
-      .map((x) => x.n)
-    place(col, x, ROW)
-  }
-  return { pos, titleY }
+/** symbol size of a node: steps grow with their weight, chains with their score, shared entities with the chains they touch */
+function sizeOf(n: GNode): number {
+  if (n.kind === 'seed') return 30
+  if (n.kind === 'chain') return 22 + Math.min(18, (n.score ?? 0) / 6)
+  if (n.kind === 'step') return 18 + Math.min(8, n.weight) * 1.5
+  if (n.kind === 'routine') return 16
+  if (n.kind === 'user') return 24
+  if (n.lane === 'artifact') return (n.linked ? 16 : 12) + Math.min(4, Math.log2(1 + (n.degree ?? 0))) * 2
+  return 13 + Math.min(4, n.degree ?? 0) * 3
 }
 
-/** a label that sits outside the graph data: lane names, column titles, lane separators */
+const symbolOf = (n: GNode) =>
+  n.kind === 'seed'
+    ? 'diamond'
+    : n.kind === 'step' || n.kind === 'chain'
+      ? 'roundRect'
+      : n.kind === 'attachment' || n.kind === 'file'
+        ? 'rect'
+        : n.kind === 'hash'
+          ? 'triangle'
+          : n.kind === 'process' || n.kind === 'config'
+            ? 'roundRect'
+            : 'circle'
+
+/** A graph as it will be drawn: the campaign folded, every node placed at its size in pixels. */
+export interface Drawing {
+  mode: 'chain' | 'campaign'
+  graph: Graph
+  layout: GraphLayout
+}
+
+/** Lay a chain, story or campaign graph out in `W` × `H` pixels of pane (more when its labels need more); `print` = the report's type sizes. */
+export function drawGraph(graph: Graph, mode: 'chain' | 'campaign', W: number, H: number, t: GraphTokens, print = false): Drawing {
+  const g = mode === 'campaign' ? foldCampaign(graph) : graph
+  const opts = { width: W, height: H, fonts: fontsFor(t, print), sizeOf, print }
+  return { mode, graph: g, layout: mode === 'campaign' ? layoutCampaign(g, opts) : layoutLanes(g, opts) }
+}
+
+/** a point that is not graph data: a corner, a lane name, a column title, the end of a lane separator */
 const anchor = (t: GraphTokens, id: string, x: number, y: number, label?: string, position = 'right') => ({
   id,
   name: label ?? '',
@@ -173,14 +169,14 @@ const anchor = (t: GraphTokens, id: string, x: number, y: number, label?: string
         position,
         formatter: label,
         color: t.fg2,
-        fontSize: 10,
+        fontSize: LANE_PILL.size,
         fontWeight: 600,
         fontFamily: t.sans,
         backgroundColor: t.surface2,
         borderColor: t.line,
-        borderWidth: 1,
+        borderWidth: LANE_PILL.border,
         borderRadius: 10,
-        padding: [3, 8],
+        padding: [3, LANE_PILL.padX],
         distance: 0,
       }
     : { show: false },
@@ -190,91 +186,44 @@ const anchor = (t: GraphTokens, id: string, x: number, y: number, label?: string
   silent: true,
 })
 
-/** The ECharts option for a chain (swimlanes, fixed positions) or campaign graph (three columns); `print` = static picture for the report. */
-export function graphOption(
-  graph: Graph,
-  mode: 'chain' | 'campaign',
-  W: number,
-  H: number,
-  t: GraphTokens,
-  selectedStep: number | null,
-  print = false,
-  selectedNode: string | null = null,
-): Record<string, unknown> {
-  if (mode === 'campaign') {
-    graph = foldCampaign(graph)
-    H = Math.max(H, campaignHeight(graph))
-  }
+/**
+ * The ECharts option for a drawing, one layout pixel to one screen pixel: the series' view box is the
+ * layout's own box, pinned by two corner points, so ECharts neither stretches nor squeezes it.
+ * `print` = static picture for the report, with the lane names drawn on it (the page draws its own).
+ */
+export function graphOption(d: Drawing, t: GraphTokens, selectedStep: number | null, print = false, selectedNode: string | null = null): Record<string, unknown> {
+  const { graph, layout, mode } = d
+  const camp = mode === 'campaign'
+  const f = fontsFor(t, print)
   const colorOf = (n: GNode): string => {
     if (n.kind === 'routine') return t.fg3
     if (n.severity) return t.sev[n.severity] ?? t.fg2
     if (n.kind === 'user' || n.kind === 'chain') return t.accent
-    if (mode === 'campaign' && (n.degree ?? 0) < 2) return t.fg3
+    if (camp && (n.degree ?? 0) < 2) return t.fg3
     if (n.lane === 'attacker') return t.sev.high
     if (n.lane === 'infra') return t.sev.low
     if (n.lane === 'artifact') return n.linked ? t.accent : t.fg2
     return n.linked ? t.accent : t.fg3
   }
-  const sizeOf = (n: GNode): number => {
-    if (n.kind === 'seed') return 30
-    if (n.kind === 'chain') return 22 + Math.min(18, (n.score ?? 0) / 6)
-    if (n.kind === 'step') return 18 + Math.min(8, n.weight) * 1.5
-    if (n.kind === 'routine') return 16
-    if (n.kind === 'user') return 24
-    if (n.lane === 'artifact') return (n.linked ? 16 : 12) + Math.min(4, Math.log2(1 + (n.degree ?? 0))) * 2
-    return 13 + Math.min(4, n.degree ?? 0) * 3
-  }
-  const symbolOf = (n: GNode) =>
-    n.kind === 'seed'
-      ? 'diamond'
-      : n.kind === 'step' || n.kind === 'chain'
-        ? 'roundRect'
-        : n.kind === 'attachment' || n.kind === 'file'
-          ? 'rect'
-          : n.kind === 'hash'
-            ? 'triangle'
-            : n.kind === 'process' || n.kind === 'config'
-              ? 'roundRect'
-              : 'circle'
-  const selectedId = selectedStep != null ? `step:${selectedStep}` : selectedNode
-  const lanes = LANES.filter((l) => graph.nodes.some((n) => n.lane === l))
-  const laneH = mode === 'chain' ? (H - 60) / Math.max(1, lanes.length) : 0
-  const colW = mode === 'chain' ? Math.min(220, Math.max(110, (W - GUTTER - 120) / Math.max(1, graph.columns))) : 0
-  const maxChars = mode === 'chain' ? Math.max(14, Math.floor(colW / 7)) : 30
-  const xOf = (n: GNode) => GUTTER + 40 + n.x * colW
-  const yOf = (n: GNode) => 30 + lanes.indexOf(n.lane) * laneH + laneH / 2
-  const camp = mode === 'campaign' ? campaignLayout(graph, W, H) : null
-  // labels: attacker-side names above, machines below; neighbours in a lane that sit closer than a column take turns above and below
-  const labelPos = new Map<string, string>()
-  if (camp) for (const n of graph.nodes) labelPos.set(n.id, n.lane === 'attacker' ? 'left' : n.lane === 'infra' ? 'right' : 'bottom')
-  else
-    for (const l of lanes) {
-      const row = graph.nodes.filter((n) => n.lane === l).sort((a, b) => a.x - b.x)
-      const home = l === 'attacker' || l === 'mail' ? 'top' : 'bottom'
-      const away = home === 'top' ? 'bottom' : 'top'
-      let prev: { x: number; level: number } | null = null
-      for (const n of row) {
-        // neighbours closer than about a column would print over each other: the next one's label moves
-        const level: number = prev && (n.x - prev.x) * colW < colW * 1.05 ? (prev.level + 1) % 3 : 0
-        // the outer lanes have no room on the far side, so their labels stack higher (or lower) instead of flipping
-        labelPos.set(n.id, level === 0 ? home : l === 'attacker' || l === 'infra' ? `${home}+${level}` : level === 1 ? away : `${away}+1`)
-        prev = { x: n.x, level }
-      }
-    }
+  // a step folded into a group is shown selected through its group
+  const selectedId = selectedStep != null ? (graph.nodes.find((n) => n.stepIdx === selectedStep || n.stepIdxs?.includes(selectedStep))?.id ?? null) : selectedNode
   const data = graph.nodes.map((n) => {
+    const p = layout.nodes.get(n.id)!
     const selected = n.id === selectedId
     const color = colorOf(n)
     const routine = n.kind === 'routine'
     const faded = camp && n.kind !== 'chain' && (n.degree ?? 0) < 2
-    const placed = labelPos.get(n.id) ?? 'bottom'
-    const [pos, level = '0'] = placed.split('+')
-    const chars = camp ? (n.kind === 'chain' ? 34 : 28) : maxChars
-    const base = {
+    const align = p.position === 'left' ? 'right' : p.position === 'right' ? 'left' : 'center'
+    const text = [...p.label.title.map((l) => `{a|${l}}`), ...p.label.sub.map((l) => `{s|${l}}`)].join('\n')
+    return {
       id: n.id,
       name: n.label,
       value: n.sub ?? '',
+      x: p.x,
+      y: p.y,
+      fixed: true,
       symbol: symbolOf(n),
-      symbolSize: sizeOf(n),
+      symbolSize: p.size,
       itemStyle: {
         color: routine ? t.surface : color,
         borderColor: selected ? t.fg1 : routine ? t.fg3 : t.surface,
@@ -287,32 +236,28 @@ export function graphOption(
       },
       label: {
         show: true,
-        position: pos,
-        distance: 6 + Number(level) * (print ? 34 : 28),
-        align: pos === 'left' ? 'right' : pos === 'right' ? 'left' : 'center',
-        formatter: () => `{a|${trunc(n.label, chars)}}${n.sub ? `\n{s|${trunc(n.sub, chars + 4)}}` : ''}`,
+        position: p.position,
+        distance: p.distance,
+        align,
+        // a function, not a template string: the evidence may hold "{b}" or "{c}"
+        formatter: () => text,
         backgroundColor: t.surface,
         borderRadius: 4,
-        padding: [2, 5],
+        padding: [f.padY, f.padX],
         rich: {
           a: {
             color: faded ? t.fg2 : t.fg1,
-            fontSize: print ? 13 : 11,
+            fontSize: f.title,
             fontWeight: n.kind === 'seed' || n.kind === 'chain' || n.kind === 'user' || selected ? 600 : 500,
             fontFamily: t.sans,
-            lineHeight: print ? 17 : 15,
-            align: pos === 'left' ? 'right' : pos === 'right' ? 'left' : 'center',
+            lineHeight: f.titleLine,
+            align,
           },
-          s: { color: t.fg3, fontSize: print ? 11 : 9.5, fontFamily: t.mono, lineHeight: print ? 15 : 13, align: pos === 'left' ? 'right' : pos === 'right' ? 'left' : 'center' },
+          s: { color: t.fg3, fontSize: f.sub, fontFamily: t.mono, lineHeight: f.subLine, align },
         },
       },
       node: n,
     }
-    if (camp) {
-      const [x, y] = camp.pos.get(n.id) ?? [W / 2, H / 2]
-      return { ...base, x, y, fixed: true }
-    }
-    return { ...base, x: xOf(n), y: yOf(n) + (n.lane === 'infra' ? 4 : 0), fixed: true }
   })
   const byId = new Map(graph.nodes.map((n) => [n.id, n]))
   const links = graph.edges.map((e) => {
@@ -320,12 +265,12 @@ export function graphOption(
     const shared = camp && (other?.degree ?? 0) >= 2
     const lineStyle =
       e.kind === 'artifact'
-        ? { color: t.accent, width: 2.2, curveness: 0.25, type: 'solid', opacity: 0.95 }
+        ? { color: t.accent, width: 2, curveness: 0.2, type: 'solid', opacity: 0.9 }
         : e.kind === 'sequence' || e.kind === 'recipient'
           ? { color: t.fg2, width: 1.6, curveness: e.kind === 'sequence' ? 0.12 : 0, opacity: 0.6 }
           : camp
             ? { color: shared && other ? colorOf(other) : t.line2, width: shared ? 1.8 : 1, type: shared ? 'solid' : 'dashed', curveness: 0.08, opacity: shared ? 0.6 : 0.9 }
-            : { color: t.line2, width: 1, type: 'dashed', curveness: 0.15, opacity: 0.9 }
+            : { color: t.line2, width: 1, type: 'dashed', curveness: 0.1, opacity: 0.7 }
     return {
       source: e.source,
       target: e.target,
@@ -333,42 +278,34 @@ export function graphOption(
       lineStyle,
       symbol: e.kind === 'sequence' || e.kind === 'recipient' || e.kind === 'artifact' ? ['none', 'arrow'] : ['none', 'none'],
       symbolSize: 8,
-      label: {
-        // only the ties to the mail are named on the edge: the other labels ("from", "delivered to", "seed from") crowd the seed and are in the tooltip
-        show: !!e.label && e.kind === 'artifact',
-        formatter: e.label ?? '',
-        fontSize: print ? 11 : 9,
-        fontFamily: t.mono,
-        color: e.kind === 'artifact' ? t.accent : t.fg3,
-        backgroundColor: t.surface,
-        borderRadius: 3,
-        padding: [1, 4],
-      },
+      // no text on the edges: turned along the curves and stacked where several leave one node, it covered the labels.
+      // What a tie is (link, attachment, replied, forwards to) is in its tooltip, and the node at its other end says it too.
+      label: { show: false },
+      edge: e,
     }
   })
-  // lane names, column titles and lane separators live inside the graph (anchor nodes and edges) so they pan and zoom with it
-  const right = mode === 'chain' ? xOf({ x: Math.max(1, ...graph.nodes.map((n) => n.x)) } as GNode) + 170 : 0
-  const guideNodes = camp
-    ? CAMPAIGN_COLS.filter((c) => graph.nodes.some((n) => n.lane === c.lane)).map((c) =>
-        anchor(t, `col:${c.lane}`, c.lane === 'attacker' ? W * 0.2 : c.lane === 'infra' ? W * 0.8 : W / 2, camp.titleY, c.title, 'inside'),
-      )
-    : lanes.flatMap((l, i) => {
-        const yTop = 30 + i * laneH
-        return [anchor(t, `lane:${l}`, 10, yTop + laneH / 2, LANE_LABEL[l]), anchor(t, `lane:${l}:l`, 0, yTop), anchor(t, `lane:${l}:r`, right, yTop)]
-      })
-  const guideLinks = camp
-    ? []
-    : lanes.slice(1).map((l) => ({
-        source: `lane:${l}:l`,
-        target: `lane:${l}:r`,
-        lineStyle: { color: t.line, width: 1, type: [4, 4], curveness: 0, opacity: 1 },
-        symbol: ['none', 'none'],
-        label: { show: false },
-        tooltip: { show: false },
-        emphasis: { disabled: true },
-        blur: { lineStyle: { opacity: 1 } },
-        silent: true,
-      }))
+  // lane separators, lane names (report only) and column titles are points of the graph, so they sit where the layout put them
+  const { width: W, height: H } = layout
+  const guideNodes = [
+    anchor(t, 'corner:0', 0, 0),
+    anchor(t, 'corner:1', W, H),
+    ...layout.titles.map((c) => anchor(t, c.id, c.x, c.y, c.text, 'inside')),
+    ...layout.lanes.flatMap((b, i) => [
+      ...(print ? [anchor(t, `lane:${b.lane}`, LANE_PILL.left, b.y, b.name)] : []),
+      ...(i ? [anchor(t, `lane:${b.lane}:l`, 0, b.top), anchor(t, `lane:${b.lane}:r`, W, b.top)] : []),
+    ]),
+  ]
+  const guideLinks = layout.lanes.slice(1).map((b) => ({
+    source: `lane:${b.lane}:l`,
+    target: `lane:${b.lane}:r`,
+    lineStyle: { color: t.line, width: 1, type: [4, 4], curveness: 0, opacity: 1 },
+    symbol: ['none', 'none'],
+    label: { show: false },
+    tooltip: { show: false },
+    emphasis: { disabled: true },
+    blur: { lineStyle: { opacity: 1 } },
+    silent: true,
+  }))
   return {
     backgroundColor: 'transparent',
     animation: !print,
@@ -383,9 +320,14 @@ export function graphOption(
       extraCssText: 'box-shadow: 0 6px 20px rgba(0,0,0,.18); max-width: 360px; white-space: normal;',
       textStyle: { color: t.fg1, fontSize: 11, fontFamily: t.sans },
       confine: true,
-      formatter: (p: { dataType: string; data: { node?: GNode; value?: string; source?: string; target?: string } }) => {
+      formatter: (p: { dataType: string; data: { node?: GNode; edge?: { source: string; target: string; label?: string } } }) => {
         // ECharts writes this as HTML, and labels, edge values and details come from the evidence
-        if (p.dataType === 'edge') return escapeHtml(String(p.data.value || ''))
+        if (p.dataType === 'edge') {
+          const e = p.data.edge
+          if (!e) return ''
+          const ends = `${escapeHtml(byId.get(e.source)?.label ?? e.source)} → ${escapeHtml(byId.get(e.target)?.label ?? e.target)}`
+          return e.label ? `<b>${escapeHtml(e.label)}</b><br/>${ends}` : ends
+        }
         const n = p.data.node
         if (!n) return ''
         const lines = [n.sub ?? '', n.ts ? fmtTs(n.ts) : '', ...(n.detail ?? []).slice(0, 8)]
@@ -397,11 +339,13 @@ export function graphOption(
       {
         type: 'graph',
         layout: 'none',
-        // room for the labels that hang outside the outermost nodes: stacked names above and below the lanes, names beside the campaign's side columns
-        ...(camp ? { left: 200, right: 200, top: 24, bottom: 64 } : { left: 16, right: 16, top: 72, bottom: 72 }),
-        roam: !print,
-        zoom: 1,
-        draggable: !print && mode !== 'chain',
+        // the view box is the layout's box (see the corner anchors): no scaling
+        left: 0,
+        top: 0,
+        width: W,
+        height: H,
+        roam: false,
+        draggable: !print && camp,
         data: [...guideNodes, ...data],
         links: [...guideLinks, ...links],
         edgeSymbol: ['none', 'none'],
@@ -417,16 +361,14 @@ export function graphOption(
 export function renderGraphPng(arg: { mode: 'chain'; chain: Chain } | { mode: 'campaign'; chains: Chain[] } | { mode: 'story'; graph: Graph }): string | null {
   const graph = arg.mode === 'chain' ? buildChainGraph(arg.chain) : arg.mode === 'story' ? arg.graph : buildCampaignGraph(arg.chains)
   if (!graph.nodes.length || typeof document === 'undefined') return null
-  const lanes = LANES.filter((l) => graph.nodes.some((n) => n.lane === l))
-  const laid = arg.mode !== 'campaign'
-  const W = laid ? Math.min(1700, Math.max(1000, GUTTER + 200 + graph.columns * 140)) : 1200
-  const H = laid ? 60 + lanes.length * 110 : campaignHeight(foldCampaign(graph))
+  const drawing = drawGraph(graph, arg.mode === 'campaign' ? 'campaign' : 'chain', arg.mode === 'campaign' ? 1200 : 1700, 0, PRINT_TOKENS, true)
+  const { width: W, height: H } = drawing.layout
   const host = document.createElement('div')
   host.style.cssText = `position:fixed;left:-30000px;top:0;width:${W}px;height:${H}px;pointer-events:none;`
   document.body.appendChild(host)
   const chart = echarts.init(host, undefined, { renderer: 'canvas', devicePixelRatio: 2, width: W, height: H })
   try {
-    chart.setOption(graphOption(graph, laid ? 'chain' : 'campaign', W, H, PRINT_TOKENS, null, true), true)
+    chart.setOption(graphOption(drawing, PRINT_TOKENS, null, true), true)
     return chart.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#ffffff' })
   } catch {
     return null
@@ -454,23 +396,60 @@ interface Props {
   selectedNode?: string | null
 }
 
-/** ECharts renderer for the chain, campaign and story graphs (see data/chainGraph.ts and data/storyGraph.ts for the models). */
+/**
+ * ECharts renderer for the chain, campaign and story graphs (see data/chainGraph.ts for the models and
+ * graphLayout.ts for where things go). The graph is drawn at its real size in a pane that scrolls; a
+ * chain's lane names stay pinned to the left edge while its timeline scrolls under them.
+ */
 export function ChainGraph({ mode, chain, chains, graph: given, selectedStep, onStep, onEntity, onChain, onRecords, onEntityNode, selectedNode }: Props) {
+  const viewRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
   const ref = useRef<HTMLDivElement>(null)
   const chartRef = useRef<echarts.ECharts | null>(null)
+  const [pane, setPane] = useState<{ w: number; h: number } | null>(null)
   const graph: (Graph & { insights?: { text: string }[] }) | null = useMemo(
     () => (given !== undefined ? given : mode === 'chain' ? (chain ? buildChainGraph(chain) : null) : buildCampaignGraph(chains)),
     [given, mode, chain, chains],
   )
+  const lanes = mode === 'chain'
+
+  // the pane's size sets the column width and how much the lanes may grow; the graph never gets smaller than its labels need
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const read = () => setPane((p) => (p && p.w === el.clientWidth && p.h === el.clientHeight ? p : { w: el.clientWidth, h: el.clientHeight }))
+    read()
+    const obs = new ResizeObserver(read)
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [])
+  // labels are measured in the app's fonts: lay out again once they are in
+  useEffect(() => {
+    let alive = true
+    document.fonts?.ready.then(() => alive && setPane((p) => (p ? { ...p } : p)))
+    return () => {
+      alive = false
+    }
+  }, [])
+  const drawing = useMemo(() => (graph && pane && pane.w > 0 ? drawGraph(graph, mode, Math.max(480, pane.w), Math.max(320, pane.h), tokens()) : null), [graph, mode, pane])
 
   useEffect(() => {
-    if (!ref.current || !graph) return
+    if (!ref.current || !drawing) return
     if (!chartRef.current) chartRef.current = echarts.init(ref.current, undefined, { renderer: 'canvas' })
     const c = chartRef.current
-    const t = tokens()
-    const W = Math.max(480, c.getWidth())
-    const H = Math.max(320, c.getHeight())
-    c.setOption(graphOption(graph, mode, W, H, t, selectedStep, false, selectedNode ?? null), true)
+    c.resize()
+    const option = graphOption(drawing, tokens(), selectedStep, false, selectedNode ?? null)
+    // the tooltip stays inside the part of the graph the pane shows
+    ;(option.tooltip as Record<string, unknown>).position = (pt: number[], _p: unknown, _d: unknown, _r: unknown, size: { contentSize: number[] }) => {
+      const el = scrollRef.current
+      const [w, h] = size.contentSize
+      const [x0, y0] = el ? [el.scrollLeft, el.scrollTop] : [0, 0]
+      const [x1, y1] = el ? [x0 + el.clientWidth, y0 + el.clientHeight] : [drawing.layout.width, drawing.layout.height]
+      const x = pt[0] + 14 + w > x1 - 4 ? pt[0] - 14 - w : pt[0] + 14
+      const y = pt[1] + 14 + h > y1 - 4 ? pt[1] - 14 - h : pt[1] + 14
+      return [Math.max(x0 + 4, Math.min(x, x1 - w - 4)), Math.max(y0 + 4, Math.min(y, y1 - h - 4))]
+    }
+    c.setOption(option, true)
     const onClick = (p: { dataType?: string; data?: { node?: GNode } }) => {
       const n = p.dataType === 'node' ? p.data?.node : undefined
       if (!n) return
@@ -482,16 +461,10 @@ export function ChainGraph({ mode, chain, chains, graph: given, selectedStep, on
       if (n.entityId && onEntityNode) onEntityNode(n.entityId)
     }
     c.on('click', onClick as never)
-    const onResize = () => c.resize()
-    window.addEventListener('resize', onResize)
-    const obs = new ResizeObserver(() => c.resize())
-    obs.observe(ref.current)
     return () => {
       c.off('click', onClick as never)
-      window.removeEventListener('resize', onResize)
-      obs.disconnect()
     }
-  }, [graph, mode, selectedStep, selectedNode, onStep, onEntity, onChain, onRecords, onEntityNode])
+  }, [drawing, selectedStep, selectedNode, onStep, onEntity, onChain, onRecords, onEntityNode])
   useEffect(
     () => () => {
       chartRef.current?.dispose()
@@ -500,9 +473,114 @@ export function ChainGraph({ mode, chain, chains, graph: given, selectedStep, on
     [],
   )
 
+  // another chain opens at its start
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ left: 0, top: 0 })
+  }, [graph])
+  // a step picked in the side pane or with j / k is scrolled into view
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el || !drawing || (selectedStep == null && !selectedNode)) return
+    const n = drawing.graph.nodes.find((x) => (selectedStep != null ? x.stepIdx === selectedStep || x.stepIdxs?.includes(selectedStep) : x.id === selectedNode))
+    const p = n && drawing.layout.nodes.get(n.id)
+    if (!p) return
+    // the node with its label, and a little room around them
+    const pad = 12
+    const half = Math.max(p.size, p.label.width) / 2 + pad
+    const y0 = (p.position === 'top' ? p.y - p.size / 2 - p.distance - p.label.height : p.y - p.size / 2) - pad
+    const y1 = (p.position === 'bottom' ? p.y + p.size / 2 + p.distance + p.label.height : p.y + p.size / 2) + pad
+    const left = p.x - half < el.scrollLeft || p.x + half > el.scrollLeft + el.clientWidth ? p.x - el.clientWidth / 2 : el.scrollLeft
+    const top = y0 < el.scrollTop ? y0 : y1 > el.scrollTop + el.clientHeight ? Math.min(y0, y1 - el.clientHeight) : el.scrollTop
+    if (left !== el.scrollLeft || top !== el.scrollTop) el.scrollTo({ left, top, behavior: 'smooth' })
+  }, [drawing, selectedStep, selectedNode])
+
+  // the edges of a graph wider than its pane: a shade on the side that has more
+  useEffect(() => {
+    const el = scrollRef.current
+    const view = viewRef.current
+    if (!el || !view) return
+    const edges = () => {
+      el.classList.toggle('scrolled', el.scrollLeft > 0)
+      view.classList.toggle('more-right', el.scrollLeft + el.clientWidth < el.scrollWidth - 2)
+    }
+    edges()
+    el.addEventListener('scroll', edges, { passive: true })
+    return () => el.removeEventListener('scroll', edges)
+  }, [drawing])
+
+  // a chain wider than the pane is dragged sideways like a map with the mouse (touch scrolls it natively), and the wheel moves
+  // it along; a campaign's nodes are dragged themselves
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el || !lanes) return
+    let from: { x: number; y: number; left: number; top: number } | null = null
+    let moved = false
+    const down = (e: PointerEvent) => {
+      if (e.pointerType !== 'mouse' || e.button !== 0 || (el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight)) return
+      from = { x: e.clientX, y: e.clientY, left: el.scrollLeft, top: el.scrollTop }
+      moved = false
+    }
+    const move = (e: PointerEvent) => {
+      if (!from) return
+      const dx = e.clientX - from.x
+      const dy = e.clientY - from.y
+      if (!moved && Math.abs(dx) + Math.abs(dy) < 5) return
+      moved = true
+      el.classList.add('panning')
+      el.scrollLeft = from.left - dx
+      el.scrollTop = from.top - dy
+    }
+    const up = () => {
+      from = null
+      el.classList.remove('panning')
+    }
+    // the click that ends a drag is not a click on the node under the pointer
+    const click = (e: MouseEvent) => {
+      if (!moved) return
+      moved = false
+      e.stopPropagation()
+    }
+    // a timeline that only scrolls sideways: a mouse wheel scrolls it sideways (a trackpad's sideways swipe does already)
+    const wheel = (e: WheelEvent) => {
+      if (e.ctrlKey || Math.abs(e.deltaX) >= Math.abs(e.deltaY) || el.scrollHeight > el.clientHeight + 1 || el.scrollWidth <= el.clientWidth + 1) return
+      el.scrollLeft += e.deltaY
+      e.preventDefault()
+    }
+    el.addEventListener('pointerdown', down)
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+    el.addEventListener('click', click, true)
+    el.addEventListener('wheel', wheel, { passive: false })
+    return () => {
+      el.removeEventListener('pointerdown', down)
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+      el.removeEventListener('click', click, true)
+      el.removeEventListener('wheel', wheel)
+    }
+  }, [lanes])
+
+  const size = drawing ? { width: drawing.layout.width, height: drawing.layout.height } : undefined
   return (
     <div className="chain-graph-wrap">
-      <div ref={ref} className="chain-graph" />
+      <div ref={viewRef} className="chain-graph-view">
+        <div ref={scrollRef} className={'chain-graph-scroll' + (lanes ? ' lanes' : '')}>
+          <div className="chain-graph-stage" style={size}>
+            {lanes && drawing && (
+              <div className="chain-graph-lanes" aria-hidden="true">
+                {drawing.layout.lanes.map((b) => (
+                  <span key={b.lane} className="chain-graph-lane" style={{ top: b.y }}>
+                    {b.name}
+                  </span>
+                ))}
+              </div>
+            )}
+            <div ref={ref} className="chain-graph" style={size} />
+          </div>
+        </div>
+      </div>
       {mode === 'campaign' && graph?.insights && (
         <div className="chain-graph-insights">
           {graph.insights.length ? (
@@ -524,7 +602,7 @@ export function ChainGraph({ mode, chain, chains, graph: given, selectedStep, on
             ['ring', 'var(--fg-3)', 'folded routine steps'],
             ['line', 'var(--accent)', 'tie to the mail'],
           ]}
-          hint="scroll to zoom, drag to pan, click a node"
+          hint="drag to pan, hover a line to see the tie, click a node"
         />
       )}
       {mode === 'campaign' && !given && (
@@ -541,7 +619,7 @@ export function ChainGraph({ mode, chain, chains, graph: given, selectedStep, on
       {given && (
         <div className="chain-graph-key small muted">
           diamond = record that started the story · box = record with a finding or a mark · grey dot = folded plain records · triangle = digest, square = file · green edges = entities shared across
-          source files · scroll to zoom, drag to pan, click a record or an entity
+          source files · drag to pan, click a record or an entity
         </div>
       )}
     </div>
