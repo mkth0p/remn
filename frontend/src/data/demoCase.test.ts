@@ -2,8 +2,9 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { gunzipSync, gzipSync } from 'node:zlib'
-import { expect, it } from 'vitest'
-import { demoBundleFile } from './demoCase'
+import { expect, it, vi } from 'vitest'
+import { defaultSettings, getDb, RemnDB, setDb } from '../db/schema'
+import { DEMO_NAME, demoBundleFile, openDemoCase } from './demoCase'
 
 const BUNDLE = path.resolve(__dirname, '../../public/demo/northstar-lab.remn.ndjson.gz')
 
@@ -38,5 +39,25 @@ it('decompresses the bundle here, or takes it as it is when the server already d
   for (const bytes of [gzipSync(plain), Buffer.from(plain)]) {
     const file = await demoBundleFile(new Response(new Uint8Array(bytes)))
     expect(await file.text()).toBe(plain)
+  }
+})
+
+it('reopens the demo case this browser has, and restores it again when its evidence is gone', async () => {
+  const db = new RemnDB(`demo-${Math.random()}`)
+  setDb(db)
+  const fetch = vi.fn(async () => new Response('', { status: 404 }))
+  vi.stubGlobal('fetch', fetch)
+  try {
+    const whole = await db.cases.add({ name: DEMO_NAME, createdAt: 1, updatedAt: 1, storage: 'browser', settings: defaultSettings() })
+    await db.evidence.add({ caseId: whole, name: 'lab.evtx', kind: 'evtx', status: 'done', count: 1 } as never)
+    expect((await openDemoCase()).id).toBe(whole)
+    expect(fetch).not.toHaveBeenCalled()
+    await db.evidence.where('caseId').equals(whole).delete()
+    await expect(openDemoCase()).rejects.toThrow('not on this server')
+    expect(await getDb().cases.get(whole)).toBeUndefined()
+  } finally {
+    vi.unstubAllGlobals()
+    await db.delete()
+    setDb(null)
   }
 })

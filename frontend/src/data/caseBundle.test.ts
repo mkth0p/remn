@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { defaultSettings, deleteCase, getDb, RemnDB, setDb, type Case } from '../db/schema'
-import { restoreCaseBundle, writeCaseBundle } from './caseBundle'
+import { removeInterruptedRestores, restoreCaseBundle, writeCaseBundle } from './caseBundle'
+import type { Locks } from './interruptedImports'
 import { migrateCaseToServer } from './migrate'
 
 vi.mock('../state/store', () => ({ toast: vi.fn(), useStore: { getState: () => ({ setCurrentCase: vi.fn(), bumpRules: vi.fn() }) } }))
@@ -276,4 +277,28 @@ it('carries the story notes and decisions, with their records and findings renum
   await deleteCase(db, id)
   expect(await db.kv.get(`story-decisions-${id}`)).toBeUndefined()
   expect((await db.kv.get('story-decisions-1'))?.value).toBeTruthy()
+})
+
+it('a finished restore leaves no restore mark; one no live tab still runs is removed at start-up, one another tab runs is kept', async () => {
+  const id = await restoreCaseBundle(await backup())
+  expect((await db.cases.get(id))?.restoring).toBeUndefined()
+  const half = await db.cases.add({ ...kase, id: undefined, name: 'Half restored', restoring: { lock: 'gone', since: Date.now() } })
+  await db.events.add({ caseId: half, evidenceId: 9, ts: 1, eventId: 4624 } as never)
+  const running = await db.cases.add({ ...kase, id: undefined, name: 'Still restoring', restoring: { lock: 'held', since: Date.now() } })
+  const locks: Locks = {
+    request: ((name: string, _opts: unknown, cb: (lock: unknown) => unknown) => Promise.resolve(cb(name === 'held' ? null : { name }))) as never,
+  }
+  expect(await removeInterruptedRestores(locks)).toEqual(['Half restored'])
+  expect(await db.cases.get(half)).toBeUndefined()
+  expect(await db.events.where('caseId').equals(half).count()).toBe(0)
+  expect(await db.cases.get(running)).toBeDefined()
+  expect(await db.cases.get(id)).toBeDefined()
+})
+
+it('without Web Locks, a restore mark is removed only once it is old', async () => {
+  const fresh = await db.cases.add({ ...kase, id: undefined, name: 'Fresh', restoring: { since: Date.now() } })
+  const old = await db.cases.add({ ...kase, id: undefined, name: 'Old', restoring: { since: Date.now() - 7 * 3600_000 } })
+  expect(await removeInterruptedRestores(null)).toEqual(['Old'])
+  expect(await db.cases.get(fresh)).toBeDefined()
+  expect(await db.cases.get(old)).toBeUndefined()
 })
