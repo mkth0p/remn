@@ -79,6 +79,10 @@ export interface LibraryRow {
   detected: Record<Cut, number>
   /** recordings with any finding of medium level and above, of whatever technique */
   alertMedium: number
+  /** medium and above, scored on the techniques the rules' authors tagged, without the title map */
+  authorTagsMedium: number
+  /** medium and above, by REMN's own rules alone */
+  ownRulesMedium: number
 }
 
 /**

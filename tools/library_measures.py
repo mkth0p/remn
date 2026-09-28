@@ -23,7 +23,9 @@ figures scores the harvest: a recording is detected when an enabled rule tagged 
 (the same id, its parent or a sub-technique, ATT&CK v19) raises a finding on it, at or above the
 level cut. The default rule set is REMN's own rules and SigmaHQ's windows and emerging-threats
 packs. A rule written after studying a library (tools/measure_rules.py WRITTEN_AGAINST) is not
-counted on it. Tactics are the tactic each technique plays in an intrusion (the story engine's
+counted on it. A rule without a technique tag is scored on the techniques its title names, by the
+title map tools/head_to_head.py applies to every tool alike; the figures also count medium and above
+without it. Tactics are the tactic each technique plays in an intrusion (the story engine's
 map, backend/services/analysis/stories.py).
 """
 
@@ -419,11 +421,14 @@ def level_of(f: list[Any], rules: dict[str, dict[str, Any]]) -> int:
 
 def figures(h: Path) -> dict[str, Any]:
     from apt29_stories import ATTACKED, UNTOUCHED
+    from head_to_head import BY_TITLE, _tagged
 
     from services.analysis.stories import PHASES
 
     recs, rules, units = load_harvest(h)
-    tech = {rid: frozenset(r["techniques"]) for rid, r in rules.items()}
+    # a rule's techniques: its tags, else those its title names (head_to_head.py's title map, the same for every tool)
+    own = {rid: frozenset(r["techniques"]) for rid, r in rules.items()}
+    tech = {rid: _tagged(t, rules[rid]["title"], BY_TITLE) for rid, t in own.items()}
     by_lib: dict[str, list[dict[str, Any]]] = collections.defaultdict(list)
     for r in recs["recordings"]:
         by_lib[r["dataset"]].append(r)
@@ -441,12 +446,14 @@ def figures(h: Path) -> dict[str, Any]:
         rows = by_lib.get(key, [])
         read = [r for r in rows if units.get(f"{key}:{r['name']}", {}).get("rows")]
         cut = [0, 0, 0]
-        alerted = 0
+        alerted = tagged = core = 0
         for r in read:
             name = f"{key}:{r['name']}"
             want = frozenset(r["techniques"])
             al = alerts(name, key)
             best = max((lv for rid, lv in al if M.related(tech[rid], want)), default=-1)
+            tagged += max((lv for rid, lv in al if M.related(own[rid], want)), default=-1) >= 2
+            core += max((lv for rid, lv in al if rules[rid]["pack"] == "core" and M.related(tech[rid], want)), default=-1) >= 2
             got = [best >= 0, best >= 2, best >= 3]
             cut = [c + g for c, g in zip(cut, got, strict=True)]
             alerted += any(lv >= 2 for _, lv in al)
@@ -472,6 +479,10 @@ def figures(h: Path) -> dict[str, Any]:
                 "events": sum(units[f"{key}:{r['name']}"]["rows"] for r in read),
                 "detected": {"any": cut[0], "medium": cut[1], "high": cut[2]},
                 "alertMedium": alerted,
+                # medium and above, scored on the techniques the rules' authors tagged, without the title map
+                "authorTagsMedium": tagged,
+                # medium and above, by REMN's own rules alone
+                "ownRulesMedium": core,
             }
         )
     held = [lib["key"] for lib in libs if not lib["practice"]]

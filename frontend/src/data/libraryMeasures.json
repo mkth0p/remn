@@ -11,88 +11,140 @@
    "name": "EVTX-to-MITRE-Attack",
    "practice": false,
    "recordings": 279,
-   "read": 0,
-   "events": 0,
+   "read": 279,
+   "events": 10625,
    "detected": {
-    "any": 0,
-    "medium": 0,
-    "high": 0
+    "any": 123,
+    "medium": 112,
+    "high": 80
    },
-   "alertMedium": 0
+   "alertMedium": 183,
+   "authorTagsMedium": 104,
+   "ownRulesMedium": 60
   },
   {
    "key": "attackDataWindows",
    "name": "Splunk attack_data, Windows",
    "practice": false,
    "recordings": 536,
-   "read": 25,
-   "events": 260367,
+   "read": 535,
+   "events": 785361,
    "detected": {
-    "any": 15,
-    "medium": 14,
-    "high": 8
+    "any": 249,
+    "medium": 246,
+    "high": 167
    },
-   "alertMedium": 25
+   "alertMedium": 413,
+   "authorTagsMedium": 246,
+   "ownRulesMedium": 103
   },
   {
    "key": "securityDatasets",
    "name": "OTRF Security-Datasets, atomic Windows",
    "practice": false,
    "recordings": 99,
-   "read": 0,
-   "events": 0,
+   "read": 99,
+   "events": 757375,
    "detected": {
-    "any": 0,
-    "medium": 0,
-    "high": 0
+    "any": 81,
+    "medium": 80,
+    "high": 66
    },
-   "alertMedium": 0
+   "alertMedium": 98,
+   "authorTagsMedium": 80,
+   "ownRulesMedium": 46
   },
   {
    "key": "attackSamples",
    "name": "EVTX-ATTACK-SAMPLES",
    "practice": true,
    "recordings": 278,
-   "read": 0,
-   "events": 0,
+   "read": 278,
+   "events": 37364,
    "detected": {
-    "any": 0,
-    "medium": 0,
-    "high": 0
+    "any": 266,
+    "medium": 264,
+    "high": 210
    },
-   "alertMedium": 0
+   "alertMedium": 271,
+   "authorTagsMedium": 264,
+   "ownRulesMedium": 180
   },
   {
    "key": "sigma",
    "name": "SigmaHQ regression samples",
    "practice": true,
    "recordings": 459,
-   "read": 0,
-   "events": 0,
+   "read": 459,
+   "events": 495,
    "detected": {
-    "any": 0,
-    "medium": 0,
-    "high": 0
+    "any": 423,
+    "medium": 421,
+    "high": 254
    },
-   "alertMedium": 0
+   "alertMedium": 452,
+   "authorTagsMedium": 421,
+   "ownRulesMedium": 79
   }
  ],
  "tactics": [
   {
-   "id": "initial-access",
-   "label": "Initial access",
+   "id": "reconnaissance",
+   "label": "Reconnaissance",
    "cells": {
     "attackDataWindows": [
-     2,
+     12,
+     1,
+     1,
+     0
+    ],
+    "all": [
+     12,
+     1,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "id": "resource-development",
+   "label": "Resource development",
+   "cells": {
+    "attackDataWindows": [
+     6,
      0,
      0,
      0
     ],
     "all": [
-     2,
+     6,
      0,
      0,
      0
+    ]
+   }
+  },
+  {
+   "id": "initial-access",
+   "label": "Initial access",
+   "cells": {
+    "evtxToMitre": [
+     4,
+     0,
+     0,
+     0
+    ],
+    "all": [
+     29,
+     3,
+     3,
+     1
+    ],
+    "attackDataWindows": [
+     25,
+     3,
+     3,
+     1
     ]
    }
   },
@@ -100,17 +152,29 @@
    "id": "execution",
    "label": "Execution",
    "cells": {
-    "attackDataWindows": [
-     4,
-     2,
-     2,
-     1
+    "evtxToMitre": [
+     13,
+     7,
+     7,
+     6
     ],
     "all": [
-     4,
-     2,
-     2,
-     1
+     83,
+     46,
+     46,
+     31
+    ],
+    "attackDataWindows": [
+     60,
+     32,
+     32,
+     23
+    ],
+    "securityDatasets": [
+     10,
+     7,
+     7,
+     2
     ]
    }
   },
@@ -118,17 +182,29 @@
    "id": "persistence",
    "label": "Persistence",
    "cells": {
-    "attackDataWindows": [
-     3,
-     3,
-     3,
-     1
+    "evtxToMitre": [
+     97,
+     48,
+     40,
+     34
     ],
     "all": [
-     3,
-     3,
-     3,
-     1
+     187,
+     105,
+     96,
+     81
+    ],
+    "attackDataWindows": [
+     78,
+     45,
+     44,
+     35
+    ],
+    "securityDatasets": [
+     12,
+     12,
+     12,
+     12
     ]
    }
   },
@@ -136,17 +212,29 @@
    "id": "privilege-escalation",
    "label": "Privilege escalation",
    "cells": {
-    "attackDataWindows": [
-     1,
-     0,
-     0,
-     0
+    "evtxToMitre": [
+     10,
+     2,
+     2,
+     1
     ],
     "all": [
-     1,
-     0,
-     0,
-     0
+     35,
+     15,
+     15,
+     8
+    ],
+    "attackDataWindows": [
+     23,
+     11,
+     11,
+     5
+    ],
+    "securityDatasets": [
+     2,
+     2,
+     2,
+     2
     ]
    }
   },
@@ -154,17 +242,29 @@
    "id": "stealth",
    "label": "Stealth",
    "cells": {
-    "attackDataWindows": [
+    "evtxToMitre": [
+     21,
      6,
-     5,
-     5,
+     6,
      4
     ],
     "all": [
-     6,
-     5,
-     5,
-     4
+     147,
+     82,
+     82,
+     60
+    ],
+    "attackDataWindows": [
+     105,
+     57,
+     57,
+     37
+    ],
+    "securityDatasets": [
+     21,
+     19,
+     19,
+     19
     ]
    }
   },
@@ -172,17 +272,29 @@
    "id": "defense-impairment",
    "label": "Defense impairment",
    "cells": {
-    "attackDataWindows": [
-     2,
-     2,
-     2,
-     2
+    "evtxToMitre": [
+     32,
+     22,
+     21,
+     13
     ],
     "all": [
-     2,
-     2,
-     2,
-     2
+     68,
+     50,
+     49,
+     36
+    ],
+    "attackDataWindows": [
+     29,
+     22,
+     22,
+     18
+    ],
+    "securityDatasets": [
+     7,
+     6,
+     6,
+     5
     ]
    }
   },
@@ -190,17 +302,29 @@
    "id": "credential-access",
    "label": "Credential access",
    "cells": {
-    "attackDataWindows": [
-     2,
-     1,
-     1,
-     0
+    "evtxToMitre": [
+     48,
+     20,
+     19,
+     14
     ],
     "all": [
-     2,
-     1,
-     1,
-     0
+     126,
+     61,
+     60,
+     47
+    ],
+    "attackDataWindows": [
+     59,
+     25,
+     25,
+     18
+    ],
+    "securityDatasets": [
+     19,
+     16,
+     16,
+     15
     ]
    }
   },
@@ -208,17 +332,29 @@
    "id": "discovery",
    "label": "Discovery",
    "cells": {
-    "attackDataWindows": [
-     2,
-     2,
-     1,
+    "evtxToMitre": [
+     29,
+     4,
+     3,
      0
     ],
     "all": [
+     79,
+     24,
+     21,
+     6
+    ],
+    "attackDataWindows": [
+     41,
+     17,
+     16,
+     5
+    ],
+    "securityDatasets": [
+     9,
+     3,
      2,
-     2,
-     1,
-     0
+     1
     ]
    }
   },
@@ -226,16 +362,100 @@
    "id": "lateral-movement",
    "label": "Lateral movement",
    "cells": {
+    "evtxToMitre": [
+     17,
+     11,
+     11,
+     6
+    ],
+    "all": [
+     67,
+     44,
+     43,
+     28
+    ],
     "attackDataWindows": [
+     33,
+     18,
+     17,
+     12
+    ],
+    "securityDatasets": [
+     17,
+     15,
+     15,
+     10
+    ]
+   }
+  },
+  {
+   "id": "collection",
+   "label": "Collection",
+   "cells": {
+    "evtxToMitre": [
      1,
      0,
      0,
      0
     ],
     "all": [
+     12,
      1,
+     1,
+     0
+    ],
+    "attackDataWindows": [
+     10,
      0,
      0,
+     0
+    ],
+    "securityDatasets": [
+     1,
+     1,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "id": "command-and-control",
+   "label": "Command and control",
+   "cells": {
+    "evtxToMitre": [
+     2,
+     0,
+     0,
+     0
+    ],
+    "all": [
+     26,
+     13,
+     13,
+     9
+    ],
+    "attackDataWindows": [
+     24,
+     13,
+     13,
+     9
+    ]
+   }
+  },
+  {
+   "id": "exfiltration",
+   "label": "Exfiltration",
+   "cells": {
+    "attackDataWindows": [
+     10,
+     1,
+     1,
+     0
+    ],
+    "all": [
+     10,
+     1,
+     1,
      0
     ]
    }
@@ -244,36 +464,42 @@
    "id": "impact",
    "label": "Impact",
    "cells": {
-    "attackDataWindows": [
-     2,
-     0,
-     0,
-     0
+    "evtxToMitre": [
+     5,
+     3,
+     3,
+     2
     ],
     "all": [
-     2,
-     0,
-     0,
-     0
+     23,
+     7,
+     7,
+     6
+    ],
+    "attackDataWindows": [
+     18,
+     4,
+     4,
+     4
     ]
    }
   }
  ],
  "techniques": {
-  "recorded": 19,
-  "detected": 9,
+  "recorded": 122,
+  "detected": 72,
   "byLibrary": {
    "evtxToMitre": [
-    0,
-    0
+    52,
+    30
    ],
    "attackDataWindows": [
-    19,
-    9
+    117,
+    66
    ],
    "securityDatasets": [
-    0,
-    0
+    34,
+    29
    ]
   }
  },
@@ -303,12 +529,37 @@
      "attacked": false
     }
    }
+  },
+  "day2": {
+   "events": 587286,
+   "hosts": {
+    "nashua": {
+     "medium": 4,
+     "high": 1,
+     "attacked": null
+    },
+    "newyork": {
+     "medium": 64,
+     "high": 26,
+     "attacked": null
+    },
+    "scranton": {
+     "medium": 37,
+     "high": 11,
+     "attacked": null
+    },
+    "utica": {
+     "medium": 590,
+     "high": 290,
+     "attacked": null
+    }
+   }
   }
  },
  "throughput": {
-  "events": 456448,
-  "loadSeconds": 285.2,
-  "rulesSeconds": 812.4
+  "events": 2377981,
+  "loadSeconds": 1522.8,
+  "rulesSeconds": 12728.9
  },
  "attackDataMaxMb": 20,
  "leftOut": {

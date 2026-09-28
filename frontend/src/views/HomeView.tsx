@@ -482,7 +482,12 @@ function Libraries({ ref }: { ref: SectionRef }) {
         <PctTicks />
         <p className="ld-note">
           Gray: libraries REMN's rules were reviewed against, shown for reference. attack_data: its Windows datasets up to {m.attackDataMaxMb} MB. Security-Datasets: OTRF's atomic Windows datasets,
-          labelled with techniques by their metadata.
+          labelled with techniques by their metadata. At medium and above, REMN's own rules alone detect{' '}
+          {rows
+            .filter((l) => !l.practice)
+            .map((l) => `${fmtNum(l.ownRulesMedium)} (${SHORT[l.key] ?? l.key})`)
+            .join(', ')}
+          ; the other detections come from SigmaHQ's packs alone. A rule without a technique tag is scored on the technique its title names, as in the head-to-head.
         </p>
       </div>
       <div className="ld-gap" />
