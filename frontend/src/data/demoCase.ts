@@ -1,4 +1,4 @@
-import { defaultSettings, getDb, type Case } from '../db/schema'
+import { deleteCase, defaultSettings, getDb, type Case } from '../db/schema'
 import { restoreCaseBundle } from './caseBundle'
 
 /**
@@ -19,16 +19,21 @@ export async function demoBundleFile(resp: Response): Promise<File> {
   return new File([body], 'northstar-lab.remn.ndjson')
 }
 
-/** Restore the demo case, or find it when this browser already has it. */
+/** Restore the demo case, or find it when this browser already has it whole. */
 export async function openDemoCase(progress?: (message: string) => void): Promise<Case> {
   const db = getDb()
-  let id = (await db.cases.filter((c) => c.name === DEMO_NAME).first())?.id
+  let id = (await db.cases.filter((c) => c.name === DEMO_NAME && !c.restoring).first())?.id
+  // a demo case whose evidence was removed opens empty: it is restored again rather than reopened
+  if (id != null && !(await db.evidence.where('caseId').equals(id).count())) {
+    await deleteCase(db, id)
+    id = undefined
+  }
   if (id == null) {
     progress?.('Downloading the demo case…')
     const resp = await fetch(DEMO_URL)
     if (!resp.ok) throw new Error(`the demo case is not on this server (${resp.status})`)
-    id = await restoreCaseBundle(await demoBundleFile(resp), progress)
-    await db.cases.update(id, { name: DEMO_NAME, updatedAt: Date.now() })
+    id = await restoreCaseBundle(await demoBundleFile(resp), progress, DEMO_NAME)
+    await db.cases.update(id, { updatedAt: Date.now() })
   }
   await db.kv.put({ key: 'lastCase', value: id })
   const c = (await db.cases.get(id))!

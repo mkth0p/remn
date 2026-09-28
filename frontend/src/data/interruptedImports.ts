@@ -15,9 +15,9 @@ export type Locks = Pick<LockManager, 'request'>
 
 const UNFINISHED: Evidence['status'][] = ['hashing', 'uploading', 'parsing']
 /** An import from before imports took a lock has no lock to ask about; past this age it is not running. */
-const UNLOCKED_STALE_MS = 6 * 3600_000
+export const UNLOCKED_STALE_MS = 6 * 3600_000
 
-function browserLocks(): Locks | null {
+export function browserLocks(): Locks | null {
   try {
     // absent outside a secure context and in older browsers, whatever the type says
     const locks = typeof navigator !== 'undefined' ? (navigator as { locks?: LockManager }).locks : undefined
