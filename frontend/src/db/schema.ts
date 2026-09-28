@@ -73,6 +73,8 @@ export interface Case {
   storage?: 'browser' | 'server'
   /** UUID of the server case store when storage === 'server'. */
   serverKey?: string
+  /** A bundle restore still writing this case's rows (data/caseBundle.ts), under this Web Lock; gone once it finishes. */
+  restoring?: { lock?: string; since: number }
 }
 
 export function newServerKey(): string {

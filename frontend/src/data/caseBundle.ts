@@ -2,6 +2,7 @@ import { createSHA256 } from 'hash-wasm'
 import { API_HEADERS, readNdjsonBody } from '../api/client'
 import { CASE_KV_KEYS, CASE_KV_PREFIXES_WITH_SUFFIX, deleteCase, getDb, newServerKey, type Case } from '../db/schema'
 import { caseRows, importServerBatch, type TransferRow } from './caseTransfer'
+import { browserLocks, UNLOCKED_STALE_MS, whileImporting, type Locks } from './interruptedImports'
 
 const TABLES = [
   'evidence',
@@ -96,10 +97,12 @@ function validateRecord(record: RecordLine): void {
   if (![...TABLES, 'kv', 'serverRows'].includes(record.table) || !record.row || typeof record.row !== 'object') throw new Error('Invalid case bundle record')
 }
 
-export async function restoreCaseBundle(file: File, progress?: (message: string) => void): Promise<number> {
+/** `name` names the restored case; by default it is the original's name, marked imported. */
+export async function restoreCaseBundle(file: File, progress?: (message: string) => void, name?: string): Promise<number> {
   const prefix = await file.slice(0, 200).text()
   let kase: Case
   let records: () => AsyncGenerator<RecordLine>
+  const totals: Record<string, number> = {}
   if (prefix.includes('"bundle":')) {
     // Compatibility with the old single-JSON format. New exports never allocate this large string.
     const text = await file.text()
@@ -131,7 +134,10 @@ export async function restoreCaseBundle(file: File, progress?: (message: string)
         if (record.sha256 !== hash.digest('hex')) throw new Error('Case bundle hash mismatch')
         verified = true
         continue
-      } else validateRecord(record)
+      } else {
+        validateRecord(record)
+        totals[record.table] = (totals[record.table] ?? 0) + 1
+      }
       hash.update(line)
     }
     if (!header || !verified) throw new Error('Case bundle is incomplete: checksum missing')
@@ -149,16 +155,54 @@ export async function restoreCaseBundle(file: File, progress?: (message: string)
       }
     }
   }
-  return restoreRecords(kase, records, progress)
+  return whileImporting((lock) => restoreRecords(kase, records, progress, lock, totals, name))
+}
+
+/**
+ * A restore writes its rows in batches, and the case is complete only when the last one is in. A tab
+ * closed or reloaded part-way left a case with some of them, which counted as holding evidence: the
+ * app opened on it instead of on the home page, and a demo case restored again beside it. So the case
+ * carries the restore's Web Lock until it finishes, and at start-up a case still restoring whose lock
+ * is free belongs to no live tab and is removed. Returns the names of the cases removed.
+ */
+export async function removeInterruptedRestores(locks: Locks | null = browserLocks(), now = Date.now()): Promise<string[]> {
+  const db = getDb()
+  const removed: string[] = []
+  for (const c of await db.cases.filter((c) => !!c.restoring).toArray()) {
+    const remove = async () => {
+      // read again under the lock: a restore that finished since the list was taken is left alone
+      if (!(await db.cases.get(c.id!))?.restoring) return
+      await deleteCase(db, c.id!)
+      if (c.serverKey) await fetch(`/api/store/${c.serverKey}`, { method: 'DELETE', headers: API_HEADERS }).catch(() => undefined)
+      removed.push(c.name)
+    }
+    const { lock, since } = c.restoring!
+    if (lock && locks) await locks.request(lock, { ifAvailable: true }, (held) => (held ? remove() : undefined))
+    else if (now - since > UNLOCKED_STALE_MS) await remove()
+  }
+  return removed
 }
 
 /** Offset mappings are constant-size even for millions of evidence rows. */
-async function restoreRecords(original: Case, records: () => AsyncGenerator<RecordLine>, progress?: (s: string) => void): Promise<number> {
+async function restoreRecords(
+  original: Case,
+  records: () => AsyncGenerator<RecordLine>,
+  progress?: (s: string) => void,
+  lock?: string,
+  totals: Record<string, number> = {},
+  name?: string,
+): Promise<number> {
   const db = getDb()
   const offsets: Record<string, number> = {}
   for (const name of TABLES) offsets[name] = Number((await db.table(name).orderBy(':id').last())?.id ?? 0)
   if (original.storage === 'server') offsets.events = offsets.mails = 0 // IDs are private to a fresh server store.
-  const kase = { ...original, id: undefined, name: `${original.name} (imported)`, serverKey: original.storage === 'server' ? newServerKey() : undefined }
+  const kase: Case = {
+    ...original,
+    id: undefined,
+    name: name ?? `${original.name} (imported)`,
+    serverKey: original.storage === 'server' ? newServerKey() : undefined,
+    restoring: { lock, since: Date.now() },
+  }
   const mapId = (table: string, id: unknown): unknown => {
     if (typeof id !== 'number') return id
     const mapped = id + (offsets[table] ?? 0)
@@ -222,6 +266,7 @@ async function restoreRecords(original: Case, records: () => AsyncGenerator<Reco
   }
   let batch: TransferRow[] = []
   let batchTable = ''
+  const done: Record<string, number> = {}
   let serverEvidence = -1
   const flush = async () => {
     if (!batch.length) return
@@ -251,9 +296,10 @@ async function restoreRecords(original: Case, records: () => AsyncGenerator<Reco
       batchTable = table
       serverEvidence = eid
       batch.push(mapped)
+      done[table] = (done[table] ?? 0) + 1
       if (batch.length >= 500) {
         await flush()
-        progress?.(`Restoring ${table}…`)
+        progress?.(totals[table] ? `Restoring ${table}: ${done[table].toLocaleString('en-US')} of ${totals[table].toLocaleString('en-US')}` : `Restoring ${table}…`)
       }
     }
     await flush()
@@ -262,6 +308,7 @@ async function restoreRecords(original: Case, records: () => AsyncGenerator<Reco
       const { anchorStoredFindings } = await import('./findingAnchors')
       await anchorStoredFindings(db, [newId])
     }
+    await db.cases.update(newId, { restoring: undefined })
     return newId
   } catch (error) {
     await deleteCase(db, newId)
