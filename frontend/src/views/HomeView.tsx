@@ -13,14 +13,17 @@ import { requestIngest } from '../data/ingest'
 import { startCase } from '../data/cases'
 import { DEFAULT_DETECTION_LEVEL, type DetectionLevel } from '../data/detectionLevel'
 import { DetectionLevelPicker } from '../components/DetectionLevelPicker'
-import { EXAMPLE_RULE, HEAD_TO_HEAD, HELD_OUT, liveFigures, MAIL_CORPORA, type LiveFigures } from '../data/landingFigures'
+import { DETECTION_LEVELS, BEFORE_LEVELS, MEASURED_ON } from '../data/detectionLevel'
+import { EXAMPLE_RULE, HEAD_TO_HEAD, HELD_OUT, heldOut, LIBRARY_MEASURES, liveFigures, MAIL_CORPORA, type Cut, type LiveFigures } from '../data/landingFigures'
 import { fmtNum } from '../util/format'
 
 type Level = 'info' | 'medium' | 'high'
-type Section = 'coverage' | 'baseline' | 'mail' | 'method' | 'modules' | 'data'
+type Section = 'libraries' | 'coverage' | 'baseline' | 'intrusion' | 'mail' | 'method' | 'modules' | 'data'
 const SECTIONS: [Section, string][] = [
-  ['coverage', 'Coverage'],
+  ['libraries', 'Libraries'],
+  ['coverage', 'Head-to-head'],
   ['baseline', 'Baseline'],
+  ['intrusion', 'APT29'],
   ['mail', 'Mail'],
   ['method', 'Method'],
   ['modules', 'Modules'],
@@ -31,6 +34,12 @@ const LEVELS: [Level, string][] = [
   ['medium', '≥ medium'],
   ['high', '≥ high'],
 ]
+const CUTS: [Cut, string][] = [
+  ['any', 'any level'],
+  ['medium', '≥ medium'],
+  ['high', '≥ high'],
+]
+const pct = (n: number, of: number) => (of ? `${Math.round((n / of) * 100)}%` : '–')
 
 /**
  * The page REMN opens on until a case holds evidence, and behind the wordmark after that: what the
@@ -81,7 +90,7 @@ export function HomeView() {
               <span>REMN</span>
             </span>
             <div className="ld-links">
-              {SECTIONS.map(([id, label]) => (
+              {SECTIONS.filter(([id]) => id !== 'modules' && id !== 'data').map(([id, label]) => (
                 <button key={id} type="button" onClick={() => jump(id)}>
                   {label}
                 </button>
@@ -123,6 +132,7 @@ export function HomeView() {
             </div>
             <ExampleFinding live={live} />
           </div>
+          <HeroFigures live={live} />
         </div>
       </header>
 
@@ -136,8 +146,10 @@ export function HomeView() {
       </div>
 
       <main className="ld-wrap">
+        <Libraries ref={(el) => void (refs.current.libraries = el)} />
         <Coverage ref={(el) => void (refs.current.coverage = el)} />
         <Baseline ref={(el) => void (refs.current.baseline = el)} live={live} />
+        <Intrusion ref={(el) => void (refs.current.intrusion = el)} />
         <Mail ref={(el) => void (refs.current.mail = el)} />
         <Method ref={(el) => void (refs.current.method = el)} live={live} />
         <Modules ref={(el) => void (refs.current.modules = el)} />
@@ -183,7 +195,8 @@ export function HomeView() {
           <span>REMN</span>
         </span>
         <span>
-          {live ? `Measured ${live.measured}` : 'Measures'} · rules/measures.json · sources: EVTX-to-MITRE-Attack, splunk/attack_data, EVTX-ATTACK-SAMPLES, SigmaHQ, NextronSystems/evtx-baseline
+          {live ? `Measured ${live.measured}` : 'Measures'} · rules/measures.json · tools/library_measures.py at {LIBRARY_MEASURES.commit} · sources: EVTX-to-MITRE-Attack, splunk/attack_data, OTRF
+          Security-Datasets, EVTX-ATTACK-SAMPLES, SigmaHQ, NextronSystems/evtx-baseline
         </span>
       </footer>
 
@@ -269,9 +282,9 @@ function Coverage({ ref }: { ref: SectionRef }) {
   return (
     <section className="ld-blk" ref={ref}>
       <div className="ld-eyebrow">
-        Coverage · {h.library.name} @ {h.library.sha}
+        Head-to-head · {h.library.name} @ {h.library.sha}
       </div>
-      <h2>Detection on held-out recordings</h2>
+      <h2>Three tools on one held-out library</h2>
       <p className="ld-intro">
         {files} technique-labelled logs ({fmtNum(h.library.events)} events) that no REMN rule was written against. A file counts as detected when a rule tagged with its ATT&amp;CK v19 technique,
         parent or sub-technique fires on it. Same scorer for all three tools, all shipped rules enabled.
@@ -345,15 +358,6 @@ function Coverage({ ref }: { ref: SectionRef }) {
               </td>
             </tr>
           </Table>
-          <Table head={[`attack_data @ ${HELD_OUT.attackData.sha}, ${HELD_OUT.attackData.recordings} recordings`, '≥ med', '≥ high']}>
-            {HELD_OUT.attackData.rows.map(([set, med, high], i, all) => (
-              <tr key={set} className={i === all.length - 1 ? 'sum' : undefined}>
-                <td>{set}</td>
-                <td className="n">{med}</td>
-                <td className="n">{high}</td>
-              </tr>
-            ))}
-          </Table>
         </div>
       </div>
       <div className="ld-gap" />
@@ -380,6 +384,267 @@ function Coverage({ ref }: { ref: SectionRef }) {
   )
 }
 
+function HeroFigures({ live }: { live: LiveFigures | null }) {
+  const m = LIBRARY_MEASURES
+  const h = heldOut(m)
+  const read = m.libraries.reduce((n, l) => n + l.read, 0)
+  const events = m.libraries.reduce((n, l) => n + l.events, 0)
+  const b = live?.baseline
+  const tiles: [string, string][] = [
+    [fmtNum(read), `recorded attacks in ${m.libraries.filter((l) => l.read).length} public libraries, ${(events / 1e6).toFixed(1)}M events`],
+    [pct(h.detected.medium, h.read), `of ${fmtNum(h.read)} held-out recordings detected at medium or above`],
+    [`${m.techniques.detected} / ${m.techniques.recorded}`, 'ATT&CK techniques recorded in the held-out libraries, detected at medium or above'],
+  ]
+  if (b) tiles.push([`${(b.events / 1e6).toFixed(1)}M`, `events from ${b.machines} clean Windows hosts, scored for false positives`])
+  return (
+    <dl className="ld-figs" aria-label="Measured figures">
+      {tiles.map(([v, t]) => (
+        <div key={t}>
+          <dt>{t}</dt>
+          <dd>{v}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+const SHORT: Record<string, string> = { evtxToMitre: 'EVTX-to-MITRE', attackDataWindows: 'attack_data', securityDatasets: 'Security-Datasets', all: 'All held-out' }
+
+function PctTicks() {
+  return (
+    <div className="ld-ticks ld-lticks" aria-hidden="true">
+      <span />
+      <div>
+        {[0, 0.25, 0.5, 0.75, 1].map((t) => (
+          <span key={t} style={{ left: `${t * 100}%` }}>
+            {t * 100}%
+          </span>
+        ))}
+      </div>
+      <span />
+    </div>
+  )
+}
+
+function Libraries({ ref }: { ref: SectionRef }) {
+  const [cut, setCut] = useState<Cut>('medium')
+  const m = LIBRARY_MEASURES
+  const rows = m.libraries.filter((l) => l.read > 0)
+  const h = heldOut(m)
+  return (
+    <section className="ld-blk" ref={ref}>
+      <div className="ld-eyebrow">
+        Libraries · {rows.length} public corpora · rules at {m.commit} · run {m.measured}
+      </div>
+      <h2>Detection by library</h2>
+      <p className="ld-intro">
+        Every rule run on every recording of each library, with a new case's settings. A recording counts as detected when a rule tagged with its ATT&amp;CK technique (the same id, its parent or a
+        sub-technique) raises a finding at or above the level cut. Default rule set: {fmtNum(m.rules.default)} rules, REMN's own and SigmaHQ's windows and emerging-threats packs. Held out: no rule was
+        written against the library; a rule written after studying one is not counted on it.
+      </p>
+      <div className="ld-panel ld-mt">
+        <div className="ld-chart-head">
+          <div>
+            <div className="ld-chart-t">Recordings detected, share of each library</div>
+            <div className="ld-chart-s">
+              held out together: {fmtNum(h.detected[cut])} of {fmtNum(h.read)} ({pct(h.detected[cut], h.read)})
+            </div>
+          </div>
+          <div className="ld-seg" role="group" aria-label="Level cut">
+            {CUTS.map(([c, label]) => (
+              <button key={c} type="button" aria-pressed={c === cut} onClick={() => setCut(c)}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="ld-bars">
+          {rows.map((l) => (
+            <div key={l.key} className={l.practice ? 'ld-lrow' : 'ld-lrow ld-us'}>
+              <div className="ld-lname">
+                <b>{l.name}</b>
+                <span>
+                  {fmtNum(l.read)} recordings · {fmtNum(l.events)} events · {l.practice ? 'rules reviewed against it' : 'held out'}
+                </span>
+              </div>
+              <div className="ld-track" title={`${l.name}: ${fmtNum(l.detected[cut])} of ${fmtNum(l.read)} recordings detected`}>
+                <div className="ld-fill" style={{ width: `${(l.detected[cut] / l.read) * 100}%` }} />
+              </div>
+              <span className="ld-v">
+                {pct(l.detected[cut], l.read)}
+                <small>
+                  {fmtNum(l.detected[cut])}/{fmtNum(l.read)}
+                </small>
+              </span>
+            </div>
+          ))}
+        </div>
+        <PctTicks />
+        <p className="ld-note">
+          Gray: libraries REMN's rules were reviewed against, shown for reference. attack_data: its Windows datasets up to {m.attackDataMaxMb} MB. Security-Datasets: OTRF's atomic Windows datasets,
+          labelled with techniques by their metadata. At medium and above, REMN's own rules alone detect{' '}
+          {rows
+            .filter((l) => !l.practice)
+            .map((l) => `${fmtNum(l.ownRulesMedium)} (${SHORT[l.key] ?? l.key})`)
+            .join(', ')}
+          ; the other detections come from SigmaHQ's packs alone. A rule without a technique tag is scored on the technique its title names, as in the head-to-head.
+        </p>
+      </div>
+      <div className="ld-gap" />
+      <TacticMap cut={cut} />
+    </section>
+  )
+}
+
+function TacticMap({ cut }: { cut: Cut }) {
+  const m = LIBRARY_MEASURES
+  const cols = [...m.libraries.filter((l) => !l.practice && l.read > 0).map((l) => l.key), 'all']
+  const at = { any: 1, medium: 2, high: 3 }[cut]
+  return (
+    <>
+      <div className="ld-chart-head">
+        <div>
+          <div className="ld-chart-t">Held-out recordings detected, by tactic ({CUTS.find(([c]) => c === cut)![1]})</div>
+          <div className="ld-chart-s">
+            Tactic of each recording's technique, ATT&amp;CK v19. {m.techniques.detected} of the {m.techniques.recorded} techniques recorded are detected at medium or above.
+          </div>
+        </div>
+        <div className="ld-scale" aria-hidden="true">
+          <span>0%</span>
+          <i />
+          <span>100%</span>
+        </div>
+      </div>
+      <div className="ld-tw ld-mt-s">
+        <table className="ld-t ld-hm">
+          <thead>
+            <tr>
+              <th>Tactic</th>
+              {cols.map((c) => (
+                <th key={c} className="n">
+                  {SHORT[c] ?? c}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {m.tactics.map((t) => (
+              <tr key={t.id}>
+                <td>{t.label}</td>
+                {cols.map((c) => {
+                  const cell = t.cells[c]
+                  if (!cell || !cell[0])
+                    return (
+                      <td key={c} className="n ld-hc ld-na">
+                        –
+                      </td>
+                    )
+                  const r = cell[at] / cell[0]
+                  return (
+                    <td
+                      key={c}
+                      className={r >= 0.55 ? 'n ld-hc ld-hc-d' : 'n ld-hc'}
+                      style={{ ['--r' as string]: r.toFixed(3) }}
+                      title={`${t.label}, ${SHORT[c] ?? c}: ${cell[at]} of ${cell[0]} recordings (${pct(cell[at], cell[0])})`}
+                    >
+                      {cell[at]}/{cell[0]}
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  )
+}
+
+function Levels() {
+  const max = Math.max(...DETECTION_LEVELS.map((l) => l.measured.perCleanMachine))
+  const rows: [string, number, boolean][] = [
+    ...DETECTION_LEVELS.map((l): [string, number, boolean] => [`${l.level} · ${l.label}`, l.measured.perCleanMachine, l.level === 2]),
+    ['≥ medium, no levels', BEFORE_LEVELS.perCleanMachine, false],
+  ]
+  return (
+    <div className="ld-panel">
+      <div className="ld-chart-t">Lines to read per clean host, by detection level</div>
+      <div className="ld-chart-s">Findings on their own, plus one line per rule and host for the findings folded below the level. Level 2 is a new case's.</div>
+      <div className="ld-bars">
+        {rows.map(([label, v, us]) => (
+          <div key={label} className={us ? 'ld-row ld-lvl ld-us' : 'ld-row ld-lvl'}>
+            <span className="ld-who">{label}</span>
+            <div className="ld-track" title={`${label}: ${v} lines per clean host`}>
+              <div className="ld-fill" style={{ width: `${(v / max) * 100}%` }} />
+            </div>
+            <span className="ld-v">{v}</span>
+          </div>
+        ))}
+      </div>
+      <p className="ld-note">
+        No level drops a finding, so every level detects the same recordings. Rule noise taken from the other six hosts for each host counted. {MEASURED_ON.cleanMachines} hosts of evtx-baseline, run{' '}
+        {MEASURED_ON.date}.
+      </p>
+    </div>
+  )
+}
+
+function Intrusion({ ref }: { ref: SectionRef }) {
+  const days = (['day1', 'day2'] as const).filter((d) => LIBRARY_MEASURES.apt29[d])
+  if (!days.length) return null
+  return (
+    <section className="ld-blk" ref={ref}>
+      <div className="ld-eyebrow">Intrusion replay · MITRE ATT&amp;CK Evaluations, APT29 · recorded by OTRF Security-Datasets</div>
+      <h2>Findings per host on an emulated intrusion</h2>
+      <p className="ld-intro">
+        The two days of MITRE's APT29 evaluation: Sysmon, Security and PowerShell logs of the lab's hosts, loaded as a case with a new case's settings and the default rule set. On day 1 the operator
+        works on SCRANTON and NASHUA; NEWYORK, the domain controller, and UTICA are left alone.
+      </p>
+      <div className="ld-proof">
+        {days.map((d) => {
+          const day = LIBRARY_MEASURES.apt29[d]!
+          const hosts = Object.entries(day.hosts).sort((a, b) => b[1].medium - a[1].medium)
+          const max = Math.max(1, ...hosts.map(([, v]) => v.medium))
+          return (
+            <div key={d} className="ld-panel">
+              <div className="ld-chart-t">Day {d.slice(3)}</div>
+              <div className="ld-chart-s">{fmtNum(day.events)} events · findings at medium and above</div>
+              <div className="ld-legend" aria-hidden="true">
+                <span>
+                  <i className="ld-k-high" />
+                  high and critical
+                </span>
+                <span>
+                  <i className="ld-k-med" />
+                  medium
+                </span>
+              </div>
+              <div className="ld-bars">
+                {hosts.map(([host, v]) => (
+                  <div key={host} className="ld-row ld-host">
+                    <span className="ld-who">
+                      {host.toUpperCase()}
+                      {v.attacked != null && <small>{v.attacked ? 'attacked' : 'not attacked'}</small>}
+                    </span>
+                    <div className="ld-track ld-stack" title={`${host.toUpperCase()}: ${v.high} high and critical, ${v.medium - v.high} medium`}>
+                      {v.high > 0 && <div className="ld-seg-h" style={{ width: `${(v.high / max) * 100}%` }} />}
+                      {v.medium > v.high && <div className="ld-seg-m" style={{ width: `${((v.medium - v.high) / max) * 100}%` }} />}
+                    </div>
+                    <span className="ld-v">{fmtNum(v.medium)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <p className="ld-note">
+        Findings are counted before folding: at a case's default detection level the analyst reads fewer lines. Run {LIBRARY_MEASURES.measured}, rules at {LIBRARY_MEASURES.commit}.
+      </p>
+    </section>
+  )
+}
+
 function Baseline({ ref, live }: { ref: SectionRef; live: LiveFigures | null }) {
   const c = HELD_OUT.clean
   const b = live?.baseline
@@ -391,23 +656,38 @@ function Baseline({ ref, live }: { ref: SectionRef; live: LiveFigures | null }) 
         {b ? `${fmtNum(b.machines)} Windows hosts with no attack activity, ${fmtNum(b.events)} events.` : 'Windows hosts with no attack activity.'} Every finding here is either a false positive or
         benign activity the rule describes correctly.
       </p>
-      <div className="ld-gap" />
-      <Table head={['Rule set', 'Rules firing', 'High + critical findings', 'Events covered', '≥ medium findings']}>
-        <tr>
-          <td>REMN rules</td>
-          <td className="n">{c.own.rules}</td>
-          <td className="n b">{fmtNum(c.own.highCritical)}</td>
-          <td className="n">{fmtNum(c.own.events)}</td>
-          <td className="n">{fmtNum(c.own.mediumUp)}</td>
-        </tr>
-        <tr>
-          <td>REMN + SigmaHQ default packs</td>
-          <td className="n">–</td>
-          <td className="n">{fmtNum(c.withPacks.highCritical)}</td>
-          <td className="n">{fmtNum(c.withPacks.events)}</td>
-          <td className="n">–</td>
-        </tr>
-      </Table>
+      <div className="ld-proof">
+        <Levels />
+        <div className="ld-side">
+          {LIBRARY_MEASURES.clean.length > 0 && (
+            <Table head={['Clean host, every finding', 'Events', '≥ med', '≥ high', 'Crit']}>
+              {LIBRARY_MEASURES.clean.map((m) => (
+                <tr key={m.machine}>
+                  <td>{m.machine}</td>
+                  <td className="n">{fmtNum(m.events)}</td>
+                  <td className="n">{fmtNum(m.medium)}</td>
+                  <td className="n">{fmtNum(m.high)}</td>
+                  <td className="n">{fmtNum(m.critical)}</td>
+                </tr>
+              ))}
+            </Table>
+          )}
+          <Table head={['Rule set, run ' + HELD_OUT.date, 'Rules firing', 'High + crit', '≥ medium']}>
+            <tr>
+              <td>REMN rules</td>
+              <td className="n">{c.own.rules}</td>
+              <td className="n b">{fmtNum(c.own.highCritical)}</td>
+              <td className="n">{fmtNum(c.own.mediumUp)}</td>
+            </tr>
+            <tr>
+              <td>REMN + SigmaHQ default packs</td>
+              <td className="n">–</td>
+              <td className="n">{fmtNum(c.withPacks.highCritical)}</td>
+              <td className="n">–</td>
+            </tr>
+          </Table>
+        </div>
+      </div>
       <p className="ld-note">
         {c.critical.logCleared} of the {c.critical.of} critical findings are Security log clears (1102) that occurred before export. {fmtNum(c.twoFindingsEvents)} of the {fmtNum(c.own.events)} events
         belong to two grouped findings: an AV installer reading LSASS and one process reading TeamViewer memory. Findings are grouped per image and host. Run {HELD_OUT.date}.
@@ -455,6 +735,11 @@ function Method({ ref, live }: { ref: SectionRef; live: LiveFigures | null }) {
           {live
             ? `${fmtNum(live.recordings)}: ${live.libraries.map((l) => `${l.name} ${fmtNum(l.recordings)} (${l.ref})`).join(', ')}.`
             : 'Public libraries of recorded attacks, each pinned to a commit.'}
+        </dd>
+        <dt>Also run</dt>
+        <dd>
+          OTRF Security-Datasets (atomic Windows datasets, labelled by their metadata) and MITRE's APT29 evaluation, with every rule, by <code>tools/library_measures.py</code>. They are scored on this
+          page, not yet in the per-rule measure.
         </dd>
         <dt>Clean hosts</dt>
         <dd>

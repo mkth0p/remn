@@ -5,6 +5,14 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- The home page shows detection by library and by tactic from one run of every rule on five
+  public libraries at one commit: 438 of 913 held-out recordings detected at medium and above
+  (EVTX-to-MITRE-Attack 112 of 279, attack_data 246 of 535, OTRF Security-Datasets 80 of 99), 72
+  of the 122 ATT&CK techniques they record, the lines to read per clean host at each detection
+  level, and the findings on each host of MITRE's APT29 evaluation. OTRF's atomic Windows datasets
+  are a third held-out library (`tools/security_datasets.py`), and `tools/library_measures.py`
+  fetches, runs and scores them all
+  ([review](docs/reviews/2026-09-28-measures-across-libraries.md)).
 - A detection level per case, from 1 (fewest lines) to 5 (every finding on its own), set when the
   case is started (2 by default) and changed on the Rules page. No level drops a finding: the
   findings of a rule that fired too often on the evtx-baseline clean machines for its severity are

@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import type { Meta } from '../api/client'
-import { EXAMPLE_RULE, HEAD_TO_HEAD, liveFigures } from './landingFigures'
+import { EXAMPLE_RULE, HEAD_TO_HEAD, heldOut, LIBRARY_MEASURES, liveFigures } from './landingFigures'
 
 const measures = {
   version: 1,
@@ -47,4 +47,27 @@ it('has nothing to show before the measures load, or from a server without total
 it('quotes the head-to-head as published: every count within the library', () => {
   for (const counts of Object.values(HEAD_TO_HEAD.detected)) for (const n of counts) expect(n).toBeLessThanOrEqual(HEAD_TO_HEAD.library.files)
   expect(HEAD_TO_HEAD.tactics.reduce((n, [, files]) => n + files, 0)).toBeLessThanOrEqual(HEAD_TO_HEAD.library.files)
+})
+
+it('quotes the library measures as measured: every count within its library, each level cut within the one below', () => {
+  const m = LIBRARY_MEASURES
+  expect(m.libraries.length).toBeGreaterThan(0)
+  for (const l of m.libraries) {
+    expect(l.read).toBeLessThanOrEqual(l.recordings)
+    expect(l.detected.any).toBeLessThanOrEqual(l.read)
+    expect(l.detected.medium).toBeLessThanOrEqual(l.detected.any)
+    expect(l.detected.high).toBeLessThanOrEqual(l.detected.medium)
+    expect(l.detected.medium).toBeLessThanOrEqual(l.alertMedium)
+  }
+  const h = heldOut(m)
+  const all = m.tactics.reduce((n, t) => n + (t.cells.all?.[0] ?? 0), 0)
+  expect(all).toBeLessThanOrEqual(h.read)
+  for (const t of m.tactics)
+    for (const [n, any, medium, high] of Object.values(t.cells)) {
+      expect(any).toBeLessThanOrEqual(n)
+      expect(medium).toBeLessThanOrEqual(any)
+      expect(high).toBeLessThanOrEqual(medium)
+    }
+  expect(m.techniques.detected).toBeLessThanOrEqual(m.techniques.recorded)
+  for (const day of Object.values(m.apt29)) for (const host of Object.values(day!.hosts)) expect(host.high).toBeLessThanOrEqual(host.medium)
 })
