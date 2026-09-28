@@ -11,6 +11,8 @@ import { deployment } from '../data/deployment'
 import { openDemoCase } from '../data/demoCase'
 import { requestIngest } from '../data/ingest'
 import { startCase } from '../data/cases'
+import { DEFAULT_DETECTION_LEVEL, type DetectionLevel } from '../data/detectionLevel'
+import { DetectionLevelPicker } from '../components/DetectionLevelPicker'
 import { EXAMPLE_RULE, HEAD_TO_HEAD, HELD_OUT, liveFigures, MAIL_CORPORA, type LiveFigures } from '../data/landingFigures'
 import { fmtNum } from '../util/format'
 
@@ -582,6 +584,7 @@ function Modules({ ref }: { ref: SectionRef }) {
 function NewCaseDialog({ browserOnly, onClose }: { browserOnly: boolean; onClose: () => void }) {
   const [name, setName] = useState('')
   const [storage, setStorage] = useState<'browser' | 'server'>('browser')
+  const [level, setLevel] = useState<DetectionLevel>(DEFAULT_DETECTION_LEVEL)
   const [files, setFiles] = useState<File[]>([])
   const [busy, setBusy] = useState(false)
   const [over, setOver] = useState(false)
@@ -593,7 +596,7 @@ function NewCaseDialog({ browserOnly, onClose }: { browserOnly: boolean; onClose
   const create = async () => {
     setBusy(true)
     try {
-      const c = await startCase(name, browserOnly ? 'browser' : storage)
+      const c = await startCase(name, browserOnly ? 'browser' : storage, level)
       const s = useStore.getState()
       s.setCurrentCase(c)
       s.bumpCases()
@@ -648,6 +651,10 @@ function NewCaseDialog({ browserOnly, onClose }: { browserOnly: boolean; onClose
                 </label>
               )}
             </div>
+          </div>
+          <div className="ld-f">
+            <span>Detection level</span>
+            <DetectionLevelPicker value={level} onChange={setLevel} compact />
           </div>
           <label
             className={over ? 'ld-dz over' : 'ld-dz'}

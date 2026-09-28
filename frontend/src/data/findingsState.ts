@@ -1,8 +1,9 @@
 import { getDb, type Case } from '../db/schema'
+import type { DetectionLevel } from './detectionLevel'
 import { sevCounts } from '../rules/incidents'
 import { log, toast, useStore } from '../state/store'
 import { pruneOrphanFindings } from './findingReviews'
-import { loadRules, runRulesFor } from './rules'
+import { loadRules, rulesAtLevel, runRulesFor } from './rules'
 
 /**
  * Are the findings current? Findings are only as fresh as the last rule run: evidence added
@@ -56,7 +57,7 @@ export async function runEnabledRules(kase: Case, reason: RulesRun['reason'] = '
   }
   const caseId = kase.id!
   const rules = await loadRules(caseId)
-  const enabled = rules.filter((r) => r.enabled && !r.error).map((r) => r.rule)
+  const { run: enabled, floors } = rulesAtLevel(kase, rules)
   if (!enabled.length) {
     if (reason === 'manual') toast('warn', 'no enabled rules')
     return false
@@ -66,7 +67,7 @@ export async function runEnabledRules(kase: Case, reason: RulesRun['reason'] = '
   const before = sevCounts((await db.findings.where('caseId').equals(caseId).toArray()).filter((f) => f.status !== 'false_positive'))
   useStore.getState().setRulesRun({ done: 0, total: enabled.length, rule: '', reason })
   try {
-    const res = await runRulesFor(kase, enabled, (done, total, rule) => useStore.getState().setRulesRun({ done, total, rule, reason }))
+    const res = await runRulesFor(kase, enabled, (done, total, rule) => useStore.getState().setRulesRun({ done, total, rule, reason }), floors)
     const pruned = await pruneOrphanFindings(
       caseId,
       rules.map((r) => r.rule.id),
@@ -111,4 +112,15 @@ export function autoRunAfterIngest(kase: Case): void {
     log('info', 'evidence changed: refreshing the findings')
     runEnabledRules(current, 'ingest').catch(() => undefined)
   }, 1500)
+}
+
+/** Set the case's detection level and, when the case holds evidence, refresh its findings at it. */
+export async function setDetectionLevel(kase: Case, level: DetectionLevel): Promise<Case> {
+  const db = getDb()
+  const next: Case = { ...kase, settings: { ...kase.settings, detectionLevel: level }, updatedAt: Date.now() }
+  await db.cases.update(kase.id!, { settings: next.settings, updatedAt: next.updatedAt })
+  useStore.getState().setCurrentCase(next)
+  log('info', `detection level ${level}`)
+  if ((await db.evidence.where('caseId').equals(kase.id!).count()) > 0) await runEnabledRules(next, 'manual')
+  return next
 }

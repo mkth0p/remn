@@ -70,3 +70,37 @@ describe('explicit finding severity reset', () => {
     expect(await db.kv.get('finding-reviews-1')).toBeUndefined()
   })
 })
+
+describe('the detection level when findings are replaced', () => {
+  const found = (key: string, severity: Finding['severity']) => ({
+    ...row({ key, severity, status: 'new', notes: undefined, decidedBy: undefined, reportExclude: undefined, severityOverride: undefined }),
+  })
+
+  it('folds the findings below their rule floor into one per host, and keeps the others on their own', async () => {
+    const on = (key: string, severity: Finding['severity'], computer: string, ref: number) => ({ ...found(key, severity), entities: { computer }, refs: [ref], ts: ref })
+    const n = await replaceFindings(1, ['replyto'], [on('a', 'low', 'WS1', 3), on('b', 'low', 'WS1', 1), on('c', 'medium', 'WS1', 2), on('d', 'low', 'WS2', 4), on('e', 'high', 'WS1', 5)], undefined, {
+      replyto: 3,
+    })
+    expect(n).toBe(3)
+    const rows = await db.findings.toArray()
+    const alone = rows.find((f) => f.key === 'e')!
+    expect(alone.folded).toBeUndefined()
+    const ws1 = rows.find((f) => f.key === 'replyto|folded|ws1')!
+    expect(ws1).toMatchObject({ severity: 'medium', folded: 3, count: 3, ts: 1, tsEnd: 3 })
+    expect(ws1.refs.sort()).toEqual([1, 2, 3])
+    expect(ws1.title).toContain('3 findings on ws1')
+    expect(rows.find((f) => f.key === 'd')).toMatchObject({ folded: 1, severity: 'low' })
+  })
+
+  it('keeps a finding below the floor an analyst already decided on on its own', async () => {
+    const decided = { ...found('a', 'low'), status: 'escalated' as const, decidedBy: 'analyst' as const }
+    const id = await db.findings.add(decided)
+    await rememberReviews(1, [{ ...decided, id }])
+    await replaceFindings(1, ['replyto'], [found('a', 'low'), found('z', 'low')], undefined, { replyto: 3 })
+    const kept = await db.findings.toArray()
+    expect(kept.map((f) => [f.key, f.status, f.folded])).toEqual([
+      ['a', 'escalated', undefined],
+      ['z', 'new', 1],
+    ])
+  })
+})

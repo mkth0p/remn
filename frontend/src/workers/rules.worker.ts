@@ -14,6 +14,8 @@ export interface RunRequest {
   settings: SettingsLike
   /** try the rules without storing anything: the findings come back in the 'done' message (the AI's test_rule) */
   dryRun?: boolean
+  /** the case's detection level: each rule's lowest severity kept (detectionLevel.severityFloors) */
+  floors?: Record<string, number>
 }
 
 /** A finding a dry run returns, cut down to what a caller shows. */
@@ -126,7 +128,7 @@ async function run(req: RunRequest): Promise<void> {
   const dry: DryFinding[] = []
   // a dry run stores nothing; its findings go back to the caller
   const store = async (ruleId: string, found: Record<string, unknown>[]): Promise<number> => {
-    if (!req.dryRun) return replaceFindings(caseId, [ruleId], found)
+    if (!req.dryRun) return replaceFindings(caseId, [ruleId], found, undefined, req.floors)
     for (const f of found.slice(0, Math.max(0, 50 - dry.length)))
       dry.push({
         ruleId,

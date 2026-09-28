@@ -390,6 +390,14 @@ def build() -> list[dict[str, Any]]:
     details = "\tUserId=CORP\\alice\r\n\tHostName=ConsoleHost\r\n\tScriptName=\r\n\tCommandLine=" + typed
     rows.append(ev(800, ps_classic, {"Data": [typed, details, 'CommandInvocation(Get-LocalGroupMember): "Get-LocalGroupMember"']}, pst + 20_000))
     rows += technique_gaps(t + 400_000)
+    for i, prog in enumerate(("whoami", "ipconfig", "net", "nltest")):
+        rows.append(
+            sysmon(
+                1,
+                {"Image": rf"C:\Windows\System32\{prog}.exe", "CommandLine": prog, "ParentImage": r"C:\Users\Public\agent.exe", "ProcessId": 5100 + i},
+                t + 500_000 + i * 30_000,
+            )
+        )
     return rows
 
 

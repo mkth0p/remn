@@ -1,5 +1,6 @@
 import { API_HEADERS } from '../api/client'
 import { defaultSettings, deleteCase, getDb, type Case } from '../db/schema'
+import { DEFAULT_DETECTION_LEVEL } from './detectionLevel'
 import { rememberReviews } from './findingReviews'
 
 /**
@@ -54,7 +55,7 @@ export async function removeCase(kase: Case): Promise<{ next: Case; serverCleare
   const rest = (await db.cases.toArray()).sort((a, b) => b.updatedAt - a.updatedAt)
   let next = rest[0]
   if (!next) {
-    const id = await db.cases.add({ name: 'Case 1', createdAt: Date.now(), updatedAt: Date.now(), settings: defaultSettings(), storage: 'browser' })
+    const id = await db.cases.add({ name: 'Case 1', createdAt: Date.now(), updatedAt: Date.now(), settings: { ...defaultSettings(), detectionLevel: DEFAULT_DETECTION_LEVEL }, storage: 'browser' })
     next = (await db.cases.get(id))!
   }
   await db.kv.put({ key: 'lastCase', value: next.id })

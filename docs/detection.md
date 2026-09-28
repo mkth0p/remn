@@ -359,6 +359,63 @@ change meant to lose a detection or add noise commits those measures, so the dif
 says what it changed. The weekly run also catches a new release of a dependency (the EVTX parser,
 DuckDB) that changes what the rules match.
 
+## Detection level
+
+A case has a detection level, from 1 (fewest lines) to 5 (every finding on its own), picked when
+the case is started and changed on the Rules page, which reruns the rules at the new level. No
+level drops a finding. The level decides which findings stand on their own in the queue; the
+others are folded with the other findings of their rule on the same host into one, which keeps the
+most severe of them as its lead (then the earliest), their count, their time span and up to 5,000
+of the rows they cite, and says in its title how many findings it stands for. So every level
+detects what the enabled rules detect, and the level sets how much there is to read.
+
+A finding stands on its own when its rule's noise fits the level's budget for its severity. The
+noise is what the rule's measure says it raised on the clean machines: its findings per machine
+that logs what it reads, with half a finding added so a rule silent on one machine is not taken as
+silent on all (`clean.findings + 0.5` over `clean.of` in `rules/measures.json`). Each level is a
+budget for a medium finding, doubled for each severity step above and halved below, so a critical
+finding may come from a rule four times noisier than a medium one. Level 4 also keeps every medium
+and higher finding on its own:
+
+| level | medium budget | findings on their own per clean machine | lines per clean machine |
+|---|---|---|---|
+| 1, compact | 0.1 | 11 | 73 |
+| **2, balanced (a new case)** | 0.5 | **40** | **92** |
+| 3, detailed | 5 | 164 | 186 |
+| 4, broad | 5, and medium and up | 314 | 330 |
+| 5, every finding | none | 587 | 587 |
+| medium and up, nothing else | | 241 | 241 |
+
+Every level detects 249 of 535 attack_data recordings, 123 of 279 EVTX-to-MITRE-Attack files and
+266 of 278 EVTX-ATTACK-SAMPLES files (a finding of the recording's technique, standing alone or
+folded), against 245, 112 and 264 when only medium and higher findings are raised. The default
+level has 62% fewer lines on a clean machine than that. Folding does not push the attack down the
+queue: on cases built from the clean machines of one half of the seven, with one recording's
+findings merged into one of them at a busy time and rule noise taken from the other half, the
+first finding of the attack came into the top ten of the priority queue (with the repeat damping
+of the priority score, where a folded finding counts as the findings it stands for) as often at
+level 2 as with every medium and higher finding raised on its own: in 47%, 38% and 75% of the
+recordings of the three libraries against 47%, 38% and 76%, with about three times fewer lines
+per host.
+
+A rule no clean machine could measure (mail, Microsoft 365, other products' logs, a rule changed
+since it was measured) keeps its findings from medium up on their own at levels 1 to 4, and the
+analyst's own rules are never folded. A finding an analyst decided on (reviewed, escalated, marked
+false positive or annotated) stays on its own whatever the level. The Rules page says how many
+enabled rules raise findings on their own at the level, and its "level" column the lowest level at
+which each rule's highest severity stands on its own. A case started before levels existed has
+none and keeps every finding on its own, as it did.
+
+The table was measured on 2026-09-26 with every rule's findings (core and the two default Sigma
+packs, every severity, at the rule levels set from the measures that day) on every recording and
+clean machine of the rule measure. Detected is a finding of the recording's ATT&CK technique, not
+counting a rule on the library it was written against (`WRITTEN_AGAINST`). A rule's level never
+reads the attack libraries; the five budgets and the doubling per severity step were picked from
+a scan of this same measure. Lines are held out: each clean machine's lines are counted under rule
+noise taken from the six other machines (the app takes it from all seven). The last row is not
+held out that way, since some rule levels were lowered from the findings on these machines. The
+budgets make the levels nest: a finding on its own at one level is on its own at every level above.
+
 ## Mail risk scoring
 
 The 0 to 100 risk score on every mail is an investigation priority, not a probability of

@@ -72,6 +72,22 @@ describe('the priority of a finding', () => {
     ).toBe(false)
   })
 
+  it('divides a rule that fires over and over on one host, as that host background, and says how often', () => {
+    const once = finding({ ruleId: 'once', entities: on('ws-1') })
+    const loud = [0, 1, 2, 3].map((i) => finding({ ruleId: 'loud', entities: on('ws-2', { image: `p${i}.exe` }), ts: T0 + (100 + i) * H }))
+    const s = scoreFindings([once, ...loud], { trust: trustAll })
+    const by = 1 + PRIORITY.repeat * Math.log(4)
+    expect(s.get(once.key)!.score).toBe(PRIORITY.severity.high)
+    expect(s.get(loud[0].key)!.score).toBe(Math.round((PRIORITY.severity.high / by) * 10) / 10)
+    expect(s.get(loud[0].key)!.reasons).toContainEqual({ kind: 'repeat', tone: 'down', short: '4 on ws-2', text: `Its rule raised 4 findings on ws-2: /${Math.round(by * 100) / 100}.` })
+  })
+
+  it('divides a finding folded below the detection level by the findings it stands for', () => {
+    const folded = finding({ ruleId: 'loud', entities: on('ws-2'), folded: 4 })
+    const by = 1 + PRIORITY.repeat * Math.log(4)
+    expect(scoreFindings([folded], { trust: trustAll }).get(folded.key)!.score).toBe(Math.round((PRIORITY.severity.high / by) * 10) / 10)
+  })
+
   it('raises a finding that other rules corroborate on its host within a day, more for other tactics, and names them', () => {
     const f = finding({ ruleId: 'dump', title: 'LSASS dumped', attack: ['T1003.001'], entities: on('ws-1') })
     const same = finding({ ruleId: 'dump2', title: 'Credential file read', attack: ['T1555'], entities: on('WS-1'), ts: T0 + 3 * H })

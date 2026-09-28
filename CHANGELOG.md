@@ -5,6 +5,18 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- A detection level per case, from 1 (fewest lines) to 5 (every finding on its own), set when the
+  case is started (2 by default) and changed on the Rules page. No level drops a finding: the
+  findings of a rule that fired too often on the evtx-baseline clean machines for its severity are
+  folded into one per rule and host. Every level detects 249, 123 and 266 attack_data,
+  EVTX-to-MITRE-Attack and EVTX-ATTACK-SAMPLES recordings, against 245, 112 and 264 with every
+  medium and higher finding raised and nothing else, and the default gives 92 lines per clean
+  machine against 241. Findings an analyst decided on stay on their own. Cases started before keep
+  every finding on its own until their level is set ([detection level](docs/detection.md#detection-level)).
+- The priority of a finding divides by 1 + ln n when its rule raised n findings on the same host
+  or for the same user, so one loud rule no longer fills the top of the queue. The first finding of
+  an attack reached the top ten in 38% of EVTX-to-MITRE-Attack recordings and 76% of
+  EVTX-ATTACK-SAMPLES recordings, up from 31% and 60%.
 - The Graph page draws a chain at its real size rather than squeezed into the pane: labels wrap
   to the room their column leaves (a long path is cut down to its file name) and no longer run
   over nodes, other labels or the next lane, steps keep their shape instead of stretching, and
@@ -32,6 +44,10 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   protection and Defender tampering, EFI boot files, credential stores and known attacker tools.
   They add 46 attack_data detections, which does not count as held out for them, fire on none of
   the clean machines, and add no detection on the two other libraries yet.
+- `win-discovery-burst`: one program starting four or more different discovery commands (whoami,
+  net, nltest, ipconfig and others) within ten minutes. Written from ATT&CK before any recording
+  was read, so every library is held out for it: it adds two attack_data detections and raises
+  one finding across the evtx-baseline clean machines.
 - A home page. REMN opens on it until a case holds evidence, and the wordmark leads back to it
   after that. It shows what the tool reads, how the rules are measured and what the measures
   show: the rule totals, recordings and clean-host baseline read live from `rules/measures.json`

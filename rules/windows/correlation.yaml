@@ -206,3 +206,21 @@ group_by: [computer, destinationIp]
 window: 5s
 distinct: initiated
 threshold: ">= 2"
+---
+id: win-discovery-burst
+title: One program starts four or more different discovery commands within ten minutes
+description: One parent process starts four or more different discovery programs (whoami, net, nltest, ipconfig, systeminfo, quser, tasklist, arp, route, netstat, hostname, nslookup, dsquery, klist, wmic, cmdkey, qwinsta) within ten minutes (Sysmon 1). An operator or a loader orienting on a new host runs a handful of these in a row from the same shell or implant. Each command on its own is ordinary; the burst from one parent is what the rule counts. Benign causes are inventory and support scripts, and an administrator troubleshooting the network from one console.
+severity: medium
+source: events
+attack: [T1082, T1016, T1033, T1087]
+tags: [discovery, correlation]
+entities: [computer, parentImage]
+where:
+  eventId: 1
+  provider|contains: Sysmon
+  image|re: '(?i)\\(whoami|net|net1|nltest|ipconfig|systeminfo|quser|tasklist|arp|route|netstat|hostname|nslookup|dsquery|klist|wmic|cmdkey|qwinsta)\.exe$'
+  parentImage|exists: true
+group_by: [computer, parentImage]
+window: 10m
+distinct: image
+threshold: ">= 4"

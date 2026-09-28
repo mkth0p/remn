@@ -4,6 +4,7 @@ import { validateRule, type Rule, type RuleDiag } from '../rules/engine'
 import { log, toast, useStore } from '../state/store'
 import type { DryFinding, RunRequest } from '../workers/rules.worker'
 import type { SettingsLike } from '../rules/filter'
+import { caseLevel, severityFloors } from './detectionLevel'
 import { enabledPackIds, getPackRules } from './packs'
 import type { RuleMeasure } from './ruleMeasures'
 import { replaceFindings } from './findingReviews'
@@ -102,6 +103,15 @@ export async function loadRules(caseId: number | null, strict = false): Promise<
   return out
 }
 
+/**
+ * The enabled rules and the floors of the case's detection level: every enabled rule runs, and the
+ * findings below their rule's floor are folded into one per rule and host (detectionLevel.ts).
+ */
+export function rulesAtLevel(kase: Case, rules: LoadedRule[]): { run: Rule[]; floors: Record<string, number> } {
+  const enabled = rules.filter((r) => r.enabled && !r.error)
+  return { run: enabled.map((r) => r.rule), floors: severityFloors(enabled, caseLevel(kase.settings)) }
+}
+
 export function settingsForRules(kase: Case): SettingsLike {
   const s = kase.settings
   return {
@@ -118,9 +128,9 @@ export function settingsForRules(kase: Case): SettingsLike {
   }
 }
 
-/** Replace the findings of the given rules, preserving analyst status/notes on findings whose key still exists. */
-export async function persistFindings(caseId: number, ruleIds: string[], findings: Record<string, unknown>[], load?: RowLoader): Promise<number> {
-  return replaceFindings(caseId, ruleIds, findings, load)
+/** Replace the findings of the given rules, preserving analyst status/notes on findings whose key still exists; with `floors`, only what the case's detection level raises. */
+export async function persistFindings(caseId: number, ruleIds: string[], findings: Record<string, unknown>[], load?: RowLoader, floors?: Record<string, number>): Promise<number> {
+  return replaceFindings(caseId, ruleIds, findings, load, floors)
 }
 
 /** Read a server case's rows by id, for the record keys of its findings; none when the server cannot answer. */
@@ -164,8 +174,16 @@ async function saveDiagnostics(caseId: number, res: RuleRunSummary): Promise<voi
   }
 }
 
-/** Run rules on whichever store the case uses and persist the findings in IndexedDB. */
-export async function runRulesFor(kase: Case, rules: Rule[], onProgress?: (done: number, total: number, ruleId: string, findings: number) => void): Promise<RuleRunSummary> {
+/**
+ * Run rules on whichever store the case uses and persist the findings in IndexedDB. With `floors`
+ * (detectionLevel.severityFloors of the case's level) only the findings the level raises are kept.
+ */
+export async function runRulesFor(
+  kase: Case,
+  rules: Rule[],
+  onProgress?: (done: number, total: number, ruleId: string, findings: number) => void,
+  floors?: Record<string, number>,
+): Promise<RuleRunSummary> {
   let res: RuleRunSummary
   if (kase.storage === 'server' && kase.serverKey) {
     const { getSource } = await import('./source')
@@ -177,6 +195,7 @@ export async function runRulesFor(kase: Case, rules: Rule[], onProgress?: (done:
       completed,
       r.findings.filter((f) => completed.includes(String(f.ruleId))),
       serverRowLoader(getSource(kase)),
+      floors,
     )
     for (const e of r.errors) log('err', e)
     log('ok', `rules done: ${n} finding(s)`)
@@ -184,15 +203,20 @@ export async function runRulesFor(kase: Case, rules: Rule[], onProgress?: (done:
     useStore.getState().bumpRules()
     res = { total: n, byRule: r.byRule, errors: r.errors, diagnostics: r.diagnostics ?? [] }
   } else {
-    res = await runRules(kase, rules, onProgress)
+    res = await runRules(kase, rules, onProgress, floors)
   }
   await saveDiagnostics(kase.id!, res)
   return res
 }
 
-export async function runRules(kase: Case, rules: Rule[], onProgress?: (done: number, total: number, ruleId: string, findings: number) => void): Promise<RuleRunSummary> {
+export async function runRules(
+  kase: Case,
+  rules: Rule[],
+  onProgress?: (done: number, total: number, ruleId: string, findings: number) => void,
+  floors?: Record<string, number>,
+): Promise<RuleRunSummary> {
   const worker = new Worker(new URL('../workers/rules.worker.ts', import.meta.url), { type: 'module' })
-  const req: RunRequest = { cmd: 'run', caseId: kase.id!, rules, settings: settingsForRules(kase) }
+  const req: RunRequest = { cmd: 'run', caseId: kase.id!, rules, settings: settingsForRules(kase), floors }
   const errors: string[] = []
   log('info', `running ${rules.length} rule(s)…`)
   return new Promise((resolve) => {
