@@ -10,6 +10,7 @@ import { getTransport, transportLabel } from './ai/transport'
 import { deployment } from './data/deployment'
 import { setCaseInternalDomains } from './rules/incidents'
 import { repairInterruptedImports } from './data/interruptedImports'
+import { removeInterruptedRestores } from './data/caseBundle'
 import { isAbort } from './data/queryClient'
 import { casesWithEvidence, FIRST_CASE_NAME } from './data/cases'
 import { DEFAULT_DETECTION_LEVEL, type DetectionLevel } from './data/detectionLevel'
@@ -157,6 +158,12 @@ export default function App() {
         getTransport()
           .ping()
           .then((r) => useStore.getState().setAiStatus({ reachable: r.reachable, error: r.error, models: r.models, checkedAt: Date.now() }))
+      // a case bundle (the demo case) a closed or reloaded tab left half-restored goes before anything counts it
+      const unfinished = await removeInterruptedRestores().catch((e: Error) => {
+        useStore.getState().log('err', `interrupted restores not checked: ${e.message}`)
+        return []
+      })
+      for (const name of unfinished) toast('warn', `${name}: its restore stopped before it finished (the tab was closed or reloaded), so the partial case was removed.`, 0)
       // one transaction, so two boots in flight (React runs effects twice in development) create one default case
       const all = await db.transaction('rw', db.cases, db.kv, async () => {
         if ((await db.cases.count()) === 0) {
