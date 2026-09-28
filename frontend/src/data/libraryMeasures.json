@@ -1,0 +1,324 @@
+{
+ "commit": "7513740",
+ "measured": "2026-09-28",
+ "rules": {
+  "all": 3092,
+  "default": 2975
+ },
+ "libraries": [
+  {
+   "key": "evtxToMitre",
+   "name": "EVTX-to-MITRE-Attack",
+   "practice": false,
+   "recordings": 279,
+   "read": 0,
+   "events": 0,
+   "detected": {
+    "any": 0,
+    "medium": 0,
+    "high": 0
+   },
+   "alertMedium": 0
+  },
+  {
+   "key": "attackDataWindows",
+   "name": "Splunk attack_data, Windows",
+   "practice": false,
+   "recordings": 536,
+   "read": 25,
+   "events": 260367,
+   "detected": {
+    "any": 15,
+    "medium": 14,
+    "high": 8
+   },
+   "alertMedium": 25
+  },
+  {
+   "key": "securityDatasets",
+   "name": "OTRF Security-Datasets, atomic Windows",
+   "practice": false,
+   "recordings": 99,
+   "read": 0,
+   "events": 0,
+   "detected": {
+    "any": 0,
+    "medium": 0,
+    "high": 0
+   },
+   "alertMedium": 0
+  },
+  {
+   "key": "attackSamples",
+   "name": "EVTX-ATTACK-SAMPLES",
+   "practice": true,
+   "recordings": 278,
+   "read": 0,
+   "events": 0,
+   "detected": {
+    "any": 0,
+    "medium": 0,
+    "high": 0
+   },
+   "alertMedium": 0
+  },
+  {
+   "key": "sigma",
+   "name": "SigmaHQ regression samples",
+   "practice": true,
+   "recordings": 459,
+   "read": 0,
+   "events": 0,
+   "detected": {
+    "any": 0,
+    "medium": 0,
+    "high": 0
+   },
+   "alertMedium": 0
+  }
+ ],
+ "tactics": [
+  {
+   "id": "initial-access",
+   "label": "Initial access",
+   "cells": {
+    "attackDataWindows": [
+     2,
+     0,
+     0,
+     0
+    ],
+    "all": [
+     2,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "id": "execution",
+   "label": "Execution",
+   "cells": {
+    "attackDataWindows": [
+     4,
+     2,
+     2,
+     1
+    ],
+    "all": [
+     4,
+     2,
+     2,
+     1
+    ]
+   }
+  },
+  {
+   "id": "persistence",
+   "label": "Persistence",
+   "cells": {
+    "attackDataWindows": [
+     3,
+     3,
+     3,
+     1
+    ],
+    "all": [
+     3,
+     3,
+     3,
+     1
+    ]
+   }
+  },
+  {
+   "id": "privilege-escalation",
+   "label": "Privilege escalation",
+   "cells": {
+    "attackDataWindows": [
+     1,
+     0,
+     0,
+     0
+    ],
+    "all": [
+     1,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "id": "stealth",
+   "label": "Stealth",
+   "cells": {
+    "attackDataWindows": [
+     6,
+     5,
+     5,
+     4
+    ],
+    "all": [
+     6,
+     5,
+     5,
+     4
+    ]
+   }
+  },
+  {
+   "id": "defense-impairment",
+   "label": "Defense impairment",
+   "cells": {
+    "attackDataWindows": [
+     2,
+     2,
+     2,
+     2
+    ],
+    "all": [
+     2,
+     2,
+     2,
+     2
+    ]
+   }
+  },
+  {
+   "id": "credential-access",
+   "label": "Credential access",
+   "cells": {
+    "attackDataWindows": [
+     2,
+     1,
+     1,
+     0
+    ],
+    "all": [
+     2,
+     1,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "id": "discovery",
+   "label": "Discovery",
+   "cells": {
+    "attackDataWindows": [
+     2,
+     2,
+     1,
+     0
+    ],
+    "all": [
+     2,
+     2,
+     1,
+     0
+    ]
+   }
+  },
+  {
+   "id": "lateral-movement",
+   "label": "Lateral movement",
+   "cells": {
+    "attackDataWindows": [
+     1,
+     0,
+     0,
+     0
+    ],
+    "all": [
+     1,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "id": "impact",
+   "label": "Impact",
+   "cells": {
+    "attackDataWindows": [
+     2,
+     0,
+     0,
+     0
+    ],
+    "all": [
+     2,
+     0,
+     0,
+     0
+    ]
+   }
+  }
+ ],
+ "techniques": {
+  "recorded": 19,
+  "detected": 9,
+  "byLibrary": {
+   "evtxToMitre": [
+    0,
+    0
+   ],
+   "attackDataWindows": [
+    19,
+    9
+   ],
+   "securityDatasets": [
+    0,
+    0
+   ]
+  }
+ },
+ "clean": [],
+ "apt29": {
+  "day1": {
+   "events": 196081,
+   "hosts": {
+    "nashua": {
+     "medium": 197,
+     "high": 121,
+     "attacked": true
+    },
+    "newyork": {
+     "medium": 45,
+     "high": 8,
+     "attacked": false
+    },
+    "scranton": {
+     "medium": 404,
+     "high": 221,
+     "attacked": true
+    },
+    "utica": {
+     "medium": 4,
+     "high": 1,
+     "attacked": false
+    }
+   }
+  }
+ },
+ "throughput": {
+  "events": 456448,
+  "loadSeconds": 285.2,
+  "rulesSeconds": 812.4
+ },
+ "attackDataMaxMb": 20,
+ "leftOut": {
+  "attackData": {},
+  "attackDataWindows": {
+   "overSize": 36,
+   "missing": 14
+  },
+  "securityDatasets": {
+   "missing": 1
+  }
+ }
+}

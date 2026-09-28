@@ -310,7 +310,9 @@ def harvest(ds: Path, out_dir: Path, jobs: int, max_mb: int, clean: bool, keep: 
     (stores / "tmp").mkdir(parents=True, exist_ok=True)
     recs, left = units(ds, max_mb)
     head = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()  # noqa: S603, S607
-    (out_dir / "recordings.json").write_text(json.dumps({"commit": head, "maxMb": max_mb, "recordings": recs, "leftOut": left}))
+    (out_dir / "recordings.json").write_text(
+        json.dumps({"commit": head, "date": dt.date.today().isoformat(), "maxMb": max_mb, "recordings": recs, "leftOut": left})
+    )
     (out_dir / "rules.json").write_text(json.dumps({"commit": head, "rules": rule_table()}))
     path = out_dir / "findings.jsonl"
     have = {json.loads(line)["name"] for line in path.open()} if path.exists() else set()
@@ -410,54 +412,56 @@ def load_harvest(h: Path) -> tuple[dict[str, Any], dict[str, dict[str, Any]], di
     return recs, rules["rules"], units
 
 
+def level_of(f: list[Any], rules: dict[str, dict[str, Any]]) -> int:
+    """A finding's level: its own (a follow-up raises it), else its rule's."""
+    return LV.get(str(f[1]).lower(), LV.get(rules[f[0]]["severity"], 2))
+
+
 def figures(h: Path) -> dict[str, Any]:
+    from apt29_stories import ATTACKED, UNTOUCHED
+
+    from services.analysis.stories import PHASES
+
     recs, rules, units = load_harvest(h)
     tech = {rid: frozenset(r["techniques"]) for rid, r in rules.items()}
-    # a finding's level: its own when it carries one (a follow-up raises it), else its rule's
     by_lib: dict[str, list[dict[str, Any]]] = collections.defaultdict(list)
     for r in recs["recordings"]:
         by_lib[r["dataset"]].append(r)
 
-    def alerts(name: str, dataset: str, packs=DEFAULT_PACKS) -> list[tuple[str, int]]:
-        u = units.get(name)
-        if not u:
-            return []
+    def alerts(name: str, dataset: str) -> list[tuple[str, int]]:
         skip = {rid for rid, dss in M.WRITTEN_AGAINST.items() if dataset in dss}
-        return [
-            (f[0], LV.get(str(f[1]).lower(), LV.get(rules[f[0]]["severity"], 2)))
-            for f in u["findings"]
-            if f[0] in rules and rules[f[0]]["pack"] in packs and f[0] not in skip
-        ]
+        return [(f[0], level_of(f, rules)) for f in units[name]["findings"] if f[0] in rules and rules[f[0]]["pack"] in DEFAULT_PACKS and f[0] not in skip]
 
     libs = []
-    tactic_rows: dict[str, dict[str, list[int]]] = collections.defaultdict(dict)
-    techniques_seen: dict[str, set[str]] = collections.defaultdict(set)
-    techniques_hit: dict[str, set[str]] = collections.defaultdict(set)
+    # tactic -> library -> [recordings, detected at any level, at medium and above, at high and above]
+    cells: dict[str, dict[str, list[int]]] = collections.defaultdict(lambda: collections.defaultdict(lambda: [0, 0, 0, 0]))
+    seen: dict[str, set[str]] = collections.defaultdict(set)
+    hit: dict[str, set[str]] = collections.defaultdict(set)
     for key, label, practice in LIBRARIES:
         rows = by_lib.get(key, [])
         read = [r for r in rows if units.get(f"{key}:{r['name']}", {}).get("rows")]
-        cut = {"any": 0, "medium": 0, "high": 0}
-        fired_medium = 0
+        cut = [0, 0, 0]
+        alerted = 0
         for r in read:
             name = f"{key}:{r['name']}"
             want = frozenset(r["techniques"])
             al = alerts(name, key)
-            good = [lv for rid, lv in al if M.related(tech[rid], want)]
-            best = max(good, default=-1)
-            cut["any"] += best >= 0
-            cut["medium"] += best >= 2
-            cut["high"] += best >= 3
-            fired_medium += any(lv >= 2 for _, lv in al)
-            if not practice and want:
-                phase = phase_of(sorted(want)) or "other"
-                row = tactic_rows[phase].setdefault(key, [0, 0, 0])
-                row[0] += 1
-                row[1] += best >= 0
-                row[2] += best >= 2
-                parents = {t.split(".")[0] for t in want}
-                techniques_seen[key] |= parents
-                if best >= 2:
-                    techniques_hit[key] |= parents
+            best = max((lv for rid, lv in al if M.related(tech[rid], want)), default=-1)
+            got = [best >= 0, best >= 2, best >= 3]
+            cut = [c + g for c, g in zip(cut, got, strict=True)]
+            alerted += any(lv >= 2 for _, lv in al)
+            if practice or not want:
+                continue
+            phase = phase_of(sorted(want)) or "other"
+            for lib in (key, "all"):
+                c = cells[phase][lib]
+                c[0] += 1
+                for i, g in enumerate(got, 1):
+                    c[i] += g
+            parents = {t.split(".")[0] for t in want}
+            seen[key] |= parents
+            if got[1]:
+                hit[key] |= parents
         libs.append(
             {
                 "key": key,
@@ -465,38 +469,33 @@ def figures(h: Path) -> dict[str, Any]:
                 "practice": practice,
                 "recordings": len(rows),
                 "read": len(read),
-                "detected": cut,
-                "anyAlertMedium": fired_medium,
-                "events": sum(units.get(f"{key}:{r['name']}", {}).get("rows", 0) for r in read),
+                "events": sum(units[f"{key}:{r['name']}"]["rows"] for r in read),
+                "detected": {"any": cut[0], "medium": cut[1], "high": cut[2]},
+                "alertMedium": alerted,
             }
         )
     held = [lib["key"] for lib in libs if not lib["practice"]]
-    seen_all = set().union(*(techniques_seen[k] for k in held))
-    hit_all = set().union(*(techniques_hit[k] for k in held))
+    tactics = [{"id": p, "label": label, "cells": {k: v for k, v in cells[p].items()}} for p, label in PHASES if p in cells]
+    all_seen, all_hit = set().union(*(seen[k] for k in held)), set().union(*(hit[k] for k in held))
 
-    # the clean machines: findings by level per machine, default packs, and per million events
+    # the clean machines: findings of the default rule set, by level
     clean = []
     for m in M.BASELINE_MACHINES:
         u = units.get(f"clean:{m}")
         if not u:
             continue
-        levels = collections.Counter()
-        for f in u["findings"]:
-            r = rules.get(f[0])
-            if r and r["pack"] in DEFAULT_PACKS:
-                levels[LV.get(str(f[1]).lower(), LV.get(r["severity"], 2))] += 1
+        lv = collections.Counter(level_of(f, rules) for f in u["findings"] if f[0] in rules and rules[f[0]]["pack"] in DEFAULT_PACKS)
         clean.append(
             {
                 "machine": m,
                 "events": u["rows"],
-                "medium": sum(v for k, v in levels.items() if k >= 2),
-                "high": sum(v for k, v in levels.items() if k >= 3),
-                "critical": levels[4],
-                "all": sum(levels.values()),
+                "medium": sum(v for k, v in lv.items() if k >= 2),
+                "high": sum(v for k, v in lv.items() if k >= 3),
+                "critical": lv[4],
             }
         )
 
-    # MITRE's APT29 evaluation: the findings of each host, medium and above, by level
+    # MITRE's APT29 evaluation: each host's findings of the default rule set, by level
     apt29 = {}
     for day in (1, 2):
         u = units.get(f"apt29:day{day}")
@@ -504,36 +503,38 @@ def figures(h: Path) -> dict[str, Any]:
             continue
         hosts: dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
         for f in u["findings"]:
-            r = rules.get(f[0])
-            if not r or r["pack"] not in DEFAULT_PACKS:
-                continue
-            lv = LV.get(str(f[1]).lower(), LV.get(r["severity"], 2))
-            host = str(f[5] or "?").split(".")[0].lower()
-            hosts[host][lv] += 1
+            if f[0] in rules and rules[f[0]]["pack"] in DEFAULT_PACKS:
+                hosts[str(f[5] or "?").split(".")[0].lower()][level_of(f, rules)] += 1
         apt29[f"day{day}"] = {
             "events": u["rows"],
             "hosts": {
-                h: {"medium": sum(v for k, v in c.items() if k >= 2), "high": sum(v for k, v in c.items() if k >= 3), "all": sum(c.values())}
+                h: {
+                    "medium": sum(v for k, v in c.items() if k >= 2),
+                    "high": sum(v for k, v in c.items() if k >= 3),
+                    # what the evaluation's day 1 did on the host (tools/apt29_stories.py)
+                    "attacked": (h in ATTACKED) if day == 1 and h in ATTACKED + UNTOUCHED else None,
+                }
                 for h, c in sorted(hosts.items())
             },
         }
 
-    # throughput: events read and rules run per second, per process, over every unit
-    load_s = sum(u.get("seconds", {}).get("load", 0) for u in units.values())
-    rules_s = sum(u.get("seconds", {}).get("rules", 0) for u in units.values())
-    events = sum(u.get("rows", 0) for u in units.values())
+    timed = [u for u in units.values() if u.get("seconds")]
     return {
-        "commit": recs.get("commit"),
-        "measured": dt.date.today().isoformat(),
+        "commit": (recs.get("commit") or "")[:7],
+        "measured": recs.get("date") or dt.date.fromtimestamp((h / "findings.jsonl").stat().st_mtime).isoformat(),
         "rules": {"all": len(rules), "default": sum(1 for r in rules.values() if r["pack"] in DEFAULT_PACKS)},
         "libraries": libs,
-        "tactics": {p: v for p, v in sorted(tactic_rows.items())},
-        "techniques": {"seen": len(seen_all), "detected": len(hit_all), "byLibrary": {k: [len(techniques_seen[k]), len(techniques_hit[k])] for k in held}},
+        "tactics": tactics,
+        "techniques": {"recorded": len(all_seen), "detected": len(all_hit), "byLibrary": {k: [len(seen[k]), len(hit[k])] for k in held}},
         "clean": clean,
         "apt29": apt29,
-        "throughput": {"events": events, "loadSeconds": round(load_s, 1), "rulesSeconds": round(rules_s, 1)},
+        "throughput": {
+            "events": sum(u["rows"] for u in timed),
+            "loadSeconds": round(sum(u["seconds"]["load"] for u in timed), 1),
+            "rulesSeconds": round(sum(u["seconds"]["rules"] for u in timed), 1),
+        },
+        "attackDataMaxMb": recs.get("maxMb"),
         "leftOut": recs.get("leftOut"),
-        "maxMb": recs.get("maxMb"),
     }
 
 

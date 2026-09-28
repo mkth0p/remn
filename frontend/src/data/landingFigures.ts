@@ -5,6 +5,7 @@
  */
 import type { Meta } from '../api/client'
 import type { MeasureSources } from './ruleMeasures'
+import measuredLibraries from './libraryMeasures.json'
 
 /** docs/reviews/2026-09-25-head-to-head.md: the three tools on a library none of their rules were written against. */
 export const HEAD_TO_HEAD = {
@@ -36,19 +37,9 @@ export const HEAD_TO_HEAD = {
   ] as [string, number, number, number, number][],
 }
 
-/** docs/reviews/2026-09-25-noise-and-held-out.md: Splunk attack_data's Windows datasets, held out, and the clean machines of evtx-baseline. */
+/** docs/reviews/2026-09-25-noise-and-held-out.md: the clean machines of evtx-baseline. */
 export const HELD_OUT = {
   date: '2026-09-25',
-  attackData: {
-    sha: '7a5e9d5',
-    recordings: 535,
-    /** [rule set, medium and above, high and above] */
-    rows: [
-      ['REMN rules', 91, 76],
-      ['SigmaHQ windows + emerging-threats', 194, 124],
-      ['Default set', 227, 162],
-    ] as [string, number, number][],
-  },
   clean: {
     /** REMN's own rules on the seven clean machines */
     own: { rules: 19, highCritical: 200, events: 2_698, mediumUp: 1_332 },
@@ -70,6 +61,59 @@ export const MAIL_CORPORA = {
     ['SpamAssassin easy_ham', 'legitimate', 800, 0, 2],
     ['SpamAssassin hard_ham', 'legitimate', 251, 14, 62],
   ] as [string, 'phishing' | 'legitimate', number, number, number][],
+}
+
+/** A level cut: a finding of any level, of medium and above, of high and above. */
+export type Cut = 'any' | 'medium' | 'high'
+
+export interface LibraryRow {
+  key: string
+  name: string
+  /** REMN's rules were reviewed or written against the library as a whole: practice, not a test */
+  practice: boolean
+  recordings: number
+  /** recordings with at least one event REMN read */
+  read: number
+  events: number
+  /** recordings with a finding of their technique, at or above each cut */
+  detected: Record<Cut, number>
+  /** recordings with any finding of medium level and above, of whatever technique */
+  alertMedium: number
+}
+
+/**
+ * tools/library_measures.py figures, from one harvest of every rule on every library at one commit
+ * (docs/reviews/2026-09-28-measures-across-libraries.md): what the default rule set detects in each
+ * library, by tactic, on the clean machines and on MITRE's APT29 evaluation.
+ */
+export interface LibraryMeasures {
+  commit: string
+  measured: string
+  rules: { all: number; default: number }
+  libraries: LibraryRow[]
+  /** by tactic, in the order an intrusion reads; each held-out library (and 'all' of them): [recordings, detected at any level, medium and above, high and above] */
+  tactics: { id: string; label: string; cells: Record<string, [number, number, number, number]> }[]
+  /** ATT&CK techniques (parent ids) the held-out libraries record, and those a finding of medium and above detects */
+  techniques: { recorded: number; detected: number; byLibrary: Record<string, [number, number]> }
+  /** the clean machines of evtx-baseline: findings of the default rule set by level */
+  clean: { machine: string; events: number; medium: number; high: number; critical: number }[]
+  apt29: Partial<Record<'day1' | 'day2', { events: number; hosts: Record<string, { medium: number; high: number; attacked: boolean | null }> }>>
+  throughput: { events: number; loadSeconds: number; rulesSeconds: number }
+  attackDataMaxMb: number
+}
+
+export const LIBRARY_MEASURES = measuredLibraries as unknown as LibraryMeasures
+
+/** The held-out libraries together: recordings read and detected at each cut. */
+export function heldOut(m: LibraryMeasures = LIBRARY_MEASURES): { libraries: number; read: number; events: number; detected: Record<Cut, number> } {
+  const rows = m.libraries.filter((l) => !l.practice && l.read > 0)
+  const sum = (f: (l: LibraryRow) => number) => rows.reduce((n, l) => n + f(l), 0)
+  return {
+    libraries: rows.length,
+    read: sum((l) => l.read),
+    events: sum((l) => l.events),
+    detected: { any: sum((l) => l.detected.any), medium: sum((l) => l.detected.medium), high: sum((l) => l.detected.high) },
+  }
 }
 
 /** The rule the home page's example finding comes from. */
