@@ -398,6 +398,16 @@ level 2 as with every medium and higher finding raised on its own: in 47%, 38% a
 recordings of the three libraries against 47%, 38% and 76%, with about three times fewer lines
 per host.
 
+The case's own machines are a second measure of noise, read after every run. A rule whose
+findings stand on their own on at least half the hosts the case's findings name (at least two, of
+at least three) is that network's background, whatever the clean machines said, and its findings
+fold per host wherever it raised more than one; the folded finding's title says on how many of
+the case's hosts its rule fired (`foldWidespread` in `frontend/src/data/detectionLevel.ts`).
+Rules a level never folds (the analyst's own, and every rule at level 5) and findings an analyst
+decided on are left as they are. On the merged cases above at level 2 it cut the lines per clean
+host from 81 to 69 (14%) and the mean number of lines read before the first finding of the attack
+by 12%, 12% and 9% on the three libraries, with the top-ten share unchanged.
+
 A rule no clean machine could measure (mail, Microsoft 365, other products' logs, a rule changed
 since it was measured) keeps its findings from medium up on their own at levels 1 to 4, and the
 analyst's own rules are never folded. A finding an analyst decided on (reviewed, escalated, marked

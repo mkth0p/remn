@@ -7,7 +7,7 @@ import type { SettingsLike } from '../rules/filter'
 import { caseLevel, severityFloors } from './detectionLevel'
 import { enabledPackIds, getPackRules } from './packs'
 import type { RuleMeasure } from './ruleMeasures'
-import { replaceFindings } from './findingReviews'
+import { refoldWidespread, replaceFindings } from './findingReviews'
 import type { RowLoader } from './findingAnchors'
 import type { DataSource } from './source'
 
@@ -205,6 +205,9 @@ export async function runRulesFor(
   } else {
     res = await runRules(kase, rules, onProgress, floors)
   }
+  // the case's own hosts as the measure of noise: a rule firing on most of them folds
+  const refolded = await refoldWidespread(kase.id!, floors)
+  if (refolded) log('info', `${refolded} finding(s) of rules that fire on most of the case's hosts were folded`)
   await saveDiagnostics(kase.id!, res)
   return res
 }

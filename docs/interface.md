@@ -154,10 +154,19 @@ point each and a point more for each other ATT&CK tactic among them, up to 6. Th
 the same entities (what it found, such as the program, command line or service, not the host,
 account or address, unless the rule names nothing else) escalated by an analyst before, in this
 case or another case of this browser, adds 5; marked false positive before, the finding keeps
-a quarter of its score. The model's decisions do not count, and the memory never leaves the
-browser. Reviewed and false-positive findings sort below the others. The priority column shows
-the score and the reasons that moved it ("1 of 40 hosts", "+2 rules, 1 tactic", "false
-positive before"), its tooltip and the finding flyout say each in a sentence ("marked false
+a quarter of its score. The case also learns from its own review: each finding of a rule an
+analyst marks false positive in this case halves the score of the rule's other findings on that
+host and takes a fifth off its findings on the other hosts (findings on the same entities are the
+memory's, not counted twice), so the queue moves past what is benign on this network as the
+analyst works down it. On cases built from clean hosts with one recording merged in, an analyst
+dismissing each benign line from the top read 27%, 24% and 12% fewer lines before the first
+finding of the attack on the attack_data, EVTX-to-MITRE-Attack and EVTX-ATTACK-SAMPLES
+recordings, and 30%, 32% and 21% fewer with the host refold of the
+[detection level](detection.md#detection-level); other factors from 0.3 to 0.7 on the same host
+and 0.6 to 1 elsewhere did about as well. The model's decisions do not count, and the memory
+never leaves the browser. Reviewed and false-positive findings sort below the others. The priority column shows
+the score and the reasons that moved it ("1 of 40 hosts", "+2 rules, 1 tactic", "rule
+dismissed 2x", "false positive before"), its tooltip and the finding flyout say each in a sentence ("marked false
 positive in case Acme on 2026-08-14"), an incident ranks by its first finding to look at, and
 the CSV export carries the score.
 
@@ -255,7 +264,8 @@ lines, to 5, every finding on its own; see [detection level](detection.md#detect
 slider with what the level keeps on its own and how many lines it was measured to give; moving it
 offers to rerun the rules at the new level, and the "level" column gives the lowest level at which
 each rule's findings stand on their own. Below that level they are folded, one per rule and host,
-and a folded finding's title says how many it stands for. The new-case dialog on the home page and
+and a folded finding's title says how many it stands for; a rule that fires on most of the case's
+hosts is folded too, and its title says on how many. The new-case dialog on the home page and
 in the sidebar sets the level too, at 2 unless changed. The Indicators page lists the IPs, domains, URLs and hashes
 extracted from the evidence with their counts and, when external lookups are enabled
 for the case, their reputation; it exports STIX 2.1 and CSV. The STIX bundle carries every
