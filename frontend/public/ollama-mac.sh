@@ -7,7 +7,8 @@
 # 1. adds the origin to OLLAMA_ORIGINS now (launchctl setenv; the menu-bar app does not read
 #    shell exports) and at every login, through a LaunchAgent that runs before Ollama starts
 # 2. restarts Ollama so it reads the variable, and checks it answers the origin
-# 3. pulls a model with tool calls when none is installed (REMN_MODEL, default qwen3:8b)
+#
+# It installs nothing and pulls no model.
 #
 # Undo: launchctl unload ~/Library/LaunchAgents/tech.remn.ollama-origins.plist, delete that
 # file, launchctl unsetenv OLLAMA_ORIGINS, and restart Ollama.
@@ -15,7 +16,6 @@ set -euo pipefail
 
 ORIGIN="${1:-${REMN_ORIGIN:-https://remn.tech}}"
 ORIGIN="${ORIGIN%/}"
-MODEL="${REMN_MODEL:-qwen3:8b}"
 OLLAMA="${OLLAMA_URL:-http://127.0.0.1:11434}"
 LABEL="tech.remn.ollama-origins"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
@@ -34,12 +34,7 @@ esac
 
 # Ollama installed?
 if [ ! -d /Applications/Ollama.app ] && [ ! -d "$HOME/Applications/Ollama.app" ] && ! command -v ollama >/dev/null 2>&1; then
-  if command -v brew >/dev/null 2>&1; then
-    say "Installing Ollama with Homebrew"
-    brew install --cask ollama
-  else
-    fail "Ollama is not installed: download it from https://ollama.com/download/mac, open it once, then run this again"
-  fi
+  fail "Ollama is not installed: download it from https://ollama.com/download/mac, open it once, then run this again"
 fi
 
 # keep origins set earlier (another REMN, a local tool), add this one
@@ -100,12 +95,6 @@ if [ "$allow" = "$ORIGIN" ] || [ "$allow" = "*" ]; then
   say "Ollama answers $ORIGIN"
 else
   fail "Ollama still refuses $ORIGIN; quit it from the menu bar, open it again and re-run this script"
-fi
-
-OLLAMA_BIN="$(command -v ollama || echo /Applications/Ollama.app/Contents/Resources/ollama)"
-if ! curl -fs "$OLLAMA/api/tags" | grep -q '"name"'; then
-  say "No model installed: pulling $MODEL (a few GB)"
-  "$OLLAMA_BIN" pull "$MODEL"
 fi
 
 say "Done. Open $ORIGIN, Settings, AI: Browser-direct at http://localhost:11434, and press test."

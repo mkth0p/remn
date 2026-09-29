@@ -7,7 +7,7 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 - A Mac connects its Ollama to a REMN served from another host with one line in Terminal,
   `curl -fsSL https://remn.tech/ollama-mac.sh | bash`: the origin is allowed now and at every
-  login, Ollama is restarted and checked, and a model is pulled when none is installed. Settings
+  login, and Ollama is restarted and checked. Settings
   and the "cannot reach Ollama" message give the line for the page's own origin ([AI](docs/ai.md)).
 - Each case adapts to its own machines and to the analyst's review. After every run, a rule that
   stands on its own on at least half the case's hosts is folded per host as that network's

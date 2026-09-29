@@ -424,10 +424,9 @@ export function SettingsView() {
                   <code>
                     curl -fsSL {typeof location !== 'undefined' ? location.origin : ''}/ollama-mac.sh | bash -s -- {typeof location !== 'undefined' ? location.origin : ''}
                   </code>{' '}
-                  (it keeps the setting across restarts, restarts Ollama and pulls a model if none is installed). Otherwise run{' '}
-                  <code>setx OLLAMA_ORIGINS "{typeof location !== 'undefined' ? location.origin : ''}"</code> (Windows, then restart Ollama) or{' '}
-                  <code>OLLAMA_ORIGINS={typeof location !== 'undefined' ? location.origin : ''} ollama serve</code>. HTTPS pages may call http://localhost in Chrome, Edge and Firefox; Safari blocks it
-                  — use the server proxy there.
+                  (it keeps the setting across restarts and restarts Ollama). Otherwise run <code>setx OLLAMA_ORIGINS "{typeof location !== 'undefined' ? location.origin : ''}"</code> (Windows, then
+                  restart Ollama) or <code>OLLAMA_ORIGINS={typeof location !== 'undefined' ? location.origin : ''} ollama serve</code>. HTTPS pages may call http://localhost in Chrome, Edge and
+                  Firefox; Safari blocks it — use the server proxy there.
                 </div>
               )}
             </div>
