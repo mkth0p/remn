@@ -7,7 +7,10 @@
  *   severity points x confidence x rule trust x rarity / repetition  + corroboration + escalated before
  *
  * and a finding whose same rule and same entities an analyst marked false positive before (in this
- * case or another one of this browser) keeps a quarter of that. Findings already decided (reviewed,
+ * case or another one of this browser) keeps a quarter of that. The case also learns from its own
+ * dismissals: each finding of a rule an analyst marked false positive in this case halves what the
+ * rule's other findings on that host weigh, and takes a fifth off its findings on the other hosts,
+ * so the queue moves past what is benign on this network as the review goes. Findings already decided (reviewed,
  * false positive) sort below the others whatever their score. Every weight is in PRIORITY below.
  */
 import { getDb, type Finding, type Severity } from '../db/schema'
@@ -45,10 +48,19 @@ export const PRIORITY = {
   escalatedBefore: 5,
   /** an analyst marked the same rule on the same entities false positive before: what the score keeps */
   falsePositiveBefore: 0.25,
+  /**
+   * what a finding keeps per finding of its rule an analyst marked false positive in this case, on
+   * the same host and on another one. Measured on 2,184 merged attack cases (three libraries,
+   * cross-fit by machine): it cut the findings reviewed before the first real one by 24 to 27% on
+   * attack_data and EVTX-to-MITRE-Attack and 12% on EVTX-ATTACK-SAMPLES, against the same queue
+   * without it; 0.3 to 0.7 on the same host and 0.6 to 1 elsewhere all did about as well.
+   */
+  dismissedSameHost: 0.5,
+  dismissedOtherHost: 0.8,
 }
 
 export interface PriorityReason {
-  kind: 'severity' | 'confidence' | 'trust' | 'rarity' | 'repeat' | 'corroboration' | 'memory' | 'decided'
+  kind: 'severity' | 'confidence' | 'trust' | 'rarity' | 'repeat' | 'corroboration' | 'dismissed' | 'memory' | 'decided'
   /** whether it raised the score, lowered it, or only says what the score started from */
   tone: 'up' | 'down' | 'neutral'
   /** a word or two for the list */
@@ -209,6 +221,12 @@ export function scoreFindings(findings: Finding[], opts: PriorityOptions = {}): 
     if (k) perPlace.set(k, (perPlace.get(k) ?? 0) + (f.folded ?? 1))
   }
   const peers = peersBy(findings)
+  // the analyst's false positives of this case, by rule, with the host each one was on
+  const dismissed = new Map<string, { f: Finding; host: string }[]>()
+  for (const f of findings) {
+    if (f.status !== 'false_positive' || f.decidedBy === 'ai' || f.ruleId === 'chain') continue
+    ;(dismissed.get(f.ruleId) ?? dismissed.set(f.ruleId, []).get(f.ruleId)!).push({ f, host: hostOf(f) })
+  }
   const memory = new Map<string, PastDecision[]>()
   for (const d of opts.memory ?? []) (memory.get(d.signature) ?? memory.set(d.signature, []).get(d.signature)!).push(d)
 
@@ -301,6 +319,29 @@ export function scoreFindings(findings: Finding[], opts: PriorityOptions = {}): 
     // what an analyst decided before on the same rule and the same entities
     const signature = f.ruleId === 'chain' ? null : decisionSignature(f)
     const before = (signature ? (memory.get(signature) ?? []) : []).filter((d) => !(d.caseId === f.caseId && d.findingId === f.id))
+
+    // the same rule dismissed elsewhere in this case, on other entities (the same entities are the memory's)
+    if (!DECIDED.includes(f.status) && f.status !== 'escalated') {
+      let same = 0
+      let other = 0
+      for (const d of dismissed.get(f.ruleId) ?? []) {
+        if (d.f.key === f.key || (signature && decisionSignature(d.f) === signature)) continue
+        // one line of the queue, folded or not, is one decision (as measured)
+        if (h && d.host === h) same++
+        else other++
+      }
+      if (same || other) {
+        const by = W.dismissedSameHost ** same * W.dismissedOtherHost ** other
+        points *= by
+        const parts = [same ? `${same} on ${h}` : '', other ? `${other} on ${plural(other, 'another host', 'other hosts')}` : ''].filter(Boolean)
+        reasons.push({
+          kind: 'dismissed',
+          tone: 'down',
+          short: `rule dismissed ${same + other}x`,
+          text: `An analyst marked ${same + other} ${plural(same + other, 'finding')} of its rule false positive in this case (${parts.join(', ')}): x${num(by)}.`,
+        })
+      }
+    }
     if (before.length) {
       const last = before.reduce((a, b) => ((b.at ?? 0) > (a.at ?? 0) ? b : a))
       const where = last.caseId === f.caseId ? 'in this case' : `in case ${last.caseName}`

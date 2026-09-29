@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { RemnDB, setDb, type Finding } from '../db/schema'
-import { rememberReviews, replaceFindings, resetFindingSeverityOverrides } from './findingReviews'
+import { refoldWidespread, rememberReviews, replaceFindings, resetFindingSeverityOverrides } from './findingReviews'
 
 let db: RemnDB
 const row = (patch: Partial<Finding> = {}): Finding => ({
@@ -102,5 +102,70 @@ describe('the detection level when findings are replaced', () => {
       ['a', 'escalated', undefined],
       ['z', 'new', 1],
     ])
+  })
+})
+
+describe('the case own hosts as the measure of noise', () => {
+  let ref = 0
+  const on = (ruleId: string, computer: string, patch: Partial<Finding> = {}): Finding => {
+    ref++
+    return row({
+      ruleId,
+      key: `${ruleId}|${ref}`,
+      title: ruleId,
+      severity: 'medium',
+      entities: { computer },
+      refs: [ref],
+      ts: ref,
+      status: 'new',
+      notes: undefined,
+      decidedBy: undefined,
+      reportExclude: undefined,
+      severityOverride: undefined,
+      ...patch,
+    })
+  }
+
+  it('folds a rule that stands alone on most of the case hosts, per host, and leaves a rare rule and a touched finding alone', async () => {
+    await db.findings.bulkAdd([
+      // everywhere: two findings on each of three hosts of four, one of them already escalated
+      on('everywhere', 'ws1'),
+      on('everywhere', 'ws1'),
+      on('everywhere', 'ws2'),
+      on('everywhere', 'ws2', { status: 'escalated', decidedBy: 'analyst' }),
+      on('everywhere', 'ws3'),
+      on('everywhere', 'ws3', { folded: 4, key: 'everywhere|folded|ws3', title: 'everywhere (4 findings on ws3, folded at this detection level)' }),
+      // rare: two findings on one host
+      on('rare', 'ws4'),
+      on('rare', 'ws4'),
+    ])
+    const removed = await refoldWidespread(1, { everywhere: 2, rare: 2 })
+    expect(removed).toBe(2)
+    const rows = await db.findings.toArray()
+    const ws1 = rows.find((f) => f.key === 'everywhere|folded|ws1')!
+    expect(ws1).toMatchObject({ folded: 2, count: 2, title: "everywhere (2 findings on ws1, folded, its rule fired on 3 of the case's 4 hosts)" })
+    expect(rows.find((f) => f.key === 'everywhere|folded|ws3')).toMatchObject({ folded: 5, title: "everywhere (5 findings on ws3, folded, its rule fired on 3 of the case's 4 hosts)" })
+    // on ws2 the escalated finding stays, and the other one with it, alone
+    expect(rows.filter((f) => f.entities.computer === 'ws2').map((f) => [f.status, f.folded])).toEqual([
+      ['new', undefined],
+      ['escalated', undefined],
+    ])
+    expect(rows.filter((f) => f.ruleId === 'rare')).toHaveLength(2)
+  })
+
+  it('gives the new folded finding its own key when a decided folded finding has that key', async () => {
+    await db.findings.bulkAdd([on('wide', 'ws1', { key: 'wide|folded|ws1', folded: 3, status: 'reviewed' }), on('wide', 'ws1'), on('wide', 'ws1'), on('wide', 'ws2'), on('x', 'ws3')])
+    await refoldWidespread(1, { wide: 2, x: 2 })
+    const keys = (await db.findings.where('ruleId').equals('wide').toArray()).map((f) => [f.key.startsWith('wide|folded|ws1'), f.folded, f.status])
+    expect(keys).toHaveLength(3)
+    expect(new Set((await db.findings.toArray()).map((f) => f.key)).size).toBe(4)
+  })
+
+  it('leaves a rule the level never folds, and a case of fewer than three hosts, as they are', async () => {
+    await db.findings.bulkAdd([on('mine', 'ws1'), on('mine', 'ws1'), on('mine', 'ws2'), on('mine', 'ws2'), on('x', 'ws3')])
+    expect(await refoldWidespread(1, { mine: 0, x: 2 })).toBe(0)
+    expect(await refoldWidespread(1, undefined)).toBe(0)
+    await db.findings.where('ruleId').equals('x').delete()
+    expect(await refoldWidespread(1, { mine: 2 })).toBe(0)
   })
 })

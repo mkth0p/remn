@@ -4,3 +4,4 @@ public
 package-lock.json
 src/parsers/evtx/reference.gen.ts
 src/data/questions/dfiq.gen.json
+src/data/libraryMeasures.json
