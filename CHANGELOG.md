@@ -5,6 +5,14 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- Each case adapts to its own machines and to the analyst's review. After every run, a rule that
+  stands on its own on at least half the case's hosts is folded per host as that network's
+  background, whatever the clean machines said, and each finding of a rule the analyst marks false
+  positive halves the priority of the rule's other findings on that host and takes a fifth off
+  elsewhere. On cases built from clean hosts with one recording merged in, at level 2, the lines
+  per clean host fell from 81 to 69, and an analyst dismissing benign lines from the top read 30%,
+  32% and 21% fewer lines before the first finding of the attack on attack_data,
+  EVTX-to-MITRE-Attack and EVTX-ATTACK-SAMPLES ([detection level](docs/detection.md#detection-level)).
 - The home page shows detection by library and by tactic from one run of every rule on five
   public libraries at one commit: 438 of 913 held-out recordings detected at medium and above
   (EVTX-to-MITRE-Attack 112 of 279, attack_data 246 of 535, OTRF Security-Datasets 80 of 99), 72

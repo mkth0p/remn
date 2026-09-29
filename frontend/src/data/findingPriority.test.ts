@@ -150,6 +150,39 @@ describe('the priority of a finding', () => {
     expect(pastDecisions([byModel], new Map())).toEqual([])
   })
 
+  it('learns from the case its own dismissals: a rule marked false positive weighs less on that host, a little less on the others', () => {
+    const far = (i: number) => T0 + i * 100 * H
+    const fp = (host: string, image: string, i: number, extra: Partial<Finding> = {}) =>
+      finding({ ruleId: 'lolbin', entities: on(host, { image }), ts: far(i), status: 'false_positive', decidedBy: 'analyst', ...extra })
+    const d1 = fp('ws-1', 'a.exe', 0)
+    const d2 = fp('ws-2', 'b.exe', 1)
+    const byModel = fp('ws-1', 'c.exe', 2, { decidedBy: 'ai' })
+    const next = finding({ ruleId: 'lolbin', entities: on('ws-1', { image: 'd.exe' }), ts: far(3) })
+    const otherRule = finding({ ruleId: 'other', entities: on('ws-1', { image: 'd.exe' }), ts: far(4) })
+    const s = scoreFindings([d1, d2, byModel, next, otherRule], { trust: trustAll })
+    const by = PRIORITY.dismissedSameHost * PRIORITY.dismissedOtherHost
+    const repeat = 1 + Math.log(3)
+    expect(s.get(next.key)!.score).toBe(Math.round((6 / repeat) * by * 10) / 10)
+    expect(s.get(next.key)!.reasons.find((r) => r.kind === 'dismissed')).toMatchObject({
+      tone: 'down',
+      short: 'rule dismissed 2x',
+      text: 'An analyst marked 2 findings of its rule false positive in this case (1 on ws-1, 1 on another host): x0.4.',
+    })
+    expect(s.get(otherRule.key)!.reasons.some((r) => r.kind === 'dismissed')).toBe(false)
+    // a finding already decided, or escalated, keeps its score
+    const up = finding({ ruleId: 'lolbin', entities: on('ws-1', { image: 'e.exe' }), ts: far(5), status: 'escalated' })
+    expect(
+      scoreFindings([d1, up], { trust: trustAll })
+        .get(up.key)!
+        .reasons.some((r) => r.kind === 'dismissed'),
+    ).toBe(false)
+    // the same entities are the memory's decision, not counted twice
+    const same = finding({ ruleId: 'lolbin', entities: on('ws-3', { image: 'a.exe' }), ts: far(6) })
+    const r = scoreFindings([d1, same], { trust: trustAll, memory: pastDecisions([d1], new Map([[1, 'case']])) }).get(same.key)!.reasons
+    expect(r.map((x) => x.kind)).toContain('memory')
+    expect(r.map((x) => x.kind)).not.toContain('dismissed')
+  })
+
   it('keys a decision on what the rule found, not where, unless the rule names only where', () => {
     expect(decisionSignature({ ruleId: 'r', entities: { computer: 'WS-1', user: 'bob', serviceName: 'Svc' } })).toBe('r\u0000serviceName=svc')
     expect(decisionSignature({ ruleId: 'r', entities: { subjectUser: 'Bob', ipAddress: '10.0.0.1' } })).toBe('r\u0000ipAddress=10.0.0.1\u0000subjectUser=bob')
