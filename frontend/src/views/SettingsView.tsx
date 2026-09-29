@@ -420,10 +420,13 @@ export function SettingsView() {
               )}
               {aiCfg.transport === 'browser' && (
                 <div className="hint">
-                  If REMN is NOT served from localhost (e.g. accessed on your home server), your Ollama must allow this origin: run{' '}
-                  <code>setx OLLAMA_ORIGINS "{typeof location !== 'undefined' ? location.origin : ''}"</code> (Windows, then restart Ollama) or{' '}
-                  <code>OLLAMA_ORIGINS={typeof location !== 'undefined' ? location.origin : ''} ollama serve</code>. HTTPS pages may call http://localhost in Chrome, Edge and Firefox; Safari blocks it
-                  — use the server proxy there.
+                  If REMN is NOT served from localhost (e.g. accessed on your home server), your Ollama must allow this origin. On a Mac, paste once in Terminal{' '}
+                  <code>
+                    curl -fsSL {typeof location !== 'undefined' ? location.origin : ''}/ollama-mac.sh | bash -s -- {typeof location !== 'undefined' ? location.origin : ''}
+                  </code>{' '}
+                  (it keeps the setting across restarts and restarts Ollama). Otherwise run <code>setx OLLAMA_ORIGINS "{typeof location !== 'undefined' ? location.origin : ''}"</code> (Windows, then
+                  restart Ollama) or <code>OLLAMA_ORIGINS={typeof location !== 'undefined' ? location.origin : ''} ollama serve</code>. HTTPS pages may call http://localhost in Chrome, Edge and
+                  Firefox; Safari blocks it — use the server proxy there.
                 </div>
               )}
             </div>

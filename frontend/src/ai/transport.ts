@@ -143,7 +143,7 @@ function corsHint(base: string): string {
     hint +=
       ` REMN is served from ${origin}, so your local Ollama must allow that origin, then be restarted:` +
       ` Windows: setx OLLAMA_ORIGINS "${origin}";` +
-      ` macOS app: launchctl setenv OLLAMA_ORIGINS "${origin}" (the menu-bar app does not read shell exports);` +
+      ` macOS: curl -fsSL ${origin}/ollama-mac.sh | bash -s -- ${origin} (sets it for good and restarts Ollama);` +
       ` Linux service: add Environment="OLLAMA_ORIGINS=${origin}" with systemctl edit ollama.` +
       ` Allow the browser's local-network prompt if it shows one, and turn off shields or ad blockers that block localhost for this site.` +
       ` Only localhost addresses are reachable from this page.` +
