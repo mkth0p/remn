@@ -63,7 +63,7 @@ jobs:
         run: >
           python tools/measure_rules.py --datasets /mnt/remn/datasets --fetch --cache /mnt/remn/cache
           --shard ${{ matrix.share }}/${{ env.SHARES }} --raw /mnt/remn/share-${{ matrix.share }}.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: rule-measures-share-${{ matrix.share }}
           path: /mnt/remn/share-${{ matrix.share }}.json
@@ -91,7 +91,7 @@ jobs:
         run: >
           python tools/measure_rules.py --merge shares/share-*.json
           --out measures.json --detail measures-detail.json --gate rules/measures-detail.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: rule-measures
