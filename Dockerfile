@@ -27,7 +27,7 @@ RUN npm run build
 FROM caddy:2-alpine@sha256:6aeddd44c3078b0f9a35206472a11420648a79c184603ef95957d0a20044cb2b AS static
 COPY --from=frontend /src/frontend/dist /srv/remn
 
-FROM python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285 AS python-build
+FROM python:3.13-slim@sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f AS python-build
 ENV PIP_NO_CACHE_DIR=1
 RUN apt-get update && apt-get -y --no-install-recommends install build-essential && rm -rf /var/lib/apt/lists/*
 RUN python -m venv /opt/venv && /opt/venv/bin/pip install --upgrade pip
@@ -40,7 +40,7 @@ RUN /opt/venv/bin/pip install -r /tmp/requirements.txt \
 
 # Hayabusa: Sigma over EVTX as a detection engine, pinned by version and by the release
 # archive's SHA-256 so a substituted download fails the build. HAYABUSA=0 builds without it.
-FROM python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285 AS hayabusa
+FROM python:3.13-slim@sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f AS hayabusa
 ARG TARGETARCH
 ARG HAYABUSA=1
 ARG HAYABUSA_VERSION=4.0.0
@@ -60,7 +60,7 @@ RUN mkdir -p /opt/hayabusa \
         && rm -f /tmp/hayabusa.zip; \
     fi
 
-FROM python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285
+FROM python:3.13-slim@sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH="/opt/venv/bin:$PATH"
 # Debian's security updates as of the build (the base tag lags them by days); no package manager stays behind
 RUN apt-get update && apt-get -y --no-install-recommends upgrade && rm -rf /var/lib/apt/lists/* \
