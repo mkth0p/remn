@@ -24,7 +24,7 @@ RUN npm run build
 # The app alone, for the public profile (docker-compose.public.yml): Caddy serves the frontend build
 # from its own image, so the process that parses hostile files never serves the page visitors run.
 # Built with --target static; the default build below is unchanged.
-FROM caddy:2-alpine@sha256:6aeddd44c3078b0f9a35206472a11420648a79c184603ef95957d0a20044cb2b AS static
+FROM caddy:2-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f AS static
 COPY --from=frontend /src/frontend/dist /srv/remn
 
 FROM python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285 AS python-build
