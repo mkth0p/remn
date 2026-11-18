@@ -12,7 +12,9 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   `requirements-dev.txt` are locks with hashes for every platform, written by
   `tools/lock_requirements.sh` from ranges that all have an upper bound, and the image installs
   from them. CI runs every night on `main`, and a nightly job runs the backend tests on the newest
-  versions the ranges allow.
+  versions the ranges allow. The EVTX parser stays at 0.13.1, the version the rule measures were
+  taken with: 0.15 writes GUID values in braces and lower case, and the rules that match a GUID,
+  the browser decoder and the measures are on the bare form.
 - A release can be checked, and CI runs on what the files say. A `vX.Y.Z` tag publishes the tagged
   source with the built frontend and an `INSTALL.md` that works as written, a CycloneDX bill of
   materials, SHA-256 sums and the Docker image on GitHub Container Registry, each with build

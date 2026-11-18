@@ -7,7 +7,11 @@ Django>=6.1.1,<7
 waitress>=3.0.2,<4
 python-dotenv>=1.2.3,<2
 PyYAML>=6.0.3,<7
-evtx>=0.13.1,<0.16
+# 0.15 writes GUID values as Windows shows them ({lower case, in braces}) where 0.13 and 0.14 wrote
+# them bare and upper case. The rules that match a GUID, the browser's decoder and the committed
+# rule measures are all on the bare form, so 0.15 waits for a change that moves the four together.
+# 0.13.1 is the version the measures in rules/ were taken with.
+evtx>=0.13.1,<0.14
 extract-msg>=0.56.1,<0.59
 oletools>=0.60.2,<0.61
 pypdf>=6.19.0,<8
