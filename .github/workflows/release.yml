@@ -1,59 +1,142 @@
 name: Release
 
-# Tag a commit "vX.Y.Z" (matching VERSION in backend/forensic/build.py) and push the tag:
-# the frontend is built, the backend and rules are packed with it, and a GitHub release
-# carries the archive. Nothing else is published.
+# Push a tag "vX.Y.Z" on the commit to release (docs/releasing.md has the steps). The tag must be
+# the version the code states; the whole of CI runs on it; then three things are published and
+# nothing else: a GitHub release carrying the source with the built frontend, its bill of
+# materials and their SHA-256 sums, each with a signed statement of which workflow run built it,
+# and the Docker image on GitHub Container Registry under the same version, with the same statement.
 on:
   push:
     tags: ["v*"]
 
+# each job below asks for what it needs and no more
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
+  version:
+    name: the tag is the version the code states
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - run: python3 tools/check_version.py --tag "$GITHUB_REF_NAME"
+
   checks:
+    needs: version
     uses: ./.github/workflows/ci.yml
-  release:
+
+  archive:
+    name: archive, bill of materials, checksums
     needs: checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - name: Version matches the tag
-        run: |
-          tag="${GITHUB_REF_NAME#v}"
-          code=$(sed -n 's/^VERSION = "\(.*\)"/\1/p' backend/forensic/build.py)
-          echo "tag $tag, code $code"
-          test "$tag" = "$code"
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Build the frontend
         working-directory: frontend
+        env:
+          REMN_BUILD_ID: ${{ github.sha }}
         run: |
           npm ci
           npm run build
       - name: Pack
         run: |
-          name="remn-${GITHUB_REF_NAME}"
-          mkdir -p "out/$name"
-          cp -r backend rules tools LICENSE THIRD_PARTY_NOTICES.md README.md CHANGELOG.md SECURITY.md docs .env.example "out/$name/"
-          rm -rf "out/$name/backend/tmp" "out/$name/backend/data/cases" "out/$name/backend/data/claude-cwd" "out/$name/docs/images"
-          find "out/$name" -name __pycache__ -type d -prune -exec rm -rf {} +
-          mkdir -p "out/$name/frontend"
-          cp -r frontend/dist "out/$name/frontend/dist"
-          (cd out && zip -qr "$name.zip" "$name")
-          ls -l out/*.zip
-      - name: Changelog excerpt
-        id: notes
-        run: |
-          awk -v tag="${GITHUB_REF_NAME#v}" '
-            /^## / { if (found) exit; if (index($0, tag)) { found = 1; next } }
-            found { print }
-          ' CHANGELOG.md > notes.md
-          test -s notes.md || echo "See CHANGELOG.md." > notes.md
-      - uses: softprops/action-gh-release@v3
+          sh tools/release_pack.sh out
+          python3 tools/check_version.py --notes notes.md
+          mv notes.md out/notes.md
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          body_path: notes.md
-          files: out/*.zip
+          name: release
+          path: out/
+          if-no-files-found: error
+          retention-days: 7
+
+  image:
+    name: image on GitHub Container Registry
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      name: ${{ steps.push.outputs.name }}
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Build
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          docker build --pull \
+            --build-arg REMN_BUILD_ID="$GITHUB_SHA" \
+            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.version=$version" \
+            -t "ghcr.io/${GITHUB_REPOSITORY,,}:$version" .
+      - name: Push
+        id: push
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          name="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker push "$name:$version"
+          digest=$(docker inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$name:$version" | sed -n "s|^$name@||p" | head -n 1)
+          echo "$digest" | grep -Eq '^sha256:[0-9a-f]{64}$'
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - name: Build provenance for the image
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ steps.push.outputs.name }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+  publish:
+    name: GitHub release
+    needs: [archive, image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: release
+          path: out
+      - name: The files are the ones the sums were taken of
+        working-directory: out
+        run: sha256sum -c SHA256SUMS
+      - name: Build provenance for the archive and the bill of materials
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: out/SHA256SUMS
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          IMAGE: ${{ needs.image.outputs.name }}
+          DIGEST: ${{ needs.image.outputs.digest }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          printf '\nDocker image: `%s:%s` (`%s`). Checking the archive and the image: docs/releasing.md.\n' "$IMAGE" "$version" "$DIGEST" >> out/notes.md
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "REMN $version" --notes-file out/notes.md \
+            "out/remn-$version.zip" "out/remn-$version.cdx.json" out/SHA256SUMS
