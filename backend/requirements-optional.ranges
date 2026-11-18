@@ -1,0 +1,19 @@
+# Optional capabilities, as ranges. The file an install reads is requirements-optional.txt, written
+# from this one by tools/lock_requirements.sh: exact versions with hashes, consistent with
+# requirements.txt. Install it into the same environment, after the main set:
+#   Windows:        .venv\Scripts\python.exe -m pip install --require-hashes -r backend\requirements-optional.txt
+#   Linux / macOS:  .venv/bin/python -m pip install --require-hashes -r backend/requirements-optional.txt
+# Not named *.in for the reason given in requirements.ranges.
+-c requirements.txt
+
+# PST/OST mailbox support (libpff bindings). It builds from source:
+#   Windows:  Visual Studio C++ build tools
+#   Linux:    apt install build-essential python3.13-dev (or the distribution's equivalent)
+# Versions are dates; the bound is the day after which a new release has to be looked at before use.
+libpff-python>=20231205,<20270701
+
+# YARA scanning of attachments with rules dropped in backend/data/yara/*.yar
+yara-python>=4.5.4,<5
+
+# 7z packages (DFIR-ORC collections ship as 7z)
+py7zr>=1.0.0,<2

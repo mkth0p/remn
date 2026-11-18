@@ -38,10 +38,10 @@ commands on every pull request and on `main`.
 
 ## Dependencies
 
-`backend/requirements.txt` and `backend/requirements-dev.txt` are locks: every package, direct
-or not, at one exact version with its hashes, for every platform. Nobody edits them by hand.
-The ranges REMN accepts are in `backend/requirements.ranges` and
-`backend/requirements-dev.ranges`, each with an upper bound.
+`backend/requirements.txt`, `backend/requirements-dev.txt` and
+`backend/requirements-optional.txt` are locks: every package, direct or not, at one exact
+version with its hashes, for every platform. Nobody edits them by hand. The ranges REMN accepts
+are in the three `.ranges` files beside them, each with an upper bound.
 
 ```
 sh tools/lock_requirements.sh              # after changing a range
