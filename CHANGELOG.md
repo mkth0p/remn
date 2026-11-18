@@ -12,7 +12,9 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   `requirements-dev.txt` are locks with hashes for every platform, written by
   `tools/lock_requirements.sh` from ranges that all have an upper bound, and the image installs
   from them. CI runs every night on `main`, and a nightly job runs the backend tests on the newest
-  versions the ranges allow.
+  versions the ranges allow. The EVTX parser stays at 0.13.1, the version the rule measures were
+  taken with: 0.15 writes GUID values in braces and lower case, and the rules that match a GUID,
+  the browser decoder and the measures are on the bare form.
 - Each case adapts to its own machines and to the analyst's review. After every run, a rule that
   stands on its own on at least half the case's hosts is folded per host as that network's
   background, whatever the clean machines said, and each finding of a rule the analyst marks false
