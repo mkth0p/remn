@@ -6,6 +6,10 @@ on:
   pull_request:
   workflow_call:
   workflow_dispatch:
+  # every night on main: a base image, an action or a data source that changed under an unchanged
+  # commit shows here the next morning, and the "newest dependencies" job below runs only then
+  schedule:
+    - cron: "23 3 * * *"
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -24,10 +28,9 @@ jobs:
           cache-dependency-path: |
             backend/requirements.txt
             backend/requirements-dev.txt
+      # exact versions with hashes (tools/lock_requirements.sh): a release upstream cannot change this run
       - name: Install
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+        run: pip install --require-hashes -r backend/requirements.txt -r backend/requirements-dev.txt
       - name: Lint
         run: ruff check .
       - name: Format check
@@ -36,6 +39,26 @@ jobs:
         run: pytest -q
       - name: Archive simulator tests
         run: python -m unittest honeypot.test_archive -q
+
+  # The locked install above cannot see a release that breaks REMN until someone raises a pin. This
+  # job installs the newest versions the ranges allow and runs the same tests, nightly and on demand,
+  # so the break is known the morning after the release and not on the day a stranger installs.
+  newest:
+    name: backend on the newest dependencies the ranges allow
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Install without the lock
+        run: |
+          grep -v '^-c ' backend/requirements-dev.ranges > "$RUNNER_TEMP/dev.txt"
+          pip install -r backend/requirements.ranges -r "$RUNNER_TEMP/dev.txt"
+          pip freeze
+      - name: Tests
+        run: pytest -q
 
   frontend:
     name: frontend (typecheck, lint, vitest, build)

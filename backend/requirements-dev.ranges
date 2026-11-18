@@ -1,0 +1,6 @@
+# Test and lint tools, as ranges. tools/lock_requirements.sh resolves them into
+# backend/requirements-dev.txt, against the versions backend/requirements.txt already fixes.
+-c requirements.txt
+pytest>=9.1.1,<10
+pytest-django>=4.14.0,<5
+ruff>=0.16.8,<0.18

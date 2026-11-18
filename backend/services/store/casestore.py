@@ -35,6 +35,18 @@ log = logging.getLogger(__name__)
 
 KEY_RE = re.compile(r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$")
 
+
+def settle(con: duckdb.DuckDBPyConnection) -> None:
+    """Drop what is left of the connection's last result, so the next call may register a table.
+
+    DuckDB 2 refuses register() while a result of execute() is unfinished, and fetchone() on a
+    one-row answer leaves it unfinished. Before DuckDB 2 there is no abort() and nothing to drop.
+    """
+    abort = getattr(con, "abort", None)
+    if abort is not None:
+        abort()
+
+
 # ---------------------------------------------------------------------------
 # Schemas. (name, duckdb type, pyarrow type)
 # ---------------------------------------------------------------------------
@@ -563,6 +575,7 @@ class CaseStore:
         cols = ", ".join(q(n) for n, _ in columns)
         with self.lock:
             con = self._con
+            settle(con)
             con.register("_batch", tbl)
             try:
                 if table == "iocs":
@@ -663,6 +676,7 @@ class CaseStore:
         sets = ", ".join(f"{q(c)} = e.{q(c)}" for c in ENRICH_COLUMNS)
         with self.lock:
             con = self._con
+            settle(con)
             con.register("_enrich", table)
             try:
                 con.execute(f"UPDATE mails SET {sets} FROM _enrich e WHERE mails.id = e.id")

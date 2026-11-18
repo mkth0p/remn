@@ -2,9 +2,19 @@
 
 ## Set up
 
+Windows:
+
 ```
-python -m venv .venv
+py -3.13 -m venv .venv
 .venv\Scripts\python.exe -m pip install -r backend\requirements.txt -r backend\requirements-dev.txt
+cd frontend && npm ci
+```
+
+Linux and macOS:
+
+```
+python3.13 -m venv .venv
+.venv/bin/python -m pip install -r backend/requirements.txt -r backend/requirements-dev.txt
 cd frontend && npm ci
 ```
 
@@ -25,6 +35,22 @@ npm test
 
 `pre-commit install` runs the linters and formatters on staged files; CI runs the same
 commands on every pull request and on `main`.
+
+## Dependencies
+
+`backend/requirements.txt` and `backend/requirements-dev.txt` are locks: every package, direct
+or not, at one exact version with its hashes, for every platform. Nobody edits them by hand.
+The ranges REMN accepts are in `backend/requirements.ranges` and
+`backend/requirements-dev.ranges`, each with an upper bound.
+
+```
+sh tools/lock_requirements.sh              # after changing a range
+sh tools/lock_requirements.sh --upgrade    # take the newest versions the ranges allow
+```
+
+The script needs [uv](https://docs.astral.sh/uv/). A pull request that changes a lock runs the
+whole suite on it. CI also runs the backend tests every night on the newest versions the ranges
+allow, without the lock, so a release upstream that breaks REMN shows the next morning.
 
 ## Branches
 

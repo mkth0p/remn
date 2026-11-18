@@ -184,11 +184,11 @@ def _ipv4_int_sql(expr: str) -> str:
 def _ipv6_hex_sql(expr: str) -> str:
     """An IPv6 address as its 32 hex digits (zone id dropped, '::' expanded); NULL for anything else."""
     a = f"lower(regexp_replace({expr}, '%.*$', ''))"
-    head = f"list_filter(string_split(split_part({a}, '::', 1), ':'), g -> g <> '')"
-    tail = f"list_filter(string_split(split_part({a}, '::', 2), ':'), g -> g <> '')"
+    head = f"list_filter(string_split(split_part({a}, '::', 1), ':'), lambda g: g <> '')"
+    tail = f"list_filter(string_split(split_part({a}, '::', 2), ':'), lambda g: g <> '')"
 
     def pad(groups: str) -> str:
-        return f"array_to_string(list_transform({groups}, g -> lpad(g, 4, '0')), '')"
+        return f"array_to_string(list_transform({groups}, lambda g: lpad(g, 4, '0')), '')"
 
     return (
         f"(CASE WHEN regexp_full_match({a}, '[0-9a-f:]+') AND contains({a}, ':') "
@@ -304,12 +304,12 @@ def compile_condition(field_name: str, op: str, value: Any, ctx: Ctx) -> str:
         return f"({sql} IS NULL OR CAST({sql} AS VARCHAR) = ''" + (f" OR len({sql}) = 0" if e.kind == "list" else "") + ")"
 
     if e.kind == "list":
-        lowlist = f"list_transform({sql}, x -> lower(x))"
+        lowlist = f"list_transform({sql}, lambda x: lower(x))"
         if op in ("eq", "in", "contains", "contains_any"):
             if len(vals) == 1 and op in ("eq", "contains"):
                 v = _norm(vals[0])
                 if op == "contains":
-                    return f"(list_contains({lowlist}, {ctx.p(v)}) OR list_bool_or(list_transform({lowlist}, x -> x LIKE {ctx.p('%' + _like_escape(v) + '%')} ESCAPE '\\')))"
+                    return f"(list_contains({lowlist}, {ctx.p(v)}) OR list_bool_or(list_transform({lowlist}, lambda x: x LIKE {ctx.p('%' + _like_escape(v) + '%')} ESCAPE '\\')))"
                 return f"list_contains({lowlist}, {ctx.p(v)})"
             return f"list_has_any({lowlist}, [{', '.join(ctx.p(_norm(v)) for v in vals)}])" if vals else "FALSE"
         if op == "contains_all":
@@ -322,11 +322,11 @@ def compile_condition(field_name: str, op: str, value: Any, ctx: Ctx) -> str:
                 " OR ".join(f"x LIKE {ctx.p((_like_escape(_norm(v)) + '%') if 'start' in op else ('%' + _like_escape(_norm(v))))} ESCAPE '\\'" for v in vals)
                 or "FALSE"
             )
-            cond = f"list_bool_or(list_transform({lowlist}, x -> ({pat})))"
+            cond = f"list_bool_or(list_transform({lowlist}, lambda x: ({pat})))"
             return f"NOT coalesce({cond}, FALSE)" if neg else f"coalesce({cond}, FALSE)"
         if op in ("re", "not_re"):
             pat = " OR ".join(f"regexp_matches(x, {ctx.p(_regex(v))}, 'i')" for v in vals) or "FALSE"
-            cond = f"coalesce(list_bool_or(list_transform({sql}, x -> ({pat}))), FALSE)"
+            cond = f"coalesce(list_bool_or(list_transform({sql}, lambda x: ({pat}))), FALSE)"
             return f"NOT {cond}" if op == "not_re" else cond
         if op in ("in_setting", "nin_setting"):
             items = [_norm(x) for x in _setting(ctx.settings, str(value))]
@@ -340,7 +340,7 @@ def compile_condition(field_name: str, op: str, value: Any, ctx: Ctx) -> str:
             if not strs:
                 return "FALSE"
             pat = " OR ".join(f"{_CS_FN[op]}(x, {ctx.p(s)})" for s in strs)
-            return f"coalesce(list_bool_or(list_transform({sql}, x -> ({pat}))), FALSE)"
+            return f"coalesce(list_bool_or(list_transform({sql}, lambda x: ({pat}))), FALSE)"
         raise FilterError(f"operator {op} not supported on list field {field_name}")
 
     # scalar

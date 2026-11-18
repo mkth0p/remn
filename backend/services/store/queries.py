@@ -155,7 +155,10 @@ def _group_expr(source: str, field: str, ctx: Ctx) -> tuple[str, str]:
     if source == "mails" and field == "riskBand":
         return "", "CASE WHEN risk >= 80 THEN 'critical' WHEN risk >= 60 THEN 'high' WHEN risk >= 40 THEN 'medium' WHEN risk >= 20 THEN 'low' ELSE 'clean' END"
     if source == "mails" and field == "attExt":
-        return ", UNNEST(list_transform(coalesce(json_extract_string(attachments, '$[*].realExt'), []), x -> coalesce(nullif(x, ''), '?'))) AS _u(v)", "_u.v"
+        return (
+            ", UNNEST(list_transform(coalesce(json_extract_string(attachments, '$[*].realExt'), []), lambda x: coalesce(nullif(x, ''), '?'))) AS _u(v)",
+            "_u.v",
+        )
     e = resolve(field, ctx)
     if e.kind == "list":
         return f", UNNEST({e.sql}) AS _u(v)", "_u.v"

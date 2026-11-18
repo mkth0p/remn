@@ -32,13 +32,23 @@ def message(subject, body="The requested report is attached. Kind regards.", att
     return build_row(headers, body, None, list(attachments), ParseContext(internal_domains=SETTINGS["internal_domains"]))
 
 
+def _add_javascript(pdf: PdfWriter, script: str) -> None:
+    """A document-level script, by whichever call this pypdf has: add_js left in 7.0."""
+    try:
+        from pypdf.actions import JavaScript
+    except ImportError:
+        pdf.add_js(script)
+    else:
+        pdf.add_open_action(JavaScript(script))
+
+
 def examples():
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("report.html", "<!doctype html><html><body><h1>Weekly report</h1><p>All work completed.</p></body></html>")
     pdf = PdfWriter()
     pdf.add_blank_page(width=595, height=842)
-    pdf.add_js("var total = 42;")
+    _add_javascript(pdf, "var total = 42;")
     pb = io.BytesIO()
     pdf.write(pb)
     controls = [

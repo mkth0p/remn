@@ -1,5 +1,8 @@
 version: 2
 updates:
+  # backend/requirements.txt and requirements-dev.txt are locks: every package, exact, with hashes.
+  # A bump here changes pins one by one and cannot add a package a new version starts to need, so
+  # when its checks fail the fix is tools/lock_requirements.sh --upgrade, not a hand edit.
   - package-ecosystem: pip
     directory: /backend
     schedule:
