@@ -9,7 +9,7 @@ import pyarrow as pa
 
 from services.analysis import baseline
 from services.analysis.mail_calibration import VERSION, calibrate_mail
-from services.store.casestore import rows_to_dicts
+from services.store.casestore import rows_to_dicts, settle
 
 FIELDS = ("risk", "flags", "attachments", "maxAttachmentRisk", "assessment")
 
@@ -51,6 +51,7 @@ def store(store: Any, settings: dict[str, Any], job: Any = None) -> dict[str, An
                     if k != "version":
                         summary[k] += result["summary"][k]
                 updates = [{**r, "attachments": json.dumps(r["attachments"]), "assessment": json.dumps(r["assessment"])} for r in result["rows"]]
+                settle(con)
                 con.register(
                     "_mail_calibration",
                     pa.Table.from_pylist(

@@ -53,6 +53,9 @@ python3.13 -m venv .venv
 cd frontend && npm ci && npm run build && cd ..
 ```
 
+`backend/requirements.txt` fixes every package at an exact version with its hashes, so two
+installs of one commit are the same install; pip refuses a file whose hash differs.
+
 Where the distribution's Python is older than 3.13 (Ubuntu 24.04 ships 3.12), install it
 from the deadsnakes PPA, with `uv python install 3.13`, or with pyenv. Every package in
 `requirements.txt` has a Linux wheel and so has `yara-python`; `libpff-python` is the one

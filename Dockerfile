@@ -34,7 +34,8 @@ RUN python -m venv /opt/venv && /opt/venv/bin/pip install --upgrade pip
 COPY backend/requirements.txt /tmp/requirements.txt
 # extra packages go in here, e.g. --build-arg EXTRA_PIP="yara-python libpff-python"
 ARG EXTRA_PIP=""
-RUN /opt/venv/bin/pip install -r /tmp/requirements.txt \
+# requirements.txt fixes every version and hash; the extras are the operator's choice and are not pinned
+RUN /opt/venv/bin/pip install --require-hashes -r /tmp/requirements.txt \
     && if [ -n "$EXTRA_PIP" ]; then /opt/venv/bin/pip install $EXTRA_PIP; fi \
     && /opt/venv/bin/python -m pip uninstall -y pip
 

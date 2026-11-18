@@ -5,6 +5,14 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- A fresh install works again and stays the same install. `backend/requirements.txt` had lower
+  bounds only, so DuckDB 2.0 and pypdf 7.0 broke every import into the server store and 21 test
+  files on the day they were released. The store now runs on DuckDB 1.5 and 2 (the new lambda
+  syntax, and no table registered over an unfinished result). `backend/requirements.txt` and
+  `requirements-dev.txt` are locks with hashes for every platform, written by
+  `tools/lock_requirements.sh` from ranges that all have an upper bound, and the image installs
+  from them. CI runs every night on `main`, and a nightly job runs the backend tests on the newest
+  versions the ranges allow.
 - Each case adapts to its own machines and to the analyst's review. After every run, a rule that
   stands on its own on at least half the case's hosts is folded per host as that network's
   background, whatever the clean machines said, and each finding of a rule the analyst marks false
