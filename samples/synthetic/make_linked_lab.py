@@ -97,6 +97,9 @@ def pdf_report(js=False):
 def zip_report():
     buf = io.BytesIO()
     info = zipfile.ZipInfo("report.html", (2026, 8, 17, 8, 0, 0))
+    # zipfile stamps the archive with the system that wrote it (0 on Windows, 3 elsewhere): fixed,
+    # so the lab is the same bytes wherever it is generated and the golden corpus holds on Windows
+    info.create_system = 3
     with zipfile.ZipFile(buf, "w") as z:
         z.writestr(info, "<!doctype html><html><body><h1>Weekly report</h1><p>All 42 deliverables accepted. No action required.</p></body></html>")
     return buf.getvalue()
