@@ -13,6 +13,17 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   `tools/lock_requirements.sh` from ranges that all have an upper bound, and the image installs
   from them. CI runs every night on `main`, and a nightly job runs the backend tests on the newest
   versions the ranges allow.
+- A release can be checked, and CI runs on what the files say. A `vX.Y.Z` tag publishes the tagged
+  source with the built frontend and an `INSTALL.md` that works as written, a CycloneDX bill of
+  materials, SHA-256 sums and the Docker image on GitHub Container Registry, each with build
+  provenance; the tag has to equal the version in `backend/forensic/build.py`
+  (`tools/check_version.py`, steps in `docs/releasing.md`). Every workflow starts with read access
+  only and every action is pinned to a commit. The optional parsers (`libpff-python`,
+  `yara-python` and `py7zr`, which the 7z reader needed and nothing declared) are a third lock
+  with hashes; the Docker build installs the names in `EXTRA_PIP` from it, and CI installs it so
+  the 7z test runs. The backend tests also run on Windows and macOS. The image has a health check,
+  the public proxy closes a connection that sends no headers within ten seconds, and a nightly or
+  weekly run that fails opens an issue instead of failing unseen.
 - Each case adapts to its own machines and to the analyst's review. After every run, a rule that
   stands on its own on at least half the case's hosts is folded per host as that network's
   background, whatever the clean machines said, and each finding of a rule the analyst marks false
