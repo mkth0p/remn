@@ -87,4 +87,6 @@ EXPOSE 8000
 ENV FORENSIC_ALLOWED_HOSTS=localhost,127.0.0.1 FORENSIC_TMP_DIR=/app/backend/tmp
 ARG REMN_BUILD_ID=""
 ENV REMN_BUILD_ID=$REMN_BUILD_ID
+# "docker ps" and an orchestrator see a server that stopped answering, not only one that exited
+HEALTHCHECK --interval=30s --timeout=6s --start-period=40s --retries=3 CMD ["python", "tools/healthcheck.py"]
 CMD ["python", "backend/run.py", "--host", "0.0.0.0", "--port", "8000"]

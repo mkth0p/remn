@@ -6,6 +6,20 @@
 # That process runs hostile PST, OLE and EVTX through the most CVE-prone libraries of the stack;
 # serving the page from it meant a parser taken over could hand every later visitor a page of its
 # own, and a parser kept busy delayed the page. Now it answers /api/* and nothing else.
+#
+# The global options come first. A connection gets ten seconds to send its request headers and is
+# closed after two idle minutes, so a client that opens connections and sends nothing, or sends a
+# header a byte at a time, does not hold them. The body and the response have no limit here on
+# purpose: an upload chunk on a slow line and a streamed parse both run for minutes.
+{
+	servers {
+		timeouts {
+			read_header 10s
+			idle 2m
+		}
+	}
+}
+
 {$REMN_DOMAIN} {
 	encode zstd gzip
 	header {
