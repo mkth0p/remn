@@ -216,7 +216,9 @@ def _named_list(items: Any, name_key: str = "Name", value_key: str = "Value") ->
     return out
 
 
-_EMAIL_RE = re.compile(r"[\w.+'-]+@[\w-]+(?:\.[\w-]+)+")
+# an address starts where a run of address characters starts: retrying from every character of a
+# long run with no "@" in it made the search quadratic in the length of the field
+_EMAIL_RE = re.compile(r"(?<![\w.+'-])[\w.+'-]+@[\w-]+(?:\.[\w-]+)+")
 
 
 def _json_value(v: Any) -> Any:

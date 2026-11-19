@@ -508,12 +508,24 @@ class CaseStore:
         except duckdb.Error:
             pass
         # the store never reads or writes files through SQL: block read_csv / COPY TO / ATTACH / extension
-        # loading so the raw SQL endpoint and the analyst's `sql` tool cannot touch the server's filesystem
+        # loading so the raw SQL endpoint and the analyst's `sql` tool cannot touch the server's filesystem.
+        # The settings are read back, and a store whose lockdown did not take effect (a setting renamed
+        # in a new engine version, say) is closed rather than opened without it. A statement may fail
+        # with the lockdown in place: a second connection to a database this process has open shares
+        # its configuration, already locked.
+        for statement in ("SET enable_external_access = false", "SET lock_configuration = true"):
+            try:
+                self._con.execute(statement)
+            except duckdb.Error as exc:
+                log.debug("case store %s: %s: %s", key, statement, exc)
         try:
-            self._con.execute("SET enable_external_access = false")
-            self._con.execute("SET lock_configuration = true")
-        except duckdb.Error:
-            pass
+            applied = self._con.execute("SELECT current_setting('enable_external_access'), current_setting('lock_configuration')").fetchall()
+        except duckdb.Error as exc:
+            applied = [str(exc)]
+        if applied != [(False, True)]:
+            self._con.close()
+            log.error("case store %s not opened: its lockdown did not take effect (%s)", key, applied)
+            raise RuntimeError("case store not opened: its lockdown did not take effect")
         self._init_schema()
         self._next: dict[str, int] = {}
         for t in ("events", "mails", "attachments", "urls"):
