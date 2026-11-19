@@ -303,10 +303,12 @@ case backup/restore using content provenance. Removed evidence is excluded from 
 reviews remain archived. Existing links without member hashes fall back to database
 identity and may need review again after restore.
 
-Six collection rules cover user-writable persistence paths, encoded execution,
-script-host connections, remote execution service names, Defender alert text and
-Prefetch script/admin tool execution. They are triage leads, not malicious verdicts,
-and have the same tested behavior in the browser and SQL engines.
+Fourteen collection rules cover persistence launched from temporary, public, download or
+AppData folders or through a script host, encoded execution, script-host connections,
+remote execution service names, Defender detections, unwanted applications, exclusions and
+alert text, Prefetch script/admin tool execution, executables and installed programs in
+user-writable locations, and unquoted service paths. They are triage leads, not malicious
+verdicts, and have the same tested behavior in the browser and SQL engines.
 
 ## Limits and synthetic verification
 
