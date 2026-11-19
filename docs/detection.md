@@ -361,9 +361,12 @@ machines a quarter less, half when it fired on every one of them
 
 Mail rules are calibrated on mail corpora instead (below).
 
-At this commit, 1,023 of the 3,008 event rules fire on a recording of what they look
-for and 1,985 are leads; 457 of the 457 SigmaHQ rules with a sample fire on it; on the
-clean machines 170 of the 2,794 rules whose log sources they have fired at least once.
+At this commit, 1,020 of the 3,009 event rules fire on a recording of what they look
+for and 1,989 are leads; 457 of the 457 SigmaHQ rules with a sample fire on it; on the
+clean machines 168 of the 2,794 rules whose log sources they have fired at least once.
+The 116 rules whose logic changed on 2026-11-19 (12 of REMN's own, and 104 of the SigmaHQ
+packs, converted again with the case of a regex kept and keywords written as events hold them)
+were measured again that day on the same versions; the others carry the measure of 2026-09-25.
 Measuring found SigmaHQ rules that could never fire (the AppX deployment channel, comparisons
 with true) and PowerShell rules blind to PowerShell 7's log, since fixed in the converter.
 EVTX-to-MITRE-Attack, added as a source on 2026-09-25, gave 53 leads their first recorded
