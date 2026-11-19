@@ -75,27 +75,40 @@ threshold: ">= 5"
 ---
 id: win-kerberos-preauth-bruteforce
 title: Kerberos pre-authentication failures burst (4771)
-description: Ten or more Kerberos pre-auth failures (4771, wrong password 0x18) from the same client within 10 minutes.
+description: >-
+  Ten or more Kerberos pre-authentication failures for a wrong password (4771 with status 0x18) from the same
+  client within 10 minutes. The other pre-authentication failures are left out: an expired password (0x17), a
+  disabled or locked account (0x12) and a clock out of step (0x25) repeat from every device that still holds old
+  credentials, without anyone guessing.
 severity: high
 source: events
 attack: [T1110.001]
 tags: [authentication, kerberos]
+falsepositives:
+  - a device or a service that keeps retrying a password changed since it was stored (a phone, a mapped drive, a scheduled task)
+references:
+  - https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4771
 where:
   eventId: 4771
+  status: "0x18"
 group_by: [ipAddress]
 window: 10m
 threshold: ">= 10"
 ---
 id: win-kerberos-user-enumeration
 title: Kerberos user enumeration (4768 / 4771 with unknown principal 0x6)
-description: TGT requests for non-existent accounts (KDC error 0x6) from the same client.
+description: Five or more TGT requests for accounts that do not exist (KDC error 0x6, and no other code) from the same client within 30 minutes.
 severity: medium
 source: events
 attack: [T1087.002]
 tags: [authentication, kerberos, recon]
+falsepositives:
+  - a device or an application still configured with an account that has been deleted or renamed
+references:
+  - https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4768
 where:
   eventId|in: [4768, 4771]
-  status|contains: "0x6"
+  status: "0x6"
 group_by: [ipAddress]
 window: 30m
 threshold: ">= 5"
