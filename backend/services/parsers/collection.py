@@ -454,15 +454,17 @@ def _xml_records(path: str, name: str) -> Iterator[dict[str, Any]]:
             }
 
 
-# Bytes a single structured export may be parsed from. Enforced while reading, not on the file
-# size, so the records parsed before the ceiling survive and the member is reported as partial.
+# Bytes a text export may be parsed from. Enforced while reading, not on the file size, so the
+# records parsed before the ceiling survive and the member is reported as partial.
 MAX_PARSE_BYTES = 64 * 1024**2
-# A delimited export is read one row at a time and each row leaves as soon as it is normalised, so
-# its size costs time, not memory. MFTECmd's $MFT and $J output runs to gigabytes, and cutting it at
-# 64 MiB kept the first few percent of the volume's files and changes and lost the rest. It is read
-# to the package's own per-member ceiling instead; a JSON document, which is read whole, keeps the
-# smaller one.
+# A delimited or JSON export is read one record at a time and each record leaves as soon as it is
+# normalised, so its size costs time, not memory. MFTECmd's $MFT and $J output and Velociraptor's
+# event log, MFT and USN results run to gigabytes, and cutting them at 64 MiB kept the first few
+# percent of the volume and lost the rest. They are read to the package's own per-member ceiling.
 MAX_STREAM_BYTES = 4 * 1024**3
+# What one JSON record may hold in memory while it is parsed. Larger than any record a collector
+# writes; past it the member stops, with the records before it kept.
+MAX_RECORD_CHARS = 64 * 1024**2
 
 
 class _ByteBudget(io.RawIOBase):
@@ -803,7 +805,7 @@ def records(path: str, name: str, notes: dict[str, Any] | None = None) -> Iterat
             notes["encoding"] = encoding
         # Lenient because the encoding above is chosen, not guessed at random: what "replace"
         # covers here is a corrupt byte in one line, and losing the file over that helps nobody.
-        budget = MAX_STREAM_BYTES if name.lower().endswith((".csv", ".tsv")) else MAX_PARSE_BYTES
+        budget = MAX_STREAM_BYTES if name.lower().endswith((".csv", ".tsv", ".json", ".jsonl", ".ndjson")) else MAX_PARSE_BYTES
         with io.TextIOWrapper(io.BufferedReader(_ByteBudget(raw, budget)), encoding=encoding, errors="replace", newline="") as fh:
             if category(name) == "defender" and name.lower().endswith((".txt", ".log")):
                 yield from _defender_records(fh, name, notes)
@@ -860,26 +862,8 @@ def records(path: str, name: str, notes: dict[str, Any] | None = None) -> Iterat
                         yield {"Message": line, "LineNumber": index + 1}
                 if record:
                     yield record
-            elif name.lower().endswith((".jsonl", ".ndjson")):
-                for line in fh:
-                    if line.strip():
-                        row = json.loads(line)
-                        if not isinstance(row, dict):
-                            raise ValueError("expected an object per line")
-                        yield row
-            elif name.lower().endswith(".json"):
-                text = fh.read()
-                try:
-                    value = json.loads(text)
-                except json.JSONDecodeError as exc:
-                    if exc.msg != "Extra data":
-                        raise
-                    # Velociraptor writes results/<Artifact>.json as one object per line
-                    value = [json.loads(line) for line in text.splitlines() if line.strip()]
-                rows = value if isinstance(value, list) else value.get("records", [value]) if isinstance(value, dict) else None
-                if not isinstance(rows, list) or any(not isinstance(r, dict) for r in rows):
-                    raise ValueError("expected an object, array of objects, or records array")
-                yield from rows
+            elif name.lower().endswith((".json", ".jsonl", ".ndjson")):
+                yield from _json_records(fh, notes)
             else:
                 sample = fh.read(8192)
                 fh.seek(0)
@@ -898,6 +882,155 @@ def records(path: str, name: str, notes: dict[str, Any] | None = None) -> Iterat
                 for row in reader:
                     if row:
                         yield _row_to_dict(row, header, notes)
+
+
+class _JsonText:
+    """JSON values read one at a time from a text stream, with only the value being parsed (and
+    the rest of the chunk it arrived in) held in memory."""
+
+    CHUNK = 1024**2
+
+    def __init__(self, fh) -> None:
+        self.fh = fh
+        self.buf = ""
+        self.pos = 0
+        self.eof = False
+        self.decoder = json.JSONDecoder()
+
+    def _more(self, size: int) -> bool:
+        if self.eof:
+            return False
+        chunk = self.fh.read(size)
+        if not chunk:
+            self.eof = True
+            return False
+        self.buf = self.buf[self.pos :] + chunk
+        self.pos = 0
+        return True
+
+    def peek(self) -> str:
+        """The next character that is not whitespace, without consuming it; "" at the end."""
+        while True:
+            while self.pos < len(self.buf) and self.buf[self.pos] in " \t\r\n":
+                self.pos += 1
+            if self.pos < len(self.buf):
+                return self.buf[self.pos]
+            if not self._more(self.CHUNK):
+                return ""
+
+    def take(self, text: str) -> bool:
+        """Consume text if it comes next (after whitespace)."""
+        self.peek()
+        while len(self.buf) - self.pos < len(text) and self._more(self.CHUNK):
+            pass
+        if self.buf.startswith(text, self.pos):
+            self.pos += len(text)
+            return True
+        return False
+
+    def value(self) -> Any:
+        """The next value. A value cut by the end of the chunk is retried with more text, the read
+        doubling each time so a large record costs one parse per doubling, not one per chunk."""
+        self.peek()
+        size = self.CHUNK
+        while True:
+            try:
+                value, end = self.decoder.raw_decode(self.buf, self.pos)
+            except json.JSONDecodeError as exc:
+                # A value the chunk cut short fails at the end of the text, or inside a string that
+                # is still open; anything else is a damaged record, and more text will not mend it.
+                cut = exc.pos >= len(self.buf) - 1 or exc.msg.startswith("Unterminated string")
+                if not cut:
+                    raise ValueError(f"JSON is malformed ({exc.msg}); records beyond it were not read") from None
+                if len(self.buf) - self.pos > MAX_RECORD_CHARS:
+                    raise ValueError(f"a JSON record is larger than {MAX_RECORD_CHARS // 1024**2:,} MiB; records beyond it were not read") from None
+                if not self._more(size):
+                    raise ValueError("JSON ends inside a record; records beyond it were not read") from None
+                size *= 2
+                continue
+            # a number or a literal at the very end of the chunk may continue in the next one
+            if end == len(self.buf) and not isinstance(value, (dict, list, str)) and self._more(size):
+                continue
+            self.pos = end
+            return value
+
+
+def _json_records(fh, notes: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    """The records of a JSON export, one at a time: an array of objects, a {"records": [...]}
+    document, a single object (indented or not), or one object per line as Velociraptor writes its
+    results/<Artifact>.json and the Zimmerman parsers their --json output.
+
+    The whole file used to be read and parsed at once, so a result file past the parse ceiling gave
+    no row at all, and one line that did not parse failed every line around it. A line or array item
+    that is not an object, and a line that does not parse, is counted in notes["unreadableRecords"]
+    and passed over; a document that breaks off ends the member, with the records before it kept.
+    """
+    reader = _JsonText(fh)
+
+    def unreadable() -> None:
+        notes["unreadableRecords"] = notes.get("unreadableRecords", 0) + 1
+
+    def array() -> Iterator[dict[str, Any]]:
+        if reader.take("]"):
+            return
+        while True:
+            item = reader.value()
+            if isinstance(item, dict):
+                yield item
+            else:
+                unreadable()
+            if reader.take(","):
+                continue
+            if reader.take("]"):
+                return
+            raise ValueError("JSON array is malformed between two records; records beyond it were not read")
+
+    first = reader.peek()
+    if first == "[":
+        reader.take("[")
+        yield from array()
+        if reader.peek():
+            raise ValueError("text follows the JSON array and was not read")
+    elif first == "{" and reader.take("{") and reader.take('"records"') and reader.take(":") and reader.take("["):
+        yield from array()
+        if not reader.take("}") or reader.peek():
+            raise ValueError("a records document holds more than its records array; what follows it was not read")
+    elif first == "{":
+        # One record per line is the common case and the one that can pass over a damaged line.
+        # An object indented over several lines opens with a line holding only its brace.
+        fh.seek(0)
+        lines = iter(lambda: fh.readline(MAX_RECORD_CHARS + 1), "")
+        opening = next((line for line in lines if line.strip()), "")
+        fh.seek(0)
+        reader = _JsonText(fh)
+        if opening.strip() == "{":
+            while reader.peek():
+                record = reader.value()
+                if isinstance(record, dict):
+                    yield record
+                else:
+                    unreadable()
+            return
+        for line in iter(lambda: fh.readline(MAX_RECORD_CHARS + 1), ""):
+            if len(line) > MAX_RECORD_CHARS and not line.endswith("\n"):
+                unreadable()
+                # the rest of an oversized line is read past, never held
+                while (rest := fh.readline(MAX_RECORD_CHARS)) and not rest.endswith("\n"):
+                    pass
+                continue
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except ValueError:
+                unreadable()
+                continue
+            if isinstance(record, dict):
+                yield record
+            else:
+                unreadable()
+    elif first:
+        raise ValueError("expected an object, an array of objects, a records array or one object per line")
 
 
 def _dhcp_records(fh, notes: dict[str, Any]) -> Iterator[dict[str, Any]]:

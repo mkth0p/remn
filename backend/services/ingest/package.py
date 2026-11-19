@@ -671,6 +671,8 @@ class PackageSource:
                         notes["xmlRepaired"] = source.stats.repaired
                 if source is not None and source.stats.errors:
                     raise ValueError(f"parser reported {source.stats.errors} error(s); any emitted rows are partial")
+                if notes.get("unreadableRecords"):
+                    raise ValueError(f"{notes['unreadableRecords']:,} record(s) could not be read and are not in the case; the records read are kept")
                 entry["status"] = "parsed"
             except Exception as exc:  # noqa: BLE001
                 entry.update(status="error", reason=str(exc)[:300])
@@ -683,6 +685,8 @@ class PackageSource:
                     decode_started = None
                 # Every compromise the parser made to read this member is reported on it, so a
                 # table that looks complete cannot quietly be one that was repaired or cut short.
+                if notes.get("unreadableRecords"):
+                    entry["unreadable"] = notes["unreadableRecords"]
                 if notes:
                     encoding = notes.get("encoding")
                     repaired = notes.get("repairedRows", 0)
@@ -708,7 +712,8 @@ class PackageSource:
                         )
                     if truncated:
                         said.append(f"kept the first {truncated:,} lines; the file is longer than that")
-                    entry["note"] = "; ".join(said)
+                    if said:
+                        entry["note"] = "; ".join(said)
                 # The parsers hold the member file open across their yields, and CPython only
                 # clears this frame after the finally block, so the handles are still live here.
                 # Windows refuses to unlink an open file, which would both raise out of generator

@@ -25,13 +25,18 @@ version. Original fields remain in `data`. Original archive bytes and unsupporte
 member contents are not retained by either store; keep the acquisition separately.
 Case migration, export/import and deletion include normalized rows and provenance.
 
-A delimited export (CSV, TSV) is read one row at a time and streamed to the case, so it is read
-to the 4 GiB member ceiling: MFTECmd's `$MFT` and `$J` output runs to gigabytes, and the 64 MiB
-ceiling it used to share with JSON kept only the first few percent of a volume. A JSON export,
-which is read whole, is parsed under a 64 MiB budget counted while reading, not checked against
-the file size. An export past its budget contributes every record read before the ceiling and is
-reported as an error member with the reason, rather than contributing nothing but a hash, and the
-report's "what the evidence cannot show" names every member read only in part.
+A delimited export (CSV, TSV) and a JSON export (an array of objects, a `records` array, an
+object, or one object per line as Velociraptor writes its `results/<Artifact>.json`) are read one
+record at a time and streamed to the case, so they are read to the 4 GiB member ceiling: MFTECmd's
+`$MFT` and `$J` output and Velociraptor's event log, MFT and USN results run to gigabytes. Other
+text exports are parsed under a 64 MiB budget counted while reading, not checked against the file
+size. An export past its budget contributes every record read before the ceiling and is reported as
+an error member with the reason, rather than contributing nothing but a hash, and the report's
+"what the evidence cannot show" names every member read only in part. A JSON line that does not
+parse, and a line or array item that is not an object, is passed over and counted: the records
+around it are kept, and the member is an error member whose reason and `unreadable` field give the
+number. A JSON record larger than 64 MiB, or a document that breaks off, ends the member with the
+records before it kept.
 
 ## Triage collections
 
@@ -293,7 +298,8 @@ and have the same tested behavior in the browser and SQL engines.
 ## Limits and synthetic verification
 
 Packages allow 20,000 archive entries, 4 GiB per member and 16 GiB expanded data.
-JSON exports cap at 64 MiB per member, delimited exports at the 4 GiB member ceiling, manifests at 64 KiB. Members stream to
+Delimited and JSON exports are read to the 4 GiB member ceiling, one JSON record to 64 MiB, other
+text exports to 64 MiB, manifests to 64 KiB. Members stream to
 temporary files; archive paths are never used as extraction destinations. Links,
 encrypted members and traversal paths are skipped. Temporary files are cleaned up.
 An inventory cut short is marked incomplete.

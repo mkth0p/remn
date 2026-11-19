@@ -360,13 +360,64 @@ def test_a_large_mft_export_is_read_whole_in_a_package(tmp_path, monkeypatch):
     assert source.counts["events"] == 400 and source.ranges["eventRange"]["firstTs"] == ms("2026-09-01 10:00:00.1234567")
 
 
-def test_a_json_export_still_stops_at_the_parse_limit_and_says_so(tmp_path, monkeypatch):
-    monkeypatch.setattr(collection, "MAX_PARSE_BYTES", 16 * 1024)
-    body = json.dumps([{"Name": f"proc{i}.exe", "Id": i, "Path": "C:\\Windows\\System32\\proc.exe"} for i in range(1000)])
+def _package(tmp_path, members: dict[str, str]) -> tuple[PackageSource, list[dict]]:
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w") as z:
-        z.writestr("Processes/processes.json", body)
-    source = PackageSource("pkg.zip", None, out.getvalue(), str(tmp_path), ParseContext(analyze_attachments=False))
-    list(source)
-    member = next(f for f in source.files if f["name"].endswith("processes.json"))
-    assert member["status"] == "error" and "parse limit" in member["reason"]
+        for name, body in members.items():
+            z.writestr(name, body)
+    source = PackageSource("collection.zip", None, out.getvalue(), str(tmp_path), ParseContext(analyze_attachments=False))
+    return source, list(source)
+
+
+def _service(i: int) -> dict:
+    return {"Name": f"svc{i}", "DisplayName": f"Service {i}", "PathName": f"C:\\Program Files\\Vendor\\svc{i}.exe", "StartMode": "Auto", "State": "Running"}
+
+
+def test_a_velociraptor_result_file_past_the_old_json_ceiling_gives_every_record(tmp_path, monkeypatch):
+    # Velociraptor names its line-delimited results .json; read whole, one past the ceiling gave 0 rows
+    monkeypatch.setattr(collection, "MAX_PARSE_BYTES", 16 * 1024)
+    body = "".join(json.dumps(_service(i)) + "\n" for i in range(2000))
+    assert len(body) > 8 * 16 * 1024
+    source, rows = _package(tmp_path, {"results/Windows.System.Services.json": body})
+    member = next(f for f in source.files if f["name"].endswith("Services.json"))
+    assert member["status"] == "parsed" and member["count"] == len(rows) == 2000
+    assert [r["serviceName"] for r in rows[:2]] == ["svc0", "svc1"] and rows[-1]["serviceName"] == "svc1999"
+
+
+def test_a_json_array_export_is_read_a_record_at_a_time(tmp_path, monkeypatch):
+    monkeypatch.setattr(collection, "MAX_PARSE_BYTES", 16 * 1024)
+    compact = json.dumps([{"Name": f"proc{i}.exe", "Id": i, "Path": "C:\\Windows\\System32\\proc.exe"} for i in range(1000)])
+    indented = json.dumps({"records": [{"Name": f"task{i}", "TaskName": f"\\Vendor\\task{i}"} for i in range(500)]}, indent=2)
+    source, rows = _package(tmp_path, {"Processes/processes.json": compact, "Scheduled Tasks/tasks.json": indented})
+    by_member = {f["name"]: f for f in source.files}
+    assert by_member["Processes/processes.json"]["status"] == "parsed" and by_member["Processes/processes.json"]["count"] == 1000
+    assert by_member["Scheduled Tasks/tasks.json"]["status"] == "parsed" and by_member["Scheduled Tasks/tasks.json"]["count"] == 500
+    assert sorted(r["processId"] for r in rows if r["artifactType"] == "process") == list(range(1000))
+
+
+def test_records_that_cannot_be_read_are_counted_and_the_rest_kept(tmp_path):
+    lines = [json.dumps(_service(0)), '{"Name": "svc1", "PathName": "C:\\\\cut', "[1, 2]", json.dumps(_service(3)), ""]
+    source, rows = _package(tmp_path, {"results/Windows.System.Services.json": "\n".join(lines)})
+    member = next(f for f in source.files if f["name"].endswith("Services.json"))
+    # before: the first bad line ended the member with no row at all
+    assert [r["serviceName"] for r in rows] == ["svc0", "svc3"]
+    assert member["unreadable"] == 2 and member["status"] == "error"
+    assert "2 record(s) could not be read" in member["reason"]
+
+
+def test_a_json_record_past_the_record_ceiling_ends_the_member_and_keeps_what_was_read(tmp_path, monkeypatch):
+    monkeypatch.setattr(collection, "MAX_RECORD_CHARS", 4096)
+    monkeypatch.setattr(collection._JsonText, "CHUNK", 1024)
+    items = [_service(0), {**_service(1), "Description": "x" * 10_000}, _service(2)]
+    source, rows = _package(tmp_path, {"Services/services.json": json.dumps(items, indent=1)})
+    member = next(f for f in source.files if f["name"].endswith("services.json"))
+    assert [r["serviceName"] for r in rows] == ["svc0"]
+    assert member["status"] == "error" and "larger than" in member["reason"]
+
+
+def test_a_truncated_json_array_keeps_the_records_before_the_cut(tmp_path):
+    body = json.dumps([_service(i) for i in range(5)])
+    source, rows = _package(tmp_path, {"Services/services.json": body[: len(body) - 40]})
+    member = next(f for f in source.files if f["name"].endswith("services.json"))
+    assert [r["serviceName"] for r in rows] == ["svc0", "svc1", "svc2", "svc3"]
+    assert member["status"] == "error"
