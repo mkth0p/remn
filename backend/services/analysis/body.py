@@ -273,8 +273,10 @@ _VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link"
 # zero-width spaces/joiners, NBSP, soft hyphen, braille blank): padding, not hidden text.
 _INVISIBLE_RE = re.compile("[\u034f\u200b\u200c\u200d\u2060-\u2064\ufeff\u00ad\u2800\u00a0\u200e\u200f\u180e\u061c]+")
 _STYLE_ATTR_RE = re.compile(r"""(?is)\bstyle\s*=\s*(?:"([^"]*)"|'([^']*)')""")
-_SCRIPT_TAG_RE = re.compile(r"(?is)<script\b([^>]*)>")
-_SCRIPT_TYPE_RE = re.compile(r"""(?is)\btype\s*=\s*["']?\s*([^"'\s>]+)""")
+# a tag searched from each opening stops at the next opening, so an unclosed one is not rescanned;
+# the spaces after a quote belong to it, so two runs of spaces are not split every way
+_SCRIPT_TAG_RE = re.compile(r"(?is)<script\b((?:(?!<script\b)[^>])*)>")
+_SCRIPT_TYPE_RE = re.compile(r"""(?is)\btype\s*=\s*(?:["']\s*)?([^"'\s>]+)""")
 
 
 def _has_inline_hidden_style(html: str) -> bool:

@@ -21,7 +21,9 @@ MAX_ENTRIES_ANALYZED = 40
 _UTF16_EXE_RE = re.compile(
     rb"(?i)\.\x00(?:e\x00x\x00e|l\x00n\x00k|d\x00l\x00l|j\x00s|v\x00b\x00s|b\x00a\x00t|c\x00m\x00d|h\x00t\x00a|p\x00s\x001|s\x00c\x00r|m\x00s\x00i|w\x00s\x00f|c\x00p\x00l)\x00"
 )
-_ASCII_EXE_RE = re.compile(rb"(?i)[A-Z0-9_\-. ]{1,60}\.(exe|lnk|dll|js|vbs|bat|cmd|hta|ps1|scr|msi|wsf|cpl)\b")
+# the lookahead names the first letters of the extensions: on a long run of dots each of the 60
+# positions a name may end at tried all thirteen extensions, five microseconds a byte
+_ASCII_EXE_RE = re.compile(rb"(?i)[A-Z0-9_\-. ]{1,60}\.(?=[bcdehjlmpsvw])(exe|lnk|dll|js|vbs|bat|cmd|hta|ps1|scr|msi|wsf|cpl)\b")
 
 
 def bounded_decompress(fmt: str, data: bytes, limit: int) -> tuple[bytes, bool]:
@@ -234,7 +236,7 @@ def analyze_archive(
                     txt = chunk.decode("utf-16-le", "ignore")
                 except Exception:  # noqa: BLE001
                     continue
-                cand = re.findall(r"[\w\-. ]{1,60}\.(?:exe|lnk|dll|js|vbs|bat|cmd|hta|ps1|scr|msi|wsf|cpl)", txt, re.I)
+                cand = re.findall(r"[\w\-. ]{1,60}\.(?=[bcdehjlmpsvw])(?:exe|lnk|dll|js|vbs|bat|cmd|hta|ps1|scr|msi|wsf|cpl)", txt, re.I)
                 if cand:
                     names.add(cand[-1].strip())
             for m in _ASCII_EXE_RE.finditer(data[:20_000_000]):

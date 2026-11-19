@@ -94,8 +94,10 @@ _ACCOUNT_CHANGES = {4720, 4722, 4724, 4728, 4732, 4738, 4756}
 _SERVICE_AFTER_SHARE = 5 * 60_000
 # the pipes a service is created through remotely: the service manager's and the tools' that install one
 _SERVICE_PIPES = frozenset({"svcctl", "psexesvc", "remcom", "paexec", "csexec"})
-# a service's program: the file an image path runs (quoted or not, with its arguments after it)
-_SERVICE_PROGRAM = re.compile(r"(?i)([^\\/\"\s]+\.(?:exe|com|bat|cmd|ps1|dll|sys|scr))(?=$|[\"\s])")
+# a service's program: the file an image path runs (quoted or not, with its arguments after it),
+# tried only where a run of name characters starts. A match inside a run is also found from its
+# start, and retrying from each character of a long run was quadratic.
+_SERVICE_PROGRAM = re.compile(r"(?i)(?<![^\\/\"\s])([^\\/\"\s]+\.(?:exe|com|bat|cmd|ps1|dll|sys|scr))(?=$|[\"\s])")
 _RDP_MATCH = 2 * 60_000
 # a process's creator is the latest creation of its id before it: within a week when the record
 # names the parent's program and it matches (explorer or a service runs for days), within a day

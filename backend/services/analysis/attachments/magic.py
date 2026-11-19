@@ -198,7 +198,8 @@ def analyze_name(name: str | None) -> dict[str, Any]:
         flags.append("double_extension")
     if any(c in n for c in _RTLO_CHARS):
         flags.append("rtlo_filename")
-    if re.search(r"\s{5,}\.", n):
+    # the run of spaces is only tried from its start, not again from each of its spaces
+    if re.search(r"(?<!\s)\s{5,}\.", n):
         flags.append("padded_filename")
     if len(n) > 120:
         flags.append("long_filename")

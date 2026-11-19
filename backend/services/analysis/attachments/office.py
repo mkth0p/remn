@@ -16,8 +16,9 @@ log = logging.getLogger(__name__)
 MAX_PART_BYTES = 32 * 1024 * 1024
 
 _DDE_RE = re.compile(rb"(?i)DDE(?:AUTO)?\b|\\ddeauto|\\dde\b|\bDDE\x00(?:A\x00U\x00T\x00O\x00)?")
-_DDE_FIELD_RE = re.compile(rb"(?i)(?:<w:instrText[^>]*>\s*)?DDE(?:AUTO)?[\s\"'\\][^<]{0,200}")
-_EXT_REL_RE = re.compile(rb"(?is)<Relationship\b[^>]*?/?>")
+# a tag searched from each opening stops at the next opening, so an unclosed one is not rescanned
+_DDE_FIELD_RE = re.compile(rb"(?i)(?:<w:instrText(?:(?!<w:instrText)[^>])*>\s*)?DDE(?:AUTO)?[\s\"'\\][^<]{0,200}")
+_EXT_REL_RE = re.compile(rb"(?is)<Relationship\b(?:(?!<Relationship\b)[^>])*?/?>")
 _ATTR_RE = re.compile(rb'(?is)\b(Type|Target|TargetMode|Id)="([^"]*)"')
 _MSO_RE = re.compile(rb"(?i)mso-?script|vbscript:|javascript:")
 _RTF_OBJ_RE = re.compile(rb"(?i)\\object|\\objdata|\\objupdate|\\objocx|\\objemb|\\objautlink|\\objclass\s*([A-Za-z0-9._]+)")
@@ -228,7 +229,8 @@ def analyze_office(data: bytes, ext: str, real_ext: str) -> dict[str, Any]:
             flags.add("rtf_object")
         if rtf["packages"]:
             flags.add("rtf_package")
-        if re.search(rb"(?i)\\object[^{}]*\\objautlink", data) or _DDE_RE.search(data):
+        # a group searched from each \object stops at the next one, which is searched in its turn
+        if re.search(rb"(?i)\\object(?:(?!\\object)[^{}])*\\objautlink", data) or _DDE_RE.search(data):
             flags.add("office_dde")
             out["dde"] = True
         out["rtf"] = rtf
@@ -260,7 +262,9 @@ def analyze_office(data: bytes, ext: str, real_ext: str) -> dict[str, Any]:
             flags.add("office_iqy_remote")
         if ext == "slk" and (b"exec(" in low or b"call(" in low or b"register(" in low):
             flags.add("office_xlm")
-        if ext == "csv" and re.search(rb"(?m)^\s*[=+\-@].*(?:cmd|powershell|mshta|http|dde)", data[:200000], re.I):
+        # the blanks before a formula are those of its own line: from every line start, \s* ran on
+        # through all the empty lines after it
+        if ext == "csv" and re.search(rb"(?m)^[^\S\n]*[=+\-@].*(?:cmd|powershell|mshta|http|dde)", data[:200000], re.I):
             flags.add("csv_formula_injection")
 
     urls = sorted({u.decode("utf-8", "replace")[:300] for u in _URL_RE.findall(data[:2_000_000])})

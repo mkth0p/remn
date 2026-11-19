@@ -193,8 +193,11 @@ def guessed_order(v: Any) -> bool:
 
 # a date as a culture writes it, with its time to the minute or the second, a 12-hour clock or
 # not, and the zone when the exporter wrote one: 9/1/2026 10:00 AM, 01.09.2026 10:00:00,
-# 2026/09/01 10:00:00, 9/1/2026, 10:00:00 AM +02:00
-_CULTURE_RE = re.compile(r"^(\d{1,4})([/.-])(\d{1,2})\2(\d{1,4}),?\s+(\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,7}))?)?\s*([AaPp][Mm])?\s*(Z|[+-]\d{2}:?\d{2})?$")
+# 2026/09/01 10:00:00, 9/1/2026, 10:00:00 AM +02:00. The spaces after AM or PM belong to it: two runs
+# of spaces side by side were split every way before a field that is not a date
+_CULTURE_RE = re.compile(
+    r"^(\d{1,4})([/.-])(\d{1,2})\2(\d{1,4}),?\s+(\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,7}))?)?\s*(?:([AaPp][Mm])\s*)?(Z|[+-]\d{2}:?\d{2})?$"
+)
 
 
 def _culture_date(s: str, day_first: bool | None) -> datetime | None:
