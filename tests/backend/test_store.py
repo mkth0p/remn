@@ -8,6 +8,7 @@ import uuid
 import zipfile
 from pathlib import Path
 
+import duckdb
 import make_samples
 import pytest
 from django.test import Client
@@ -16,7 +17,7 @@ from services.ingest.pipeline import EvtxSource, MailSource, detect_mail_format,
 from services.parsers.mail.common import ParseContext
 from services.store import queries as Q
 from services.store import rules as R
-from services.store.casestore import StoreRegistry
+from services.store.casestore import CaseStore, StoreRegistry
 from services.store.sqlfilter import Ctx, FilterError, compile_condition, compile_filter
 from services.store.writers import EventWriter, MailWriter
 
@@ -154,6 +155,52 @@ def test_reputation_worst_ranks_malicious_above_suspicious(store):
     )
     store.mirror_reputation_to_mails()
     assert Q.get_row(store, "mails", mail["id"])["reputationWorst"] == "malicious"
+
+
+class _UnappliedSetting:
+    """A connection on which one statement of the lockdown fails, or does nothing, as it would after an
+    engine upgrade renamed the setting."""
+
+    def __init__(self, con: duckdb.DuckDBPyConnection, statement: str, fails: bool) -> None:
+        self.con, self.statement, self.fails = con, statement, fails
+
+    def execute(self, sql: str, *args):
+        if sql.startswith(self.statement):
+            if self.fails:
+                raise duckdb.CatalogException("invented: unrecognized configuration parameter")
+            return self
+        return self.con.execute(sql, *args)
+
+    def __getattr__(self, name: str):
+        return getattr(self.con, name)
+
+
+def test_a_store_opens_only_with_file_access_off_and_its_configuration_locked(tmp_path, monkeypatch):
+    st = CaseStore(tmp_path, str(uuid.uuid4()))
+    cur = st.cursor()
+    assert cur.execute("SELECT current_setting('enable_external_access'), current_setting('lock_configuration')").fetchall() == [(False, True)]
+    secret = tmp_path / "invented-secret.txt"
+    secret.write_text("not for the case", encoding="utf-8")
+    with pytest.raises(duckdb.PermissionException):
+        cur.execute(f"SELECT * FROM read_text('{secret}')")
+    with pytest.raises(duckdb.Error):
+        cur.execute("SET enable_external_access = true")
+    st.close()
+    connect = duckdb.connect
+    for statement in ("SET enable_external_access", "SET lock_configuration"):
+        for fails in (True, False):
+            opened: list[_UnappliedSetting] = []
+
+            def unapplied(path: str, s: str = statement, f: bool = fails, out: list[_UnappliedSetting] = opened) -> _UnappliedSetting:
+                out.append(_UnappliedSetting(connect(path), s, f))
+                return out[-1]
+
+            monkeypatch.setattr(duckdb, "connect", unapplied)
+            with pytest.raises(RuntimeError, match="lockdown"):
+                CaseStore(tmp_path, str(uuid.uuid4()))
+            # the connection is closed, not left open without its lockdown
+            with pytest.raises(duckdb.ConnectionException):
+                opened[0].con.execute("SELECT 1")
 
 
 def test_server_rules_engine(store):
