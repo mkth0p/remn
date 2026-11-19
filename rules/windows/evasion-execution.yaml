@@ -76,14 +76,39 @@ where:
 ---
 id: win-powershell-suspicious-scriptblock
 title: Suspicious PowerShell script block (4104)
-description: Script block logging contains download cradles, encoded commands, AMSI bypass, credential dumping or offensive tooling keywords. "hidden" alone and "char[]" are not keywords (the window style is "-w hidden" or "-windowstyle hidden"), and the module code PowerShell generates for CDXML cmdlets (__cmdletization) is left out; on the clean machines those were 72 of its 76 findings, and no recorded attack needed them.
+description: >-
+  Script block logging (4104) holds a download cradle (Net.WebClient, DownloadString) or IEX, an encoded
+  command or a hidden window, an AMSI bypass, credential theft (Mimikatz, LSASS dumps, saved registry hives,
+  shadow copies), an offensive framework or tool (PowerSploit, PowerView, Rubeus, BloodHound, Empire...),
+  shellcode APIs, Defender switched off, given exclusions or told to allow what it finds, or an obfuscation
+  idiom of Invoke-Obfuscation (a reversed string joined back, IEX spelled with characters of $PSHome or
+  $ShellId, a format string that puts quoted pieces back in order). Language features and administration
+  cmdlets are not keywords on their own (-join, [char], Replace(, Add-Type, Get-CimInstance, Invoke-Command,
+  -Credential, Invoke-WebRequest, Set-MpPreference, -ExecutionPolicy Bypass, net user...): administration
+  scripts use them every day. "hidden" alone and "char[]" are not keywords either, and the module code
+  PowerShell generates for CDXML cmdlets (__cmdletization) is left out.
 severity: high
 source: events
 attack: [T1059.001, T1027, T1685]
 tags: [execution, powershell]
+falsepositives:
+  - security assessment and red team scripts run on purpose
+  - administration scripts that download with Net.WebClient, decode base64 or start a hidden window
+references:
+  - https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_logging_windows
+  - https://github.com/danielbohannon/Invoke-Obfuscation
 where:
   eventId: 4104
-  scriptBlockText|contains: [-encodedcommand, "-enc ", "-e ", frombase64string, downloadstring, downloadfile, "net.webclient", "invoke-webrequest", "iwr ", "iex ", "invoke-expression", "start-bitstransfer", "bitsadmin", "invoke-mimikatz", "mimikatz", "invoke-shellcode", "invoke-dllinjection", "invoke-reflectivepeinjection", "invoke-wmimethod", "invoke-command", "amsiutils", "amsiinitfailed", "amsi.dll", "system.management.automation.amsi", "bypass", "-nop ", "-noprofile", "-w hidden", "-windowstyle hidden", "sekurlsa", "lsadump", "kerberos::", "get-keystrokes", "powersploit", "powerview", "get-netuser", "get-netgroup", "get-domainuser", "invoke-kerberoast", "rubeus", "sharphound", "bloodhound", "nishang", "empire", "covenant", "sliver", "cobalt", "beacon", "shellcode", "virtualalloc", "createthread", "memcpy", "kernel32", "reflection.assembly", "add-type", "dllimport", "compress-archive", "rundll32", "certutil", "vssadmin", "wbadmin", "bcdedit", "cipher /w", "reg save", "ntdsutil", "comsvcs", "minidump", "procdump", "lsass", "schtasks /create", "new-service", "sc create", "net user", "net localgroup", "net group", "wmic", "psexec", "sysinternals", "set-mppreference", "add-mppreference", "disablerealtimemonitoring", "exclusionpath", "-xor", "[char]", "-join", "replace(", ".invoke(", "gzipstream", "deflatestream", "memorystream", "securestring", "convertto-securestring", "get-credential", "-credential", "clipboard", "get-wmiobject win32_", "get-ciminstance", "shadowcopy", "invoke-obfuscation"]
+  any_of:
+    - scriptBlockText|contains: [-encodedcommand, "-enc ", frombase64string, downloadstring, downloadfile, "net.webclient", "iex ", "invoke-expression", "invoke-mimikatz", "mimikatz", "invoke-shellcode", "invoke-dllinjection", "invoke-reflectivepeinjection", "amsiutils", "amsiinitfailed", "amsi.dll", "system.management.automation.amsi", "-w hidden", "-windowstyle hidden", "sekurlsa", "lsadump", "kerberos::", "get-keystrokes", "powersploit", "powerview", "get-netuser", "get-netgroup", "get-domainuser", "invoke-kerberoast", "rubeus", "sharphound", "bloodhound", "nishang", "empire", "covenant", "sliver", "cobalt", "beacon", "shellcode", "virtualalloc", "createthread", "memcpy", "cipher /w", "reg save", "ntdsutil", "comsvcs", "minidump", "procdump", "lsass", "psexec", "shadowcopy", "-xor", "invoke-obfuscation", "disablerealtimemonitoring", "disablebehaviormonitoring", "disableioavprotection", "disablescriptscanning", "disableblockatfirstseen", "disableintrusionpreventionsystem", "exclusionpath", "exclusionprocess", "exclusionextension"]
+    # a reversed string joined back: ('gnirtS46esaBmorF'[-1..-16] -join '')
+    - scriptBlockText|re: '\[\s*-1\s*\.\.\s*-[^\]]*\]\s*-join'
+    # iex spelled with characters of automatic variables: $PSHome[4]+$PSHome[34]+'X'
+    - scriptBlockText|contains: ["$pshome[", "$shellid[", "$env:comspec[", "$env:public[", "verbosepreference.tostring()["]
+    # a format string whose first placeholder is not {0}, filled with quoted pieces: ("{1}{0}" -f 'ject','New-Ob')
+    - scriptBlockText|re: '["'']\{[1-9]\d*\}(\{\d+\})+["'']\s*-f\s*["'']'
+    # defender told to allow (6) or ignore (9) what it finds
+    - scriptBlockText|re: 'threatdefaultaction\s+["'']?(6|9|allow|noaction)\b'
   scriptBlockText|not_contains: ["Microsoft.PowerShell.Utility", "PSReadLine", "Set-StrictMode -Version", "# Copyright (c) Microsoft Corporation", "$PSScriptRoot\\", "chocolatey", "winget", "Windows Defender Advanced Threat Protection", "__cmdletization"]
 ---
 id: win-powershell-encoded-command

