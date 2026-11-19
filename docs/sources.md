@@ -45,6 +45,10 @@ record is read with those escaped, and the file says how many were. An export ho
 query selected, not a file's own record numbering, so no statement about missing records is made
 for it, and its rendered message (`RenderingInfo`) is not read.
 
+A record the decoder cannot read is counted as an error and passed over. Should the decoder
+itself stop part-way through a file, in the browser or on the server, the rows read before that
+point are kept and the file is reported as cut there.
+
 Each file also says what it cannot show about itself, in its parser statistics
 (`sequences`, one entry per file, archive or package member):
 

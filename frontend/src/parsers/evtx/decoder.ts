@@ -25,9 +25,15 @@ export interface DecodedRecord {
 
 export type ChunkResult = { ok: true; records: DecodedRecord[] } | { ok: false; error: string }
 
+/** What the server says when its decoder panics part-way through a file (evtx_parser.DECODER_STOPPED). */
+export const DECODER_STOPPED = 'the EVTX decoder stopped part-way through the file; records after that point were not read'
+
 export class EvtxDecoder {
   private readonly x: Exports
   private readonly utf8 = new TextDecoder()
+  /** The module is built to abort on a panic, which traps the instance: its memory is then whatever
+   * the abort left, so an instance that trapped decodes nothing more. */
+  trapped = false
 
   private constructor(instance: WebAssembly.Instance) {
     this.x = instance.exports as unknown as Exports
@@ -48,9 +54,17 @@ export class EvtxDecoder {
 
   /** Decode one chunk; the chunk is copied in, so the caller keeps its buffer. */
   chunk(bytes: Uint8Array): ChunkResult {
-    const ptr = this.x.alloc(bytes.length)
-    new Uint8Array(this.x.memory.buffer, ptr, bytes.length).set(bytes)
-    const n = this.x.parse_chunk(ptr, bytes.length)
+    if (this.trapped) throw new Error(DECODER_STOPPED)
+    let n: number
+    try {
+      const ptr = this.x.alloc(bytes.length)
+      new Uint8Array(this.x.memory.buffer, ptr, bytes.length).set(bytes)
+      n = this.x.parse_chunk(ptr, bytes.length)
+    } catch (e) {
+      if (!(e instanceof WebAssembly.RuntimeError)) throw e
+      this.trapped = true
+      throw new Error(DECODER_STOPPED, { cause: e })
+    }
     // read after the call: the memory may have grown, which detaches earlier views
     const text = this.utf8.decode(new Uint8Array(this.x.memory.buffer, this.x.out_ptr(), this.x.out_len()))
     if (n < 0) return { ok: false, error: text }

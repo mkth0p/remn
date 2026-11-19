@@ -1005,6 +1005,16 @@ def _enriched(row: dict[str, Any], note: str) -> str:
     return f"{row['enriched']}; {note}" if row.get("enriched") else note
 
 
+DECODER_STOPPED = "the EVTX decoder stopped part-way through the file; records after that point were not read"
+
+
+def _panicked(exc: BaseException) -> bool:
+    """A panic in the Rust decoder, which pyo3 raises as PanicException. That class derives from
+    BaseException, so no except Exception clause sees it, and the module it is defined in cannot be
+    imported to name it."""
+    return type(exc).__name__ == "PanicException"
+
+
 def iter_events(
     path_or_file: Any, include_raw: bool = True, stats: Stats | None = None, number_of_threads: int = 0, source_file: str | None = None
 ) -> Iterator[dict[str, Any]]:
@@ -1019,10 +1029,15 @@ def iter_events(
     if seq is not None:
         seq.checksums = chunk_checksums(path_or_file)
     try:
-        parser = PyEvtxParser(path_or_file, number_of_threads=number_of_threads, indent=False)
-    except TypeError:
-        parser = PyEvtxParser(path_or_file, number_of_threads)
-    iterator = parser.records_json()
+        try:
+            parser = PyEvtxParser(path_or_file, number_of_threads=number_of_threads, indent=False)
+        except TypeError:
+            parser = PyEvtxParser(path_or_file, number_of_threads)
+        iterator = parser.records_json()
+    except BaseException as exc:
+        if _panicked(exc):
+            raise ValueError(DECODER_STOPPED) from None
+        raise
     lineage = Lineage()
     while True:
         try:
@@ -1034,6 +1049,12 @@ def iter_events(
                 stats.errors += 1
             log.debug("bad record: %s", exc)
             continue
+        except BaseException as exc:
+            # The decoder's state after a panic is unknown, so it is not asked for another record:
+            # the rows read so far stand, and the file is reported as cut where it stopped.
+            if _panicked(exc):
+                raise ValueError(DECODER_STOPPED) from None
+            raise
         if rec is None:
             continue
         if isinstance(rec, RuntimeError):
