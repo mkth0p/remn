@@ -8,7 +8,7 @@ import { getSource } from '../data/source'
 import type { MailRow } from '../db/schema'
 import type { Condition, Filter } from '../rules/filter'
 import { toggleFacetValue } from '../data/facetToggle'
-import { useStore } from '../state/store'
+import { useImportsFinished, useStore } from '../state/store'
 import { fmtTs, tzLabel } from '../util/format'
 import { exportCsv, exportJson } from '../util/export'
 import { BaselineButton } from '../components/BaselineButton'
@@ -80,7 +80,7 @@ export function MailsView() {
   const setFilter = useStore((s) => s.setMailsFilter)
   const focus = useStore((s) => s.focusId)
   const setFocus = useStore((s) => s.setFocus)
-  const jobs = useStore((s) => s.jobs)
+  const importsFinished = useImportsFinished()
   const rulesVersion = useStore((s) => s.rulesVersion)
   const [rows, setRows] = useState<MailRow[]>([])
   const [truncated, setTruncated] = useState(false)
@@ -123,8 +123,8 @@ export function MailsView() {
   }
   const ds = useMemo(() => (kase ? getSource(kase) : null), [kase])
   useEffect(() => {
-    if (jobs.every((j) => j.phase === 'done' || j.phase === 'error')) setVersion((v) => v + 1)
-  }, [jobs])
+    if (importsFinished) setVersion((v) => v + 1)
+  }, [importsFinished])
   useEffect(() => {
     if (!ds) return
     let alive = true
