@@ -282,7 +282,7 @@ class ServerSource implements DataSource {
   async runRules(rules: Rule[], onProgress?: (done: number, total: number, ruleId: string, findings: number) => void) {
     const { waitForJob } = await import('./jobs')
     const { jobId } = await this.post<{ jobId: string }>('rules/run', { rules, settings: this.settings })
-    const job = await waitForJob(jobId, (j) => {
+    const job = await waitForJob(jobId, this.key, (j) => {
       const p = j.progress as { index?: number; total?: number; ruleId?: string; findings?: number }
       if (p.index != null) onProgress?.(p.index, p.total ?? rules.length, p.ruleId ?? '', p.findings ?? 0)
     })

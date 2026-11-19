@@ -3,7 +3,6 @@ import { apiGet, API_HEADERS } from '../api/client'
 export interface JobInfo {
   id: string
   kind: string
-  caseKey: string | null
   label: string
   status: 'queued' | 'running' | 'done' | 'error' | 'cancelled'
   progress: Record<string, unknown>
@@ -12,14 +11,15 @@ export interface JobInfo {
   log: string[]
 }
 
-/** Poll a server job until it finishes. */
-export async function waitForJob(jobId: string, onProgress?: (job: JobInfo) => void, signal?: AbortSignal, intervalMs = 700): Promise<JobInfo> {
+/** Poll a server job until it finishes. The server answers about a job only to a request that presents the key of its case. */
+export async function waitForJob(jobId: string, caseKey: string, onProgress?: (job: JobInfo) => void, signal?: AbortSignal, intervalMs = 700): Promise<JobInfo> {
+  const path = `/api/jobs/${jobId}?case=${encodeURIComponent(caseKey)}`
   for (;;) {
     if (signal?.aborted) {
-      await fetch(`/api/jobs/${jobId}`, { method: 'DELETE', headers: API_HEADERS }).catch(() => undefined)
+      await fetch(path, { method: 'DELETE', headers: API_HEADERS }).catch(() => undefined)
       throw new Error('cancelled')
     }
-    const job = await apiGet<JobInfo>(`/api/jobs/${jobId}`)
+    const job = await apiGet<JobInfo>(path)
     onProgress?.(job)
     if (job.status === 'done') return job
     if (job.status === 'error') throw new Error(job.error || 'job failed')

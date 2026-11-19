@@ -56,11 +56,12 @@ class Job:
             raise JobCancelled()
 
     def to_dict(self, with_result: bool = False) -> dict[str, Any]:
+        # The case key stays out: it is the only thing that protects the case, and an answer about a
+        # job should not hand it to whoever reads that answer.
         with self._lock:
             d = {
                 "id": self.id,
                 "kind": self.kind,
-                "caseKey": self.case_key,
                 "label": self.label,
                 "status": self.status,
                 "progress": dict(self.progress),
@@ -110,9 +111,10 @@ class JobManager:
     def get(self, job_id: str) -> Job | None:
         return self._jobs.get(job_id)
 
-    def list(self, case_key: str | None = None) -> list[dict[str, Any]]:
+    def list(self, case_key: str) -> list[dict[str, Any]]:
+        """The jobs of one case. There is no listing across cases."""
         with self._lock:
-            jobs = [j for j in self._jobs.values() if case_key is None or j.case_key == case_key]
+            jobs = [j for j in self._jobs.values() if j.case_key == case_key]
         return [j.to_dict() for j in sorted(jobs, key=lambda j: -j.created)]
 
     def cancel(self, job_id: str) -> bool:

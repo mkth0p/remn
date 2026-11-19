@@ -246,7 +246,11 @@ that default.
 For the full mode, one change came with this: listing every server store (`GET
 /api/store`) is an operator action and is only answered when an access token is
 configured. A case reaches its store by the key it holds, and the keys are random, so
-without the listing a store cannot be found by a client that was never given it.
+without the listing a store cannot be found by a client that was never given it. The
+background jobs follow the same rule: they are listed per case (`GET /api/jobs?case=<key>`),
+a job is read, followed and cancelled only with its case's key, and no answer about a job
+carries the key. Reading a store (an export included) never creates one: a key nobody wrote
+to is a 404.
 
 ## Text in the evidence that addresses the model
 

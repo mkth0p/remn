@@ -6,6 +6,7 @@ IOCs and reputation, rule runs, read-only SQL, deletion.
 
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import shutil
@@ -27,7 +28,7 @@ from services.parsers import evtx_parser
 from services.parsers.mail.common import ParseContext
 from services.store import queries as Q
 from services.store import rules as R
-from services.store.casestore import registry
+from services.store.casestore import KEY_RE, registry
 from services.store.sqlfilter import FilterError
 from services.store.writers import EventWriter, MailWriter
 
@@ -302,7 +303,8 @@ def export_rows(request: HttpRequest, key: str):
     """Stream every stored row as NDJSON in the exact format /import accepts:
     {"type":"evidence"|"event"|"mail", ...}. Event and mail lines keep their
     original evidenceId so the importer can regroup them per evidence."""
-    st, err = _store(key)
+    # a read never creates a store: an export of a key nobody wrote to is a 404
+    st, err = _store(key, create=False)
     if err:
         return err
 
@@ -575,12 +577,29 @@ def rules_run(request: HttpRequest, key: str):
 # ---------------------------------------------------------------------------
 @require_GET
 def jobs_list(request: HttpRequest):
-    return JsonResponse({"jobs": manager.list(request.GET.get("case") or None)})
+    """The jobs of the case whose key the request presents. Without a key there is nothing to list:
+    a listing of every job would hand each client the ids, file names and errors of every other case."""
+    key = request.GET.get("case") or ""
+    if not KEY_RE.match(key):
+        return JsonResponse({"error": "case is required: the key of the case whose jobs are listed"}, status=400)
+    return JsonResponse({"jobs": manager.list(key)})
+
+
+def _job(request: HttpRequest, job_id: str) -> Job | None:
+    """The job, when the request presents (?case=) the key of the case it belongs to.
+
+    A missing or wrong key gets the answer an unknown id gets, so a key cannot be tried against a
+    job, and a job id that reached someone else does not open the job's results to them."""
+    job = manager.get(job_id)
+    key = request.GET.get("case") or ""
+    if job is None or not job.case_key or not hmac.compare_digest(key.encode("utf-8", "surrogateescape"), job.case_key.encode("utf-8")):
+        return None
+    return job
 
 
 @require_http_methods(["GET", "DELETE"])
 def job_detail(request: HttpRequest, job_id: str):
-    job = manager.get(job_id)
+    job = _job(request, job_id)
     if not job:
         return JsonResponse({"error": "unknown job"}, status=404)
     if request.method == "DELETE":
@@ -591,8 +610,8 @@ def job_detail(request: HttpRequest, job_id: str):
 
 @require_GET
 def job_events(request: HttpRequest, job_id: str):
-    """SSE stream of job progress (polling fallback: GET /api/jobs/<id>)."""
-    job = manager.get(job_id)
+    """SSE stream of job progress (polling fallback: GET /api/jobs/<id>?case=<key>)."""
+    job = _job(request, job_id)
     if not job:
         return JsonResponse({"error": "unknown job"}, status=404)
 
