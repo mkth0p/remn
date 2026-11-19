@@ -1,0 +1,6 @@
+# Shown beside the issue templates. A security problem goes to private reporting, never to a public issue.
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/mkth0p/remn/security/advisories/new
+    about: Privately, through GitHub's private vulnerability reporting, as SECURITY.md describes. Never in a public issue.

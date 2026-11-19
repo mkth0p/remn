@@ -2,9 +2,17 @@
 
 ## Reporting
 
-Open a private security advisory on the GitHub repository ("Security" tab, "Report a
-vulnerability"), or an issue without details asking for a contact. Do not put evidence,
-credentials or exploit details in a public issue. Reports are acknowledged within a week.
+Report a vulnerability privately, with GitHub's private vulnerability reporting: on the
+repository, open the "Security" tab, then "Report a vulnerability"
+(https://github.com/mkth0p/remn/security/advisories/new), and fill in the form. The report
+is a draft security advisory that only you and the repository's maintainers can read. The
+discussion, a fix in a temporary private fork and, when the fix is released, the published
+advisory (with a CVE identifier when one is requested) all happen there. Reports are
+acknowledged within a week.
+
+Do not put evidence, credentials or exploit details in a public issue. If the "Report a
+vulnerability" button is missing, open an issue that says only that you have a security
+report and asks for a private channel, with nothing of the report in it.
 
 ## What REMN promises
 

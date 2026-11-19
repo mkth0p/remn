@@ -146,14 +146,14 @@ timings), `ai_repro.py` (replay of a model turn).
 
 | set | what | drop in as | source |
 |---|---|---|---|
-| EVTX-ATTACK-SAMPLES | about 200 small .evtx files, one attack technique each, GPL-3.0 | the zip, or any .evtx | github.com/sbousseaden/EVTX-ATTACK-SAMPLES |
+| EVTX-ATTACK-SAMPLES | 278 small .evtx files at the commit measured, one attack technique each, GPL-3.0 | the zip, or any .evtx | github.com/sbousseaden/EVTX-ATTACK-SAMPLES |
 | EVTX-to-MITRE-Attack | 270+ samples, Security, Sysmon, PowerShell | the repository zip | github.com/mdecrevoisier/EVTX-to-MITRE-Attack |
 | Splunk attack_data, Windows | about 750 attack-range recordings (Sysmon, Security, PowerShell), labelled with ATT&CK techniques, as XmlWinEventLog; Git LFS files | the `.log` files (event records as XML) | github.com/splunk/attack_data |
 | hayabusa-sample-evtx | the two sets above plus DeepBlueCLI samples | the repository zip | github.com/Yamato-Security/hayabusa-sample-evtx |
 | omerbenamram/evtx samples | security_big_sample.evtx, sysmon.evtx | the files | github.com/omerbenamram/evtx |
 | Invictus IR O365 dataset | 9,608 Unified Audit Log records from real BEC cases, CC BY 4.0 | `auditrecords.csv` after extracting the 7z | github.com/invictus-ir/o365_dataset |
 | Nazario phishing corpus | hand-classified phishing mailboxes, mbox, 2005-2025, CC BY 4.0 | any `phishingN.mbox` | monkey.org/~jose/phishing |
-| Phishing Pot | 8,614 honeypot phishing .eml, 2022 onwards | the zip, or a folder of .eml | github.com/rf-peixoto/phishing_pot |
+| Phishing Pot | 8,614 honeypot phishing .eml, 2022 onwards, CC BY-NC 4.0 (non-commercial use only) | the zip, or a folder of .eml | github.com/rf-peixoto/phishing_pot |
 | SpamAssassin public corpus | legitimate mail (easy_ham, hard_ham) and spam | the tar.bz2 as is, or run the harness | spamassassin.apache.org/old/publiccorpus |
 | Apache Tika test PST | a 7-message PST for the PST path | `testPST.pst` | apache/tika test documents |
 | CMU Enron maildir | 1.7 GB tar.gz, about 500,000 messages | the archive | www.cs.cmu.edu/~enron |

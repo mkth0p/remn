@@ -9,8 +9,8 @@ the repository is laid out.
 
 ## Requirements
 
-- Python 3.13. The optional PST and YARA packages have wheels for 3.13 and not yet for
-  3.14, and the continuous integration and the Docker image use 3.13.
+- Python 3.13. The lock files are resolved for 3.13, and the continuous integration and
+  the Docker image use it.
 - Node 22 or later, for building the browser application. Continuous integration and
   the Docker image use 22.
 - Developed and used on Windows 11; the same code runs on Linux in the Docker image and
@@ -160,8 +160,14 @@ image keeps no package manager, and a build stage with a compiler takes care of 
 docker build --build-arg EXTRA_PIP="yara-python libpff-python py7zr" -t remn .
 ```
 
-The names are chosen from `backend/requirements-optional.txt` and installed at the
-versions and hashes that file fixes; a name it does not list fails the build.
+or, with compose, `REMN_EXTRA_PIP="yara-python libpff-python" docker compose up --build`
+(`set REMN_EXTRA_PIP=yara-python libpff-python` first in a Windows command prompt). The
+names are chosen from `backend/requirements-optional.txt` and installed at the versions
+and hashes that file fixes; a name it does not list fails the build. The health endpoint,
+`/api/health`, reports what the running server has under `optional` to a request that
+carries the `X-Forensic-Client` header (the token, when one is set). Without the header it
+answers `{"ok": true}` and nothing else; that is what the image's health check
+(`tools/healthcheck.py`) asks, so the check needs no token.
 
 The image differs from a virtual-environment install in one more way: it carries
 [Hayabusa](https://github.com/Yamato-Security/hayabusa) (AGPL-3.0, run as a separate
@@ -169,13 +175,6 @@ program) and runs it over Windows event logs as a third detection engine beside 
 two. A virtual-environment install has that engine only when Hayabusa is installed on the
 machine (on `PATH`, or where `HAYABUSA_PATH` points), so the same evidence can give more
 findings in the container. `--build-arg HAYABUSA=0` builds the image without it.
-
-or, with compose, `REMN_EXTRA_PIP="yara-python libpff-python" docker compose up --build`
-(`set REMN_EXTRA_PIP=yara-python libpff-python` first in a Windows command prompt). The
-health endpoint, `/api/health`, reports what the running server has under `optional` to a
-request that carries the `X-Forensic-Client` header (the token, when one is set). Without the
-header it answers `{"ok": true}` and nothing else; that is what the image's health check
-(`tools/healthcheck.py`) asks, so the check needs no token.
 
 Still not in the image: GeoLite2 and the offline lists, which are data the operator
 downloads under licence (mount your `backend/data` folder at `/app/backend/data`), YARA
@@ -226,7 +225,8 @@ One script does all of it, from a clone of the repository:
 sudo REMN_DOMAIN=remn.example.tech bash deploy/public-server-setup.sh
 ```
 
-It refuses to go on until the name resolves to that machine, installs Docker and the
+It stops when the name does not resolve (and warns, then waits ten seconds, when it
+resolves to an address other than the machine's), installs Docker and the
 firewall, opens 22, 80 and 443 and nothing else, turns on unattended security updates,
 closes SSH password logins only once it has found a key to log in with (never before, so
 it cannot lock you out), starts the stack and waits for the certificate. Running it again
@@ -284,15 +284,20 @@ REMN_DOMAIN=remn.example.tech sudo -E docker compose -f docker-compose.public.ym
 
 ### Upkeep
 
-There is no case data on the machine to back up: browser-only mode keeps nothing, and the
-only volume holds the temporary upload area. What needs attention is the code and the
-base images, since a public address means the vulnerabilities in them are reachable:
+There is no case data on the machine to back up: browser-only mode keeps nothing, staging
+is a RAM-backed tmpfs in a read-only container, and the only volumes hold Caddy's
+certificates and configuration. What needs attention is the code and the base images, since
+a public address means the vulnerabilities in them are reachable:
 
 ```bash
-git pull && REMN_DOMAIN=remn.example.tech sudo -E docker compose -f docker-compose.public.yml up -d --build --pull always
+REMN_DOMAIN=remn.example.tech sudo -E bash deploy/update.sh
 ```
 
-Run that when a release is tagged. Continuous integration scans every image build with
+`deploy/update.sh` pulls the clone, rebuilds the images stamped with the commit (which the
+page shows visitors, with a link to that source; a plain `docker compose up --build` shows
+the build as unknown), checks the new proxy image and Caddyfile before it replaces anything,
+and restarts the stack. `REMN_DOMAIN` can stay out of the command when the `.env` beside the
+compose file holds it, as the setup script leaves it. Run it when a release is tagged. Continuous integration scans every image build with
 Trivy and fails on critical or high findings that have a fix, so a green build is the
 signal that the image is worth deploying. `docker logs` on the two containers shows what
 happened; `sudo docker system prune -f` reclaims the space of the images replaced.
@@ -304,7 +309,8 @@ parses whatever it is given, so treat it as a machine that runs untrusted input 
 the parsers all day: that is why it holds no case data, no keys and no model account, and
 why it lives on a machine of its own rather than next to anything that matters. Visitors
 upload evidence to it; the rows come back to their browser and the temporary copy is
-discarded, but during the parse the file is on that disk, so the instance is a place to
+discarded, but during the parse the file is held on that machine, in its RAM-backed staging
+area, so the instance is a place to
 try REMN and not a place for anyone's real evidence. Say so on the page that links to it.
 
 ## Remote access
