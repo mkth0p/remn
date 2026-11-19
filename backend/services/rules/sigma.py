@@ -252,6 +252,9 @@ def _octet_range_regex(lo: int, hi: int) -> str:
         end = n + step - 1
         if step == 1:
             parts.append(str(n))
+        elif n == 0:
+            # 0 to 9 or 0 to 99: an address writes these without leading zeros, so one digit or two
+            parts.append("[0-9]" if step == 10 else "[1-9]?[0-9]")
         else:
             width = len(str(step)) - 1
             prefix = str(n)[:-width] if len(str(n)) > width else ""

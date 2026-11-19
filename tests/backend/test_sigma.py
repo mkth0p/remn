@@ -242,6 +242,24 @@ def test_modifiers():
     compile_cond(w, Ctx(source="events"))
 
 
+@pytest.mark.parametrize("cidr", ["0.0.0.0/1", "10.0.0.0/9", "10.128.0.0/9", "172.16.0.0/17", "192.168.1.0/25", "192.168.1.128/25", "10.0.0.0/14"])
+def test_an_ipv4_cidr_matches_every_address_of_its_network_and_no_other(cidr):
+    # a ranged octet starting at 0 used to need two digits (0.0.0.0/1 missed 1.2.3.4 to 9.9.9.9)
+    import ipaddress
+    import re as _re
+
+    cond = sigma.compile_field("DestinationIp|cidr", cidr, {}, [])
+    op, pattern = next(iter(cond.items()))
+    assert op == "destinationIp|re"
+    net = ipaddress.ip_network(cidr)
+    ranged = net.prefixlen // 8
+    base = list(net.network_address.packed)
+    for value in range(256):
+        octets = base[:ranged] + [value] + [7] * (3 - ranged)
+        addr = ".".join(str(o) for o in octets)
+        assert bool(_re.match(pattern, addr)) == (ipaddress.ip_address(addr) in net), addr
+
+
 def test_unsupported_constructs_are_skipped_not_weakened():
     res = sigma.convert_text(UNSUPPORTED)
     assert [r["ok"] for r in res] == [False, False, False, False]
