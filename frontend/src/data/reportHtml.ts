@@ -609,7 +609,7 @@ function storyCard({ story: s, key, note, decisions: dec }: ReportStory, d: Repo
     s.attackerAddresses.length ? `from <code>${h(s.attackerAddresses.slice(0, 6).join(', '))}</code>` : '',
   ].filter(Boolean)
   return `<div class="card chain ${h(s.severity)}">
-<div class="card-head">${pill(s.severity)}<h3>${h(s.title)}${dec?.part === 'second' ? ' (second part)' : dec?.part === 'first' ? ' (first part)' : ''}</h3>${dec?.call ? `<span class="pill verdict-${STORY_PILL[dec.call.verdict] ?? 'benign'}">${h(STORY_VERDICT_LABEL[dec.call.verdict])}</span>` : ''}${chip(`${s.confidence} ties`)}</div>
+<div class="card-head">${pill(s.severity)}<h3>${h(s.title)}${dec?.part === 'second' ? ' (second part)' : dec?.part === 'first' ? ' (first part)' : ''}</h3>${dec?.call ? `<span class="pill verdict-${STORY_PILL[dec.call.verdict] ?? 'benign'}">${h(STORY_VERDICT_LABEL[dec.call.verdict])}</span>` : ''}${chip(`${s.confidence} confidence`)}</div>
 <div class="card-meta">${who} ${h(s.subject.label)} · ${span(s.start, s.end)} · ${n(s.records)} record(s) in ${n(s.steps.length)} step(s)${where.length ? ' · ' + where.join(' · ') : ''}</div>
 ${note ? `<div class="narr">${md(note)}</div><div class="cap">the analyst's reading of the story</div>${textNote(`story:${key}`, d.claims)}` : `<div class="narr"><p>${h(s.summary || s.headline)}</p></div>`}
 ${storySpine(s)}

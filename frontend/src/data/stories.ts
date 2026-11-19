@@ -24,6 +24,18 @@ import { settingsForRules } from './rules'
 import type { ReportStoryDecisions } from './storyDecisions'
 
 export type Confidence = 'strong' | 'medium' | 'weak'
+/** How surely a story's flagged steps are its subject's (its ties, not the intrusion). */
+export type StoryConfidence = 'high' | 'medium' | 'low'
+
+/** high when a record states the tie of every flagged step, medium for half of them or more, low for fewer (mirror of stories.story_confidence). */
+export function storyConfidence(strong: boolean[]): { confidence: StoryConfidence; basis: string } {
+  const n = strong.length
+  const k = strong.filter(Boolean).length
+  if (!n) return { confidence: 'low', basis: 'no step of it carries a flag' }
+  const confidence: StoryConfidence = k === n ? 'high' : 2 * k >= n ? 'medium' : 'low'
+  const rest = n - k
+  return { confidence, basis: `a record states the tie of ${k} of its ${n} flagged steps` + (rest ? `; ${rest} rest${rest === 1 ? 's' : ''} on naming rules, time and place, or an address` : '') }
+}
 export type TieKind = 'flag' | 'chain' | 'session' | 'hop' | 'process' | 'address' | 'identity'
 
 /** ATT&CK v19's tactics in the order an intrusion reads (mirror of stories.PHASES). */
@@ -305,7 +317,9 @@ export interface Story {
   firm?: { key: string; phase: string; step: string }[]
   /** what started it: a flag, or low findings of several rules within a week that add up */
   startKind?: 'flag' | 'accumulated'
-  confidence: Confidence
+  confidence: StoryConfidence
+  /** why: of its flagged steps, how many a record ties to its subject */
+  confidenceBasis?: string
   phases: StoryPhase[]
   steps: StoryStep[]
   records: number

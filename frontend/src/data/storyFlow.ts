@@ -15,7 +15,7 @@ import { getDb } from '../db/schema'
 import type { Case, Finding } from '../db/schema'
 import { canonical, exportJson, REMN_NS, STIX_SCO_NS, stixObservable, TLP_AMBER, uuid5 } from '../util/export'
 import { uuid4 } from '../util/uuid'
-import type { Campaign, Confidence, Identity, Story, StoryFinding, StoryStep } from './stories'
+import type { Campaign, Confidence, Identity, Story, StoryConfidence, StoryFinding, StoryStep } from './stories'
 
 /** What a spine was anchored on and where it starts (stories._spine_basis). */
 export interface SpineBasis {
@@ -91,6 +91,8 @@ const TLP_AMBER_DEFINITION = {
 const NEW_SDO = { [ATTACK_FLOW_EXT]: { extension_type: 'new-sdo' } }
 /** how surely a tie holds, on Attack Flow's confidence scale (probable, very probable) */
 export const TIE_CONFIDENCE: Record<Confidence, number> = { strong: 90, medium: 70, weak: 50 }
+/** how surely a story's flagged steps are its subject's, on the same scale */
+const STORY_CONFIDENCE: Record<StoryConfidence, number> = { high: 90, medium: 70, low: 50 }
 /** a spine an older snapshot does not have is read as the story's flags, as many as a spine holds */
 const SPINE_MAX = 15
 
@@ -228,7 +230,7 @@ async function addFlow(o: Objects, story: Story): Promise<string> {
     description: [basis?.text, story.summary].filter(Boolean).join(' '),
     scope: 'incident',
     start_refs: actions.length ? [actions[0].id] : [],
-    confidence: TIE_CONFIDENCE[story.confidence] ?? 50,
+    confidence: STORY_CONFIDENCE[story.confidence] ?? 50,
   })
 }
 

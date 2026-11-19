@@ -140,6 +140,8 @@ _CONTEXT_BEFORE = 60 * 60_000
 _NEAR_MS = 15 * 60_000
 # the sessions a person sits at: at the console, over RDP, with cached credentials
 _SEATED = frozenset({2, 10, 11, 12})
+# a story's confidence: how many of its flagged steps a record ties to its subject (story_confidence)
+STORY_HIGH, STORY_MEDIUM, STORY_LOW = "high", "medium", "low"
 # an outside address at least this many people of one organisation sign in from, with no finding, and
 # more than half of its people seen signing in from outside, is its own egress (a tenant of three has one)
 SHARED_EGRESS_PEOPLE = 2
@@ -1880,6 +1882,19 @@ def _rare(kind: str, value: str, seen: int, of: int, unit: str) -> dict[str, Any
     return {"kind": kind, "value": value, "seen": seen, "of": of, "unit": unit, "text": f"{value}: seen {where}"}
 
 
+def story_confidence(strong: list[bool]) -> tuple[str, str]:
+    """How surely a story's flagged steps are its subject's, with why: high when a record states
+    the tie of every one (it names the person, or it is their session's, their process tree's or
+    their way in's), medium when it does for half of them or more, low when for fewer; the others
+    rest on naming rules, time and place, or an address. Its subject is that sure, not the intrusion."""
+    n, k = len(strong), sum(strong)
+    if not n:
+        return STORY_LOW, "no step of it carries a flag"
+    level = STORY_HIGH if k == n else STORY_MEDIUM if 2 * k >= n else STORY_LOW
+    basis = f"a record states the tie of {k} of its {n} flagged steps"
+    return level, basis + (f"; {n - k} rest{'s' if n - k == 1 else ''} on naming rules, time and place, or an address" if k < n else "")
+
+
 def _story(
     case: _Case,
     kind: str,
@@ -1924,7 +1939,7 @@ def _story(
     firm = _firm(weighed)
     if SEV_WEIGHT[severity] < 4 and _three_in_three(firm):
         severity = "high"
-    confidence = STRONG if all(s["tie"]["confidence"] == STRONG for s in steps if s["tie"]["kind"] in ("flag", "chain")) else MEDIUM
+    confidence, confidence_basis = story_confidence([s["tie"]["confidence"] == STRONG for s in steps if s["tie"]["kind"] in ("flag", "chain")])
     hosts = sorted({s["host"] for s in steps if s["host"]})
     accounts = sorted({a for s in steps for a in s["accounts"]})
     lineage = lin.to_dict(refs=refs, hosts=hosts)
@@ -1955,6 +1970,7 @@ def _story(
         # what started it: a flag (a finding of medium or more, a phishing mail acted on) or low findings that add up
         "startKind": "flag",
         "confidence": confidence,
+        "confidenceBasis": confidence_basis,
         "phases": phases,
         "steps": steps,
         "records": len(refs),

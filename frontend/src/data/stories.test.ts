@@ -22,6 +22,7 @@ import {
   selectRows,
   slimFinding,
   storiesStaleness,
+  storyConfidence,
   storyCoverageWarnings,
   storyInputs,
   storyOwnGaps,
@@ -314,6 +315,16 @@ describe('values', () => {
     expect(refRow('event:12')).toEqual({ source: 'events', id: 12 })
     expect(refRow('mail:3')).toEqual({ source: 'mails', id: 3 })
     expect(refRow('entra:x')).toBeNull()
+  })
+})
+
+describe("a story's confidence", () => {
+  it('is high when a record ties every flagged step, medium for half or more, low for fewer, as the Python says', () => {
+    expect(storyConfidence([true, true, true])).toEqual({ confidence: 'high', basis: 'a record states the tie of 3 of its 3 flagged steps' })
+    expect(storyConfidence([true, true, false, false]).confidence).toBe('medium')
+    expect(storyConfidence([true, false, false])).toEqual({ confidence: 'low', basis: 'a record states the tie of 1 of its 3 flagged steps; 2 rest on naming rules, time and place, or an address' })
+    expect(storyConfidence([false])).toEqual({ confidence: 'low', basis: 'a record states the tie of 0 of its 1 flagged steps; 1 rests on naming rules, time and place, or an address' })
+    expect(storyConfidence([])).toEqual({ confidence: 'low', basis: 'no step of it carries a flag' })
   })
 })
 

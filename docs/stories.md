@@ -252,8 +252,17 @@ Every record of a story is a step, or folded into one, and every step says why i
 | same source | came from an address the story's findings name and the evidence ties beyond one finding (below), or is that address trying another account; the step says why the address is the attacker's | medium |
 | same person | names the person and is something (a task, a rule, a group change) | as sure as the form |
 
-A weak tie never puts a record in a story. The story's confidence is the weakest tie of its
-flagged steps. A program run with no finding is most of a person's day, so their name alone
+A weak tie never puts a record in a story. The story's confidence says how surely its flagged
+steps are its subject's: high when a record states the tie of every one (it names the person by
+a form a record joined to them, or it is their session's, their process tree's or their way
+in's), medium when a record does for half of them or more, low when for fewer, the others
+resting on naming rules, time and place, or an address. It says so (`confidenceBasis`: "a record
+states the tie of 15 of its 24 flagged steps; 9 rest on naming rules, time and place, or an
+address"), and the story list, the open story and the report show it as "medium confidence"
+with that basis. It is about who and where, not whether the flags are an intrusion: the
+severity and the score say that. A step the analyst confirmed counts as one a record ties. A
+story saved before this scale keeps its old value (strong or medium) until the stories are
+built again. A program run with no finding is most of a person's day, so their name alone
 does not put one in a story: it joins when it ran in one of the story's logon sessions, or is,
 or descends from, one of the story's processes, and its step says which.
 
@@ -598,7 +607,7 @@ the story, and the confidence of its tie: strong 90, medium 70. The hosts, accou
 addresses a step touches are `attack-asset`s; an account's refers to an `identity` (individual,
 or system for a service account), an address's to `infrastructure` that consists of the address
 (`ipv4-addr` or `ipv6-addr`, with STIX's own id for it). The flow's description is the spine's
-basis and the story's summary. A story built before spines exports its flagged steps, fifteen
+basis and the story's summary, and its confidence the story's: high 90, medium 70, low 50. A story built before spines exports its flagged steps, fifteen
 at most.
 
 A campaign downloads as a STIX 2.1 `grouping` of context `suspicious-activity` ("Download STIX

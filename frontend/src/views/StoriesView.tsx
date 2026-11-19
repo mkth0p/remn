@@ -223,8 +223,8 @@ function StoryRows({ stories, active, onSelect, views }: { stories: Story[]; act
             <span className="score">{s.score}</span>
             <span>{s.steps.length} steps</span>
             <span>{fmtNum(s.records)} records</span>
-            <span className={s.confidence === 'strong' ? 'bridged' : ''} title="the weakest tie of a flagged step">
-              {s.confidence} ties
+            <span className={s.confidence === 'high' ? 'bridged' : ''} title={s.confidenceBasis ?? 'how many of its flagged steps a record ties to it'}>
+              {s.confidence} confidence
             </span>
             <StoryCallTag view={views?.get(s.id)} />
           </div>
@@ -1420,7 +1420,7 @@ export function StoriesView() {
                       <span className="muted" style={{ fontWeight: 400 }}>
                         {' '}
                         · <span title={scoreTitle(story)}>score {story.score}</span> · {story.steps.length} steps, {fmtNum(story.records)} records over {spanText(story.end - story.start)} ·{' '}
-                        <span title="the weakest tie of a flagged step: strong when records state it, medium when naming rules or time and place join it">{story.confidence} ties</span>
+                        <span title={story.confidenceBasis ?? 'how many of its flagged steps a record ties to it'}>{story.confidence} confidence</span>
                       </span>
                     </div>
                     <div className="small" style={{ color: 'var(--fg-1)' }}>

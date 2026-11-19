@@ -143,14 +143,15 @@ describe('decisions on a step', () => {
     expect(a.story.headline).toBe('RDP logon from outside → Service installed')
     expect(a.story.findings).toEqual(['rdp|1', 'svc|6'])
     // its one medium flag disputed, every flag left is strong
-    expect(a.story.confidence).toBe('strong')
+    expect(a.story.confidence).toBe('high')
 
     const confirmed = on(res, 'story-a', (d) => setStepCall(d, stepOf(res, 'story-a', 'event:2'), 'confirmed'))
     const [b] = applyStoryDecisions(res, confirmed).views
     // confirming changes nothing the engine stated but the tie's confidence
     expect(b.story.severity).toBe('critical')
     expect(b.story.phases).toBe(res.stories[0].phases)
-    expect(b.story.confidence).toBe('strong')
+    expect(b.story.confidence).toBe('high')
+    expect(b.story.confidenceBasis).toMatch(/^a record states the tie of (\d+) of its \1 flagged steps$/)
     // a second call on the same step replaces the first
     const again = on(res, 'story-a', (d) => setStepCall(d, stepOf(res, 'story-a', 'event:2'), 'disputed'), confirmed)
     expect(again['story-a'].steps).toHaveLength(1)

@@ -102,6 +102,7 @@ function snapshot(): StoryResult {
     severity: 'critical',
     score: 90,
     confidence: 'medium',
+    confidenceBasis: 'a record states the tie of 1 of its 2 flagged steps; 1 rests on naming rules, time and place, or an address',
     phases: [
       { phase: 'initial-access', label: 'Initial access', first: T0, last: T0, steps: 1, records: 1, findings: 1, severity: 'high' },
       { phase: 'defense-impairment', label: 'Defense impairment', first: T0 + 960_000, last: T0 + 960_000, steps: 1, records: 1, findings: 1, severity: 'critical' },
@@ -241,6 +242,9 @@ describe('the Stories page', () => {
       render(<StoriesView />)
       await screen.findByRole('button', { name: 'Story daniel.roy@northstar.example' }, WAIT)
       expect(screen.getByText('1 story · 1 critical · 1 campaign(s)', { exact: false })).toBeTruthy()
+      // how surely its flagged steps are daniel's, and why
+      for (const label of screen.getAllByText('medium confidence'))
+        expect(label.getAttribute('title')).toBe('a record states the tie of 1 of its 2 flagged steps; 1 rests on naming rules, time and place, or an address')
       // the phase rail: three phases lit, in the story's own order
       const rail = screen.getByRole('list', { name: 'ATT&CK phases of the story' })
       const lit = within(rail)
