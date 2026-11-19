@@ -7,7 +7,8 @@ hooks, plugins, MCP servers or session file (``--safe-mode``, ``--tools ""``,
 ``--no-session-persistence``). The browser still owns the conversation and executes the
 REMN tools; Claude asks for them through a JSON reply because the command line exposes no
 tool API in this mode. Everything sent this way leaves the server for Anthropic through
-the Claude Code login of the account that runs the server.
+the Claude Code login of the account that runs the server, for every analyst who picks the
+connector. It is off unless the operator sets CLAUDE_CODE_ENABLED=1.
 """
 
 from __future__ import annotations
@@ -61,7 +62,7 @@ the date: it is not part of the case."""
 
 
 def enabled() -> bool:
-    return bool(getattr(settings, "CLAUDE_CODE_ENABLED", True))
+    return bool(getattr(settings, "CLAUDE_CODE_ENABLED", False))
 
 
 def binary() -> str | None:
@@ -123,7 +124,7 @@ def status(force: bool = False) -> dict[str, Any]:
         "defaultModel": DEFAULT_MODEL,
     }
     if not enabled():
-        out["error"] = "the Claude Code connector is switched off on this server (CLAUDE_CODE_ENABLED=0)"
+        out["error"] = "the Claude Code connector is off on this server; an operator turns it on with CLAUDE_CODE_ENABLED=1"
     else:
         path = binary()
         if not path:

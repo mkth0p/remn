@@ -49,23 +49,35 @@ budgets for it.
 (`OLLAMA_HOST`, `OLLAMA_MODEL`, `OLLAMA_NUM_CTX`); nothing is persisted on the server.
 For machines without a local model.
 
-**Claude Code.** The REMN server runs the `claude` command line installed on its
-machine, signed in with that machine's Claude account, as the analyst model. One command
-per model turn, in print mode, with REMN's system prompt in place of Claude Code's, its
-own tools, hooks, plugins and MCP servers off (`--safe-mode --tools ""`) and no session
-file (`--no-session-persistence`). The browser still owns the conversation and runs the
-REMN tools; Claude asks for them with a JSON reply (`{"tool_calls": [...]}`) that the
-server holds back and hands to the agent loop, and the command line is stopped as soon
-as that object is complete, so the model cannot invent the tool result. Models are the
-`sonnet`, `opus`, `fable` and `haiku` aliases. Prompts, tool results (evidence excerpts)
-and answers leave the server for Anthropic; the server keeps nothing. Not for evidence
-that may not leave the organisation. Install with `npm install -g @anthropic-ai/claude-code`,
-run `claude` once to sign in, restart REMN. `CLAUDE_CODE_ENABLED=0` switches the
-connector off, `CLAUDE_CODE_BIN` points at the binary, `CLAUDE_CODE_TIMEOUT` (600 s) caps
-a turn. Endpoints: `GET /api/ai/claude/status` (whether the connector is on, installed
-and signed in; it does not name the account or say how it signed in),
-`POST /api/ai/claude/chat` (server-sent events, the same chunks as the Ollama proxy),
-`POST /api/ai/claude/query`. The connector is not available in the Docker image.
+**Claude Code.** Off unless the operator turns it on. When it is on, the REMN server runs
+the `claude` command line installed on its machine as the analyst model, with whatever
+sign-in that command line has for the operating-system account that runs REMN. REMN holds
+no credential of its own and does not check which kind of sign-in that is. Turning it on
+means:
+
+- Every analyst who can reach this REMN server and picks Claude Code works through that one
+  sign-in, whoever they are.
+- Prompts, tool results (evidence excerpts) and answers leave the server for Anthropic
+  under that account; the REMN server keeps nothing. Not for evidence that may not leave
+  the organisation. Whether that account may be used this way, and on which terms, is for
+  its holder to settle with Anthropic before turning the connector on; REMN does not decide
+  it.
+
+It is turned on with one setting: install Claude Code on the server machine
+(`npm install -g @anthropic-ai/claude-code`), run `claude` there once to sign in as the
+account that runs REMN, set `CLAUDE_CODE_ENABLED=1` and restart REMN. `CLAUDE_CODE_BIN`
+points at the binary and `CLAUDE_CODE_TIMEOUT` (600 s) caps a turn. One command runs per
+model turn, in print mode, with REMN's system prompt in place of Claude Code's, its own
+tools, hooks, plugins and MCP servers off (`--safe-mode --tools ""`) and no session file
+(`--no-session-persistence`). The browser still owns the conversation and runs the REMN
+tools; Claude asks for them with a JSON reply (`{"tool_calls": [...]}`) that the server
+holds back and hands to the agent loop, and the command line is stopped as soon as that
+object is complete, so the model cannot invent the tool result. Models are the `sonnet`,
+`opus`, `fable` and `haiku` aliases. Endpoints: `GET /api/ai/claude/status` (whether the
+connector is on, installed and signed in; it does not name the account or say how it
+signed in), `POST /api/ai/claude/chat` (server-sent events, the same chunks as the Ollama
+proxy), `POST /api/ai/claude/query`; the last two answer 403 while the connector is off.
+The connector is not available in the Docker image.
 
 ## The agent
 

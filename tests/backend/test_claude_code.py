@@ -142,7 +142,9 @@ def fake_cli(monkeypatch, tmp_path):
     monkeypatch.setattr(cc, "binary", lambda: "claude")
     monkeypatch.setattr(cc, "_cwd", lambda: tmp_path)
     _FakePopen.returncode_value = 0
-    yield _FakePopen
+    # the connector is off unless an operator turns it on; these tests are about it turned on
+    with override_settings(CLAUDE_CODE_ENABLED=True):
+        yield _FakePopen
 
 
 def test_plain_answer_streams_tokens(fake_cli):
@@ -211,7 +213,8 @@ def test_error_result_becomes_error_chunk(fake_cli):
 def test_missing_binary_is_an_error_chunk(monkeypatch):
     monkeypatch.setattr(cc, "binary", lambda: None)
     cc.reset_status_cache()
-    chunks = list(cc.chat_stream([{"role": "user", "content": "q"}], "SYS"))
+    with override_settings(CLAUDE_CODE_ENABLED=True):
+        chunks = list(cc.chat_stream([{"role": "user", "content": "q"}], "SYS"))
     assert chunks[0]["type"] == "error" and "not installed" in chunks[0]["error"]
     cc.reset_status_cache()
 
@@ -230,7 +233,7 @@ def test_status_view_reports_disabled_connector():
         r = c.get("/api/ai/claude/status", **HDR)
         assert r.status_code == 200
         body = r.json()
-        assert body["enabled"] is False and body["available"] is False and "switched off" in body["error"]
+        assert body["enabled"] is False and body["available"] is False and "CLAUDE_CODE_ENABLED=1" in body["error"]
         assert (
             c.post(
                 "/api/ai/claude/chat", data=json.dumps({"messages": [{"role": "user", "content": "hi"}]}), content_type="application/json", **HDR
@@ -289,6 +292,7 @@ def test_chat_view_streams_sse_from_fake_cli(fake_cli):
     assert fake_cli.last_args[fake_cli.last_args.index("--model") + 1] == "haiku"
 
 
+@override_settings(CLAUDE_CODE_ENABLED=True)
 def test_chat_view_validates_body():
     c = Client()
     assert c.post("/api/ai/claude/chat", data="not json", content_type="application/json", **HDR).status_code == 400
