@@ -81,6 +81,10 @@ pack importer download from their sources on request, never during an investigat
   WITH, DESCRIBE, SHOW) with write keywords rejected, and every DuckDB connection runs
   with external access disabled and the configuration locked, so a prompt-injected
   query cannot read or write files on the server or load extensions.
+- Identifiers that reach the filesystem are validated (case keys and upload ids by
+  pattern, pack ids without separators, static files resolved inside the build
+  directory); rule archives are capped per member and in total; CSV exports neutralise
+  spreadsheet formula injection.
 - A reputation lookup value is checked against its kind (an IP address, a domain name, an
   MD5, SHA-1 or SHA-256 digest, a URL with a scheme and a host) before the cache or any
   provider sees it; a value that fails gets an error verdict that says it was not looked
@@ -88,10 +92,6 @@ pack importer download from their sources on request, never during an investigat
   is followed over HTTPS on the host that sent it, at most five times, because the request
   carries the provider key; RDAP, whose requests carry no key, may be sent on to the
   registry by name, never to an address.
-- Identifiers that reach the filesystem are validated (case keys and upload ids by
-  pattern, pack ids without separators, static files resolved inside the build
-  directory); rule archives are capped per member and in total; CSV exports neutralise
-  spreadsheet formula injection.
 - The Docker image is built from base images pinned by digest, takes Debian's security
   updates at build time, runs as a non-root user without a package manager, and is
   scanned by Trivy in continuous integration.
