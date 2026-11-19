@@ -303,7 +303,8 @@ def _scalar(value: Any) -> Any:
 
 
 # The text rules search whole: a command line (Windows allows 32,767 characters), a script
-# block, a task definition, a WMI consumer. Cut at 4,000 characters, an indicator placed after
+# block, a task definition, a WMI consumer, and the message joined from a classic event's unnamed
+# Data (a PowerShell 400's HostApplication). Cut at 4,000 characters, an indicator placed after
 # the cut escaped every rule, and padding a command is trivial. Other columns keep the short cut;
 # every value stays whole in data.
 _LONG_FIELDS = frozenset(
@@ -512,9 +513,9 @@ def flatten(event: dict[str, Any], record: dict[str, Any] | None = None, include
             continue
         if key == "dataList":
             if isinstance(v, list):
-                row["message"] = _str("\n".join(str(_scalar(x)) for x in v if x is not None), 4000)
+                row["message"] = _str("\n".join(str(_scalar(x)) for x in v if x is not None), LONG_LIMIT)
             else:
-                row["message"] = _str(v, 4000)
+                row["message"] = _str(v, LONG_LIMIT)
             continue
         if key in row and row[key] not in (None, ""):
             continue  # first mapping wins

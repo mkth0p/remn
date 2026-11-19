@@ -179,6 +179,18 @@ def test_long_command_lines_and_script_blocks_reach_the_rules_whole():
     assert row["commandLine"] == cmd and len(cmd) > 4000
 
 
+def test_the_unnamed_data_of_a_classic_event_reaches_the_rules_whole():
+    """Classic PowerShell 400 and 600, MsiInstaller and SQL Server write their payload as unnamed
+    Data, which the parser joins into message and Sigma's Data field reads. It was cut at 4,000
+    characters, so a HostApplication padded past that escaped the rules."""
+    host = "HostApplication=powershell.exe " + "-NoP " * 900 + "-enc SQBFAFgA"
+    event = _sample_event(400, "PowerShell", {"Data": ["Available", "None", f"\tNewEngineState=Available\n\t{host}\n\tEngineVersion=5.1"]})
+    event["Event"]["System"]["Channel"] = "Windows PowerShell"
+    row = evtx_parser.flatten(event, None, include_raw=False)
+    assert host in row["message"] and len(row["message"]) > 4000
+    # frontend/src/parsers/evtx/productFields.test.ts holds the browser parser to the same
+
+
 EVENT_NS = "http://schemas.microsoft.com/win/2004/08/events/event"
 LOGON_DATA = {
     "SubjectUserSid": "S-1-0-0",

@@ -17,8 +17,11 @@ every event is tagged with its source file. Records are flattened into the event
 the standard fields (time, event id, channel, provider, computer, level) and the
 event-specific ones under their own names (`targetUser`, `subjectUser`, `ipAddress`,
 `logonType`, `processName`, `commandLine`, `serviceName`, `taskName`, …), with every
-EventData field also reachable as `data.<Name>`. Access rights in object-access events
-(4656, 4663, 5145 …) keep their codes and are followed by their names (`%%4417` then
+EventData field also reachable as `data.<Name>`. A column keeps at most 4,000 characters and
+ends in `…` where it is cut, except the text rules search whole, which keep 65,536: the command
+line, the script block, the task definition, and `message`, the unnamed Data of a classic event
+(a PowerShell 400's `HostApplication`) joined; `data` keeps every value whole. Access rights in
+object-access events (4656, 4663, 5145 …) keep their codes and are followed by their names (`%%4417` then
 `WriteData (or AddFile)`), as the event viewer shows them, so rules written against either
 spelling match. Where an older log leaves out what a newer one records about a parent
 process, the parser fills it in from the parent's own event in the same log: `ParentUser`

@@ -372,6 +372,15 @@ def _event_data_fields(event_id: Any, provider: Any, sections: dict[str, Any]) -
     return fields
 
 
+def _long_text(value: Any) -> str | None:
+    """An exported event's message, kept to the length the native parser keeps of the text rules
+    search, and marked where it is cut; the whole value stays in data."""
+    from services.parsers.evtx_parser import LONG_LIMIT
+
+    text = str(value) if value else ""
+    return (text if len(text) <= LONG_LIMIT else text[:LONG_LIMIT] + "…") or None
+
+
 _EPOCH = re.compile(r"^\d{9,12}(?:\.\d+)?$")
 
 
@@ -462,7 +471,7 @@ def _event_export(
         "userSid": str(user_sid) if user_sid else None,
         "category": "collection:event-export",
         "targetUser": str(user) if user else None,
-        "message": str(message)[:4000] if message else None,
+        "message": _long_text(message),
         "data": raw,
     }
     label = f"{row['provider'] or row['channel'] or 'event'} {row['eventId'] or ''}".strip()

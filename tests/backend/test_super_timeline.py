@@ -347,6 +347,23 @@ def test_velociraptor_event_log_artifact_rows_are_dated_and_their_event_data_map
     assert row["message"] == "An account was successfully logged on." and row["data"]["IpAddress"] == "203.0.113.9"
 
 
+def test_an_exported_event_message_is_kept_past_four_thousand_characters():
+    host = "HostApplication=powershell.exe " + "-NoP " * 900 + "-enc SQBFAFgA"
+    raw = {
+        "EventTime": "2026-08-19T01:35:00Z",
+        "Channel": "Windows PowerShell",
+        "Provider": "PowerShell",
+        "EventID": 400,
+        "EventRecordID": 13,
+        "Message": f"Engine state is changed from None to Available. {host}",
+    }
+    row = normalize(raw, "results/Windows.EventLogs.Evtx.json", 0, CTX)
+    # before: cut at 4,000 characters with nothing saying so
+    assert host in row["message"]
+    long = normalize({**raw, "Message": "x" * 70_000}, "results/Windows.EventLogs.Evtx.json", 0, CTX)
+    assert long["message"].endswith("…") and len(long["message"]) == 65_537 and long["data"]["Message"] == "x" * 70_000
+
+
 # ---- 5. dissect's $MFT and USN journal: an explicit option ----------------------------------------
 def test_dissect_mft_and_usn_records_carry_their_meaning():
     std = triage.to_row(
