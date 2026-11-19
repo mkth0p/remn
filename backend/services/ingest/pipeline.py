@@ -429,7 +429,7 @@ class EvtxSource:
         except Exception as exc:  # noqa: BLE001
             log.warning("cloud export failed: %s", type(exc).__name__)
             self.stats.errors += 1
-            self.files.append({"name": source_file, "status": "error", "error": str(exc)[:200]})
+            self.files.append({"name": source_file, "status": "error", "error": error_text(exc)})
 
     def _iter_one(self, src: Any, source_file: str, fmt: str = "evtx") -> Iterator[dict[str, Any]]:
         try:
@@ -444,7 +444,15 @@ class EvtxSource:
         except Exception as exc:  # noqa: BLE001
             log.warning("event log failed: %s", type(exc).__name__)
             self.stats.errors += 1
-            self.files.append({"name": source_file, "status": "error", "error": str(exc)[:200]})
+            self.files.append({"name": source_file, "status": "error", "error": error_text(exc)})
+
+
+def error_text(exc: BaseException, limit: int = 200) -> str:
+    """What the entry of a member that failed says. A MemoryError has no text of its own; in a
+    parse process it means the member took the parse to its memory limit."""
+    if isinstance(exc, MemoryError):
+        return "the parse ran out of memory reading this (FORENSIC_PARSE_MAX_MB)"
+    return str(exc)[:limit]
 
 
 def _read_head(path: str | None, n: int = 512) -> bytes:
@@ -531,7 +539,7 @@ def _error_row(folder: str, exc: Exception, fmt: str) -> dict[str, Any]:
         "subject": "(unparseable message)",
         "flags": ["parse_error"],
         "risk": 10,
-        "error": str(exc)[:200],
+        "error": error_text(exc),
         "attachments": [],
         "urls": [],
         "sourceFormat": fmt,
@@ -736,7 +744,7 @@ class MailSource:
                 raise
             except Exception as exc:  # noqa: BLE001
                 log.warning("archive member #%d failed: %s", index, type(exc).__name__)
-                entry.update(status="error", error=str(exc)[:200])
+                entry.update(status="error", error=error_text(exc))
                 row = _error_row(folder, exc, "archive")
                 row["sourceIndex"] = index
                 index += 1

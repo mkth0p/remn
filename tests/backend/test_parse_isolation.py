@@ -450,3 +450,26 @@ def test_a_parse_past_its_deadline_that_does_not_stop_itself_is_killed(tmp_path,
 
     result = parse.result("stopped")
     assert result["stats"]["count"] == 1 and result["stats"]["errors"] == 1
+
+
+def test_a_member_that_runs_the_parse_out_of_memory_says_so_and_the_next_is_read(tmp_path, monkeypatch):
+    from services.parsers import evtx_parser
+
+    original = evtx_parser.iter_events
+
+    def iter_events(src, **kwargs):
+        if kwargs.get("source_file") == "first.evtx":
+            raise MemoryError()
+        return original(src, **kwargs)
+
+    monkeypatch.setattr(evtx_parser, "iter_events", iter_events)
+    blob = io.BytesIO()
+    with zipfile.ZipFile(blob, "w") as z:
+        z.writestr("first.evtx", evtx_bytes(2))
+        z.writestr("second.evtx", evtx_bytes(2))
+    source = pipeline.EvtxSource("logs.zip", None, blob.getvalue(), str(tmp_path))
+    rows = list(source)
+
+    assert len(rows) == 2 and {row["sourceFile"] for row in rows} == {"second.evtx"}
+    first = next(f for f in source.files if f["name"] == "first.evtx")
+    assert first["status"] == "error" and "ran out of memory" in first["error"] and "FORENSIC_PARSE_MAX_MB" in first["error"]

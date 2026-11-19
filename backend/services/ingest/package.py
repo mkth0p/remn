@@ -27,6 +27,7 @@ from services.ingest.pipeline import (
     MailSource,
     Member,
     detect_archive,
+    error_text,
     looks_like_mail,
     open_tar,
 )
@@ -237,7 +238,7 @@ class PackageSource:
                 raise ValueError(failure)
             entry["status"] = "parsed"
         except Exception as exc:  # noqa: BLE001
-            entry.update(status="error", reason=str(exc)[:300])
+            entry.update(status="error", reason=error_text(exc, 300))
         finally:
             closer = getattr(rows, "close", None)
             if closer is not None:
@@ -865,7 +866,7 @@ class PackageSource:
                     raise ValueError(f"{notes['unreadableRecords']:,} record(s) could not be read and are not in the case; the records read are kept")
                 entry["status"] = "parsed"
             except Exception as exc:  # noqa: BLE001
-                entry.update(status="error", reason=str(exc)[:300])
+                entry.update(status="error", reason=error_text(exc, 300))
             finally:
                 # Charged here rather than after the row loop: a decode that raises jumps
                 # straight past that point, so a failing decode used to cost the allowance nothing

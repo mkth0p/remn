@@ -323,7 +323,8 @@ That process:
   stopped and the processes it started go with it. The rows read before the stop are kept; the
   stream's error line or the job's error says what stopped it and while reading which member;
   the result is marked incomplete, and the members it had not finished are errors with the
-  reason.
+  reason. A member that ran the parse out of memory and was given up says so on its entry, and
+  the parse goes on with the next one.
 
 What each system enforces:
 
