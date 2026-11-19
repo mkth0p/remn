@@ -694,6 +694,76 @@ def test_pst_items_libpff_cannot_read_are_counted_not_dropped():
     assert all(r["sourceFormat"] == "pst" and r["attachments"] == [] for r in errors)
 
 
+def test_a_body_longer_than_the_kept_length_is_flagged_as_cut():
+    """Text past 200,000 characters (400,000 of HTML) was dropped with nothing on the row, so the
+    URLs and words in the rest were missing from search and rules without a sign."""
+    from services.parsers.mail.common import MAX_HTML, MAX_TEXT, build_row
+
+    headers = [("From", "billing@example.org"), ("To", "user@example.com"), ("Subject", "statement")]
+    long_text = build_row(headers, "a" * (MAX_TEXT + 1), None, [], CTX, extra={"sourceFormat": "eml"})
+    long_html = build_row(headers, "short", "<p>" + "b" * MAX_HTML + "</p>", [], CTX, extra={"sourceFormat": "eml"})
+    whole = build_row(headers, "a" * MAX_TEXT, None, [], CTX, extra={"sourceFormat": "eml"})
+    assert "body_truncated" in long_text["flags"] and len(long_text["bodyText"]) == MAX_TEXT
+    assert "body_truncated" in long_html["flags"]
+    assert "body_truncated" not in whole["flags"]
+    assert long_text["risk"] == whole["risk"], "the flag says what was kept; it is not evidence"
+
+
+class _FakeAttachment:
+    def __init__(self, name, size):
+        self.name = name
+        self.size = size
+        self.reads = 0
+
+    def get_size(self):
+        return self.size
+
+    def read_buffer(self, size):
+        self.reads += 1
+        return b"%PDF-1.7\n" + b"0" * (size - 9)
+
+
+class _FakeMsgWithAttachments(_FakeMsg):
+    def __init__(self, attachments):
+        super().__init__("files", "see attached", 21)
+        self._a = attachments
+        self.number_of_attachments = len(attachments)
+
+    def get_attachment(self, i):
+        return self._a[i]
+
+
+def test_a_pst_attachment_too_large_to_read_keeps_its_size_and_says_it_was_not_read():
+    """An attachment over the 60 MiB REMN reads from a PST was handed on as no bytes, so it showed
+    as an empty file with no hash, which misdescribes the evidence."""
+    from services.parsers.mail import pst
+
+    big = _FakeAttachment("disk.iso", 70 * 1024 * 1024)
+    small = _FakeAttachment("note.pdf", 1024)
+    msg = _FakeMsgWithAttachments([big, small])
+    row = pst._message_row(msg, "Inbox", ParseContext(internal_domains=["interne.fr"]), 1)
+
+    assert big.reads == 0 and small.reads == 1
+    unread, read = row["attachments"]
+    assert unread["name"] == "disk.iso" and unread["size"] == 70 * 1024 * 1024
+    assert "not_read" in unread["flags"] and "empty_file" not in unread["flags"] and not unread.get("sha256")
+    assert "60 MiB" in unread["details"]["skipped"]
+    assert read["sha256"] and "not_read" not in read["flags"]
+    assert "att_not_read" in row["flags"] and "att_empty_file" not in row["flags"]
+
+
+def test_a_pst_message_with_more_attachments_than_are_analysed_keeps_their_count():
+    """Past 60 attachments a PST message lost the rest outright, and its attachment count said 60."""
+    from services.parsers.mail import pst
+
+    msg = _FakeMsgWithAttachments([_FakeAttachment(f"scan-{i:02d}.pdf", 64) for i in range(65)])
+    row = pst._message_row(msg, "Inbox", ParseContext(internal_domains=["interne.fr"]), 1)
+
+    assert row["attachmentCount"] == 65 and len(row["attachments"]) == 60
+    assert "attachments_truncated" in row["flags"]
+    assert sum(a.reads for a in msg._a) == 60, "the attachments past those analysed are counted, not read"
+
+
 def test_raw_8bit_header_bytes_do_not_end_the_mailbox():
     """An mbox whose second message has a Latin-1 byte in its Subject: all three messages arrive,
     and the byte is read as the character it stands for."""

@@ -36,6 +36,8 @@ log = logging.getLogger(__name__)
 Header = tuple[str, str]
 MAX_TEXT = 200_000
 MAX_HTML = 400_000
+# attachments analysed and listed per message; the count on the row is still the real one
+MAX_ATTACHMENTS = 60
 
 MAIL_WEIGHTS: dict[str, int] = {
     "spf_fail": 35,
@@ -264,6 +266,10 @@ class RawAttachment:
     mime: str | None = None
     inline: bool = False
     content_id: str | None = None
+    # set by a container parser that did not read the bytes (an attachment past its size limit):
+    # why, and the size the container declares
+    unread: str | None = None
+    size: int | None = None
 
 
 def normalize_name(name: str | None) -> str:
@@ -368,8 +374,13 @@ def build_row(
     size: int | None = None,
     extra: dict[str, Any] | None = None,
     depth: int = 0,
+    attachment_count: int | None = None,
 ) -> dict[str, Any]:
-    """Assemble and analyse one message."""
+    """Assemble and analyse one message.
+
+    attachment_count is the message's real number of attachments when the container parser
+    passed only those it read.
+    """
     extra = extra or {}
     date_raw = first_header(headers, "Date")
     date_ms, date_iso = parse_timestamp(date_raw)
@@ -399,6 +410,9 @@ def build_row(
             flags.add("display_name_email_mismatch")
 
     # Bodies
+    if len(body_text or "") > MAX_TEXT or len(body_html or "") > MAX_HTML:
+        # the rest is in no column, search or rule, so the row says it was cut
+        flags.add("body_truncated")
     text = (body_text or "")[:MAX_TEXT]
     html = (body_html or "")[:MAX_HTML] if body_html else ""
     subject = decode_mime(first_header(headers, "Subject") or extra.get("subject") or "")
@@ -561,20 +575,28 @@ def build_row(
     # Attachments
     att_rows: list[dict[str, Any]] = []
     max_att_risk = 0
+    total_attachments = max(len(attachments), attachment_count or 0)
     if ctx.analyze_attachments:
-        for a in attachments[:60]:
-            try:
-                row = analyze_attachment(a.name, a.data, a.mime, depth=depth, inline=a.inline, content_id=a.content_id)
-            except Exception as exc:  # noqa: BLE001
-                log.warning("attachment failed: %s", exc)
-                row = {"name": a.name, "size": len(a.data), "flags": ["analysis_error"], "risk": 20, "details": {"error": str(exc)[:200]}}
+        for a in attachments[:MAX_ATTACHMENTS]:
+            if a.unread:
+                # no bytes to hash or analyse: the size is the container's, and the reason is
+                # kept where the analyzer keeps its own skips, so a rescore does not lower it
+                size_flag = ["large_attachment"] if (a.size or 0) > 25 * 1024 * 1024 else []
+                row = {"name": a.name, "size": a.size, "flags": sorted(["not_read", *size_flag]), "risk": 20, "details": {"skipped": a.unread}}
+            else:
+                try:
+                    row = analyze_attachment(a.name, a.data, a.mime, depth=depth, inline=a.inline, content_id=a.content_id)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("attachment failed: %s", exc)
+                    row = {"name": a.name, "size": len(a.data), "flags": ["analysis_error"], "risk": 20, "details": {"error": str(exc)[:200]}}
             att_rows.append(row)
             max_att_risk = max(max_att_risk, row.get("risk", 0))
             for f in row.get("flags", []):
                 flags.add("att_" + f)
-        if len(attachments) > 60:
+        if total_attachments > MAX_ATTACHMENTS:
             flags.add("many_attachments")
-    if len(attachments) > 10:
+            flags.add("attachments_truncated")
+    if total_attachments > 10:
         flags.add("many_attachments")
 
     to_list = parse_addresses(header_values(headers, "To"))
@@ -651,7 +673,7 @@ def build_row(
         "urlCount": len(urls),
         "htmlInfo": {k: v for k, v in html_info.items() if k != "forms"} | {"forms": html_info.get("forms", [])[:10]},
         "attachments": att_rows,
-        "attachmentCount": len(attachments),
+        "attachmentCount": total_attachments,
         "maxAttachmentRisk": max_att_risk,
         "lookalike": look,
         "replyToLookalike": reply_look,

@@ -85,7 +85,11 @@ Bodies and raw headers are kept for previews and body rules unless the case says
 otherwise. Attachments are analysed statically at ingest (structure, macros, PDF
 content, archives, YARA when installed); the analysis summary is kept, the bytes are
 not. Deep attachment analysis can be switched off for a first pass over a very large
-mailbox.
+mailbox. A body is kept to 200,000 characters of text and 400,000 of HTML, and a longer one
+is flagged `body_truncated`. The first 60 attachments of a message are analysed and listed,
+and a message with more is flagged `attachments_truncated` while its attachment count stays
+the real one. An attachment over 60 MiB in a PST or OST is not read: it is listed with the
+size the mailbox declares, no hash, and the flag `not_read`.
 
 ### Deleted and orphaned mail (PST and OST)
 

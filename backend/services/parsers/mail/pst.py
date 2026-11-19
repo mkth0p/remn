@@ -11,9 +11,12 @@ from collections.abc import Iterator
 from email.utils import format_datetime
 from typing import Any
 
-from services.parsers.mail.common import Header, ParseContext, RawAttachment, build_row
+from services.parsers.mail.common import MAX_ATTACHMENTS, Header, ParseContext, RawAttachment, build_row
 
 log = logging.getLogger(__name__)
+
+# the most of one attachment read into memory; a larger one is listed with its size, unread
+MAX_ATTACHMENT_BYTES = 60 * 1024 * 1024
 
 # MAPI property identifiers we read from record sets when transport headers are missing
 PR_SENDER_NAME = 0x0C1A
@@ -143,13 +146,14 @@ def _headers_from_message(message: Any, props: dict[int, Any]) -> tuple[list[Hea
     return headers, extra
 
 
-def _attachments(message: Any) -> list[RawAttachment]:
+def _attachments(message: Any) -> tuple[list[RawAttachment], int]:
+    """The attachments build_row analyses, and how many the message has in all."""
     out: list[RawAttachment] = []
     try:
         n = message.number_of_attachments
     except Exception:  # noqa: BLE001
-        return out
-    for i in range(min(n, 60)):
+        return out, 0
+    for i in range(min(n, MAX_ATTACHMENTS)):
         try:
             att = message.get_attachment(i)
             name = None
@@ -169,7 +173,18 @@ def _attachments(message: Any) -> list[RawAttachment]:
                 except Exception:  # noqa: BLE001
                     size = 0
             data = b""
-            if size and size <= 60 * 1024 * 1024:
+            if size > MAX_ATTACHMENT_BYTES:
+                # handed on as no bytes it would read as an empty file with no hash
+                out.append(
+                    RawAttachment(
+                        name or f"attachment-{i}",
+                        b"",
+                        unread=f"larger than the {MAX_ATTACHMENT_BYTES // 1024**2} MiB read from a PST or OST; not hashed or analysed",
+                        size=size,
+                    )
+                )
+                continue
+            if size:
                 try:
                     data = att.read_buffer(size)
                 except Exception:  # noqa: BLE001
@@ -181,7 +196,7 @@ def _attachments(message: Any) -> list[RawAttachment]:
             out.append(RawAttachment(name or f"attachment-{i}", data or b"", None, False, None))
         except Exception as exc:  # noqa: BLE001
             log.debug("pst attachment %d failed: %s", i, exc)
-    return out
+    return out, n
 
 
 def _bodies(message: Any) -> tuple[str | None, str | None]:
@@ -290,9 +305,9 @@ def _message_row(message: Any, folder: str, ctx: ParseContext, index: int) -> di
         props = _props(message)
         headers, extra = _headers_from_message(message, props)
         text, html = _bodies(message)
-        attachments = _attachments(message) if ctx.analyze_attachments else []
+        attachments, attachment_count = _attachments(message) if ctx.analyze_attachments else ([], 0)
         extra["sourceFormat"] = "pst"
-        row = build_row(headers, text, html, attachments, ctx, folder=folder, size=None, extra=extra)
+        row = build_row(headers, text, html, attachments, ctx, folder=folder, size=None, extra=extra, attachment_count=attachment_count)
     except Exception as exc:  # noqa: BLE001
         log.warning("pst message %d failed: %s", index, exc)
         row = _error_row(folder, "(unparseable message)", str(exc)[:200])
