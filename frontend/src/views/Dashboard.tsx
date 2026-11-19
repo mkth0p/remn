@@ -79,7 +79,8 @@ export function Dashboard() {
             tone="accent"
             icon={<IconEvents />}
             value={fmtNum(counts.events)}
-            label={range?.firstIso ? `events · ${range.firstIso.slice(0, 10)} → ${range.lastIso?.slice(0, 10)}` : 'events · no EVTX loaded'}
+            // events come from event logs, cloud audit exports and triage collections, and not all of them give a range
+            label={range?.firstIso ? `events · ${range.firstIso.slice(0, 10)} → ${range.lastIso?.slice(0, 10)}` : counts.events ? 'events' : 'events · none loaded'}
             onClick={() => setView('events')}
           />
           <Kpi tone="accent" icon={<IconMail />} value={fmtNum(counts.mails)} label={`mails · ${evidence.filter((e) => e.kind === 'mail').length} mailbox file(s)`} onClick={() => setView('mails')} />
@@ -118,7 +119,7 @@ export function Dashboard() {
               </button>
             </div>
             <div className="panel-b col" style={{ gap: 6 }}>
-              {!findings.length && <div className="muted small">No findings yet. Load evidence, then run the rules from the Findings view.</div>}
+              {!findings.length && <div className="muted small">{noFindings(counts.evidence, kase.settings.autoRunRules !== false)}</div>}
               {findings.map((f) => (
                 <div key={f.id} className="row small" style={{ gap: 8 }}>
                   <Badge sev={f.severity}>{f.severity}</Badge>
@@ -164,7 +165,7 @@ export function Dashboard() {
                     ? dep.tier === 'this-machine'
                       ? 'checking…'
                       : 'not checked'
-                    : 'Ollama unreachable'}
+                    : unreachable(aiCfg.transport)}
               </span>
             </div>
             <div className="small muted">
@@ -195,6 +196,22 @@ export function Dashboard() {
       </div>
     </div>
   )
+}
+
+/** What the empty findings panel says: the rules run on their own after an import unless the case turned that off. */
+function noFindings(evidence: number, autoRun: boolean): string {
+  if (autoRun)
+    return evidence
+      ? 'No findings. The rules run on their own once an import finishes; the Findings view says when they last ran.'
+      : 'No findings yet. Load evidence: the rules run on their own once an import finishes.'
+  return evidence ? 'No findings yet. Run the rules from the Findings view: this case does not run them on its own.' : 'No findings yet. Load evidence, then run the rules from the Findings view.'
+}
+
+/** The AI connection that did not answer, named as Settings names it. */
+function unreachable(transport: 'browser' | 'openai' | 'server' | 'claude'): string {
+  if (transport === 'claude') return 'Claude Code unavailable'
+  if (transport === 'openai') return 'model server unreachable'
+  return 'Ollama unreachable'
 }
 
 /** A first look without evidence of one's own: the synthetic lab, already read, restored in this browser. */
