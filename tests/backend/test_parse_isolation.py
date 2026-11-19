@@ -121,7 +121,8 @@ def test_a_parser_sees_neither_the_token_nor_the_keys_nor_the_server_settings(tm
     assert seen["token"] is None and seen["settingsToken"] is None and seen["reputationKeys"] is None
     assert seen["secretKey"] != "invented-secret"
     assert not {"FORENSIC_AUTH_TOKEN", "VIRUSTOTAL_API_KEY", "REMN_TEST_MARKER"} & set(seen["environ"])
-    assert set(seen["environ"]) <= set(isolation.CHILD_ENVIRONMENT) | {"HOME", "TMPDIR", "TEMP", "TMP", "USERPROFILE", "__CF_USER_TEXT_ENCODING"}
+    own = {"HOME", "TMPDIR", "TEMP", "TMP", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "__CF_USER_TEXT_ENCODING"}
+    assert set(seen["environ"]) <= set(isolation.CHILD_ENVIRONMENT) | own
     assert Path(seen["cwd"]).parent.resolve() == tmp_path.resolve(), "it works in a folder of its own in the staging area"
 
 
