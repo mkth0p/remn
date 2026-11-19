@@ -30,7 +30,10 @@ def load_rules(rules_dir: Path) -> list[dict]:
             docs = [d for d in yaml.safe_load_all(text) if isinstance(d, dict)]
         except Exception as exc:  # noqa: BLE001
             log.warning("rule file %s invalid: %s", path, exc)
-            out.append({"file": str(path.relative_to(rules_dir)), "error": str(exc)[:200], "yaml": ""})
+            # what is wrong with the YAML is for the reader of the rule list; any other failure
+            # (the file cannot be read) carries the server's full path in its text
+            said = str(exc)[:200] if isinstance(exc, yaml.YAMLError) else f"the file could not be read ({type(exc).__name__})"
+            out.append({"file": str(path.relative_to(rules_dir)), "error": said, "yaml": ""})
             continue
         if len(docs) == 1:
             out.append({"file": str(path.relative_to(rules_dir)).replace("\\", "/"), "yaml": text, "rule": docs[0]})

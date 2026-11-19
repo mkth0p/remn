@@ -211,8 +211,10 @@ LOGGING = {
     "disable_existing_loggers": False,
     "formatters": {"std": {"format": "%(asctime)s %(levelname)s %(name)s: %(message)s"}},
     "filters": {"redact": {"()": "forensic.logfilter.RedactEvidence"}},
-    # in browser-only mode, exceptions from the parsing code are logged by type and place, not text
-    "handlers": {"console": {"class": "logging.StreamHandler", "formatter": "std", "filters": ["redact"] if FORENSIC_BROWSER_ONLY else []}},
+    # Exceptions from the parsing code and from requests are logged by type and place, not text.
+    # FORENSIC_DEBUG keeps the text and the traceback for a developer on their own machine, and
+    # never does on a browser-only instance.
+    "handlers": {"console": {"class": "logging.StreamHandler", "formatter": "std", "filters": [] if DEBUG and not FORENSIC_BROWSER_ONLY else ["redact"]}},
     "root": {"handlers": ["console"], "level": os.environ.get("FORENSIC_LOG_LEVEL", "INFO")},
     "loggers": {
         "django.request": {"level": "WARNING"},

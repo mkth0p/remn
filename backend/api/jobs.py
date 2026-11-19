@@ -5,10 +5,11 @@ from __future__ import annotations
 import logging
 import threading
 import time
-import traceback
 import uuid
 from collections.abc import Callable
 from typing import Any
+
+from api.errors import failure
 
 log = logging.getLogger(__name__)
 
@@ -98,9 +99,9 @@ class JobManager:
                 except JobCancelled:
                     job.status = "cancelled"
                 except Exception as exc:  # noqa: BLE001
+                    # the job's id stays out of the log: whoever holds it can find the job
+                    job.error = failure(f"the {kind} job", exc, log)["error"]
                     job.status = "error"
-                    job.error = str(exc)[:500]
-                    log.error("job %s failed: %s\n%s", job.id, exc, traceback.format_exc())
                 finally:
                     job.finished = time.time()
 

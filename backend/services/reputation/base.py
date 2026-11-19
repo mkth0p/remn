@@ -16,6 +16,21 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
+
+def _failed(exc: BaseException) -> str:
+    """What a client is told of a lookup that raised. The text of an HTTP client's exception names
+    the URL it called, and that URL can carry the provider's key and the value looked up."""
+    import httpx
+
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"the provider answered HTTP {exc.response.status_code}"
+    if isinstance(exc, httpx.TimeoutException):
+        return "the provider did not answer in time"
+    if isinstance(exc, httpx.TransportError):
+        return f"the provider could not be reached ({type(exc).__name__})"
+    return f"the lookup failed ({type(exc).__name__})"
+
+
 KINDS = ("url", "domain", "ip", "hash")
 # "timeout": the batch deadline passed before this lookup ran or answered
 VERDICTS = ("malicious", "suspicious", "clean", "unknown", "error", "not_configured", "timeout")
@@ -174,7 +189,7 @@ class Registry:
             v.fetched_at = time.time()
         except Exception as exc:  # noqa: BLE001
             log.info("%s lookup failed for %s %s: %s", provider.name, kind, value[:80], exc)
-            v = Verdict(provider.name, kind, value, "error", details={"error": str(exc)[:200]})
+            v = Verdict(provider.name, kind, value, "error", details={"error": _failed(exc)})
         self.cache.put(v)
         return v
 
@@ -210,7 +225,7 @@ class Registry:
                 try:
                     results.append(fut.result().to_dict())
                 except Exception as exc:  # noqa: BLE001
-                    results.append(Verdict(p.name, k, v, "error", details={"error": str(exc)[:200]}).to_dict())
+                    results.append(Verdict(p.name, k, v, "error", details={"error": _failed(exc)}).to_dict())
         except TimeoutError:
             pass
         finally:

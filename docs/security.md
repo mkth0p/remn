@@ -191,11 +191,23 @@ finishes.
 ### What the server log holds
 
 The log is the one thing on a browser-only server that outlives a parse. It holds operational
-lines: requests refused, sweeps, the engine's state. In browser-only mode a failure in the
-parsing code is logged by exception type and place (`UnicodeDecodeError at common.py:104`),
-never with the exception's text, which is often a piece of the input, and never with a file,
-member or attachment name. `docker-compose.public.yml` rotates the log (three files of 10 MB)
-rather than keeping it for the life of the container.
+lines: requests refused, sweeps, the engine's state. A failure in the parsing code, in a request
+or in the web server is logged by exception type and place (`UnicodeDecodeError at common.py:104`),
+never with the exception's text, which is often a piece of the input or a path on the server. This
+holds in every mode; `FORENSIC_DEBUG=1` keeps the text and the traceback for a developer on their
+own machine, and has no such effect in browser-only mode. In browser-only mode the log also never
+names a file, member or attachment. `docker-compose.public.yml` rotates the log (three files of
+10 MB) rather than keeping it for the life of the container.
+
+A client is told no more than the log holds. A request, a parse or a job that fails on the server
+answers with what failed, the exception's type and a reference (`the store query failed on the
+server (OSError); the server log has the cause under reference 3f9a01c2`), and the log line of
+that failure carries the same reference, so the operator can find the cause for the analyst who
+reports it. Two kinds of text are still passed on as they are: a statement or filter the database
+cannot run gets DuckDB's diagnostic as a 400, because the analyst, and the model's `sql` tool,
+correct the query from it; and the per-file entries of a package or mailbox ingest (a member that
+could not be read, an unparseable message) keep the parser's message for that file, which can
+quote the file.
 
 This is what lets a public instance take real evidence: the exposure of a file is bounded to one
 parse, and nothing of it is kept. Before the first upload to a parser on another machine, the app

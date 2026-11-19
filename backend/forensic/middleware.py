@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hmac
 import ipaddress
+import logging
 import re
 import threading
 import time
@@ -23,6 +24,8 @@ from django.conf import settings
 from django.http import JsonResponse
 
 HEADER_NAME = "HTTP_X_FORENSIC_CLIENT"
+# under "api.", so the log filter reduces an exception recorded here to its type and place
+log = logging.getLogger("api.errors")
 
 
 def client_address(request) -> str:
@@ -294,7 +297,8 @@ class ConcurrencyGuardMiddleware:
 
 class JsonErrorsMiddleware:
     """An API client reads JSON: a body over DATA_UPLOAD_MAX_MEMORY_SIZE gets a 413 that says so,
-    not Django's HTML 400, which the pages could only show as "400 Bad Request"."""
+    not Django's HTML 400, which the pages could only show as "400 Bad Request". A view that raises
+    gets a JSON 500 that names a reference and not the exception, in place of Django's HTML page."""
 
     def __init__(self, get_response):
         self.get_response = get_response
@@ -303,9 +307,20 @@ class JsonErrorsMiddleware:
         return self.get_response(request)
 
     def process_exception(self, request, exception):
-        from django.core.exceptions import RequestDataTooBig
+        from django.core import signals
+        from django.core.exceptions import BadRequest, PermissionDenied, RequestDataTooBig, SuspiciousOperation
+        from django.http import Http404
+        from django.http.multipartparser import MultiPartParserError
 
-        if request.path.startswith("/api/") and isinstance(exception, RequestDataTooBig):
+        from api.errors import failure
+
+        if not request.path.startswith("/api/"):
+            return None
+        if isinstance(exception, RequestDataTooBig):
             mib = settings.DATA_UPLOAD_MAX_MEMORY_SIZE // (1024 * 1024)
             return JsonResponse({"error": f"request larger than the server accepts ({mib} MiB)", "code": "tooLarge"}, status=413)
-        return None
+        if isinstance(exception, (Http404, PermissionDenied, BadRequest, SuspiciousOperation, MultiPartParserError)):
+            return None  # Django answers these with their own 4xx status
+        # as Django does for an exception nothing handled: error reporting and the test client listen for it
+        signals.got_request_exception.send(sender=None, request=request)
+        return JsonResponse(failure("the request", exception, log), status=500)

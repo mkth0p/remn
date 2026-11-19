@@ -14,18 +14,21 @@ import time
 from collections.abc import Iterator
 from typing import Any
 
+import duckdb
 from django.conf import settings
 from django.http import HttpRequest, JsonResponse, StreamingHttpResponse
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
+from api.errors import failure
 from api.jobs import Job, manager
 from api.params import BadParameter, whole_number
 from api.views.upload import discard_upload, get_upload
 from services.analysis import hayabusa
 from services.common import ndjson_line
 from services.ingest.package import PackageSource
-from services.ingest.pipeline import EvtxSource, MailSource, MailStats
+from services.ingest.pipeline import EvtxSource, MailSource, MailStats, detect_mail_format
 from services.parsers import evtx_parser
+from services.parsers.mail import pst as pst_mod
 from services.parsers.mail.common import ParseContext
 from services.store import queries as Q
 from services.store import rules as R
@@ -133,6 +136,14 @@ def ingest(request: HttpRequest, key: str):
     except (TypeError, ValueError):
         return JsonResponse({"error": "evidence.id is required"}, status=400)
     name = str(evidence.get("name") or meta.get("name") or "upload")
+    if kind == "mail" and not pst_mod.available():
+        # said here, as the browser-store path says it: inside the job it would be one more failure
+        # whose text is not shown
+        with open(path, "rb") as fh:
+            head = fh.read(4096)
+        if detect_mail_format(name, head) == "pst":
+            discard_upload(upload_id)
+            return JsonResponse({"error": "PST/OST support requires libpff-python (see backend/requirements-optional.txt)"}, status=501)
     sha_client = str(evidence.get("sha256Client") or "")
     ctx = _ctx_from(options.get("settings"))
     include_raw = bool(options.get("includeRaw", True))
@@ -420,9 +431,14 @@ def _query(request: HttpRequest, key: str, fn):
         return JsonResponse(fn(st, body), safe=False)
     except (FilterError, BadParameter) as exc:
         return JsonResponse({"error": str(exc)}, status=400)
+    except (duckdb.ProgrammingError, duckdb.DataError) as exc:
+        # The database's answer to a statement or filter it cannot run: a name it does not know, a
+        # syntax error, a value that does not convert. It is about the analyst's own query over
+        # their own case, it is what they (and the model's sql tool) correct the query from, and it
+        # names no file. Every other database error (I/O, memory, internal) is a server failure.
+        return JsonResponse({"error": str(exc)[:500]}, status=400)
     except Exception as exc:  # noqa: BLE001
-        log.exception("store query failed")
-        return JsonResponse({"error": str(exc)[:300]}, status=500)
+        return JsonResponse(failure("the store query", exc, log), status=500)
 
 
 @require_POST

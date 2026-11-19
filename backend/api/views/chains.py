@@ -9,6 +9,7 @@ from django.conf import settings as conf
 from django.http import HttpRequest, JsonResponse
 from django.views.decorators.http import require_POST
 
+from api.errors import failure
 from services.analysis import chains as C
 from services.store.casestore import registry
 
@@ -54,6 +55,5 @@ def build(request: HttpRequest):
         else:
             result = C.build_chains(body.get("mails") or [], body.get("events") or [], findings, settings, **opts)
     except Exception as exc:  # noqa: BLE001
-        log.exception("chain build failed")
-        return JsonResponse({"error": str(exc)[:300]}, status=500)
+        return JsonResponse(failure("the chain build", exc, log), status=500)
     return JsonResponse(result)
