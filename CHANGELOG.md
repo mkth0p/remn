@@ -42,6 +42,22 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   are a third held-out library (`tools/security_datasets.py`), and `tools/library_measures.py`
   fetches, runs and scores them all
   ([review](docs/reviews/2026-09-28-measures-across-libraries.md)).
+- Microsoft 365 and Entra exports are read for what they are, and what reading them cost is said.
+  A directory audit, risk or user export that names a `userPrincipalName` was read as successful,
+  undated sign-ins of nobody. A record is now a sign-in only when it carries a time, a client
+  address and a user or application; other exports are listed as unread, and a record inside a
+  sign-in file that is not a sign-in is counted as not read. The PascalCase columns of
+  `Get-MgAuditLogSignIn | Export-Csv` are read, its .NET type names are left out, and a sign-in
+  whose export gives no outcome is no longer counted as a success (its `status` is empty, so rules
+  on `status: "0"` no longer count it). An AuditData field longer than 131,072 characters no
+  longer ends a CSV; a row the CSV reader cannot take is one parse error and the rows after it are
+  read. JSON arrays and Graph pages are read one record at a time instead of loaded whole in the
+  server process (a 75 MB sign-in array peaked at 228 MB, now 3 MB). A value cut at its length
+  limit ends with an ellipsis. Culture dates with minutes only, a 12-hour clock, the year first or
+  an offset are read with their zone, and a sign-in CSV's date order is decided from the whole
+  file. The ids kept to find repeated records stop growing at 64 MiB. The evidence statistics
+  (`cut`, `undated`, `dateOrderGuessed`, `repeatsUnchecked`) and the archive or package member
+  notes count each of these.
 - A detection level per case, from 1 (fewest lines) to 5 (every finding on its own), set when the
   case is started (2 by default) and changed on the Rules page. No level drops a finding: the
   findings of a rule that fired too often on the evtx-baseline clean machines for its severity are
