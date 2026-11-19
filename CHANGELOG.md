@@ -65,6 +65,20 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   same escaping, so a value from the evidence cannot start a formula in Excel builds that split
   CSV on semicolons. The HTML report carries its own content security policy (no script, no
   remote loads), and the build's source link is only ever an http(s) URL.
+- The documentation says only what the repository can show. The detection figures in the README
+  and `docs/detection.md` are those of the committed rule measure (`rules/measures.json` and
+  `rules/measures-detail.json`), and `tests/backend/test_quoted_measures.py` fails when a page
+  quotes another; figures from runs whose scripts are not in the repository are gone. The quick
+  start works from a clone on Linux, macOS and Windows, the screenshots show the current
+  interface, and `.env.example` lists every variable the backend reads at its default, with a test
+  that fails on one it misses. A code of conduct, an issue-template config and `SECURITY.md` send
+  security reports to GitHub's private vulnerability reporting. `THIRD_PARTY_NOTICES.md` is
+  written from the lock files by `tools/third_party_notices.py`: every shipped Python, npm and
+  Rust package with the licence it declares, the copyleft components (extract-msg, the dissect
+  packages, Hayabusa in the Docker image and others) with how REMN uses each, the licence texts of
+  the browser application, the bundled Tranco list, and the corpora behind the published rates
+  (Phishing Pot is non-commercial). A test fails when a lock gains a package the notices do not
+  list.
 - Public instance limits: a chunk upload over 64 MiB is refused before it is read (by Caddy and by
   the server), unfinished uploads reserve the size they announced in the staging budget, and the
   chains and mail enrichment paths refuse a server case key in browser-only mode, as stories and
