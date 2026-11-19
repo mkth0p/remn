@@ -5,7 +5,9 @@ from django.test import Client, override_settings
 
 def test_no_token_mode_presence_only():
     c = Client()
-    assert c.get("/api/health").status_code == 403
+    assert c.get("/api/meta").status_code == 403
+    # a health probe without the header learns that the server is up, and nothing more
+    assert c.get("/api/health").json() == {"ok": True}
     assert c.get("/api/health", HTTP_X_FORENSIC_CLIENT="anything").status_code == 200
     assert c.options("/api/health").status_code == 403
 
@@ -14,7 +16,8 @@ def test_no_token_mode_presence_only():
 def test_token_mode_requires_exact_value():
     c = Client()
     # missing header stays 403 (not 401) so scanners learn nothing
-    assert c.get("/api/health").status_code == 403
+    assert c.get("/api/meta").status_code == 403
+    assert c.get("/api/health").json() == {"ok": True}
     r = c.get("/api/health", HTTP_X_FORENSIC_CLIENT="remn")
     assert r.status_code == 401
     assert r.json()["code"] == "auth"

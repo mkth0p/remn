@@ -166,7 +166,10 @@ findings in the container. `--build-arg HAYABUSA=0` builds the image without it.
 
 or, with compose, `REMN_EXTRA_PIP="yara-python libpff-python" docker compose up --build`
 (`set REMN_EXTRA_PIP=yara-python libpff-python` first in a Windows command prompt). The
-health endpoint, `/api/health`, reports what the running server has under `optional`.
+health endpoint, `/api/health`, reports what the running server has under `optional` to a
+request that carries the `X-Forensic-Client` header (the token, when one is set). Without the
+header it answers `{"ok": true}` and nothing else; that is what the image's health check
+(`tools/healthcheck.py`) asks, so the check needs no token.
 
 Still not in the image: GeoLite2 and the offline lists, which are data the operator
 downloads under licence (mount your `backend/data` folder at `/app/backend/data`), YARA

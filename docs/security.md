@@ -43,8 +43,9 @@ pack importer download from their sources on request, never during an investigat
 
 - The server binds to `127.0.0.1` and keeps no database. Every `/api` call needs the
   `X-Forensic-Client` header (cookie-less CSRF protection); cross-origin preflights are
-  refused. With `FORENSIC_AUTH_TOKEN` set, the header value must equal the token (see
-  [remote access](setup.md#remote-access)). The remote mode is one shared token, with no
+  refused. The one exception is a GET of `/api/health`, which a caller without the header
+  gets as `{"ok": true}` only. With `FORENSIC_AUTH_TOKEN` set, the header value must equal
+  the token (see [remote access](setup.md#remote-access)). The remote mode is one shared token, with no
   per-user accounts, audit log or rate limit; keep such a deployment private.
 - Parsed content is treated as hostile: React escaping, HTML previews in a sandboxed
   iframe with DOMPurify, images blocked, links disabled and defanged. Attachments are
@@ -122,7 +123,10 @@ the one the proxy added; set it only when a proxy you control is the only way to
 server. `docker-compose.public.yml` is this configuration with Caddy in front, and
 `FORENSIC_MAX_UPLOAD_MB` lowered.
 
-The health endpoint reports the build (`version+commit`) and a link to that exact source in
+A GET of the health endpoint without the `X-Forensic-Client` header is the one request the
+server answers without it, and it answers `{"ok": true}` and nothing else: that is what a
+container health check or a load balancer can send. With the header (and the token, when one
+is set), the health endpoint reports the build (`version+commit`) and a link to that exact source in
 every mode, and the app shows both: a visitor who trusts the server with evidence can read the
 code that parses it. It withholds the machine: paths, platform, interpreter, and which native
 libraries are compiled in, reporting only coarse formats (`"formats": {"pst": true}`). The
