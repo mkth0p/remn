@@ -162,3 +162,36 @@ def test_a_program_on_admin_share_is_reported_on_its_own_so_the_rule_promises_no
     found = fired(store, "win-psexec-pattern", [share])
     assert len(found) == 1 and found[0]["severity"] == "medium"
     assert "followed by" not in found[0]["description"]
+
+
+def task_xml(command: str, arguments: str, description: str = "Keeps the agent up to date") -> str:
+    return (
+        '<?xml version="1.0" encoding="UTF-16"?>\r\n<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">\r\n'
+        f"  <RegistrationInfo>\r\n    <Description>{description}</Description>\r\n  </RegistrationInfo>\r\n"
+        "  <Settings>\r\n    <Hidden>true</Hidden>\r\n  </Settings>\r\n"
+        f'  <Actions Context="Author">\r\n    <Exec>\r\n      <Command>{command}</Command>\r\n      <Arguments>{arguments}</Arguments>\r\n    </Exec>\r\n  </Actions>\r\n</Task>'
+    )
+
+
+def task_created(name: str, xml: str) -> dict:
+    return event(4698, {"SubjectUserName": "j.doe", "TaskName": name, "TaskContent": xml}, computer="WS01.corp.example")
+
+
+def test_a_task_is_not_suspicious_for_the_schema_address_every_task_carries_or_for_its_description(store):
+    benign = task_xml(r"C:\Program Files\Example Vendor\agent.exe", "--check", "Runs the agent; never uses PowerShell or cmd.exe")
+    assert fired(store, "win-scheduled-task-suspicious-content", [task_created(r"\Example Vendor Agent", benign)]) == []
+
+
+def test_a_task_whose_action_runs_a_hidden_encoded_powershell_or_a_script_is_reported(store):
+    bad = task_xml("powershell.exe", "-w hidden -enc SQBFAFgA")
+    script = task_xml(r"C:\tools\shell.cmd", "")
+    found = fired(store, "win-scheduled-task-suspicious-content", [task_created(r"\Updater", bad), task_created(r"\Helper", script)])
+    assert sorted(f["entities"]["taskName"] for f in found) == [r"\Helper", r"\Updater"]
+
+
+def test_a_task_action_reading_a_json_file_or_starting_internet_explorer_is_not_a_script(store):
+    rows = [
+        task_created(r"\Example Sync", task_xml(r"C:\Program Files\Example Vendor\sync.exe", r"--config C:\Program Files\Example Vendor\sync.json")),
+        task_created(r"\Example Kiosk", task_xml(r"C:\Program Files\Internet Explorer\iexplore.exe", "-k")),
+    ]
+    assert fired(store, "win-scheduled-task-suspicious-content", rows) == []

@@ -88,18 +88,27 @@ where:
 ---
 id: win-scheduled-task-suspicious-content
 title: Scheduled task with suspicious command
-description: Task XML (4698/4702) references cmd, powershell, mshta, script hosts, temp folders or encoded commands. One finding per task name and host; the task name and the account are on the finding, the command is in the rows.
+description: >-
+  The command or the arguments of a task's action (4698/4702) run cmd, PowerShell, mshta, a script host or a
+  LOLBin, a script file, a URL, a program in a temp or user-writable folder, or an encoded or hidden command. Only
+  the action is read: every task's XML carries the address of its schema (http://schemas.microsoft.com/...) and
+  <Hidden>, and its description is free text. One finding per task name and host; the task name and the account
+  are on the finding, the command is in the rows.
 severity: high
 source: events
 attack: [T1053.005]
 tags: [persistence, execution]
+falsepositives:
+  - maintenance tasks that run a script with cmd or PowerShell, and tasks of Windows itself that run rundll32, when Windows updates them (4702)
+references:
+  - https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4698
 entities: [computer, subjectUser, taskName]
 group_by: [computer, taskName]
 threshold: ">= 1"
 where:
   eventId|in: [4698, 4702]
-  # not a bare "hidden": every task's XML carries <Hidden>true</Hidden>
-  taskContent|contains: [powershell, pwsh, cmd.exe, cmd /c, mshta, wscript, cscript, rundll32, regsvr32, certutil, bitsadmin, "\\temp\\", "\\appdata\\", "\\users\\public\\", "\\programdata\\", "-enc", "-w hidden", "-windowstyle hidden", "windowstyle hidden", downloadstring, iex, "http", ".vbs", ".js", ".hta", ".ps1", ".bat"]
+  # the text of an Exec action's Command or Arguments element; within it the XML escapes "<"
+  taskContent|re: '<(command|arguments)>[^<]*(powershell|pwsh|cmd\.exe|cmd /c|mshta|wscript|cscript|rundll32|regsvr32|certutil|bitsadmin|\\temp\\|\\appdata\\|\\users\\public\\|\\programdata\\|-enc|-w hidden|windowstyle hidden|downloadstring|\biex\b|https?://|\.(vbs|js|hta|ps1|bat|cmd)\b)'
 ---
 id: win-user-account-created
 title: User account created
