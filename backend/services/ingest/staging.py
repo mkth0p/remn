@@ -27,8 +27,8 @@ MEMBER_MAX = 4 * GIB
 RESERVE_MAX = 10 * GIB
 
 
-def gib(n: int) -> str:
-    return f"{n / GIB:,.1f} GiB"
+def size_text(n: int) -> str:
+    return f"{n / GIB:,.1f} GiB" if n >= GIB else f"{n / 1024**2:,.1f} MiB"
 
 
 def root() -> Path:
@@ -87,10 +87,10 @@ def capacity() -> tuple[int, str]:
     if configured > 0:
         if configured * GIB <= staged + disk.free:
             return configured * GIB, f"FORENSIC_TMP_MAX_GB is {configured}"
-        return staged + disk.free, f"the disk under the staging area has {gib(disk.free)} free"
+        return staged + disk.free, f"the disk under the staging area has {size_text(disk.free)} free"
     kept = reserve(disk.total)
     return max(0, staged + disk.free - kept), (
-        f"the disk under the staging area has {gib(disk.free)} free and keeps {gib(kept)} of it for the case stores "
+        f"the disk under the staging area has {size_text(disk.free)} free and keeps {size_text(kept)} of it for the case stores "
         "and the system; FORENSIC_TMP_MAX_GB sets the total instead"
     )
 

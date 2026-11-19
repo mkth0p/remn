@@ -27,7 +27,7 @@ Case migration, export/import and deletion include normalized rows and provenanc
 
 A delimited export (CSV, TSV) and a JSON export (an array of objects, a `records` array, an
 object, or one object per line as Velociraptor writes its `results/<Artifact>.json`) are read one
-record at a time and streamed to the case, so they are read to the 4 GiB member ceiling: MFTECmd's
+record at a time and streamed to the case, so they are read to the member ceiling: MFTECmd's
 `$MFT` and `$J` output and Velociraptor's event log, MFT and USN results run to gigabytes. Other
 text exports are parsed under a 64 MiB budget counted while reading, not checked against the file
 size. An export past its budget contributes every record read before the ceiling and is reported as
@@ -97,7 +97,7 @@ they sit on the timeline beside the event logs (a host super-timeline):
 The event detail shows the time's meaning beside the time, and the Timesketch and Timeline
 Explorer exports write it as `timestamp_desc`. Velociraptor result files are mapped by the artifact that produced them,
 including its event log exports, which become events. DFIR-ORC archives are 7z, expanded once
-into the staging area within the package byte budget, and their `GetThis`, `NTFSInfo`,
+into the staging area within the limits below, and their `GetThis`, `NTFSInfo`,
 `USNInfo` and `RegInfo` CSVs are read by name. Timestamps these tools write without a zone
 are taken as UTC, which is what their documentation fixes. A date written in numbers (DFIR-ORC's
 `08/19/2026 01:34:26`, or a Zimmerman CSV saved again from a spreadsheet as `19/08/2026 01:34`)
@@ -310,9 +310,19 @@ and have the same tested behavior in the browser and SQL engines.
 
 ## Limits and synthetic verification
 
-Packages allow 20,000 archive entries, 4 GiB per member and 16 GiB expanded data.
-Delimited and JSON exports are read to the 4 GiB member ceiling, one JSON record to 64 MiB, other
-text exports to 64 MiB, manifests to 64 KiB. Members stream to
+Packages allow 20,000 archive entries and 16 GiB read out of their archives in all. One member
+may be at most 4 GiB and at most half what the staging area may hold (see
+[security](security.md)). What a package holds in the staging area at once, the member being read
+at each nesting level, an expanded 7z, a decoded cabinet and the artifacts held back below, is
+at most what the area had room for when the parse began. An archive may expand to 200 times its
+own size, and never less than 64 MiB: a zip or 7z member past that is not read, and a compressed
+tar, which has to decompress a member to pass over it, stops its walk there and lists the rest as
+one `(rest of archive)` member. A 7z also counts what it decompresses to reach the members wanted,
+which in a solid archive include the members before them; one that passes the allowance that way
+is reported as an error with its members listed as not read. Every member these limits
+leave out is listed as skipped with the reason, and the inventory is marked incomplete where the
+walk stopped. Delimited and JSON exports are read to the member ceiling, one JSON record to
+64 MiB, other text exports to 64 MiB, manifests to 64 KiB. Members stream to
 temporary files; archive paths are never used as extraction destinations. Links,
 encrypted members and traversal paths are skipped. Temporary files are cleaned up.
 An inventory cut short is marked incomplete.

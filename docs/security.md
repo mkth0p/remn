@@ -186,7 +186,12 @@ finishes.
   evidence in transit is not readable by other accounts on the host.
 - **A ceiling on what one parse holds.** A package parse holds artifacts back to decode them in
   groups, and that hold is capped per request rather than per archive, so nesting cannot multiply
-  it. A client that disconnects mid-parse releases everything the parse was holding rather than
+  it. Everything a package parse holds in the staging area at once, the member being read at each
+  nesting level, an expanded 7z and a decoded cabinet included, stays within what the area had
+  room for when the parse began. An archive expands to at most 200 times its own size, and never
+  less than 64 MiB; that counts what a compressed tar decompresses to pass over a member and what
+  a 7z decompresses to reach one, and the members past it are listed as skipped with the reason.
+  A client that disconnects mid-parse releases everything the parse was holding rather than
   stranding it for the sweeper to find later.
 - **A ceiling on how long one parse runs.** `FORENSIC_INGEST_MAX_S` (30 minutes in
   browser-only mode, off otherwise) ends an ingest stream at the limit with the rows already
@@ -215,8 +220,9 @@ finishes.
   carries, and over at most 10,000 headers and 10 seconds; an attachment whose walk stops early
   is flagged as partly analysed.
 - **Every member accounted for.** An archive's members are listed in the stream's last line
-  as parsed (with their row count), skipped or failed, with the reason: too large, encrypted,
-  a compression method that is not read, not a mail file, not an event log. Nothing is left
+  as parsed (with their row count), skipped or failed, with the reason: too large, past the
+  archive's expansion allowance, encrypted, a compression method that is not read, not a mail
+  file, not an event log. Nothing is left
   out without a line saying so.
 - **Rules read without expansion.** The Sigma and Sublime converters take YAML from visitors,
   and a safe YAML loader is safe against object construction, not against anchors that each

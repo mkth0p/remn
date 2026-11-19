@@ -292,6 +292,25 @@ def test_staging_an_archive_counts_the_logs_past_its_ceiling(tmp_path, monkeypat
         shutil.rmtree(staged, ignore_errors=True)
 
 
+def test_staging_an_archive_counts_the_logs_its_walk_passed_over(tmp_path, monkeypatch):
+    """An event log the archive walk does not hand over (here past the archive's expansion
+    allowance, lowered so the invented fixture stays small) is a log the engine did not scan."""
+    from services.ingest import pipeline
+
+    monkeypatch.setattr(pipeline, "RATIO_FLOOR", 1024**2)
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for i in range(3):
+            z.writestr(f"Logs/padded{i}.evtx", bytes(600 * 1024))
+    staged, said = hayabusa.stage_upload("logs.zip", None, out.getvalue(), "zip", str(tmp_path))
+    try:
+        assert len(os.listdir(staged)) == 1
+        assert said["members"] == 1 and said["notScanned"] == 2, said
+        assert "2 event log(s)" in said["reason"] and "times its own size" in said["reason"], said
+    finally:
+        shutil.rmtree(staged, ignore_errors=True)
+
+
 def test_a_server_store_ingest_of_an_archive_hands_the_engine_its_logs(engine, settings, tmp_path, monkeypatch):
     import time
     import uuid

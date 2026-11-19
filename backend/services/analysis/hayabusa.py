@@ -314,7 +314,7 @@ def stage_upload(name: str, path: str | None, data: bytes | None, fmt: str, tmp_
     is not the engine's input. Returns the directory, or None with the summary that says why
     nothing was scanned, and the facts the run's summary must carry.
     """
-    from services.ingest.pipeline import iter_archive
+    from services.ingest.pipeline import REST_OF_ARCHIVE, iter_archive
 
     if fmt not in ("evtx", "zip", "tar"):
         return None, {
@@ -335,7 +335,8 @@ def stage_upload(name: str, path: str | None, data: bytes | None, fmt: str, tmp_
             return directory, {"members": 1}
         ceiling = _stage_ceiling()
         held = held_bytes = skipped = skipped_bytes = 0
-        for member in iter_archive(path, data, fmt, None, ceiling):
+        passed: list[dict[str, Any]] = []
+        for member in iter_archive(path, data, fmt, passed, ceiling):
             # the same members the event log reader takes as logs
             if not member.name.lower().endswith(".evtx"):
                 continue
@@ -349,12 +350,21 @@ def stage_upload(name: str, path: str | None, data: bytes | None, fmt: str, tmp_
             held += 1
             held_bytes += member.size
         said: dict[str, Any] = {"members": held}
+        reasons = []
         if skipped:
-            said["notScanned"] = skipped
-            said["reason"] = (
+            reasons.append(
                 f"{skipped:,} event log(s), {skipped_bytes / 1024**2:,.1f} MiB, came after the {ceiling // 1024**2:,} MiB of logs "
                 "staged for the engine and were not scanned; their rows are in the case"
             )
+        # the logs the archive walk itself passed over, with its reasons, are not scanned either
+        unread = [s for s in passed if s["name"].lower().endswith(".evtx") or s["name"] == REST_OF_ARCHIVE]
+        if unread:
+            skipped += len(unread)
+            why = "; ".join(sorted({s["reason"] for s in unread}))
+            reasons.append(f"{len(unread):,} event log(s) in the archive were not read for the engine: {why}"[:600])
+        if skipped:
+            said["notScanned"] = skipped
+            said["reason"] = "; ".join(reasons)
         if not held:
             shutil.rmtree(directory, ignore_errors=True)
             return None, {

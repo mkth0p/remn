@@ -24,7 +24,7 @@ from django.views.decorators.http import require_http_methods, require_POST
 
 from api.params import BadParameter, whole_number
 from services.ingest import staging
-from services.ingest.staging import DIRECTORY_SUFFIXES, gib, staged_bytes
+from services.ingest.staging import DIRECTORY_SUFFIXES, size_text, staged_bytes
 
 log = logging.getLogger(__name__)
 _ID = re.compile(r"^[a-f0-9]{32}$")
@@ -220,7 +220,7 @@ def init(request: HttpRequest):
             # answer says what does.
             return JsonResponse(
                 {
-                    "error": f"this file is {gib(size)} and the staging area can hold at most {gib(budget)} ({decided_by}); it cannot be accepted until that changes",
+                    "error": f"this file is {size_text(size)} and the staging area can hold at most {size_text(budget)} ({decided_by}); it cannot be accepted until that changes",
                     "code": "staging-too-small",
                 },
                 status=413,
@@ -232,8 +232,8 @@ def init(request: HttpRequest):
                 return JsonResponse(
                     {
                         "error": (
-                            f"the staging area holds {gib(held)} of other uploads and parses in progress and has room for "
-                            f"{gib(max(0, budget - held))} more; this file needs {gib(size)}. The room frees as those are parsed, "
+                            f"the staging area holds {size_text(held)} of other uploads and parses in progress and has room for "
+                            f"{size_text(max(0, budget - held))} more; this file needs {size_text(size)}. The room frees as those are parsed, "
                             f"or after {settings.FORENSIC_UPLOAD_MAX_AGE_S // 60} minutes for an upload that was abandoned"
                         ),
                         "code": "staging-full",

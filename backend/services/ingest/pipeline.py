@@ -6,8 +6,12 @@ views (browser storage) and by the server-store jobs.
 
 from __future__ import annotations
 
+import bz2
+import contextlib
+import gzip
 import io
 import logging
+import lzma
 import os
 import re
 import tarfile
@@ -18,6 +22,7 @@ from collections.abc import Callable, Iterator
 from typing import Any
 
 from services.common import sha256_file
+from services.ingest.staging import member_ceiling
 from services.parsers import evtx_parser, m365
 from services.parsers.mail import mbox as mbox_mod
 from services.parsers.mail import pst as pst_mod
@@ -123,6 +128,123 @@ class Member:
             return fh.read()
 
 
+# an archive may expand to at most this many times its own size. Collections and mail archives
+# expand a few to twenty times; empty event logs and zero-padded artifacts take a small part of
+# one much further, so the ratio is judged over the whole archive, and only past RATIO_FLOOR,
+# below which nothing costs much to read. A CAB has its own ratio in the native worker.
+MAX_RATIO = 200
+RATIO_FLOOR = 64 * 1024**2
+# the name under which a walk that stopped early reports the members it could not list
+REST_OF_ARCHIVE = "(rest of archive)"
+
+
+class ExpansionLimit(ValueError):
+    """An archive expanded, or would expand, past what its own size allows."""
+
+
+class Expansion:
+    """What one archive has expanded to so far, against what its size allows."""
+
+    def __init__(self, compressed: int) -> None:
+        self.limit = max(RATIO_FLOOR, MAX_RATIO * compressed)
+        self.used = 0
+        self.reason = f"the archive expands past {MAX_RATIO} times its own size ({self.limit / 2**20:,.0f} MiB)"
+
+    def fits(self, size: int) -> bool:
+        return self.used + size <= self.limit
+
+    def charge(self, n: int) -> None:
+        self.used += n
+        if self.used > self.limit:
+            raise ExpansionLimit(self.reason)
+
+
+class _Walk:
+    """The decompressed stream of a compressed tar, charged for every byte it decompresses: those
+    read, those passed over to reach the next header, and those decompressed again when a reader
+    goes back. A tar reader skips a member it does not read by decompressing all of it, so this is
+    what bounds a walk over a member that declares terabytes. The last mebibyte is kept, so taking
+    the head of a member to sniff it and then copying it from its start costs nothing more."""
+
+    WINDOW = 1024**2
+
+    def __init__(self, raw: Any, expansion: Expansion) -> None:
+        self._raw = raw
+        self._expansion = expansion
+        self._pos = 0  # where the reader is
+        self._end = 0  # how far the stream has been decompressed
+        self._kept = b""  # the bytes just before _end
+
+    def tell(self) -> int:
+        return self._pos
+
+    def seek(self, offset: int, whence: int = io.SEEK_SET) -> int:
+        if whence not in (io.SEEK_SET, io.SEEK_CUR):
+            raise io.UnsupportedOperation("a tar walk seeks from the start or the current position")
+        target = offset if whence == io.SEEK_SET else self._pos + offset
+        if self._end - len(self._kept) <= target <= self._end:
+            self._pos = target
+            return target
+        # going forward decompresses what lies between; going back further than what is kept
+        # decompresses everything again from the start
+        if not self._expansion.fits(target - self._end if target > self._end else target):
+            raise ExpansionLimit(self._expansion.reason)
+        self._raw.seek(target)
+        self._expansion.charge(target - self._end if target > self._end else target)
+        self._pos = self._end = self._raw.tell()
+        self._kept = b""
+        return self._pos
+
+    def read(self, size: int = -1) -> bytes:
+        out = b""
+        if self._pos < self._end:
+            start = len(self._kept) - (self._end - self._pos)
+            out = self._kept[start : None if size < 0 else start + size]
+            self._pos += len(out)
+            if size >= 0:
+                size -= len(out)
+                if size == 0:
+                    return out
+        if size < 0:
+            size = self._expansion.limit - self._expansion.used + 1
+        if not self._expansion.fits(size):
+            raise ExpansionLimit(self._expansion.reason)
+        data = self._raw.read(size)
+        self._expansion.charge(len(data))
+        self._kept = (self._kept + data)[-self.WINDOW :]
+        self._pos = self._end = self._end + len(data)
+        return out + data
+
+
+def _decompressing(src: Any) -> Any:
+    """The decompressed stream of a gzip, bz2 or xz file, or None for anything else."""
+    head = src.read(6)
+    src.seek(0)
+    if head.startswith(b"\x1f\x8b"):
+        return gzip.GzipFile(fileobj=src)
+    if head.startswith(b"BZh"):
+        return bz2.BZ2File(src)
+    if head.startswith(b"\xfd7zXZ\x00"):
+        return lzma.LZMAFile(src)
+    return None
+
+
+@contextlib.contextmanager
+def open_tar(path: str | None, data: bytes | None) -> Iterator[tuple[tarfile.TarFile, Expansion]]:
+    """A tar archive opened for walking, with what the walk has cost so far. A compressed one is
+    read through a stream that charges everything it decompresses to the archive's expansion
+    allowance; a plain one costs no more than the bytes read, which its member sizes bound."""
+    with open(path, "rb") if path else io.BytesIO(data or b"") as src:
+        walk = Expansion(os.fstat(src.fileno()).st_size if path else len(data or b""))
+        raw = _decompressing(src)
+        if raw is None:
+            with tarfile.open(fileobj=src, mode="r:") as tf:
+                yield tf, walk
+            return
+        with raw, tarfile.open(fileobj=_Walk(raw, walk), mode="r:") as tf:  # type: ignore[call-overload]
+            yield tf, walk
+
+
 class DeadlineExceeded(Exception):
     """The request's parse time (FORENSIC_INGEST_MAX_S) ran out between archive members."""
 
@@ -147,10 +269,16 @@ def iter_archive(
     deadline: float | None = None,
 ) -> Iterator[Member]:
     """Yield members of a zip or tar(.gz/.bz2/.xz) archive. Directories are passed over; members
-    that are too large, encrypted or compressed with an unsupported method are recorded in skipped."""
+    that are too large, encrypted or compressed with an unsupported method are recorded in skipped,
+    as are those past the archive's expansion allowance. A member is never larger than half what
+    the staging area may hold, whatever max_member says."""
+    max_member = min(max_member, member_ceiling())
     limit = f"larger than the {max_member // 2**20} MiB per-member limit"
     if kind == "zip":
         zf = zipfile.ZipFile(path) if path else zipfile.ZipFile(io.BytesIO(data or b""))
+        # zipfile writes no more of a member than it declares, so the declared sizes bound what
+        # reading the members can expand to
+        expansion = Expansion(os.path.getsize(path) if path else len(data or b""))
         with zf:
             for zi in zf.infolist():
                 check_deadline(deadline)
@@ -166,21 +294,31 @@ def iter_archive(
                     # zipfile expands bzip2 and LZMA members without an output bound
                     skip_record(skipped, zi.filename, zi.file_size, f"compression method {zi.compress_type} is not read")
                     continue
+                if not expansion.fits(zi.file_size):
+                    skip_record(skipped, zi.filename, zi.file_size, f"{expansion.reason}; not read")
+                    continue
+                expansion.charge(zi.file_size)
                 yield Member(zi.filename, zi.file_size, lambda zi=zi: zf.open(zi))  # type: ignore[misc]
     elif kind == "tar":
-        tf = tarfile.open(name=path, mode="r:*") if path else tarfile.open(fileobj=io.BytesIO(data or b""), mode="r:*")
-        with tf:
-            for m in tf:
-                check_deadline(deadline)
-                if m.isdir():
-                    continue
-                if not m.isfile():
-                    skip_record(skipped, m.name, 0, "not a regular file (link or device)")
-                    continue
-                if m.size > max_member:
-                    skip_record(skipped, m.name, m.size, limit)
-                    continue
-                yield Member(m.name, m.size, lambda m=m: tf.extractfile(m))  # type: ignore[misc,return-value]
+        with open_tar(path, data) as (tf, walk):
+            try:
+                for m in tf:
+                    check_deadline(deadline)
+                    if m.isdir():
+                        continue
+                    if not m.isfile():
+                        skip_record(skipped, m.name, 0, "not a regular file (link or device)")
+                        continue
+                    if m.size > max_member:
+                        skip_record(skipped, m.name, m.size, limit)
+                        continue
+                    if not walk.fits(m.size):
+                        skip_record(skipped, m.name, m.size, f"{walk.reason}; not read")
+                        continue
+                    yield Member(m.name, m.size, lambda m=m: tf.extractfile(m))  # type: ignore[misc,return-value]
+            except ExpansionLimit as exc:
+                # passing over a member decompresses it, so a walk past the allowance cannot list more
+                skip_record(skipped, REST_OF_ARCHIVE, 0, f"{exc}; the members after this point were not listed")
     else:
         raise ValueError(f"not an archive: {kind}")
 
