@@ -119,7 +119,7 @@ class PackageSource:
         # handed something that is not one.
         self.engines: list[str] = []
         # keys of the cloud audit and sign-in records read so far, across every member
-        self.seen_records: set[int] = set()
+        self.seen_records = m365.RecordKeys()
         self.evtx_held: dict[str, tuple[dict[str, Any], str]] = {}
         self.findings: list[dict[str, Any]] = []
         self.engine_summaries: list[dict[str, Any]] = []

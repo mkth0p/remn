@@ -839,3 +839,35 @@ def test_a_date_order_the_file_cannot_show_is_said(tmp_path):
         "1 record(s) have no time: their date is missing or could not be read; "
         "1 record(s) were dated month-first: no date in the file has a day above 12 to show its order"
     )
+
+
+def test_the_ids_kept_to_find_repeats_are_held_in_little_memory():
+    """One Python int in a set per record, about 70 bytes: a package of sixteen million audit
+    records held a gigabyte of ids in the web process."""
+    import tracemalloc
+
+    tracemalloc.start()
+    try:
+        seen = m365.RecordKeys()
+        rows = list(m365.iter_records(None, b"", "m365-ual-json", seen=seen))
+        for i in range(200_000):
+            seen.add(m365._key_hash(f"ual:{i}"))
+        held = tracemalloc.get_traced_memory()[0]
+    finally:
+        tracemalloc.stop()
+    assert rows == [] and held < 6 * 1024 * 1024 and len(seen) == 200_000
+    assert m365._key_hash("ual:5") in seen and m365._key_hash("ual:200000") not in seen
+
+
+def test_records_past_the_ids_held_are_read_and_counted(tmp_path):
+    from services.parsers.evtx_parser import Stats
+
+    recs = make_m365.ual_records()[:5]
+    stats = Stats()
+    seen = m365.RecordKeys(limit=3)
+    data = json.dumps(recs + recs).encode()
+    rows = list(m365.iter_records(None, data, "m365-ual-json", stats=stats, seen=seen))
+    # the first three are remembered and their repeats left out; the last two are read, twice, and said
+    assert [r["recordKey"] for r in rows] == [m365.record_key("ual", r["Id"]) for r in recs + recs[3:]]
+    assert stats.duplicates == 3 and stats.repeats_unchecked == 4 and stats.to_dict()["repeatsUnchecked"] == 4
+    assert m365.note(m365.counts(stats)) == "4 record(s) were read once the ids held to find repeats were full, and were not compared with one another"

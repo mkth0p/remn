@@ -217,7 +217,7 @@ class EvtxSource:
         include_raw: bool = True,
         max_member: int = MAX_MEMBER_BYTES,
         deadline: float | None = None,
-        seen: set[int] | None = None,
+        seen: m365.RecordKeys | None = None,
     ) -> None:
         self.name = name
         self.path = path
@@ -231,7 +231,7 @@ class EvtxSource:
         self.files: list[dict[str, Any]] = []
         # the keys of the cloud records read so far, for every file of this upload (a package
         # passes its own set, shared by all its members)
-        self.seen_records: set[int] = set() if seen is None else seen
+        self.seen_records = m365.RecordKeys() if seen is None else seen
         head = (data or b"")[:SNIFF_BYTES] if data is not None else _read_head(path, SNIFF_BYTES)
         self.format = detect_evtx_format(name, head)
 

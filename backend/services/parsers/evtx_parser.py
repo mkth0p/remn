@@ -870,10 +870,12 @@ class Stats:
         # records exported as XML that were read once what their exporter left unescaped was escaped
         self.repaired = 0
         # cloud exports only: records with a value cut at its length limit, records without a
-        # time, and records whose numeric date was read month-first without the file showing it
+        # time, records whose numeric date was read month-first without the file showing it, and
+        # records read once the ids held to find repeats were full
         self.cut = 0
         self.undated = 0
         self.date_order_guessed = 0
+        self.repeats_unchecked = 0
         # one per EVTX file read: its record numbering and chunk checksums, for the statement of
         # what the evidence cannot show
         self.sequences: list[FileSequence] = []
@@ -920,6 +922,7 @@ class Stats:
             **({"cut": self.cut} if self.cut else {}),
             **({"undated": self.undated} if self.undated else {}),
             **({"dateOrderGuessed": self.date_order_guessed} if self.date_order_guessed else {}),
+            **({"repeatsUnchecked": self.repeats_unchecked} if self.repeats_unchecked else {}),
             **self.coverage(),
         }
 

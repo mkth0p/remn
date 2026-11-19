@@ -157,7 +157,10 @@ and exports cut into time slices overlap, so a UAL record whose `AuditData.Id` w
 read, and a Graph sign-in whose `id` was, is not added again: not from the same file, not
 from another file of the upload, not from evidence added earlier. The evidence detail and
 the archive or package member list say how many repeats were left out. A record without a
-GUID for an id is never dropped.
+GUID for an id is never dropped. The ids of the first 6,291,456 records of an upload are
+held to find repeats, in 64 MiB of the server's memory at most; a record read after that is
+still compared with them and with the case, but not with the others read after it, and the
+evidence's statistics (`repeatsUnchecked`) and its member list say how many there were.
 
 Sign-ins keep what ties them to the token and session they gave: `data.sessionId` and
 `data.uniqueTokenIdentifier` (the audit records the token made carry them as

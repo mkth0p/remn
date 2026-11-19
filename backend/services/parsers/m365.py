@@ -38,6 +38,7 @@ import json
 import logging
 import os
 import re
+from array import array
 from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
@@ -1076,15 +1077,62 @@ def _key_hash(key: str) -> int:
     return int.from_bytes(hashlib.blake2b(key.encode(), digest_size=8).digest(), "big")
 
 
+# How many record ids are held to find repeats. They were Python ints in a set, about 70 bytes
+# each, without a bound: a package of sixteen million audit records held a gigabyte in the web
+# process. Held as 8-byte slots of a table at most three quarters full, this many fill 64 MiB.
+MAX_REMEMBERED = 6 * 1024 * 1024
+
+
+class RecordKeys:
+    """The ids (_key_hash) of the cloud records read so far, in an open-addressing table. Once it
+    holds its limit, further ids are still looked up but no longer added."""
+
+    def __init__(self, limit: int = MAX_REMEMBERED) -> None:
+        self.limit = limit
+        self._slots = array("Q", bytes(8 * 1024))
+        self._size = 0
+
+    def __len__(self) -> int:
+        return self._size
+
+    def _slot(self, h: int) -> int:
+        slots, mask = self._slots, len(self._slots) - 1
+        i = h & mask
+        while slots[i] not in (0, h):
+            i = (i + 1) & mask
+        return i
+
+    def __contains__(self, h: object) -> bool:
+        return isinstance(h, int) and self._slots[self._slot(h or 1)] == (h or 1)
+
+    def add(self, h: int) -> bool:
+        """Hold h (0 marks an empty slot, so it is held as 1); False when the table is full."""
+        h = h or 1
+        i = self._slot(h)
+        if self._slots[i] == h:
+            return True
+        if self._size >= self.limit:
+            return False
+        self._slots[i] = h
+        self._size += 1
+        if self._size * 4 > len(self._slots) * 3:
+            old, self._slots = self._slots, array("Q", bytes(16 * len(self._slots)))
+            for x in old:
+                if x:
+                    self._slots[self._slot(x)] = x
+        return True
+
+
 def iter_records(
-    path: str | None, data: bytes | None, fmt: str, stats: Any = None, include_raw: bool = True, seen: set[int] | None = None
+    path: str | None, data: bytes | None, fmt: str, stats: Any = None, include_raw: bool = True, seen: RecordKeys | None = None
 ) -> Iterator[dict[str, Any]]:
     """Yield event rows from a UAL / Entra export in the given format (see FORMATS). A record
     whose key (record_key) is already in ``seen`` is the same record exported again: it is
     counted in ``stats.duplicates`` and not yielded: Search-UnifiedAuditLog's ReturnLargeSet
     pages repeat records within one file, and overlapping time slices repeat them across files.
-    Pass one set for every file of an upload so an archive of slices gives each record once."""
-    seen = set() if seen is None else seen
+    Pass one RecordKeys for every file of an upload so an archive of slices gives each record
+    once. A record read once it is full is counted in ``stats.repeats_unchecked``."""
+    seen = RecordKeys() if seen is None else seen
     for row in _iter_rows(path, data, fmt, stats, include_raw):
         marks = row.pop("_marks", ())
         key = row.get("recordKey")
@@ -1094,7 +1142,8 @@ def iter_records(
                 if stats is not None:
                     stats.duplicates = getattr(stats, "duplicates", 0) + 1
                 continue
-            seen.add(h)
+            if not seen.add(h):
+                marks = (*marks, "repeats_unchecked")
         if stats is not None:
             _count(row, stats)
             for mark in marks:
@@ -1107,6 +1156,7 @@ _NOTES = (
     ("cut", "{:,} record(s) hold a value cut at its length limit, marked by a closing …"),
     ("undated", "{:,} record(s) have no time: their date is missing or could not be read"),
     ("date_order_guessed", "{:,} record(s) were dated month-first: no date in the file has a day above 12 to show its order"),
+    ("repeats_unchecked", "{:,} record(s) were read once the ids held to find repeats were full, and were not compared with one another"),
 )
 
 
