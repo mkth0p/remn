@@ -66,7 +66,9 @@ function sameValue(have: string, want: string): boolean {
       .toLowerCase()
       .replace(/^\[|\]$/g, '')
       .replace(/['"]/g, '')
-      .replace(/\s*,\s*/g, ',')
+      // blanks before a comma from the first of them only: a long run of blanks in a value was
+      // otherwise tried from each of its characters
+      .replace(/(?:(?<!\s)\s+)?,\s*/g, ',')
       .trim()
   const h = norm(have)
   const w = norm(want)

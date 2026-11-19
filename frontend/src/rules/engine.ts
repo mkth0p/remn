@@ -129,7 +129,9 @@ export function compileCond(cond: RuleCond | undefined | null, settings?: Settin
 export function parseDuration(s: string | number | undefined): number | null {
   if (s == null || s === '') return null
   if (typeof s === 'number') return s * 1000
-  const m = /^\s*(\d+(?:\.\d+)?)\s*(ms|s|m|h|d|w)?\s*$/i.exec(String(s))
+  // blanks after the unit only when there is one: two runs of blanks side by side were split every
+  // way when what follows failed, as services/store/rules.py reads it
+  const m = /^\s*(\d+(?:\.\d+)?)\s*(?:(ms|s|m|h|d|w)\s*)?$/i.exec(String(s))
   if (!m) return null
   const n = Number(m[1])
   const unit = (m[2] || 's').toLowerCase()
@@ -140,7 +142,8 @@ export function parseDuration(s: string | number | undefined): number | null {
 export function parseThreshold(t: string | number | undefined): ((n: number) => boolean) | null {
   if (t == null || t === '') return null
   if (typeof t === 'number') return (n) => n >= t
-  const m = /^\s*(>=|<=|==|=|>|<|!=)?\s*(\d+)\s*$/.exec(String(t))
+  // blanks after the operator only when there is one, as in parseDuration
+  const m = /^\s*(?:(>=|<=|==|=|>|<|!=)\s*)?(\d+)\s*$/.exec(String(t))
   if (!m) return null
   const v = Number(m[2])
   switch (m[1] || '>=') {
@@ -225,7 +228,7 @@ export function findingCap(rule: Rule): number {
 /** Whether a rule counting up to its threshold is about its biggest groups (a burst, a spray), as services/store/rules.py decides. */
 function keepsLargest(t: string | number | undefined): boolean {
   if (typeof t === 'number') return Math.trunc(t) > 1
-  const m = /^\s*(>=|<=|==|=|>|<|!=)?\s*(\d+)\s*$/.exec(String(t ?? ''))
+  const m = /^\s*(?:(>=|<=|==|=|>|<|!=)\s*)?(\d+)\s*$/.exec(String(t ?? ''))
   if (!m) return false
   const op = m[1] || '>='
   const v = Number(m[2])

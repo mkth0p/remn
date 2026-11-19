@@ -614,11 +614,13 @@ function ipOf(v: unknown): string {
 export function hostKey(v: unknown): string {
   const s = String(v ?? '')
     .trim()
-    .replace(/^\\+|\\+$/g, '')
+    // each trailing run from its first character only: tried from each character of a run inside
+    // the name, it took time that grew with the square of the run
+    .replace(/^\\+|(?<!\\)\\+$/g, '')
     .trim()
     .toLowerCase()
   if (!s || s === '-' || s === 'localhost' || /^[\d.]+$/.test(s) || s.includes(':')) return ''
-  return s.replace(/\$+$/, '').split('.')[0]
+  return s.replace(/(?<!\$)\$+$/, '').split('.')[0]
 }
 
 /**

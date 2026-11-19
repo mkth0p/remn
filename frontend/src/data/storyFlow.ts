@@ -294,7 +294,8 @@ async function attackTags(kase: Case): Promise<ExportContext['attackOf']> {
 const slug = (s: string) =>
   s
     .replace(/[^a-z0-9_.-]+/gi, '_')
-    .replace(/^_+|_+$/g, '')
+    // the trailing run from its first character only, so a run inside the title is not tried from each one
+    .replace(/^_+|(?<!_)_+$/g, '')
     .slice(0, 60) || 'story'
 
 export async function downloadAttackFlow(kase: Case, story: Story, identities: Identity[]): Promise<void> {

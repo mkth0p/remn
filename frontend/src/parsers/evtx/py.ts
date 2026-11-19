@@ -44,7 +44,9 @@ export function or<T, U>(a: T, b: U): T | U {
 
 // the characters str.isspace() accepts, which str.strip() removes
 const WS = '\\t\\n\\x0b\\x0c\\r\\x1c-\\x1f \\x85\\xa0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000'
-const STRIP = new RegExp(`^[${WS}]+|[${WS}]+$`, 'g')
+// the trailing run is matched from its first character only: tried from each character of a run
+// inside the text, it took time that grew with the square of the run
+const STRIP = new RegExp(`^[${WS}]+|(?<![${WS}])[${WS}]+$`, 'g')
 
 export function strip(s: string): string {
   return s.replace(STRIP, '')
