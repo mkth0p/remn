@@ -371,6 +371,9 @@ def test_a_script_block_with_a_cradle_an_offensive_tool_or_an_obfuscation_idiom_
         script_block("&( $PSHome[4]+$PSHome[34]+'X') ( [string]::join('', ( (36,97) -AS [ChAR[]])) )"),
         script_block("& ((\"{1}{0}\" -f 'ject','New-Ob')) Net.Sockets.TCPClient"),
         script_block("Set-MpPreference -HighThreatDefaultAction 6 -Force"),
+        script_block("IEX([System.Text.Encoding]::ASCII.GetString($o[0..3932]))"),
+        script_block("$vvA.GetMethod('GetProcAddress', [Type[]]@([System.Runtime.InteropServices.HandleRef], [String]))"),
+        script_block("$Graphics.CopyFromScreen($Left, $Top, 0, 0, $bitmap.Size)"),
     ]
     found = fired(store, "win-powershell-suspicious-scriptblock", rows)
-    assert len(found) == 6 and {f["severity"] for f in found} == {"high"}
+    assert len(found) == 9 and {f["severity"] for f in found} == {"high"}

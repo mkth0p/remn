@@ -80,13 +80,14 @@ description: >-
   Script block logging (4104) holds a download cradle (Net.WebClient, DownloadString) or IEX, an encoded
   command or a hidden window, an AMSI bypass, credential theft (Mimikatz, LSASS dumps, saved registry hives,
   shadow copies), an offensive framework or tool (PowerSploit, PowerView, Rubeus, BloodHound, Empire...),
-  shellcode APIs, Defender switched off, given exclusions or told to allow what it finds, or an obfuscation
-  idiom of Invoke-Obfuscation (a reversed string joined back, IEX spelled with characters of $PSHome or
-  $ShellId, a format string that puts quoted pieces back in order). Language features and administration
-  cmdlets are not keywords on their own (-join, [char], Replace(, Add-Type, Get-CimInstance, Invoke-Command,
-  -Credential, Invoke-WebRequest, Set-MpPreference, -ExecutionPolicy Bypass, net user...): administration
-  scripts use them every day. "hidden" alone and "char[]" are not keywords either, and the module code
-  PowerShell generates for CDXML cmdlets (__cmdletization) is left out.
+  shellcode and in-memory loading (VirtualAlloc, GetProcAddress, GetDelegateForFunctionPointer, a dynamic
+  assembly), a keylogger or screen capture API, Defender switched off, given exclusions or told to allow what
+  it finds, or an obfuscation idiom of Invoke-Obfuscation (a reversed string joined back, IEX spelled with
+  characters of $PSHome or $ShellId, a format string that puts quoted pieces back in order). Language features
+  and administration cmdlets are not keywords on their own (-join, [char], Replace(, Add-Type,
+  Get-CimInstance, Invoke-Command, -Credential, Invoke-WebRequest, Set-MpPreference, -ExecutionPolicy Bypass,
+  net user...): administration scripts use them every day. "hidden" alone and "char[]" are not keywords
+  either, and the module code PowerShell generates for CDXML cmdlets (__cmdletization) is left out.
 severity: high
 source: events
 attack: [T1059.001, T1027, T1685]
@@ -100,7 +101,9 @@ references:
 where:
   eventId: 4104
   any_of:
-    - scriptBlockText|contains: [-encodedcommand, "-enc ", frombase64string, downloadstring, downloadfile, "net.webclient", "iex ", "invoke-expression", "invoke-mimikatz", "mimikatz", "invoke-shellcode", "invoke-dllinjection", "invoke-reflectivepeinjection", "amsiutils", "amsiinitfailed", "amsi.dll", "system.management.automation.amsi", "-w hidden", "-windowstyle hidden", "sekurlsa", "lsadump", "kerberos::", "get-keystrokes", "powersploit", "powerview", "get-netuser", "get-netgroup", "get-domainuser", "invoke-kerberoast", "rubeus", "sharphound", "bloodhound", "nishang", "empire", "covenant", "sliver", "cobalt", "beacon", "shellcode", "virtualalloc", "createthread", "memcpy", "cipher /w", "reg save", "ntdsutil", "comsvcs", "minidump", "procdump", "lsass", "psexec", "shadowcopy", "-xor", "invoke-obfuscation", "disablerealtimemonitoring", "disablebehaviormonitoring", "disableioavprotection", "disablescriptscanning", "disableblockatfirstseen", "disableintrusionpreventionsystem", "exclusionpath", "exclusionprocess", "exclusionextension"]
+    - scriptBlockText|contains: [-encodedcommand, "-enc ", frombase64string, downloadstring, downloadfile, "net.webclient", "invoke-expression", "invoke-mimikatz", "mimikatz", "invoke-shellcode", "invoke-dllinjection", "invoke-reflectivepeinjection", "amsiutils", "amsiinitfailed", "amsi.dll", "system.management.automation.amsi", "-w hidden", "-windowstyle hidden", "sekurlsa", "lsadump", "kerberos::", "get-keystrokes", "powersploit", "powerview", "get-netuser", "get-netgroup", "get-domainuser", "invoke-kerberoast", "rubeus", "sharphound", "bloodhound", "nishang", "empire", "covenant", "sliver", "cobalt", "beacon", "shellcode", "virtualalloc", "virtualprotect", "createthread", "memcpy", "getprocaddress", "getdelegateforfunctionpointer", "unsafenativemethods", "definedynamicassembly", "getasynckeystate", "setwindowshookex", "copyfromscreen", "cipher /w", "reg save", "ntdsutil", "comsvcs", "minidump", "procdump", "lsass", "psexec", "shadowcopy", "-xor", "invoke-obfuscation", "disablerealtimemonitoring", "disablebehaviormonitoring", "disableioavprotection", "disablescriptscanning", "disableblockatfirstseen", "disableintrusionpreventionsystem", "exclusionpath", "exclusionprocess", "exclusionextension"]
+    # iex however it is followed: iex(...), iex $x, iex 'x'
+    - scriptBlockText|re: '\biex\b'
     # a reversed string joined back: ('gnirtS46esaBmorF'[-1..-16] -join '')
     - scriptBlockText|re: '\[\s*-1\s*\.\.\s*-[^\]]*\]\s*-join'
     # iex spelled with characters of automatic variables: $PSHome[4]+$PSHome[34]+'X'
