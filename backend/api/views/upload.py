@@ -129,7 +129,7 @@ def cleanup_stale(max_age_s: int | None = None) -> int:
                     n += 1
         except OSError:
             continue
-    # The directories a parse creates, an expanded 7z and the event logs staged for an engine run,
+    # the directories a parse creates, an expanded 7z and the event logs staged for an engine run,
     # go on the same age. A parse still reading an expanded archive touches it as it takes each
     # member, so the age is the time since it was last used.
     try:
@@ -216,7 +216,7 @@ def init(request: HttpRequest):
     with _reserve:
         budget, decided_by = staging.capacity()
         if size > budget:
-            # Larger than the staging area could hold even empty: waiting changes nothing, so the
+            # larger than the staging area could hold even empty: waiting changes nothing, so the
             # answer says what does.
             return JsonResponse(
                 {

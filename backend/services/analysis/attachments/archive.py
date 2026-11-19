@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 
 MAX_NESTED_BYTES = 15 * 1024 * 1024
 MAX_ENTRIES_ANALYZED = 40
-# A tar walk is bounded three ways: what it decompresses (the nested limit, whatever compression
+# a tar walk is bounded three ways: what it decompresses (the nested limit, whatever compression
 # the tar carries), how many headers it reads, and how long it runs.
 MAX_TAR_MEMBERS = 10_000
 MAX_TAR_SECONDS = 10.0

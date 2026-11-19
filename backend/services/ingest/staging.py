@@ -16,12 +16,12 @@ from pathlib import Path
 from django.conf import settings
 
 GIB = 1024**3
-# The directories a parse creates in the staging area, named by tempfile.mkdtemp with these
+# the directories a parse creates in the staging area, named by tempfile.mkdtemp with these
 # suffixes: a 7z archive expanded to be read, and the event logs staged for one engine run.
 DIRECTORY_SUFFIXES = (".7z", ".evtx")
-# The largest archive member copied out for parsing, however much the staging area may hold.
+# the largest archive member copied out for parsing, however much the staging area may hold.
 MEMBER_MAX = 4 * GIB
-# Without a configured total the staging area may use the free space of its disk, less a reserve
+# without a configured total the staging area may use the free space of its disk, less a reserve
 # for the case stores, which grow as staged evidence is ingested, and for the system: a tenth of
 # the disk, and never more than 10 GiB of it.
 RESERVE_MAX = 10 * GIB

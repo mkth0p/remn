@@ -372,7 +372,7 @@ class PackageSource:
             if real is None:
                 yield Member(name, size, lambda: io.BytesIO(b"")), reason
                 continue
-            # The staging sweep goes by age; touched as each member is taken, the expansion of a
+            # the staging sweep goes by age; touched as each member is taken, the expansion of a
             # parse that runs for hours is not taken from under it.
             try:
                 os.utime(root)

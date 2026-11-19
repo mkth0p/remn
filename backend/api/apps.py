@@ -36,7 +36,7 @@ class ApiConfig(AppConfig):
             offline_dir=str(settings.OFFLINE_LISTS_DIR),
             geoip_dir=str(settings.DATA_DIR / "geoip"),
         )
-        # Remove whatever a previous run stopped mid-parse left in the staging area: files, and the
+        # remove whatever a previous run stopped mid-parse left in the staging area: files, and the
         # directories an expanded 7z or the logs staged for an engine run occupy.
         try:
             removed = clear_leftovers()
