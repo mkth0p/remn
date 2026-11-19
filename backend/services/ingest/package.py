@@ -75,6 +75,22 @@ MAX_TOTAL = 16 * 1024**3
 MAX_STRUCTURED = 64 * 1024**2
 
 
+def request_budget() -> dict[str, Any]:
+    """The allowances one package request shares across its nesting levels, sized from the staging
+    area when the request begins. Computed by the server, which sees the whole staging area, and
+    handed to the parse wherever it runs."""
+    capacity, _ = staging.capacity()
+    return {
+        "bytes": 0,
+        "files": 0,
+        "decodes": 0,
+        "decodeSeconds": 0.0,
+        "memberCap": min(MAX_MEMBER, capacity // 2),
+        "heldCap": max(0, capacity - staging.staged_bytes()),
+        "held": 0,
+    }
+
+
 def _unlink(path: str | None) -> None:
     if path:
         try:
@@ -114,8 +130,8 @@ class PackageSource:
         self.budget.setdefault("decodeSeconds", 0.0)
         if "memberCap" not in self.budget:
             # set once per request and shared by every nesting level, like the other allowances
-            capacity, _ = staging.capacity()
-            self.budget.update(memberCap=min(MAX_MEMBER, capacity // 2), heldCap=max(0, capacity - staging.staged_bytes()), held=0)
+            fresh = request_budget()
+            self.budget.update(memberCap=fresh["memberCap"], heldCap=fresh["heldCap"], held=0)
         self.depth = depth
         self.inherited_context = inherited_context or {}
         self.expectations = []
@@ -143,6 +159,9 @@ class PackageSource:
         # findings are collected rather than streamed, so consumers that only want rows are not
         # handed something that is not one.
         self.engines: list[str] = []
+        # what runs them over a folder of held-back logs: hayabusa.run here, and in a parse process
+        # a request to the server, which runs the engine under its own limit on concurrent runs
+        self.run_engine = None
         # keys of the cloud audit and sign-in records read so far, across every member
         self.seen_records = m365.RecordKeys()
         self.evtx_held: dict[str, tuple[dict[str, Any], str]] = {}
@@ -416,7 +435,7 @@ class PackageSource:
         started = time.monotonic()
         try:
             staged = hayabusa.stage([(name, path) for path, (_entry, name) in self.evtx_held.items()], self.tmp_dir)
-            findings, summary = hayabusa.run(staged, self.tmp_dir, deadline_s=remaining)
+            findings, summary = (self.run_engine or hayabusa.run)(staged, self.tmp_dir, deadline_s=remaining)
             for finding in findings:
                 finding["packageId"] = self.package_id
             self.findings.extend(findings)
@@ -698,6 +717,7 @@ class PackageSource:
                         )
                         nested.engines = list(self.engines)
                         nested.filesystem = self.filesystem
+                        nested.run_engine = self.run_engine
                         nested_error = None
                         try:
                             for row in nested:

@@ -211,6 +211,8 @@ def run(target: str, tmp_dir: str, *, deadline_s: float | None = None) -> tuple[
     Returns the findings and a summary the caller can put in front of the analyst: how many, how
     long, and whether the run completed or was stopped at a limit.
     """
+    from services.ingest.isolation import child_env
+
     fd, output = tempfile.mkstemp(dir=tmp_dir, suffix=".jsonl")
     os.close(fd)
     max_seconds = float(getattr(settings, "HAYABUSA_MAX_S", 300) or 300)
@@ -238,6 +240,8 @@ def run(target: str, tmp_dir: str, *, deadline_s: float | None = None) -> tuple[
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             cwd=os.path.dirname(os.path.abspath(exe)) if exe else None,
+            # the engine reads hostile logs: none of the server's variables, its token and keys among them
+            env=child_env(),
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         monitor = psutil.Process(process.pid)
