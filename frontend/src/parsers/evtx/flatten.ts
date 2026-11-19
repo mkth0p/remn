@@ -619,9 +619,9 @@ export function flatten(event: Json, record: RecordHeader | null = null, include
             .filter((x) => x !== null)
             .map((x) => pyStr(scalar(x)))
             .join('\n'),
-          4000,
+          LONG_LIMIT,
         )
-      } else row.message = str(v, 4000)
+      } else row.message = str(v, LONG_LIMIT)
       continue
     }
     if (Object.hasOwn(row, key) && !inValues(row[key], [null, ''])) continue // first mapping wins

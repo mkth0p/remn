@@ -13,6 +13,13 @@ from pathlib import Path
 import psutil
 
 MAX_OUTPUT = 64 * 1024**2
+# A hive is read where its cells are, not loaded, so its size is not what it costs: a SOFTWARE hive
+# of a few hundred megabytes is common, and refusing everything above the 64 MiB the decoder may
+# write left the analyst with nothing. It is bounded by the member ceiling, and what it yields by
+# the output, memory and time limits below, which now keep what was read before them.
+MAX_HIVE_INPUT = 4 * 1024**3
+MAX_RSS = 512 * 1024**2
+MAX_SECONDS = 30.0
 # A CAB decodes to an archive, not to records, so it is not bounded by the record-output ceiling.
 # A Windows Defender support cab is routinely a couple of hundred megabytes expanded and carries
 # the Defender operational event log, which is exactly the evidence an unwanted-software case
@@ -26,9 +33,28 @@ MAX_BATCH_SECONDS = 60.0
 MAX_BATCH_OUTPUT = 16 * 1024**2
 
 
+def _keep_partial(output: str, reason: str, at_most: int) -> None:
+    """Close a stopped worker's output at its last whole record within at_most bytes and mark it
+    partial, as the worker marks a failure it catches itself, so the records decoded before the
+    limit are kept. Read a megabyte at a time: the output may be as large as the limit."""
+    end = records = 0
+    with open(output, "rb+") as fh:
+        position = 0
+        while position < at_most and (chunk := fh.read(min(1024**2, at_most - position))):
+            last = chunk.rfind(b"\n")
+            if last >= 0:
+                end = position + last + 1
+                records += chunk.count(b"\n", 0, last + 1)
+            position += len(chunk)
+        fh.seek(end)
+        fh.truncate()
+        marker = {"_partial": f"native parser stopped at its {reason} after {records:,} record(s); the records before it are kept", "_decoded": records}
+        fh.write((json.dumps(marker) + "\n").encode("utf-8"))
+
+
 def decode(kind: str, path: str, tmp_dir: str) -> str:
-    if os.path.getsize(path) > MAX_OUTPUT:
-        raise ValueError("native artifact exceeds 64 MiB limit")
+    if os.path.getsize(path) > (MAX_HIVE_INPUT if kind == "registry" else MAX_OUTPUT):
+        raise ValueError(f"native artifact exceeds {(MAX_HIVE_INPUT if kind == 'registry' else MAX_OUTPUT) // 1024**2:,} MiB limit")
     ceiling = MAX_CAB_OUTPUT if kind == "cab" else MAX_OUTPUT
     fd, output = tempfile.mkstemp(dir=tmp_dir, suffix=".decoded")
     os.close(fd)
@@ -45,12 +71,33 @@ def decode(kind: str, path: str, tmp_dir: str) -> str:
                 rss = monitor.memory_info().rss
             except psutil.NoSuchProcess:
                 break
-            if rss > 512 * 1024**2 or os.path.getsize(output) > ceiling or time.monotonic() - started > 30:
-                raise ValueError("native parser exceeded memory, output or 30-second time limit")
-            time.sleep(0.05)
+            limit = (
+                f"{MAX_RSS // 1024**2} MiB memory limit"
+                if rss > MAX_RSS
+                else f"{ceiling // 1024**2} MiB output limit"
+                if os.path.getsize(output) > ceiling
+                else f"{MAX_SECONDS:g}-second time limit"
+                if time.monotonic() - started > MAX_SECONDS
+                else None
+            )
+            if limit is None:
+                time.sleep(0.05)
+                continue
+            # A cabinet cut short is no archive; records are evidence one by one, so a record
+            # decoder's output is kept up to the cut.
+            process.kill()
+            process.wait()
+            if kind == "cab" or os.path.getsize(output) == 0:
+                raise ValueError(f"native parser exceeded its {limit}")
+            _keep_partial(output, limit, ceiling)
+            return output
         process.wait()
         if os.path.getsize(output) > ceiling:
-            raise ValueError(f"native parser output exceeds {ceiling // 1024**2} MiB")
+            if kind == "cab":
+                raise ValueError(f"native parser output exceeds {ceiling // 1024**2} MiB")
+            # finished between two looks of the monitor, past the ceiling: kept up to it
+            _keep_partial(output, f"{ceiling // 1024**2} MiB output limit", ceiling)
+            return output
         if process.returncode:
             with open(output, encoding="utf-8") as fh:
                 reason = fh.read(500)

@@ -23,8 +23,11 @@ every event is tagged with its source file. Records are flattened into the event
 the standard fields (time, event id, channel, provider, computer, level) and the
 event-specific ones under their own names (`targetUser`, `subjectUser`, `ipAddress`,
 `logonType`, `processName`, `commandLine`, `serviceName`, `taskName`, …), with every
-EventData field also reachable as `data.<Name>`. Access rights in object-access events
-(4656, 4663, 5145 …) keep their codes and are followed by their names (`%%4417` then
+EventData field also reachable as `data.<Name>`. A column keeps at most 4,000 characters and
+ends in `…` where it is cut, except the text rules search whole, which keep 65,536: the command
+line, the script block, the task definition, and `message`, the unnamed Data of a classic event
+(a PowerShell 400's `HostApplication`) joined; `data` keeps every value whole. Access rights in
+object-access events (4656, 4663, 5145 …) keep their codes and are followed by their names (`%%4417` then
 `WriteData (or AddFile)`), as the event viewer shows them, so rules written against either
 spelling match. Where an older log leaves out what a newer one records about a parent
 process, the parser fills it in from the parent's own event in the same log: `ParentUser`
@@ -47,6 +50,10 @@ replaced. Some exports write a value as it is, an ampersand or markup inside it 
 record is read with those escaped, and the file says how many were. An export holds what its
 query selected, not a file's own record numbering, so no statement about missing records is made
 for it, and its rendered message (`RenderingInfo`) is not read.
+
+A record the decoder cannot read is counted as an error and passed over. Should the decoder
+itself stop part-way through a file, in the browser or on the server, the rows read before that
+point are kept and the file is reported as cut there.
 
 Each file also says what it cannot show about itself, in its parser statistics
 (`sequences`, one entry per file, archive or package member):
@@ -84,7 +91,11 @@ Bodies and raw headers are kept for previews and body rules unless the case says
 otherwise. Attachments are analysed statically at ingest (structure, macros, PDF
 content, archives, YARA when installed); the analysis summary is kept, the bytes are
 not. Deep attachment analysis can be switched off for a first pass over a very large
-mailbox.
+mailbox. A body is kept to 200,000 characters of text and 400,000 of HTML, and a longer one
+is flagged `body_truncated`. The first 60 attachments of a message are analysed and listed,
+and a message with more is flagged `attachments_truncated` while its attachment count stays
+the real one. An attachment over 60 MiB in a PST or OST is not read: it is listed with the
+size the mailbox declares, no hash, and the flag `not_read`.
 
 ### Deleted and orphaned mail (PST and OST)
 
@@ -96,6 +107,11 @@ from the PST or OST item tree as libpff orphan items, listed under a synthetic
 `mail-deleted-message-with-indicators` reports the ones that also score 45 or more,
 since a cleaned mailbox is itself evidence. Outlook *exports* rarely contain orphans;
 original PST and OST files do.
+
+A message, folder or orphan item that libpff cannot read, as in a damaged PST or a partly
+synchronised OST, becomes a row of its own in its folder, with the subject "(unreadable
+message)", "(unreadable folder)", "(unreadable folder contents)" or "(unreadable orphan item)",
+the flag `parse_error` and libpff's error, and the import counts it among its errors.
 
 ## Microsoft 365 audit and Entra sign-in exports
 

@@ -11,6 +11,7 @@ from collections import deque
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from itertools import chain, islice
+from pathlib import PurePosixPath
 from typing import Any
 
 VERSION = "collection/1"
@@ -142,12 +143,28 @@ DHCP_EVENTS = {
 }
 
 
+def _ez_header_kind(head: bytes) -> str | None:
+    """The artifact a Zimmerman parser's output holds, from its first line: the CSV header, or the
+    keys of the first object of its --json output."""
+    first = head.decode("utf-8-sig", "replace").lstrip().split("\n", 1)[0].strip()
+    if first.startswith("{"):
+        try:
+            record = json.loads(first)
+        except ValueError:
+            return None
+        names = list(record) if isinstance(record, dict) else []
+    else:
+        names = next(csv.reader([first]), [])
+    return _ez_kind(dict.fromkeys(key(n) for n in names)) if names else None
+
+
 def sniff_category(name: str, head: bytes) -> str | None:
-    """A category the file's first lines show when its name does not: a DHCP audit log renamed."""
+    """A category the file's first lines show when its name does not: a DHCP audit log renamed, or
+    the output of a Zimmerman parser in a directory KAPE's module list does not name, or none."""
     text = head[:4096].decode("utf-8", "replace")
     if "Microsoft DHCP Service Activity Log" in text or any(_DHCP_HEADER.match(line) for line in text.splitlines()[:80]):
         return "dhcp"
-    return None
+    return _ez_header_kind(head)
 
 
 def category(name: str) -> str | None:
@@ -188,12 +205,37 @@ def timestamp(value: Any) -> int | None:
 
 
 _FRACTION = re.compile(r"(\.\d{6})\d+")
+# A date written with numbers in the order of a locale: DFIR-ORC's 08/19/2026 01:34:26.000, or a
+# Zimmerman CSV saved again from a spreadsheet as 19/08/2026 01:34 or 8/19/2026 1:34 PM.
+_NUMERIC_DATE = re.compile(r"^(\d{1,2})([/.])(\d{1,2})\2(\d{4})[ T]+(\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?\s*([AaPp][Mm])?$")
+_SLASH_DATE = re.compile(r"(?<![\d/])(\d{1,2})/(\d{1,2})/\d{4}(?![\d/])")
 
 
-def timestamp_utc(value: Any) -> int | None:
+def date_order(text: str) -> bool | None:
+    """Whether the numeric dates in an export's text are day-first (True), month-first (False), or
+    cannot tell (None). An export is written in one locale, so one date with a day above 12 settles
+    the order of all of them."""
+    day_first = month_first = False
+    for match in _SLASH_DATE.finditer(text):
+        day_first = day_first or int(match.group(1)) > 12
+        month_first = month_first or int(match.group(2)) > 12
+    return None if day_first == month_first else day_first
+
+
+def ambiguous_date(value: Any) -> bool:
+    """A numeric date that reads as a valid day-first and a valid month-first date alike."""
+    match = _NUMERIC_DATE.match(value.strip()) if isinstance(value, str) else None
+    return bool(match) and match.group(2) == "/" and int(match.group(1)) <= 12 and int(match.group(3)) <= 12 and match.group(1) != match.group(3)
+
+
+def timestamp_utc(value: Any, day_first: bool | None = None) -> int | None:
     """Timestamps from tools whose documentation fixes the zone as UTC without writing it: the
     Zimmerman parsers, DFIR-ORC and Velociraptor. Anything a zone is written on goes through
-    timestamp(); this only fills in for the formats those tools are known to write."""
+    timestamp(); this only fills in for the formats those tools are known to write.
+
+    A numeric date is read in the order day_first gives, which the caller takes from the export's
+    own dates. Without it, a date that reads both ways (03/04/2026) has no time: guessing put a
+    day-first export a month or more away from where it happened, without a word."""
     if not isinstance(value, str) or not value.strip():
         return None
     text = value.strip()
@@ -201,12 +243,34 @@ def timestamp_utc(value: Any) -> int | None:
     if parsed is not None:
         return parsed
     text = _FRACTION.sub(r"\1", text)  # seven fractional digits is more than strptime takes
-    for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S", "%m/%d/%Y %H:%M:%S.%f", "%m/%d/%Y %H:%M:%S"):
+    for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M"):
         try:
             return int(datetime.strptime(text, fmt).replace(tzinfo=UTC).timestamp() * 1000)
         except ValueError:
             continue
-    return None
+    match = _NUMERIC_DATE.match(text)
+    if not match:
+        return None
+    first, separator, second, year, hour, minute, seconds, fraction, half = match.groups()
+    a, b = int(first), int(second)
+    if separator == "." or a > 12 or (a == b):
+        day, month = a, b
+    elif b > 12:
+        day, month = b, a
+    elif day_first is None:
+        return None
+    else:
+        day, month = (a, b) if day_first else (b, a)
+    hours = int(hour)
+    if half:
+        if not 1 <= hours <= 12:
+            return None
+        hours = hours % 12 + (12 if half.lower() == "pm" else 0)
+    try:
+        moment = datetime(int(year), month, day, hours, int(minute), int(seconds or 0), int((fraction or "0")[:6].ljust(6, "0")), tzinfo=UTC)
+    except ValueError:
+        return None
+    return int(moment.timestamp() * 1000)
 
 
 def _flatten(raw: dict[str, Any]) -> dict[str, Any]:
@@ -308,14 +372,43 @@ def _event_data_fields(event_id: Any, provider: Any, sections: dict[str, Any]) -
     return fields
 
 
-def _event_export(raw: dict[str, Any], fields: dict[str, Any], kind: str | None, name: str, index: int, context: dict[str, Any]) -> dict[str, Any] | None:
+def _long_text(value: Any) -> str | None:
+    """An exported event's message, kept to the length the native parser keeps of the text rules
+    search, and marked where it is cut; the whole value stays in data."""
+    from services.parsers.evtx_parser import LONG_LIMIT
+
+    text = str(value) if value else ""
+    return (text if len(text) <= LONG_LIMIT else text[:LONG_LIMIT] + "…") or None
+
+
+_EPOCH = re.compile(r"^\d{9,12}(?:\.\d+)?$")
+
+
+def _event_time(value: Any, utc=timestamp_utc) -> int | None:
+    """An exported event's time: a string with or without its zone (the tools that write none
+    write UTC), or seconds since 1970, which is what Velociraptor's parse_evtx() writes in
+    TimeCreated.SystemTime."""
+    if isinstance(value, str) and _EPOCH.match(value.strip()):
+        value = float(value)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            return round(value * 1000)
+        except (OverflowError, ValueError):
+            return None
+    return utc(value) if isinstance(value, str) else None
+
+
+def _event_export(
+    raw: dict[str, Any], fields: dict[str, Any], kind: str | None, name: str, index: int, context: dict[str, Any], utc=timestamp_utc
+) -> dict[str, Any] | None:
     """Event log records another tool exported become event rows, not observations.
 
     EvtxECmd writes one flat CSV row per record, with the whole EventData as JSON in its Payload
-    column; Velociraptor writes the record's System and EventData objects as JSON. Both carry the
-    same identity: channel, record id, event id, time. The EventData goes through the native
-    parser's own mapping, so a command line, a logon type or a source address lands in the same
-    column it would have had if the .evtx itself had been read.
+    column; Velociraptor writes the record's System and EventData objects as JSON, or, in its
+    Windows.EventLogs artifacts, flat columns (EventTime, Channel, EventID ...) beside an EventData
+    object. All carry the same identity: channel, record id, event id, time. The EventData goes
+    through the native parser's own mapping, so a command line, a logon type or a source address
+    lands in the same column it would have had if the .evtx itself had been read.
     """
     system = raw.get("System") if isinstance(raw.get("System"), dict) else None
     if system is None and kind != "event-export":
@@ -350,21 +443,22 @@ def _event_export(raw: dict[str, Any], fields: dict[str, Any], kind: str | None,
         security = system.get("Security") if isinstance(system.get("Security"), dict) else {}
         user_sid = security.get("UserID")
     else:
-        event_id, provider, when = get("EventId", "EventID"), get("Provider"), get("TimeCreated")
+        event_id, provider, when = get("EventId", "EventID", "EventID.Value"), get("Provider", "Provider.Name"), get("TimeCreated", "EventTime")
         channel, computer, record_id = get("Channel"), get("Computer"), get("EventRecordId", "RecordNumber")
         message = get("MapDescription", "Message")
         user = get("UserName", "TargetUserName")
         payload = " ".join(v for v in (get(f"PayloadData{i}") for i in range(1, 7)) if v)
         if payload:
             message = f"{message}: {payload}" if message else payload
-        sections = _evtxecmd_payload(get("Payload"))
-        process_id, thread_id, user_sid = get("ProcessId"), get("ThreadId"), get("UserId")
+        # Velociraptor's flat rows carry the EventData as an object, EvtxECmd's as JSON text
+        sections = {k: raw[k] for k in ("EventData", "UserData") if isinstance(raw.get(k), dict)} or _evtxecmd_payload(get("Payload"))
+        process_id, thread_id, user_sid = get("ProcessId"), get("ThreadId"), get("UserId", "UserSID")
     event_number = int(event_id) if str(event_id or "").strip().isdigit() else None
     row: dict[str, Any] = {
         "recordKind": "event",
         "artifactType": "event-export",
         "eventId": event_number,
-        "ts": timestamp(when) or timestamp_utc(when) if isinstance(when, str) else None,
+        "ts": _event_time(when, utc),
         "observedAt": timestamp(context.get("collectedAt")) if context.get("collectedAt") else None,
         "sourceIndex": index,
         "parserVersion": VERSION,
@@ -377,7 +471,7 @@ def _event_export(raw: dict[str, Any], fields: dict[str, Any], kind: str | None,
         "userSid": str(user_sid) if user_sid else None,
         "category": "collection:event-export",
         "targetUser": str(user) if user else None,
-        "message": str(message)[:4000] if message else None,
+        "message": _long_text(message),
         "data": raw,
     }
     label = f"{row['provider'] or row['channel'] or 'event'} {row['eventId'] or ''}".strip()
@@ -454,15 +548,19 @@ def _xml_records(path: str, name: str) -> Iterator[dict[str, Any]]:
             }
 
 
-# Bytes a single structured export may be parsed from. Enforced while reading, not on the file
-# size, so the records parsed before the ceiling survive and the member is reported as partial.
+# Bytes a text export may be parsed from. Enforced while reading, not on the file size, so the
+# records parsed before the ceiling survive and the member is reported as partial.
 MAX_PARSE_BYTES = 64 * 1024**2
-# A delimited export is read one row at a time and each row leaves as soon as it is normalised, so
-# its size costs time, not memory. MFTECmd's $MFT and $J output runs to gigabytes, and cutting it at
-# 64 MiB kept the first few percent of the volume's files and changes and lost the rest. It is read
-# to the package's own per-member ceiling instead; a JSON document, which is read whole, keeps the
-# smaller one.
+# A delimited or JSON export is read one record at a time and each record leaves as soon as it is
+# normalised, so its size costs time, not memory. MFTECmd's $MFT and $J output and Velociraptor's
+# event log, MFT and USN results run to gigabytes, and cutting them at 64 MiB kept the first few
+# percent of the volume and lost the rest. They are read to the package's own per-member ceiling.
 MAX_STREAM_BYTES = 4 * 1024**3
+# How much of an export its date order is read from.
+DATE_SAMPLE_BYTES = 1024**2
+# What one JSON record may hold in memory while it is parsed. Larger than any record a collector
+# writes; past it the member stops, with the records before it kept.
+MAX_RECORD_CHARS = 64 * 1024**2
 
 
 class _ByteBudget(io.RawIOBase):
@@ -801,9 +899,15 @@ def records(path: str, name: str, notes: dict[str, Any] | None = None) -> Iterat
         encoding = _text_encoding(raw)
         if encoding != "utf-8-sig":
             notes["encoding"] = encoding
+        # The order of the numeric dates is the export's, read from its first megabyte before any
+        # row is: the rows themselves are normalised one at a time and cannot look ahead.
+        sample = raw.read(DATE_SAMPLE_BYTES)
+        raw.seek(0)
+        if (order := date_order(sample.decode(encoding, "replace"))) is not None:
+            notes["dayFirst"] = order
         # Lenient because the encoding above is chosen, not guessed at random: what "replace"
         # covers here is a corrupt byte in one line, and losing the file over that helps nobody.
-        budget = MAX_STREAM_BYTES if name.lower().endswith((".csv", ".tsv")) else MAX_PARSE_BYTES
+        budget = MAX_STREAM_BYTES if name.lower().endswith((".csv", ".tsv", ".json", ".jsonl", ".ndjson")) else MAX_PARSE_BYTES
         with io.TextIOWrapper(io.BufferedReader(_ByteBudget(raw, budget)), encoding=encoding, errors="replace", newline="") as fh:
             if category(name) == "defender" and name.lower().endswith((".txt", ".log")):
                 yield from _defender_records(fh, name, notes)
@@ -860,26 +964,8 @@ def records(path: str, name: str, notes: dict[str, Any] | None = None) -> Iterat
                         yield {"Message": line, "LineNumber": index + 1}
                 if record:
                     yield record
-            elif name.lower().endswith((".jsonl", ".ndjson")):
-                for line in fh:
-                    if line.strip():
-                        row = json.loads(line)
-                        if not isinstance(row, dict):
-                            raise ValueError("expected an object per line")
-                        yield row
-            elif name.lower().endswith(".json"):
-                text = fh.read()
-                try:
-                    value = json.loads(text)
-                except json.JSONDecodeError as exc:
-                    if exc.msg != "Extra data":
-                        raise
-                    # Velociraptor writes results/<Artifact>.json as one object per line
-                    value = [json.loads(line) for line in text.splitlines() if line.strip()]
-                rows = value if isinstance(value, list) else value.get("records", [value]) if isinstance(value, dict) else None
-                if not isinstance(rows, list) or any(not isinstance(r, dict) for r in rows):
-                    raise ValueError("expected an object, array of objects, or records array")
-                yield from rows
+            elif name.lower().endswith((".json", ".jsonl", ".ndjson")):
+                yield from _json_records(fh, notes)
             else:
                 sample = fh.read(8192)
                 fh.seek(0)
@@ -898,6 +984,155 @@ def records(path: str, name: str, notes: dict[str, Any] | None = None) -> Iterat
                 for row in reader:
                     if row:
                         yield _row_to_dict(row, header, notes)
+
+
+class _JsonText:
+    """JSON values read one at a time from a text stream, with only the value being parsed (and
+    the rest of the chunk it arrived in) held in memory."""
+
+    CHUNK = 1024**2
+
+    def __init__(self, fh) -> None:
+        self.fh = fh
+        self.buf = ""
+        self.pos = 0
+        self.eof = False
+        self.decoder = json.JSONDecoder()
+
+    def _more(self, size: int) -> bool:
+        if self.eof:
+            return False
+        chunk = self.fh.read(size)
+        if not chunk:
+            self.eof = True
+            return False
+        self.buf = self.buf[self.pos :] + chunk
+        self.pos = 0
+        return True
+
+    def peek(self) -> str:
+        """The next character that is not whitespace, without consuming it; "" at the end."""
+        while True:
+            while self.pos < len(self.buf) and self.buf[self.pos] in " \t\r\n":
+                self.pos += 1
+            if self.pos < len(self.buf):
+                return self.buf[self.pos]
+            if not self._more(self.CHUNK):
+                return ""
+
+    def take(self, text: str) -> bool:
+        """Consume text if it comes next (after whitespace)."""
+        self.peek()
+        while len(self.buf) - self.pos < len(text) and self._more(self.CHUNK):
+            pass
+        if self.buf.startswith(text, self.pos):
+            self.pos += len(text)
+            return True
+        return False
+
+    def value(self) -> Any:
+        """The next value. A value cut by the end of the chunk is retried with more text, the read
+        doubling each time so a large record costs one parse per doubling, not one per chunk."""
+        self.peek()
+        size = self.CHUNK
+        while True:
+            try:
+                value, end = self.decoder.raw_decode(self.buf, self.pos)
+            except json.JSONDecodeError as exc:
+                # A value the chunk cut short fails at the end of the text, or inside a string that
+                # is still open; anything else is a damaged record, and more text will not mend it.
+                cut = exc.pos >= len(self.buf) - 1 or exc.msg.startswith("Unterminated string")
+                if not cut:
+                    raise ValueError(f"JSON is malformed ({exc.msg}); records beyond it were not read") from None
+                if len(self.buf) - self.pos > MAX_RECORD_CHARS:
+                    raise ValueError(f"a JSON record is larger than {MAX_RECORD_CHARS // 1024**2:,} MiB; records beyond it were not read") from None
+                if not self._more(size):
+                    raise ValueError("JSON ends inside a record; records beyond it were not read") from None
+                size *= 2
+                continue
+            # a number or a literal at the very end of the chunk may continue in the next one
+            if end == len(self.buf) and not isinstance(value, (dict, list, str)) and self._more(size):
+                continue
+            self.pos = end
+            return value
+
+
+def _json_records(fh, notes: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    """The records of a JSON export, one at a time: an array of objects, a {"records": [...]}
+    document, a single object (indented or not), or one object per line as Velociraptor writes its
+    results/<Artifact>.json and the Zimmerman parsers their --json output.
+
+    The whole file used to be read and parsed at once, so a result file past the parse ceiling gave
+    no row at all, and one line that did not parse failed every line around it. A line or array item
+    that is not an object, and a line that does not parse, is counted in notes["unreadableRecords"]
+    and passed over; a document that breaks off ends the member, with the records before it kept.
+    """
+    reader = _JsonText(fh)
+
+    def unreadable() -> None:
+        notes["unreadableRecords"] = notes.get("unreadableRecords", 0) + 1
+
+    def array() -> Iterator[dict[str, Any]]:
+        if reader.take("]"):
+            return
+        while True:
+            item = reader.value()
+            if isinstance(item, dict):
+                yield item
+            else:
+                unreadable()
+            if reader.take(","):
+                continue
+            if reader.take("]"):
+                return
+            raise ValueError("JSON array is malformed between two records; records beyond it were not read")
+
+    first = reader.peek()
+    if first == "[":
+        reader.take("[")
+        yield from array()
+        if reader.peek():
+            raise ValueError("text follows the JSON array and was not read")
+    elif first == "{" and reader.take("{") and reader.take('"records"') and reader.take(":") and reader.take("["):
+        yield from array()
+        if not reader.take("}") or reader.peek():
+            raise ValueError("a records document holds more than its records array; what follows it was not read")
+    elif first == "{":
+        # One record per line is the common case and the one that can pass over a damaged line.
+        # An object indented over several lines opens with a line holding only its brace.
+        fh.seek(0)
+        lines = iter(lambda: fh.readline(MAX_RECORD_CHARS + 1), "")
+        opening = next((line for line in lines if line.strip()), "")
+        fh.seek(0)
+        reader = _JsonText(fh)
+        if opening.strip() == "{":
+            while reader.peek():
+                record = reader.value()
+                if isinstance(record, dict):
+                    yield record
+                else:
+                    unreadable()
+            return
+        for line in iter(lambda: fh.readline(MAX_RECORD_CHARS + 1), ""):
+            if len(line) > MAX_RECORD_CHARS and not line.endswith("\n"):
+                unreadable()
+                # the rest of an oversized line is read past, never held
+                while (rest := fh.readline(MAX_RECORD_CHARS)) and not rest.endswith("\n"):
+                    pass
+                continue
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except ValueError:
+                unreadable()
+                continue
+            if isinstance(record, dict):
+                yield record
+            else:
+                unreadable()
+    elif first:
+        raise ValueError("expected an object, an array of objects, a records array or one object per line")
 
 
 def _dhcp_records(fh, notes: dict[str, Any]) -> Iterator[dict[str, Any]]:
@@ -998,32 +1233,49 @@ def timestomp_hints(si_created: int | None, fn_created: int | None, si_text: lis
     return hints
 
 
-def normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, Any]) -> dict[str, Any]:
+def normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, Any], notes: dict[str, Any] | None = None) -> dict[str, Any]:
     """The record as one row: for an artifact with several times, the row of its first."""
-    return _normalize(raw, name, index, context)[0]
+    return _normalize(raw, name, index, context, notes)[0]
 
 
-def normalize_rows(raw: dict[str, Any], name: str, index: int, context: dict[str, Any]) -> Iterator[dict[str, Any]]:
+def normalize_rows(raw: dict[str, Any], name: str, index: int, context: dict[str, Any], notes: dict[str, Any] | None = None) -> Iterator[dict[str, Any]]:
     """The record as rows, one per moment it records: an MFT entry's distinct MACB times, a
     prefetch file's last and earlier runs. Every row is the same record (same source index and
-    data); only the time and what that time means differ."""
-    row, more = _normalize(raw, name, index, context)
+    data); only the time and what that time means differ. notes is the one records() filled for
+    the same export: it gives the order of its numeric dates and counts the rows left untimed."""
+    row, more = _normalize(raw, name, index, context, notes)
     yield row
     for extra in more:
         yield {**row, **extra}
 
 
-def _normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def _normalize(
+    raw: dict[str, Any], name: str, index: int, context: dict[str, Any], notes: dict[str, Any] | None = None
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     if category(name) == "dhcp":
         return _dhcp_row(raw, index, context), []
     if category(name) == "deception":
         from services.parsers.deception import normalize as normalize_deception
 
         return normalize_deception(raw, index, context), []
+    notes = {} if notes is None else notes
+    # DFIR-ORC documents its dates as month-first; any other export shows its order in its dates
+    day_first = notes.get("dayFirst", False if any(key(PurePosixPath(name.replace("\\", "/")).stem).startswith(p) for p, _kind in ORC_TOOLS) else None)
+    undated = False
+
+    def utc(value: Any) -> int | None:
+        nonlocal undated
+        ms = timestamp_utc(value, day_first)
+        if ms is None and day_first is None and ambiguous_date(value):
+            undated = True
+        return ms
+
     raw = _flatten(raw)
     fields = {key(k): v for k, v in raw.items()}
-    exported = _event_export(raw, fields, _ez_kind(fields) or category(name), name, index, context)
+    exported = _event_export(raw, fields, _ez_kind(fields) or category(name), name, index, context, utc)
     if exported is not None:
+        if undated:
+            notes["undatedRows"] = notes.get("undatedRows", 0) + 1
         return exported, []
     more: list[dict[str, Any]] = []
 
@@ -1168,17 +1420,17 @@ def _normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, An
         # holds the file's own modification time and PowerShell history no time per line, so neither
         # is an event; the other exports carry a moment something happened.
         if kind not in ("registry", "shimcache", "powershell-history", "mft", "usn"):
-            row["ts"] = row.get("ts") or timestamp_utc(when)
+            row["ts"] = row.get("ts") or utc(when)
         if kind == "usn":
             # when the change was journaled, and what the change was: the reasons are the
             # operation, as a UAL record's is ("FileCreate|Close", "DataExtend|DataOverwrite")
-            row["ts"] = timestamp_utc(get("UpdateTimestamp"))
+            row["ts"] = utc(get("UpdateTimestamp"))
             row["name"] = row.get("name") or get("Name")
             row["operation"] = get("UpdateReasons")
             row["description"] = f"USN {row['operation'] or 'update'}"
         if kind == "mft":
             text = {attr: {letter: get(f"{stem}{code}") for letter, _what, stem in MACB} for attr, code in (("SI", "0x10"), ("FN", "0x30"))}
-            values = {attr: {letter: timestamp_utc(v) for letter, v in times.items()} for attr, times in text.items()}
+            values = {attr: {letter: utc(v) for letter, v in times.items()} for attr, times in text.items()}
             times = macb_times(values)
             hints = timestomp_hints(
                 values["SI"]["B"],
@@ -1210,11 +1462,11 @@ def _normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, An
         loaded = get("FilesLoaded")
         if loaded and not row.get("image"):
             row["image"] = row["path"] = _prefetch_image(row.get("processName"), [p.strip() for p in loaded.split(",")])
-        row["ts"] = timestamp(get("LastRunTime", "LastExecutionTime")) or timestamp_utc(get("LastRun"))
+        row["ts"] = timestamp(get("LastRunTime", "LastExecutionTime")) or utc(get("LastRun"))
         if row["ts"] is not None:
             row["recordKind"] = "event"
             # PECmd writes the last run and up to seven before it; each is an execution
-            earlier = sorted({ms for i in range(8) if (ms := timestamp_utc(get(f"PreviousRun{i}"))) is not None and ms != row["ts"]}, reverse=True)
+            earlier = sorted({ms for i in range(8) if (ms := utc(get(f"PreviousRun{i}"))) is not None and ms != row["ts"]}, reverse=True)
             row["description"] = "prefetch last run" if get("LastRun") and not get("LastRunTime", "LastExecutionTime") else "prefetch run"
             more.extend({"ts": ms, "description": "prefetch earlier run"} for ms in earlier)
     label = row.get("taskName") or row.get("serviceName") or row.get("image") or row.get("path") or get("Name", "DisplayName", "UserName") or kind
@@ -1226,6 +1478,9 @@ def _normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, An
         row["summary"] = f"{kind}: {row['message']}"[:2000]
     if kind == "usn":
         row["summary"] = f"usn: {row.get('path') or row.get('name') or 'entry'} ({row['operation'] or 'update'})"[:2000]
+    if undated:
+        # kept as written in data, and counted on the member so the gap on the timeline is said
+        notes["undatedRows"] = notes.get("undatedRows", 0) + 1
     if kind == "mft":
         # which of the entry's times this row is, on the line the timeline shows
         label = row.get("path") or row.get("name") or "entry"

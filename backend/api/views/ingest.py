@@ -9,9 +9,7 @@ from __future__ import annotations
 import io
 import json
 import logging
-import os
 import shutil
-import tempfile
 import time
 from collections.abc import Iterator
 from typing import Any
@@ -129,32 +127,21 @@ def _members_line_stats(members: list[dict[str, Any]], limit: int = 2000) -> dic
     return {"members": members[:limit], "membersTotal": len(members), "memberCounts": counts}
 
 
-def _engine_lines(src, tmp_dir: str, deadline: float | None) -> Iterator[bytes]:
-    """Hayabusa over the staged event log, its detections as finding lines and one summary line."""
+def _engine_lines(src, fmt: str, tmp_dir: str, deadline: float | None) -> Iterator[bytes]:
+    """Hayabusa over the upload's event logs, its detections as finding lines and one summary line."""
     remaining = max(1.0, deadline - time.monotonic()) if deadline else None
-    target = src.path
-    staged = None
-    if target is None or not str(target).lower().endswith(".evtx"):
-        # the engine picks files by extension, and an in-memory upload has no path at all
-        fd, staged = tempfile.mkstemp(dir=tmp_dir, suffix=".evtx")
-        with os.fdopen(fd, "wb") as out:
-            if target is None:
-                out.write(src.data or b"")
-            else:
-                with open(target, "rb") as fh:
-                    shutil.copyfileobj(fh, out)
-        target = staged
+    # an archive gives the engine its .evtx members, and a format it cannot read is said, not run
+    staged, said = hayabusa.stage_upload(src.name, src.path, src.data, fmt, tmp_dir)
+    if staged is None:
+        yield ndjson_line({"type": "engine", **said})
+        return
     try:
-        findings, summary = hayabusa.run(target, tmp_dir, deadline_s=remaining)
+        findings, summary = hayabusa.run(staged, tmp_dir, deadline_s=remaining)
     finally:
-        if staged:
-            try:
-                os.unlink(staged)
-            except OSError:
-                pass
+        shutil.rmtree(staged, ignore_errors=True)
     for finding in findings:
         yield ndjson_line({"type": "finding", **finding})
-    yield ndjson_line({"type": "engine", **summary})
+    yield ndjson_line({"type": "engine", **hayabusa.finish(summary, said)})
 
 
 def _stream(gen: Iterator[bytes]) -> StreamingHttpResponse:
@@ -224,7 +211,7 @@ def ingest_evtx(request: HttpRequest):
                     if _expired(deadline):
                         raise DeadlineExceeded()
                 if engines:
-                    yield from _engine_lines(src, tmp_dir, deadline)
+                    yield from _engine_lines(src, evsrc.format, tmp_dir, deadline)
             except DeadlineExceeded:
                 evsrc.stats.errors += 1
                 yield ndjson_line({"type": "error", "error": DEADLINE_REASON, "emitted": n})
