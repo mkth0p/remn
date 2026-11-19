@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import threading
 import time
 import uuid
@@ -23,7 +24,7 @@ from django.views.decorators.http import require_http_methods, require_POST
 
 from api.params import BadParameter, whole_number
 from services.ingest import staging
-from services.ingest.staging import gib, staged_bytes
+from services.ingest.staging import DIRECTORY_SUFFIXES, gib, staged_bytes
 
 log = logging.getLogger(__name__)
 _ID = re.compile(r"^[a-f0-9]{32}$")
@@ -115,19 +116,51 @@ def cleanup_stale(max_age_s: int | None = None) -> int:
     n = 0
     now = time.time()
     # .member, .decoded and .manifest are the parsers own staging. A parse releases them itself,
-    # but a process killed mid-parse cannot, and nothing else reclaims them.
+    # but a process killed mid-parse cannot, and nothing else reclaims them. Django's spool keeps
+    # the uploaded file's extension after ".upload", so every suffix of the name is looked at.
     parser_temp = (".upload", ".member", ".decoded", ".manifest")
     for directory, suffixes in ((upload_dir(), (".part", ".json")), (Path(settings.FILE_UPLOAD_TEMP_DIR), parser_temp)):
         try:
             for p in directory.iterdir():
-                if not p.is_file() or p.suffix not in suffixes:
+                if not p.is_file() or not set(p.suffixes) & set(suffixes):
                     continue
                 if now - p.stat().st_mtime > max_age_s:
                     p.unlink(missing_ok=True)
                     n += 1
         except OSError:
             continue
+    # The directories a parse creates, an expanded 7z and the event logs staged for an engine run,
+    # go on the same age. A parse still reading an expanded archive touches it as it takes each
+    # member, so the age is the time since it was last used.
+    try:
+        for p in Path(settings.FILE_UPLOAD_TEMP_DIR).iterdir():
+            if p.is_dir() and not p.is_symlink() and p.name.endswith(DIRECTORY_SUFFIXES) and now - p.stat().st_mtime > max_age_s:
+                shutil.rmtree(p, ignore_errors=True)
+                n += 1
+    except OSError:
+        pass
     return n
+
+
+def clear_leftovers() -> int:
+    """At startup nothing is being parsed, so whatever a parse staged was left by a process that
+    stopped in the middle of one: remove it whatever its age. Chunked uploads stay, since a client
+    can resume one."""
+    tmp = Path(settings.FILE_UPLOAD_TEMP_DIR)
+    tmp.mkdir(parents=True, exist_ok=True)
+    removed = 0
+    for child in tmp.iterdir():
+        try:
+            if child.is_file() and child.suffix not in (".part", ".json"):
+                child.unlink()
+            elif child.is_dir() and not child.is_symlink() and child.name.endswith(DIRECTORY_SUFFIXES):
+                shutil.rmtree(child)
+            else:
+                continue
+            removed += 1
+        except OSError:
+            pass
+    return removed
 
 
 _sweeper: threading.Thread | None = None

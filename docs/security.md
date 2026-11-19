@@ -168,7 +168,11 @@ finishes.
   The sweep covers Django's own multipart spool as well as the chunked staging area: a request
   that dies part-way through a single-request upload leaves a file there too. It also covers the
   parsers' own staging, the `.member`, `.decoded` and `.manifest` files a parse writes while it
-  works. A parse releases those itself, and a process killed mid-parse cannot.
+  works and the folders it expands a 7z into or stages event logs in for Hayabusa. A parse
+  releases those itself, and a process killed mid-parse cannot. A parse still reading an expanded
+  7z touches its folder as it takes each member, so the age is the time since last use. At
+  startup, when nothing is being parsed, all of it is removed whatever its age; chunked uploads
+  stay, since a client can resume them. The total budget below counts those folders too.
 - **A total budget.** `FORENSIC_TMP_MAX_GB` caps what the staging area may hold at once: 4 in
   browser-only mode, and otherwise 0, which is the free space of the disk under the staging area
   less a tenth of that disk (at most 10 GiB) kept for the case stores and the system. A configured

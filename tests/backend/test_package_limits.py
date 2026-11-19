@@ -41,6 +41,87 @@ def staged_bytes(directory):
     return sum(e.stat().st_size for e in os.scandir(directory) if e.is_file())
 
 
+SEVEN_ZIP = b"7z\xbc\xaf\x27\x1c\x00\x04"
+
+
+class FakeSevenZip:
+    """Stands in for py7zr where it is not installed, as in this suite's default run: the archive
+    is a list of (name, declared size, content) and extraction writes the content. Like py7zr it
+    writes no more than a member declares and stops once more than max_extract_size has been
+    decompressed in total. The optional parser run of the continuous integration has the real one."""
+
+    members: list[tuple[str, int, bytes]] = []
+    extracted: list[str] = []
+
+    def __init__(self, src, mode="r", max_extract_size=None):
+        self.limit = max_extract_size
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def list(self):
+        from types import SimpleNamespace
+
+        return [SimpleNamespace(filename=name, uncompressed=size, is_directory=False) for name, size, _ in self.members]
+
+    def extract(self, path=None, targets=None):
+        total = 0
+        last = max((i for i, (name, _, _) in enumerate(self.members) if targets is None or name in targets), default=-1)
+        for name, size, content in self.members[: last + 1]:
+            total += min(len(content), size)
+            if self.limit is not None and total > self.limit:
+                raise RuntimeError(f"decompressed size {total} exceeds limit of {self.limit} bytes")
+            if targets is not None and name not in targets:
+                continue
+            out = os.path.join(path, name)
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+            with open(out, "wb") as fh:
+                fh.write(content[:size])
+            FakeSevenZip.extracted.append(name)
+
+    def extractall(self, path=None):
+        self.extract(path)
+
+
+@pytest.fixture
+def fake_py7zr(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    FakeSevenZip.members, FakeSevenZip.extracted = [], []
+    monkeypatch.setitem(sys.modules, "py7zr", SimpleNamespace(SevenZipFile=FakeSevenZip))
+    return FakeSevenZip
+
+
+def test_an_expanded_7z_still_being_read_is_not_swept_as_stale(tmp_path, fake_py7zr):
+    """The sweep removes staging directories by age, and a 7z is expanded once when its parse
+    starts. A parse that runs past the retention window takes its members from the expansion until
+    the end, so it must not look abandoned while it does."""
+    from django.test import override_settings
+
+    from api.views.upload import cleanup_stale
+
+    fake_py7zr.members = [
+        ("Processes/processes.csv", 18, b"Name,PID\nAgent,42\n"),
+        ("Services/services.csv", 29, b"Name,PathName\nSvc,C:\\svc.exe\n"),
+    ]
+    with override_settings(FILE_UPLOAD_TEMP_DIR=tmp_path, FORENSIC_UPLOAD_MAX_AGE_S=60):
+        source = PackageSource("ORC_WS01.7z", None, SEVEN_ZIP, str(tmp_path), ParseContext(analyze_attachments=False))
+        rows = iter(source)
+        next(rows)
+        expanded = source._extracted
+        old = time.time() - 3600
+        os.utime(expanded, (old, old))  # the parse has been running for an hour
+        next(rows)  # and takes its next member
+        assert cleanup_stale() == 0
+        assert os.path.isdir(expanded)
+        list(rows)
+    assert not os.path.exists(expanded), "the parse removes its expansion when it ends"
+
+
 def test_a_client_that_disconnects_mid_group_strands_nothing(tmp_path):
     """A streaming response that is abandoned closes the generator part-way. The group being
     decoded had been taken off the instance, so nothing could reclaim it, and the staging area is

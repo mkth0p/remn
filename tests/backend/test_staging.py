@@ -139,6 +139,70 @@ def test_a_full_staging_area_sweeps_before_refusing(tmp_path):
         assert not stale.exists()
 
 
+def _aged(path: Path, seconds: int = 3600) -> None:
+    old = time.time() - seconds
+    os.utime(path, (old, old))
+
+
+def _left_behind(tmp_path: Path) -> tuple[Path, Path]:
+    """What a parse killed mid-way leaves: a 7z expanded to be read, and event logs staged for an
+    engine run, both directories named the way the parsers name them. The contents are invented."""
+    expanded = tmp_path / "tmpa1b2c3d4.7z"
+    (expanded / "ORC" / "General").mkdir(parents=True)
+    (expanded / "ORC" / "General" / "GetThis.csv").write_bytes(b"x" * 4096)
+    staged = tmp_path / "tmpe5f6g7h8.evtx"
+    staged.mkdir()
+    (staged / "0000-Security.evtx").write_bytes(b"ElfFile\x00" + bytes(4088))
+    return expanded, staged
+
+
+def test_the_sweep_removes_the_directories_a_killed_parse_left_behind(tmp_path):
+    """An expanded 7z and the event logs staged for Hayabusa are directories, and the sweep only
+    ever looked at files: a parse killed in the middle of either left them on disk for good."""
+    with override_settings(FILE_UPLOAD_TEMP_DIR=tmp_path, FORENSIC_UPLOAD_MAX_AGE_S=60):
+        upload_dir()
+        expanded, staged = _left_behind(tmp_path)
+        in_use = tmp_path / "tmpi9j0k1l2.evtx"
+        in_use.mkdir()
+        for directory in (expanded, staged, upload_dir()):
+            _aged(directory)
+        # while they exist they count against the staging budget
+        assert staged_bytes() >= 2 * 4096
+
+        assert cleanup_stale() == 2
+        assert not expanded.exists() and not staged.exists()
+        assert in_use.exists(), "a directory a parse may still be using is left alone"
+        assert upload_dir().exists(), "the chunked staging area itself is not a parse's leftover"
+
+
+def test_a_restart_clears_what_a_stopped_process_staged_and_keeps_resumable_uploads(tmp_path):
+    from api.views.upload import clear_leftovers
+
+    with override_settings(FILE_UPLOAD_TEMP_DIR=tmp_path):
+        part = upload_dir() / ("a" * 32 + ".part")
+        part.write_bytes(b"half an upload a client can resume")
+        expanded, staged = _left_behind(tmp_path)
+        # Django's spool keeps the uploaded file's extension after ".upload"
+        spool = tmp_path / "tmpm3n4o5p6.upload.pst"
+        spool.write_bytes(b"part of a mailbox")
+
+        assert clear_leftovers() == 3
+        assert not expanded.exists() and not staged.exists() and not spool.exists()
+        assert part.exists(), "a chunked upload can be resumed after a restart"
+
+
+def test_the_sweep_finds_the_spool_of_an_upload_whose_name_has_an_extension(tmp_path):
+    """The spool file is named tmpXXXX.upload.<extension>, so matching on the last suffix only
+    found uploads that had no extension at all."""
+    with override_settings(FILE_UPLOAD_TEMP_DIR=tmp_path, FORENSIC_UPLOAD_MAX_AGE_S=60):
+        upload_dir()
+        spool = tmp_path / "tmpq7r8s9t0.upload.evtx"
+        spool.write_bytes(b"half an event log")
+        _aged(spool)
+        assert cleanup_stale() == 1
+        assert not spool.exists()
+
+
 def test_staged_evidence_is_private_to_the_server_account(tmp_path):
     with override_settings(FILE_UPLOAD_TEMP_DIR=tmp_path):
         upload_id = _init(Client()).json()["uploadId"]

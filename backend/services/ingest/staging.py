@@ -1,18 +1,24 @@
 """What the staging area may hold.
 
-FORENSIC_TMP_DIR holds evidence while it is parsed: chunked uploads, Django's multipart spool and
-the members a parse copies out of an archive. One figure bounds all of it, so the upload gate and
-the readers that copy members out agree on what fits.
+FORENSIC_TMP_DIR holds evidence while it is parsed: chunked uploads, Django's multipart spool, the
+members a parse copies out of an archive and the directories it expands an archive or stages
+event logs into. One figure bounds all of it, so the upload gate and the readers that copy members
+out agree on what fits.
 """
 
 from __future__ import annotations
 
+import os
 import shutil
+import stat
 from pathlib import Path
 
 from django.conf import settings
 
 GIB = 1024**3
+# The directories a parse creates in the staging area, named by tempfile.mkdtemp with these
+# suffixes: a 7z archive expanded to be read, and the event logs staged for one engine run.
+DIRECTORY_SUFFIXES = (".7z", ".evtx")
 # The largest archive member copied out for parsing, however much the staging area may hold.
 MEMBER_MAX = 4 * GIB
 # Without a configured total the staging area may use the free space of its disk, less a reserve
@@ -30,15 +36,36 @@ def root() -> Path:
 
 
 def staged_bytes() -> int:
-    """Everything the staging area currently holds, including Django's own multipart spool."""
+    """Everything the staging area currently holds, including Django's own multipart spool and the
+    directories a parse writes into. A file linked under two names (an event log staged for the
+    engine is a hard link to the member it was copied to) is counted once."""
+    seen: set[tuple[int, int]] = set()
     total = 0
+
+    def count(path: str) -> None:
+        nonlocal total
+        try:
+            st = os.lstat(path)
+        except OSError:
+            return
+        if not stat.S_ISREG(st.st_mode) or (st.st_dev, st.st_ino) in seen:
+            return
+        if st.st_ino:  # some filesystems give no inode number, and then every file is its own
+            seen.add((st.st_dev, st.st_ino))
+        total += st.st_size
+
     for directory in (root() / "uploads", root()):
         try:
-            for p in directory.iterdir():
-                if p.is_file():
-                    total += p.stat().st_size
+            entries = list(os.scandir(directory))
         except OSError:
             continue
+        for entry in entries:
+            if not entry.is_dir(follow_symlinks=False):
+                count(entry.path)
+            elif directory == root() and entry.name.endswith(DIRECTORY_SUFFIXES):
+                for dirpath, _dirs, files in os.walk(entry.path):
+                    for name in files:
+                        count(os.path.join(dirpath, name))
     return total
 
 

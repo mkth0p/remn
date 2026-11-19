@@ -278,6 +278,12 @@ class PackageSource:
             if not real.startswith(root + os.sep):
                 continue  # a member that escaped the extraction directory is not evidence
             name = os.path.relpath(real, root).replace(os.sep, "/")
+            # The staging sweep goes by age; touched as each member is taken, the expansion of a
+            # parse that runs for hours is not taken from under it.
+            try:
+                os.utime(root)
+            except OSError:
+                pass
             yield Member(name, os.path.getsize(real), lambda p=real: open(p, "rb")), None
 
     def _release_evtx(self) -> None:
