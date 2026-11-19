@@ -95,6 +95,52 @@ def test_amcache_shimcache_and_recmd_outputs_reach_image_and_registry_fields(tmp
     assert row["name"] == "Dropper" and row["image"] == '"C:\\Users\\Public\\svc.exe" -k'
 
 
+def test_zimmerman_output_is_read_by_its_header_wherever_it_sits(tmp_path):
+    mft = (
+        "EntryNumber,SequenceNumber,InUse,ParentEntryNumber,ParentSequenceNumber,ParentPath,FileName,Extension,FileSize,ReferenceCount,"
+        "ReparseTarget,IsDirectory,HasAds,IsAds,SI<FN,uSecZeros,Copied,SiFlags,NameType,Created0x10,Created0x30,LastModified0x10,"
+        "LastModified0x30,LastRecordChange0x10,LastRecordChange0x30,LastAccess0x10,LastAccess0x30,UpdateSequenceNumber,"
+        "LogfileSequenceNumber,SecurityId,ObjectIdFileDroid,LoggedUtilStream,ZoneIdContents\n"
+        "42,1,True,5,5,.\\Users\\jdoe\\Downloads,upd.exe,.exe,1024,1,,False,False,False,False,False,False,Archive,Windows,"
+        "2026-09-01 10:00:00.1234567,,2026-09-01 10:00:00.1234567,,2026-09-01 10:00:00.1234567,,2026-09-01 10:00:00.1234567,,0,0,256,,,\n"
+    )
+    srum = "Id,Timestamp,ExeInfo,ExeInfoDescription,ExeTimestamp,SidType,Sid,UserName,UserId,AppId,BytesReceived,BytesSent,InterfaceLuid,InterfaceType,L2ProfileFlags,L2ProfileId,ProfileName\n"
+    srum += "1,2026-09-02 08:00:00,\\device\\harddiskvolume3\\users\\jdoe\\downloads\\upd.exe,,,,S-1-5-21-1-2-3-1001,jdoe,7,9,1200,880000,1,IF_TYPE_ETHERNET_CSMACD,0,0,\n"
+    evtxecmd = json.dumps(
+        {
+            "RecordNumber": 7,
+            "EventRecordId": 7,
+            "TimeCreated": "2026-08-19T01:35:00.0000000+00:00",
+            "EventId": 4688,
+            "Provider": "Microsoft-Windows-Security-Auditing",
+            "Channel": "Security",
+            "Computer": "WS01",
+            "MapDescription": "A new process has been created",
+            "Payload": "{}",
+        }
+    )
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as z:
+        # MFTECmd run by hand, a KAPE module folder outside the listed ones, EvtxECmd's --json output
+        z.writestr("20260905_MFTECmd_$MFT_Output.csv", mft)
+        z.writestr("SRUMDatabase/20260905_SrumECmd_NetworkUsages_Output.csv", srum)
+        z.writestr("Output/20260905_EvtxECmd_Output.json", evtxecmd + "\n")
+        z.writestr("hayabusa.csv", "Timestamp,RuleTitle,Level,Computer,Channel,EventID,RecordID,Details\n")
+    source = PackageSource("kape-modules.zip", None, out.getvalue(), str(tmp_path), ParseContext(analyze_attachments=False))
+    rows = list(source)
+    files = {f["name"]: f for f in source.files}
+
+    # before: each was "unsupported: no parser for this member"
+    assert files["20260905_MFTECmd_$MFT_Output.csv"]["status"] == "parsed" and files["20260905_MFTECmd_$MFT_Output.csv"]["artifactType"] == "mft"
+    assert any(r["artifactType"] == "mft" and r["path"] == ".\\Users\\jdoe\\Downloads\\upd.exe" for r in rows)
+    assert files["SRUMDatabase/20260905_SrumECmd_NetworkUsages_Output.csv"]["status"] == "parsed"
+    assert any(r["artifactType"] == "sru" and r["image"].endswith("upd.exe") for r in rows)
+    assert files["Output/20260905_EvtxECmd_Output.json"]["status"] == "parsed"
+    assert any(r["artifactType"] == "event-export" and r["eventId"] == 4688 and r["recordId"] == 7 for r in rows)
+    # a header the parser does not know is still said to be unsupported, not read as something else
+    assert files["hayabusa.csv"]["status"] == "unsupported"
+
+
 # ---- Velociraptor offline collector -------------------------------------------------------
 def test_velociraptor_results_are_named_after_their_artifact():
     assert category("results/Windows.System.Services.json") == "service"

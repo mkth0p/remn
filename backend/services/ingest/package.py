@@ -623,9 +623,12 @@ class PackageSource:
                     entry["format"] = source.format
                     rows = (("event", r) for r in source)
                 elif (
-                    collection.supported(member.name)
+                    # The Zimmerman parsers' output is recognised by its header before its path, so
+                    # an MFTECmd CSV run by hand or a KAPE module folder outside the listed names
+                    # is read rather than reported as having no parser.
+                    (low.endswith((".log", ".txt", ".csv", ".json", ".jsonl")) and collection.sniff_category(member.name, head))
+                    or collection.supported(member.name)
                     or (self.context.get("artifactDefault") == "defender" and low.endswith((".txt", ".log", ".csv", ".json")))
-                    or (low.endswith((".log", ".txt", ".csv")) and collection.sniff_category(member.name, head))
                 ):
                     # No size pre-check: collection.records() enforces the parse budget while
                     # reading, so an oversized export yields the records before the ceiling and is
@@ -633,8 +636,14 @@ class PackageSource:
                     entry["format"] = collection.VERSION
                     source = None
                     sniffed = None if collection.category(member.name) else collection.sniff_category(member.name, head)
+                    if sniffed:
+                        entry["artifactType"] = sniffed
                     parse_name = (
-                        member.name if collection.category(member.name) else f"dhcp/{member.name}" if sniffed == "dhcp" else f"WdSupportLogs/{member.name}"
+                        f"dhcp/{member.name}"
+                        if sniffed == "dhcp"
+                        else member.name
+                        if collection.category(member.name) or sniffed
+                        else f"WdSupportLogs/{member.name}"
                     )
                     rows = (
                         ("event", row)

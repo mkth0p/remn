@@ -63,7 +63,10 @@ Exports written by other tools land in the same fields. The Zimmerman parsers ar
 by their headers wherever the file sits (EvtxECmd rows become events, PECmd prefetch,
 AmcacheParser and AppCompatCacheParser presence and execution evidence, RECmd registry values, LECmd,
 JLECmd and SBECmd files and folders, MFTECmd `$MFT` entries and `$J` changes, SrumECmd network
-usage), so KAPE module output needs no renaming.
+usage), as CSV or as the one object per line of their `--json` output, so KAPE module output and
+a parser run by hand need no renaming. Output of theirs whose header matches none of these (RBCmd,
+SQLECmd, SrumECmd's other tables) is read only under one of the directory names below, and
+reported as unsupported elsewhere.
 
 Disk artifacts keep every time they record, each as its own row that says which time it is, so
 they sit on the timeline beside the event logs (a host super-timeline):

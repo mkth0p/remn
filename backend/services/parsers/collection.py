@@ -142,12 +142,28 @@ DHCP_EVENTS = {
 }
 
 
+def _ez_header_kind(head: bytes) -> str | None:
+    """The artifact a Zimmerman parser's output holds, from its first line: the CSV header, or the
+    keys of the first object of its --json output."""
+    first = head.decode("utf-8-sig", "replace").lstrip().split("\n", 1)[0].strip()
+    if first.startswith("{"):
+        try:
+            record = json.loads(first)
+        except ValueError:
+            return None
+        names = list(record) if isinstance(record, dict) else []
+    else:
+        names = next(csv.reader([first]), [])
+    return _ez_kind(dict.fromkeys(key(n) for n in names)) if names else None
+
+
 def sniff_category(name: str, head: bytes) -> str | None:
-    """A category the file's first lines show when its name does not: a DHCP audit log renamed."""
+    """A category the file's first lines show when its name does not: a DHCP audit log renamed, or
+    the output of a Zimmerman parser in a directory KAPE's module list does not name, or none."""
     text = head[:4096].decode("utf-8", "replace")
     if "Microsoft DHCP Service Activity Log" in text or any(_DHCP_HEADER.match(line) for line in text.splitlines()[:80]):
         return "dhcp"
-    return None
+    return _ez_header_kind(head)
 
 
 def category(name: str) -> str | None:
