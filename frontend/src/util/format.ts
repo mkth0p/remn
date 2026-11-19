@@ -85,6 +85,19 @@ export function severityOfRisk(r: number | null | undefined): Severity {
   return v >= 85 ? 'critical' : v >= 65 ? 'high' : v >= 40 ? 'medium' : v >= 20 ? 'low' : 'info'
 }
 
+/**
+ * The stored form of an indicator. Only a URL's scheme and host are case-insensitive: its path and
+ * query name another resource when their case changes, so they keep it. Every other kind folds.
+ */
+export function iocValue(kind: string, value: string): string {
+  const v = value.trim().slice(0, 2048)
+  if (kind !== 'url') return v.toLowerCase()
+  const m = /^((?:[a-z][a-z0-9+.-]*:)?\/\/)?([^/?#]*)(.*)$/is.exec(v)!
+  // credentials before the host keep their case
+  const at = m[2].lastIndexOf('@')
+  return (m[1] ?? '').toLowerCase() + m[2].slice(0, at + 1) + m[2].slice(at + 1).toLowerCase() + m[3]
+}
+
 export function defang(s: string | null | undefined): string {
   if (!s) return ''
   return s

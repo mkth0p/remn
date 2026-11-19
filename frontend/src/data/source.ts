@@ -146,7 +146,8 @@ class BrowserSource implements DataSource {
     for (const r of rows) kinds[r.kind] = (kinds[r.kind] ?? 0) + 1
     const rank = (v: string | null | undefined) => ({ malicious: 3, suspicious: 2, clean: 1 })[v ?? ''] ?? 0
     rows = rows.filter(
-      (i) => (!opts.kind || i.kind === opts.kind) && (!opts.q || i.value.includes(opts.q.toLowerCase())) && (!opts.onlyBad || rank(i.verdict) >= 2) && (!opts.unchecked || !i.checkedAt),
+      // a URL keeps the case of its path, so the search ignores case on both sides
+      (i) => (!opts.kind || i.kind === opts.kind) && (!opts.q || i.value.toLowerCase().includes(opts.q.toLowerCase())) && (!opts.onlyBad || rank(i.verdict) >= 2) && (!opts.unchecked || !i.checkedAt),
     )
     rows.sort((a, b) => rank(b.verdict) - rank(a.verdict) || b.count - a.count)
     const total = rows.length

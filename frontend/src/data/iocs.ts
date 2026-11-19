@@ -1,6 +1,7 @@
 import { lookupReputation, type LookupResponse } from '../api/client'
 import { getDb, type Case, type Ioc } from '../db/schema'
 import { log, toast } from '../state/store'
+import { iocValue } from '../util/format'
 import { getSource } from './source'
 
 const CHECK_KINDS = new Set(['ip', 'domain', 'url', 'hash'])
@@ -66,7 +67,9 @@ export async function mirrorToMails(caseId: number): Promise<void> {
     const origin = m.originIp ? byKey.get(`ip:${m.originIp.toLowerCase()}`) : undefined
     consider(origin)
     for (const u of m.urls ?? []) {
-      consider(byKey.get(`url:${(u.normalized || u.url).toLowerCase()}`))
+      const url = u.normalized || u.url
+      // stored with the case of its path, or in lower case by a version that kept none
+      consider(byKey.get(`url:${iocValue('url', url)}`) ?? byKey.get(`url:${url.toLowerCase()}`))
       if (u.domain) consider(byKey.get(`domain:${u.domain.toLowerCase()}`))
     }
     for (const a of m.attachments ?? []) if (a.sha256) consider(byKey.get(`hash:${a.sha256.toLowerCase()}`))

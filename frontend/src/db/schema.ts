@@ -349,6 +349,13 @@ export interface Finding {
   notesBy?: 'analyst' | 'ai'
 }
 
+/** kv iocs-capped-<caseId>: the imports that stopped collecting indicators at the limit, or the recount after a removal that did. */
+export interface IocsCapped {
+  limit: number
+  files: string[]
+  rebuilt?: boolean
+}
+
 export interface Ioc {
   id?: number
   caseId: number
@@ -631,8 +638,9 @@ export const CASE_KV_KEYS = (caseId: number) =>
     'story-decisions',
     // the rule choices in force when the case was exported (packs, disabled rules), for the record
     'rule-context',
-    // facet fields whose distinct values passed what one ingest counts
+    // facet fields whose distinct values passed what one ingest counts, and the imports that stopped collecting indicators
     'facets-capped',
+    'iocs-capped',
     // the analyst's waivers and the time the report was issued as final
     'report-final',
     // the investigative scenarios chosen for the case (data/questions/answers.ts); the answers are rows of questionAnswers

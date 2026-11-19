@@ -275,6 +275,12 @@ value as a cyber-observable and makes an indicator only of the values a reputati
 flagged, with identifiers derived from the content (an export imported twice is the same
 objects), an identity for the case and a TLP:AMBER marking. On a browser-only server the
 page offers no lookups, which the server refuses; it says so and offers the exports.
+Values are listed without regard to case, except the path and query of a URL, which keep
+theirs (another case there can be another resource); the search ignores case. In a
+browser-store case one import collects up to 50,000 distinct indicators; when a file
+reaches that, the page names it and says that indicators first seen later in it are not
+listed, and the console says so at the import. The recount after evidence is removed meets
+the same limit over the whole case, and the page says so when it does.
 
 ## AI analyst
 
