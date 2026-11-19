@@ -236,12 +236,16 @@ id: win-lsass-memory-access
 title: A program outside Windows read LSASS memory (Sysmon 10)
 description: >-
   Sysmon 10: a program outside the Windows and Program Files folders, or a script host or LOLBin inside them,
-  opened lsass.exe with the right to read its memory (PROCESS_VM_READ, or full access), which is how mimikatz,
-  procdump, nanodump and their kin read the credentials it holds (T1003.001). Opening it only to query it
-  (0x1000, 0x1400) cannot read credentials and is left out, as are Defender, the Windows system folders
-  (System32, SysWOW64) and THOR or Aurora duplicating a handle (0x40). One finding per program per machine.
-  Benign causes: an antivirus or security product's installer or updater run from a temporary folder, which
-  opens LSASS the way a dumper does: check the program's signature and origin. A program whose own executable
+  opened lsass.exe with the right to read its memory (PROCESS_VM_READ in the access mask, which full access
+  includes), which is how mimikatz, procdump, nanodump and their kin read the credentials it holds (T1003.001).
+  Opening it only to query it (0x1000, 0x1400) cannot read credentials and is left out, as are the Windows
+  system folders (System32, SysWOW64), Program Files, Defender's platform folder, Sysmon in the Windows folder and
+  THOR or Aurora duplicating a handle (0x40). Each folder is read from the start of the path and no program is
+  left out for its name, so a dumper named procexp64.exe or MsMpEng.exe, or put in a folder called Program Files
+  under a profile, is reported. One finding per program per machine. Benign causes: an antivirus or security
+  product's installer or updater run from a temporary folder, which opens LSASS the way a dumper does, and
+  Process Explorer run from a download folder, which opens every process with full access while it runs (and can
+  write a dump of LSASS): check the program's signature and origin. A program whose own executable
   Sysmon saw validly signed by a vendor other than Microsoft (sourceSigner), and which loaded no unsigned DLL
   before, is the medium rule win-lsass-memory-access-signed: security products' installers and updaters are
   signed, and so are the dump tools some vendors ship (Avast's AvDump), which is why it stays a finding.
@@ -250,14 +254,25 @@ severity: high
 source: events
 attack: [T1003.001]
 tags: [credential-access]
+falsepositives:
+  - an antivirus or security product's installer or updater run from a temporary folder
+  - Process Explorer run from outside Program Files
+references:
+  - https://learn.microsoft.com/en-us/windows/win32/procthread/process-security-and-access-rights
+  - https://learn.microsoft.com/en-us/sysinternals/downloads/sysmon
 entities: [computer, sourceImage, grantedAccess, sourceSigner]
 where:
   eventId: 10
   provider|contains: Sysmon
   targetImage|endswith: lsass.exe
-  grantedAccess|in: ["0x1010", "0x1410", "0x1438", "0x143a", "0x1fffff", "0x1f0fff", "0x1f1fff", "0x1f2fff", "0x1f3fff", "0x40"]
-  sourceImage|not_contains: ["\\program files\\", "\\program files (x86)\\", "msmpeng", "csrss", "wininit", "wmiprvse", "taskmgr", "procexp", "vmtoolsd", "sysmon"]
-  not: { sourceImage|contains: ["\\windows\\system32\\", "\\windows\\syswow64\\"], sourceImage|not_endswith: ["\\powershell.exe", "\\pwsh.exe", "\\rundll32.exe", "\\regsvr32.exe", "\\mshta.exe", "\\wscript.exe", "\\cscript.exe", "\\cmd.exe", "\\msbuild.exe"] }
+  # PROCESS_VM_READ (0x10) is in the mask when its second hex digit from the right is odd; 0x40 duplicates a handle
+  any_of_2:
+    - grantedAccess|re: "^0x[0-9a-f]*[13579bdf][0-9a-f]$"
+    - grantedAccess: "0x40"
+  # folders only the system or an administrator can write, read from the drive: a folder of the same name
+  # further down a path, or a program merely named like a system tool, is not one of them
+  sourceImage|not_re: '^[a-z]:\\(program files( \(x86\))?\\|programdata\\microsoft\\windows defender\\platform\\|windows\\sysmon(64)?\.exe$)'
+  not: { sourceImage|re: '^[a-z]:\\windows\\(system32|syswow64)\\', sourceImage|not_endswith: ["\\powershell.exe", "\\pwsh.exe", "\\rundll32.exe", "\\regsvr32.exe", "\\mshta.exe", "\\wscript.exe", "\\cscript.exe", "\\cmd.exe", "\\msbuild.exe"] }
   # a vendor's valid signature on the program (and no unsigned DLL in it) is the medium rule
   any_of:
     - sourceSigner|exists: false
@@ -272,22 +287,32 @@ id: win-lsass-memory-access-signed
 title: A program signed by a vendor other than Microsoft read LSASS memory (Sysmon 10)
 description: >-
   Sysmon 10: a program outside the Windows and Program Files folders opened lsass.exe with the right to read its
-  memory, and Sysmon saw its own executable validly signed by a vendor other than Microsoft, with no unsigned DLL
-  loaded before. Security products' installers and updaters do this (Avira, Avast, AVG and Malwarebytes on the
-  clean machines), and so do the dump tools some vendors ship and attackers borrow (Avast's AvDump): check which
-  program it is. One finding per program per machine.
+  memory (PROCESS_VM_READ in the access mask), and Sysmon saw its own executable validly signed by a vendor other
+  than Microsoft, with no unsigned DLL loaded before. Security products' installers and updaters do this (Avira,
+  Avast, AVG and Malwarebytes on the clean machines), and so do the dump tools some vendors ship and attackers
+  borrow (Avast's AvDump): check which program it is. The folders are read as in win-lsass-memory-access, from the
+  start of the path. One finding per program per machine.
 severity: medium
 source: events
 attack: [T1003.001]
 tags: [credential-access]
+falsepositives:
+  - security products' installers and updaters (Avira, Avast, AVG, Malwarebytes, Dropbox's updater on the clean machines)
+references:
+  - https://learn.microsoft.com/en-us/windows/win32/procthread/process-security-and-access-rights
 entities: [computer, sourceImage, grantedAccess, sourceSigner]
 where:
   eventId: 10
   provider|contains: Sysmon
   targetImage|endswith: lsass.exe
-  grantedAccess|in: ["0x1010", "0x1410", "0x1438", "0x143a", "0x1fffff", "0x1f0fff", "0x1f1fff", "0x1f2fff", "0x1f3fff", "0x40"]
-  sourceImage|not_contains: ["\\program files\\", "\\program files (x86)\\", "msmpeng", "csrss", "wininit", "wmiprvse", "taskmgr", "procexp", "vmtoolsd", "sysmon"]
-  not: { sourceImage|contains: ["\\windows\\system32\\", "\\windows\\syswow64\\"], sourceImage|not_endswith: ["\\powershell.exe", "\\pwsh.exe", "\\rundll32.exe", "\\regsvr32.exe", "\\mshta.exe", "\\wscript.exe", "\\cscript.exe", "\\cmd.exe", "\\msbuild.exe"] }
+  # PROCESS_VM_READ (0x10) is in the mask when its second hex digit from the right is odd; 0x40 duplicates a handle
+  any_of_2:
+    - grantedAccess|re: "^0x[0-9a-f]*[13579bdf][0-9a-f]$"
+    - grantedAccess: "0x40"
+  # folders only the system or an administrator can write, read from the drive: a folder of the same name
+  # further down a path, or a program merely named like a system tool, is not one of them
+  sourceImage|not_re: '^[a-z]:\\(program files( \(x86\))?\\|programdata\\microsoft\\windows defender\\platform\\|windows\\sysmon(64)?\.exe$)'
+  not: { sourceImage|re: '^[a-z]:\\windows\\(system32|syswow64)\\', sourceImage|not_endswith: ["\\powershell.exe", "\\pwsh.exe", "\\rundll32.exe", "\\regsvr32.exe", "\\mshta.exe", "\\wscript.exe", "\\cscript.exe", "\\cmd.exe", "\\msbuild.exe"] }
   sourceSigner|exists: true
   sourceSigner|not_startswith: "Microsoft "
 exclude:

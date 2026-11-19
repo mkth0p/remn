@@ -239,3 +239,42 @@ def test_a_service_whose_program_is_in_a_folder_users_can_write_is_reported(stor
     ]
     found = fired(store, "win-service-installed-suspicious", rows)
     assert sorted(f["entities"]["serviceName"] for f in found) == ["Cleaner", "Helper", "Updater"]
+
+
+def lsass_opened(source: str, access: str) -> dict:
+    return event(
+        10,
+        {"SourceImage": source, "TargetImage": r"C:\Windows\system32\lsass.exe", "GrantedAccess": access, "SourceProcessId": "4242"},
+        SYSMON,
+        computer="WS01",
+    )
+
+
+def test_a_program_named_like_a_system_tool_or_in_a_folder_named_like_one_is_reported_for_reading_lsass(store):
+    rows = [
+        lsass_opened(r"C:\Users\Public\procexp64.exe", "0x1010"),
+        lsass_opened(r"C:\Users\j.doe\Program Files\MsMpEng.exe", "0x1010"),
+        lsass_opened(r"C:\Users\j.doe\Windows\System32\taskmgr.exe", "0x1010"),
+        # the real ones, in folders only the system or an administrator can write
+        lsass_opened(r"C:\Windows\Sysmon64.exe", "0x1fffff"),
+        lsass_opened(r"C:\ProgramData\Microsoft\Windows Defender\Platform\4.18.2201.10-0\MsMpEng.exe", "0x1010"),
+        lsass_opened(r"C:\Windows\system32\taskmgr.exe", "0x1fffff"),
+    ]
+    found = fired(store, "win-lsass-memory-access", rows)
+    assert sorted(f["entities"]["sourceImage"] for f in found) == [
+        r"C:\Users\Public\procexp64.exe",
+        r"C:\Users\j.doe\Program Files\MsMpEng.exe",
+        r"C:\Users\j.doe\Windows\System32\taskmgr.exe",
+    ]
+
+
+def test_lsass_opened_with_the_right_to_read_its_memory_is_reported_whatever_else_the_mask_holds(store):
+    rows = [
+        lsass_opened(r"C:\Users\Public\a.exe", "0x1418"),
+        lsass_opened(r"C:\Users\Public\b.exe", "0x101ffb"),
+        # query rights only, no memory read
+        lsass_opened(r"C:\Users\Public\c.exe", "0x1400"),
+        lsass_opened(r"C:\Users\Public\d.exe", "0x101000"),
+    ]
+    found = fired(store, "win-lsass-memory-access", rows)
+    assert sorted(f["entities"]["sourceImage"] for f in found) == [r"C:\Users\Public\a.exe", r"C:\Users\Public\b.exe"]
