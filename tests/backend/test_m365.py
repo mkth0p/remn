@@ -658,3 +658,77 @@ def test_a_csv_row_that_cannot_be_read_is_counted_and_the_rest_are_read():
     finally:
         csv.field_size_limit(limit)
     assert stats.errors == 1 and [r["recordKey"] for r in rows] == [m365.record_key("ual", recs[i]["Id"]) for i in (0, 1, 3, 4)]
+
+
+class _CountingText(io.StringIO):
+    """A text stream that counts the characters handed out, to show how much was read."""
+
+    handed = 0
+
+    def read(self, size=-1):
+        out = super().read(size)
+        self.handed += len(out)
+        return out
+
+    def readline(self, size=-1):
+        out = super().readline(size)
+        self.handed += len(out)
+        return out
+
+
+def test_a_json_array_export_is_read_one_record_at_a_time():
+    """A sign-in or audit export written as a JSON array was loaded whole, about ten times its size
+    in the web process. The first record comes out before more than a piece of the file is read."""
+    signins = [{**s, "id": str(uuid.uuid4())} for s in make_m365.entra_signins() * 200]
+    text = json.dumps(signins, indent=2)
+    assert len(text) > 4 * 1024 * 1024
+    fh = _CountingText(text)
+    records = m365._iter_json_objects(fh)
+    assert next(records)["id"] == signins[0]["id"] and fh.handed < len(text) / 3
+    assert [r["id"] for r in records] == [s["id"] for s in signins[1:]]
+
+
+def test_graph_pages_and_documents_one_after_another_are_read():
+    a, b, c = (dict(s, id=str(uuid.uuid4())) for s in make_m365.entra_signins()[:3])
+    page = json.dumps(
+        {
+            "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#auditLogs/signIns",
+            "value": [a, b],
+            "@odata.nextLink": "https://graph.microsoft.com/next",
+        },
+        indent=2,
+    )
+    assert [r["id"] for r in m365._iter_json_objects(io.StringIO(page))] == [a["id"], b["id"]]
+    # an export written page by page, each page appended to the same file
+    appended = json.dumps([a, b], indent=2) + "\n" + json.dumps([c], indent=2) + "\n"
+    assert [r["id"] for r in m365._iter_json_objects(io.StringIO(appended))] == [a["id"], b["id"], c["id"]]
+    single = json.dumps(a, indent=2)
+    assert [r["id"] for r in m365._iter_json_objects(io.StringIO(single))] == [a["id"]]
+
+
+def test_a_json_export_broken_part_way_keeps_what_came_before_and_says_where(tmp_path):
+    signins = make_m365.entra_signins()[:4]
+    text = json.dumps(signins, indent=1)
+    cut = text.index(signins[2]["id"])
+    f = tmp_path / "signins.json"
+    f.write_text(text[:cut] + "\x00" + text[cut:], encoding="utf-8")
+    rows, src = _rows(str(f))
+    assert len(rows) == 2 and src.stats.errors == 1
+    assert src.files[0]["status"] == "error" and src.files[0]["error"].startswith("invalid JSON after record 2:")
+
+
+def test_a_record_longer_than_the_limit_is_counted_not_held(monkeypatch):
+    from services.parsers.evtx_parser import Stats
+
+    monkeypatch.setattr(m365, "MAX_RECORD_CHARS", 4096)
+    monkeypatch.setattr(m365, "_CHUNK", 1024)
+    small = make_m365.entra_signins()[:2]
+    big = {**make_m365.entra_signins()[2], "userAgent": "x" * 10_000}
+    # one record per line: the long line is counted, the lines after it read
+    stats = Stats()
+    lines = "\n".join(json.dumps(r) for r in (small[0], big, small[1])) + "\n"
+    rows = list(m365.iter_records(None, lines.encode(), "entra-signin-json", stats=stats))
+    assert [r["data"]["id"] for r in rows] == [small[0]["id"], small[1]["id"]] and stats.errors == 1
+    # inside an array there is no line to resume at: the file stops there and says why
+    with pytest.raises(ValueError, match="longer than"):
+        list(m365.iter_records(None, json.dumps([small[0], big, small[1]]).encode(), "entra-signin-json"))

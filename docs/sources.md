@@ -130,7 +130,12 @@ Rows carry `provider`, `channel` (the workload), `category` (`M365 Exchange`,
 A record that cannot be read is counted in the evidence's parse errors, and the records after
 it are still read. A CSV field may hold up to 16 MiB, so an AuditData column longer than the
 131,072 characters Python's CSV reader stops at by default no longer ends the file; a row
-the reader cannot take (a longer field, a stray quote) is one such error.
+the reader cannot take (a longer field, a stray quote) is one such error. JSON exports are
+read one record at a time whatever their size, so a large array no longer has to fit in the
+server's memory: an array, a Graph page (`{"value": [...]}`), several of them one after the
+other, or one object per line. A record longer than 16 MiB on a line of its own is one
+error; inside an array it stops the file there, the records before it kept and the file
+marked failed with the record number. So does JSON that is broken part-way.
 
 A record is in the case once. Search-UnifiedAuditLog's large-set pages repeat records,
 and exports cut into time slices overlap, so a UAL record whose `AuditData.Id` was already

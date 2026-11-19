@@ -824,42 +824,144 @@ def _open_text(path: str | None, data: bytes | None) -> io.TextIOBase:
     return io.TextIOWrapper(io.BytesIO(data or b""), encoding="utf-8-sig", errors="replace", newline="")
 
 
+# The longest record a JSON export may hold (a sign-in is a few kilobytes, an audit record rarely
+# more than a few hundred). JSON arrays used to be loaded whole, about ten times their size in the
+# web process, so one large Graph export could take the server down; they are read one record at
+# a time, and only a record past this length stops the file.
+MAX_RECORD_CHARS = MAX_FIELD_CHARS
+_CHUNK = 1024 * 1024
+_DECODER = json.JSONDecoder()
+_SPACE = re.compile(r"[ \t\r\n]*")
+
+
+class _JsonStream:
+    """The records of a JSON text read a piece at a time: the objects of an array, of a Graph
+    page's "value" array, a lone object, or several such documents one after the other."""
+
+    def __init__(self, fh: io.TextIOBase) -> None:
+        self.fh, self.buf, self.pos, self.eof, self.count = fh, "", 0, False, 0
+
+    def _more(self) -> bool:
+        if self.eof:
+            return False
+        self.buf, self.pos = self.buf[self.pos :], 0
+        if len(self.buf) > MAX_RECORD_CHARS:
+            raise ValueError(f"a JSON record after record {self.count:,} is longer than {MAX_RECORD_CHARS:,} characters; the file was read up to it")
+        # the read doubles with what one value already holds, so a long record is decoded a few
+        # times rather than once per megabyte
+        chunk = self.fh.read(max(_CHUNK, len(self.buf)))
+        self.eof = not chunk
+        self.buf += chunk
+        return bool(chunk)
+
+    def _peek(self) -> str:
+        """The next character that is not white space, "" at the end."""
+        while True:
+            self.pos = _SPACE.match(self.buf, self.pos).end()  # type: ignore[union-attr]
+            if self.pos < len(self.buf):
+                return self.buf[self.pos]
+            if not self._more():
+                return ""
+
+    def _fail(self, what: str) -> ValueError:
+        return ValueError(f"invalid JSON after record {self.count:,}: {what}")
+
+    def _take(self, char: str) -> None:
+        if self._peek() != char:
+            raise self._fail(f"expected {char!r}")
+        self.pos += 1
+
+    def _value(self) -> Any:
+        self._peek()
+        while True:
+            try:
+                value, end = _DECODER.raw_decode(self.buf, self.pos)
+            except json.JSONDecodeError as exc:
+                if self._more():
+                    continue  # the value goes on in the next piece
+                raise self._fail(exc.msg) from None
+            if end == len(self.buf) and isinstance(value, (int, float)) and self._more():
+                continue  # a number at the end of a piece may go on in the next one
+            self.pos = end
+            return value
+
+    def _items(self) -> Iterator[Any]:
+        """The objects of the array whose "[" was just passed."""
+        if self._peek() == "]":
+            self.pos += 1
+            return
+        while True:
+            value = self._value()
+            self.count += 1
+            if isinstance(value, dict):
+                yield value
+            if self._peek() == ",":
+                self.pos += 1
+                continue
+            self._take("]")
+            return
+
+    def records(self) -> Iterator[Any]:
+        while (c := self._peek()) != "":
+            if c == "[":
+                self.pos += 1
+                yield from self._items()
+            elif c == "{":
+                # a Graph page {"value": [...]} gives its records as the array is read; any other
+                # object is a record of its own
+                self.pos += 1
+                obj: dict[str, Any] = {}
+                paged = False
+                while self._peek() != "}":
+                    key = self._value()
+                    if not isinstance(key, str):
+                        raise self._fail("expected a name")
+                    self._take(":")
+                    if key == "value" and self._peek() == "[":
+                        self.pos += 1
+                        paged = True
+                        yield from self._items()
+                    else:
+                        obj[key] = self._value()
+                    if self._peek() != ",":
+                        break
+                    self.pos += 1
+                self._take("}")
+                if not paged:
+                    self.count += 1
+                    yield obj
+            else:
+                raise self._fail("expected an array or an object")
+
+
 def _iter_json_objects(fh: io.TextIOBase, stats: Any = None) -> Iterator[Any]:
     """A JSON array, a single object (a Graph page {"value": [...]} included, however it is
-    indented), or NDJSON. A line of NDJSON that does not parse is counted as an error, never
-    dropped without a trace: a pretty-printed Graph page read line by line used to give 0 rows
-    and 0 errors, which reads as "no sign-ins"."""
-    head = fh.read(1)
-    fh.seek(0)
-    if head == "[":
-        try:
-            arr = json.load(fh)
-        except ValueError as exc:
-            raise ValueError(f"invalid JSON array: {str(exc)[:120]}") from None
-        yield from (x for x in arr if isinstance(x, dict))
-        return
+    indented), several of them one after the other, or NDJSON, read one record at a time. A line
+    of NDJSON that does not parse is counted as an error, never dropped without a trace: a
+    pretty-printed Graph page read line by line used to give 0 rows and 0 errors, which reads as
+    "no sign-ins"."""
     first = ""
     while not first:
-        line = fh.readline()
+        line = fh.readline(MAX_RECORD_CHARS)
         if not line:
             break
         first = line.strip().rstrip(",")
     fh.seek(0)
     try:
-        whole = not isinstance(json.loads(first), dict)
+        lines = first.startswith("{") and isinstance(json.loads(first), dict)
     except ValueError:
-        whole = True  # the first line is not an object on its own: one indented document
-    if whole:
-        try:
-            doc = json.load(fh)
-        except ValueError as exc:
-            raise ValueError(f"invalid JSON document: {str(exc)[:120]}") from None
-        if isinstance(doc, dict) and isinstance(doc.get("value"), list):
-            yield from (x for x in doc["value"] if isinstance(x, dict))
-        elif isinstance(doc, dict):
-            yield doc
+        lines = False  # the first line is not an object on its own: an indented document
+    if not lines:
+        yield from _JsonStream(fh).records()
         return
-    for line in fh:
+    while line := fh.readline(MAX_RECORD_CHARS + 1):
+        if len(line) > MAX_RECORD_CHARS:
+            # longer than any record: counted, and passed over to the end of its line
+            while line and not line.endswith("\n"):
+                line = fh.readline(_CHUNK)
+            if stats is not None:
+                stats.errors += 1
+            continue
         line = line.strip().rstrip(",")
         if not line or line in ("[", "]"):
             continue
