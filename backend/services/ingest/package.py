@@ -122,6 +122,9 @@ class PackageSource:
         # keys of the cloud audit and sign-in records read so far, across every member
         self.seen_records: set[int] = set()
         self.evtx_held: dict[str, tuple[dict[str, Any], str]] = {}
+        # event logs that came after the hold was full: parsed, but never seen by the engines
+        self.not_scanned = 0
+        self.not_scanned_bytes = 0
         self.findings: list[dict[str, Any]] = []
         self.engine_summaries: list[dict[str, Any]] = []
 
@@ -285,12 +288,27 @@ class PackageSource:
 
     def _drain_engines(self) -> None:
         """Run the external engines over the event logs held back for them, once, together."""
-        if not self.engines or not self.evtx_held:
+        if not self.engines or not (self.evtx_held or self.not_scanned):
             self._release_evtx()
+            return
+        # the logs past the hold are counted on the summary, so a run that looks clean is not
+        # mistaken for one that read every log in the package
+        skipped = {}
+        if self.not_scanned:
+            skipped = {
+                "notScanned": self.not_scanned,
+                "reason": (
+                    f"{self.not_scanned:,} event log(s), {self.not_scanned_bytes / 1024**2:,.1f} MiB, came after the "
+                    f"{MAX_DEFERRED_BYTES // 1024**2} MiB of logs held for the engine and were not scanned; their rows are in the case"
+                ),
+            }
+        if not self.evtx_held:
+            self.engine_summaries.append({"engine": hayabusa.ENGINE, "status": "unsupported", "findings": 0, "seconds": 0.0, **skipped})
             return
         remaining = MAX_NATIVE_SECONDS - self.budget["decodeSeconds"]
         if remaining <= 0:
-            self.engine_summaries.append({"engine": hayabusa.ENGINE, "status": "unsupported", "findings": 0, "seconds": 0.0, "reason": BUDGET_SPENT})
+            reason = "; ".join(x for x in (BUDGET_SPENT, skipped.get("reason")) if x)
+            self.engine_summaries.append({"engine": hayabusa.ENGINE, "status": "unsupported", "findings": 0, "seconds": 0.0, **skipped, "reason": reason})
             self._release_evtx()
             return
         staged = None
@@ -302,6 +320,12 @@ class PackageSource:
                 finding["packageId"] = self.package_id
             self.findings.extend(findings)
             summary["members"] = len(self.evtx_held)
+            if skipped:
+                summary["notScanned"] = skipped["notScanned"]
+                summary["reason"] = "; ".join(x for x in (summary.get("reason"), skipped["reason"]) if x)
+                # a run over part of the logs is reported like one stopped at a limit
+                if summary.get("status") == "parsed":
+                    summary["status"] = "error"
             self.engine_summaries.append(summary)
         finally:
             self.budget["decodeSeconds"] += time.monotonic() - started
@@ -676,12 +700,16 @@ class PackageSource:
                     and isinstance(source, EvtxSource)
                     and source.format == "evtx"
                     and tmp_path
-                    and self.budget["deferredBytes"] + size <= MAX_DEFERRED_BYTES
                 ):
-                    # kept for the engines that run once the loop is done; released by _drain_engines
-                    self.evtx_held[tmp_path] = (entry, member.name)
-                    self.budget["deferredBytes"] += size
-                    tmp_path = None
+                    if self.budget["deferredBytes"] + size <= MAX_DEFERRED_BYTES:
+                        # kept for the engines that run once the loop is done; released by _drain_engines
+                        self.evtx_held[tmp_path] = (entry, member.name)
+                        self.budget["deferredBytes"] += size
+                        tmp_path = None
+                    else:
+                        notes["engineSkipped"] = True
+                        self.not_scanned += 1
+                        self.not_scanned_bytes += size
                 if isinstance(source, EvtxSource) and source.stats.duplicates:
                     # a repeat is not a compromise in reading the member, so it is no note
                     entry["duplicates"] = source.stats.duplicates
@@ -739,6 +767,11 @@ class PackageSource:
                         said.append(
                             f"{notes['undatedRows']:,} row(s) carry a date that reads as day-first and as month-first, and no date in the "
                             "file settles which; that date has no time on the timeline and is kept as written in data"
+                        )
+                    if notes.get("engineSkipped"):
+                        said.append(
+                            f"not scanned by {', '.join(self.engines)}: the {MAX_DEFERRED_BYTES // 1024**2} MiB of logs held for it was "
+                            "full when this log was read; its rows are in the case"
                         )
                     if said:
                         entry["note"] = "; ".join(said)

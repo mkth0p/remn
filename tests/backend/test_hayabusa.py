@@ -171,6 +171,54 @@ def test_a_package_hands_its_event_logs_to_the_engine_once(engine, tmp_path):
     assert not list(staging.iterdir()), "nothing staged is left behind"
 
 
+def test_an_event_log_past_the_hold_allowance_is_said_to_be_unscanned(engine, tmp_path, monkeypatch):
+    """The engine reads the logs held back for it, and the hold has a ceiling. A log past it was
+    parsed but never scanned, and neither the member nor the engine's summary said so."""
+    from services.ingest import package as P
+    from services.ingest.package import PackageSource
+    from services.parsers.mail.common import ParseContext
+
+    log = evtx_bytes()
+    monkeypatch.setattr(P, "MAX_DEFERRED_BYTES", len(log) + 1024)
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as z:
+        z.writestr("Logs/Security.evtx", log)
+        z.writestr("Logs/System.evtx", log)
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    package = PackageSource("pkg.zip", None, out.getvalue(), str(staging), ParseContext(analyze_attachments=False))
+    package.engines = ["hayabusa"]
+    rows = list(package)
+
+    assert sum(1 for r in rows if r["type"] == "event") == 2, "both logs are still in the case"
+    summary = package.engine_summaries[0]
+    assert summary["members"] == 1 and summary["notScanned"] == 1
+    assert summary["status"] != "parsed" and "1 event log(s)" in summary["reason"] and "not scanned" in summary["reason"]
+    files = {f["name"]: f for f in package.files}
+    assert files["Logs/Security.evtx"]["status"] == "parsed" and "note" not in files["Logs/Security.evtx"]
+    assert files["Logs/System.evtx"]["status"] == "parsed" and "not scanned by hayabusa" in files["Logs/System.evtx"]["note"]
+    assert not list(staging.iterdir()), "nothing staged is left behind"
+
+
+def test_when_no_event_log_fits_the_hold_the_engine_summary_still_says_so(engine, tmp_path, monkeypatch):
+    from services.ingest import package as P
+    from services.ingest.package import PackageSource
+    from services.parsers.mail.common import ParseContext
+
+    monkeypatch.setattr(P, "MAX_DEFERRED_BYTES", 1024)
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as z:
+        z.writestr("Logs/Security.evtx", evtx_bytes())
+    package = PackageSource("pkg.zip", None, out.getvalue(), str(tmp_path), ParseContext(analyze_attachments=False))
+    package.engines = ["hayabusa"]
+    list(package)
+
+    assert not package.findings
+    [summary] = package.engine_summaries
+    assert summary["engine"] == "hayabusa" and summary["status"] == "unsupported" and summary["notScanned"] == 1
+    assert "not scanned" in summary["reason"]
+
+
 def test_refs_resolve_against_a_server_store(tmp_path):
     import uuid
 

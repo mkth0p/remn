@@ -331,7 +331,8 @@ costs only itself, and only artifacts the single-artifact path would accept are 
 back. A package may decode 5,000 native artifacts or spend 300 seconds decoding,
 whichever comes first, counting cabinets and counting decodes that fail; past that,
 members are inventoried and hashed with the reason recorded. Held-back artifacts
-occupy at most 256 MiB of staging per request rather than per archive. Text exports keep their first 100,000 lines and are marked
+occupy at most 256 MiB of staging per request rather than per archive; an event log read
+after that is parsed but not scanned by Hayabusa, and its member and the engine summary say so. Text exports keep their first 100,000 lines and are marked
 truncated rather than discarded; registry traversal caps at 100,000 keys and depth
 128. No evidence command or executable is run. Native decoder dependencies
 include AGPL-licensed Dissect and LGPL-licensed cabarchive; see `THIRD_PARTY_NOTICES.md`.
