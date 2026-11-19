@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from services.analysis.identity import MEDIUM, STRONG
-from services.analysis.stories import build_stories, finding_phase, record_phase
+from services.analysis.stories import build_stories, finding_phase, record_phase, story_confidence
 
 SEC = {"provider": "Microsoft-Windows-Security-Auditing", "channel": "Security"}
 SCM = {"provider": "Service Control Manager", "channel": "System"}
@@ -94,7 +94,9 @@ def test_an_intrusion_reads_as_one_story_in_phases_with_every_step_tied():
     # the service names no one; the admin share a minute before is its tie to the story, by time only
     service = by_ref["event:24"]
     assert service["phase"] == "persistence" and service["hops"] and service["tie"]["confidence"] == MEDIUM
-    assert story["confidence"] == MEDIUM
+    # most of its flags name NORTHSTAR\\daniel.roy, joined to his address by the organisation's naming rule only
+    assert story["confidence"] == "low"
+    assert story["confidenceBasis"] == "a record states the tie of 3 of its 8 flagged steps; 5 rest on naming rules, time and place, or an address"
     # five mailbox reads are one step
     assert by_ref["event:30"]["count"] == 5 and by_ref["event:30"]["phase"] == "collection"
     assert "event:41" not in by_ref
@@ -511,7 +513,7 @@ def test_a_machine_account_or_a_service_is_never_a_storys_subject():
     assert not res["identities"]
 
 
-def test_a_flag_lineage_ties_by_time_only_is_medium_and_so_is_its_story():
+def test_a_flag_lineage_ties_by_time_only_is_medium_and_its_story_low():
     host = "WS-001.northstar.example"
     events = [
         ev(1, 0, eventId=4624, computer=host, targetUser="dave", targetDomain="NORTHSTAR", targetLogonId="0x3001", logonType=3, ipAddress="10.0.0.31", workstation="WS-031"),
@@ -524,7 +526,25 @@ def test_a_flag_lineage_ties_by_time_only_is_medium_and_so_is_its_story():
     assert by_ref["event:2"]["tie"] == {"kind": "flag", "basis": "it is part of their way into ws-001 (wmi)", "confidence": MEDIUM}
     # the logon it is tied to by time comes with it no surer
     assert by_ref["event:1"]["tie"]["kind"] == "hop" and by_ref["event:1"]["tie"]["confidence"] == MEDIUM
-    assert story["confidence"] == MEDIUM
+    assert (story["confidence"], story["confidenceBasis"]) == (
+        "low",
+        "a record states the tie of 0 of its 1 flagged steps; 1 rests on naming rules, time and place, or an address",
+    )
+
+
+def test_a_storys_confidence_follows_how_many_of_its_flagged_steps_a_record_ties():
+    """high when a record states the tie of every flagged step, medium for half or more, low for fewer."""
+    assert story_confidence([True, True, True]) == ("high", "a record states the tie of 3 of its 3 flagged steps")
+    assert story_confidence([True, True, False, False])[0] == "medium"
+    assert story_confidence([True, False, False]) == (
+        "low",
+        "a record states the tie of 1 of its 3 flagged steps; 2 rest on naming rules, time and place, or an address",
+    )
+    assert story_confidence([]) == ("low", "no step of it carries a flag")
+    # a story whose flags all name the person's own account form reads high
+    events = [ev(1, 0, eventId=4698, computer="WS-001", subjectUser="alice.martin", subjectDomain="NORTHSTAR", taskName="\\Updater")]
+    [story] = build_stories(events, [], [finding("win-scheduled-task", "high", [1], tags=["persistence"])], SETTINGS)["stories"]
+    assert story["confidence"] == "high"
 
 
 def test_a_logon_id_reused_after_a_reboot_keeps_the_other_persons_logon_out():
