@@ -98,6 +98,11 @@ from the PST or OST item tree as libpff orphan items, listed under a synthetic
 since a cleaned mailbox is itself evidence. Outlook *exports* rarely contain orphans;
 original PST and OST files do.
 
+A message, folder or orphan item that libpff cannot read, as in a damaged PST or a partly
+synchronised OST, becomes a row of its own in its folder, with the subject "(unreadable
+message)", "(unreadable folder)", "(unreadable folder contents)" or "(unreadable orphan item)",
+the flag `parse_error` and libpff's error, and the import counts it among its errors.
+
 ## Microsoft 365 audit and Entra sign-in exports
 
 Business email compromise investigations rest on the tenant's own logs. Drop the exports

@@ -215,6 +215,15 @@ def _bodies(message: Any) -> tuple[str | None, str | None]:
     return text, html
 
 
+class _Unreadable:
+    """An item libpff refused. It becomes an error row rather than a debug line, so the import
+    counts it and a damaged mailbox does not look complete."""
+
+    def __init__(self, subject: str, exc: Exception) -> None:
+        self.subject = subject
+        self.error = str(exc)[:200]
+
+
 def _walk(folder: Any, path: str) -> Iterator[tuple[str, Any]]:
     try:
         name = folder.name or ""
@@ -222,21 +231,32 @@ def _walk(folder: Any, path: str) -> Iterator[tuple[str, Any]]:
         name = ""
     current = f"{path}/{name}".strip("/") if name else path
     try:
-        for i in range(folder.number_of_sub_messages):
-            try:
-                yield current, folder.get_sub_message(i)
-            except Exception as exc:  # noqa: BLE001
-                log.debug("pst message %d in %s failed: %s", i, current, exc)
+        count = folder.number_of_sub_messages
     except Exception as exc:  # noqa: BLE001
-        log.debug("pst folder %s messages failed: %s", current, exc)
+        log.warning("pst folder %s messages failed: %s", current, exc)
+        yield current, _Unreadable("(unreadable folder contents)", exc)
+        count = 0
+    for i in range(count):
+        try:
+            message = folder.get_sub_message(i)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("pst message %d in %s failed: %s", i, current, exc)
+            message = _Unreadable("(unreadable message)", exc)
+        yield current, message
     try:
-        for i in range(folder.number_of_sub_folders):
-            try:
-                yield from _walk(folder.get_sub_folder(i), current)
-            except Exception as exc:  # noqa: BLE001
-                log.debug("pst subfolder %d in %s failed: %s", i, current, exc)
-    except Exception:  # noqa: BLE001
-        pass
+        count = folder.number_of_sub_folders
+    except Exception as exc:  # noqa: BLE001
+        log.warning("pst folder %s sub-folders failed: %s", current, exc)
+        yield current, _Unreadable("(unreadable folder)", exc)
+        count = 0
+    for i in range(count):
+        try:
+            sub = folder.get_sub_folder(i)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("pst subfolder %d in %s failed: %s", i, current, exc)
+            yield current, _Unreadable("(unreadable folder)", exc)
+            continue
+        yield from _walk(sub, current)
 
 
 # Folders whose content the user (or an attacker) deleted: Outlook's Deleted Items in the common
@@ -248,7 +268,24 @@ _DELETED_FOLDER_RE = re.compile(
 ORPHAN_FOLDER = "(orphaned - deleted item not attached to any folder)"
 
 
+def _error_row(folder: str, subject: str, error: str) -> dict[str, Any]:
+    return {
+        "folder": folder,
+        "subject": subject,
+        "flags": ["parse_error"],
+        "risk": 10,
+        "error": error,
+        "attachments": [],
+        "urls": [],
+        "sourceFormat": "pst",
+    }
+
+
 def _message_row(message: Any, folder: str, ctx: ParseContext, index: int) -> dict[str, Any]:
+    if isinstance(message, _Unreadable):
+        row = _error_row(folder, message.subject, message.error)
+        row["sourceIndex"] = index
+        return row
     try:
         props = _props(message)
         headers, extra = _headers_from_message(message, props)
@@ -258,16 +295,7 @@ def _message_row(message: Any, folder: str, ctx: ParseContext, index: int) -> di
         row = build_row(headers, text, html, attachments, ctx, folder=folder, size=None, extra=extra)
     except Exception as exc:  # noqa: BLE001
         log.warning("pst message %d failed: %s", index, exc)
-        row = {
-            "folder": folder,
-            "subject": "(unparseable message)",
-            "flags": ["parse_error"],
-            "risk": 10,
-            "error": str(exc)[:200],
-            "attachments": [],
-            "urls": [],
-            "sourceFormat": "pst",
-        }
+        row = _error_row(folder, "(unparseable message)", str(exc)[:200])
     row["sourceIndex"] = index
     try:
         row["pstIdentifier"] = message.identifier
@@ -303,9 +331,9 @@ def iter_pst_file(pst: Any, ctx: ParseContext) -> Iterator[dict[str, Any]]:
         try:
             item = pst.get_orphan_item(i)
         except Exception as exc:  # noqa: BLE001
-            log.debug("pst orphan %d failed: %s", i, exc)
-            continue
-        if item is None or not _looks_like_message(item):
+            log.warning("pst orphan %d failed: %s", i, exc)
+            item = _Unreadable("(unreadable orphan item)", exc)
+        if item is None or not (isinstance(item, _Unreadable) or _looks_like_message(item)):
             continue
         index += 1
         row = _message_row(item, ORPHAN_FOLDER, ctx, index)

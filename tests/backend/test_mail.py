@@ -628,6 +628,72 @@ def test_pst_orphan_and_deleted_items_are_tagged():
     assert pst._DELETED_FOLDER_RE.search("Recoverable Items/Purges") and not pst._DELETED_FOLDER_RE.search("Inbox/Projects")
 
 
+class _DamagedFolder(_FakeFolder):
+    """A folder of an invented, damaged mailbox: libpff refuses the second message and the first
+    sub-folder, as it does for a corrupt PST or a partly synced OST."""
+
+    def get_sub_message(self, i):
+        if i == 1:
+            raise OSError("libpff_folder_get_sub_message: unable to retrieve sub message: 1")
+        return super().get_sub_message(i)
+
+    def get_sub_folder(self, i):
+        if i == 0:
+            raise OSError("libpff_folder_get_sub_folder: unable to retrieve sub folder: 0")
+        return super().get_sub_folder(i)
+
+
+class _UnlistedFolder:
+    name = "Sync Issues"
+    number_of_sub_folders = 0
+
+    @property
+    def number_of_sub_messages(self):
+        raise OSError("libpff_folder_get_number_of_sub_messages: unable to retrieve number of sub messages")
+
+
+class _DamagedPst(_FakePst):
+    def __init__(self):
+        super().__init__()
+        inbox = _DamagedFolder(
+            "Inbox",
+            [_FakeMsg("first", "one", 11), _FakeMsg("second", "two", 12), _FakeMsg("third", "three", 13)],
+            [_FakeFolder("lost", []), _FakeFolder("Projects", [_FakeMsg("fourth", "four", 14)])],
+        )
+        self.root = _FakeFolder("Top of Outlook data file", [], [inbox, _UnlistedFolder()])
+        self.number_of_orphan_items = 2
+
+    def get_orphan_item(self, i):
+        if i == 0:
+            raise OSError("libpff_file_get_orphan_item: unable to retrieve orphan item: 0")
+        return _FakeMsg("fifth", "five", 15)
+
+
+def test_pst_items_libpff_cannot_read_are_counted_not_dropped():
+    """A message, a folder or an orphan item that libpff refuses was logged at debug level and
+    skipped, so a damaged mailbox looked complete. Each now comes through as an error row, which
+    the import counts as an error."""
+    from services.ingest.pipeline import MailStats
+    from services.parsers.mail import pst
+
+    rows = list(pst.iter_pst_file(_DamagedPst(), ParseContext(internal_domains=["interne.fr"])))
+    stats = MailStats()
+    for row in rows:
+        stats.add(row)
+
+    read = [r["subject"] for r in rows if "parse_error" not in r["flags"]]
+    assert read == ["first", "third", "fourth", "fifth"]
+    errors = [r for r in rows if "parse_error" in r["flags"]]
+    assert stats.errors == len(errors) == 4
+    by_subject = {r["subject"]: r for r in errors}
+    assert set(by_subject) == {"(unreadable message)", "(unreadable folder)", "(unreadable folder contents)", "(unreadable orphan item)"}
+    assert by_subject["(unreadable message)"]["folder"] == "Top of Outlook data file/Inbox"
+    assert "sub message: 1" in by_subject["(unreadable message)"]["error"]
+    assert by_subject["(unreadable folder contents)"]["folder"] == "Top of Outlook data file/Sync Issues"
+    assert by_subject["(unreadable orphan item)"]["folder"] == pst.ORPHAN_FOLDER
+    assert all(r["sourceFormat"] == "pst" and r["attachments"] == [] for r in errors)
+
+
 def test_raw_8bit_header_bytes_do_not_end_the_mailbox():
     """An mbox whose second message has a Latin-1 byte in its Subject: all three messages arrive,
     and the byte is read as the character it stands for."""
