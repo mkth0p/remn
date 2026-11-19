@@ -648,7 +648,7 @@ class PackageSource:
                     rows = (
                         ("event", row)
                         for i, r in enumerate(collection.records(tmp_path, parse_name, notes))
-                        for row in collection.normalize_rows(r, parse_name, i, self.context)
+                        for row in collection.normalize_rows(r, parse_name, i, self.context, notes)
                     )
                 elif low.endswith((".eml", ".msg", ".mbox", ".mbx", ".pst", ".ost")) or looks_like_mail(head):
                     source = MailSource(member.name, tmp_path, None, self.ctx, self.tmp_dir)
@@ -696,6 +696,8 @@ class PackageSource:
                 # table that looks complete cannot quietly be one that was repaired or cut short.
                 if notes.get("unreadableRecords"):
                     entry["unreadable"] = notes["unreadableRecords"]
+                if notes.get("undatedRows"):
+                    entry["undated"] = notes["undatedRows"]
                 if notes:
                     encoding = notes.get("encoding")
                     repaired = notes.get("repairedRows", 0)
@@ -721,6 +723,11 @@ class PackageSource:
                         )
                     if truncated:
                         said.append(f"kept the first {truncated:,} lines; the file is longer than that")
+                    if notes.get("undatedRows"):
+                        said.append(
+                            f"{notes['undatedRows']:,} row(s) carry a date that reads as day-first and as month-first, and no date in the "
+                            "file settles which; that date has no time on the timeline and is kept as written in data"
+                        )
                     if said:
                         entry["note"] = "; ".join(said)
                 # The parsers hold the member file open across their yields, and CPython only

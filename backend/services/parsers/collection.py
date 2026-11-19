@@ -11,6 +11,7 @@ from collections import deque
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from itertools import chain, islice
+from pathlib import PurePosixPath
 from typing import Any
 
 VERSION = "collection/1"
@@ -204,12 +205,37 @@ def timestamp(value: Any) -> int | None:
 
 
 _FRACTION = re.compile(r"(\.\d{6})\d+")
+# A date written with numbers in the order of a locale: DFIR-ORC's 08/19/2026 01:34:26.000, or a
+# Zimmerman CSV saved again from a spreadsheet as 19/08/2026 01:34 or 8/19/2026 1:34 PM.
+_NUMERIC_DATE = re.compile(r"^(\d{1,2})([/.])(\d{1,2})\2(\d{4})[ T]+(\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?\s*([AaPp][Mm])?$")
+_SLASH_DATE = re.compile(r"(?<![\d/])(\d{1,2})/(\d{1,2})/\d{4}(?![\d/])")
 
 
-def timestamp_utc(value: Any) -> int | None:
+def date_order(text: str) -> bool | None:
+    """Whether the numeric dates in an export's text are day-first (True), month-first (False), or
+    cannot tell (None). An export is written in one locale, so one date with a day above 12 settles
+    the order of all of them."""
+    day_first = month_first = False
+    for match in _SLASH_DATE.finditer(text):
+        day_first = day_first or int(match.group(1)) > 12
+        month_first = month_first or int(match.group(2)) > 12
+    return None if day_first == month_first else day_first
+
+
+def ambiguous_date(value: Any) -> bool:
+    """A numeric date that reads as a valid day-first and a valid month-first date alike."""
+    match = _NUMERIC_DATE.match(value.strip()) if isinstance(value, str) else None
+    return bool(match) and match.group(2) == "/" and int(match.group(1)) <= 12 and int(match.group(3)) <= 12 and match.group(1) != match.group(3)
+
+
+def timestamp_utc(value: Any, day_first: bool | None = None) -> int | None:
     """Timestamps from tools whose documentation fixes the zone as UTC without writing it: the
     Zimmerman parsers, DFIR-ORC and Velociraptor. Anything a zone is written on goes through
-    timestamp(); this only fills in for the formats those tools are known to write."""
+    timestamp(); this only fills in for the formats those tools are known to write.
+
+    A numeric date is read in the order day_first gives, which the caller takes from the export's
+    own dates. Without it, a date that reads both ways (03/04/2026) has no time: guessing put a
+    day-first export a month or more away from where it happened, without a word."""
     if not isinstance(value, str) or not value.strip():
         return None
     text = value.strip()
@@ -217,12 +243,34 @@ def timestamp_utc(value: Any) -> int | None:
     if parsed is not None:
         return parsed
     text = _FRACTION.sub(r"\1", text)  # seven fractional digits is more than strptime takes
-    for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S", "%m/%d/%Y %H:%M:%S.%f", "%m/%d/%Y %H:%M:%S"):
+    for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M"):
         try:
             return int(datetime.strptime(text, fmt).replace(tzinfo=UTC).timestamp() * 1000)
         except ValueError:
             continue
-    return None
+    match = _NUMERIC_DATE.match(text)
+    if not match:
+        return None
+    first, separator, second, year, hour, minute, seconds, fraction, half = match.groups()
+    a, b = int(first), int(second)
+    if separator == "." or a > 12 or (a == b):
+        day, month = a, b
+    elif b > 12:
+        day, month = b, a
+    elif day_first is None:
+        return None
+    else:
+        day, month = (a, b) if day_first else (b, a)
+    hours = int(hour)
+    if half:
+        if not 1 <= hours <= 12:
+            return None
+        hours = hours % 12 + (12 if half.lower() == "pm" else 0)
+    try:
+        moment = datetime(int(year), month, day, hours, int(minute), int(seconds or 0), int((fraction or "0")[:6].ljust(6, "0")), tzinfo=UTC)
+    except ValueError:
+        return None
+    return int(moment.timestamp() * 1000)
 
 
 def _flatten(raw: dict[str, Any]) -> dict[str, Any]:
@@ -327,7 +375,7 @@ def _event_data_fields(event_id: Any, provider: Any, sections: dict[str, Any]) -
 _EPOCH = re.compile(r"^\d{9,12}(?:\.\d+)?$")
 
 
-def _event_time(value: Any) -> int | None:
+def _event_time(value: Any, utc=timestamp_utc) -> int | None:
     """An exported event's time: a string with or without its zone (the tools that write none
     write UTC), or seconds since 1970, which is what Velociraptor's parse_evtx() writes in
     TimeCreated.SystemTime."""
@@ -338,10 +386,12 @@ def _event_time(value: Any) -> int | None:
             return round(value * 1000)
         except (OverflowError, ValueError):
             return None
-    return timestamp(value) or timestamp_utc(value) if isinstance(value, str) else None
+    return utc(value) if isinstance(value, str) else None
 
 
-def _event_export(raw: dict[str, Any], fields: dict[str, Any], kind: str | None, name: str, index: int, context: dict[str, Any]) -> dict[str, Any] | None:
+def _event_export(
+    raw: dict[str, Any], fields: dict[str, Any], kind: str | None, name: str, index: int, context: dict[str, Any], utc=timestamp_utc
+) -> dict[str, Any] | None:
     """Event log records another tool exported become event rows, not observations.
 
     EvtxECmd writes one flat CSV row per record, with the whole EventData as JSON in its Payload
@@ -399,7 +449,7 @@ def _event_export(raw: dict[str, Any], fields: dict[str, Any], kind: str | None,
         "recordKind": "event",
         "artifactType": "event-export",
         "eventId": event_number,
-        "ts": _event_time(when),
+        "ts": _event_time(when, utc),
         "observedAt": timestamp(context.get("collectedAt")) if context.get("collectedAt") else None,
         "sourceIndex": index,
         "parserVersion": VERSION,
@@ -497,6 +547,8 @@ MAX_PARSE_BYTES = 64 * 1024**2
 # event log, MFT and USN results run to gigabytes, and cutting them at 64 MiB kept the first few
 # percent of the volume and lost the rest. They are read to the package's own per-member ceiling.
 MAX_STREAM_BYTES = 4 * 1024**3
+# How much of an export its date order is read from.
+DATE_SAMPLE_BYTES = 1024**2
 # What one JSON record may hold in memory while it is parsed. Larger than any record a collector
 # writes; past it the member stops, with the records before it kept.
 MAX_RECORD_CHARS = 64 * 1024**2
@@ -838,6 +890,12 @@ def records(path: str, name: str, notes: dict[str, Any] | None = None) -> Iterat
         encoding = _text_encoding(raw)
         if encoding != "utf-8-sig":
             notes["encoding"] = encoding
+        # The order of the numeric dates is the export's, read from its first megabyte before any
+        # row is: the rows themselves are normalised one at a time and cannot look ahead.
+        sample = raw.read(DATE_SAMPLE_BYTES)
+        raw.seek(0)
+        if (order := date_order(sample.decode(encoding, "replace"))) is not None:
+            notes["dayFirst"] = order
         # Lenient because the encoding above is chosen, not guessed at random: what "replace"
         # covers here is a corrupt byte in one line, and losing the file over that helps nobody.
         budget = MAX_STREAM_BYTES if name.lower().endswith((".csv", ".tsv", ".json", ".jsonl", ".ndjson")) else MAX_PARSE_BYTES
@@ -1166,32 +1224,49 @@ def timestomp_hints(si_created: int | None, fn_created: int | None, si_text: lis
     return hints
 
 
-def normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, Any]) -> dict[str, Any]:
+def normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, Any], notes: dict[str, Any] | None = None) -> dict[str, Any]:
     """The record as one row: for an artifact with several times, the row of its first."""
-    return _normalize(raw, name, index, context)[0]
+    return _normalize(raw, name, index, context, notes)[0]
 
 
-def normalize_rows(raw: dict[str, Any], name: str, index: int, context: dict[str, Any]) -> Iterator[dict[str, Any]]:
+def normalize_rows(raw: dict[str, Any], name: str, index: int, context: dict[str, Any], notes: dict[str, Any] | None = None) -> Iterator[dict[str, Any]]:
     """The record as rows, one per moment it records: an MFT entry's distinct MACB times, a
     prefetch file's last and earlier runs. Every row is the same record (same source index and
-    data); only the time and what that time means differ."""
-    row, more = _normalize(raw, name, index, context)
+    data); only the time and what that time means differ. notes is the one records() filled for
+    the same export: it gives the order of its numeric dates and counts the rows left untimed."""
+    row, more = _normalize(raw, name, index, context, notes)
     yield row
     for extra in more:
         yield {**row, **extra}
 
 
-def _normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def _normalize(
+    raw: dict[str, Any], name: str, index: int, context: dict[str, Any], notes: dict[str, Any] | None = None
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     if category(name) == "dhcp":
         return _dhcp_row(raw, index, context), []
     if category(name) == "deception":
         from services.parsers.deception import normalize as normalize_deception
 
         return normalize_deception(raw, index, context), []
+    notes = {} if notes is None else notes
+    # DFIR-ORC documents its dates as month-first; any other export shows its order in its dates
+    day_first = notes.get("dayFirst", False if any(key(PurePosixPath(name.replace("\\", "/")).stem).startswith(p) for p, _kind in ORC_TOOLS) else None)
+    undated = False
+
+    def utc(value: Any) -> int | None:
+        nonlocal undated
+        ms = timestamp_utc(value, day_first)
+        if ms is None and day_first is None and ambiguous_date(value):
+            undated = True
+        return ms
+
     raw = _flatten(raw)
     fields = {key(k): v for k, v in raw.items()}
-    exported = _event_export(raw, fields, _ez_kind(fields) or category(name), name, index, context)
+    exported = _event_export(raw, fields, _ez_kind(fields) or category(name), name, index, context, utc)
     if exported is not None:
+        if undated:
+            notes["undatedRows"] = notes.get("undatedRows", 0) + 1
         return exported, []
     more: list[dict[str, Any]] = []
 
@@ -1336,17 +1411,17 @@ def _normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, An
         # holds the file's own modification time and PowerShell history no time per line, so neither
         # is an event; the other exports carry a moment something happened.
         if kind not in ("registry", "shimcache", "powershell-history", "mft", "usn"):
-            row["ts"] = row.get("ts") or timestamp_utc(when)
+            row["ts"] = row.get("ts") or utc(when)
         if kind == "usn":
             # when the change was journaled, and what the change was: the reasons are the
             # operation, as a UAL record's is ("FileCreate|Close", "DataExtend|DataOverwrite")
-            row["ts"] = timestamp_utc(get("UpdateTimestamp"))
+            row["ts"] = utc(get("UpdateTimestamp"))
             row["name"] = row.get("name") or get("Name")
             row["operation"] = get("UpdateReasons")
             row["description"] = f"USN {row['operation'] or 'update'}"
         if kind == "mft":
             text = {attr: {letter: get(f"{stem}{code}") for letter, _what, stem in MACB} for attr, code in (("SI", "0x10"), ("FN", "0x30"))}
-            values = {attr: {letter: timestamp_utc(v) for letter, v in times.items()} for attr, times in text.items()}
+            values = {attr: {letter: utc(v) for letter, v in times.items()} for attr, times in text.items()}
             times = macb_times(values)
             hints = timestomp_hints(
                 values["SI"]["B"],
@@ -1378,11 +1453,11 @@ def _normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, An
         loaded = get("FilesLoaded")
         if loaded and not row.get("image"):
             row["image"] = row["path"] = _prefetch_image(row.get("processName"), [p.strip() for p in loaded.split(",")])
-        row["ts"] = timestamp(get("LastRunTime", "LastExecutionTime")) or timestamp_utc(get("LastRun"))
+        row["ts"] = timestamp(get("LastRunTime", "LastExecutionTime")) or utc(get("LastRun"))
         if row["ts"] is not None:
             row["recordKind"] = "event"
             # PECmd writes the last run and up to seven before it; each is an execution
-            earlier = sorted({ms for i in range(8) if (ms := timestamp_utc(get(f"PreviousRun{i}"))) is not None and ms != row["ts"]}, reverse=True)
+            earlier = sorted({ms for i in range(8) if (ms := utc(get(f"PreviousRun{i}"))) is not None and ms != row["ts"]}, reverse=True)
             row["description"] = "prefetch last run" if get("LastRun") and not get("LastRunTime", "LastExecutionTime") else "prefetch run"
             more.extend({"ts": ms, "description": "prefetch earlier run"} for ms in earlier)
     label = row.get("taskName") or row.get("serviceName") or row.get("image") or row.get("path") or get("Name", "DisplayName", "UserName") or kind
@@ -1394,6 +1469,9 @@ def _normalize(raw: dict[str, Any], name: str, index: int, context: dict[str, An
         row["summary"] = f"{kind}: {row['message']}"[:2000]
     if kind == "usn":
         row["summary"] = f"usn: {row.get('path') or row.get('name') or 'entry'} ({row['operation'] or 'update'})"[:2000]
+    if undated:
+        # kept as written in data, and counted on the member so the gap on the timeline is said
+        notes["undatedRows"] = notes.get("undatedRows", 0) + 1
     if kind == "mft":
         # which of the entry's times this row is, on the line the timeline shows
         label = row.get("path") or row.get("name") or "entry"

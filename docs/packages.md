@@ -97,7 +97,12 @@ Explorer exports write it as `timestamp_desc`. Velociraptor result files are map
 including its event log exports, which become events. DFIR-ORC archives are 7z, expanded once
 into the staging area within the package byte budget, and their `GetThis`, `NTFSInfo`,
 `USNInfo` and `RegInfo` CSVs are read by name. Timestamps these tools write without a zone
-are taken as UTC, which is what their documentation fixes.
+are taken as UTC, which is what their documentation fixes. A date written in numbers (DFIR-ORC's
+`08/19/2026 01:34:26`, or a Zimmerman CSV saved again from a spreadsheet as `19/08/2026 01:34`)
+is read in the order the export's own dates show, since one date with a day above 12 settles it;
+DFIR-ORC's are month-first by its documentation. In an export that does not settle the order, a
+date that reads both ways (`03/04/2026`) has no time on the timeline: it stays as written in
+`data`, and the member's note and `undated` field give the number of such rows.
 
 ## Collection adapters
 
