@@ -7,7 +7,9 @@ scenario (Windows events, M365 rows, mails), runs every bundled rule on the Duck
 the rows and the resulting finding keys to tests/fixtures/parity/. frontend/src/rules/parity.test.ts
 runs the browser engine on the same rows and fails on any difference. The stacks of a few fields
 over the same events (services/store/queries.stack) go to stacks.json for
-frontend/src/data/stack.parity.test.ts, which stacks them in the browser store.
+frontend/src/data/stack.parity.test.ts, which stacks them in the browser store. A few rules past
+their finding cap run on rows of their own, and cap.json records which findings the SQL engine kept
+and what it said about the cut.
 
     .venv\\Scripts\\python.exe tools\\parity_fixture.py        # rewrite the fixture after changing an engine or a rule
 """
@@ -194,6 +196,105 @@ def main() -> None:
     )
     for e in res["errors"]:
         print("  error", e)
+    cap_case()
+
+
+# Rules past their cap, each a different way of choosing what to keep. The rows are invented: first
+# seen in an order unlike the order the cap keeps, with ties in time and a row without a time.
+CAP_T0 = 1788300000000
+CAP_RULES: list[dict[str, Any]] = [
+    {"id": "cap-rows", "title": "log cleared", "severity": "high", "source": "events", "where": {"eventId": 1102}, "max_findings": 3},
+    {
+        "id": "cap-rarest",
+        "title": "failures by account",
+        "severity": "low",
+        "source": "events",
+        "where": {"eventId": 4625},
+        "group_by": ["targetUser"],
+        "max_findings": 2,
+    },
+    {
+        "id": "cap-largest",
+        "title": "repeated failures by account",
+        "severity": "medium",
+        "source": "events",
+        "where": {"eventId": 4625},
+        "group_by": ["targetUser"],
+        "threshold": ">= 2",
+        "max_findings": 2,
+    },
+    {
+        "id": "cap-bursts",
+        "title": "failure bursts by address",
+        "severity": "medium",
+        "source": "events",
+        "where": {"eventId": 4625},
+        "group_by": ["ipAddress"],
+        "window": "1m",
+        "threshold": ">= 2",
+        "max_findings": 3,
+    },
+    {
+        "id": "cap-collapsed",
+        "title": "failed logons",
+        "severity": "low",
+        "source": "events",
+        "where": {"eventId": 4625},
+        "entities": ["targetUser"],
+        "collapse_after": 3,
+        "max_findings": 2,
+    },
+]
+
+
+def cap_rows() -> list[dict[str, Any]]:
+    # five log clearings, two at the same time and one without a time
+    rows: list[dict[str, Any]] = [{"eventId": 1102, "computer": "WS01", "subjectUser": "operator"} for _ in range(5)]
+    for r, offset in zip(rows, (50, 10, None, 10, 30), strict=True):
+        if offset is not None:
+            r["ts"] = CAP_T0 + offset * 1000
+    # fifteen failed logons from three addresses, two bursts each; the accounts fail 1 (amy, zed), 2,
+    # 3, 4 and 4 times, the smaller groups and the last address seen first
+    failures = sorted((i * 20 + offset, ip) for i, ip in enumerate(("203.0.113.30", "198.51.100.20", "192.0.2.10")) for offset in (0, 10, 300, 310, 320))
+    users = ["bob", "cat", "eve", "dan", "zed", "bob", "cat", "dan", "eve", "cat", "dan", "eve", "amy", "dan", "eve"]
+    for (offset, ip), user in zip(failures, users, strict=True):
+        rows.append({"eventId": 4625, "computer": "WS01", "ipAddress": ip, "targetUser": user, "ts": CAP_T0 + offset * 1000})
+    return rows
+
+
+def cap_case() -> None:
+    rows = cap_rows()
+    with tempfile.TemporaryDirectory() as tmp:
+        reg = StoreRegistry()
+        reg.configure(Path(tmp) / "cases")
+        store = reg.get(str(uuid.uuid4()))
+        try:
+            w = EventWriter(store, 1)
+            for r in rows:
+                w.add(dict(r))
+            w.flush()
+            with store.lock:
+                stored = [x[0] for x in store._con.execute("SELECT id FROM events ORDER BY id").fetchall()]
+            res = R.run_rules(store, CAP_RULES, {})
+        finally:
+            reg.close_all()
+    assert stored == list(range(1, len(rows) + 1)), "event ids are not sequential"
+    for i, r in enumerate(rows, 1):
+        r["id"] = i
+    findings: dict[str, list[str]] = {}
+    for f in res["findings"]:
+        findings.setdefault(f["ruleId"], []).append(f["key"])
+    cuts = {d["ruleId"]: {"detail": d["detail"], "dropped": d["dropped"]} for d in res["diagnostics"] if d["reason"] == "truncated"}
+    assert not res["errors"] and set(cuts) == {r["id"] for r in CAP_RULES}, (res["errors"], cuts)
+    (OUT / "cap.json").write_text(
+        json.dumps(
+            {"default": R.MAX_FINDINGS, "rows": rows, "rules": CAP_RULES, "findings": {k: sorted(v) for k, v in findings.items()}, "cuts": cuts},
+            indent=1,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    print(f"{len(CAP_RULES)} rules past their cap: {', '.join(f'{k} left out {v["dropped"]}' for k, v in sorted(cuts.items()))}")
 
 
 if __name__ == "__main__":

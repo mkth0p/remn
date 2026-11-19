@@ -368,6 +368,45 @@ def test_rules_past_the_finding_cap_keep_the_rarest_groups_and_say_so(store, mon
     assert got["burst"] == {"u3", "u4", "u5"}
     cut = {d["ruleId"]: d for d in res["diagnostics"] if d["reason"] == "truncated"}
     assert "rarest" in cut["rare"]["detail"] and "largest" in cut["burst"]["detail"]
+    # five groups for the hunt, four reach the threshold: the cut says how many were left out
+    assert cut["rare"]["dropped"] == 2 and cut["burst"]["dropped"] == 1
+    assert cut["rare"]["detail"] == "2 of 5 findings left out past the cap of 3; kept the 3 rarest groups"
+
+
+def test_a_rule_keeps_its_own_max_findings_and_the_default_cap_on_the_server(store):
+    w = EventWriter(store, 1)
+    # 2,001 accounts failing once, and three hosts with a burst of three failures each
+    for i in range(2001):
+        w.add(_event(i, eventId=4625, targetUser=f"user{i:04d}"))
+    for h, host in enumerate(("ws03", "ws01", "ws02")):
+        for k in range(3):
+            w.add(_event(5000 + h * 600 + k, eventId=4771, computer=host))
+    w.flush()
+    settings = {"internal_ips": [], "service_accounts": []}
+    hunt = {"id": "hunt", "title": "h", "severity": "low", "source": "events", "where": {"eventId": 4625}, "group_by": ["targetUser"]}
+    few = {**hunt, "id": "few", "max_findings": 5}
+    burst = {
+        "id": "burst",
+        "title": "b",
+        "severity": "low",
+        "source": "events",
+        "where": {"eventId": 4771},
+        "group_by": ["computer"],
+        "window": "1m",
+        "threshold": ">= 2",
+    }
+    bursts = [{**burst, "id": f"bursts-{n}", "max_findings": n} for n in (2, 3)]
+    res = R.run_rules(store, [hunt, few, *bursts], settings)
+    cut = {d["ruleId"]: d for d in res["diagnostics"] if d["reason"] == "truncated"}
+    assert res["byRule"]["hunt"] == 2000 and cut["hunt"]["dropped"] == 1
+    assert res["byRule"]["few"] == 5 and cut["few"]["dropped"] == 1996
+    # bursts past the cap are counted to the end, and the bursts kept are whole, in the order of the hosts
+    kept = [f for f in res["findings"] if f["ruleId"] == "bursts-2"]
+    assert [(f["entities"]["computer"], f["count"]) for f in kept] == [("ws01", 3), ("ws02", 3)]
+    assert cut["bursts-2"]["dropped"] == 1
+    assert cut["bursts-2"]["detail"] == "1 of 3 findings left out past the cap of 2; kept the first 2 bursts in the order of the grouped fields"
+    # exactly as many bursts as the cap: nothing was left out, so nothing is said to be
+    assert res["byRule"]["bursts-3"] == 3 and "bursts-3" not in cut
 
 
 def test_then_is_checked_for_every_finding(store):
