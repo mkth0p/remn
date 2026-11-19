@@ -29,8 +29,9 @@ export function cancelImport(jobId: number): void {
 
 /**
  * The kind of a dropped file, from its name. A file in a dropped folder goes to the package reader,
- * which recognises each file by its content. A loose file whose name is none of these is unknown:
- * it used to be sent as mail, where the parser takes anything for a message.
+ * which recognises each file by its content. A loose file whose name is none of these is unknown,
+ * unless its start was read as mail when it was dropped: such a file used to be sent as mail
+ * whatever it held, and the mail parser takes anything for a message.
  */
 export function detectKind(file: File): 'evtx' | 'mail' | 'package' | 'unknown' {
   if (file.webkitRelativePath || isArchive(file)) return 'package'
@@ -40,7 +41,28 @@ export function detectKind(file: File): 'evtx' | 'mail' | 'package' | 'unknown' 
   if (/\.(csv|tsv|json|jsonl|ndjson|pf|cab|reg|hiv|xml|txt|log)$/.test(n)) return 'package'
   if (isArchive(file) && /evtx|winevt|eventlog|event[-_ ]?logs?|sysmon|security[-_ ]?log/i.test(n)) return 'evtx'
   if (/\.(eml|msg|mbox|mbx|pst|ost)$/.test(n)) return 'mail'
-  return 'unknown'
+  return startsLikeMail.has(file) ? 'mail' : 'unknown'
+}
+
+/** Files of a drop whose name said nothing and whose start reads as mail (see requestIngest). */
+const startsLikeMail = new WeakSet<File>()
+
+// the start of a mail as the server's parser knows one: an mbox "From " line, or a header line
+// with two of the usual mail headers in the first 4 KB
+const HEADER_LINE = /^[A-Za-z][A-Za-z0-9-]{1,40}:\s/
+const MAIL_MARKERS = ['\nFrom:', '\nSubject:', '\nReceived:', '\nMessage-ID:', '\nMessage-Id:', '\nTo:', '\nDate:', '\nReturn-Path:']
+
+/** Whether a file whose name says nothing starts like mail: a mail client's mailbox file often has no extension. */
+export async function looksLikeMail(file: File): Promise<boolean> {
+  try {
+    const head = new TextDecoder().decode(await file.slice(0, 4096).arrayBuffer()).trimStart()
+    if (head.startsWith('From ') && head.includes('\n')) return true
+    if (!HEADER_LINE.test(head.split('\n', 1)[0])) return false
+    return MAIL_MARKERS.filter((m) => `\n${head}`.includes(m)).length >= 2
+  } catch {
+    // a file that cannot be read is not taken for mail
+    return false
+  }
 }
 
 /**
@@ -99,14 +121,27 @@ export function requestIngest(files: File[], kase: Case, kindOverride?: 'evtx' |
   if (!kindOverride) {
     const unknown = files.filter((f) => detectKind(f) === 'unknown')
     if (unknown.length) {
-      const names = unknown.slice(0, 5).map((f) => f.name)
-      toast(
-        'err',
-        `${unknown.length} file(s) not imported: their kind is unknown (${names.join(', ')}${unknown.length > names.length ? `, and ${unknown.length - names.length} more` : ''}). REMN reads event logs (.evtx), mail (.eml, .msg, .mbox, .pst, .ost), cloud and triage exports and archives; inside a dropped folder or an archive a file is recognised by its content.`,
-        0,
-      )
-      for (const f of unknown) log('warn', `[${f.name}] not imported: its kind is unknown`)
-      files = files.filter((f) => !unknown.includes(f))
+      // a file whose name says nothing is read by its start: one that starts like mail goes on as
+      // mail, in the same drop as the others, and anything else is turned away
+      const drop = files
+      void Promise.all(unknown.map(looksLikeMail)).then((isMail) => {
+        unknown.forEach((f, i) => {
+          if (isMail[i]) startsLikeMail.add(f)
+        })
+        const refused = unknown.filter((_, i) => !isMail[i])
+        if (refused.length) {
+          const names = refused.slice(0, 5).map((f) => f.name)
+          toast(
+            'err',
+            `${refused.length} file(s) not imported: their kind is unknown (${names.join(', ')}${refused.length > names.length ? `, and ${refused.length - names.length} more` : ''}). REMN reads event logs (.evtx), mail (.eml, .msg, .mbox, .pst, .ost, or a mailbox file that starts like mail), cloud and triage exports and archives; inside a dropped folder or an archive a file is recognised by its content.`,
+            0,
+          )
+          for (const f of refused) log('warn', `[${f.name}] not imported: its kind is unknown`)
+        }
+        const rest = drop.filter((f) => !refused.includes(f))
+        if (rest.length) requestIngest(rest, kase, undefined, noticeRead)
+      })
+      return
     }
   }
   if (!files.length) return
