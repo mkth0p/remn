@@ -217,8 +217,10 @@ Each pack directory holds the rules grouped by log source (`process_creation.yam
 `registry_set.yaml`, …) or by Sublime rule family, a `pack.json` manifest with the
 upstream repository, the exact commit, the licence and the counts, the upstream
 `LICENSE` verbatim, and `skipped.json` naming every upstream rule that was not converted
-and why. A rule is skipped rather than weakened: `fieldref`, `expand` and the time-part
-modifiers, any modifier outside the Sigma 2.1 list, `file_access` sources, Sublime ML
+and why. A SigmaHQ rule converted with a caveat (an unknown service matched by channel name,
+`cased` on an equality) carries it in its YAML under `sigma.warnings`, and `pack.json` counts
+them. A rule is skipped rather than weakened: `fieldref`, `expand` and the time-part
+modifiers, a `timeframe`, any modifier outside the Sigma 2.1 list, `file_access` sources, Sublime ML
 classifiers, `file.explode`, link analysis, and so on. What translates exactly is
 translated: `base64`, `base64offset` and `utf16`/`wide` values become the literal strings
 the encoded value can appear as (all three alignments), matched case-sensitively; `neq`

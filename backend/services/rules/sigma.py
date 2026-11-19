@@ -15,7 +15,7 @@ close enough that a faithful translation exists for the large structural subset:
 
 What is NOT translated (the rule is reported as skipped, never silently weakened):
 fieldref / expand and the time-part modifiers (minute ... year), any modifier outside the
-Sigma 2.1 appendix, aggregation expressions (``| count() > 5``), ``N of`` with 1 < N < all,
+Sigma 2.1 appendix, aggregation expressions (``| count() > 5``) and ``timeframe``, ``N of`` with 1 < N < all,
 non-Windows products, IPv6 CIDRs other than one address or a prefix on the first group,
 encodings of values with wildcards, and correlation rules.
 
@@ -735,14 +735,15 @@ def convert_rule(doc: dict[str, Any]) -> dict[str, Any]:
         ls = doc.get("logsource") or {}
         if not isinstance(ls, dict):
             raise Unsupported("logsource is not a mapping")
+        if detection.get("timeframe"):
+            # converted without it, the rule would match outside the window its author set
+            raise Unsupported("timeframe (the rule language cannot attach this time window to the condition)")
         ls_where, aliases = _logsource(ls, warnings)
         selections: dict[str, dict[str, Any]] = {}
         for name, sel in detection.items():
             if name in ("condition", "timeframe"):
                 continue
             selections[str(name)] = compile_selection(sel, aliases, warnings)
-        if detection.get("timeframe"):
-            warnings.append("timeframe ignored (aggregation not translated)")
         conditions = detection["condition"]
         conditions = conditions if isinstance(conditions, list) else [conditions]
         trees = [_CondParser(str(c), selections).parse() for c in conditions]
@@ -770,6 +771,8 @@ def convert_rule(doc: dict[str, Any]) -> dict[str, Any]:
                 "modified": str(doc.get("modified")) if doc.get("modified") else None,
                 "level": level, "logsource": ls,
                 "falsepositives": [str(x) for x in (doc.get("falsepositives") or [])] or None,
+                # what the conversion could not keep exactly, kept with the rule for whoever reads it
+                "warnings": list(warnings) or None,
             }.items() if v},
         }
         rule = {k: v for k, v in rule.items() if v is not None}

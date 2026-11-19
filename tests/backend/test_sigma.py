@@ -282,9 +282,27 @@ level: low
 """
     res = sigma.convert_text(text)[0]
     assert res["ok"] and res["warnings"] and "some-new-provider" in res["warnings"][0]
+    # the caveat stays with the rule, in a pack or a custom rule, not only in the import result
+    assert res["rule"]["sigma"]["warnings"] == res["warnings"]
+    assert "some-new-provider" in yaml.safe_load(res["yaml"])["sigma"]["warnings"][0]
     w = res["rule"]["where"]
     assert w["channel|contains"] == "some-new-provider" and w["data.SomeNewField|startswith"] == "abc" and w["provider"] == "Microsoft-Windows-Foo"
     compile_cond(w, Ctx(source="events"))
+
+
+def test_a_rule_with_a_timeframe_is_skipped_rather_than_run_without_its_window():
+    text = """
+title: Burst Of Failed Logons
+logsource: {product: windows, service: security}
+detection:
+  selection:
+    EventID: 4625
+  timeframe: 5m
+  condition: selection
+level: medium
+"""
+    res = sigma.convert_text(text)[0]
+    assert not res["ok"] and "timeframe" in res["error"]
 
 
 def test_informational_level_is_enrichment_not_an_alert():
