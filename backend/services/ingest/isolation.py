@@ -124,7 +124,8 @@ def cpu_limit() -> int:
 def child_env(home: str | None = None) -> dict[str, str]:
     """The environment of a process that reads evidence: enough to start an interpreter or an
     engine, none of the server's own variables."""
-    env = {name: value for name in CHILD_ENVIRONMENT if (value := os.environ.get(name))}
+    # copied, not read as configuration: names are upper case on Windows, as CHILD_ENVIRONMENT is
+    env = {name: value for name, value in os.environ.items() if name in CHILD_ENVIRONMENT and value}
     if home:
         env.update(HOME=home, TMPDIR=home, TEMP=home, TMP=home)
         if os.name == "nt":
