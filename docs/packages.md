@@ -87,7 +87,10 @@ they sit on the timeline beside the event logs (a host super-timeline):
 - **EvtxECmd**: the `Payload` column (the record's EventData or UserData as JSON) goes through
   the native EVTX parser's own field mapping, so the command line, logon type, source address
   and the rest fill the columns they fill for a `.evtx`, and the event's category, description
-  and summary are the native parser's. Velociraptor's EventData is mapped the same way.
+  and summary are the native parser's. Velociraptor's EventData is mapped the same way, whether
+  it comes with the record's `System` object as `parse_evtx()` writes it (dated by
+  `TimeCreated.SystemTime`, seconds since 1970) or as the flat rows of its `Windows.EventLogs`
+  artifacts (dated by `EventTime`).
 
 The event detail shows the time's meaning beside the time, and the Timesketch and Timeline
 Explorer exports write it as `timestamp_desc`. Velociraptor result files are mapped by the artifact that produced them,

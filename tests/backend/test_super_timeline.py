@@ -300,6 +300,53 @@ def test_velociraptor_event_data_is_mapped_the_same_way():
     assert row["logonType"] == 3 and row["ipAddress"] == "203.0.113.9" and row["targetUser"] == "jdoe" and row["processId"] == 4
 
 
+# Velociraptor's parse_evtx() writes the record's System block with TimeCreated.SystemTime as seconds
+# since 1970 (a float); its Windows.EventLogs.* artifacts write flat rows with the time as EventTime and
+# the EventData as an object. Both shapes are invented here from that description.
+def test_velociraptor_parse_evtx_rows_are_dated_by_their_epoch_seconds():
+    raw = {
+        "System": {
+            "Provider": {"Name": "Microsoft-Windows-Security-Auditing", "Guid": "{00000000-0000-0000-0000-000000000001}"},
+            "EventID": {"Value": 4624},
+            "TimeCreated": {"SystemTime": 1787103300.125},
+            "EventRecordID": 12,
+            "Execution": {"ProcessID": 640, "ThreadID": 700},
+            "Channel": "Security",
+            "Computer": "WS01",
+            "Security": {},
+        },
+        "EventData": {"TargetUserName": "jdoe", "LogonType": 3, "IpAddress": "203.0.113.9"},
+    }
+    row = normalize(raw, "results/Windows.EventLogs.Evtx.json", 0, CTX)
+    # before: ts None, so the event was off the timeline
+    assert row["ts"] == 1787103300125 and row["recordKind"] == "event"
+    assert row["logonType"] == 3 and row["ipAddress"] == "203.0.113.9"
+
+
+def test_velociraptor_event_log_artifact_rows_are_dated_and_their_event_data_mapped():
+    raw = {
+        "EventTime": "2026-08-19T01:35:00.123456789Z",
+        "Computer": "WS01",
+        "Channel": "Security",
+        "Provider": "Microsoft-Windows-Security-Auditing",
+        "EventID": 4624,
+        "EventRecordID": 12,
+        "UserSID": "S-1-5-18",
+        "EventData": {"TargetUserName": "jdoe", "TargetDomainName": "CORP", "LogonType": 10, "IpAddress": "203.0.113.9", "IpPort": "50123"},
+        "UserData": None,
+        "Message": "An account was successfully logged on.",
+        "OSPath": "C:\\Windows\\System32\\winevt\\Logs\\Security.evtx",
+    }
+    row = normalize(raw, "results/Windows.EventLogs.Evtx.json", 0, CTX)
+    native = _native(4624, "Microsoft-Windows-Security-Auditing", raw["EventData"])
+    # before: ts None, logonType None, ipAddress None
+    assert row["ts"] == 1787103300123 and row["recordKind"] == "event"
+    assert (row["eventId"], row["recordId"], row["channel"], row["computer"], row["userSid"]) == (4624, 12, "Security", "WS01", "S-1-5-18")
+    for field in ("targetUser", "targetDomain", "logonType", "logonTypeName", "ipAddress", "ipPort"):
+        assert row[field] == native[field], field
+    assert row["message"] == "An account was successfully logged on." and row["data"]["IpAddress"] == "203.0.113.9"
+
+
 # ---- 5. dissect's $MFT and USN journal: an explicit option ----------------------------------------
 def test_dissect_mft_and_usn_records_carry_their_meaning():
     std = triage.to_row(

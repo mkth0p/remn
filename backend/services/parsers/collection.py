@@ -324,14 +324,32 @@ def _event_data_fields(event_id: Any, provider: Any, sections: dict[str, Any]) -
     return fields
 
 
+_EPOCH = re.compile(r"^\d{9,12}(?:\.\d+)?$")
+
+
+def _event_time(value: Any) -> int | None:
+    """An exported event's time: a string with or without its zone (the tools that write none
+    write UTC), or seconds since 1970, which is what Velociraptor's parse_evtx() writes in
+    TimeCreated.SystemTime."""
+    if isinstance(value, str) and _EPOCH.match(value.strip()):
+        value = float(value)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            return round(value * 1000)
+        except (OverflowError, ValueError):
+            return None
+    return timestamp(value) or timestamp_utc(value) if isinstance(value, str) else None
+
+
 def _event_export(raw: dict[str, Any], fields: dict[str, Any], kind: str | None, name: str, index: int, context: dict[str, Any]) -> dict[str, Any] | None:
     """Event log records another tool exported become event rows, not observations.
 
     EvtxECmd writes one flat CSV row per record, with the whole EventData as JSON in its Payload
-    column; Velociraptor writes the record's System and EventData objects as JSON. Both carry the
-    same identity: channel, record id, event id, time. The EventData goes through the native
-    parser's own mapping, so a command line, a logon type or a source address lands in the same
-    column it would have had if the .evtx itself had been read.
+    column; Velociraptor writes the record's System and EventData objects as JSON, or, in its
+    Windows.EventLogs artifacts, flat columns (EventTime, Channel, EventID ...) beside an EventData
+    object. All carry the same identity: channel, record id, event id, time. The EventData goes
+    through the native parser's own mapping, so a command line, a logon type or a source address
+    lands in the same column it would have had if the .evtx itself had been read.
     """
     system = raw.get("System") if isinstance(raw.get("System"), dict) else None
     if system is None and kind != "event-export":
@@ -366,21 +384,22 @@ def _event_export(raw: dict[str, Any], fields: dict[str, Any], kind: str | None,
         security = system.get("Security") if isinstance(system.get("Security"), dict) else {}
         user_sid = security.get("UserID")
     else:
-        event_id, provider, when = get("EventId", "EventID"), get("Provider"), get("TimeCreated")
+        event_id, provider, when = get("EventId", "EventID", "EventID.Value"), get("Provider", "Provider.Name"), get("TimeCreated", "EventTime")
         channel, computer, record_id = get("Channel"), get("Computer"), get("EventRecordId", "RecordNumber")
         message = get("MapDescription", "Message")
         user = get("UserName", "TargetUserName")
         payload = " ".join(v for v in (get(f"PayloadData{i}") for i in range(1, 7)) if v)
         if payload:
             message = f"{message}: {payload}" if message else payload
-        sections = _evtxecmd_payload(get("Payload"))
-        process_id, thread_id, user_sid = get("ProcessId"), get("ThreadId"), get("UserId")
+        # Velociraptor's flat rows carry the EventData as an object, EvtxECmd's as JSON text
+        sections = {k: raw[k] for k in ("EventData", "UserData") if isinstance(raw.get(k), dict)} or _evtxecmd_payload(get("Payload"))
+        process_id, thread_id, user_sid = get("ProcessId"), get("ThreadId"), get("UserId", "UserSID")
     event_number = int(event_id) if str(event_id or "").strip().isdigit() else None
     row: dict[str, Any] = {
         "recordKind": "event",
         "artifactType": "event-export",
         "eventId": event_number,
-        "ts": timestamp(when) or timestamp_utc(when) if isinstance(when, str) else None,
+        "ts": _event_time(when),
         "observedAt": timestamp(context.get("collectedAt")) if context.get("collectedAt") else None,
         "sourceIndex": index,
         "parserVersion": VERSION,
