@@ -22,7 +22,10 @@ credentials or exploit details in a public issue. Reports are acknowledged withi
 
 ## What it does not promise
 
-- No encryption at rest for the server store or the browser database.
+- No encryption at rest of its own, for the server store, its backups or the browser
+  database. A server that keeps evidence must keep its cases folder, staging area and
+  backups on an encrypted volume; `docs/security.md` says what that covers and what it
+  does not.
 - No multi-user model: the remote mode uses one shared token.
 - No sandboxed execution: attachments are analysed statically (structure, macros,
   scripts, URLs, YARA), never opened or run.

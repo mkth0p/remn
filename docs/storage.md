@@ -30,6 +30,8 @@ the findings built on it and keeps the engine (Hayabusa) findings of the other f
 ## Server store
 
 Rows live in a DuckDB file per case under `backend/data/cases/<uuid>/` on the REMN host.
+REMN does not encrypt these files: on a server they belong on an encrypted volume, as the
+[security model](security.md#where-evidence-lives) requires.
 Search, facets, rules and the AI's `sql` tool run inside DuckDB. Files arrive through
 chunked uploads with resumable offsets and are ingested by background jobs, so a
 multi-gigabyte export does not depend on a browser tab staying open.
