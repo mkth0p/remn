@@ -119,6 +119,24 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   rows. A cut mail body, attachments past 60 and PST attachments over 60 MiB are flagged
   (`body_truncated`, `attachments_truncated`, `not_read`), and the attachment count is the real
   one. A Sigma `ProcessId` in a process creation rule reads the new process's id.
+- The detection rules do what their descriptions say. Twelve of REMN's own Windows and collection
+  rules were corrected and measured again: the suspicious scheduled task rule reads only the
+  task's command, so it no longer matches the XML namespace every task carries; the Kerberos rules
+  read the exact failure code; a new service is judged by its program's folder rather than an
+  eight-character name; LSASS readers are left out by folder and by the access right that reads
+  memory, never by a name; the Office rule matches parent and child by path end and drops from
+  critical to high; PowerShell's encoded and hidden switches are read in every abbreviation
+  PowerShell accepts (high to medium); the script block rule no longer takes administration
+  cmdlets as keywords; collected autoruns and tasks in AppData are a new low lead apart from the
+  high persistence rule. Four rules whose condition cannot do what their title said (PsExec,
+  pass-the-hash, and two pairs of events in a window) now say what they match and are rated one
+  level lower. The Sigma converter keeps a regex's case (new operator `re_cs`), writes keywords as
+  the event's JSON text holds them, skips a rule with a `timeframe`, converts an IPv4 CIDR whose
+  ranged octet starts at 0, and stores its warnings on each rule; 104 rules of the SigmaHQ packs
+  changed. Both engines refuse a rule that sets `then`, `window`, `distinct` or `any_in_group`
+  without a group, or `then_flags` on events. The browser counts distinct values as the server
+  does, and the parity test compares severity, count and escalation. On the seven clean machines
+  the changed own rules raise 4 high or critical findings where they raised 50.
 - The priority of a finding divides by 1 + ln n when its rule raised n findings on the same host
   or for the same user, so one loud rule no longer fills the top of the queue. The first finding of
   an attack reached the top ten in 38% of EVTX-to-MITRE-Attack recordings and 76% of
