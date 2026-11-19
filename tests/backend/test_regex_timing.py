@@ -294,7 +294,11 @@ def shapes(pattern: re.Pattern) -> list[tuple[str, str, str]]:
     singles = list(dict.fromkeys(singles))[:3]
     units += [("", a + b) for a, b in itertools.combinations(singles, 2)]
     units += [("", g) for g in GENERIC]
-    return list(dict.fromkeys((head, unit, tail) for head, unit in units for tail in TAILS))
+    found = [(head, unit, tail) for head, unit in units for tail in TAILS]
+    # a run after other text: "^\s+|\s+$" takes a leading run whole, and only a run that does not
+    # start the text makes it try the second branch from every position of the run
+    found += [("\x00", unit, "\x00") for head, unit in units if not head]
+    return list(dict.fromkeys(found))
 
 
 def text(shape: tuple[str, str, str], length: int, as_bytes: bool) -> str | bytes:
@@ -414,6 +418,8 @@ def test_the_harness_reads_every_module_and_both_kinds_of_pattern():
         (r"(?s)\bfrom\s+(.+?)(?=\s+\b(?:by|with)\b|;|$)", "search"),
         # nested repetition: exponential
         (r"^(?:\s|<!--.*?-->)*<Events?[\s>]", "match"),
+        # a trim whose second branch is tried from every position of a run inside the text
+        (r"^\s+|\s+$", "search"),
     ],
 )
 def test_the_harness_finds_a_pattern_that_backtracks(source: str | bytes, how: str):
