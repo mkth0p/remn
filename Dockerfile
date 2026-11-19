@@ -1,7 +1,7 @@
 # REMN in one container: the built frontend served by the Python API (backend/run.py, waitress).
 #
 #   docker build -t remn .                                                  # core
-#   docker build --build-arg EXTRA_PIP="yara-python libpff-python" -t remn .  # full: YARA and PST support
+#   docker build --build-arg EXTRA_PIP="yara-python libpff-python py7zr" -t remn .  # full: YARA, PST and 7z support
 #   docker run --rm -p 8000:8000 -v remn-data:/app/backend/data remn
 #
 # Python packages are installed in a build stage that has a compiler (libpff builds from source) and
@@ -31,12 +31,14 @@ FROM python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb
 ENV PIP_NO_CACHE_DIR=1
 RUN apt-get update && apt-get -y --no-install-recommends install build-essential && rm -rf /var/lib/apt/lists/*
 RUN python -m venv /opt/venv && /opt/venv/bin/pip install --upgrade pip
-COPY backend/requirements.txt /tmp/requirements.txt
-# extra packages go in here, e.g. --build-arg EXTRA_PIP="yara-python libpff-python"
+COPY backend/requirements.txt backend/requirements-optional.txt /tmp/
+# the optional parsers go in here, by name: --build-arg EXTRA_PIP="yara-python libpff-python py7zr"
 ARG EXTRA_PIP=""
-# requirements.txt fixes every version and hash; the extras are the operator's choice and are not pinned
+# requirements.txt fixes every version and hash. The optional parsers are the operator's choice of
+# names from requirements-optional.txt, installed at the versions and hashes that file fixes: a
+# name it does not list, or a download whose hash differs, fails the build.
 RUN /opt/venv/bin/pip install --require-hashes -r /tmp/requirements.txt \
-    && if [ -n "$EXTRA_PIP" ]; then /opt/venv/bin/pip install $EXTRA_PIP; fi \
+    && if [ -n "$EXTRA_PIP" ]; then /opt/venv/bin/pip install --require-hashes -c /tmp/requirements-optional.txt $EXTRA_PIP; fi \
     && /opt/venv/bin/python -m pip uninstall -y pip
 
 # Hayabusa: Sigma over EVTX as a detection engine, pinned by version and by the release
@@ -85,4 +87,6 @@ EXPOSE 8000
 ENV FORENSIC_ALLOWED_HOSTS=localhost,127.0.0.1 FORENSIC_TMP_DIR=/app/backend/tmp
 ARG REMN_BUILD_ID=""
 ENV REMN_BUILD_ID=$REMN_BUILD_ID
+# "docker ps" and an orchestrator see a server that stopped answering, not only one that exited
+HEALTHCHECK --interval=30s --timeout=6s --start-period=40s --retries=3 CMD ["python", "tools/healthcheck.py"]
 CMD ["python", "backend/run.py", "--host", "0.0.0.0", "--port", "8000"]

@@ -50,8 +50,10 @@ jobs:
       matrix:
         share: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.13"
           cache: pip
@@ -63,7 +65,7 @@ jobs:
         run: >
           python tools/measure_rules.py --datasets /mnt/remn/datasets --fetch --cache /mnt/remn/cache
           --shard ${{ matrix.share }}/${{ env.SHARES }} --raw /mnt/remn/share-${{ matrix.share }}.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: rule-measures-share-${{ matrix.share }}
           path: /mnt/remn/share-${{ matrix.share }}.json
@@ -75,14 +77,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.13"
           cache: pip
           cache-dependency-path: backend/requirements.txt
       - run: pip install -r backend/requirements.txt
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: rule-measures-share-*
           path: shares
@@ -91,7 +95,7 @@ jobs:
         run: >
           python tools/measure_rules.py --merge shares/share-*.json
           --out measures.json --detail measures-detail.json --gate rules/measures-detail.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: always()
         with:
           name: rule-measures

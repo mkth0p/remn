@@ -21,7 +21,8 @@ the repository is laid out.
   tools (`gemma4`, `qwen3` and `llama3.1` are known to), or a Claude Code sign-in on the
   server machine. See [AI analyst](ai.md).
 - Optional Python packages: `libpff-python` for PST and OST mailboxes, `yara-python` for
-  YARA scanning of attachments. Everything else works without them.
+  YARA scanning of attachments, `py7zr` for packages delivered as 7z (DFIR-ORC). Everything
+  else works without them.
 
 ## Install
 
@@ -32,7 +33,7 @@ Windows:
 py -3.13 -m venv .venv
 .venv\Scripts\python.exe -m pip install -r backend\requirements.txt
 
-# optional: PST and YARA support
+# optional: PST, YARA and 7z support
 .venv\Scripts\python.exe -m pip install -r backend\requirements-optional.txt
 
 # the browser application
@@ -46,7 +47,7 @@ Linux and macOS:
 python3.13 -m venv .venv
 .venv/bin/python -m pip install -r backend/requirements.txt
 
-# optional: PST and YARA support (libpff builds from source: apt install build-essential python3.13-dev first)
+# optional: PST, YARA and 7z support (libpff builds from source: apt install build-essential python3.13-dev first)
 .venv/bin/python -m pip install -r backend/requirements-optional.txt
 
 # the browser application
@@ -55,6 +56,8 @@ cd frontend && npm ci && npm run build && cd ..
 
 `backend/requirements.txt` fixes every package at an exact version with its hashes, so two
 installs of one commit are the same install; pip refuses a file whose hash differs.
+`backend/requirements-optional.txt` does the same for the optional packages, at versions
+that agree with the main set.
 
 Where the distribution's Python is older than 3.13 (Ubuntu 24.04 ships 3.12), install it
 from the deadsnakes PPA, with `uv python install 3.13`, or with pyenv. Every package in
@@ -143,13 +146,23 @@ If the container starts but the page does not load, check these in order:
 - **`docker run` without `-p`.** The container listens on 8000 inside; publish it with
   `-p 127.0.0.1:8000:8000`.
 
-The default build is the core: everything in `requirements.txt`, no PST or YARA. The
+The default build is the core: everything in `requirements.txt`, no PST, YARA or 7z. The
 full build adds the optional packages; they are named at build time because the runtime
 image keeps no package manager, and a build stage with a compiler takes care of libpff:
 
 ```
-docker build --build-arg EXTRA_PIP="yara-python libpff-python" -t remn .
+docker build --build-arg EXTRA_PIP="yara-python libpff-python py7zr" -t remn .
 ```
+
+The names are chosen from `backend/requirements-optional.txt` and installed at the
+versions and hashes that file fixes; a name it does not list fails the build.
+
+The image differs from a virtual-environment install in one more way: it carries
+[Hayabusa](https://github.com/Yamato-Security/hayabusa) (AGPL-3.0, run as a separate
+program) and runs it over Windows event logs as a third detection engine beside REMN's
+two. A virtual-environment install has that engine only when Hayabusa is installed on the
+machine (on `PATH`, or where `HAYABUSA_PATH` points), so the same evidence can give more
+findings in the container. `--build-arg HAYABUSA=0` builds the image without it.
 
 or, with compose, `REMN_EXTRA_PIP="yara-python libpff-python" docker compose up --build`
 (`set REMN_EXTRA_PIP=yara-python libpff-python` first in a Windows command prompt). The

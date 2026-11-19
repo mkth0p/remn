@@ -2,7 +2,8 @@
 
 The commit is what a visitor can check the running code against, and what every parse result is
 stamped with, so rows can be traced to the parser that produced them. An image build passes it in
-REMN_BUILD_ID (the checkout's .git is not copied into the image); a checkout reads it from .git."""
+REMN_BUILD_ID (the checkout's .git is not copied into the image); a checkout reads it from .git;
+a release archive carries it in a BUILD_ID file."""
 
 from __future__ import annotations
 
@@ -44,11 +45,21 @@ def _git_commit(root: Path) -> str:
     return ""
 
 
+def _packed_commit(root: Path) -> str:
+    """The commit a release archive was packed from. An archive has no .git to read, so
+    tools/release_pack.sh writes the commit to BUILD_ID beside the README."""
+    try:
+        value = (root / "BUILD_ID").read_text(encoding="utf-8").strip().lower()
+    except OSError:
+        return ""
+    return value if _SHA.match(value) else ""
+
+
 @functools.cache
 def commit() -> str:
-    """The full source commit, or "" when neither the environment nor a checkout says."""
+    """The full source commit, or "" when the environment, a checkout and a release archive all say nothing."""
     value = os.environ.get("REMN_BUILD_ID", "").strip().lower()
-    return value if _SHA.match(value) else _git_commit(_ROOT)
+    return value if _SHA.match(value) else (_git_commit(_ROOT) or _packed_commit(_ROOT))
 
 
 def build_id() -> str:

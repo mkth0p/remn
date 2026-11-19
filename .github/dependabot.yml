@@ -24,10 +24,14 @@ updates:
       # js-yaml 5 changed its module shape; the rule loader and its tests are written against 4
       - dependency-name: js-yaml
         update-types: ["version-update:semver-major"]
+  # actions are pinned to a commit with the version in a comment; one pull request raises them together
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
   - package-ecosystem: docker
     directory: /
     schedule:
