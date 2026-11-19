@@ -14,11 +14,14 @@ Every step says why it belongs to the story and how surely:
   of their logon session (its logon id), a process started by one in the story, or evidence of
   their way into a host (the service installed through the service manager's pipe their admin
   share connection opened, for one);
-- **medium**: the record names the person by a form the organisation rules joined, it happened on
-  a host of the story while the person's session there was open, lineage ties it to them by time
-  only (a program WMI started just after their network logon, a service installed just after
-  their admin share), it came from an address the story's findings name, or it follows the
-  phishing mail's link or attachment (the chains' notes).
+- **medium**: the record names the person by a form the organisation rules joined, lineage ties
+  it to them by time only (a program WMI started just after their network logon, a service
+  installed just after their admin share), it came from an address the story's findings name, or
+  it follows the phishing mail's link or attachment (the chains' notes).
+
+A flag whose record ties it to no account or session of anyone's (SYSTEM's, a service's, a
+machine's) is the host's, never the person's who was at the host then: the host's story says who
+was on and links to theirs.
 
 Weak ties never put a record in a story, and a person's name alone never puts a program they ran
 in one: it must run in the story's session or process tree, or carry a finding. One person's
@@ -415,7 +418,9 @@ class _Case:
         if s:
             how = f"it happened in their logon session {s['logonId']} on {s['host']}"
             add(self.account(s.get("user"), s.get("domain"), s.get("sid")), lin.session_tie(ref), how)
-        p = lin.process_of(ref) or lin.process_of_guid(row.get("processGuid"))
+        # a handle opened or a thread created (Sysmon 10, 8) is its source process's doing
+        data = row.get("data") if isinstance(row.get("data"), dict) else {}
+        p = lin.process_of(ref) or lin.process_of_guid(row.get("processGuid") or data.get("SourceProcessGUID"))
         depth = 0
         while p and depth < 6:
             if p.get("session") and p["session"] in lin.sessions:
@@ -511,21 +516,15 @@ def build_stories(
             flags[iid].append((int(c["seed"]["ts"]), seed_ref, kind, "the phishing mail that starts the chain"))
             ties[(iid, seed_ref)] = (STRONG, "the phishing mail that starts the chain")
 
-    # a flag that names no one joins the one person who was at its host then; otherwise it is the host's.
-    # It joins the incident of theirs nearest it, as a supporting flag does, and never bridges two
+    # a flag that names no one is the host's: whoever was on the host then is said, and the host's
+    # story links to theirs (_Seats)
     seats = _Seats(case, flags, gap)
-    on_host: dict[str, list[str]] = {}  # a host's flag -> the people who were on the host then
-    folded = 0
+    on_host: dict[str, tuple[list[str], str]] = {}  # a host's flag -> the people who were on the host then, and how surely
     for ts, ref, host in nameless:
-        owner, how, others = seats.owner(host, ts)
-        if owner:
-            flags[owner].append((ts, ref, "support", how))
-            ties[(owner, ref)] = (MEDIUM, how)
-            folded += 1
-        else:
-            host_flags[host].append((ts, ref, "start", how))
-            if others:
-                on_host[ref] = others
+        how, people, conf = seats.on(host, ts)
+        host_flags[host].append((ts, ref, "start", how))
+        if people:
+            on_host[ref] = (people, conf)
 
     # an address most of the organisation's users sign in from is its own, not the attacker's
     shared = _shared_egress(case)
@@ -632,7 +631,6 @@ def build_stories(
             "campaigns": len(campaigns),
             "unstoried": len(un),
             # host flags that joined the story of the person at the host, host stories left as leads
-            "folded": folded,
             "hostLeads": leads,
             "incidents": len(incidents),
             # the incidents that joined more stories than INCIDENT_CAP: each names those it left out
@@ -912,21 +910,27 @@ class _Seats:
     whose own flagged steps there (a program run, a service or a task created, a script block: not a
     logon or a share opened, which every domain logon makes on a domain controller) are near.
 
-    A flag that names no one (SYSTEM's, a service's, a Sysmon handle with no user) is that person's
-    when there is exactly one and they have a story of their own near; with two or more it stays the
-    host's and says who was on."""
+    A flag that names no one (SYSTEM's, a service's, a Sysmon handle with no user) is never theirs:
+    its record ties it to no account or session of anyone's. It is the host's, and says who was on.
+    The host's story links to the story of the one person who was on when they raised a flag of
+    their own within the gap (one intrusion, by time and place: medium), and weakly to each of
+    several, or to one who raised none."""
 
     def __init__(self, case: _Case, flags: dict[str, list[tuple[int, str, str, str]]], gap: int):
         self.case, self.gap = case, gap
-        self.seated: dict[str, list[tuple[int, int, str, str]]] = defaultdict(list)  # host -> (start, end, person, logon id)
+        self.seated: dict[str, list[tuple[int, int, str, str, str]]] = defaultdict(list)  # host -> (start, end, person, logon id, bound)
         for s in case.lineage.sessions.values():
             if not s.get("logonSeen") or not (s.get("type") in _SEATED or s.get("rdp")):
                 continue
             iid = case.account(s.get("user"), s.get("domain"), s.get("sid"))
             if iid:
-                # a session whose logoff is not in the evidence is taken as open for the story gap after its logon
-                end = s["end"] if s.get("end") is not None else s["start"] + gap
-                self.seated[s["host"]].append((s["start"], end, iid, s["logonId"]))
+                if s.get("end") is not None:
+                    end, bound = s["end"], ""
+                else:
+                    # a session whose logoff is not in the evidence is open as far as its own records go, no further
+                    end = max(s["start"], int(s.get("last") or 0))
+                    bound = f" (its logoff is not in the evidence: taken as open to its last record, {_span_words(end - s['start'])} after its logon)"
+                self.seated[s["host"]].append((s["start"], end, iid, s["logonId"], bound))
         self.hands: dict[str, list[tuple[int, str]]] = defaultdict(list)  # host -> (ts, person) of what a person did there
         self.starts: dict[str, list[int]] = {}
         for iid, fl in flags.items():
@@ -939,30 +943,32 @@ class _Seats:
         for lst in self.hands.values():
             lst.sort()
 
-    def owner(self, host: str, ts: int) -> tuple[str | None, str, list[str]]:
-        """(the person, why) when one person was at the host then; else (None, why, the people who were on)."""
+    def on(self, host: str, ts: int) -> tuple[str, list[str], str]:
+        """Why a flag that names no one is the host's, the people who were on the host then, and how
+        surely the host's story is one intrusion with theirs (medium for one person with a flag of
+        their own within the gap, weak otherwise)."""
         case = self.case
         on: dict[str, str] = {}
-        for start, end, iid, lid in self.seated.get(host, ()):
+        for start, end, iid, lid, bound in self.seated.get(host, ()):
             if start - _MOMENT_MS <= ts <= end + _MOMENT_MS:
-                on.setdefault(iid, f"on {host} while {_label(case, iid)}'s session {lid} was open")
+                on.setdefault(iid, f"while {_label(case, iid)}'s session {lid} was open{bound}")
         lst = self.hands.get(host, [])
         i = bisect_left(lst, (ts - _NEAR_MS, ""))
         while i < len(lst) and lst[i][0] <= ts + _NEAR_MS:
             iid = lst[i][1]
-            on.setdefault(iid, f"on {host} within {_NEAR_MS // 60_000} minutes of {_label(case, iid)}'s own flagged steps there, and no one else's")
+            on.setdefault(iid, f"within {_NEAR_MS // 60_000} minutes of {_label(case, iid)}'s own flagged steps there, and no one else's")
             i += 1
         if not on:
-            return None, "", []
+            return "", [], WEAK
         if len(on) == 1:
             [(iid, how)] = on.items()
             starts = self.starts.get(iid, [])
             j = bisect_left(starts, ts - self.gap)
             if j < len(starts) and starts[j] <= ts + self.gap:
-                return iid, how, []
-            return None, f"a finding on {host}; {_label(case, iid)} was on it then but raised no flag of their own within {self.gap // 3_600_000} hours", [iid]
+                return f"a finding on {host} {how}; its record ties it to no account or session of theirs", [iid], MEDIUM
+            return f"a finding on {host}; {_label(case, iid)} was on it then but raised no flag of their own within {self.gap // 3_600_000} hours", [iid], WEAK
         names = sorted(_label(case, i) for i in on)
-        return None, f"a finding on {host} while {_and(names)} were on it (a session open, or their own flagged steps there): no one person's", sorted(on)
+        return f"a finding on {host} while {_and(names)} were on it (a session open, or their own flagged steps there): no one person's", sorted(on), WEAK
 
 
 def _links(
@@ -970,7 +976,7 @@ def _links(
     stories: list[dict[str, Any]],
     gap: int,
     dismissed: Collection[str],
-    on_host: dict[str, list[str]],
+    on_host: dict[str, tuple[list[str], str]],
 ) -> dict[tuple[str, str], dict[str, Any]]:
     """The links between stories that are one intrusion, the surest of each pair of stories:
 
@@ -980,7 +986,8 @@ def _links(
     - process: a program of one story started by a process of another story's flags, or of its
       person's session;
     - record: one event names both people (a password reset of one by the other);
-    - session (weak): the people who were at a host when its flags were raised, no one of them alone.
+    - session: the people who were at a host when its flags were raised; medium for the one person on
+      it who raised flags of their own within the gap, weak for each of several or for one who raised none.
 
     A hop links as surely as it is, and a host's flags after a hop by time and place only (medium),
     unless the host story holds the hop's own records; a connection to a remote-access port is weak.
@@ -994,7 +1001,11 @@ def _links(
     held: dict[str, set[str]] = {}
     out: dict[tuple[str, str], dict[str, Any]] = {}
     # the people who were on a host story's host when its flags were raised, no one of them alone
-    shared_seat = {s["id"]: {i for st in s["steps"] for r in st["refs"] for i in on_host.get(r, ())} for s in stories if s["kind"] == "host"}
+    shared_seat = {
+        s["id"]: {i for st in s["steps"] for r in st["refs"] if r in on_host and on_host[r][1] == WEAK for i in on_host[r][0]}
+        for s in stories
+        if s["kind"] == "host"
+    }
 
     def refs_of(s: dict[str, Any]) -> set[str]:
         if s["id"] not in held:
@@ -1018,17 +1029,19 @@ def _links(
             return s["start"] - _CONTEXT_BEFORE <= ts <= s["end"] + gap // 2
         return s["start"] - _NEAR_MS <= ts <= s["end"] + _NEAR_MS
 
-    # the people who were at a host when its flags were raised, no one of them alone: weak, and said first,
-    # since it says best why a way in of one of them is no surer
+    # the people who were at a host when its flags were raised: the one person who was on it and raised
+    # flags of their own (medium), or no one of them alone (weak, and said first, since it says best
+    # why a way in of one of them is no surer)
     for b in stories:
         if b["kind"] != "host":
             continue
         for st in b["steps"]:
             for r in st["refs"]:
-                for iid in on_host.get(r, ()):
+                people, conf = on_host.get(r, ([], WEAK))
+                for iid in people:
                     for a in persons.get(iid, []):
                         if near(a, st["ts"]):
-                            add(a, b, "session", st["tie"]["basis"], WEAK, [r])
+                            add(a, b, "session", st["tie"]["basis"], conf, [r])
 
     for h in lin.hops.values():
         ts, to, src = h["ts"], h["to"], h["from"].get("host")

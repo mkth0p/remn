@@ -565,6 +565,8 @@ export const STORY_DATA_KEYS = [
   // the logon GUID explicit credentials name for their target's logon, which the domain controller's ticket carries
   'TargetLogonGuid',
   'ProcessId',
+  // the process that opened a handle or created a thread (Sysmon 10, 8), whose session the flag is of
+  'SourceProcessGUID',
   // lineage: DNS answers, WinRM's session record, WMI's failed calls, DHCP leases, Entra devices
   'QueryName',
   'QueryResults',

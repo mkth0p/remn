@@ -30,18 +30,23 @@ two days apart; then they are two stories. A mail received or a failed logon joi
 nearest it, within two days, and never joins two: a spray's daily failures between two
 intrusions three weeks apart leave them two stories, and the failures far from both are listed
 with the flags in no story. A flag that names no person, a service installed or a program run by
-SYSTEM, belongs to the person whose session, process tree or way into the host it is part of.
-When the records tie it to no one, it belongs to the one person who was on the host then: whose
-console, RDP or cached-credential session there was open at its time (a session whose logoff is
-not in the evidence counts as open for two days after its logon), or whose own flagged steps
-there fall within fifteen minutes of it, when that person has a flag of their own within two
-days. Their own flagged steps are what they did: a program run, a service or a task created, a
-script block; not a logon, a share opened, or the connections, lookups, file writes, image loads
-and handle opens every session makes (a domain logon opens IPC$ on a domain controller). The tie
-is medium and says so: "on WS-004 while daniel.roy's session 0x9a01 was open". Such a flag
-supports the story; it does not start one, so it never joins two incidents of its person. When
-two people or more were on the host then, the flag stays the host's and its step says who was on;
-when there is no one, it starts a story of its own host.
+SYSTEM, belongs to the person whose session, process tree or way into the host it is part of (a
+handle opened or a thread created, Sysmon 10 and 8, is part of its source program's tree).
+When the records tie it to no one, it is the host's: being at a host when SYSTEM, a management
+agent or a security product raises a flag there does not make the flag a person's. Its step says
+who was on the host then: whose console, RDP or cached-credential session there was open at its
+time, or whose own flagged steps there fall within fifteen minutes of it. A session whose logoff
+is not in the evidence is open as far as its own records go (its logon, the programs and actions
+of its logon id, its reconnects) and no further, and the step says so: "a finding on ws-004
+while daniel.roy's session 0x9a01 was open (its logoff is not in the evidence: taken as open to
+its last record, 66 min after its logon); its record ties it to no account or session of
+theirs". Their own flagged steps are what they did: a program run, a service or a task created,
+a script block; not a logon, a share opened, or the connections, lookups, file writes, image
+loads and handle opens every session makes (a domain logon opens IPC$ on a domain controller).
+When one person was on the host then and has a flag of their own within two days, the host's
+story links to theirs (medium, `session`), and the two are one incident. When two people or more
+were on it, or the one person raised no flag of their own, the link is weak and makes no
+incident. When no one was on it, the host's flags stand on evidence of their own (below).
 
 A host's own flags make a story only on evidence of their own: a rule that fires on clean
 machines fires on a host's own maintenance too (Windows updating its built-in scheduled tasks,
@@ -239,7 +244,7 @@ Every record of a story is a step, or folded into one, and every step says why i
 
 | tie | the record | confidence |
 |---|---|---|
-| flagged | carries a finding, and names the person, or (naming no one) is part of their session, process tree or way in, or happened on a host only they were on then | as sure as the form it names them by, or as lineage ties it: medium for a program WMI or WinRM started, a WinRM shell or an RDP session manager's record placed in the session by time, a service tied to an admin share by time only, or a flag on a host only they were on |
+| flagged | carries a finding, and names the person, or (naming no one) is part of their session, process tree or way in | as sure as the form it names them by, or as lineage ties it: medium for a program WMI or WinRM started, a WinRM shell or an RDP session manager's record placed in the session by time, or a service tied to an admin share by time only |
 | phishing chain | is a step of the person's mail-led chain | strong with a link to the mail, else medium |
 | same session | is the logon of a session in which a flagged record happened, or the other logon of its split token | strong, medium when time alone placed the flagged record in the session |
 | same way in | is part of the same hop (the service after the admin share) | strong, medium when this record or the flagged one is part of the hop by time only |
@@ -401,7 +406,7 @@ reaches, its kind, why (`basis`), how surely and the records it rests on (`refs`
 | explicit credentials | the same, with explicit credentials (4648: its subject is who took the way in), or one person's hop into another story's host or account with another person's account | the hop's own |
 | process tree | a program of one story descends, within six generations, from a program of another story's flags or of its person's session (a `runas`) | strong |
 | one record names both | one record whose two people are two stories' subjects: a password reset of one by the other, an account enabled | the weaker of the two names |
-| on the host then | a host's flag left the host's because two people or more were on it: its story and theirs | weak |
+| on the host then | a host's flag that names no one, and the people who were on the host then (a session open, or their own flagged steps within fifteen minutes): its story and theirs | medium for the one person on it with a flag of their own within two days; weak for each of two people or more, or for one with no flag of their own |
 
 A weak link is shown on the story but joins nothing; a hop from a person who was one of several
 on a host when its flags were raised is weak too, since it makes no one's the more. A link never
@@ -685,11 +690,14 @@ as a server case does, and prints each story with the checks below;
 `REMN_APT29=DIR pytest -m heavy tests/backend/test_apt29_stories.py` runs the same checks, day 1 in
 about a minute. On day 1 (196,081 records: pbeesly's payload, UAC bypass, discovery, credential
 access and persistence on SCRANTON, then PsExec to NASHUA; NEWYORK is the domain controller and
-UTICA is left alone) REMN's own rules raise 258 findings and the build reads one story:
-pbeesly's, holding the flags of SCRANTON (her RDP session) and NASHUA (her PsExec sessions) that
-name no one, while the domain controller's and UTICA's own maintenance are leads. No story is
-about a SID or a service account, pbeesly's story holds the 31 flagged script blocks she ran on
-SCRANTON and NASHUA (their header names her SID), and it reaches NASHUA through the explicit
+UTICA is left alone) REMN's own rules raise 261 findings and the build reads one incident of
+three stories: pbeesly's, holding what her sessions and her programs did on SCRANTON and NASHUA
+(the handles her PowerShell opened among them), and the two hosts' own stories, holding the
+flags there that no account or session of hers raised (Windows' firewall and Group Policy
+changes, the event log service stopped, the service manager's PsExec entries), each linked to
+hers by time and place; the domain controller's and UTICA's own maintenance are leads. No story
+is about a SID or a service account, pbeesly's story holds the 31 flagged script blocks she ran
+on SCRANTON and NASHUA (their header names her SID), and it reaches NASHUA through the explicit
 credentials, the PsExec service and WinRM. Without the joins above it read five stories: hers
 and four host stories, all four high. On day 2 it reads two incidents: dschrute's and mscott's
 stories with UTICA's and NEWYORK's, joined by explicit credentials, and kmalone's with the local
@@ -728,10 +736,11 @@ account on SCRANTON she enabled (one record names both).
   weigh as rules never measured.
 - The thresholds at which low findings add up are case settings the build reads, but the page's
   settings do not offer them yet: a case posted by the page uses the defaults.
-- A flag that names no one joins the person on its host by time and place: a job an intruder
-  left running on a host fires in the session of whoever is on it then, and reads as theirs
-  (medium, and the step says so). A session whose logoff is not in the evidence counts as open
-  for two days after its logon.
+- A flag that names no one is its host's, and its host's story is one incident with the one
+  person who was on the host then by time and place only (medium, and the link says so): a job an
+  intruder left running fires beside whoever is on the host then. A session whose logoff is not
+  in the evidence is open only to its last record: a person still at the console after it, doing
+  nothing the logs record, is not taken as on the host.
 - A host's flags stand on their rules' measures (read by rule id, as above). A rule measured
   quiet on the clean machines can still fire on a host's own configuration: with the SigmaHQ packs on, the
   first day of the APT29 evaluation keeps a story of its domain controller (NEWYORK) standing on

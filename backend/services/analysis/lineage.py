@@ -757,6 +757,9 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
             "linkedLogonId": hex(x) if (x := logon_id(ev.get("targetLinkedLogonId"))) else None,
             "start": ts,
             "end": None,
+            # the time of its last record (its logon, a program it ran, an action, a reconnect): where the
+            # evidence of a session whose logoff is not in it ends
+            "last": ts,
             "logonRef": ref_of(ev),
             "logoffRef": None,
             "logonSeen": True,
@@ -829,6 +832,7 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
         if s:
             s["reconnects"].append(entry)
             s["rdp"] = True
+            s["last"] = max(s["last"], entry["ts"])
             lin._session_of_ref[entry["ref"]] = s["id"]
         if entry["kind"] == "reconnect":
             _hop(
@@ -1220,6 +1224,7 @@ def _unseen_session(lin: Lineage, host: str, lid: int, ev: dict[str, Any]) -> di
         "linkedLogonId": None,
         "start": ts,
         "end": None,
+        "last": ts,
         "logonRef": None,
         "logoffRef": None,
         "logonSeen": False,
@@ -1265,6 +1270,7 @@ def remote_action(ev: dict[str, Any], parent: Any = None) -> str | None:
 def _add_activity(lin: Lineage, s: dict[str, Any], ev: dict[str, Any], parent: Any = None) -> None:
     ref = ref_of(ev)
     s["activity"] += 1
+    s["last"] = max(s["last"], _ts(ev))
     if len(s["activityRefs"]) < 200:
         s["activityRefs"].append(ref)
     k = str(_eid(ev))
