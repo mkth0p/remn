@@ -92,3 +92,40 @@ def test_kerberos_user_enumeration_reads_the_unknown_principal_code_and_no_code_
 def test_kerberos_user_enumeration_reports_tgt_requests_for_unknown_accounts(store):
     found = fired(store, "win-kerberos-user-enumeration", [unknown_principal("0x6", i) for i in range(6)])
     assert len(found) == 1 and found[0]["count"] == 6
+
+
+SYSMON = ("Microsoft-Windows-Sysmon", "Microsoft-Windows-Sysmon/Operational")
+
+
+def test_an_rdp_connection_and_a_run_dialog_command_are_paired_in_either_order_so_the_pair_is_rated_low(store):
+    run_dialog = event(
+        13,
+        {"Image": r"C:\Windows\explorer.exe", "TargetObject": r"HKU\S-1-5-21-1-2-3-1001\Software\Microsoft\Windows\CurrentVersion\Explorer\RunMRU\a"},
+        SYSMON,
+        0,
+        "WS01",
+    )
+    rdp_in = event(3, {"Image": r"C:\Windows\System32\svchost.exe", "Initiated": "false", "DestinationPort": 3389, "SourceIp": "10.0.0.66"}, SYSMON, 4, "WS01")
+    # the command comes first here: the rule cannot tell, so it cannot claim the connection led to it
+    found = fired(store, "win-rdp-connect-then-run-dialog", [run_dialog, rdp_in])
+    assert len(found) == 1 and found[0]["severity"] == "low"
+    assert " after " not in found[0]["title"] and "either order" in found[0]["description"]
+
+
+def test_an_event_log_crash_and_a_client_on_its_pipe_are_paired_in_either_order_so_the_pair_is_rated_medium(store):
+    crash = event(
+        1,
+        {
+            "Image": r"C:\Windows\System32\WerFault.exe",
+            "ParentImage": r"C:\Windows\System32\svchost.exe",
+            "ParentCommandLine": r"C:\Windows\System32\svchost.exe -k LocalServiceNetworkRestricted -p",
+        },
+        SYSMON,
+        0,
+        "WS01",
+    )
+    pipe = event(18, {"Image": "System", "PipeName": "\\eventlog", "EventType": "ConnectPipe"}, SYSMON, 20, "WS01")
+    # the crash comes first here: the rule cannot tell, so it cannot claim the client caused it
+    found = fired(store, "win-eventlog-crash-after-remote-pipe", [crash, pipe])
+    assert len(found) == 1 and found[0]["severity"] == "medium"
+    assert "right after" not in found[0]["title"] and "either order" in found[0]["description"]
