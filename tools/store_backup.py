@@ -40,7 +40,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 import duckdb
 
 from forensic.build import build_id
-from services.store.casestore import KEY_RE, SCHEMA_VERSION, schema_version
+from services.store.casestore import KEY_RE, SCHEMA_VERSION, held_elsewhere, schema_version
 
 FILES = ("case.duckdb", "case.duckdb.wal")
 HELD = (
@@ -67,7 +67,7 @@ def _open(path: Path) -> duckdb.DuckDBPyConnection:
     try:
         return duckdb.connect(str(path), read_only=True)
     except duckdb.Error as exc:
-        if "Could not set lock" in str(exc) or "different configuration" in str(exc):
+        if held_elsewhere(exc):
             raise Refused(HELD) from exc
         raise Refused(f"the store could not be opened ({type(exc).__name__}: {str(exc).splitlines()[0][:200]}). Nothing was copied.") from exc
 

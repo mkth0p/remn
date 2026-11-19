@@ -21,7 +21,7 @@ import pytest
 from django.test import Client
 
 from services.store import casestore
-from services.store.casestore import CaseStore, StoreRegistry, registry
+from services.store.casestore import CaseStore, StoreRegistry, held_elsewhere, registry
 from services.store.writers import EventWriter
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -233,3 +233,18 @@ def test_a_manifest_that_names_another_case_or_a_file_outside_its_folder_is_refu
         assert store_backup.main(["restore", "--cases-dir", str(cases), str(dest)]) == 1
         assert "does not describe a store of this case" in capsys.readouterr().out
         assert list(cases.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        # the wording on Linux and macOS
+        'IO Error: Could not set lock on file "/cases/invented/case.duckdb": Conflicting lock is held in /usr/bin/python3 (PID 4242)',
+        # the wording on Windows, which the store and the backup tool read as a failure to open
+        'IO Error: Cannot open file "C:\\cases\\invented\\case.duckdb": The process cannot access the file because it is being used by '
+        "another process.\n\nFile is already open in \nC:\\Python\\python.exe (PID 4242)",
+    ],
+)
+def test_a_store_held_by_another_process_is_recognised_on_every_platform(message):
+    assert held_elsewhere(duckdb.IOException(message))
+    assert not held_elsewhere(duckdb.IOException('IO Error: Cannot open file "/cases/invented/case.duckdb": No such file or directory'))

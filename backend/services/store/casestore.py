@@ -85,10 +85,15 @@ def schema_version(con: duckdb.DuckDBPyConnection) -> int | None:
         ) from None
 
 
-def _held_elsewhere(exc: duckdb.Error) -> bool:
+# How DuckDB says another process holds the file: a lock it could not take elsewhere, a
+# sharing violation on Windows, or the same file opened here in another mode.
+_HELD = ("Could not set lock", "File is already open in", "being used by another process", "different configuration")
+
+
+def held_elsewhere(exc: duckdb.Error) -> bool:
     """Whether opening a store failed because another connection holds the file."""
     text = str(exc)
-    return "Could not set lock" in text or "different configuration" in text
+    return any(marker in text for marker in _HELD)
 
 
 _time_limit: ContextVar[TimeLimit | None] = ContextVar("store_time_limit", default=None)
@@ -632,7 +637,7 @@ class CaseStore:
         try:
             self._con = duckdb.connect(str(self.path))
         except duckdb.Error as exc:
-            if _held_elsewhere(exc):
+            if held_elsewhere(exc):
                 raise StoreBusyError(
                     "the case store is open in another program (a backup or restore with tools/store_backup.py, or a second REMN server on the "
                     "same folder), so it was not opened. Try again when that program has finished."
