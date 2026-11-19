@@ -390,6 +390,84 @@ def test_then_is_checked_for_every_finding(store):
     assert len(f) == 600 and all(x["severity"] == "high" for x in f)
 
 
+def _sql_store(store):
+    w = EventWriter(store, 1)
+    for i, (line, service) in enumerate(
+        [
+            ("powershell Set-MpPreference -DisableRealtimeMonitoring $true", None),
+            ("powershell Import-Module .\\invented.psm1; copy a.txt b.txt", None),
+            ("sc create invented", "install"),
+        ]
+    ):
+        w.add(_event(i, commandLine=line, serviceName=service, summary="update" if i == 0 else f"event {i}"))
+    w.flush()
+
+
+@pytest.mark.parametrize(
+    "sql, rows",
+    [
+        # words a keyword list refused, inside literals and names
+        ("""SELECT count(*) AS n FROM events WHERE "commandLine" ILIKE '%Set-MpPreference%'""", [{"n": 1}]),
+        ("SELECT count(*) AS n FROM events WHERE summary = 'update'", [{"n": 1}]),
+        ('SELECT 1 AS "load"', [{"load": 1}]),
+        ("""SELECT count(*) AS n FROM events WHERE "commandLine" ILIKE '%Import-Module%' AND "commandLine" ILIKE '%copy %'""", [{"n": 1}]),
+        ("""SELECT count(*) AS n FROM events WHERE "serviceName" = 'install'""", [{"n": 1}]),
+        # a semicolon inside a literal is not a second statement
+        ("""SELECT count(*) AS n FROM events WHERE "commandLine" LIKE '%;%'""", [{"n": 1}]),
+        ("WITH t AS (SELECT computer FROM events) SELECT count(*) AS n FROM t", [{"n": 3}]),
+        ("FROM events SELECT count(*) AS n;", [{"n": 3}]),
+        ("SELECT count(*) AS n FROM main.events -- a closing comment", [{"n": 3}]),
+        ("SELECT sum(range) AS n FROM range(4)", [{"n": 6}]),
+    ],
+)
+def test_the_sql_view_answers_a_select_whose_text_holds_a_statement_word(store, sql, rows):
+    _sql_store(store)
+    assert Q.run_sql(store, sql)["rows"] == rows
+
+
+def test_the_sql_view_still_describes_and_lists_the_tables(store):
+    _sql_store(store)
+    assert "commandLine" in {r["column_name"] for r in Q.run_sql(store, "DESCRIBE events", limit=500)["rows"]}
+    assert {"events", "mails"} <= {r["name"] for r in Q.run_sql(store, "SHOW TABLES")["rows"]}
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        # file-reading functions a keyword list let through, and a file path used as a table
+        "SELECT * FROM read_csv_auto('{path}')",
+        "SELECT * FROM read_json_auto('{path}')",
+        "SELECT * FROM read_ndjson_auto('{path}')",
+        "SELECT * FROM read_json_objects('{path}')",
+        "SELECT * FROM parquet_scan('{path}')",
+        "SELECT * FROM sniff_csv('{path}')",
+        "SELECT * FROM '{path}'",
+        "DESCRIBE '{path}'",
+        "SELECT count(*) FROM events WHERE id IN (SELECT 1 FROM read_text('{path}'))",
+        # a statement held in a string
+        "SELECT * FROM query('SELECT * FROM read_text(''{path}'')')",
+        # anything but one SELECT
+        "DELETE FROM events",
+        "UPDATE events SET summary = 'tampered'",
+        "COPY events TO '{path}'",
+        "ATTACH '{path}' AS other",
+        "SET enable_external_access = true",
+        "INSTALL httpfs",
+        "PRAGMA table_info('events')",
+        "CREATE TABLE invented AS SELECT * FROM events",
+        "SELECT 1; SELECT 2",
+        "SELECT 1; DROP TABLE events",
+    ],
+)
+def test_the_sql_view_refuses_all_but_one_select_on_the_case_tables(store, tmp_path, sql):
+    _sql_store(store)
+    path = tmp_path / "invented.csv"
+    path.write_text("a,b\n1,2\n", encoding="utf-8")
+    with pytest.raises(FilterError):
+        Q.run_sql(store, sql.format(path=path))
+    assert Q.run_sql(store, "SELECT count(*) AS n FROM events WHERE summary <> 'tampered'")["rows"] == [{"n": 3}]
+
+
 def test_sql_compiler_edge_cases():
     ctx = Ctx(source="events", settings={})
     sql = compile_condition("eventId", "in", "4624, 4625", ctx)

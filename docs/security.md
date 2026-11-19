@@ -62,12 +62,15 @@ pack importer download from their sources on request, never during an investigat
   which the browser requires before the page may call print on it. Links whose target
   comes from data (reputation providers, pack manifests, ATT&CK ids) pass through a
   scheme check and get `rel="noopener noreferrer"`; anything but http(s) is dropped.
-- The raw SQL endpoint and the analyst's `sql` tool accept one read statement (SELECT,
-  WITH, DESCRIBE, SHOW) with write keywords rejected, and every DuckDB connection runs
-  with external access disabled and the configuration locked, so a prompt-injected
-  query cannot read or write files on the server or load extensions. The two settings
-  are read back when a case store opens, and a store on which they did not take effect
-  is not opened.
+- The raw SQL endpoint and the analyst's `sql` tool accept one SELECT statement (WITH,
+  DESCRIBE, SHOW and SUMMARIZE included), as DuckDB's own parser reads it, on the case's
+  tables: a table function other than `range`, `generate_series`, `unnest`, `json_each`
+  and `json_tree` (those that read files among them) and a file path used as a table are
+  refused, while a word such as `Set-MpPreference` or `update` inside a string is not.
+  Every DuckDB connection also runs with external access disabled and the configuration
+  locked, so a prompt-injected query cannot read or write files on the server or load
+  extensions. The two settings are read back when a case store opens, and a store on
+  which they did not take effect is not opened.
 - Identifiers that reach the filesystem are validated (case keys and upload ids by
   pattern, pack ids without separators, static files resolved inside the build
   directory); rule archives are capped per member and in total; CSV exports neutralise
