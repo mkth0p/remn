@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import uuid
 from pathlib import Path
@@ -617,3 +619,42 @@ def test_a_graph_property_csv_in_pascal_case_is_read():
     }
     (row,) = list(m365.iter_records(None, json.dumps([obj]).encode(), "entra-signin-json"))
     assert row["status"] == "50126" and row["data"]["country"] == "FR" and row["data"]["city"] == "Lyon"
+
+
+def _ual_csv(records: list[dict]) -> bytes:
+    """A Purview audit search export: one AuditData JSON column per record (invented records)."""
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["RecordId", "CreationDate", "RecordType", "Operation", "UserId", "AuditData"])
+    for r in records:
+        w.writerow([r["Id"], r["CreationTime"] + "Z", r["RecordType"], r["Operation"], r["UserId"], json.dumps(r)])
+    return out.getvalue().encode()
+
+
+def test_an_audit_record_longer_than_the_csv_default_is_read_with_the_rest(tmp_path):
+    """Python's csv stops at a field of 131,072 characters, and a DLP or MailItemsAccessed record
+    passes that: the export ended at that record and every record after it was lost."""
+    recs = make_m365.ual_records()[:7]
+    recs[1] = {**recs[1], "PolicyDetails": [{"PolicyName": "DLP " + "x" * 140_000}]}
+    f = tmp_path / "audit.csv"
+    f.write_bytes(_ual_csv(recs))
+    rows, src = _rows(str(f))
+    assert src.format == "m365-ual-csv" and src.stats.errors == 0 and src.files == []
+    assert [r["recordKey"] for r in rows] == [m365.record_key("ual", r["Id"]) for r in recs]
+
+
+def test_a_csv_row_that_cannot_be_read_is_counted_and_the_rest_are_read():
+    from services.parsers.evtx_parser import Stats
+
+    recs = make_m365.ual_records()[:5]
+    recs[2] = {**recs[2], "Note": "x" * 10_000}
+    data = _ual_csv(recs)
+    limit = csv.field_size_limit()
+    # a field past the limit, made with a small limit rather than sixteen megabytes of test data
+    csv.field_size_limit(8_000)
+    try:
+        stats = Stats()
+        rows = list(m365.iter_records(None, data, "m365-ual-csv", stats=stats))
+    finally:
+        csv.field_size_limit(limit)
+    assert stats.errors == 1 and [r["recordKey"] for r in rows] == [m365.record_key("ual", recs[i]["Id"]) for i in (0, 1, 3, 4)]

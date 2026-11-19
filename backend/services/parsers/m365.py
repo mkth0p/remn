@@ -45,6 +45,13 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
+# The longest field a CSV export may hold. Python's csv stops at 131,072 characters, which one
+# DLP or MailItemsAccessed record passes, and the export then ended at that record. The limit is
+# the csv module's own, for the whole process, so it is only ever raised here.
+MAX_FIELD_CHARS = 16 * 1024 * 1024
+if csv.field_size_limit() < MAX_FIELD_CHARS:
+    csv.field_size_limit(MAX_FIELD_CHARS)
+
 UAL_PROVIDER = "Microsoft 365 Unified Audit Log"
 ENTRA_PROVIDER = "Microsoft Entra ID Sign-in"
 FORMATS = ("m365-ual-csv", "m365-ual-json", "entra-signin-json", "entra-signin-csv")
@@ -903,6 +910,25 @@ def _audit_from_row(obj: dict[str, Any]) -> tuple[dict[str, Any] | None, Any]:
     return None, None
 
 
+def _csv_rows(fh: io.TextIOBase, stats: Any) -> Iterator[dict[str, Any]]:
+    """The rows of a CSV export. A row the csv module cannot read (a field past MAX_FIELD_CHARS, a
+    stray quote) is counted as an error and the rows after it are still read."""
+    reader = csv.DictReader(fh)
+    # the header is read outside the loop: a header that cannot be read fails the file
+    if reader.fieldnames is None:
+        return
+    while True:
+        try:
+            rec = next(reader)
+        except StopIteration:
+            return
+        except csv.Error:
+            if stats is not None:
+                stats.errors += 1
+            continue
+        yield {k: v for k, v in rec.items() if k is not None}
+
+
 def _key_hash(key: str) -> int:
     return int.from_bytes(hashlib.blake2b(key.encode(), digest_size=8).digest(), "big")
 
@@ -942,9 +968,8 @@ def _iter_rows(path: str | None, data: bytes | None, fmt: str, stats: Any, inclu
     fh = _open_text(path, data)
     try:
         if fmt == "m365-ual-csv":
-            reader = csv.DictReader(fh)
-            for rec in reader:
-                ad, rtype = _audit_from_row({k: v for k, v in rec.items() if k is not None})
+            for rec in _csv_rows(fh, stats):
+                ad, rtype = _audit_from_row(rec)
                 if ad is None:
                     if stats is not None:
                         stats.errors += 1
@@ -968,13 +993,12 @@ def _iter_rows(path: str | None, data: bytes | None, fmt: str, stats: Any, inclu
                     continue
                 yield _finish(entra_row(signin), obj, stats, include_raw)
         elif fmt == "entra-signin-csv":
-            reader = csv.DictReader(fh)
+            reader = _csv_rows(fh, stats)
             # the date order is decided from the file's own dates before any row is read
             head = list(itertools.islice(reader, 5000))
-            date_keys = [k for k in (reader.fieldnames or []) if _PORTAL_MAP.get(k.strip().lower()) == "createdDateTime" or k == "createdDateTime"]
+            date_keys = {k for rec in head[:1] for k in rec if _PORTAL_MAP.get(k.strip().lower()) == "createdDateTime" or k == "createdDateTime"}
             day_first = date_order(rec.get(k) for rec in head for k in date_keys)
-            for rec in itertools.chain(head, reader):
-                obj = {k: v for k, v in rec.items() if k is not None}
+            for obj in itertools.chain(head, reader):
                 yield _finish(entra_row(obj, day_first), obj, stats, include_raw)
         else:
             raise ValueError(f"unknown M365 format {fmt}")

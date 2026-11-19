@@ -127,6 +127,11 @@ Rows carry `provider`, `channel` (the workload), `category` (`M365 Exchange`,
 (Parameters, ModifiedProperties and OperationProperties flattened; Entra
 `data.country`, `data.clientAppUsed`, `data.riskState`, …).
 
+A record that cannot be read is counted in the evidence's parse errors, and the records after
+it are still read. A CSV field may hold up to 16 MiB, so an AuditData column longer than the
+131,072 characters Python's CSV reader stops at by default no longer ends the file; a row
+the reader cannot take (a longer field, a stray quote) is one such error.
+
 A record is in the case once. Search-UnifiedAuditLog's large-set pages repeat records,
 and exports cut into time slices overlap, so a UAL record whose `AuditData.Id` was already
 read, and a Graph sign-in whose `id` was, is not added again: not from the same file, not
