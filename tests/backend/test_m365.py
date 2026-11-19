@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import uuid
 from pathlib import Path
@@ -511,3 +513,371 @@ def test_a_record_with_its_keys_in_alphabetical_order_is_read(tmp_path):
         zf.writestr("audit/o365.json", line + "\n")
     zipped = EvtxSource("audit.zip", None, buf.getvalue(), str(tmp_path))
     assert [r["operation"] for r in zipped] == ["Set-Mailbox"]
+
+
+# The exports below are invented and shaped like what Graph, the Graph PowerShell SDK and
+# Microsoft-Extractor-Suite write for a tenant; no record comes from a real tenant.
+def _directory_audit(n: int) -> dict:
+    """A Graph directoryAudit (Get-MgAuditLogDirectoryAudit, Get-EntraAuditLogs)."""
+    return {
+        "id": f"Directory_{uuid.uuid4()}_{n}",
+        "category": "UserManagement",
+        "correlationId": str(uuid.uuid4()),
+        "result": "success",
+        "resultReason": "",
+        "activityDisplayName": "Update user",
+        "activityDateTime": "2026-09-01T10:00:00Z",
+        "loggedByService": "Core Directory",
+        "operationType": "Update",
+        "initiatedBy": {
+            "user": {"id": str(uuid.uuid4()), "displayName": None, "userPrincipalName": "admin@contoso.com", "ipAddress": "203.0.113.9"},
+            "app": None,
+        },
+        "targetResources": [{"id": str(uuid.uuid4()), "displayName": None, "type": "User", "userPrincipalName": "alice@contoso.com", "modifiedProperties": []}],
+        "additionalDetails": [{"key": "UserType", "value": "Member"}],
+    }
+
+
+def _sources_of(path) -> tuple[list[dict], dict]:
+    from services.ingest.package import PackageSource
+    from services.parsers.mail.common import ParseContext
+
+    source = PackageSource(path.name, str(path), None, str(path.parent), ParseContext(analyze_attachments=False))
+    return list(source), source.stats()
+
+
+def test_a_directory_audit_export_is_not_read_as_sign_ins(tmp_path):
+    """A directoryAudits page names a userPrincipalName and an ipAddress, and every record of it
+    became a successful, undated sign-in of nobody. It is not an export REMN reads, and is said so."""
+    page = {"@odata.context": "https://graph.microsoft.com/v1.0/$metadata#auditLogs/directoryAudits", "value": [_directory_audit(i) for i in range(3)]}
+    f = tmp_path / "AuditLogs.json"
+    f.write_text(json.dumps(page, indent=2), encoding="utf-8")
+    assert m365.detect_format(f.name, f.read_bytes()[:65536]) is None
+    rows, stats = _sources_of(f)
+    assert rows == [] and stats["files"][0]["status"] == "unsupported"
+    # given to the event-log import, it is not read as an event log either
+    with pytest.raises(ValueError, match="not a recognised Microsoft 365 or Entra export"):
+        list(EvtxSource(f.name, str(f), None, str(tmp_path)))
+
+
+def test_risk_and_user_exports_are_not_read_as_sign_ins():
+    risky_user = {"id": str(uuid.uuid4()), "isDeleted": False, "riskLevel": "high", "riskState": "atRisk", "userPrincipalName": "alice@contoso.com"}
+    detection = {
+        "id": "a1b2c3",
+        "riskEventType": "unfamiliarFeatures",
+        "riskLevel": "medium",
+        "ipAddress": "203.0.113.20",
+        "activityDateTime": "2026-09-01T10:00:00Z",
+        "detectedDateTime": "2026-09-01T10:01:00Z",
+        "userPrincipalName": "alice@contoso.com",
+        "tokenIssuerType": "AzureAD",
+        "location": {"city": "Lyon", "countryOrRegion": "FR"},
+    }
+    for record in (risky_user, detection):
+        assert m365.detect_format("risk.json", json.dumps([record]).encode()) is None
+    # a user list as Microsoft-Extractor-Suite and Get-MgUser | Export-Csv write it
+    users = b"Id,DisplayName,UserPrincipalName,AccountEnabled,CreatedDateTime,UserType\n1d2c,Alice,alice@contoso.com,True,1/15/2024 10:11:12 AM,Member\n"
+    assert m365.detect_format("Users.csv", users) is None
+
+
+def test_a_record_that_is_not_a_sign_in_is_counted_not_read():
+    from services.parsers.evtx_parser import Stats
+
+    stats = Stats()
+    data = json.dumps([make_m365.entra_signins()[0], _directory_audit(1)]).encode()
+    assert m365.detect_format("signins.json", data) == "entra-signin-json"
+    rows = list(m365.iter_records(None, data, "entra-signin-json", stats=stats))
+    assert len(rows) == 1 and rows[0]["user"] == make_m365.entra_signins()[0]["userPrincipalName"] and stats.errors == 1
+
+
+def test_a_graph_property_csv_in_pascal_case_is_read():
+    """Get-MgAuditLogSignIn | Export-Csv names its columns in PascalCase and writes each object
+    property as its .NET type name. Read by the camelCase names only, every row was a blank,
+    undated "Sign-in ok"; read now, the type names are not taken for a status or a place."""
+    model = "Microsoft.Graph.PowerShell.Models.MicrosoftGraph"
+    data = (
+        "AppDisplayName,AppId,ClientAppUsed,ConditionalAccessStatus,CorrelationId,CreatedDateTime,DeviceDetail,Id,IPAddress,"
+        "IsInteractive,Location,ResourceDisplayName,RiskEventTypes,RiskLevelDuringSignIn,RiskState,Status,UserDisplayName,UserId,UserPrincipalName\n"
+        f"Office 365 Exchange Online,00000002,Browser,success,c-1,9/1/2026 10:00:00 AM,{model}DeviceDetail,{uuid.uuid4()},203.0.113.30,"
+        f"True,{model}SignInLocation,Office 365 Exchange Online,System.String[],none,none,{model}SignInStatus,Alice,u-1,alice@contoso.com\n"
+    ).encode()
+    assert m365.detect_format("SignInLogs.csv", data) == "entra-signin-csv"
+    (row,) = list(m365.iter_records(None, data, "entra-signin-csv"))
+    assert row["user"] == "alice@contoso.com" and row["ipAddress"] == "203.0.113.30" and row["tsIso"] == "2026-09-01T10:00:00.000Z"
+    assert row["data"]["appDisplayName"] == "Office 365 Exchange Online" and row["data"]["clientAppUsed"] == "Browser"
+    assert "country" not in row["data"] and "riskEventTypes" not in row["data"] and "browser" not in row["data"]
+    # the export does not say whether the sign-in succeeded, and the row does not claim it did
+    assert row["status"] is None and row["summary"].startswith("Sign-in (outcome not in the export): alice@contoso.com from 203.0.113.30")
+    # the same export as JSON (ConvertTo-Json) keeps the objects, under PascalCase names
+    obj = {
+        "CreatedDateTime": "2026-09-01T10:00:00Z",
+        "UserPrincipalName": "alice@contoso.com",
+        "IPAddress": "203.0.113.30",
+        "AppDisplayName": "Office 365 Exchange Online",
+        "Status": {"ErrorCode": 50126, "FailureReason": "Invalid username or password."},
+        "Location": {"City": "Lyon", "CountryOrRegion": "FR"},
+    }
+    (row,) = list(m365.iter_records(None, json.dumps([obj]).encode(), "entra-signin-json"))
+    assert row["status"] == "50126" and row["data"]["country"] == "FR" and row["data"]["city"] == "Lyon"
+
+
+def _ual_csv(records: list[dict]) -> bytes:
+    """A Purview audit search export: one AuditData JSON column per record (invented records)."""
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["RecordId", "CreationDate", "RecordType", "Operation", "UserId", "AuditData"])
+    for r in records:
+        w.writerow([r["Id"], r["CreationTime"] + "Z", r["RecordType"], r["Operation"], r["UserId"], json.dumps(r)])
+    return out.getvalue().encode()
+
+
+def test_an_audit_record_longer_than_the_csv_default_is_read_with_the_rest(tmp_path):
+    """Python's csv stops at a field of 131,072 characters, and a DLP or MailItemsAccessed record
+    passes that: the export ended at that record and every record after it was lost."""
+    recs = make_m365.ual_records()[:7]
+    recs[1] = {**recs[1], "PolicyDetails": [{"PolicyName": "DLP " + "x" * 140_000}]}
+    f = tmp_path / "audit.csv"
+    f.write_bytes(_ual_csv(recs))
+    rows, src = _rows(str(f))
+    assert src.format == "m365-ual-csv" and src.stats.errors == 0 and src.files == []
+    assert [r["recordKey"] for r in rows] == [m365.record_key("ual", r["Id"]) for r in recs]
+
+
+def test_a_csv_row_that_cannot_be_read_is_counted_and_the_rest_are_read():
+    from services.parsers.evtx_parser import Stats
+
+    recs = make_m365.ual_records()[:5]
+    recs[2] = {**recs[2], "Note": "x" * 10_000}
+    data = _ual_csv(recs)
+    limit = csv.field_size_limit()
+    # a field past the limit, made with a small limit rather than sixteen megabytes of test data
+    csv.field_size_limit(8_000)
+    try:
+        stats = Stats()
+        rows = list(m365.iter_records(None, data, "m365-ual-csv", stats=stats))
+    finally:
+        csv.field_size_limit(limit)
+    assert stats.errors == 1 and [r["recordKey"] for r in rows] == [m365.record_key("ual", recs[i]["Id"]) for i in (0, 1, 3, 4)]
+
+
+class _CountingText(io.StringIO):
+    """A text stream that counts the characters handed out, to show how much was read."""
+
+    handed = 0
+
+    def read(self, size=-1):
+        out = super().read(size)
+        self.handed += len(out)
+        return out
+
+    def readline(self, size=-1):
+        out = super().readline(size)
+        self.handed += len(out)
+        return out
+
+
+def test_a_json_array_export_is_read_one_record_at_a_time():
+    """A sign-in or audit export written as a JSON array was loaded whole, about ten times its size
+    in the web process. The first record comes out before more than a piece of the file is read."""
+    signins = [{**s, "id": str(uuid.uuid4())} for s in make_m365.entra_signins() * 200]
+    text = json.dumps(signins, indent=2)
+    assert len(text) > 4 * 1024 * 1024
+    fh = _CountingText(text)
+    records = m365._iter_json_objects(fh)
+    assert next(records)["id"] == signins[0]["id"] and fh.handed < len(text) / 3
+    assert [r["id"] for r in records] == [s["id"] for s in signins[1:]]
+
+
+def test_graph_pages_and_documents_one_after_another_are_read():
+    a, b, c = (dict(s, id=str(uuid.uuid4())) for s in make_m365.entra_signins()[:3])
+    page = json.dumps(
+        {
+            "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#auditLogs/signIns",
+            "value": [a, b],
+            "@odata.nextLink": "https://graph.microsoft.com/next",
+        },
+        indent=2,
+    )
+    assert [r["id"] for r in m365._iter_json_objects(io.StringIO(page))] == [a["id"], b["id"]]
+    # an export written page by page, each page appended to the same file
+    appended = json.dumps([a, b], indent=2) + "\n" + json.dumps([c], indent=2) + "\n"
+    assert [r["id"] for r in m365._iter_json_objects(io.StringIO(appended))] == [a["id"], b["id"], c["id"]]
+    single = json.dumps(a, indent=2)
+    assert [r["id"] for r in m365._iter_json_objects(io.StringIO(single))] == [a["id"]]
+
+
+def test_a_json_export_broken_part_way_keeps_what_came_before_and_says_where(tmp_path):
+    signins = make_m365.entra_signins()[:4]
+    text = json.dumps(signins, indent=1)
+    cut = text.index(signins[2]["id"])
+    f = tmp_path / "signins.json"
+    f.write_text(text[:cut] + "\x00" + text[cut:], encoding="utf-8")
+    rows, src = _rows(str(f))
+    assert len(rows) == 2 and src.stats.errors == 1
+    assert src.files[0]["status"] == "error" and src.files[0]["error"].startswith("invalid JSON after record 2:")
+
+
+def test_a_record_longer_than_the_limit_is_counted_not_held(monkeypatch):
+    from services.parsers.evtx_parser import Stats
+
+    monkeypatch.setattr(m365, "MAX_RECORD_CHARS", 4096)
+    monkeypatch.setattr(m365, "_CHUNK", 1024)
+    small = make_m365.entra_signins()[:2]
+    big = {**make_m365.entra_signins()[2], "userAgent": "x" * 10_000}
+    # one record per line: the long line is counted, the lines after it read
+    stats = Stats()
+    lines = "\n".join(json.dumps(r) for r in (small[0], big, small[1])) + "\n"
+    rows = list(m365.iter_records(None, lines.encode(), "entra-signin-json", stats=stats))
+    assert [r["data"]["id"] for r in rows] == [small[0]["id"], small[1]["id"]] and stats.errors == 1
+    # inside an array there is no line to resume at: the file stops there and says why
+    with pytest.raises(ValueError, match="longer than"):
+        list(m365.iter_records(None, json.dumps([small[0], big, small[1]]).encode(), "entra-signin-json"))
+
+
+def _long_record() -> dict:
+    """A DLP match whose policy details run past the 4,000 characters a data value keeps (invented)."""
+    rec = make_m365.ual_records()[0]
+    return {**rec, "Id": str(uuid.uuid4()), "PolicyDetails": [{"PolicyName": "Finance", "Rules": [{"RuleName": f"rule {i}"} for i in range(400)]}]}
+
+
+def test_a_value_cut_at_its_limit_says_so_and_is_counted(tmp_path):
+    """A nested AuditData value was cut at 4,000 characters into JSON that does not parse, and
+    nothing said it was cut. The cut value now ends with an ellipsis and the record is counted."""
+    from services.parsers.evtx_parser import Stats
+
+    stats = Stats()
+    rec = _long_record()
+    whole = json.dumps(rec["PolicyDetails"], ensure_ascii=False)
+    rows = list(m365.iter_records(None, json.dumps([rec, make_m365.ual_records()[1]]).encode(), "m365-ual-json", stats=stats))
+    value = rows[0]["data"]["PolicyDetails"]
+    assert len(whole) > 4000 and value == whole[:4000] + "…"
+    assert json.loads(rows[0]["raw"])["PolicyDetails"] == rec["PolicyDetails"]
+    assert stats.cut == 1 and stats.to_dict()["cut"] == 1 and "_cut" not in rows[0] and "_cut" not in rows[1]
+
+
+def test_a_raw_record_cut_at_its_limit_says_so():
+    from services.parsers.evtx_parser import Stats
+
+    stats = Stats()
+    rec = {**make_m365.ual_records()[0], "AffectedItems": [{"InternetMessageId": f"<{i}@example.test>", "Subject": "s" * 300} for i in range(800)]}
+    (row,) = m365.iter_records(None, json.dumps([rec]).encode(), "m365-ual-json", stats=stats)
+    assert len(row["raw"]) == 200_001 and row["raw"].endswith("…") and stats.cut == 1
+
+
+def test_the_member_list_says_how_many_records_were_cut(tmp_path):
+    import zipfile
+
+    z = tmp_path / "export.zip"
+    with zipfile.ZipFile(z, "w") as zf:
+        zf.writestr("ual/long.json", json.dumps([_long_record()]))
+        zf.writestr("ual/short.json", json.dumps(make_m365.ual_records()[1:3]))
+    src = EvtxSource(z.name, str(z), None, str(tmp_path))
+    list(src)
+    notes = {f["name"]: f.get("note") for f in src.files}
+    assert notes == {"ual/long.json": "1 record(s) hold a value cut at its length limit, marked by a closing …", "ual/short.json": None}
+    rows, stats = _sources_of(tmp_path / "export.zip")
+    member = next(f for f in stats["files"] if f["name"] == "ual/long.json")
+    assert member["status"] == "parsed" and member["note"] == notes["ual/long.json"]
+
+
+def _portal_csv(dates: list[str]) -> bytes:
+    """An Entra portal sign-in CSV, as re-saved by a spreadsheet in some culture (invented rows)."""
+    head = "Date (UTC),Request ID,Username,IP address,Status,Sign-in error code,Application\n"
+    return (head + "".join(f"{d},r{i},alice@contoso.com,203.0.113.5,Success,0,Office 365\n" for i, d in enumerate(dates))).encode()
+
+
+def test_culture_dates_keep_their_zone_and_their_minutes():
+    """Dates the parser could not read left the row off the timeline without a word."""
+    assert m365.parse_ts("9/1/2026 10:00:00 AM +02:00")[1] == "2026-09-01T08:00:00.000Z"
+    assert m365.parse_ts("9/1/2026 10:00 PM")[1] == "2026-09-01T22:00:00.000Z"
+    assert m365.parse_ts("1/09/2026 10:00:00 AM", day_first=True)[1] == "2026-09-01T10:00:00.000Z"
+    assert m365.parse_ts("2026/09/01 10:00:00")[1] == "2026-09-01T10:00:00.000Z"
+    assert m365.parse_ts("01-09-2026 10:00", day_first=True)[1] == "2026-09-01T10:00:00.000Z"
+    assert m365.parse_ts("2026-09-01T10:00:00.1234567-05:00")[1] == "2026-09-01T15:00:00.123Z"
+    assert m365.parse_ts("31/02/2026 10:00:00", day_first=True) == (None, None)
+
+
+def test_a_record_without_a_readable_time_is_counted(tmp_path):
+    from services.parsers.evtx_parser import Stats
+
+    stats = Stats()
+    recs = make_m365.ual_records()[:3]
+    recs[1] = {**recs[1], "CreationTime": "sometime in September"}
+    rows = list(m365.iter_records(None, json.dumps(recs).encode(), "m365-ual-json", stats=stats))
+    assert [r["ts"] is None for r in rows] == [False, True, False]
+    assert stats.undated == 1 and stats.to_dict()["undated"] == 1
+
+
+def test_the_date_order_is_decided_from_the_whole_file():
+    """Only the first 5,000 rows decided: a fr-FR export whose first days were all 12 or below
+    was read month-first, every date of it wrong."""
+    from services.parsers.evtx_parser import Stats
+
+    stats = Stats()
+    dates = ["05/01/2024 10:11:12"] * 5000 + ["15/01/2024 10:11:12"]
+    rows = list(m365.iter_records(None, _portal_csv(dates), "entra-signin-csv", stats=stats))
+    assert {r["tsIso"][:10] for r in rows} == {"2024-01-05", "2024-01-15"} and stats.date_order_guessed == 0
+
+
+def test_a_date_order_the_file_cannot_show_is_said(tmp_path):
+    """Every date at day 12 or below: read month-first, the portal's own order, and counted, so the
+    analyst knows the dates of a day-first export would be wrong."""
+    from services.parsers.evtx_parser import Stats
+
+    stats = Stats()
+    rows = list(m365.iter_records(None, _portal_csv(["05/01/2024 10:11:12", "06/01/2024 10:11:12", "06/06/2024 10:11:12"]), "entra-signin-csv", stats=stats))
+    assert [r["tsIso"][:10] for r in rows] == ["2024-05-01", "2024-06-01", "2024-06-06"]
+    # a day equal to its month reads the same either way, and a dotted date is always day-first
+    assert stats.date_order_guessed == 2 and stats.to_dict()["dateOrderGuessed"] == 2
+    stats = Stats()
+    rows = list(m365.iter_records(None, _portal_csv(["05.01.2024 10:11:12"]), "entra-signin-csv", stats=stats))
+    assert rows[0]["tsIso"][:10] == "2024-01-05" and stats.date_order_guessed == 0
+    f = tmp_path / "signins.csv"
+    f.write_bytes(_portal_csv(["05/01/2024 10:11:12", "13/01/2024 10:11:12"]).replace(b"13/01", b"1301"))
+    rows, stats = _sources_of(f)
+    assert stats["files"][0]["note"] == (
+        "1 record(s) have no time: their date is missing or could not be read; "
+        "1 record(s) were dated month-first: no date in the file has a day above 12 to show its order"
+    )
+
+
+def test_the_ids_kept_to_find_repeats_are_held_in_little_memory():
+    """One Python int in a set per record, about 70 bytes: a package of sixteen million audit
+    records held a gigabyte of ids in the web process."""
+    import tracemalloc
+
+    tracemalloc.start()
+    try:
+        seen = m365.RecordKeys()
+        rows = list(m365.iter_records(None, b"", "m365-ual-json", seen=seen))
+        for i in range(200_000):
+            seen.add(m365._key_hash(f"ual:{i}"))
+        held = tracemalloc.get_traced_memory()[0]
+    finally:
+        tracemalloc.stop()
+    assert rows == [] and held < 6 * 1024 * 1024 and len(seen) == 200_000
+    assert m365._key_hash("ual:5") in seen and m365._key_hash("ual:200000") not in seen
+
+
+def test_records_past_the_ids_held_are_read_and_counted(tmp_path):
+    from services.parsers.evtx_parser import Stats
+
+    recs = make_m365.ual_records()[:5]
+    stats = Stats()
+    seen = m365.RecordKeys(limit=3)
+    data = json.dumps(recs + recs).encode()
+    rows = list(m365.iter_records(None, data, "m365-ual-json", stats=stats, seen=seen))
+    # the first three are remembered and their repeats left out; the last two are read, twice, and said
+    assert [r["recordKey"] for r in rows] == [m365.record_key("ual", r["Id"]) for r in recs + recs[3:]]
+    assert stats.duplicates == 3 and stats.repeats_unchecked == 4 and stats.to_dict()["repeatsUnchecked"] == 4
+    assert m365.note(m365.counts(stats)) == "4 record(s) were read once the ids held to find repeats were full, and were not compared with one another"
+
+
+def test_an_element_that_is_not_a_record_is_counted():
+    from services.parsers.evtx_parser import Stats
+
+    signin = make_m365.entra_signins()[0]
+    for text, unread in ((json.dumps([signin, None, "x", 3]), 3), (json.dumps({"value": [signin, None]}), 1), (json.dumps(signin) + "\n[1, 2]\n", 1)):
+        stats = Stats()
+        rows = list(m365.iter_records(None, text.encode(), "entra-signin-json", stats=stats))
+        assert len(rows) == 1 and stats.errors == unread, text[-40:]

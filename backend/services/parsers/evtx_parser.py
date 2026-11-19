@@ -303,7 +303,8 @@ def _scalar(value: Any) -> Any:
 
 
 # The text rules search whole: a command line (Windows allows 32,767 characters), a script
-# block, a task definition, a WMI consumer. Cut at 4,000 characters, an indicator placed after
+# block, a task definition, a WMI consumer, and the message joined from a classic event's unnamed
+# Data (a PowerShell 400's HostApplication). Cut at 4,000 characters, an indicator placed after
 # the cut escaped every rule, and padding a command is trivial. Other columns keep the short cut;
 # every value stays whole in data.
 _LONG_FIELDS = frozenset(
@@ -512,9 +513,9 @@ def flatten(event: dict[str, Any], record: dict[str, Any] | None = None, include
             continue
         if key == "dataList":
             if isinstance(v, list):
-                row["message"] = _str("\n".join(str(_scalar(x)) for x in v if x is not None), 4000)
+                row["message"] = _str("\n".join(str(_scalar(x)) for x in v if x is not None), LONG_LIMIT)
             else:
-                row["message"] = _str(v, 4000)
+                row["message"] = _str(v, LONG_LIMIT)
             continue
         if key in row and row[key] not in (None, ""):
             continue  # first mapping wins
@@ -869,6 +870,13 @@ class Stats:
         self.duplicates = 0
         # records exported as XML that were read once what their exporter left unescaped was escaped
         self.repaired = 0
+        # cloud exports only: records with a value cut at its length limit, records without a
+        # time, records whose numeric date was read month-first without the file showing it, and
+        # records read once the ids held to find repeats were full
+        self.cut = 0
+        self.undated = 0
+        self.date_order_guessed = 0
+        self.repeats_unchecked = 0
         # one per EVTX file read: its record numbering and chunk checksums, for the statement of
         # what the evidence cannot show
         self.sequences: list[FileSequence] = []
@@ -912,6 +920,10 @@ class Stats:
             "levels": dict(self.levels),
             **({"duplicates": self.duplicates} if self.duplicates else {}),
             **({"repaired": self.repaired} if self.repaired else {}),
+            **({"cut": self.cut} if self.cut else {}),
+            **({"undated": self.undated} if self.undated else {}),
+            **({"dateOrderGuessed": self.date_order_guessed} if self.date_order_guessed else {}),
+            **({"repeatsUnchecked": self.repeats_unchecked} if self.repeats_unchecked else {}),
             **self.coverage(),
         }
 
@@ -1004,6 +1016,16 @@ def _enriched(row: dict[str, Any], note: str) -> str:
     return f"{row['enriched']}; {note}" if row.get("enriched") else note
 
 
+DECODER_STOPPED = "the EVTX decoder stopped part-way through the file; records after that point were not read"
+
+
+def _panicked(exc: BaseException) -> bool:
+    """A panic in the Rust decoder, which pyo3 raises as PanicException. That class derives from
+    BaseException, so no except Exception clause sees it, and the module it is defined in cannot be
+    imported to name it."""
+    return type(exc).__name__ == "PanicException"
+
+
 def iter_events(
     path_or_file: Any, include_raw: bool = True, stats: Stats | None = None, number_of_threads: int = 0, source_file: str | None = None
 ) -> Iterator[dict[str, Any]]:
@@ -1018,10 +1040,15 @@ def iter_events(
     if seq is not None:
         seq.checksums = chunk_checksums(path_or_file)
     try:
-        parser = PyEvtxParser(path_or_file, number_of_threads=number_of_threads, indent=False)
-    except TypeError:
-        parser = PyEvtxParser(path_or_file, number_of_threads)
-    iterator = parser.records_json()
+        try:
+            parser = PyEvtxParser(path_or_file, number_of_threads=number_of_threads, indent=False)
+        except TypeError:
+            parser = PyEvtxParser(path_or_file, number_of_threads)
+        iterator = parser.records_json()
+    except BaseException as exc:
+        if _panicked(exc):
+            raise ValueError(DECODER_STOPPED) from None
+        raise
     lineage = Lineage()
     while True:
         try:
@@ -1033,6 +1060,12 @@ def iter_events(
                 stats.errors += 1
             log.debug("bad record: %s", exc)
             continue
+        except BaseException as exc:
+            # The decoder's state after a panic is unknown, so it is not asked for another record:
+            # the rows read so far stand, and the file is reported as cut where it stopped.
+            if _panicked(exc):
+                raise ValueError(DECODER_STOPPED) from None
+            raise
         if rec is None:
             continue
         if isinstance(rec, RuntimeError):

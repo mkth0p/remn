@@ -464,6 +464,44 @@ def test_the_worker_reports_a_total_failure_as_before(tmp_path, monkeypatch):
     assert [r["Value"] for r in native.records("registry", "ignored", str(tmp_path))] == ["a.exe"]
 
 
+def _hive(keys: int) -> bytes:
+    from triage_fixture import VALUES, build_hive
+
+    run = {VALUES: {f"Updater{i}": f"C:\\Users\\Public\\u{i}.exe" for i in range(3)}}
+    return build_hive({"Software": {"Vendor": {f"Key{i:05d}": {VALUES: {"Path": f"C:\\Program Files\\Vendor\\{i}"}} for i in range(keys)}, "Run": run}})
+
+
+def test_a_hive_larger_than_the_record_output_ceiling_is_still_read(tmp_path, monkeypatch):
+    from services.parsers import native
+
+    hive = tmp_path / "SOFTWARE"
+    hive.write_bytes(_hive(3))
+    # a SOFTWARE hive is commonly larger than the 64 MiB the decoder may write; the size of the
+    # file is not what it yields
+    monkeypatch.setattr(native, "MAX_OUTPUT", hive.stat().st_size - 1)
+    records = list(native.records("registry", str(hive), str(tmp_path)))
+    # before: "native artifact exceeds 64 MiB limit" and no record
+    assert any(r["KeyPath"].endswith("\\Run") for r in records)
+
+
+def test_a_hive_decode_stopped_at_a_limit_keeps_the_keys_it_read(tmp_path, monkeypatch):
+    from services.parsers import native
+
+    hive = tmp_path / "SOFTWARE"
+    hive.write_bytes(_hive(20_000))
+    monkeypatch.setattr(native, "MAX_OUTPUT", 64 * 1024)
+    seen = []
+    with pytest.raises(native.PartialDecode) as caught:
+        for record in native.records("registry", str(hive), str(tmp_path)):
+            seen.append(record)
+    # before: the worker was killed, its output deleted, and not one key was kept
+    assert len(seen) > 100 and all("KeyPath" in r for r in seen)
+    assert "output limit" in str(caught.value) and f"{len(seen):,} record(s)" in str(caught.value)
+    rows, stats = parse(tmp_path, archive([("Registry/SOFTWARE", hive.read_bytes())]))
+    member = next(f for f in stats["files"] if f["name"] == "Registry/SOFTWARE")
+    assert member["status"] == "error" and member["count"] == len(rows) > 100 and "output limit" in member["reason"]
+
+
 def test_the_graph_uses_the_subject_pid_of_an_event_not_the_writers():
     """evtx_parser puts the Execution ProcessID in processId: the PID of the service that wrote
     the record. The subject is newProcessId (created) or callerProcessId (acting)."""

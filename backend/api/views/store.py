@@ -6,6 +6,7 @@ IOCs and reputation, rule runs, read-only SQL, deletion.
 
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import shutil
@@ -13,21 +14,25 @@ import time
 from collections.abc import Iterator
 from typing import Any
 
+import duckdb
 from django.conf import settings
 from django.http import HttpRequest, JsonResponse, StreamingHttpResponse
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
+from api.errors import failure
 from api.jobs import Job, manager
+from api.params import BadParameter, whole_number
 from api.views.upload import discard_upload, get_upload
 from services.analysis import hayabusa
 from services.common import ndjson_line
 from services.ingest.package import PackageSource
-from services.ingest.pipeline import EvtxSource, MailSource, MailStats
+from services.ingest.pipeline import EvtxSource, MailSource, MailStats, detect_mail_format
 from services.parsers import evtx_parser
+from services.parsers.mail import pst as pst_mod
 from services.parsers.mail.common import ParseContext
 from services.store import queries as Q
 from services.store import rules as R
-from services.store.casestore import registry
+from services.store.casestore import KEY_RE, registry
 from services.store.sqlfilter import FilterError
 from services.store.writers import EventWriter, MailWriter
 
@@ -131,6 +136,14 @@ def ingest(request: HttpRequest, key: str):
     except (TypeError, ValueError):
         return JsonResponse({"error": "evidence.id is required"}, status=400)
     name = str(evidence.get("name") or meta.get("name") or "upload")
+    if kind == "mail" and not pst_mod.available():
+        # said here, as the browser-store path says it: inside the job it would be one more failure
+        # whose text is not shown
+        with open(path, "rb") as fh:
+            head = fh.read(4096)
+        if detect_mail_format(name, head) == "pst":
+            discard_upload(upload_id)
+            return JsonResponse({"error": "PST/OST support requires libpff-python (see backend/requirements-optional.txt)"}, status=501)
     sha_client = str(evidence.get("sha256Client") or "")
     ctx = _ctx_from(options.get("settings"))
     include_raw = bool(options.get("includeRaw", True))
@@ -200,13 +213,16 @@ def ingest(request: HttpRequest, key: str):
                 fmt = src.format
                 if hayabusa.available():
                     job.update(phase="engines")
-                    staged = hayabusa.stage([(name, str(path))], tmp_dir)
-                    try:
-                        found, summary = hayabusa.run(staged, tmp_dir)
-                    finally:
-                        shutil.rmtree(staged, ignore_errors=True)
-                    findings = hayabusa.resolve_refs(st, evidence_id, found)
-                    engine_summaries = [summary]
+                    # an archive gives the engine its .evtx members, and a format it cannot read is said, not run
+                    staged, said = hayabusa.stage_upload(name, str(path), None, src.format, tmp_dir)
+                    engine_summaries = [said]
+                    if staged is not None:
+                        try:
+                            found, summary = hayabusa.run(staged, tmp_dir)
+                        finally:
+                            shutil.rmtree(staged, ignore_errors=True)
+                        findings = hayabusa.resolve_refs(st, evidence_id, found)
+                        engine_summaries = [hayabusa.finish(summary, said)]
             else:
                 src2 = MailSource(name, str(path), None, ctx, tmp_dir)
                 mw = MailWriter(st, evidence_id, keep_bodies=keep_bodies)
@@ -302,7 +318,8 @@ def export_rows(request: HttpRequest, key: str):
     """Stream every stored row as NDJSON in the exact format /import accepts:
     {"type":"evidence"|"event"|"mail", ...}. Event and mail lines keep their
     original evidenceId so the importer can regroup them per evidence."""
-    st, err = _store(key)
+    # a read never creates a store: an export of a key nobody wrote to is a 404
+    st, err = _store(key, create=False)
     if err:
         return err
 
@@ -415,11 +432,16 @@ def _query(request: HttpRequest, key: str, fn):
     body = _json(request) if request.method == "POST" else {}
     try:
         return JsonResponse(fn(st, body), safe=False)
-    except FilterError as exc:
+    except (FilterError, BadParameter) as exc:
         return JsonResponse({"error": str(exc)}, status=400)
+    except (duckdb.ProgrammingError, duckdb.DataError) as exc:
+        # The database's answer to a statement or filter it cannot run: a name it does not know, a
+        # syntax error, a value that does not convert. It is about the analyst's own query over
+        # their own case, it is what they (and the model's sql tool) correct the query from, and it
+        # names no file. Every other database error (I/O, memory, internal) is a server failure.
+        return JsonResponse({"error": str(exc)[:500]}, status=400)
     except Exception as exc:  # noqa: BLE001
-        log.exception("store query failed")
-        return JsonResponse({"error": str(exc)[:300]}, status=500)
+        return JsonResponse(failure("the store query", exc, log), status=500)
 
 
 @require_POST
@@ -431,8 +453,8 @@ def search(request: HttpRequest, key: str):
             st,
             str(b.get("source") or "events"),
             b.get("filter"),
-            int(b.get("limit") or 2000),
-            int(b.get("offset") or 0),
+            whole_number(b.get("limit"), "limit", 2000),
+            whole_number(b.get("offset"), "offset", 0, minimum=0),
             b.get("sort"),
             b.get("settings"),
             bool(b.get("full")),
@@ -451,7 +473,12 @@ def aggregate(request: HttpRequest, key: str):
         request,
         key,
         lambda st, b: Q.aggregate(
-            st, str(b.get("source") or "events"), b.get("filter"), str(b.get("field") or "eventId"), int(b.get("limit") or 25), b.get("settings")
+            st,
+            str(b.get("source") or "events"),
+            b.get("filter"),
+            str(b.get("field") or "eventId"),
+            whole_number(b.get("limit"), "limit", 25),
+            b.get("settings"),
         ),
     )
 
@@ -462,7 +489,7 @@ def stack(request: HttpRequest, key: str):
         request,
         key,
         lambda st, b: Q.stack(
-            st, b.get("filter"), str(b.get("field") or "image"), str(b.get("order") or "rare"), int(b.get("limit") or 500), b.get("settings")
+            st, b.get("filter"), str(b.get("field") or "image"), str(b.get("order") or "rare"), whole_number(b.get("limit"), "limit", 500), b.get("settings")
         ),
     )
 
@@ -480,10 +507,9 @@ def facets(request: HttpRequest, key: str):
     if err:
         return err
     try:
-        return JsonResponse(
-            Q.facets(st, request.GET.get("source", "events"), request.GET.get("field", "eventId"), int(request.GET.get("limit", "50"))), safe=False
-        )
-    except FilterError as exc:
+        limit = whole_number(request.GET.get("limit"), "limit", 50)
+        return JsonResponse(Q.facets(st, request.GET.get("source", "events"), request.GET.get("field", "eventId"), limit), safe=False)
+    except (FilterError, BadParameter) as exc:
         return JsonResponse({"error": str(exc)}, status=400)
 
 
@@ -512,6 +538,11 @@ def iocs(request: HttpRequest, key: str):
     if err:
         return err
     g = request.GET
+    try:
+        limit = whole_number(g.get("limit"), "limit", 500)
+        offset = whole_number(g.get("offset"), "offset", 0, minimum=0)
+    except BadParameter as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
     return JsonResponse(
         Q.list_iocs(
             st,
@@ -519,8 +550,8 @@ def iocs(request: HttpRequest, key: str):
             g.get("q") or None,
             g.get("bad") in ("1", "true"),
             g.get("unchecked") in ("1", "true"),
-            int(g.get("limit", "500")),
-            int(g.get("offset", "0")),
+            limit,
+            offset,
             g.get("sort", "verdict"),
         )
     )
@@ -540,7 +571,7 @@ def reputation(request: HttpRequest, key: str):
 
 @require_POST
 def sql(request: HttpRequest, key: str):
-    return _query(request, key, lambda st, b: Q.run_sql(st, str(b.get("sql") or ""), int(b.get("limit") or 200)))
+    return _query(request, key, lambda st, b: Q.run_sql(st, str(b.get("sql") or ""), whole_number(b.get("limit"), "limit", 200)))
 
 
 @require_GET
@@ -575,12 +606,29 @@ def rules_run(request: HttpRequest, key: str):
 # ---------------------------------------------------------------------------
 @require_GET
 def jobs_list(request: HttpRequest):
-    return JsonResponse({"jobs": manager.list(request.GET.get("case") or None)})
+    """The jobs of the case whose key the request presents. Without a key there is nothing to list:
+    a listing of every job would hand each client the ids, file names and errors of every other case."""
+    key = request.GET.get("case") or ""
+    if not KEY_RE.match(key):
+        return JsonResponse({"error": "case is required: the key of the case whose jobs are listed"}, status=400)
+    return JsonResponse({"jobs": manager.list(key)})
+
+
+def _job(request: HttpRequest, job_id: str) -> Job | None:
+    """The job, when the request presents (?case=) the key of the case it belongs to.
+
+    A missing or wrong key gets the answer an unknown id gets, so a key cannot be tried against a
+    job, and a job id that reached someone else does not open the job's results to them."""
+    job = manager.get(job_id)
+    key = request.GET.get("case") or ""
+    if job is None or not job.case_key or not hmac.compare_digest(key.encode("utf-8", "surrogateescape"), job.case_key.encode("utf-8")):
+        return None
+    return job
 
 
 @require_http_methods(["GET", "DELETE"])
 def job_detail(request: HttpRequest, job_id: str):
-    job = manager.get(job_id)
+    job = _job(request, job_id)
     if not job:
         return JsonResponse({"error": "unknown job"}, status=404)
     if request.method == "DELETE":
@@ -591,8 +639,8 @@ def job_detail(request: HttpRequest, job_id: str):
 
 @require_GET
 def job_events(request: HttpRequest, job_id: str):
-    """SSE stream of job progress (polling fallback: GET /api/jobs/<id>)."""
-    job = manager.get(job_id)
+    """SSE stream of job progress (polling fallback: GET /api/jobs/<id>?case=<key>)."""
+    job = _job(request, job_id)
     if not job:
         return JsonResponse({"error": "unknown job"}, status=404)
 

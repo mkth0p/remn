@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import itertools
 import json
 import os
 import shutil
@@ -119,8 +120,11 @@ class PackageSource:
         # handed something that is not one.
         self.engines: list[str] = []
         # keys of the cloud audit and sign-in records read so far, across every member
-        self.seen_records: set[int] = set()
+        self.seen_records = m365.RecordKeys()
         self.evtx_held: dict[str, tuple[dict[str, Any], str]] = {}
+        # event logs that came after the hold was full: parsed, but never seen by the engines
+        self.not_scanned = 0
+        self.not_scanned_bytes = 0
         self.findings: list[dict[str, Any]] = []
         self.engine_summaries: list[dict[str, Any]] = []
 
@@ -241,7 +245,7 @@ class PackageSource:
                 finally:
                     self.budget["decodeSeconds"] += time.monotonic() - started
 
-    def _members_7z(self, src) -> Iterator[tuple[Member, str | None]]:
+    def _members_7z(self, src, every: bool = False) -> Iterator[tuple[Member, str | None]]:
         """DFIR-ORC ships 7z. py7zr offers no streaming member access, so the archive is expanded
         once into the staging area, within the package byte budget, and read from there."""
         try:
@@ -267,7 +271,7 @@ class PackageSource:
         root = os.path.realpath(self._extracted)
         found = sorted(os.path.join(dirpath, filename) for dirpath, _dirs, files in os.walk(root) for filename in files)
         for i, path in enumerate(found):
-            if i >= MAX_FILES:
+            if i >= MAX_FILES and not every:
                 self.inventory_complete = False
                 break
             real = os.path.realpath(path)
@@ -284,12 +288,27 @@ class PackageSource:
 
     def _drain_engines(self) -> None:
         """Run the external engines over the event logs held back for them, once, together."""
-        if not self.engines or not self.evtx_held:
+        if not self.engines or not (self.evtx_held or self.not_scanned):
             self._release_evtx()
+            return
+        # the logs past the hold are counted on the summary, so a run that looks clean is not
+        # mistaken for one that read every log in the package
+        skipped = {}
+        if self.not_scanned:
+            skipped = {
+                "notScanned": self.not_scanned,
+                "reason": (
+                    f"{self.not_scanned:,} event log(s), {self.not_scanned_bytes / 1024**2:,.1f} MiB, came after the "
+                    f"{MAX_DEFERRED_BYTES // 1024**2} MiB of logs held for the engine and were not scanned; their rows are in the case"
+                ),
+            }
+        if not self.evtx_held:
+            self.engine_summaries.append({"engine": hayabusa.ENGINE, "status": "unsupported", "findings": 0, "seconds": 0.0, **skipped})
             return
         remaining = MAX_NATIVE_SECONDS - self.budget["decodeSeconds"]
         if remaining <= 0:
-            self.engine_summaries.append({"engine": hayabusa.ENGINE, "status": "unsupported", "findings": 0, "seconds": 0.0, "reason": BUDGET_SPENT})
+            reason = "; ".join(x for x in (BUDGET_SPENT, skipped.get("reason")) if x)
+            self.engine_summaries.append({"engine": hayabusa.ENGINE, "status": "unsupported", "findings": 0, "seconds": 0.0, **skipped, "reason": reason})
             self._release_evtx()
             return
         staged = None
@@ -300,8 +319,7 @@ class PackageSource:
             for finding in findings:
                 finding["packageId"] = self.package_id
             self.findings.extend(findings)
-            summary["members"] = len(self.evtx_held)
-            self.engine_summaries.append(summary)
+            self.engine_summaries.append(hayabusa.finish(summary, {"members": len(self.evtx_held), **skipped}))
         finally:
             self.budget["decodeSeconds"] += time.monotonic() - started
             if staged:
@@ -385,7 +403,12 @@ class PackageSource:
                 entry["note"] = info["note"]
         self.triage_summary = {"target": run.target, "functions": run.summary}
 
-    def _members(self) -> Iterator[tuple[Member, str | None]]:
+    def _members(self, every: bool = False) -> Iterator[tuple[Member, str | None]]:
+        """The archive's members in order, up to the inventory cap unless every is set.
+
+        The first pass sets every: it only reads names, and the layout check must see the whole
+        tree, since a collector that writes profile directories before Windows lists System32 last.
+        """
         if self.path:
             with open(self.path, "rb") as fh:
                 head = fh.read(512)
@@ -396,7 +419,7 @@ class PackageSource:
         if fmt == "zip":
             with zipfile.ZipFile(src) as zf:
                 for i, info in enumerate(zf.infolist()):
-                    if i >= MAX_FILES:
+                    if i >= MAX_FILES and not every:
                         self.inventory_complete = False
                         break
                     if info.is_dir():
@@ -406,13 +429,20 @@ class PackageSource:
                         reason = "symbolic link"
                     yield Member(info.filename, info.file_size, lambda info=info: zf.open(info)), reason
         elif fmt == "7z":
-            yield from self._members_7z(src)
+            yield from self._members_7z(src, every)
         elif fmt == "tar":
             with tarfile.open(name=self.path, fileobj=None if self.path else src, mode="r:*") as tf:
-                for i, info in enumerate(tf):
-                    if i >= MAX_FILES:
-                        self.inventory_complete = False
+                for i in itertools.count():
+                    info = tf.next()
+                    if info is None:
                         break
+                    if i >= MAX_FILES:
+                        if not every:
+                            self.inventory_complete = False
+                            break
+                        # tarfile keeps every header it has read; past the cap only the name is
+                        # wanted, so the list does not grow with the archive
+                        tf.members.clear()
                     if info.isdir():
                         continue
                     reason = None if info.isfile() else "non-regular member"
@@ -443,10 +473,9 @@ class PackageSource:
 
     def _iterate(self) -> Iterator[dict[str, Any]]:
         # A small explicit manifest supplies collection context regardless of archive order.
-        names: list[str] = []
-        for member, reason in self._members():
-            if len(names) < MAX_FILES:
-                names.append(member.name)
+        found_layout = False
+        for member, reason in self._members(every=True):
+            found_layout = found_layout or triage.is_triage_layout([member.name])
             if not reason and member.name == "collection-manifest.json":
                 self.manifest_count += 1
                 if member.size > 65536:
@@ -465,7 +494,7 @@ class PackageSource:
             self.context = {}
             self.expectations = []
         self.context = {**self.inherited_context, **self.context}
-        self.triage = triage.is_triage_layout(names)
+        self.triage = found_layout
         for index, (member, reason) in enumerate(self._members()):
             if self.budget["files"] >= MAX_FILES:
                 self.inventory_complete = False
@@ -623,9 +652,12 @@ class PackageSource:
                     entry["format"] = source.format
                     rows = (("event", r) for r in source)
                 elif (
-                    collection.supported(member.name)
+                    # The Zimmerman parsers' output is recognised by its header before its path, so
+                    # an MFTECmd CSV run by hand or a KAPE module folder outside the listed names
+                    # is read rather than reported as having no parser.
+                    (low.endswith((".log", ".txt", ".csv", ".json", ".jsonl")) and collection.sniff_category(member.name, head))
+                    or collection.supported(member.name)
                     or (self.context.get("artifactDefault") == "defender" and low.endswith((".txt", ".log", ".csv", ".json")))
-                    or (low.endswith((".log", ".txt", ".csv")) and collection.sniff_category(member.name, head))
                 ):
                     # No size pre-check: collection.records() enforces the parse budget while
                     # reading, so an oversized export yields the records before the ceiling and is
@@ -633,13 +665,19 @@ class PackageSource:
                     entry["format"] = collection.VERSION
                     source = None
                     sniffed = None if collection.category(member.name) else collection.sniff_category(member.name, head)
+                    if sniffed:
+                        entry["artifactType"] = sniffed
                     parse_name = (
-                        member.name if collection.category(member.name) else f"dhcp/{member.name}" if sniffed == "dhcp" else f"WdSupportLogs/{member.name}"
+                        f"dhcp/{member.name}"
+                        if sniffed == "dhcp"
+                        else member.name
+                        if collection.category(member.name) or sniffed
+                        else f"WdSupportLogs/{member.name}"
                     )
                     rows = (
                         ("event", row)
                         for i, r in enumerate(collection.records(tmp_path, parse_name, notes))
-                        for row in collection.normalize_rows(r, parse_name, i, self.context)
+                        for row in collection.normalize_rows(r, parse_name, i, self.context, notes)
                     )
                 elif low.endswith((".eml", ".msg", ".mbox", ".mbx", ".pst", ".ost")) or looks_like_mail(head):
                     source = MailSource(member.name, tmp_path, None, self.ctx, self.tmp_dir)
@@ -655,12 +693,16 @@ class PackageSource:
                     and isinstance(source, EvtxSource)
                     and source.format == "evtx"
                     and tmp_path
-                    and self.budget["deferredBytes"] + size <= MAX_DEFERRED_BYTES
                 ):
-                    # kept for the engines that run once the loop is done; released by _drain_engines
-                    self.evtx_held[tmp_path] = (entry, member.name)
-                    self.budget["deferredBytes"] += size
-                    tmp_path = None
+                    if self.budget["deferredBytes"] + size <= MAX_DEFERRED_BYTES:
+                        # kept for the engines that run once the loop is done; released by _drain_engines
+                        self.evtx_held[tmp_path] = (entry, member.name)
+                        self.budget["deferredBytes"] += size
+                        tmp_path = None
+                    else:
+                        notes["engineSkipped"] = True
+                        self.not_scanned += 1
+                        self.not_scanned_bytes += size
                 if isinstance(source, EvtxSource) and source.stats.duplicates:
                     # a repeat is not a compromise in reading the member, so it is no note
                     entry["duplicates"] = source.stats.duplicates
@@ -669,8 +711,12 @@ class PackageSource:
                     entry.update(source.stats.coverage())
                     if source.stats.repaired:
                         notes["xmlRepaired"] = source.stats.repaired
+                    if cloud_note := m365.note(m365.counts(source.stats)):
+                        notes["cloud"] = cloud_note
                 if source is not None and source.stats.errors:
                     raise ValueError(f"parser reported {source.stats.errors} error(s); any emitted rows are partial")
+                if notes.get("unreadableRecords"):
+                    raise ValueError(f"{notes['unreadableRecords']:,} record(s) could not be read and are not in the case; the records read are kept")
                 entry["status"] = "parsed"
             except Exception as exc:  # noqa: BLE001
                 entry.update(status="error", reason=str(exc)[:300])
@@ -683,6 +729,10 @@ class PackageSource:
                     decode_started = None
                 # Every compromise the parser made to read this member is reported on it, so a
                 # table that looks complete cannot quietly be one that was repaired or cut short.
+                if notes.get("unreadableRecords"):
+                    entry["unreadable"] = notes["unreadableRecords"]
+                if notes.get("undatedRows"):
+                    entry["undated"] = notes["undatedRows"]
                 if notes:
                     encoding = notes.get("encoding")
                     repaired = notes.get("repairedRows", 0)
@@ -708,7 +758,20 @@ class PackageSource:
                         )
                     if truncated:
                         said.append(f"kept the first {truncated:,} lines; the file is longer than that")
-                    entry["note"] = "; ".join(said)
+                    if notes.get("undatedRows"):
+                        said.append(
+                            f"{notes['undatedRows']:,} row(s) carry a date that reads as day-first and as month-first, and no date in the "
+                            "file settles which; that date has no time on the timeline and is kept as written in data"
+                        )
+                    if notes.get("engineSkipped"):
+                        said.append(
+                            f"not scanned by {', '.join(self.engines)}: the {MAX_DEFERRED_BYTES // 1024**2} MiB of logs held for it was "
+                            "full when this log was read; its rows are in the case"
+                        )
+                    if notes.get("cloud"):
+                        said.append(notes["cloud"])
+                    if said:
+                        entry["note"] = "; ".join(said)
                 # The parsers hold the member file open across their yields, and CPython only
                 # clears this frame after the finally block, so the handles are still live here.
                 # Windows refuses to unlink an open file, which would both raise out of generator

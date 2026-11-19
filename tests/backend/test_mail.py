@@ -628,6 +628,142 @@ def test_pst_orphan_and_deleted_items_are_tagged():
     assert pst._DELETED_FOLDER_RE.search("Recoverable Items/Purges") and not pst._DELETED_FOLDER_RE.search("Inbox/Projects")
 
 
+class _DamagedFolder(_FakeFolder):
+    """A folder of an invented, damaged mailbox: libpff refuses the second message and the first
+    sub-folder, as it does for a corrupt PST or a partly synced OST."""
+
+    def get_sub_message(self, i):
+        if i == 1:
+            raise OSError("libpff_folder_get_sub_message: unable to retrieve sub message: 1")
+        return super().get_sub_message(i)
+
+    def get_sub_folder(self, i):
+        if i == 0:
+            raise OSError("libpff_folder_get_sub_folder: unable to retrieve sub folder: 0")
+        return super().get_sub_folder(i)
+
+
+class _UnlistedFolder:
+    name = "Sync Issues"
+    number_of_sub_folders = 0
+
+    @property
+    def number_of_sub_messages(self):
+        raise OSError("libpff_folder_get_number_of_sub_messages: unable to retrieve number of sub messages")
+
+
+class _DamagedPst(_FakePst):
+    def __init__(self):
+        super().__init__()
+        inbox = _DamagedFolder(
+            "Inbox",
+            [_FakeMsg("first", "one", 11), _FakeMsg("second", "two", 12), _FakeMsg("third", "three", 13)],
+            [_FakeFolder("lost", []), _FakeFolder("Projects", [_FakeMsg("fourth", "four", 14)])],
+        )
+        self.root = _FakeFolder("Top of Outlook data file", [], [inbox, _UnlistedFolder()])
+        self.number_of_orphan_items = 2
+
+    def get_orphan_item(self, i):
+        if i == 0:
+            raise OSError("libpff_file_get_orphan_item: unable to retrieve orphan item: 0")
+        return _FakeMsg("fifth", "five", 15)
+
+
+def test_pst_items_libpff_cannot_read_are_counted_not_dropped():
+    """A message, a folder or an orphan item that libpff refuses was logged at debug level and
+    skipped, so a damaged mailbox looked complete. Each now comes through as an error row, which
+    the import counts as an error."""
+    from services.ingest.pipeline import MailStats
+    from services.parsers.mail import pst
+
+    rows = list(pst.iter_pst_file(_DamagedPst(), ParseContext(internal_domains=["interne.fr"])))
+    stats = MailStats()
+    for row in rows:
+        stats.add(row)
+
+    read = [r["subject"] for r in rows if "parse_error" not in r["flags"]]
+    assert read == ["first", "third", "fourth", "fifth"]
+    errors = [r for r in rows if "parse_error" in r["flags"]]
+    assert stats.errors == len(errors) == 4
+    by_subject = {r["subject"]: r for r in errors}
+    assert set(by_subject) == {"(unreadable message)", "(unreadable folder)", "(unreadable folder contents)", "(unreadable orphan item)"}
+    assert by_subject["(unreadable message)"]["folder"] == "Top of Outlook data file/Inbox"
+    assert "sub message: 1" in by_subject["(unreadable message)"]["error"]
+    assert by_subject["(unreadable folder contents)"]["folder"] == "Top of Outlook data file/Sync Issues"
+    assert by_subject["(unreadable orphan item)"]["folder"] == pst.ORPHAN_FOLDER
+    assert all(r["sourceFormat"] == "pst" and r["attachments"] == [] for r in errors)
+
+
+def test_a_body_longer_than_the_kept_length_is_flagged_as_cut():
+    """Text past 200,000 characters (400,000 of HTML) was dropped with nothing on the row, so the
+    URLs and words in the rest were missing from search and rules without a sign."""
+    from services.parsers.mail.common import MAX_HTML, MAX_TEXT, build_row
+
+    headers = [("From", "billing@example.org"), ("To", "user@example.com"), ("Subject", "statement")]
+    long_text = build_row(headers, "a" * (MAX_TEXT + 1), None, [], CTX, extra={"sourceFormat": "eml"})
+    long_html = build_row(headers, "short", "<p>" + "b" * MAX_HTML + "</p>", [], CTX, extra={"sourceFormat": "eml"})
+    whole = build_row(headers, "a" * MAX_TEXT, None, [], CTX, extra={"sourceFormat": "eml"})
+    assert "body_truncated" in long_text["flags"] and len(long_text["bodyText"]) == MAX_TEXT
+    assert "body_truncated" in long_html["flags"]
+    assert "body_truncated" not in whole["flags"]
+    assert long_text["risk"] == whole["risk"], "the flag says what was kept; it is not evidence"
+
+
+class _FakeAttachment:
+    def __init__(self, name, size):
+        self.name = name
+        self.size = size
+        self.reads = 0
+
+    def get_size(self):
+        return self.size
+
+    def read_buffer(self, size):
+        self.reads += 1
+        return b"%PDF-1.7\n" + b"0" * (size - 9)
+
+
+class _FakeMsgWithAttachments(_FakeMsg):
+    def __init__(self, attachments):
+        super().__init__("files", "see attached", 21)
+        self._a = attachments
+        self.number_of_attachments = len(attachments)
+
+    def get_attachment(self, i):
+        return self._a[i]
+
+
+def test_a_pst_attachment_too_large_to_read_keeps_its_size_and_says_it_was_not_read():
+    """An attachment over the 60 MiB REMN reads from a PST was handed on as no bytes, so it showed
+    as an empty file with no hash, which misdescribes the evidence."""
+    from services.parsers.mail import pst
+
+    big = _FakeAttachment("disk.iso", 70 * 1024 * 1024)
+    small = _FakeAttachment("note.pdf", 1024)
+    msg = _FakeMsgWithAttachments([big, small])
+    row = pst._message_row(msg, "Inbox", ParseContext(internal_domains=["interne.fr"]), 1)
+
+    assert big.reads == 0 and small.reads == 1
+    unread, read = row["attachments"]
+    assert unread["name"] == "disk.iso" and unread["size"] == 70 * 1024 * 1024
+    assert "not_read" in unread["flags"] and "empty_file" not in unread["flags"] and not unread.get("sha256")
+    assert "60 MiB" in unread["details"]["skipped"]
+    assert read["sha256"] and "not_read" not in read["flags"]
+    assert "att_not_read" in row["flags"] and "att_empty_file" not in row["flags"]
+
+
+def test_a_pst_message_with_more_attachments_than_are_analysed_keeps_their_count():
+    """Past 60 attachments a PST message lost the rest outright, and its attachment count said 60."""
+    from services.parsers.mail import pst
+
+    msg = _FakeMsgWithAttachments([_FakeAttachment(f"scan-{i:02d}.pdf", 64) for i in range(65)])
+    row = pst._message_row(msg, "Inbox", ParseContext(internal_domains=["interne.fr"]), 1)
+
+    assert row["attachmentCount"] == 65 and len(row["attachments"]) == 60
+    assert "attachments_truncated" in row["flags"]
+    assert sum(a.reads for a in msg._a) == 60, "the attachments past those analysed are counted, not read"
+
+
 def test_raw_8bit_header_bytes_do_not_end_the_mailbox():
     """An mbox whose second message has a Latin-1 byte in its Subject: all three messages arrive,
     and the byte is read as the character it stands for."""

@@ -50,6 +50,8 @@ export const SEVERITIES: Severity[] = ['info', 'low', 'medium', 'high', 'critica
 export const COLLAPSE_AFTER = 200
 /** row ids kept on a finding (both engines): enough for a mailbox-wide burst to stay linked from every mail */
 export const MAX_REFS = 5000
+/** findings a rule keeps when it sets no max_findings (both engines) */
+export const MAX_FINDINGS = 2000
 const GROUPABLE: Record<string, string[]> = {
   events: ['computer', 'targetUser', 'subjectUser', 'ipAddress', 'processName', 'serviceName', 'memberName', 'groupName', 'shareName', 'image', 'destinationIp', 'query'],
   mails: ['fromAddr', 'fromDomain', 'fromRegistrable', 'fromNameNorm', 'originIp', 'replyToDomain', 'folder'],
@@ -201,8 +203,8 @@ export function timePred(rule: Rule, settings: SettingsLike | undefined, tsField
 }
 
 /**
- * Why a rule produced zero findings (emitted through RunOptions.onDiag), or, from the SQL engine,
- * that it produced more findings than a run keeps (`truncated`, with the ones kept in `detail`).
+ * Why a rule produced zero findings (emitted through RunOptions.onDiag), or that it found more than
+ * its cap (`truncated`: how many it left out in `dropped`, which ones it kept in `detail`).
  */
 export interface RuleDiag {
   ruleId: string
@@ -211,6 +213,23 @@ export interface RuleDiag {
   matched: number
   afterExclude: number
   afterTime: number
+  dropped?: number
+}
+
+/** The findings a rule keeps: its max_findings when that is a positive whole number, else MAX_FINDINGS (both engines). */
+export function findingCap(rule: Rule): number {
+  const n = rule.max_findings
+  return typeof n === 'number' && Number.isInteger(n) && n > 0 ? n : MAX_FINDINGS
+}
+
+/** Whether a rule counting up to its threshold is about its biggest groups (a burst, a spray), as services/store/rules.py decides. */
+function keepsLargest(t: string | number | undefined): boolean {
+  if (typeof t === 'number') return Math.trunc(t) > 1
+  const m = /^\s*(>=|<=|==|=|>|<|!=)?\s*(\d+)\s*$/.exec(String(t ?? ''))
+  if (!m) return false
+  const op = m[1] || '>='
+  const v = Number(m[2])
+  return (op === '>=' && v > 1) || (op === '>' && v >= 1)
 }
 
 /** Settings names referenced by AND-position `in_setting` conditions whose lists are empty (rule can never match). */
@@ -236,7 +255,7 @@ export interface RunOptions {
   thenRows?: (cond: RuleCond) => Row[]
   now?: number
   idField?: string
-  /** called once when the rule yields zero findings, with the reason */
+  /** called once when the rule yields zero findings, with the reason, or finds more than its cap */
   onDiag?: (d: RuleDiag) => void
 }
 
@@ -259,7 +278,7 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
   const exclude = rule.exclude ? compileCond(rule.exclude, settings) : null
   const tp = timePred(rule, settings, tsField)
   const entityFields = defaultEntityFields(rule)
-  const maxFindings = rule.max_findings ?? 2000
+  const maxFindings = findingCap(rule)
   const thenFlags = (rule.then_flags ?? []).flatMap((o) => Object.entries(o)) as [string, Severity][]
 
   const matches: Row[] = []
@@ -318,6 +337,13 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
     return { severity, escalation, refs }
   }
   const idOf = (r: Row) => Number(r[idField])
+  // Past the cap the findings kept are the ones the SQL engine keeps, and the cut is reported with
+  // the same words: how many were found, how many left out, which were kept.
+  const reportCut = (found: number, how: string) => {
+    const n = (x: number) => x.toLocaleString('en-US')
+    const detail = `${n(found - maxFindings)} of ${n(found)} findings left out past the cap of ${n(maxFindings)}; kept the ${how}`
+    opts.onDiag?.({ ruleId: rule.id, reason: 'truncated', detail, matched: maxFindings, afterExclude: maxFindings, afterTime: maxFindings, dropped: found - maxFindings })
+  }
 
   const threshold = parseThreshold(rule.threshold)
   const groupBy = rule.group_by ?? []
@@ -334,9 +360,10 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
       for (const f of out) f.escalation = f.escalation || `collapsed: ${matches.length.toLocaleString('en-US')} matching rows`
       return out
     }
-    // one finding per matching row
-    for (const row of matches) {
-      if (findings.length >= maxFindings) break
+    // one finding per matching row; past the cap the first in time order, a row without a time last, then by id
+    const time = (r: Row) => (r[tsField] == null || Number.isNaN(Number(r[tsField])) ? Infinity : Number(r[tsField]))
+    const kept = matches.length > maxFindings ? [...matches].sort((a, b) => time(a) - time(b) || idOf(a) - idOf(b)).slice(0, maxFindings) : matches
+    for (const row of kept) {
       let sev = rule.severity
       let escalation: string | undefined
       const flags = Array.isArray(row.flags) ? (row.flags as string[]) : []
@@ -357,6 +384,7 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
         escalation,
       })
     }
+    if (matches.length > maxFindings) reportCut(matches.length, `first ${maxFindings.toLocaleString('en-US')} matching rows in time order`)
     emitZeroDiag()
     return findings
   }
@@ -370,6 +398,8 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
     if (!g) groups.set(k, (g = []))
     g.push(row)
   }
+  // what the cap orders grouped findings by: rows in the group, group key, start of a burst
+  const rank = new Map<object, { rows: number; key: string; ts: number }>()
   const anyInGroup = rule.any_in_group ? compileCond(rule.any_in_group, settings) : null
   const distinctOf = (rows: Row[]) => (rule.distinct ? new Set(rows.map((r) => str(getPath(r, rule.distinct!)).toLowerCase()).filter(Boolean)).size : rows.length)
 
@@ -395,7 +425,7 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
         entities: ent,
         count: rows.length,
       })
-      if (findings.length >= maxFindings) break
+      rank.set(findings[findings.length - 1], { rows: rows.length, key: groupKey(first, groupBy), ts: 0 })
       continue
     }
     // sliding window: detect bursts
@@ -421,7 +451,6 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
       }
     }
     if (open) findings.push(makeBurst(open))
-    if (findings.length >= maxFindings) break
   }
 
   function makeBurst(b: { rows: Row[]; start: number; last: number }) {
@@ -431,7 +460,25 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
       ent[rule.distinct] = Array.from(new Set(b.rows.map((r) => str(getPath(r, rule.distinct!))).filter(Boolean)))
         .slice(0, 8)
         .join(', ')
-    return { ...base(), ...escalationFor(b.rows), key: `${rule.id}|${groupKey(first, groupBy)}|${Math.floor(b.start / 60000)}`, ts: b.start, tsEnd: b.last, entities: ent, count: b.rows.length }
+    const burst = { ...base(), ...escalationFor(b.rows), key: `${rule.id}|${groupKey(first, groupBy)}|${Math.floor(b.start / 60000)}`, ts: b.start, tsEnd: b.last, entities: ent, count: b.rows.length }
+    rank.set(burst, { rows: b.rows.length, key: groupKey(first, groupBy), ts: b.start })
+    return burst
+  }
+
+  if (findings.length > maxFindings) {
+    // bursts in the order of the grouped fields, then in time; groups by size (largest for a rule
+    // counting up to a threshold, rarest otherwise), then by key
+    const largest = keepsLargest(rule.threshold)
+    const by = (f: object) => rank.get(f)!
+    const order = windowMs
+      ? (a: object, b: object) => (by(a).key < by(b).key ? -1 : by(a).key > by(b).key ? 1 : by(a).ts - by(b).ts)
+      : (a: object, b: object) => (largest ? by(b).rows - by(a).rows : by(a).rows - by(b).rows) || (by(a).key < by(b).key ? -1 : by(a).key > by(b).key ? 1 : 0)
+    const found = findings.length
+    findings.sort(order).splice(maxFindings)
+    reportCut(
+      found,
+      windowMs ? `first ${maxFindings.toLocaleString('en-US')} bursts in the order of the grouped fields` : `${maxFindings.toLocaleString('en-US')} ${largest ? 'largest' : 'rarest'} groups`,
+    )
   }
 
   // follow-up ("then"): escalate when a matching event follows within `within`

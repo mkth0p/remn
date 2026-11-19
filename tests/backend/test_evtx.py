@@ -179,6 +179,50 @@ def test_long_command_lines_and_script_blocks_reach_the_rules_whole():
     assert row["commandLine"] == cmd and len(cmd) > 4000
 
 
+def test_the_unnamed_data_of_a_classic_event_reaches_the_rules_whole():
+    """Classic PowerShell 400 and 600, MsiInstaller and SQL Server write their payload as unnamed
+    Data, which the parser joins into message and Sigma's Data field reads. It was cut at 4,000
+    characters, so a HostApplication padded past that escaped the rules."""
+    host = "HostApplication=powershell.exe " + "-NoP " * 900 + "-enc SQBFAFgA"
+    event = _sample_event(400, "PowerShell", {"Data": ["Available", "None", f"\tNewEngineState=Available\n\t{host}\n\tEngineVersion=5.1"]})
+    event["Event"]["System"]["Channel"] = "Windows PowerShell"
+    row = evtx_parser.flatten(event, None, include_raw=False)
+    assert host in row["message"] and len(row["message"]) > 4000
+    # frontend/src/parsers/evtx/productFields.test.ts holds the browser parser to the same
+
+
+def test_a_panic_in_the_decoder_keeps_the_rows_read_and_says_the_file_was_cut(monkeypatch, tmp_path):
+    """A Rust panic reaches Python as pyo3's PanicException, which derives from BaseException, so
+    it passed every except clause and ended the whole import without a word on the file."""
+    import evtx
+
+    from services.ingest.pipeline import EvtxSource
+
+    class PanicException(BaseException):  # named as pyo3 names it; the module it lives in is not importable
+        pass
+
+    good = _sample_event(4624, "Microsoft-Windows-Security-Auditing", LOGON_DATA)
+
+    class Parser:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def records_json(self):
+            yield {"event_record_id": 1, "timestamp": "2026-09-01 22:13:40.123456 UTC", "data": json.dumps(good)}
+            raise PanicException("index out of bounds")
+
+    monkeypatch.setattr(evtx, "PyEvtxParser", Parser)
+    path = tmp_path / "Security.evtx"
+    path.write_bytes(b"ElfFile\x00" + bytes(4088))
+    source = EvtxSource("Security.evtx", str(path), None, str(tmp_path), include_raw=False)
+    rows = list(source)
+    assert [r["recordId"] for r in rows] == [4242]
+    assert source.stats.errors == 1
+    assert source.files == [
+        {"name": "Security.evtx", "status": "error", "error": "the EVTX decoder stopped part-way through the file; records after that point were not read"}
+    ]
+
+
 EVENT_NS = "http://schemas.microsoft.com/win/2004/08/events/event"
 LOGON_DATA = {
     "SubjectUserSid": "S-1-0-0",

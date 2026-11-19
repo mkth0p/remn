@@ -300,6 +300,70 @@ def test_velociraptor_event_data_is_mapped_the_same_way():
     assert row["logonType"] == 3 and row["ipAddress"] == "203.0.113.9" and row["targetUser"] == "jdoe" and row["processId"] == 4
 
 
+# Velociraptor's parse_evtx() writes the record's System block with TimeCreated.SystemTime as seconds
+# since 1970 (a float); its Windows.EventLogs.* artifacts write flat rows with the time as EventTime and
+# the EventData as an object. Both shapes are invented here from that description.
+def test_velociraptor_parse_evtx_rows_are_dated_by_their_epoch_seconds():
+    raw = {
+        "System": {
+            "Provider": {"Name": "Microsoft-Windows-Security-Auditing", "Guid": "{00000000-0000-0000-0000-000000000001}"},
+            "EventID": {"Value": 4624},
+            "TimeCreated": {"SystemTime": 1787103300.125},
+            "EventRecordID": 12,
+            "Execution": {"ProcessID": 640, "ThreadID": 700},
+            "Channel": "Security",
+            "Computer": "WS01",
+            "Security": {},
+        },
+        "EventData": {"TargetUserName": "jdoe", "LogonType": 3, "IpAddress": "203.0.113.9"},
+    }
+    row = normalize(raw, "results/Windows.EventLogs.Evtx.json", 0, CTX)
+    # before: ts None, so the event was off the timeline
+    assert row["ts"] == 1787103300125 and row["recordKind"] == "event"
+    assert row["logonType"] == 3 and row["ipAddress"] == "203.0.113.9"
+
+
+def test_velociraptor_event_log_artifact_rows_are_dated_and_their_event_data_mapped():
+    raw = {
+        "EventTime": "2026-08-19T01:35:00.123456789Z",
+        "Computer": "WS01",
+        "Channel": "Security",
+        "Provider": "Microsoft-Windows-Security-Auditing",
+        "EventID": 4624,
+        "EventRecordID": 12,
+        "UserSID": "S-1-5-18",
+        "EventData": {"TargetUserName": "jdoe", "TargetDomainName": "CORP", "LogonType": 10, "IpAddress": "203.0.113.9", "IpPort": "50123"},
+        "UserData": None,
+        "Message": "An account was successfully logged on.",
+        "OSPath": "C:\\Windows\\System32\\winevt\\Logs\\Security.evtx",
+    }
+    row = normalize(raw, "results/Windows.EventLogs.Evtx.json", 0, CTX)
+    native = _native(4624, "Microsoft-Windows-Security-Auditing", raw["EventData"])
+    # before: ts None, logonType None, ipAddress None
+    assert row["ts"] == 1787103300123 and row["recordKind"] == "event"
+    assert (row["eventId"], row["recordId"], row["channel"], row["computer"], row["userSid"]) == (4624, 12, "Security", "WS01", "S-1-5-18")
+    for field in ("targetUser", "targetDomain", "logonType", "logonTypeName", "ipAddress", "ipPort"):
+        assert row[field] == native[field], field
+    assert row["message"] == "An account was successfully logged on." and row["data"]["IpAddress"] == "203.0.113.9"
+
+
+def test_an_exported_event_message_is_kept_past_four_thousand_characters():
+    host = "HostApplication=powershell.exe " + "-NoP " * 900 + "-enc SQBFAFgA"
+    raw = {
+        "EventTime": "2026-08-19T01:35:00Z",
+        "Channel": "Windows PowerShell",
+        "Provider": "PowerShell",
+        "EventID": 400,
+        "EventRecordID": 13,
+        "Message": f"Engine state is changed from None to Available. {host}",
+    }
+    row = normalize(raw, "results/Windows.EventLogs.Evtx.json", 0, CTX)
+    # before: cut at 4,000 characters with nothing saying so
+    assert host in row["message"]
+    long = normalize({**raw, "Message": "x" * 70_000}, "results/Windows.EventLogs.Evtx.json", 0, CTX)
+    assert long["message"].endswith("…") and len(long["message"]) == 65_537 and long["data"]["Message"] == "x" * 70_000
+
+
 # ---- 5. dissect's $MFT and USN journal: an explicit option ----------------------------------------
 def test_dissect_mft_and_usn_records_carry_their_meaning():
     std = triage.to_row(
@@ -360,13 +424,64 @@ def test_a_large_mft_export_is_read_whole_in_a_package(tmp_path, monkeypatch):
     assert source.counts["events"] == 400 and source.ranges["eventRange"]["firstTs"] == ms("2026-09-01 10:00:00.1234567")
 
 
-def test_a_json_export_still_stops_at_the_parse_limit_and_says_so(tmp_path, monkeypatch):
-    monkeypatch.setattr(collection, "MAX_PARSE_BYTES", 16 * 1024)
-    body = json.dumps([{"Name": f"proc{i}.exe", "Id": i, "Path": "C:\\Windows\\System32\\proc.exe"} for i in range(1000)])
+def _package(tmp_path, members: dict[str, str]) -> tuple[PackageSource, list[dict]]:
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w") as z:
-        z.writestr("Processes/processes.json", body)
-    source = PackageSource("pkg.zip", None, out.getvalue(), str(tmp_path), ParseContext(analyze_attachments=False))
-    list(source)
-    member = next(f for f in source.files if f["name"].endswith("processes.json"))
-    assert member["status"] == "error" and "parse limit" in member["reason"]
+        for name, body in members.items():
+            z.writestr(name, body)
+    source = PackageSource("collection.zip", None, out.getvalue(), str(tmp_path), ParseContext(analyze_attachments=False))
+    return source, list(source)
+
+
+def _service(i: int) -> dict:
+    return {"Name": f"svc{i}", "DisplayName": f"Service {i}", "PathName": f"C:\\Program Files\\Vendor\\svc{i}.exe", "StartMode": "Auto", "State": "Running"}
+
+
+def test_a_velociraptor_result_file_past_the_old_json_ceiling_gives_every_record(tmp_path, monkeypatch):
+    # Velociraptor names its line-delimited results .json; read whole, one past the ceiling gave 0 rows
+    monkeypatch.setattr(collection, "MAX_PARSE_BYTES", 16 * 1024)
+    body = "".join(json.dumps(_service(i)) + "\n" for i in range(2000))
+    assert len(body) > 8 * 16 * 1024
+    source, rows = _package(tmp_path, {"results/Windows.System.Services.json": body})
+    member = next(f for f in source.files if f["name"].endswith("Services.json"))
+    assert member["status"] == "parsed" and member["count"] == len(rows) == 2000
+    assert [r["serviceName"] for r in rows[:2]] == ["svc0", "svc1"] and rows[-1]["serviceName"] == "svc1999"
+
+
+def test_a_json_array_export_is_read_a_record_at_a_time(tmp_path, monkeypatch):
+    monkeypatch.setattr(collection, "MAX_PARSE_BYTES", 16 * 1024)
+    compact = json.dumps([{"Name": f"proc{i}.exe", "Id": i, "Path": "C:\\Windows\\System32\\proc.exe"} for i in range(1000)])
+    indented = json.dumps({"records": [{"Name": f"task{i}", "TaskName": f"\\Vendor\\task{i}"} for i in range(500)]}, indent=2)
+    source, rows = _package(tmp_path, {"Processes/processes.json": compact, "Scheduled Tasks/tasks.json": indented})
+    by_member = {f["name"]: f for f in source.files}
+    assert by_member["Processes/processes.json"]["status"] == "parsed" and by_member["Processes/processes.json"]["count"] == 1000
+    assert by_member["Scheduled Tasks/tasks.json"]["status"] == "parsed" and by_member["Scheduled Tasks/tasks.json"]["count"] == 500
+    assert sorted(r["processId"] for r in rows if r["artifactType"] == "process") == list(range(1000))
+
+
+def test_records_that_cannot_be_read_are_counted_and_the_rest_kept(tmp_path):
+    lines = [json.dumps(_service(0)), '{"Name": "svc1", "PathName": "C:\\\\cut', "[1, 2]", json.dumps(_service(3)), ""]
+    source, rows = _package(tmp_path, {"results/Windows.System.Services.json": "\n".join(lines)})
+    member = next(f for f in source.files if f["name"].endswith("Services.json"))
+    # before: the first bad line ended the member with no row at all
+    assert [r["serviceName"] for r in rows] == ["svc0", "svc3"]
+    assert member["unreadable"] == 2 and member["status"] == "error"
+    assert "2 record(s) could not be read" in member["reason"]
+
+
+def test_a_json_record_past_the_record_ceiling_ends_the_member_and_keeps_what_was_read(tmp_path, monkeypatch):
+    monkeypatch.setattr(collection, "MAX_RECORD_CHARS", 4096)
+    monkeypatch.setattr(collection._JsonText, "CHUNK", 1024)
+    items = [_service(0), {**_service(1), "Description": "x" * 10_000}, _service(2)]
+    source, rows = _package(tmp_path, {"Services/services.json": json.dumps(items, indent=1)})
+    member = next(f for f in source.files if f["name"].endswith("services.json"))
+    assert [r["serviceName"] for r in rows] == ["svc0"]
+    assert member["status"] == "error" and "larger than" in member["reason"]
+
+
+def test_a_truncated_json_array_keeps_the_records_before_the_cut(tmp_path):
+    body = json.dumps([_service(i) for i in range(5)])
+    source, rows = _package(tmp_path, {"Services/services.json": body[: len(body) - 40]})
+    member = next(f for f in source.files if f["name"].endswith("services.json"))
+    assert [r["serviceName"] for r in rows] == ["svc0", "svc1", "svc2", "svc3"]
+    assert member["status"] == "error"

@@ -99,6 +99,8 @@ FLAGS: dict[str, str] = {
     "empty_subject": "Empty subject.",
     "reply_without_thread": "Subject starts with RE/FW but there is no thread reference (fake reply).",
     "many_attachments": "More than 10 attachments.",
+    "attachments_truncated": "More than 60 attachments: the first 60 are analysed and listed; the attachment count is the real one.",
+    "body_truncated": "The body is longer than REMN keeps (200,000 characters of text, 400,000 of HTML): search, URLs and rules see the start only.",
     "encrypted_body": "S/MIME encrypted content.",
     # urls
     "url_ip_literal": "Link to a raw IP address instead of a domain.",
@@ -233,6 +235,7 @@ FLAGS: dict[str, str] = {
     "nested_mail": "Forwarded message attached.",
     "empty_file": "Empty attachment.",
     "large_attachment": "Attachment larger than 25 MB.",
+    "not_read": "Attachment larger than REMN reads from a PST or OST (60 MiB): not hashed or analysed; its size is the one the mailbox declares.",
     "yara_match": "Matched a YARA rule.",
     "calendar_lure": "Calendar invitation with links / attendees (calendar phishing).",
     "vcard": "vCard.",
