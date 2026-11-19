@@ -42,7 +42,9 @@ other pages stay usable. When the browser does not let the app open its database
 (a private window, site data turned off, storage full, a database written by a newer
 version), the page says so and why instead of waiting.
 
-On every list, `j` and `k` move the selection and `/` focuses the search. The Review page
+On the Mails and Findings lists, `j` and `k` move the selection and `/` focuses the search;
+the Stories, Graph and Review pages move between their steps or cards with `j` and `k` too.
+The other lists, Events and Indicators among them, are used with the mouse. The Review page
 adds `r`, `e`, `f` and `x` for its decisions.
 
 ## Evidence

@@ -38,8 +38,9 @@ export interface CaseSettings {
   readFileSystem?: boolean
   /**
    * which findings the rules raise, 1 (fewest false positives) to 5 (every finding), from each
-   * rule's measured noise on clean machines (data/detectionLevel.ts). A new case starts at 3; a
-   * case from before levels has none and raises every finding, as it always did.
+   * rule's measured noise on clean machines (data/detectionLevel.ts). A new case starts at
+   * DEFAULT_DETECTION_LEVEL there (2); a case from before levels has none and raises every
+   * finding, as it always did.
    */
   detectionLevel?: number
 }
@@ -608,7 +609,7 @@ export function setDb(db: RemnDB | null): void {
   _db = db
 }
 
-/** kv keys that belong to one case (mirrors CASE_KV_PREFIXES in data/caseState.ts, kept here to avoid a schema -> data import). */
+/** kv keys that belong to one case, the only list of them: deleting, exporting and importing a case read it. */
 export const CASE_KV_KEYS = (caseId: number) =>
   [
     'chains',

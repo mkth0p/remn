@@ -11,13 +11,6 @@ import { rememberReviews } from './findingReviews'
  * the same finding keys reappear.
  */
 
-/** kv keys that belong to one case, by prefix (the case id follows the dash). */
-export const CASE_KV_PREFIXES = ['chains-', 'ruleDiags-', 'baseline-', 'mail-calibration-', 'report-summary-', 'finding-reviews-'] as const
-
-export function caseKvKeys(caseId: number): string[] {
-  return CASE_KV_PREFIXES.map((p) => `${p}${caseId}`)
-}
-
 export async function clearDerivedState(caseId: number, removedEvidenceId?: number): Promise<{ findings: number; chains: number }> {
   const db = getDb()
   return db.transaction('rw', [db.findings, db.kv, db.facets], async () => {
