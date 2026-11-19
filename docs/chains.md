@@ -57,7 +57,13 @@ names, Defender detections, persistence and log-clearing events.
 Steps that name the mail's URL domains, attachment names or sender are *artifact links*,
 the strongest tie between the mail and what followed. Links to the organisation's own
 domains (the internal domains of the case settings, and the domains of the mail's own
-recipients, so a case with no internal domain set is read the same) are not artifacts. Bursts collapse into one step, findings of the last rule run
+recipients, so a case with no internal domain set is read the same) are not artifacts. A
+burst collapses into one step only when its events agree on what makes them distinct: the
+operation, the host and program, the account, the address and what was acted on (a command
+line, a query, a destination, a file, a share, a service, a script), so logons from two
+addresses are two steps. A flagged event of a kind the builder does not model (a process
+access, an RDP authentication record, a share file access) is kept as a step that names the
+record and what it says. Findings of the last rule run
 attach to the steps they reference, and one chain is kept per identity per day with the
 other seeds listed as related. Deduplication uses the recipient's full address, so two
 organisations' accounts named Alice retain separate chains. A bare alias on the same event

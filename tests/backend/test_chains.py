@@ -506,3 +506,61 @@ def test_a_campaign_of_another_organisation_or_time_stays_its_own_chain():
     for events in (other, later):
         kinds = sorted(c.get("kind") or "mail" for c in C.build_chains(mails, events)["chains"])
         assert kinds == ["authentication", "mail"], kinds
+
+
+def test_a_flagged_event_of_a_kind_the_builder_does_not_model_is_kept_as_a_step():
+    """The process access to LSASS (Sysmon 10) and the RDP connection record (1149) after the phish are
+    no kind the chain builder models; flagged, they are steps that say what they are, not dropped."""
+    mails = [_mail(1, 5, "Invoice overdue", PHISHER, [VICTIM], 85, urls=["evil-login.net"])]
+    sysmon = {"channel": "Microsoft-Windows-Sysmon/Operational", "provider": "Microsoft-Windows-Sysmon"}
+    events = [
+        _ev(22, 8, **sysmon, user="CONTOSO\\alice", subjectUser="alice", query="evil-login.net"),
+        _ev(10, 20, **sysmon, user="CONTOSO\\alice", subjectUser="alice", summary="Process accessed: rundll32.exe opened lsass.exe"),
+        _ev(
+            1149,
+            30,
+            channel="Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational",
+            targetUser="alice",
+            summary="RDP user authentication succeeded",
+        ),
+        # unflagged, it is still no step: the chain is not every record of the person's day
+        _ev(10, 40, **sysmon, user="CONTOSO\\alice", subjectUser="alice", summary="Process accessed: explorer.exe opened svchost.exe"),
+    ]
+    for i, e in enumerate(events, 2):
+        e["id"] = i
+    findings = [
+        {"ruleId": "sysmon-lsass-access", "title": "LSASS memory access", "severity": "high", "source": "events", "refs": [3], "ts": ms(20)},
+        {"ruleId": "rdp-auth-unusual", "title": "RDP authentication", "severity": "medium", "source": "events", "refs": [4], "ts": ms(30)},
+    ]
+    [chain] = C.build_chains(mails, events, findings, {"internal_domains": ["contoso.com"]})["chains"]
+    by_id = {s["id"]: s for s in chain["steps"]}
+    assert by_id[3]["findings"][0]["ruleId"] == "sysmon-lsass-access" and "lsass.exe" in by_id[3]["title"] and "Sysmon 10" in by_id[3]["title"]
+    assert by_id[4]["findings"][0]["ruleId"] == "rdp-auth-unusual" and "1149" in by_id[4]["title"]
+    assert 5 not in by_id
+
+
+def test_events_fold_into_one_step_only_when_they_agree_on_address_account_and_target():
+    mails = [_mail(1, 5, "Invoice overdue", PHISHER, [VICTIM], 85, urls=["evil-login.net"])]
+    sysmon = {"channel": "Microsoft-Windows-Sysmon/Operational", "provider": "Microsoft-Windows-Sysmon"}
+    logon = {"targetUser": "alice", "targetDomain": "CONTOSO", "logonType": 3, "logonTypeName": "Network"}
+    events = [
+        _ev(22, 8, **sysmon, user="CONTOSO\\alice", subjectUser="alice", query="evil-login.net"),
+        # four network logons within minutes: two from one address, one from another, one of another type
+        _ev(4624, 20, **logon, ipAddress="10.0.0.5"),
+        _ev(4624, 21, **logon, ipAddress="10.0.0.5"),
+        _ev(4624, 22, **logon, ipAddress="203.0.113.80"),
+        _ev(4624, 23, **{**logon, "logonType": 10, "logonTypeName": "RemoteInteractive"}, ipAddress="10.0.0.5"),
+        # two runs of one program with different command lines, two lookups of different names
+        _ev(1, 24, **sysmon, user="CONTOSO\\alice", subjectUser="alice", image=r"C:\Windows\System32\cmd.exe", commandLine="cmd /c whoami"),
+        _ev(1, 25, **sysmon, user="CONTOSO\\alice", subjectUser="alice", image=r"C:\Windows\System32\cmd.exe", commandLine="cmd /c net group"),
+        _ev(22, 26, **sysmon, user="CONTOSO\\alice", subjectUser="alice", query="files.example"),
+        _ev(22, 27, **sysmon, user="CONTOSO\\alice", subjectUser="alice", query="cdn.example"),
+    ]
+    for i, e in enumerate(events, 2):
+        e["id"] = i
+    [chain] = C.build_chains(mails, events, [], {"internal_domains": ["contoso.com"]})["chains"]
+    refs = sorted(sorted(s.get("refs") or [s["id"]]) for s in chain["steps"] if s["kind"] == "event")
+    assert [3, 4] in refs and [5] in refs and [6] in refs
+    assert [7] in refs and [8] in refs and [9] in refs and [10] in refs
+    folded = next(s for s in chain["steps"] if s.get("refs") == [3, 4])
+    assert folded["count"] == 2 and "10.0.0.5" in folded["title"]

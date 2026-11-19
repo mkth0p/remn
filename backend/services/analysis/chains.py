@@ -15,8 +15,10 @@ Identity is the link: a recipient address ``alice@contoso.com``, a Windows ``CON
 ``alice`` and a UAL ``UserId`` all normalise to the key ``alice``. Artifacts of the seed mail
 (URL domains, attachment file names, sender address) give *strong* links when they reappear
 in an event (a DNS query for the phishing domain, a process whose command line names the
-attachment). Steps are ordered in time, bursts of the same operation are collapsed, findings
-of the rule run are attached to the steps they reference, and the chain is scored.
+attachment). Steps are ordered in time, bursts of the same operation from one account and
+address on the same thing are collapsed, a flagged event of a kind no step models is kept as a
+step that says what it is, findings of the rule run are attached to the steps they reference,
+and the chain is scored.
 
 Pure functions over plain dict rows so the same code serves the DuckDB store and rows posted
 from a browser-stored case.
@@ -546,10 +548,43 @@ def _is_m365(ev: dict[str, Any]) -> bool:
 # ---------------------------------------------------------------------------
 # Chain building
 # ---------------------------------------------------------------------------
-def _collapse_key(ev: dict[str, Any]) -> str:
+# what a Windows event acted on, beyond its program: two events that differ in one of these are two steps
+_TARGET_FIELDS = (
+    "logonType",
+    "commandLine",
+    "query",
+    "destinationHostname",
+    "destinationIp",
+    "destinationPort",
+    "targetFilename",
+    "shareName",
+    "relativeTargetName",
+    "serviceName",
+    "taskName",
+    "scriptBlockText",
+    "objectName",
+)
+
+
+def _collapse_key(ev: dict[str, Any], title: str) -> str:
+    """Events fold into one step only when they agree on what makes them distinct: the operation, the
+    host and program, the account, the address and what was acted on (the step's title, and the
+    fields it is made of in full), so a fold never hides a logon from another address or another command."""
+    account = _lower(ev.get("targetUser") or ev.get("subjectUser") or ev.get("user") or ev.get("upn"))
     if _is_m365(ev):
-        return f"m365|{_lower(ev.get('operation'))}|{ev.get('ipAddress') or ''}|{ev.get('status') or ''}"
-    return f"host|{ev.get('eventId')}|{_lower(ev.get('computer'))}|{_lower(ev.get('image') or ev.get('processName'))}"
+        return f"m365|{_lower(ev.get('operation'))}|{account}|{ev.get('ipAddress') or ''}|{ev.get('status') or ''}|{_lower(ev.get('targetUser'))}|{title}"
+    target = "|".join(str(ev.get(k) or "") for k in _TARGET_FIELDS)
+    return f"host|{ev.get('eventId')}|{_lower(ev.get('computer'))}|{_lower(ev.get('image') or ev.get('processName'))}|{account}|{ev.get('ipAddress') or ''}|{target}|{title}"
+
+
+def _record_step(ev: dict[str, Any]) -> tuple[int, str, list[str]]:
+    """(weight, title, notes) for a flagged record of a kind the chain does not model: what it is, where."""
+    eid = ev.get("eventId")
+    chan = str(ev.get("channel") or ev.get("provider") or "")
+    what = f"Sysmon {eid}" if "sysmon" in chan.lower() else f"event {eid} ({chan})" if eid is not None else str(ev.get("operation") or chan or "a record")
+    where = f" on {ev['computer']}" if ev.get("computer") else ""
+    summary = str(ev.get("summary") or ev.get("description") or "").strip()
+    return (1, f"{what}{where}" + (f": {summary}" if summary else ""), [])
 
 
 def build_chains(
@@ -669,16 +704,19 @@ def build_chains(
                 if id(ev) in seen_events:
                     continue
                 seen_events.add(id(ev))
+                fs = f_by_ref.get(("events", int(ev["id"]))) if ev.get("id") is not None else []
                 cls = _m365_step(ev, art_r, settings) if _is_m365(ev) else _host_step(ev, art_r)
+                if cls is None and fs:
+                    # flagged, it is part of what happened next even of a kind the builder does not model
+                    cls = _record_step(ev)
                 if cls is None:
                     continue
                 w, title, notes = cls
-                fs = f_by_ref.get(("events", int(ev["id"]))) if ev.get("id") is not None else []
                 w += max((SEV_WEIGHT.get(str(f.get("severity")), 0) for f in (fs or [])), default=0)
                 w += 2 * len([n for n in notes if n.startswith("mail ")])
                 if w <= 0 and not fs:
                     continue
-                key = _collapse_key(ev)
+                key = _collapse_key(ev, title)
                 # bursts of the same operation from the same client merge into one step (kept at the
                 # first timestamp) even when other steps interleave, so a 30-row MailItemsAccessed run
                 # reads as one line while an inbox rule created in the middle keeps its own place
