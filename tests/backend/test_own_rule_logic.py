@@ -195,3 +195,18 @@ def test_a_task_action_reading_a_json_file_or_starting_internet_explorer_is_not_
         task_created(r"\Example Kiosk", task_xml(r"C:\Program Files\Internet Explorer\iexplore.exe", "-k")),
     ]
     assert fired(store, "win-scheduled-task-suspicious-content", rows) == []
+
+
+def test_a_task_is_left_out_for_a_vendor_name_only_where_its_name_starts_with_it(store):
+    plain = task_xml(r"C:\Program Files\Example Vendor\agent.exe", "")
+    rows = [
+        task_created(r"\Microsoft\Windows\Defrag\ScheduledDefrag", plain),
+        task_created(r"\GoogleUpdateTaskMachineCore{00000000-0000-0000-0000-000000000000}", plain),
+        task_created(r"\Intel\Telemetry 3", plain),
+        # the creator chooses the name: a vendor's name inside it is not the vendor's task
+        task_created(r"\Windows Defender Intel Check", plain),
+        task_created(r"\SyncHPrinter", plain),
+        task_created(r"\Users\Public\Adobe", plain),
+    ]
+    found = fired(store, "win-scheduled-task-created", rows)
+    assert sorted(f["entities"]["taskName"] for f in found) == [r"\SyncHPrinter", r"\Users\Public\Adobe", r"\Windows Defender Intel Check"]

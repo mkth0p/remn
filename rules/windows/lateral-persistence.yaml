@@ -72,11 +72,20 @@ threshold: ">= 1"
 ---
 id: win-scheduled-task-created
 title: Scheduled task created or updated
-description: 4698/4702 (Security) or 106/140 (TaskScheduler) - persistence or remote execution (at, schtasks /s). One finding per task name and host; the task name and the account are on the finding.
+description: >-
+  4698/4702 (Security) or 106/140 (TaskScheduler) - persistence or remote execution (at, schtasks /s). Tasks
+  whose name starts with the folder or name Windows, Office and common updaters give their own tasks
+  (\Microsoft\Windows\, \GoogleUpdateTask, \Intel...) are left out. The creator chooses the name, so a task
+  named like one of them is left out too; win-scheduled-task-suspicious-content still reads its command. One
+  finding per task name and host; the task name and the account are on the finding.
 severity: medium
 source: events
 attack: [T1053.005]
 tags: [persistence]
+falsepositives:
+  - software installers and updaters that register their own tasks
+references:
+  - https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4698
 entities: [computer, subjectUser, taskName]
 group_by: [computer, taskName]
 threshold: ">= 1"
@@ -84,7 +93,8 @@ where:
   any_of:
     - { eventId|in: [4698, 4702] }
     - { eventId|in: [106, 140], provider|contains: TaskScheduler }
-  taskName|not_contains: ["\\Microsoft\\Windows\\", "\\Microsoft\\Office\\", "\\SoftLanding\\", "OneDrive", "GoogleUpdate", "MicrosoftEdgeUpdate", "Adobe", "Mozilla", "Firefox", "Brave", "Opera", "Dropbox", "npcap", "Intel", "NVIDIA", "Lenovo", "Dell", "HP"]
+  # anchored at the start of the name: a vendor's name anywhere inside it is not the vendor's task
+  taskName|not_startswith: ["\\Microsoft\\Windows\\", "\\Microsoft\\Office\\", "\\OneDrive ", "\\GoogleUpdateTask", "\\MicrosoftEdgeUpdateTask", "\\Adobe", "\\Mozilla\\", "\\BraveSoftwareUpdateTask", "\\Opera ", "\\DropboxUpdateTask", "\\npcapwatchdog", "\\Intel", "\\NVIDIA", "\\Lenovo", "\\Dell", "\\HP"]
 ---
 id: win-scheduled-task-suspicious-content
 title: Scheduled task with suspicious command
