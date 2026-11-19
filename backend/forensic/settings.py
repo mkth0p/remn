@@ -144,8 +144,11 @@ FORENSIC_UPLOAD_SWEEP_S = _env_int("FORENSIC_UPLOAD_SWEEP_S", 300)
 # like. Off on a private instance; an instance open to strangers gets thirty minutes.
 FORENSIC_INGEST_MAX_S = _env_int("FORENSIC_INGEST_MAX_S", 1800 if FORENSIC_BROWSER_ONLY else 0)
 # Total bytes the staging area may hold. A new upload is refused above it, after a sweep, so a
-# stream of abandoned uploads cannot fill the disk however short the lifetime is.
-FORENSIC_TMP_MAX_GB = _env_int("FORENSIC_TMP_MAX_GB", 4)
+# stream of abandoned uploads cannot fill the disk however short the lifetime is. 0 is the free
+# space of the disk under FORENSIC_TMP_DIR, less a tenth of that disk (at most 10 GiB) kept for the
+# case stores and the system: a fixed 4 GiB under a 64 GiB chunked-upload limit refused every
+# larger mailbox or collection. An instance open to strangers keeps a fixed total.
+FORENSIC_TMP_MAX_GB = _env_int("FORENSIC_TMP_MAX_GB", 4 if FORENSIC_BROWSER_ONLY else 0)
 # The largest single message (eml, msg, or one message of an mbox) that is parsed. Parsing holds
 # about a dozen copies of a message in memory, so a 128 MiB message inside a 128 KiB zip took the
 # parser past 1.7 GiB. A larger message gets an error row that says why it was not read.

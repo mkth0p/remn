@@ -169,9 +169,15 @@ finishes.
   that dies part-way through a single-request upload leaves a file there too. It also covers the
   parsers' own staging, the `.member`, `.decoded` and `.manifest` files a parse writes while it
   works. A parse releases those itself, and a process killed mid-parse cannot.
-- **A total budget.** `FORENSIC_TMP_MAX_GB` (4 by default) caps what the staging area may hold at
-  once. A new upload that would exceed it triggers a sweep and is then refused with 507, so a
-  stream of abandoned uploads cannot fill the disk however short the lifetime is.
+- **A total budget.** `FORENSIC_TMP_MAX_GB` caps what the staging area may hold at once: 4 in
+  browser-only mode, and otherwise 0, which is the free space of the disk under the staging area
+  less a tenth of that disk (at most 10 GiB) kept for the case stores and the system. A configured
+  total is never taken as more than that disk can hold. A file larger than the whole budget is
+  refused with 413 and a message naming what sets the budget, since waiting cannot change it. A
+  new upload that fits the budget but not what other uploads hold now triggers a sweep and is
+  then refused with 507, saying how much is held and how much is free, so a stream of abandoned
+  uploads cannot fill the disk however short the lifetime is. One archive member copied out for
+  parsing may take at most half the budget, and never more than 4 GiB.
 - **Private to the server account.** The staging directory is 0700 and each staged file 0600, so
   evidence in transit is not readable by other accounts on the host.
 - **A ceiling on what one parse holds.** A package parse holds artifacts back to decode them in

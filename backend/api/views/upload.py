@@ -22,6 +22,8 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.http import require_http_methods, require_POST
 
 from api.params import BadParameter, whole_number
+from services.ingest import staging
+from services.ingest.staging import gib, staged_bytes
 
 log = logging.getLogger(__name__)
 _ID = re.compile(r"^[a-f0-9]{32}$")
@@ -38,19 +40,6 @@ def upload_dir() -> Path:
     except OSError:
         pass
     return d
-
-
-def staged_bytes() -> int:
-    """Everything the staging area currently holds, including Django's own multipart spool."""
-    total = 0
-    for directory in (upload_dir(), Path(settings.FILE_UPLOAD_TEMP_DIR)):
-        try:
-            for p in directory.iterdir():
-                if p.is_file():
-                    total += p.stat().st_size
-        except OSError:
-            continue
-    return total
 
 
 def pending_bytes() -> int:
@@ -191,12 +180,33 @@ def init(request: HttpRequest):
     # Refuse rather than accept an upload the disk cannot take. Sweep first, so a burst of
     # abandoned uploads does not lock out a legitimate one for the rest of the retention window.
     # What is announced counts as taken: the room an upload will need is reserved when it starts.
-    budget = settings.FORENSIC_TMP_MAX_GB * 1024**3
     with _reserve:
+        budget, decided_by = staging.capacity()
+        if size > budget:
+            # Larger than the staging area could hold even empty: waiting changes nothing, so the
+            # answer says what does.
+            return JsonResponse(
+                {
+                    "error": f"this file is {gib(size)} and the staging area can hold at most {gib(budget)} ({decided_by}); it cannot be accepted until that changes",
+                    "code": "staging-too-small",
+                },
+                status=413,
+            )
         if staged_bytes() + pending_bytes() + size > budget:
             cleanup_stale()
-            if staged_bytes() + pending_bytes() + size > budget:
-                return JsonResponse({"error": "the server is staging as much evidence as it can hold; try again shortly", "code": "staging-full"}, status=507)
+            held = staged_bytes() + pending_bytes()
+            if held + size > budget:
+                return JsonResponse(
+                    {
+                        "error": (
+                            f"the staging area holds {gib(held)} of other uploads and parses in progress and has room for "
+                            f"{gib(max(0, budget - held))} more; this file needs {gib(size)}. The room frees as those are parsed, "
+                            f"or after {settings.FORENSIC_UPLOAD_MAX_AGE_S // 60} minutes for an upload that was abandoned"
+                        ),
+                        "code": "staging-full",
+                    },
+                    status=507,
+                )
 
         upload_id = uuid.uuid4().hex
         dp, _ = _paths(upload_id)

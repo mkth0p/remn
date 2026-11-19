@@ -25,6 +25,7 @@ from services.analysis import hayabusa
 from services.analysis.attachments.analyzer import analyze_attachment
 from services.common import ndjson_line, sha256_chunks
 from services.ingest.pipeline import DeadlineExceeded, EvtxSource, MailSource, detect_mail_format, iter_mbox_fileobj
+from services.ingest.staging import member_ceiling
 from services.parsers.mail import pst as pst_mod
 from services.parsers.mail.common import ParseContext
 
@@ -115,7 +116,7 @@ def _expired(deadline: float | None) -> bool:
 def _max_member() -> int:
     """The largest archive member copied out for parsing: never more than half the staging budget,
     so one member of a small upload cannot fill the area every other visitor's upload shares."""
-    return min(4 * 1024**3, int(settings.FORENSIC_TMP_MAX_GB) * 1024**3 // 2)
+    return member_ceiling()
 
 
 def _members_line_stats(members: list[dict[str, Any]], limit: int = 2000) -> dict[str, Any]:

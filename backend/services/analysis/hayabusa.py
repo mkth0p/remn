@@ -300,7 +300,9 @@ def stage(paths: list[tuple[str, str]], tmp_dir: str, directory: str | None = No
 
 def _stage_ceiling() -> int:
     """The most an archive's logs may take in staging: what one upload's largest member may take."""
-    return min(4 * 1024**3, int(getattr(settings, "FORENSIC_TMP_MAX_GB", 4) or 4) * 1024**3 // 2)
+    from services.ingest.staging import member_ceiling
+
+    return member_ceiling()
 
 
 def stage_upload(name: str, path: str | None, data: bytes | None, fmt: str, tmp_dir: str) -> tuple[str | None, dict[str, Any]]:
