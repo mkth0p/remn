@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+from urllib.parse import quote
 
 from services.reputation.base import Provider, Verdict
 
@@ -101,5 +102,5 @@ class Spamhaus(Provider):
             40 if only_pbl else 90,
             tags=tags,
             details={"listed": desc, "codes": results, "query": self._shown(qname)},
-            link=f"https://check.spamhaus.org/results/?query={value}",
+            link=f"https://check.spamhaus.org/results/?query={quote(value, safe=':')}",
         )

@@ -6,7 +6,9 @@ provider. Nothing here is Django-specific; ``configure()`` receives the keys.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
+import re
 import threading
 import time
 from collections.abc import Iterable
@@ -24,6 +26,8 @@ def _failed(exc: BaseException) -> str:
 
     if isinstance(exc, httpx.HTTPStatusError):
         return f"the provider answered HTTP {exc.response.status_code}"
+    if isinstance(exc, httpx.TooManyRedirects):
+        return "the provider redirected the lookup, and the redirect was not followed"
     if isinstance(exc, httpx.TimeoutException):
         return "the provider did not answer in time"
     if isinstance(exc, httpx.TransportError):
@@ -32,6 +36,46 @@ def _failed(exc: BaseException) -> str:
 
 
 KINDS = ("url", "domain", "ip", "hash")
+_HASH = re.compile(r"[0-9a-fA-F]{32}|[0-9a-fA-F]{40}|[0-9a-fA-F]{64}")
+_LABEL = re.compile(r"[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?")
+_URL = re.compile(r"[a-zA-Z][a-zA-Z0-9+.-]*://[^/?#\s]+\S*")
+
+
+def refusal(kind: str, value: str) -> str | None:
+    """Why `value` is not a `kind` a provider can be asked about, or None when it is.
+
+    The value goes into provider URLs, DNS names and links. One that is not what its kind says (a
+    domain with a slash in it, an address followed by a path) could change what is asked, and of
+    whom, so it is refused before the cache or any provider sees it."""
+    if any(ord(ch) < 0x21 or ord(ch) == 0x7F for ch in value):
+        return "it contains a space or a control character"
+    if kind == "ip":
+        try:
+            ipaddress.ip_address(value)
+        except ValueError:
+            return "not an IP address"
+        return None
+    if kind == "domain":
+        try:
+            ipaddress.ip_address(value)
+            return "an IP address, not a domain name"
+        except ValueError:
+            pass
+        try:
+            name = value.rstrip(".").encode("idna").decode("ascii").lower()
+        except UnicodeError:
+            return "not a domain name"
+        labels = name.split(".")
+        if len(name) > 253 or len(labels) < 2 or not all(_LABEL.fullmatch(label) for label in labels):
+            return "not a domain name"
+        return None
+    if kind == "hash":
+        return None if _HASH.fullmatch(value) else "not an MD5, SHA-1 or SHA-256 digest"
+    if kind == "url":
+        return None if _URL.fullmatch(value) else "not a URL with a scheme and a host"
+    return "not a kind that can be looked up"
+
+
 # "timeout": the batch deadline passed before this lookup ran or answered
 VERDICTS = ("malicious", "suspicious", "clean", "unknown", "error", "not_configured", "timeout")
 
@@ -203,15 +247,20 @@ class Registry:
         wanted = [p for p in self.providers.values() if (providers is None or p.name in providers)]
         jobs: list[tuple[Provider, str, str]] = []
         seen: set[tuple[str, str, str]] = set()
+        results: list[dict[str, Any]] = []
         for kind, value in items:
             if kind not in KINDS or not value:
                 continue
             value = value.strip()
+            # a value refused here is reported per provider, so the analyst sees it was not looked up
+            said = refusal(kind, value)
             for p in wanted:
                 if kind in p.kinds and (p.name, kind, value) not in seen:
                     seen.add((p.name, kind, value))
-                    jobs.append((p, kind, value))
-        results: list[dict[str, Any]] = []
+                    if said:
+                        results.append(Verdict(p.name, kind, value, "error", details={"error": f"not looked up: {said}"}).to_dict())
+                    else:
+                        jobs.append((p, kind, value))
         if not jobs:
             return results
         # Not a `with` block: leaving it waits for every queued lookup, so the deadline only
