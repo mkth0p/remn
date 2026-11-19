@@ -104,8 +104,9 @@ where:
     - scriptBlockText|contains: [-encodedcommand, "-enc ", frombase64string, downloadstring, downloadfile, "net.webclient", "invoke-expression", "invoke-mimikatz", "mimikatz", "invoke-shellcode", "invoke-dllinjection", "invoke-reflectivepeinjection", "amsiutils", "amsiinitfailed", "amsi.dll", "system.management.automation.amsi", "-w hidden", "-windowstyle hidden", "sekurlsa", "lsadump", "kerberos::", "get-keystrokes", "powersploit", "powerview", "get-netuser", "get-netgroup", "get-domainuser", "invoke-kerberoast", "rubeus", "sharphound", "bloodhound", "nishang", "empire", "covenant", "sliver", "cobalt", "beacon", "shellcode", "virtualalloc", "virtualprotect", "createthread", "memcpy", "getprocaddress", "getdelegateforfunctionpointer", "unsafenativemethods", "definedynamicassembly", "getasynckeystate", "setwindowshookex", "copyfromscreen", "cipher /w", "reg save", "ntdsutil", "comsvcs", "minidump", "procdump", "lsass", "psexec", "shadowcopy", "-xor", "invoke-obfuscation", "disablerealtimemonitoring", "disablebehaviormonitoring", "disableioavprotection", "disablescriptscanning", "disableblockatfirstseen", "disableintrusionpreventionsystem", "exclusionpath", "exclusionprocess", "exclusionextension"]
     # iex however it is followed: iex(...), iex $x, iex 'x'
     - scriptBlockText|re: '\biex\b'
-    # a reversed string joined back: ('gnirtS46esaBmorF'[-1..-16] -join '')
-    - scriptBlockText|re: '\[\s*-1\s*\.\.\s*-[^\]]*\]\s*-join'
+    # a reversed string joined back: ('gnirtS46esaBmorF'[-1..-16] -join ''); the index stops at the next
+    # bracket of either kind, so a value of many "[-1..-" is read once, not from each of them
+    - scriptBlockText|re: '\[\s*-1\s*\.\.\s*-[^\[\]]*\]\s*-join'
     # iex spelled with characters of automatic variables: $PSHome[4]+$PSHome[34]+'X'
     - scriptBlockText|contains: ["$pshome[", "$shellid[", "$env:comspec[", "$env:public[", "verbosepreference.tostring()["]
     # a format string whose first placeholder is not {0}, filled with quoted pieces: ("{1}{0}" -f 'ject','New-Ob')

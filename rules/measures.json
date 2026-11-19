@@ -2935,7 +2935,7 @@
     "win-powershell-clm-lockdown-removed": {"clean": {"events": 0, "findings": 0, "machines": 0, "of": 7, "scope": 2866165}, "fires": 1, "h": "577b74c8b3b8", "hits": 1, "of": 52},
     "win-powershell-encoded-command": {"clean": {"events": 2, "findings": 2, "machines": 1, "of": 7, "scope": 27399}, "fires": 101, "h": "62879f436961", "hits": 31, "of": 106},
     "win-powershell-execution-policy-relaxed": {"clean": {"events": 1, "findings": 1, "machines": 1, "of": 7, "scope": 1151765}, "fires": 1, "h": "a49a10cd0a01", "hits": 1, "of": 43},
-    "win-powershell-suspicious-scriptblock": {"clean": {"events": 0, "findings": 0, "machines": 0, "of": 6, "scope": 323}, "fires": 68, "h": "f4013a9e8437", "hits": 26, "of": 38},
+    "win-powershell-suspicious-scriptblock": {"clean": {"events": 0, "findings": 0, "machines": 0, "of": 6, "scope": 323}, "fires": 68, "h": "66e1e8e50624", "hits": 26, "of": 38},
     "win-ppid-spoofing-handle": {"clean": {"events": 546588, "findings": 17, "machines": 3, "of": 7, "scope": 1619360}, "fires": 19, "h": "2b574c3388e0", "hits": 1, "of": 1},
     "win-privileged-local-group-enumeration": {"clean": {"events": 0, "findings": 0, "machines": 0, "of": 6, "scope": 581}, "fires": 2, "h": "8c1962540bf6", "hits": 2, "of": 4},
     "win-process-access-hollowing": {"clean": {"events": 1685, "findings": 139, "machines": 7, "of": 7, "scope": 1619360}, "fires": 137, "h": "8132fbc18e8a", "hits": 5, "of": 13},
