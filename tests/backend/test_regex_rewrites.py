@@ -10,13 +10,16 @@ out and the whole answer is compared on representative pages instead. All text h
 
 from __future__ import annotations
 
+import pathlib
 import random
 import re
 import time
 from collections.abc import Callable
 from typing import Any
 
+import duckdb
 import pytest
+import yaml
 
 from services.ai.claude_code import _FENCE_RE, parse_tool_calls
 from services.analysis import headers, urls
@@ -29,7 +32,7 @@ from services.parsers.collection import REG_VALUE
 from services.parsers.m365 import _CULTURE_RE
 from services.parsers.mail.common import normalize_name
 from services.store.rules import _DUR, _THR
-from services.store.sqlfilter import _THRESHOLD_RE
+from services.store.sqlfilter import _THRESHOLD_RE, _regex
 
 SAMPLES = 1500
 
@@ -486,3 +489,44 @@ def test_hostile_text_is_read_in_under_a_second(what, run):
     t0 = time.process_time()
     run()
     assert time.process_time() - t0 < 1.0, what
+
+
+RULES = pathlib.Path(__file__).resolve().parents[2] / "rules"
+
+# file | rule | field | the pattern before | what a value starts with | pieces
+RULE_REWRITES = [
+    (
+        "collection/host-artifacts.yaml",
+        "collection-service-unquoted-path",
+        "serviceFile|re",
+        r'(?i)^[a-z]:\\[^"]* [^"]*\.exe',
+        "C:\\",
+        ["C:\\", "a:\\", "\\", " ", '"', "a", "Program Files", ".exe", ".EXE", "x", "\n"],
+    ),
+    (
+        "windows/image-load.yaml",
+        "win-psexec-renamed-service-pipe",
+        "pipeName|re",
+        r"^\\[^\\]+-[^\\]+-[0-9]+-std(in|out|err)$",
+        "\\",
+        ["-", "a", "svc", "1", "23", "\\", "-1-stdin", "-12-stdout", "-stderr", "--3-stdin", "x"],
+    ),
+]
+
+
+@pytest.mark.parametrize("file, rule, field, before, head, pieces", RULE_REWRITES, ids=[r[1] for r in RULE_REWRITES])
+def test_a_rewritten_rule_pattern_matches_the_values_it_matched_before_in_the_store(file, rule, field, before, head, pieces):
+    # the store runs a rule's pattern with RE2 (case-insensitive) as sqlfilter writes it; the browser's
+    # engine, which backtracks, is compared in frontend/src/test/regexRewrites.test.ts
+    now = next(d for d in yaml.safe_load_all((RULES / file).read_text(encoding="utf-8")) if d and d.get("id") == rule)["where"][field]
+    assert now != before
+    rng = random.Random(rule)
+    values = [head + soup(rng, pieces, 12) for _ in range(SAMPLES)]
+    rows = (
+        duckdb.connect()
+        .execute("SELECT v, regexp_matches(v, ?, 'i'), regexp_matches(v, ?, 'i') FROM unnest(?) AS t(v)", [_regex(before), _regex(now), values])
+        .fetchall()
+    )
+    assert [v for v, old, new in rows if old != new] == []
+    assert [bool(re.search(now, v, re.I)) for v in values] == [old for _, old, _ in rows]
+    assert sum(old for _, old, _ in rows) > 50

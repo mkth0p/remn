@@ -1,11 +1,12 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import yaml from 'js-yaml'
 import { describe, expect, it } from 'vitest'
 import { hostKey } from '../data/stories'
 import { psPipeline } from '../parsers/evtx/flatten'
 import { strip } from '../parsers/evtx/py'
 import { parseDuration, parseThreshold } from '../rules/engine'
-import { matchCondition } from '../rules/filter'
+import { compileRegex, matchCondition } from '../rules/filter'
 
 /**
  * The patterns made linear answer as they did before, and the code that applies them stays fast.
@@ -104,6 +105,63 @@ describe('the rewritten patterns of the browser code', () => {
     // each of these took more than six seconds with the patterns they replace
     const t0 = performance.now()
     run()
+    expect(performance.now() - t0).toBeLessThan(1000)
+  })
+})
+
+const RULES = join(__dirname, '../../../rules')
+
+// rule | file | field | the pattern before | what a value starts with | pieces
+const RULE_REWRITES: [string, string, string, string, string, string[]][] = [
+  [
+    'collection-service-unquoted-path',
+    'collection/host-artifacts.yaml',
+    'serviceFile|re',
+    String.raw`(?i)^[a-z]:\\[^"]* [^"]*\.exe`,
+    'C:\\',
+    ['C:\\', 'a:\\', '\\', ' ', '"', 'a', 'Program Files', '.exe', '.EXE', 'x', '\n'],
+  ],
+  [
+    'win-psexec-renamed-service-pipe',
+    'windows/image-load.yaml',
+    'pipeName|re',
+    String.raw`^\\[^\\]+-[^\\]+-[0-9]+-std(in|out|err)$`,
+    '\\',
+    ['-', 'a', 'svc', '1', '23', '\\', '-1-stdin', '-12-stdout', '-stderr', '--3-stdin', 'x'],
+  ],
+]
+
+function rulePattern(file: string, rule: string, field: string): string {
+  const docs = yaml.loadAll(readFileSync(join(RULES, file), 'utf-8')) as { id?: string; where?: Record<string, string> }[]
+  return docs.find((d) => d?.id === rule)?.where?.[field] ?? ''
+}
+
+describe("the rewritten patterns of REMN's own rule packs", () => {
+  it.each(RULE_REWRITES.map((r, i) => [r[0], i] as const))('%s matches the values it matched before in the browser', (_rule, i) => {
+    const [rule, file, field, before, head, pieces] = RULE_REWRITES[i]
+    const now = rulePattern(file, rule, field)
+    expect(now).not.toBe(before)
+    // as the browser engine runs them; the store's RE2 is compared in tests/backend/test_regex_rewrites.py
+    const [old, rewritten] = [compileRegex(before, 'i') as RegExp, compileRegex(now, 'i') as RegExp]
+    const next = seeded(i + 50)
+    let matched = 0
+    for (let n = 0; n < SAMPLES; n++) {
+      const s = head + soup(next, pieces, 12)
+      expect(rewritten.test(s), JSON.stringify(s)).toBe(old.test(s))
+      if (old.test(s)) matched++
+    }
+    expect(matched).toBeGreaterThan(50)
+  })
+
+  it.each([
+    ['collection-service-unquoted-path', 'a service path of 50,000 words', 'C:\\' + 'a '.repeat(50_000)],
+    ['win-psexec-renamed-service-pipe', 'a pipe name of 100,000 dashes', '\\' + '-'.repeat(100_000)],
+  ])('%s reads %s in under a second', (rule, _what, value) => {
+    const [, file, field] = RULE_REWRITES.find((r) => r[0] === rule) as (typeof RULE_REWRITES)[number]
+    const re = compileRegex(rulePattern(file, rule, field), 'i') as RegExp
+    // the patterns they replace took from four to nine seconds on these values
+    const t0 = performance.now()
+    re.test(value)
     expect(performance.now() - t0).toBeLessThan(1000)
   })
 })

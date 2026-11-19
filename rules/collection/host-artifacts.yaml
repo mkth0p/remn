@@ -129,7 +129,8 @@ entities: [computer, serviceName, serviceFile]
 where:
   artifactType: service
   serviceFile|not_startswith: '"'
-  serviceFile|re: '(?i)^[a-z]:\\[^"]* [^"]*\.exe'
+  # up to the first space, then the rest: two runs that both take spaces were split every way on a long path
+  serviceFile|re: '(?i)^[a-z]:\\[^" ]* [^"]*\.exe'
 ---
 id: collection-execution-user-path
 title: Executable ran from, or sat in, a temporary or user profile location
