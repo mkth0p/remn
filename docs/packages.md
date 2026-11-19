@@ -316,8 +316,12 @@ encrypted members and traversal paths are skipped. Temporary files are cleaned u
 An inventory cut short is marked incomplete.
 
 Native decoders run in subprocesses, monitored at 50 ms intervals with 30-second,
-512 MiB RSS and 64 MiB input/output limits; CAB output is allowed 512 MiB because it
-is an archive rather than records. These are sampled limits, not an OS sandbox.
+512 MiB RSS and 64 MiB output limits; CAB output is allowed 512 MiB because it
+is an archive rather than records. A prefetch file or a CAB may be 64 MiB; a registry hive is
+read where its cells are rather than loaded, so it may be as large as the member ceiling. A
+registry or prefetch decode stopped at one of these limits keeps the records it decoded before
+it, and the member is an error member whose reason names the limit and the number of records
+kept; a CAB stopped at one is not kept. These are sampled limits, not an OS sandbox.
 Prefetch is decoded in groups of up to 64 artifacts per process, since a collection
 carries hundreds of them and an interpreter start each cost more than the decoding.
 An artifact a group does not reach is decoded on its own, so one damaged artifact
