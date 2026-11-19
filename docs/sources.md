@@ -109,8 +109,9 @@ events table:
   `ManagedIdentitySignInLogs`; a record of another category, such as `AuditLogs`, is
   counted as not read); a `.zip` of a whole acquisition folder is walked.
 
-A record is read as a sign-in only when it carries a time (`createdDateTime`), a client
-address (`ipAddress`) and the user or the application signed in to. Entra directory audit
+Outside the Azure Monitor records, whose category says what they are, a record is read as a
+sign-in only when it carries a time (`createdDateTime`), a client address (`ipAddress`) and
+the user or the application signed in to. Entra directory audit
 records, risk detections, risky users and user lists name a `userPrincipalName` too, but
 they are not sign-ins: a file of them is listed as a member REMN has no parser for (in the
 event-log import, as "not a recognised Microsoft 365 or Entra export"), and such a record
