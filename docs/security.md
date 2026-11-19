@@ -311,8 +311,11 @@ change to the case:
   text that addresses a model, an assistant or a reviewer is found before the model reads
   it: the result opens with a notice naming the rows, the chat shows the text, the AI
   ledger records it, and every proposal the run makes afterwards is marked so that
-  "accept all" leaves it for a one-by-one look. The triage pass marks the proposals on items
-  whose own text does the same (`frontend/src/ai/evidence.ts`, `evidence.test.ts`).
+  "accept all" leaves it for a one-by-one look; so is one made after evidence too long for
+  the check to read whole. The triage pass marks every proposal of a batch in which any item
+  does the same (`frontend/src/ai/evidence.ts`, `evidence.test.ts`). The check is a handful
+  of English patterns and finds about one in four of an invented set of payloads; what it
+  misses goes through "accept all" unmarked ([AI analyst](ai.md#evidence-that-addresses-the-model)).
 - Every prompt on those paths says the case text is evidence, never an instruction, and
   that a record asking to be ignored or marked benign is evidence of intent to be named
   in the reason (`backend/services/ai/prompts.py`, `claude_code.py`, the triage

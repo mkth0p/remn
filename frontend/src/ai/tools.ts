@@ -20,7 +20,7 @@ import { listNotes } from '../data/caseNotes'
 import { dryRunRule, loadRules, parseRuleYaml } from '../data/rules'
 import { runQuery } from '../data/queryClient'
 import { useStore } from '../state/store'
-import { evRef, findInstructions, mailRef, parseRef, parseRefs, refKey, wrapEvidence, type RowRef, type SeenSet, type Suspect } from './evidence'
+import { evRef, mailRef, parseRef, parseRefs, refKey, scanEvidence, wrapEvidence, type RowRef, type SeenSet, type Suspect } from './evidence'
 import { recordHypothesis, type HypothesisStatus } from './hypotheses'
 import { loadInbox, pendingCount, propose, type Proposal } from './inbox'
 import { loadBoard } from './hypotheses'
@@ -157,6 +157,8 @@ export interface ToolContext {
   session?: number
   /** whether the run has already read text addressed to a model */
   exposed?: () => boolean
+  /** whether the run has already read evidence the check for such text could not read whole */
+  unchecked?: () => boolean
 }
 
 export interface ToolOutput {
@@ -165,6 +167,8 @@ export interface ToolOutput {
   /** refs this result returned */
   refs: string[]
   suspects: Suspect[]
+  /** places in the result the check for text addressed to a model could not read whole */
+  unread?: number
   plan?: PlanStep[]
   final?: FinalAnswer
   proposal?: Proposal
@@ -861,7 +865,7 @@ function citeError(unseen: string[], bad: string[]): string {
 async function agentTool(name: string, args: Record<string, unknown>, ctx: ToolContext): Promise<ToolOutput> {
   const { kase, seen } = ctx
   const caseId = kase.id!
-  const base = { by: 'agent' as const, model: ctx.model, session: ctx.session, exposed: ctx.exposed?.() || undefined }
+  const base = { by: 'agent' as const, model: ctx.model, session: ctx.session, exposed: ctx.exposed?.() || undefined, unchecked: ctx.unchecked?.() || undefined }
   const done = (obj: unknown, extra: Partial<ToolOutput> = {}): ToolOutput => ({ content: JSON.stringify(obj), refs: [], suspects: [], ...extra })
   switch (name) {
     case 'update_plan': {
@@ -1024,9 +1028,9 @@ export async function runTool(name: string, args: Record<string, unknown>, ctx: 
     const result = await read(name, args ?? {}, ctx)
     const refs = refsIn(result)
     ctx.seen.addAll(refs)
-    const suspects = findInstructions(result)
+    const { suspects, unread } = scanEvidence(result)
     const text = cap(result)
-    return { content: wrapEvidence(name, text, suspects), refs, suspects, error: !!(result && typeof result === 'object' && 'error' in (result as object)) }
+    return { content: wrapEvidence(name, text, suspects), refs, suspects, unread: unread || undefined, error: !!(result && typeof result === 'object' && 'error' in (result as object)) }
   } catch (e) {
     if ((e as Error).name === 'AbortError') throw e
     return fail((e as Error).message || String(e))

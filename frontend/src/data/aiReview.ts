@@ -1,6 +1,6 @@
 import { runAgent } from '../ai/chat'
 import { loadInbox, propose, updateInbox, type Proposal } from '../ai/inbox'
-import { findInstructions } from '../ai/evidence'
+import { scanEvidence } from '../ai/evidence'
 import { appendLedger } from '../ai/ledger'
 import { getDb, type Case, type Finding, type Severity } from '../db/schema'
 import { useStore } from '../state/store'
@@ -113,6 +113,8 @@ export interface Suggestion {
   proposalId?: string
   /** the model had read text addressed to a model before proposing it */
   exposed?: boolean
+  /** the model had read evidence too long or too deeply nested for that check to read whole */
+  unchecked?: boolean
 }
 
 const LEGACY_KEY = (caseId: number) => `ai-suggestions-${caseId}`
@@ -128,6 +130,7 @@ function toProposal(s: Suggestion): Omit<Proposal, 'id' | 'status' | 'createdAt'
     by: s.by === 'triage' ? 'triage' : 'chat',
     model: s.model,
     exposed: s.exposed,
+    unchecked: s.unchecked,
   }
 }
 
@@ -147,6 +150,7 @@ function toSuggestion(p: Proposal): Suggestion {
     model: p.model,
     proposalId: p.id,
     exposed: p.exposed,
+    unchecked: p.unchecked,
   }
 }
 
@@ -546,6 +550,9 @@ export async function runTriage(
     opts.onProgress?.({ done: b * size, total: items.length, batch: b + 1, batches: batches.length })
     const payload = batch.map((it) => describeItem(it, currentReviews))
     const prompt = `${INSTRUCTION}\n\nItems:\n${JSON.stringify(payload, null, 1).slice(0, 90_000)}`
+    // the model reads the whole batch at once: text in one item addressed to a model can steer the
+    // decision on another, so every proposal of the batch is marked, and accept-all leaves them
+    const read = scanEvidence(payload)
     let text: string
     try {
       const msgs = await runAgent([{ role: 'user', content: prompt }], kase, { mode: 'triage', tools: false, think: false, maxIterations: 1, model: opts.model, signal: opts.signal })
@@ -585,8 +592,8 @@ export async function runTriage(
           at: Date.now(),
           by: 'triage',
           model: run.model || undefined,
-          // the item's own text addresses a model: accept-all leaves this one for a look
-          exposed: findInstructions(describeItem(it, currentReviews)).length > 0 || undefined,
+          exposed: read.suspects.length > 0 || undefined,
+          unchecked: read.unread > 0 || undefined,
         })
         run.entries.push({
           id: it.id,
