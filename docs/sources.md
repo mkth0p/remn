@@ -125,7 +125,11 @@ Rows carry `provider`, `channel` (the workload), `category` (`M365 Exchange`,
 `M365 Entra`, `Entra sign-in`, …), `operation`, `subjectUser` and `targetUser`,
 `ipAddress`, `status`, `objectName`, and every AuditData field under `data.<Name>`
 (Parameters, ModifiedProperties and OperationProperties flattened; Entra
-`data.country`, `data.clientAppUsed`, `data.riskState`, …).
+`data.country`, `data.clientAppUsed`, `data.riskState`, …). A value nested deeper is kept as
+JSON up to 4,000 characters (`Target` and `Actor` ids, `Folders` paths and the applied
+conditional access policies up to 2,000), and the whole record in `raw` up to 200,000. A
+value cut at its limit ends with `…`, and the evidence's statistics (`cut`) and its member
+list say how many records hold one.
 
 A record that cannot be read is counted in the evidence's parse errors, and the records after
 it are still read. A CSV field may hold up to 16 MiB, so an AuditData column longer than the

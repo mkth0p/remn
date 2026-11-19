@@ -264,6 +264,7 @@ class EvtxSource:
             tmp_path, sha = member_to_tempfile(member, self.tmp_dir, suffix)
             try:
                 before, dup_before, rep_before = self.stats.count, self.stats.duplicates, self.stats.repaired
+                cloud_before = m365.counts(self.stats)
                 if fmt in ("evtx", evtx_parser.XML_FORMAT):
                     yield from self._iter_one(tmp_path, member.name, fmt)
                 else:
@@ -273,6 +274,8 @@ class EvtxSource:
                     entry["duplicates"] = self.stats.duplicates - dup_before
                 if self.stats.repaired > rep_before:
                     entry["repaired"] = self.stats.repaired - rep_before
+                if cloud_note := m365.note({k: v - cloud_before[k] for k, v in m365.counts(self.stats).items()}):
+                    entry["note"] = cloud_note
                 self.files.append(entry)
             finally:
                 try:

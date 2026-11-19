@@ -732,3 +732,49 @@ def test_a_record_longer_than_the_limit_is_counted_not_held(monkeypatch):
     # inside an array there is no line to resume at: the file stops there and says why
     with pytest.raises(ValueError, match="longer than"):
         list(m365.iter_records(None, json.dumps([small[0], big, small[1]]).encode(), "entra-signin-json"))
+
+
+def _long_record() -> dict:
+    """A DLP match whose policy details run past the 4,000 characters a data value keeps (invented)."""
+    rec = make_m365.ual_records()[0]
+    return {**rec, "Id": str(uuid.uuid4()), "PolicyDetails": [{"PolicyName": "Finance", "Rules": [{"RuleName": f"rule {i}"} for i in range(400)]}]}
+
+
+def test_a_value_cut_at_its_limit_says_so_and_is_counted(tmp_path):
+    """A nested AuditData value was cut at 4,000 characters into JSON that does not parse, and
+    nothing said it was cut. The cut value now ends with an ellipsis and the record is counted."""
+    from services.parsers.evtx_parser import Stats
+
+    stats = Stats()
+    rec = _long_record()
+    whole = json.dumps(rec["PolicyDetails"], ensure_ascii=False)
+    rows = list(m365.iter_records(None, json.dumps([rec, make_m365.ual_records()[1]]).encode(), "m365-ual-json", stats=stats))
+    value = rows[0]["data"]["PolicyDetails"]
+    assert len(whole) > 4000 and value == whole[:4000] + "…"
+    assert json.loads(rows[0]["raw"])["PolicyDetails"] == rec["PolicyDetails"]
+    assert stats.cut == 1 and stats.to_dict()["cut"] == 1 and "_cut" not in rows[0] and "_cut" not in rows[1]
+
+
+def test_a_raw_record_cut_at_its_limit_says_so():
+    from services.parsers.evtx_parser import Stats
+
+    stats = Stats()
+    rec = {**make_m365.ual_records()[0], "AffectedItems": [{"InternetMessageId": f"<{i}@example.test>", "Subject": "s" * 300} for i in range(800)]}
+    (row,) = m365.iter_records(None, json.dumps([rec]).encode(), "m365-ual-json", stats=stats)
+    assert len(row["raw"]) == 200_001 and row["raw"].endswith("…") and stats.cut == 1
+
+
+def test_the_member_list_says_how_many_records_were_cut(tmp_path):
+    import zipfile
+
+    z = tmp_path / "export.zip"
+    with zipfile.ZipFile(z, "w") as zf:
+        zf.writestr("ual/long.json", json.dumps([_long_record()]))
+        zf.writestr("ual/short.json", json.dumps(make_m365.ual_records()[1:3]))
+    src = EvtxSource(z.name, str(z), None, str(tmp_path))
+    list(src)
+    notes = {f["name"]: f.get("note") for f in src.files}
+    assert notes == {"ual/long.json": "1 record(s) hold a value cut at its length limit, marked by a closing …", "ual/short.json": None}
+    rows, stats = _sources_of(tmp_path / "export.zip")
+    member = next(f for f in stats["files"] if f["name"] == "ual/long.json")
+    assert member["status"] == "parsed" and member["note"] == notes["ual/long.json"]

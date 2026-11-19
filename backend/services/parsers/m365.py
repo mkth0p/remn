@@ -220,15 +220,25 @@ def parse_ts(v: Any, day_first: bool | None = None) -> tuple[int | None, str | N
     return int(dt.timestamp() * 1000), dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
+class _Cut(str):
+    """A value cut at its length limit. Its closing ellipsis says so wherever it is read, and the
+    record that holds it is counted (stats.cut): a nested value cut into JSON that does not parse
+    used to pass for the whole of it."""
+
+
+def _cut(text: str, limit: int) -> str:
+    return text if len(text) <= limit else _Cut(text[:limit] + "…")
+
+
 def _scalar(v: Any) -> Any:
     if v is None or isinstance(v, (str, int, float, bool)):
         return v
     if isinstance(v, list):
         if all(x is None or isinstance(x, (str, int, float, bool)) for x in v):
             return ", ".join("" if x is None else str(x) for x in v)
-        return json.dumps(v, ensure_ascii=False)[:4000]
+        return _cut(json.dumps(v, ensure_ascii=False), 4000)
     if isinstance(v, dict):
-        return json.dumps(v, ensure_ascii=False)[:4000]
+        return _cut(json.dumps(v, ensure_ascii=False), 4000)
     return str(v)
 
 
@@ -308,7 +318,7 @@ def outlook_rule_fields(data: dict[str, Any]) -> dict[str, Any]:
         if "move" in kind:
             folder = action.get("Folder") or action.get("FolderName") or action.get("TargetFolder") or action.get("FolderId")
             if folder:
-                out["MoveToFolder"] = str(folder)[:200]
+                out["MoveToFolder"] = _cut(str(folder), 200)
     condition = _json_value(data.get("RuleCondition"))
     words: dict[str, list[str]] = {}
     for k, v in _walk(condition):
@@ -326,7 +336,7 @@ def outlook_rule_fields(data: dict[str, Any]) -> dict[str, Any]:
             elif "from" in low and "SubjectOrBodyContainsWords" in words:
                 words["FromAddressContainsWords"] = words.pop("SubjectOrBodyContainsWords")
     for k, v in words.items():
-        out[k] = ";".join(v)[:500]
+        out[k] = _cut(";".join(v), 500)
     return {k: v for k, v in out.items() if k not in data}
 
 
@@ -350,10 +360,10 @@ def flatten_audit(a: dict[str, Any]) -> dict[str, Any]:
         elif k in ("Target", "Actor"):
             if isinstance(v, list):
                 ids = [str(it.get("ID")) for it in v if isinstance(it, dict) and it.get("ID") is not None]
-                data[k] = "; ".join(ids)[:2000]
-                data[k + ".Type"] = ", ".join(str(it.get("Type")) for it in v if isinstance(it, dict))[:200]
+                data[k] = _cut("; ".join(ids), 2000)
+                data[k + ".Type"] = _cut(", ".join(str(it.get("Type")) for it in v if isinstance(it, dict)), 200)
         elif k == "Folders" and isinstance(v, list):
-            data["Folders"] = "; ".join(str(f.get("Path")) for f in v if isinstance(f, dict) and f.get("Path"))[:2000]
+            data["Folders"] = _cut("; ".join(str(f.get("Path")) for f in v if isinstance(f, dict) and f.get("Path")), 2000)
             data["FolderItemCount"] = sum(len(f.get("FolderItems") or []) for f in v if isinstance(f, dict))
             _message_ids(data, (it for f in v if isinstance(f, dict) for it in (f.get("FolderItems") or [])))
         elif k == "AffectedItems" and isinstance(v, list):
@@ -609,7 +619,7 @@ def _ca_policies(v: Any) -> str | None:
         for p in v
         if isinstance(p, dict) and str(p.get("result") or "").lower() not in ("notapplied", "notenabled", "")
     ]
-    return "; ".join(out)[:2000] or None
+    return _cut("; ".join(out), 2000) or None
 
 
 # Azure Monitor diagnostic categories whose records carry a sign-in in "properties"
@@ -1045,6 +1055,7 @@ def iter_records(
     Pass one set for every file of an upload so an archive of slices gives each record once."""
     seen = set() if seen is None else seen
     for row in _iter_rows(path, data, fmt, stats, include_raw):
+        cut = row.pop("_cut", False)
         key = row.get("recordKey")
         if key:
             h = _key_hash(key)
@@ -1055,7 +1066,23 @@ def iter_records(
             seen.add(h)
         if stats is not None:
             _count(row, stats)
+            if cut:
+                stats.cut = getattr(stats, "cut", 0) + 1
         yield row
+
+
+# what each count on a cloud export's stats says on its member of an archive or a package
+_NOTES = (("cut", "{:,} record(s) hold a value cut at its length limit, marked by a closing …"),)
+
+
+def counts(stats: Any) -> dict[str, int]:
+    """The counts of what reading cloud exports compromised on, so far."""
+    return {name: int(getattr(stats, name, 0) or 0) for name, _ in _NOTES}
+
+
+def note(counts: dict[str, int]) -> str:
+    """Those counts in words, for one file: "" when there is nothing to say."""
+    return "; ".join(text.format(counts[name]) for name, text in _NOTES if counts.get(name))
 
 
 def _count(row: dict[str, Any], stats: Any) -> None:
@@ -1110,7 +1137,10 @@ def _iter_rows(path: str | None, data: bytes | None, fmt: str, stats: Any, inclu
 
 def _finish(row: dict[str, Any], source: dict[str, Any], stats: Any, include_raw: bool) -> dict[str, Any]:
     if include_raw:
-        row["raw"] = json.dumps(source, ensure_ascii=False, separators=(",", ":"))[:200_000]
+        row["raw"] = _cut(json.dumps(source, ensure_ascii=False, separators=(",", ":")), 200_000)
+    # counted by iter_records once it knows the row is kept
+    if isinstance(row.get("raw"), _Cut) or any(isinstance(v, _Cut) for v in row["data"].values()):
+        row["_cut"] = True
     return row
 
 
