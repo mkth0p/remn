@@ -346,6 +346,9 @@ export function SettingsView() {
                       placeholder="http://localhost:11434"
                     />
                   </div>
+                  {urlDraft.trim() !== '' && !isLocalModelUrl(urlDraft.trim()) && (
+                    <div className="hint">✗ not a local address: REMN only sends evidence to an Ollama on this machine or your local network.</div>
+                  )}
                 </label>
               )}
               {aiCfg.transport === 'openai' && (

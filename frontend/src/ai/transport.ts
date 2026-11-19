@@ -169,10 +169,13 @@ class BrowserOllamaTransport implements AiTransport {
   readonly endpoint: string
   private base: string
   private caps = new Map<string, string[]>()
+  private refused: string | null
 
   constructor(baseUrl: string) {
     this.base = (baseUrl || 'http://localhost:11434').replace(/\/+$/, '')
     this.endpoint = this.base
+    // the prompts carry evidence excerpts: an address typed by mistake must not receive the case
+    this.refused = isLocalModelUrl(this.base) ? null : `REMN only talks to an Ollama on this machine or your local network, not to ${this.base}.`
   }
 
   private cfgNumCtx(meta: AiMeta): number {
@@ -196,6 +199,11 @@ class BrowserOllamaTransport implements AiTransport {
   }
 
   async chatTurn(p: ChatTurnParams, onChunk: (c: ChatChunk) => void, signal?: AbortSignal): Promise<void> {
+    if (this.refused) {
+      onChunk({ type: 'error', error: this.refused })
+      onChunk({ type: 'done', model: p.model || '', stats: {} })
+      return
+    }
     let meta: AiMeta
     try {
       meta = await fetchAiMeta()
@@ -292,6 +300,7 @@ class BrowserOllamaTransport implements AiTransport {
   }
 
   async queryJson(question: string, context: Record<string, unknown>, model?: string) {
+    if (this.refused) throw new Error(this.refused)
     const meta = await fetchAiMeta()
     const cfg = useStore.getState().aiConfig
     const useModel = model || cfg.model || meta.defaultModel || (await this.firstInstalledModel())
@@ -338,6 +347,7 @@ class BrowserOllamaTransport implements AiTransport {
   }
 
   async listModels(): Promise<ModelInfo[]> {
+    if (this.refused) throw new Error(this.refused)
     const resp = await fetch(`${this.base}/api/tags`, { signal: AbortSignal.timeout(6000) }).catch((e) => {
       throw new Error(corsHint(this.base) + ` (${(e as Error).message})`)
     })
@@ -347,6 +357,7 @@ class BrowserOllamaTransport implements AiTransport {
   }
 
   async capabilities(model: string): Promise<string[]> {
+    if (this.refused) return []
     if (this.caps.has(model)) return this.caps.get(model)!
     try {
       const resp = await fetch(`${this.base}/api/show`, {

@@ -155,6 +155,31 @@ describe('BrowserOllamaTransport.chatTurn', () => {
   })
 })
 
+describe('browser-direct Ollama addresses', () => {
+  it('never send a case to an address off this machine and its local network', async () => {
+    for (const ollamaUrl of ['https://ollama.example.com', 'http://203.0.113.7:11434']) {
+      useStore.getState().setAiConfig({ transport: 'browser', ollamaUrl })
+      const t = getTransport()
+      const chunks: ChatChunk[] = []
+      await t.chatTurn(chatParams(), (c) => chunks.push(c))
+      expect(chunks[0]).toMatchObject({ type: 'error', error: expect.stringContaining(`not to ${ollamaUrl}`) })
+      expect(chunks[1].type).toBe('done')
+      await expect(t.queryJson('failed logons', { now: 'T' })).rejects.toThrow('this machine or your local network')
+      await expect(t.listModels()).rejects.toThrow('this machine or your local network')
+      expect(await t.ping()).toMatchObject({ reachable: false })
+      expect(await t.capabilities('m')).toEqual([])
+    }
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('still reach an Ollama on another machine of the local network', async () => {
+    useStore.getState().setAiConfig({ transport: 'browser', ollamaUrl: 'http://192.168.1.50:11434/' })
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ models: [{ name: 'qwen3:8b' }] }), { status: 200 }))
+    expect(await getTransport().listModels()).toEqual([{ name: 'qwen3:8b', parameterSize: undefined }])
+    expect(fetchMock.mock.calls[0][0]).toBe('http://192.168.1.50:11434/api/tags')
+  })
+})
+
 describe('Claude Code transport', () => {
   it('keeps Claude aliases and full ids, drops Ollama names', () => {
     expect(pickClaudeModel('opus', 'sonnet')).toBe('opus')

@@ -17,7 +17,10 @@ Settings → AI chooses one of four ways to reach a model.
 
 **Browser-direct Ollama** is the default. The analyst's page calls the analyst's own
 Ollama at `http://localhost:11434`; prompts, tool results and evidence excerpts never
-reach the REMN server, and each analyst uses the models on their own machine. When REMN
+reach the REMN server, and each analyst uses the models on their own machine. The address
+can be changed in Settings to an Ollama elsewhere on the local network; as for the
+OpenAI-compatible servers below, only loopback, private-range addresses and local names are
+accepted, and any other address is refused before a prompt is sent. When REMN
 is served from another host, Ollama must allow that origin once, then be restarted:
 `setx OLLAMA_ORIGINS "https://remn.example.com"` on Windows, `launchctl setenv
 OLLAMA_ORIGINS "https://remn.example.com"` for the macOS app (it does not read shell
