@@ -432,10 +432,13 @@ def test_an_address_most_of_the_organisation_signs_in_from_ties_nothing_and_make
     for s in res["stories"]:
         assert s["attackerAddresses"] == [] and s["sharedAddresses"] == [nat]
         assert f"Most of the organisation's users sign in from {nat}" in s["summary"]
-    # four others signing in from it is no organisation's egress: the address links the two stories
+    # a small office: four others signing in from it are most of the people who sign in from outside
     few = build_stories(events[:6], [], findings, SETTINGS)
-    [camp] = few["campaigns"]
-    assert camp["label"] == nat and len(camp["stories"]) == 2 and len(camp["targets"]) == 4
+    assert few["campaigns"] == [] and all(s["sharedAddresses"] == [nat] and s["attackerAddresses"] == [] for s in few["stories"])
+    # one other is not most of three: two rules name the address, so it is the attacker's, and links the two stories
+    fewer = build_stories(events[:3], [], findings, SETTINGS)
+    [camp] = fewer["campaigns"]
+    assert camp["label"] == nat and len(camp["stories"]) == 2 and len(camp["targets"]) == 1
 
 
 def test_a_campaign_lists_the_accounts_its_address_reached_around_its_stories_only():

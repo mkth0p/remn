@@ -315,6 +315,8 @@ export interface Story {
   attackerAddresses: string[]
   /** addresses the findings name that most of the organisation's users sign in from: they tie nothing */
   sharedAddresses?: string[]
+  /** outside addresses its findings name that the evidence ties no further than one finding: they tie nothing */
+  untiedAddresses?: string[]
   chains: string[]
   findings: string[]
   campaigns: string[]

@@ -140,6 +140,9 @@ _CONTEXT_BEFORE = 60 * 60_000
 _NEAR_MS = 15 * 60_000
 # the sessions a person sits at: at the console, over RDP, with cached credentials
 _SEATED = frozenset({2, 10, 11, 12})
+# an outside address at least this many people of one organisation sign in from, with no finding, and
+# more than half of its people seen signing in from outside, is its own egress (a tenant of three has one)
+SHARED_EGRESS_PEOPLE = 2
 # what a browser case's identities are read from: the rows it posted around its flags, not the whole case
 ROWS_SCOPE = "the rows this build read (not the whole case)"
 # an incident joins at most this many stories, the highest-scoring first (Defender XDR caps what
@@ -356,6 +359,8 @@ class _Case:
         # each rule's measure by rule id (build_stories reads rules/measures.json), and the case's rarity counts once a step asks
         self.measures: dict[str, Any] = {}
         self._rarity: _Rarity | None = None
+        self._ip_findings: dict[str, list[dict[str, Any]]] | None = None
+        self._ip_users: dict[str, set[str]] = {}
 
     def kind(self, iid: str) -> str:
         return self.resolver.by_id[iid]["kind"] if iid in self.resolver.by_id else "person"
@@ -364,6 +369,34 @@ class _Case:
         """A person or service account the case gives a name: a SID or an object id alone is no one to tell a story of."""
         ident = self.resolver.by_id.get(iid)
         return bool(ident) and ident["kind"] in ("person", "service") and any(f["kind"] in ("addr", "netbios", "dn", "name") for f in ident["forms"])
+
+    def ip_findings(self, ip: str) -> list[dict[str, Any]]:
+        """The findings of medium or more that name an address as a source, once each."""
+        if self._ip_findings is None:
+            by_ip: dict[str, dict[int, dict[str, Any]]] = defaultdict(dict)
+            for fs in self.f_by_ref.values():
+                for f in fs:
+                    if _sev(f.get("severity")) < 2:
+                        continue
+                    ents = f.get("entities") or {}
+                    for k in ("ipAddress", "sourceIp"):
+                        if a := ip_of(ents.get(k)):
+                            by_ip[a][id(f)] = f
+            self._ip_findings = {a: list(fs.values()) for a, fs in by_ip.items()}
+        return self._ip_findings.get(ip, [])
+
+    def ip_users(self, ip: str) -> set[str]:
+        """The people whose own records come from an address: a sign-in or a logon that worked, or
+        what they did from it. A failed one is someone trying their account, not them."""
+        if ip not in self._ip_users:
+            users: set[str] = set()
+            for _, ref in self.by_ip.get(ip, []):
+                row, _ = self.rows[ref]
+                if authentication_outcome(row) == "failure":
+                    continue
+                users.update(i for i in self.named.get(ref, {}) if self.kind(i) == "person")
+            self._ip_users[ip] = users
+        return self._ip_users[ip]
 
     def internal_addr(self, addr: str) -> bool:
         dom = addr.split("@", 1)[-1]
@@ -723,9 +756,9 @@ def _person_story(
                 if ref in case.rows and mine(ref):
                     members.take(ref, "chain", STRONG if links else MEDIUM, "a step of the phishing chain" + (f": {links[0]}" if links else ""), links)
         start, end = min(start, int(c["start"])), max(end, int(c["end"]))
-    # the addresses the story's findings name as a source, but for the organisation's own shared egress
-    attacker: set[str] = set()
-    named_shared: set[str] = set()
+    # the addresses the story's findings name as a source, the attacker's only where the evidence ties
+    # them beyond one finding, and never the organisation's own shared egress
+    named: set[str] = set()
     for ref in list(members):
         for f in case.f_by_ref.get(ref, []):
             if _sev(f.get("severity")) < 2:
@@ -734,7 +767,16 @@ def _person_story(
             for k in ("ipAddress", "sourceIp"):
                 ip = ip_of(ents.get(k))
                 if ip and not is_internal_ip(ip):
-                    (named_shared if ip in shared else attacker).add(ip)
+                    named.add(ip)
+    named_shared = named & set(shared)
+    attacker: dict[str, str] = {}
+    untied: set[str] = set()
+    for ip in sorted(named - named_shared):
+        why = _attacker_basis(case, iid, ip)
+        if why:
+            attacker[ip] = why
+        else:
+            untied.add(ip)
     _lineage_context(case, members)
     lin = case.lineage
     # the story's logon sessions and processes: a program run with no finding belongs to it only through them
@@ -750,7 +792,7 @@ def _person_story(
         phase, basis = record_phase(row, source, attacker)
         conf = case.named[ref][iid][0]
         if ip and ip in attacker:
-            members.take(ref, "address", MEDIUM, f"it came from {ip}, a source the story's findings name")
+            members.take(ref, "address", MEDIUM, f"it came from {ip}, a source the story's findings name ({attacker[ip]})")
         elif phase and (_eid(row) not in (4624, 4625) or other_credentials(row)) and not _is_routine_cloud(row):
             if _is_process_creation(row) and not case.f_by_ref.get(ref):
                 # a person's name alone does not make every program of their day part of the incident
@@ -769,10 +811,15 @@ def _person_story(
             row, _ = case.rows[ref]
             if authentication_outcome(row) == "failure" or case.f_by_ref.get(ref):
                 if mine(ref) or authentication_outcome(row) == "failure":
-                    members.take(ref, "address", MEDIUM, f"the same source, {ip}, in the same days" + ("; it tried another account" if not mine(ref) else ""))
-    steps, cut = _steps(case, members, attacker, max_steps)
+                    members.take(
+                        ref,
+                        "address",
+                        MEDIUM,
+                        f"the same source, {ip}, in the same days ({attacker[ip]})" + ("; it tried another account" if not mine(ref) else ""),
+                    )
+    steps, cut = _steps(case, members, set(attacker), max_steps)
     subject = {"kind": "person", "id": iid, "label": ident["label"], "org": ident.get("org")}
-    return _story(case, "person", subject, steps, attacker, used_chains, cut=cut, shared=named_shared)
+    return _story(case, "person", subject, steps, set(attacker), used_chains, cut=cut, shared=named_shared, untied=untied)
 
 
 def _is_routine_cloud(row: dict[str, Any]) -> bool:
@@ -803,13 +850,31 @@ def _in_story_tree(case: _Case, ref: str, sessions: set[str], procs: set[str]) -
     return None
 
 
+def _attacker_basis(case: _Case, iid: str, ip: str) -> str | None:
+    """Why an outside address a story's finding names is the attacker's, or None when one finding is
+    all that says so: a finding of high severity or more names it, findings of two rules or more do,
+    or no one else in the case uses it (a failed sign-in to their account is not their use). An
+    office's address that one medium finding names, a false positive among them, ties nothing."""
+    fs = case.ip_findings(ip)
+    worst = max(fs, key=lambda f: _sev(f.get("severity")), default=None)
+    if worst and _sev(worst.get("severity")) >= 3:
+        return f"a {worst.get('severity')} finding names it: {str(worst.get('title') or worst.get('ruleId'))[:80]}"
+    rules = sorted({str(f.get("ruleId") or f.get("title")) for f in fs})
+    if len(rules) >= 2:
+        return f"findings of {len(rules)} rules name it: {', '.join(rules[:3])}"
+    if not case.ip_users(ip) - {iid}:
+        return "no one else in the case signs in or acts from it"
+    return None
+
+
 def _shared_egress(case: _Case) -> set[str]:
     """Outside addresses most of an organisation's users sign in from (an office's NAT, a VPN's egress).
 
-    An address is shared when at least five people of one organisation signed in from it with no
+    An address is shared when at least two people of one organisation signed in from it with no
     finding on any of their records from it, and they are more than half of that organisation's
-    people seen signing in from outside. It is then no attacker's infrastructure: it ties no
-    record to a story and joins no stories into a campaign."""
+    people seen signing in from outside: a tenant of three has its office address shared. It is
+    then no attacker's infrastructure: it ties no record to a story and joins no stories into a
+    campaign."""
     signers: dict[Any, set[str]] = defaultdict(set)  # organisation -> people who signed in from an outside address
     clean: dict[str, set[str]] = defaultdict(set)  # address -> people who signed in from it
     flagged: dict[str, set[str]] = defaultdict(set)  # address -> people with a finding on a record from it
@@ -831,7 +896,7 @@ def _shared_egress(case: _Case) -> set[str]:
         by_org: dict[Any, int] = defaultdict(int)
         for iid in people - flagged[ip]:
             by_org[case.resolver.by_id.get(iid, {}).get("org")] += 1
-        if any(n >= 5 and 2 * n > len(signers[org]) for org, n in by_org.items()):
+        if any(n >= SHARED_EGRESS_PEOPLE and 2 * n > len(signers[org]) for org, n in by_org.items()):
             out.add(ip)
     return out
 
@@ -1825,6 +1890,7 @@ def _story(
     *,
     cut: int = 0,
     shared: Collection[str] = frozenset(),
+    untied: Collection[str] = frozenset(),
 ) -> dict[str, Any]:
     lin = case.lineage
     refs = [r for s in steps for r in s["refs"]]
@@ -1870,7 +1936,7 @@ def _story(
             "so a step absent from it is not a negative result."
         )
     anchor = min((r for s in steps if s["tie"]["kind"] in ("flag", "chain") for r in s["refs"]), default=str(start))
-    headline, summary = _describe(subject, steps, phases, attacker, hosts, shared, why_score=_score_text(score, parts))
+    headline, summary = _describe(subject, steps, phases, attacker, hosts, shared, why_score=_score_text(score, parts), untied=untied)
     story = {
         "id": "story-" + _hid(kind, subject["id"], anchor),
         "kind": kind,
@@ -1898,6 +1964,8 @@ def _story(
         "attackerAddresses": sorted(attacker),
         # addresses the findings name that most of the organisation's users sign in from: no tie, no campaign
         "sharedAddresses": sorted(shared),
+        # the outside addresses its findings name that the evidence ties no further than one finding
+        "untiedAddresses": sorted(untied),
         "chains": [c["id"] for c in chains if c.get("id")],
         "findings": fkeys,
         "campaigns": [],
@@ -1924,6 +1992,7 @@ def _describe(
     shared: Collection[str] = frozenset(),
     *,
     why_score: str = "",
+    untied: Collection[str] = frozenset(),
 ) -> tuple[str, str]:
     """A headline (the worst finding of each phase, in order) and a few plain sentences, from the story's own steps only."""
     parts = []
@@ -1952,6 +2021,10 @@ def _describe(
         lines.append(f"The findings name {', '.join(sorted(attacker)[:3])} as a source.")
     if shared:
         lines.append(f"Most of the organisation's users sign in from {', '.join(sorted(shared)[:3])}, which the findings name: it ties nothing to the story.")
+    if untied:
+        lines.append(
+            f"The findings also name {', '.join(sorted(untied)[:3])}, which others in the case use and no high finding or second rule names: it ties nothing to the story."
+        )
     if hosts:
         lines.append(f"Hosts: {', '.join(hosts[:5])}{' and more' if len(hosts) > 5 else ''}.")
     return headline[:300], " ".join(lines)[:900]

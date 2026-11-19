@@ -249,7 +249,7 @@ Every record of a story is a step, or folded into one, and every step says why i
 | same session | is the logon of a session in which a flagged record happened, or the other logon of its split token | strong, medium when time alone placed the flagged record in the session |
 | same way in | is part of the same hop (the service after the admin share) | strong, medium when this record or the flagged one is part of the hop by time only |
 | process tree | started a flagged process | strong |
-| same source | came from an address the story's findings name, or is that address trying another account | medium |
+| same source | came from an address the story's findings name and the evidence ties beyond one finding (below), or is that address trying another account; the step says why the address is the attacker's | medium |
 | same person | names the person and is something (a task, a rule, a group change) | as sure as the form |
 
 A weak tie never puts a record in a story. The story's confidence is the weakest tie of its
@@ -377,8 +377,8 @@ by rule id, or from the finding when it carries its rule's measure (`measured`).
 
 ## Campaigns
 
-The attacker's infrastructure in a story's flagged steps is: the addresses its findings name,
-the outside sender domains, link domains and attachment digests of its flagged mails, the
+The attacker's infrastructure in a story's flagged steps is: the outside addresses its findings
+name that the evidence ties beyond one finding (below), the outside sender domains, link domains and attachment digests of its flagged mails, the
 forwarding addresses its inbox rules and mailbox settings name, and the applications its
 people consented to. Stories that share any of these are one campaign. A campaign also lists
 the accounts outside its stories that the same sources reached within two days of one of its
@@ -387,11 +387,28 @@ the accounts its addresses tried. Flagged mails and failed logons in no story an
 are grouped by sender domain and by address. Nothing in a campaign's list of accounts says they
 were compromised.
 
+An outside address a finding names is the attacker's only when the case says more than that one
+finding does: a finding of high severity or more names it, findings of two rules or more name it,
+or no one else in the case uses it (signs in or acts from it; a failed sign-in to someone's
+account is someone trying it, not their use). Only then does it pull the person's other records
+from it, and the failed sign-ins and flagged records of other accounts from it, into the story,
+and each of those steps says which of the three it was: "it came from 203.0.113.69, a source the
+story's findings name (a critical finding names it: Brute force - burst of failed logons from
+one source IP)". An address one medium finding names that others in the case use, an office's
+address flagged by one rule's false positive, ties nothing; the story lists it
+(`untiedAddresses`) and its summary says so. On the lab ([below](#how-well-it-reads-the-lab))
+each planted attack's address is the attacker's by a critical finding, as before the rule, and no
+address is left untied or taken as shared; `tests/backend/test_story_identity.py` holds the cases
+built to mislead it (an office's address flagged once, a shared account signing in from the
+office and from an attacker's address, a tenant of three).
+
 An address most of the organisation's users sign in from, an office's NAT or a VPN's egress, is
-not the attacker's: at least five people of one organisation signed in from it with no finding
-of medium or more on their records from it, and they are more than half of that organisation's
-people the records show signing in from outside. The findings may name it, and the story says
-so (`sharedAddresses`), but it ties no record to the story and joins no stories into a campaign.
+not the attacker's even then: at least two people of one organisation signed in from it with no
+finding of medium or more on their records from it, and they are more than half of that
+organisation's people the records show signing in from outside, so a tenant of three whose
+office is where two of them sign in from has it as its egress. The findings may name it, and the
+story says so (`sharedAddresses`), but it ties no record to the story and joins no stories into
+a campaign.
 
 ## Incidents
 
@@ -757,9 +774,14 @@ account on SCRANTON she enabled (one record names both).
   them are listed with the flags in no story, saying why. The API holds what a caller asks for
   to at most 1,000 stories and 2,000 steps a story, and a gap between one hour and thirty days.
 - An address is read as the organisation's shared egress from the records a build reads: an
-  attacker who signed in to five accounts or more from one address with no finding on any of
-  those sign-ins, and so outnumbers the people the records show signing in from outside, would
-  be taken for one.
+  attacker who signed in to two accounts or more from one address with no finding on any of
+  those sign-ins, and so outnumbers the people the records show signing in from outside (in a
+  tenant of three, two), would be taken for one. An office's address that fewer than half of
+  the organisation's outside signers use is not its egress: a high finding on it, or findings
+  of two rules, still make it the attacker's.
+- Who else uses an address is read from the records a build reads: an attacker's address that
+  one medium finding names and that another person's records also come from (a hotel's, a
+  carrier's) ties nothing to the story.
 - A decision reads a story again from the steps it leaves (phases, severity, headline), in the
   engine's way, but keeps the engine's score and does not tie steps again: records taken out of
   a story, or the steps split off it, take no other records with them, and a step tied through
