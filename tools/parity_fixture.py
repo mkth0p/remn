@@ -131,6 +131,10 @@ def main() -> None:
             {"artifactType": "defender", "message": "Threat detected: synthetic", "recordKind": "observation"},
             {"artifactType": "prefetch", "processName": "POWERSHELL.EXE", "ts": 1788948000000, "recordKind": "event"},
             {"artifactType": "service", "serviceName": "Expected", "serviceFile": r"C:\Program Files\Vendor\demo.exe", "recordKind": "observation"},
+            # appdata is the low rule's for an autorun and the high rule's for a service, and a temp folder under it is the high rule's
+            {"artifactType": "autorun", "name": "Sync", "image": r"C:\Users\demo\AppData\Local\Sync\sync.exe", "recordKind": "observation"},
+            {"artifactType": "autorun", "name": "Stage", "image": r"C:\Users\demo\AppData\Local\Temp\stage.exe", "recordKind": "observation"},
+            {"artifactType": "service", "serviceName": "SyncSvc", "serviceFile": r"%APPDATA%\Sync\syncsvc.exe", "recordKind": "observation"},
             # the same programs on other hosts, spelled in other cases, for the stacks
             {"artifactType": "process", "image": r"C:\Windows\System32\svchost.exe", "computer": "WS02.contoso.com", "recordKind": "observation"},
             {"artifactType": "process", "image": r"c:\windows\system32\SVCHOST.EXE", "computer": "ws03", "recordKind": "observation"},

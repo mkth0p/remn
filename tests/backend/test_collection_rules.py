@@ -154,8 +154,10 @@ def test_persistence_through_a_script_host(store):
     assert len(found) == 2
 
 
-def test_the_existing_persistence_rule_now_reaches_tasks_and_reg_autoruns(store):
-    """These two shapes produced rows before, but with image and commandLine empty."""
+def test_the_persistence_rules_reach_tasks_and_reg_autoruns(store):
+    """These two shapes produced rows before, but with image and commandLine empty. The task starts
+    from AppData, where per-user installs start too, so it is the low rule's; the autorun in the
+    public profile is the high rule's."""
     rows = [
         observation(
             "task", taskName="\\Updater", commandLine='"C:\\Users\\jdoe\\AppData\\Roaming\\upd.exe" /silent', image="C:\\Users\\jdoe\\AppData\\Roaming\\upd.exe"
@@ -163,6 +165,41 @@ def test_the_existing_persistence_rule_now_reaches_tasks_and_reg_autoruns(store)
         observation("autorun", name="Dropper", image='"C:\\Users\\Public\\svc.exe" -k', targetObject="HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"),
         observation("autorun", name="SecurityHealth", image="%windir%\\system32\\SecurityHealthSystray.exe", targetObject="HKLM\\...\\Run"),
     ]
-    found = fire(store, "collection-persistence-user-path", rows)
+    high = fire(store, "collection-persistence-user-path", rows)
+    low = run_rules(store, [RULES["collection-persistence-appdata"]], {})["findings"]
 
-    assert len(found) == 2
+    assert [f["entities"].get("name") for f in high] == ["Dropper"]
+    assert [f["entities"].get("taskName") for f in low] == ["\\Updater"]
+
+
+def test_an_autorun_or_task_in_appdata_is_a_low_lead_and_a_service_there_stays_high(store):
+    rows = [
+        observation(
+            "autorun",
+            name="OneDrive",
+            image='"C:\\Users\\jdoe\\AppData\\Local\\Microsoft\\OneDrive\\OneDrive.exe" /background',
+            targetObject="HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run",
+        ),
+        observation("task", taskName="\\ChatUpdate", commandLine="%LOCALAPPDATA%\\Programs\\chat\\update.exe --check"),
+        observation(
+            "service",
+            serviceName="helpersvc",
+            serviceFile="C:\\Users\\jdoe\\AppData\\Roaming\\helper\\helpersvc.exe",
+            image="C:\\Users\\jdoe\\AppData\\Roaming\\helper\\helpersvc.exe",
+        ),
+        observation("autorun", name="Stage", image="C:\\Users\\jdoe\\AppData\\Local\\Temp\\stage.exe", targetObject="HKCU\\...\\Run"),
+        observation("autorun", name="Env", image="%TEMP%\\run.exe", targetObject="HKCU\\...\\Run"),
+        observation("task", taskName="\\Public", commandLine="%PUBLIC%\\svc.exe"),
+    ]
+    high = fire(store, "collection-persistence-user-path", rows)
+    low = run_rules(store, [RULES["collection-persistence-appdata"]], {})["findings"]
+
+    assert sorted(f["entities"].get("name") or f["entities"].get("serviceName") or f["entities"].get("taskName") for f in high) == [
+        "Env",
+        "Stage",
+        "\\Public",
+        "helpersvc",
+    ]
+    assert {f["severity"] for f in high} == {"high"}
+    assert sorted(f["entities"].get("name") or f["entities"].get("taskName") for f in low) == ["OneDrive", "\\ChatUpdate"]
+    assert {f["severity"] for f in low} == {"low"}

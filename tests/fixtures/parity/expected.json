@@ -186,11 +186,31 @@
     "severity": "high"
    }
   ],
+  "collection-persistence-appdata": [
+   {
+    "count": 1,
+    "escalation": null,
+    "key": "collection-persistence-appdata|247",
+    "severity": "low"
+   }
+  ],
   "collection-persistence-user-path": [
    {
     "count": 1,
     "escalation": null,
     "key": "collection-persistence-user-path|241",
+    "severity": "high"
+   },
+   {
+    "count": 1,
+    "escalation": null,
+    "key": "collection-persistence-user-path|248",
+    "severity": "high"
+   },
+   {
+    "count": 1,
+    "escalation": null,
+    "key": "collection-persistence-user-path|249",
     "severity": "high"
    }
   ],
@@ -1434,6 +1454,7 @@
   "collection-defender-pua",
   "collection-encoded-execution",
   "collection-execution-user-path",
+  "collection-persistence-appdata",
   "collection-persistence-script-host",
   "collection-persistence-user-path",
   "collection-prefetch-script-execution",
