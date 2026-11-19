@@ -311,7 +311,8 @@ def test_an_orc_archive_is_read_through_its_csv_manifests(tmp_path):
     }
     sample = next(r for r in files if "upd.exe" in str(r.get("path")))
     assert sample["hashes"] == "SHA256=" + "c" * 64 + ",SHA1=" + "a" * 40 + ",MD5=" + "b" * 32
-    assert sample["ts"] == timestamp_utc("09/02/2026 08:00:00.000") and sample["recordKind"] == "event"
+    # 09/02 fits either order alone; the 08/30 beside it in the file says month first
+    assert sample["ts"] == timestamp_utc("09/02/2026 08:00:00.000", day_first=False) and sample["recordKind"] == "event"
     listed = next(r for r in files if "svc.exe" in str(r.get("path")))
     assert listed["path"] == "\\Users\\Public\\svc.exe"
     assert not [p for p in Path(tmp_path).iterdir() if p.suffix == ".7z"], "the expanded archive is removed with the parse"
