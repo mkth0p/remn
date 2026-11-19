@@ -170,6 +170,24 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   net, nltest, ipconfig and others) within ten minutes. Written from ATT&CK before any recording
   was read, so every library is held out for it: it adds two attack_data detections and raises
   one finding across the evtx-baseline clean machines.
+- Each parse of uploaded evidence runs in a process of its own. Event logs and their archives,
+  mail of every format including PST, packages and collections, the attachment analysis inside
+  them and a single attachment dropped for analysis were read inside the web server, which holds
+  the access token, the provider keys and every case store, so a memory-safety bug in libpff, the
+  EVTX reader or an attachment analyser gave all of that to whoever wrote the file. The parse
+  process starts without the server's environment or settings and works in a folder of its own in
+  the staging area. Where the system enforces them it has a memory limit (`FORENSIC_PARSE_MAX_MB`,
+  4096 MiB, 1024 in browser-only mode) and a processor-time limit (`FORENSIC_PARSE_MAX_CPU_S`, six
+  hours). On Linux, where an unprivileged network namespace is allowed, it has no network. When
+  the server runs as root and `FORENSIC_PARSE_UID` names an account, it runs as that account. It
+  is stopped at the ingest deadline, which used to be checked only between records, at its memory
+  limit and when its job is cancelled; the rows read before a stop are kept, and the stream or the
+  job says what stopped it and while reading which member. A member that ran the parse out of
+  memory says so on its entry. The native decoders and Hayabusa also start without the server's
+  environment. Starting the process adds about 0.2 s to every file; on a 90,000-event archive the
+  browser-store stream is 7% slower and the server-store ingest 25% shorter.
+  `FORENSIC_PARSE_ISOLATION=0` parses in the server process again, for debugging;
+  `docs/security.md` says what each system enforces and what turning it off gives up.
 - A home page. REMN opens on it until a case holds evidence, and the wordmark leads back to it
   after that. It shows what the tool reads, how the rules are measured and what the measures
   show: the rule totals, recordings and clean-host baseline read live from `rules/measures.json`

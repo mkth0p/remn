@@ -133,11 +133,7 @@ archived and reattached when the same findings reappear on the next rule run.
 4. **Expected throughput** (laptop, one core): EVTX about 10,000 events per second; mail
    150 to 300 messages per second with deep analysis off, so a 300,000-mail export takes
    20 to 35 minutes. The heavy validation suite (`pytest -m heavy -s`) reproduces these
-   numbers with synthetic data from `samples/synthetic/make_big.py`. Each parse runs in a
-   process of its own ([security](security.md#each-parse-in-a-process-of-its-own)): starting
-   it adds about 0.2 s to every file, and on an archive of 90,000 synthetic events the
-   browser-store stream was 7% slower and the server-store ingest 25% shorter, because the
-   parse and the writes to the store then run side by side on two cores.
+   numbers with synthetic data from `samples/synthetic/make_big.py`.
 5. **If an ingest job fails**: the store stays consistent. Read the job's error in the
    console or in `GET /api/jobs?case=<key>`, cancel leftovers, fix the cause (usually disk space or
    a corrupt member file), delete the evidence and re-ingest.

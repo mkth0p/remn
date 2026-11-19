@@ -365,6 +365,10 @@ A parse process that has been taken over can still fill the disk under the stagi
 takes something this server does not set up: a container (the public compose), cgroups or a job
 object.
 
+Starting the parse process adds about 0.2 s to every file. On an archive of 90,000 synthetic
+events the browser-store stream was 7% slower and the server-store ingest 25% shorter, because
+the parse and the writes to the store then run side by side on two cores.
+
 `FORENSIC_PARSE_ISOLATION=0` parses inside the server process, as before. It is for debugging a
 parser, and it gives up everything above: the parser then runs with the token, the keys and every
 case store in reach, without a memory or a processor-time limit, without a network namespace or
