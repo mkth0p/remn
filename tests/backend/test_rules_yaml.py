@@ -24,6 +24,7 @@ OPS = {
     "not_endswith",
     "re",
     "not_re",
+    "re_cs",
     "gt",
     "gte",
     "lt",
@@ -81,7 +82,7 @@ def _walk_cond(cond, rule_id: str):
         field, _, op = key.partition("|")
         assert field, f"{rule_id}: empty field in {key!r}"
         assert not op or op in OPS, f"{rule_id}: unknown operator {op!r} in {key!r}"
-        if op in ("re", "not_re"):
+        if op in ("re", "not_re", "re_cs"):
             for pat in value if isinstance(value, list) else [value]:
                 re.compile(str(pat).replace("(?i)", ""))
 

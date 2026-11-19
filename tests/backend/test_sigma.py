@@ -314,11 +314,76 @@ def test_neq_cased_and_regex_flags_keep_their_meaning():
     assert sigma.compile_field("CommandLine|neq", ["a", "b"], {}, w) == {"any_of": [{"not": {"commandLine": "a"}}, {"not": {"commandLine": "b"}}]}
     assert sigma.compile_field("CommandLine|neq|all", ["a", "b"], {}, w) == {"all_of": [{"not": {"commandLine": "a"}}, {"not": {"commandLine": "b"}}]}
     assert sigma.compile_field("CommandLine|contains|cased", "hTTp", {}, w) == {"commandLine|contains_cs": "hTTp"}
-    assert sigma.compile_field("CommandLine|re|s", "a.b", {}, w) == {"commandLine|re": "(?s)a.b"}
-    assert sigma.compile_field("CommandLine|re|m", "(?i)^x$", {}, w) == {"commandLine|re": "(?im)^x$"}
+    assert sigma.compile_field("CommandLine|re|s", "a.b", {}, w) == {"commandLine|re_cs": "(?s)a.b"}
+    assert sigma.compile_field("CommandLine|re|m", "(?i)^x$", {}, w) == {"commandLine|re_cs": "(?im)^x$"}
     for field in ("EventTime|hour", "CommandLine|bogus", "CommandLine|s", "CommandLine|base64|wide|contains"):
         with pytest.raises(sigma.Unsupported):
             sigma.compile_field(field, "value", {}, w)
+
+
+def test_a_sigma_regex_keeps_its_case_unless_it_says_otherwise(store):
+    # Sigma regexes are case-sensitive; every one used to be matched without case, so a rule written
+    # for upper-case letters (dat[0-9A-Z]{4}) also took lower-case ones
+    assert sigma.compile_field("CommandLine|re", "dat[0-9A-Z]{4}", {}, []) == {"commandLine|re_cs": "dat[0-9A-Z]{4}"}
+    assert sigma.compile_field("CommandLine|re|i", "dat[0-9A-Z]{4}", {}, []) == {"commandLine|re": "dat[0-9A-Z]{4}"}
+    w = EventWriter(store, 1)
+    for cmd in ("copy x C:\\Temp\\datQ7Z1.tmp", "copy x C:\\Temp\\database.tmp", "COPY X DATQ7Z1"):
+        w.add(_ev(eventId=1, channel="Microsoft-Windows-Sysmon/Operational", commandLine=cmd))
+    w.flush()
+
+    def refs(where):
+        return sorted(r for f in R.run_rule(store, {"id": "t", "title": "t", "severity": "low", "source": "events", "where": where}, {}) for r in f["refs"])
+
+    assert refs({"commandLine|re_cs": "dat[0-9A-Z]{4}"}) == [1]
+    assert refs({"commandLine|re": "dat[0-9A-Z]{4}"}) == [1, 2, 3]
+    assert refs({"commandLine|re_cs": "(?i)dat[0-9A-Z]{4}"}) == [1, 2, 3]
+    assert refs({"commandLine|re_cs": ["^COPY", "^copy x C"]}) == [1, 2, 3]
+
+
+def test_keywords_match_the_text_an_event_holds_quotes_and_backslashes_included(store):
+    # keywords are searched in the event's JSON text, where a quote is \" and a backslash \\: a
+    # keyword with either never matched (Mailbox Export to Exchange Webserver could not fire)
+    res = sigma.convert_text(
+        r"""
+title: Mailbox Export To A Share
+logsource: {product: windows, service: msexchange-management}
+detection:
+  keywords:
+    '|all':
+      - 'New-MailboxExportRequest'
+      - ' -FilePath "\\\\'
+  condition: keywords
+level: critical
+"""
+    )[0]
+    assert res["ok"], res
+    assert res["rule"]["where"]["raw|contains_all"] == ["New-MailboxExportRequest", ' -FilePath \\"\\\\\\\\']
+    quoted = sigma.convert_text(
+        r"""
+title: Quoted Keyword List
+logsource: {product: windows, service: msexchange-management}
+detection:
+  keywords:
+    - '"unsafe"};'
+    - 'C:\\inetpub\\*.aspx'
+  condition: keywords
+level: high
+"""
+    )[0]
+    assert quoted["ok"], quoted
+    channel = "MSExchange Management"
+    w = EventWriter(store, 1)
+    for text in (
+        'New-MailboxExportRequest -Mailbox "a@example.org" -FilePath "\\\\host01\\c$\\inetpub\\shell.aspx"',
+        'New-MailboxExportRequest -Mailbox "a@example.org" -FilePath "D:\\export\\a.pst"',
+        'Set-OabVirtualDirectory -ExternalUrl "http://f/<script>function Page_Load(){"unsafe"};</script>"',
+        "Get-Item C:\\inetpub\\wwwroot\\x.aspx",
+    ):
+        data = {"Data": text}
+        w.add(_ev(eventId=1, channel=channel, message=text, data=data))
+    w.flush()
+    assert [r for f in R.run_rule(store, res["rule"], {}) for r in f["refs"]] == [1]
+    assert sorted(r for f in R.run_rule(store, quoted["rule"], {}) for r in f["refs"]) == [3, 4]
 
 
 def test_base64_and_wide_encodings_find_the_value_at_every_alignment():

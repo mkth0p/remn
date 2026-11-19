@@ -179,6 +179,15 @@ describe('case-sensitive operators', () => {
     expect(matchCondition({ urls: [{ url: 'hTTPs://a' }, { url: 'https://b' }] }, { field: 'urls.url', op: 'contains_cs', value: 'hTTPs://' })).toBe(true)
     expect(matchCondition({ subject: null }, { field: 'subject', op: 'contains_cs', value: 'x' })).toBe(false)
   })
+  it('re_cs keeps the pattern case unless the pattern lifts it, as a Sigma regex does', () => {
+    const rows = ['copy x C:\\Temp\\datQ7Z1.tmp', 'copy x C:\\Temp\\database.tmp', 'COPY X DATQ7Z1'].map((commandLine) => ({ commandLine }))
+    const hits = (op: 're' | 're_cs', value: string | string[]) => rows.map((r, i) => (matchCondition(r, { field: 'commandLine', op, value }) ? i + 1 : 0)).filter(Boolean)
+    expect(hits('re_cs', 'dat[0-9A-Z]{4}')).toEqual([1])
+    expect(hits('re', 'dat[0-9A-Z]{4}')).toEqual([1, 2, 3])
+    expect(hits('re_cs', '(?i)dat[0-9A-Z]{4}')).toEqual([1, 2, 3])
+    expect(hits('re_cs', ['^COPY', '^copy x C'])).toEqual([1, 2, 3])
+    expect(matchCondition({ flags: ['Att_Macro'] }, { field: 'flags', op: 're_cs', value: '^att_' })).toBe(false)
+  })
 })
 
 describe('what converted Sigma rules rely on', () => {

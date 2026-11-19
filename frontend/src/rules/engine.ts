@@ -72,6 +72,7 @@ const OPS = new Set<string>([
   'not_endswith',
   're',
   'not_re',
+  're_cs',
   'gt',
   'gte',
   'lt',
@@ -608,7 +609,8 @@ export function validateRule(r: unknown): { ok: true; rule: Rule } | { ok: false
     for (const [k, v] of Object.entries(c)) {
       if (/^(any_of|all_of)(_\d+)?$/.test(k)) for (const alt of Array.isArray(v) ? v : [v]) walk(alt as RuleCond)
       else if (k === 'not') walk(v as RuleCond)
-      else if (k.endsWith('|re') || k.endsWith('|not_re')) for (const p of Array.isArray(v) ? v : [v]) if (!compileRegex(String(p))) throw new Error(`${rule.id}: invalid regex ${p}`)
+      else if (k.endsWith('|re') || k.endsWith('|not_re') || k.endsWith('|re_cs'))
+        for (const p of Array.isArray(v) ? v : [v]) if (!compileRegex(String(p))) throw new Error(`${rule.id}: invalid regex ${p}`)
     }
   }
   try {

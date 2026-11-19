@@ -21,15 +21,19 @@ encodings of values with wildcards, and correlation rules.
 
 Encodings (base64, base64offset, utf16 / wide) are expanded into the literal strings the
 encoded value can appear as, matched case-sensitively; ``neq`` becomes a negated equality;
-``cased`` selects the case-sensitive operators; the regex flags ``m`` and ``s`` travel as an
-inline flag group, which both engines honour.
+``cased`` selects the case-sensitive operators; a regex keeps its case (``re_cs``) unless ``|i``
+says otherwise, and the flags ``m`` and ``s`` travel as an inline flag group, which both engines
+honour. Keywords are searched in the event's JSON text, so they are written as that text holds
+them: a quote as \\" and a backslash as \\\\.
 """
 from __future__ import annotations
 
 import base64
 import fnmatch
 import ipaddress
+import json
 import re
+from collections.abc import Callable
 from typing import Any
 
 import yaml
@@ -172,14 +176,15 @@ class Unsupported(Exception):
 # ---------------------------------------------------------------------------
 # Values
 # ---------------------------------------------------------------------------
-def _glob_to_regex(value: str, anchor_start: bool, anchor_end: bool) -> str:
-    """Sigma wildcards: * any, ? one, backslash escapes (\\* \\? \\\\)."""
+def _glob_to_regex(value: str, anchor_start: bool, anchor_end: bool, literal: Callable[[str], str] = str) -> str:
+    """Sigma wildcards: * any, ? one, backslash escapes (\\* \\? \\\\). literal writes a literal
+    character as the searched text holds it (_raw_text for a keyword)."""
     out: list[str] = []
     i = 0
     while i < len(value):
         c = value[i]
         if c == "\\" and i + 1 < len(value) and value[i + 1] in "*?\\":
-            out.append(re.escape(value[i + 1]))
+            out.append(re.escape(literal(value[i + 1])))
             i += 2
             continue
         if c == "*":
@@ -187,7 +192,7 @@ def _glob_to_regex(value: str, anchor_start: bool, anchor_end: bool) -> str:
         elif c == "?":
             out.append(".")
         else:
-            out.append(re.escape(c))
+            out.append(re.escape(literal(c)))
         i += 1
     return ("^" if anchor_start else "") + "".join(out) + ("$" if anchor_end else "")
 
@@ -206,6 +211,12 @@ def _has_wildcard(value: str) -> bool:
 
 def _unescape(value: str) -> str:
     return re.sub(r"\\([*?\\])", r"\1", value)
+
+
+def _raw_text(value: str) -> str:
+    """A keyword as the event's JSON text holds it (both parsers write raw as JSON): a quote is \\"
+    there and a backslash \\\\, so the keyword is searched in that form."""
+    return json.dumps(value, ensure_ascii=False)[1:-1]
 
 
 def _plain_string(value: str) -> tuple[str, str]:
@@ -403,12 +414,15 @@ def compile_field(raw_field: str, value: Any, aliases: dict[str, list[str]], war
     if "cidr" in mods:
         return _any_of([_spread(targets, *_cidr_prefix(str(v))) for v in values])
     if "re" in mods:
-        # i / m / s as an inline group; REMN regexes are case-insensitive already
+        # a Sigma regex is case-sensitive unless |i says otherwise; m / s travel as an inline group
+        op = "re" if "i" in mods else "re_cs"
         flags = "".join(f for f in ("m", "s") if f in mods)
         pats = [_with_flags(str(v), flags) for v in values]
+        if keywords:
+            warnings.append("regex keyword: matched against the event's JSON text, where quotes and backslashes are escaped")
         if all_mode:
-            return {"all_of": [_spread(targets, "re", p) for p in pats]}
-        return _spread(targets, "re", pats if len(pats) > 1 else pats[0])
+            return {"all_of": [_spread(targets, op, p) for p in pats]}
+        return _spread(targets, op, pats if len(pats) > 1 else pats[0])
 
     if values == [None] or values == []:
         return _spread(targets, "exists", False)
@@ -425,11 +439,11 @@ def compile_field(raw_field: str, value: Any, aliases: dict[str, list[str]], war
         wild = [s for s in strs if _has_wildcard(s)]
         if wild:
             # a glob inside a contains/startswith/endswith value: regex with the matching anchors
-            pats = [_glob_to_regex(s, smod == "startswith", smod == "endswith") for s in strs]
+            pats = [_glob_to_regex(s, smod == "startswith", smod == "endswith", _raw_text if keywords else str) for s in strs]
             if all_mode:
                 return {"all_of": [_spread(targets, "re", p) for p in pats]}
             return _spread(targets, "re", pats if len(pats) > 1 else pats[0])
-        strs = [_unescape(s) for s in strs]
+        strs = [_raw_text(_unescape(s)) if keywords else _unescape(s) for s in strs]
         if "cased" in mods:
             op = CASED_OPS[smod]
             if all_mode:
@@ -509,12 +523,12 @@ def compile_selection(sel: Any, aliases: dict[str, list[str]], warnings: list[st
         return _all_of(parts)
     if isinstance(sel, list):
         if all(isinstance(x, (str, int, float)) for x in sel):
-            # keyword list: anywhere in the event
-            return {"raw|contains_any": [str(x) for x in sel]}
-        alts = [compile_selection(x, aliases, warnings) if isinstance(x, (dict, list)) else {"raw|contains": str(x)} for x in sel]
+            # keyword list: anywhere in the event, read as a field-less value list (wildcards, escapes)
+            return compile_field("", sel, aliases, warnings)
+        alts = [compile_selection(x, aliases, warnings) if isinstance(x, (dict, list)) else compile_field("", x, aliases, warnings) for x in sel]
         return _any_of(alts)
     if isinstance(sel, (str, int, float)):
-        return {"raw|contains": str(sel)}
+        return compile_field("", sel, aliases, warnings)
     raise Unsupported(f"selection of type {type(sel).__name__}")
 
 

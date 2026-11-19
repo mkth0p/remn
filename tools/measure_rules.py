@@ -530,6 +530,7 @@ POSITIVE_OPS = {
     "startswith",
     "endswith",
     "re",
+    "re_cs",
     "gt",
     "gte",
     "lt",

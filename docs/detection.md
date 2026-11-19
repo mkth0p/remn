@@ -63,9 +63,10 @@ Rules view marks the rule "cut short", with the count as `2000+`, and the run sa
 rules were cut. A `then` follow-up is checked for every finding the rule keeps.
 
 Operators: `eq ne in nin contains not_contains contains_any contains_all startswith
-not_startswith endswith not_endswith re not_re gt gte lt lte exists empty in_setting
+not_startswith endswith not_endswith re not_re re_cs gt gte lt lte exists empty in_setting
 nin_setting levenshtein length contains_cs startswith_cs endswith_cs`. The `_cs`
-variants match case exactly; everything else is case-insensitive. Dotted paths reach
+variants match case exactly (`re_cs` is a regex that keeps its case unless the pattern
+starts with `(?i)`); everything else is case-insensitive, `re` included. Dotted paths reach
 nested values (`attachments.flags`, `data.LogonType`). `field|length: "< 500"` counts the
 characters of a text or the items of a list, with the same threshold syntax as
 `threshold`. The derived URL fields `urls.subdomain` (host minus the registrable domain)
@@ -221,8 +222,10 @@ modifiers, any modifier outside the Sigma 2.1 list, `file_access` sources, Subli
 classifiers, `file.explode`, link analysis, and so on. What translates exactly is
 translated: `base64`, `base64offset` and `utf16`/`wide` values become the literal strings
 the encoded value can appear as (all three alignments), matched case-sensitively; `neq`
-becomes a negated equality; `cased` selects the case-sensitive operators; the regex flags
-`m` and `s` travel as an inline group; IPv6 CIDRs translate when they name one address or
+becomes a negated equality; `cased` selects the case-sensitive operators; a regex keeps its
+case (`re_cs`) unless `|i` is given, and the flags `m` and `s` travel as an inline group;
+keywords, searched in the event's JSON text, are written as that text holds them (a quote as
+`\"`, a backslash as `\\`); IPv6 CIDRs translate when they name one address or
 a prefix within the first group (`::1/128`, `fe80::/10`, `fc00::/7`). The SigmaHQ rules are
 redistributed under the Detection Rule License 1.1, the Sublime rules under MIT.
 
