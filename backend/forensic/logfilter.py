@@ -1,17 +1,19 @@
-"""Keeps evidence out of the server log on an instance open to strangers.
+"""Keeps evidence out of the server log.
 
 Parsers log failures, and an exception's message is often a piece of the input: a
-UnicodeDecodeError quotes the bytes, a ValueError the value, a KeyError the key. In browser-only
-mode the log is the one thing that outlives a parse, so a record from the parsing code keeps its
-message template and the exception's type and location, and loses the exception's text."""
+UnicodeDecodeError quotes the bytes, a ValueError the value, a KeyError the key. The log outlives
+a parse and is what an operator copies into a bug report, so a record from the parsing code keeps
+its message template and the exception's type and location, and loses the exception's text."""
 
 from __future__ import annotations
 
 import logging
 import traceback
 
-# loggers whose records may carry evidence: the parsers and analysers, and the views that call them
-_EVIDENCE_LOGGERS = ("services.", "api.")
+# loggers whose records may carry evidence: the parsers and analysers, the views that call them,
+# Django's record of a request that raised, and the web server's record of a response that raised
+# while it was being streamed
+_EVIDENCE_LOGGERS = ("services.", "api.", "django.request", "waitress")
 
 
 def _describe(exc: BaseException) -> str:

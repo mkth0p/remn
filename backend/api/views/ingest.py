@@ -20,6 +20,7 @@ from django.conf import settings
 from django.http import HttpRequest, JsonResponse, StreamingHttpResponse
 from django.views.decorators.http import require_POST
 
+from api.errors import failure
 from api.views.upload import discard_upload, get_upload
 from forensic.build import build_id
 from services.analysis import hayabusa
@@ -228,9 +229,8 @@ def ingest_evtx(request: HttpRequest):
                 evsrc.stats.errors += 1
                 yield ndjson_line({"type": "error", "error": DEADLINE_REASON, "emitted": n})
             except Exception as exc:  # noqa: BLE001
-                log.error("evtx ingestion failed: %s", type(exc).__name__)
                 evsrc.stats.errors += 1
-                yield ndjson_line({"type": "error", "error": str(exc)[:300], "emitted": n})
+                yield ndjson_line({"type": "error", **failure("the parse of the event log", exc, log), "emitted": n})
             stats = evsrc.stats.to_dict()
             stats["files"] = evsrc.files
             yield ndjson_line({"type": "done", "format": evsrc.format, "stats": stats, "emitted": n, "sha256": src.sha256, "parser": build_id()})
@@ -285,9 +285,8 @@ def ingest_mail(request: HttpRequest):
                 msrc.stats.errors += 1
                 yield ndjson_line({"type": "error", "error": DEADLINE_REASON, "emitted": n})
             except Exception as exc:  # noqa: BLE001
-                log.error("mail ingestion failed: %s", type(exc).__name__)
                 msrc.stats.errors += 1
-                yield ndjson_line({"type": "error", "error": str(exc)[:300], "emitted": n})
+                yield ndjson_line({"type": "error", **failure("the parse of the mail", exc, log), "emitted": n})
             stats = msrc.stats.to_dict()
             if msrc.members:
                 stats.update(_members_line_stats(msrc.members))
@@ -357,7 +356,7 @@ def ingest_package(request: HttpRequest):
                 yield ndjson_line({"type": "engine", **summary})
             yield ndjson_line({"type": "done", "format": package.format, "stats": package.stats(), "sha256": src.sha256})
         except Exception as exc:  # noqa: BLE001
-            yield ndjson_line({"type": "error", "error": str(exc)[:300]})
+            yield ndjson_line({"type": "error", **failure("the parse of the package", exc, log)})
             package.inventory_complete = False
             yield ndjson_line({"type": "done", "format": package.format, "stats": package.stats(), "sha256": src.sha256})
         finally:

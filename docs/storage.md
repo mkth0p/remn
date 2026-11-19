@@ -80,8 +80,11 @@ Browser-store ingestion streams from the browser to the server and back in one r
 Server-store ingestion uploads the file in chunks (`POST /api/upload/init`, then one
 request per chunk, then `complete`, which checks the size and the SHA-256), and a
 background job parses it; the Evidence page shows the job's progress and its errors,
-and `GET /api/jobs` lists them. An interrupted upload resumes from the last received
-offset when the same file is dropped again.
+and `GET /api/jobs?case=<key>` lists the jobs of that case. A job is read, followed and
+cancelled only with its case's key (`/api/jobs/<id>?case=<key>`); without it, or with
+another key, the answer is the 404 of an unknown job, and no answer about a job carries
+the key. An interrupted upload resumes from the last received offset when the same file
+is dropped again.
 
 A browser-store import writes its rows as they arrive and completes the evidence (status,
 count, facets, indicators) at the end, so a tab closed, reloaded or crashed part-way would
@@ -132,5 +135,5 @@ archived and reattached when the same findings reappear on the next rule run.
    20 to 35 minutes. The heavy validation suite (`pytest -m heavy -s`) reproduces these
    numbers with synthetic data from `samples/synthetic/make_big.py`.
 5. **If an ingest job fails**: the store stays consistent. Read the job's error in the
-   console or in `GET /api/jobs`, cancel leftovers, fix the cause (usually disk space or
+   console or in `GET /api/jobs?case=<key>`, cancel leftovers, fix the cause (usually disk space or
    a corrupt member file), delete the evidence and re-ingest.

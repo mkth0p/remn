@@ -75,7 +75,7 @@ export async function rescoreMails(kase: Case, onProgress?: (text: string) => vo
     let summary: RescoreSummary
     if (kase.storage === 'server' && kase.serverKey) {
       const { jobId } = await apiPost<{ jobId: string }>('/api/enrich/mails/rescore', { storeKey: kase.serverKey, settings })
-      const job = await waitForJob(jobId, (j) => onProgress?.(`${j.progress.done ?? 0} / ${j.progress.total ?? '…'} mails`))
+      const job = await waitForJob(jobId, kase.serverKey, (j) => onProgress?.(`${j.progress.done ?? 0} / ${j.progress.total ?? '…'} mails`))
       summary = job.result as unknown as RescoreSummary
     } else {
       onProgress?.('Updating sender history…')

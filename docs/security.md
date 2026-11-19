@@ -25,7 +25,11 @@ Nothing, unless the analyst switches it on:
 
 - reputation lookups (URLhaus, MalwareBazaar, ThreatFox, VirusTotal, AbuseIPDB,
   GreyNoise, ipinfo, RDAP, Spamhaus, Google Safe Browsing) go out only when "allow
-  external lookups" is enabled for the case, and only the indicator values;
+  external lookups" is enabled for the case, and only the indicator values. The server
+  holds to that choice too: a lookup that would reach one of these providers is refused
+  (403, code `lookupsNotAllowed`) before any provider is asked unless the request says
+  that the case allows it (`networkAllowed: true`), which the page sends from the case's
+  setting. The offline lists and GeoIP stay on the machine and need no such word;
 - the browser-direct AI transport sends prompts and tool results to the analyst's own
   Ollama on the analyst's own machine;
 - the server proxy sends them to the Ollama the REMN host is configured with;
@@ -37,11 +41,22 @@ pack importer download from their sources on request, never during an investigat
 
 ## Hardening in place
 
-- The server binds to `127.0.0.1` and keeps no database. Every `/api` call needs the
+- The server binds to `127.0.0.1` and keeps no database. It does not start on an address
+  other machines can reach without an access token, unless `FORENSIC_ALLOW_NO_TOKEN=1`
+  says that this is intended; a container is judged by the address its port is published
+  on (`FORENSIC_PUBLISHED_ON`, which `docker-compose.yml` sets). Every `/api` call needs the
   `X-Forensic-Client` header (cookie-less CSRF protection); cross-origin preflights are
-  refused. With `FORENSIC_AUTH_TOKEN` set, the header value must equal the token (see
-  [remote access](setup.md#remote-access)). The remote mode is one shared token, with no
-  per-user accounts, audit log or rate limit; keep such a deployment private.
+  refused. The one exception is a GET of `/api/health`, which a caller without the header
+  gets as `{"ok": true}` only. With `FORENSIC_AUTH_TOKEN` set, the header value must equal
+  the token (see [remote access](setup.md#remote-access)). Wrong tokens are counted per
+  client address (per /64 for IPv6): past `FORENSIC_AUTH_FAILURES_PER_MIN` (10 by default)
+  in a minute, that address gets 429 with a Retry-After for every request that carries a
+  token, the right one included, until its allowance refills. The fixed values the page and
+  the documented commands send before they hold a token (`remn`, `1`) are refused but not
+  counted. Behind a proxy without `FORENSIC_TRUST_PROXY=1` every client shares the proxy's
+  address and so one allowance.
+  The remote mode is one shared token, with no per-user accounts or audit log; keep such a
+  deployment private.
 - Parsed content is treated as hostile: React escaping, HTML previews in a sandboxed
   iframe with DOMPurify, images blocked, links disabled and defanged. Attachments are
   analysed statically, never opened or executed.
@@ -70,6 +85,13 @@ pack importer download from their sources on request, never during an investigat
   pattern, pack ids without separators, static files resolved inside the build
   directory); rule archives are capped per member and in total; CSV exports neutralise
   spreadsheet formula injection.
+- A reputation lookup value is checked against its kind (an IP address, a domain name, an
+  MD5, SHA-1 or SHA-256 digest, a URL with a scheme and a host) before the cache or any
+  provider sees it; a value that fails gets an error verdict that says it was not looked
+  up and why. A value goes into a provider URL as one path segment. A provider's redirect
+  is followed over HTTPS on the host that sent it, at most five times, because the request
+  carries the provider key; RDAP, whose requests carry no key, may be sent on to the
+  registry by name, never to an address.
 - The Docker image is built from base images pinned by digest, takes Debian's security
   updates at build time, runs as a non-root user without a package manager, and is
   scanned by Trivy in continuous integration.
@@ -111,7 +133,10 @@ the one the proxy added; set it only when a proxy you control is the only way to
 server. `docker-compose.public.yml` is this configuration with Caddy in front, and
 `FORENSIC_MAX_UPLOAD_MB` lowered.
 
-The health endpoint reports the build (`version+commit`) and a link to that exact source in
+A GET of the health endpoint without the `X-Forensic-Client` header is the one request the
+server answers without it, and it answers `{"ok": true}` and nothing else: that is what a
+container health check or a load balancer can send. With the header (and the token, when one
+is set), the health endpoint reports the build (`version+commit`) and a link to that exact source in
 every mode, and the app shows both: a visitor who trusts the server with evidence can read the
 code that parses it. It withholds the machine: paths, platform, interpreter, and which native
 libraries are compiled in, reporting only coarse formats (`"formats": {"pst": true}`). The
@@ -191,11 +216,23 @@ finishes.
 ### What the server log holds
 
 The log is the one thing on a browser-only server that outlives a parse. It holds operational
-lines: requests refused, sweeps, the engine's state. In browser-only mode a failure in the
-parsing code is logged by exception type and place (`UnicodeDecodeError at common.py:104`),
-never with the exception's text, which is often a piece of the input, and never with a file,
-member or attachment name. `docker-compose.public.yml` rotates the log (three files of 10 MB)
-rather than keeping it for the life of the container.
+lines: requests refused, sweeps, the engine's state. A failure in the parsing code, in a request
+or in the web server is logged by exception type and place (`UnicodeDecodeError at common.py:104`),
+never with the exception's text, which is often a piece of the input or a path on the server. This
+holds in every mode; `FORENSIC_DEBUG=1` keeps the text and the traceback for a developer on their
+own machine, and has no such effect in browser-only mode. In browser-only mode the log also never
+names a file, member or attachment. `docker-compose.public.yml` rotates the log (three files of
+10 MB) rather than keeping it for the life of the container.
+
+A client is told no more than the log holds. A request, a parse or a job that fails on the server
+answers with what failed, the exception's type and a reference (`the store query failed on the
+server (OSError); the server log has the cause under reference 3f9a01c2`), and the log line of
+that failure carries the same reference, so the operator can find the cause for the analyst who
+reports it. Two kinds of text are still passed on as they are: a statement or filter the database
+cannot run gets DuckDB's diagnostic as a 400, because the analyst, and the model's `sql` tool,
+correct the query from it; and the per-file entries of a package or mailbox ingest (a member that
+could not be read, an unparseable message) keep the parser's message for that file, which can
+quote the file.
 
 This is what lets a public instance take real evidence: the exposure of a file is bounded to one
 parse, and nothing of it is kept. Before the first upload to a parser on another machine, the app
@@ -246,7 +283,11 @@ that default.
 For the full mode, one change came with this: listing every server store (`GET
 /api/store`) is an operator action and is only answered when an access token is
 configured. A case reaches its store by the key it holds, and the keys are random, so
-without the listing a store cannot be found by a client that was never given it.
+without the listing a store cannot be found by a client that was never given it. The
+background jobs follow the same rule: they are listed per case (`GET /api/jobs?case=<key>`),
+a job is read, followed and cancelled only with its case's key, and no answer about a job
+carries the key. Reading a store (an export included) never creates one: a key nobody wrote
+to is a 404.
 
 ## Text in the evidence that addresses the model
 

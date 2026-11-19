@@ -405,7 +405,7 @@ def test_chunked_upload_store_ingest_and_query(settings, tmp_path):
     assert r.status_code == 200
     job_id = r.json()["jobId"]
     for _ in range(600):
-        j = c.get(f"/api/jobs/{job_id}", **HDR).json()
+        j = c.get(f"/api/jobs/{job_id}?case={key}", **HDR).json()
         if j["status"] in ("done", "error", "cancelled"):
             break
         time.sleep(0.1)
@@ -427,7 +427,7 @@ def test_chunked_upload_store_ingest_and_query(settings, tmp_path):
     )
     job_id = r.json()["jobId"]
     for _ in range(300):
-        j = c.get(f"/api/jobs/{job_id}", **HDR).json()
+        j = c.get(f"/api/jobs/{job_id}?case={key}", **HDR).json()
         if j["status"] in ("done", "error"):
             break
         time.sleep(0.1)

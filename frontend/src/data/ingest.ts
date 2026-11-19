@@ -179,7 +179,7 @@ export async function ingestToServer(file: File, kase: Case, kind: 'evtx' | 'mai
         },
       },
     })
-    const job = await waitForJob(serverJob, (j) => {
+    const job = await waitForJob(serverJob, kase.serverKey!, (j) => {
       const p = j.progress as { rows?: number; format?: string }
       useStore.getState().upsertJob({ id: jobId, phase: 'parsing', rows: Number(p.rows ?? 0) })
     })

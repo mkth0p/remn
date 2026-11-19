@@ -50,6 +50,7 @@ class OfflineLists(Provider):
     name = "offline"
     kinds = ("url", "domain", "ip", "hash")
     needs_key = None
+    external = False
     description = "Local block lists (URLhaus CSV, Feodo, Tor exits, OpenPhish, custom txt) - no network"
     homepage = ""
 
@@ -221,6 +222,7 @@ class GeoIP(Provider):
     name = "geoip"
     kinds = ("ip",)
     needs_key = None
+    external = False
     description = "MaxMind GeoLite2 City/ASN databases (offline) - context only"
     homepage = "https://www.maxmind.com/"
 
