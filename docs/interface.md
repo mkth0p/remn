@@ -462,9 +462,12 @@ AI transport and model, described on the [AI page](ai.md).
 
 At the bottom are the two destructive actions. "Delete all case data" empties the case
 (every row, finding, note and session, and the server store when it has one) and keeps
-the case with its settings. "Delete this case" removes the case itself, custom rules and
-settings included, and switches to the most recently updated remaining case, or to a
-fresh one when none is left. Both ask for confirmation and neither can be undone.
+the case with its settings; when the server does not confirm that its store is gone (the
+request is refused or the server cannot be reached), nothing is deleted in the browser
+either and the message gives the server's answer. "Delete this case" removes the case
+itself, custom rules and settings included, and switches to the most recently updated
+remaining case, or to a fresh one when none is left; a server store it could not remove
+is named in a message. Both ask for confirmation and neither can be undone.
 
 ## Interface tests
 

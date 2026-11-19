@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { deleteCaseData, getDb, type CaseSettings } from '../db/schema'
+import { getDb, type CaseSettings } from '../db/schema'
 import { toast, useStore } from '../state/store'
 import { fmtBytes, getLocalTime, setLocalTime } from '../util/format'
 import { Badge, ListInput, Progress, Toggle } from '../components/ui'
 import { refreshCounts } from '../data/ingest'
-import { removeCase } from '../data/caseState'
+import { removeCase, wipeCase } from '../data/caseState'
 import { migrateCaseToServer } from '../data/migrate'
 import { getSource } from '../data/source'
-import { API_HEADERS } from '../api/client'
 import { CLAUDE_MODELS, fetchClaudeStatus, getTransport, isLocalModelUrl, OPENAI_PRESETS, type ClaudeStatus, type ModelInfo } from '../ai/transport'
 import { suggestTrustedSenders, type TrustedSuggestion } from '../data/trusted'
 import { Modal } from '../components/ui'
@@ -82,10 +81,12 @@ export function SettingsView() {
   }
   const wipe = async () => {
     if (!confirm(`Delete ALL data of case "${kase.name}" (${isServer ? 'server store + ' : ''}browser records: evidence rows, findings, sessions)? The case itself is kept.`)) return
-    if (isServer && kase.serverKey) {
-      await fetch(`/api/store/${kase.serverKey}`, { method: 'DELETE', headers: API_HEADERS }).catch(() => undefined)
+    try {
+      await wipeCase(kase)
+    } catch (e) {
+      toast('err', `case data not deleted: ${(e as Error).message}`, 0)
+      return
     }
-    await deleteCaseData(getDb(), kase.id!)
     await refreshCounts(kase)
     toast('ok', 'case data deleted')
   }

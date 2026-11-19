@@ -1,5 +1,5 @@
 import { API_HEADERS } from '../api/client'
-import { defaultSettings, deleteCase, getDb, type Case } from '../db/schema'
+import { defaultSettings, deleteCase, deleteCaseData, getDb, type Case } from '../db/schema'
 import { DEFAULT_DETECTION_LEVEL } from './detectionLevel'
 import { rememberReviews } from './findingReviews'
 
@@ -38,10 +38,30 @@ export async function clearDerivedState(caseId: number, removedEvidenceId?: numb
 }
 
 /**
+ * Empty a case and keep it: its server store when it has one, then every browser record. The
+ * server's answer is read first. When the store was not removed (the request was refused or the
+ * server could not be reached), nothing is deleted in the browser either and the error says so:
+ * the analyst must not be told the evidence is gone while the server still holds it.
+ */
+export async function wipeCase(kase: Case): Promise<void> {
+  if (kase.storage === 'server' && kase.serverKey) {
+    let r: Response
+    try {
+      r = await fetch(`/api/store/${kase.serverKey}`, { method: 'DELETE', headers: API_HEADERS })
+    } catch (e) {
+      throw new Error(`the server store could not be reached (${(e as Error).message}); nothing was deleted`, { cause: e })
+    }
+    if (!r.ok && r.status !== 404) throw new Error(`the server did not delete the store (HTTP ${r.status}); nothing was deleted`)
+  }
+  await deleteCaseData(getDb(), kase.id!)
+}
+
+/**
  * Delete a case entirely: its server store when it has one, every browser record, custom rules,
  * and the case row. Returns the case to show next: the most recently updated of the remaining
  * ones, or a fresh browser case when none is left. serverCleared is false when the server store
- * could not be removed (server down); the browser side is deleted regardless, like the wipe.
+ * could not be removed (server down); the browser side is deleted regardless, and the caller
+ * tells the analyst where the store is left.
  */
 export async function removeCase(kase: Case): Promise<{ next: Case; serverCleared: boolean }> {
   const db = getDb()
