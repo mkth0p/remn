@@ -281,11 +281,11 @@ def run(target: str, tmp_dir: str, *, deadline_s: float | None = None) -> tuple[
             pass
 
 
-def stage(paths: list[tuple[str, str]], tmp_dir: str) -> str:
+def stage(paths: list[tuple[str, str]], tmp_dir: str, directory: str | None = None) -> str:
     """A directory of .evtx files for a single engine run: hard links where the filesystem allows
     them, copies where it does not. Names carry a position so two members with the same base name
     do not collide."""
-    directory = tempfile.mkdtemp(dir=tmp_dir, suffix=".evtx")
+    directory = directory or tempfile.mkdtemp(dir=tmp_dir, suffix=".evtx")
     for index, (name, path) in enumerate(paths):
         base = re.sub(r"[^A-Za-z0-9._-]+", "_", os.path.basename(name.replace("\\", "/")))
         if not base.lower().endswith(".evtx"):
@@ -296,6 +296,89 @@ def stage(paths: list[tuple[str, str]], tmp_dir: str) -> str:
         except OSError:
             shutil.copyfile(path, destination)
     return directory
+
+
+def _stage_ceiling() -> int:
+    """The most an archive's logs may take in staging: what one upload's largest member may take."""
+    return min(4 * 1024**3, int(getattr(settings, "FORENSIC_TMP_MAX_GB", 4) or 4) * 1024**3 // 2)
+
+
+def stage_upload(name: str, path: str | None, data: bytes | None, fmt: str, tmp_dir: str) -> tuple[str | None, dict[str, Any]]:
+    """What the engine can read from one event log upload, staged as a directory of .evtx files.
+
+    fmt is the format the event log reader detected. A single log is staged as itself; an archive
+    gives its .evtx members, never itself, since the engine would read nothing from it and the
+    summary would look like a clean run. Anything else (records exported as XML, a cloud export)
+    is not the engine's input. Returns the directory, or None with the summary that says why
+    nothing was scanned, and the facts the run's summary must carry.
+    """
+    from services.ingest.pipeline import iter_archive
+
+    if fmt not in ("evtx", "zip", "tar"):
+        return None, {
+            "engine": ENGINE,
+            "status": "unsupported",
+            "findings": 0,
+            "seconds": 0.0,
+            "reason": f"{ENGINE} reads .evtx files and this upload is {fmt}; it was not scanned. Its rows are in the case",
+        }
+    directory = tempfile.mkdtemp(dir=tmp_dir, suffix=".evtx")
+    try:
+        if fmt == "evtx":
+            if path:
+                stage([(name, path)], tmp_dir, directory)
+            else:
+                with open(os.path.join(directory, "0000-upload.evtx"), "wb") as out:
+                    out.write(data or b"")
+            return directory, {"members": 1}
+        ceiling = _stage_ceiling()
+        held = held_bytes = skipped = skipped_bytes = 0
+        for member in iter_archive(path, data, fmt, None, ceiling):
+            # the same members the event log reader takes as logs
+            if not member.name.lower().endswith(".evtx"):
+                continue
+            if held_bytes + member.size > ceiling:
+                skipped += 1
+                skipped_bytes += member.size
+                continue
+            base = re.sub(r"[^A-Za-z0-9._-]+", "_", os.path.basename(member.name.replace("\\", "/")))
+            with member.open() as src, open(os.path.join(directory, f"{held:04d}-{base}"), "wb") as out:
+                shutil.copyfileobj(src, out, 4 * 1024 * 1024)
+            held += 1
+            held_bytes += member.size
+        said: dict[str, Any] = {"members": held}
+        if skipped:
+            said["notScanned"] = skipped
+            said["reason"] = (
+                f"{skipped:,} event log(s), {skipped_bytes / 1024**2:,.1f} MiB, came after the {ceiling // 1024**2:,} MiB of logs "
+                "staged for the engine and were not scanned; their rows are in the case"
+            )
+        if not held:
+            shutil.rmtree(directory, ignore_errors=True)
+            return None, {
+                "engine": ENGINE,
+                "status": "unsupported",
+                "findings": 0,
+                "seconds": 0.0,
+                **said,
+                "reason": said.get("reason") or f"{ENGINE} reads .evtx files and this archive holds none; it was not scanned",
+            }
+        return directory, said
+    except BaseException:
+        shutil.rmtree(directory, ignore_errors=True)
+        raise
+
+
+def finish(summary: dict[str, Any], said: dict[str, Any]) -> dict[str, Any]:
+    """A run's summary with what staging said: how many logs it read and those it did not."""
+    summary = {**summary, "members": said.get("members", summary.get("members"))}
+    if said.get("notScanned"):
+        summary["notScanned"] = said["notScanned"]
+        summary["reason"] = "; ".join(x for x in (summary.get("reason"), said["reason"]) if x)
+        # a run over part of the logs is reported like one stopped at a limit
+        if summary.get("status") == "parsed":
+            summary["status"] = "error"
+    return summary
 
 
 def resolve_refs(store, evidence_id, findings: list[dict[str, Any]]) -> list[dict[str, Any]]:

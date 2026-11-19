@@ -8,11 +8,13 @@ on PATH or `HAYABUSA_PATH`, rules beside it or at `HAYABUSA_RULES`; the containe
 it pinned by version and by the SHA-256 of the release archive) every ingested event log is
 also handed to it, and its detections come back as findings with rule ids under
 `engine:hayabusa:`, the level mapped to a severity, the MITRE techniques it tags, and refs to
-the rows REMN parsed from the same records, linked by computer, channel and record id. In a
-package the logs are held for it in at most 256 MiB of staging; a log read after that is parsed
-but not scanned, its member says so, and the engine's line in the ingest log counts those logs
-(`notScanned` in its summary). The rules run in REMN's own engines are untouched; they cover mail, cloud and collected artifacts,
-which Hayabusa does not.
+the rows REMN parsed from the same records, linked by computer, channel and record id. An
+archive of event logs gives it its `.evtx` members, up to half the staging area (4 GiB at
+most); records exported as XML and cloud exports are not its input, and its summary says they
+were not scanned. In a package the logs are held for it in at most 256 MiB of staging; a log
+read after that is parsed but not scanned, its member says so, and the engine's line in the
+ingest log counts those logs (`notScanned` in its summary, as for an archive past its share). The rules run in REMN's own
+engines are untouched; they cover mail, cloud and collected artifacts, which Hayabusa does not.
 
 It runs the way the native decoders do: a separate process, watched for memory, time and
 output, killed rather than trusted past a limit, with whatever it wrote before that kept and

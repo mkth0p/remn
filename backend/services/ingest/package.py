@@ -319,14 +319,7 @@ class PackageSource:
             for finding in findings:
                 finding["packageId"] = self.package_id
             self.findings.extend(findings)
-            summary["members"] = len(self.evtx_held)
-            if skipped:
-                summary["notScanned"] = skipped["notScanned"]
-                summary["reason"] = "; ".join(x for x in (summary.get("reason"), skipped["reason"]) if x)
-                # a run over part of the logs is reported like one stopped at a limit
-                if summary.get("status") == "parsed":
-                    summary["status"] = "error"
-            self.engine_summaries.append(summary)
+            self.engine_summaries.append(hayabusa.finish(summary, {"members": len(self.evtx_held), **skipped}))
         finally:
             self.budget["decodeSeconds"] += time.monotonic() - started
             if staged:
