@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-import threading
 from datetime import UTC
 from typing import Any
 
@@ -497,8 +496,9 @@ def _check_read_only(cur: duckdb.DuckDBPyConnection, sql: str) -> None:
                 raise FilterError(f"{name!r} is not a table of the case")
 
 
-def run_sql(store: CaseStore, sql: str, limit: int = 200, timeout_s: float = 30.0) -> dict[str, Any]:
-    """Read-only SQL for the analyst's `sql` tool and the SQL view: one SELECT (WITH, DESCRIBE, SHOW) on the case's tables, capped rows and time."""
+def run_sql(store: CaseStore, sql: str, limit: int = 200) -> dict[str, Any]:
+    """Read-only SQL for the analyst's `sql` tool and the SQL view: one SELECT (WITH, DESCRIBE, SHOW) on the case's tables, capped rows.
+    Its time is limited by the caller, as every store query's is (casestore.TimeLimit)."""
     s = sql.strip().rstrip(";").strip()
     cur = store.cursor()
     _one_select(cur, s)
@@ -507,15 +507,8 @@ def run_sql(store: CaseStore, sql: str, limit: int = 200, timeout_s: float = 30.
     # one that runs
     wrapped = f"SELECT * FROM (\n{s}\n) AS _q LIMIT {limit + 1}"
     _check_read_only(cur, wrapped)
-    timer = threading.Timer(timeout_s, cur.interrupt)
-    timer.start()
-    try:
-        cur.execute(wrapped)
-        rows = rows_to_dicts(cur)
-    except duckdb.InterruptException as exc:
-        raise FilterError(f"query cancelled after {timeout_s:.0f}s") from exc
-    finally:
-        timer.cancel()
+    cur.execute(wrapped)
+    rows = rows_to_dicts(cur)
     truncated = len(rows) > limit
     return {"rows": rows[:limit], "truncated": truncated, "columns": [d[0] for d in cur.description] if cur.description else []}
 

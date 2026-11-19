@@ -210,6 +210,11 @@ OFFLINE_LISTS_DIR = DATA_DIR / "lists"
 YARA_RULES_DIR = DATA_DIR / "yara"
 # Server-side case stores (DuckDB, one folder per case) for gigabyte-scale evidence.
 CASES_DIR = Path(os.environ.get("FORENSIC_CASES_DIR", DATA_DIR / "cases"))
+# How long one query on a server store (search, count, aggregate, stack, timeline, facets, pivot,
+# row, summary, SQL) may run, and one rule of a rule run, before it is stopped and the analyst is
+# told so. 0 is no limit.
+FORENSIC_STORE_QUERY_MAX_S = _env_int("FORENSIC_STORE_QUERY_MAX_S", 60)
+FORENSIC_STORE_RULE_MAX_S = _env_int("FORENSIC_STORE_RULE_MAX_S", 300)
 
 # Bundled detection rules (YAML)
 RULES_DIR = ROOT_DIR / "rules"

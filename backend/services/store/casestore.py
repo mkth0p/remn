@@ -17,6 +17,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Iterable
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -58,6 +59,10 @@ class StoreVersionError(RuntimeError):
     """A case store this version cannot read. It is refused before anything in it is changed."""
 
 
+class QueryStopped(Exception):
+    """A query on a store stopped at its time limit. The message says which limit and what to do."""
+
+
 def schema_version(con: duckdb.DuckDBPyConnection) -> int | None:
     """The schema version a store records, or None when it records none: a new file, or a store
     written before the version was recorded."""
@@ -72,6 +77,68 @@ def schema_version(con: duckdb.DuckDBPyConnection) -> int | None:
         raise StoreVersionError(
             f"this case store records a schema version this version of REMN cannot read ({str(row[0])[:40]!r}). It was not opened and nothing in it was changed."
         ) from None
+
+
+_time_limit: ContextVar[TimeLimit | None] = ContextVar("store_time_limit", default=None)
+
+
+class TimeLimit:
+    """Stops the queries a block runs on case stores once `seconds` have passed, and raises
+    QueryStopped with `message` ("{seconds}" in it is filled in). 0 or less is no limit.
+
+    DuckDB has no statement timeout. A watcher interrupts every cursor that CaseStore.cursor() hands
+    out inside the block, and repeats the interrupt until the block ends, since an interrupt that
+    lands between two statements is cleared by the next one. A block inside another is watched by
+    both."""
+
+    def __init__(self, seconds: float, message: str) -> None:
+        self.seconds = float(seconds or 0)
+        self.message = message
+        self.stopped = False
+        self._cursors: list[duckdb.DuckDBPyConnection] = []
+        self._lock = threading.Lock()
+        self._done = threading.Event()
+        self._outer: TimeLimit | None = None
+        self._token: Any = None
+
+    def watch(self, con: duckdb.DuckDBPyConnection) -> duckdb.DuckDBPyConnection:
+        limit: TimeLimit | None = self
+        while limit is not None:
+            with limit._lock:
+                limit._cursors.append(con)
+            limit = limit._outer
+        return con
+
+    def _interrupt(self) -> None:
+        if self._done.wait(self.seconds):
+            return
+        self.stopped = True
+        while True:
+            with self._lock:
+                cursors = list(self._cursors)
+            for con in cursors:
+                try:
+                    con.interrupt()
+                except duckdb.Error:
+                    pass
+            if self._done.wait(0.05):
+                return
+
+    def __enter__(self) -> TimeLimit:
+        if self.seconds > 0:
+            self._outer = _time_limit.get()
+            self._token = _time_limit.set(self)
+            threading.Thread(target=self._interrupt, name="store-time-limit", daemon=True).start()
+        return self
+
+    def __exit__(self, kind: type[BaseException] | None, exc: BaseException | None, tb: Any) -> None:
+        if self._token is None:
+            return
+        self._done.set()
+        _time_limit.reset(self._token)
+        self._token = None
+        if self.stopped and isinstance(exc, duckdb.InterruptException):
+            raise QueryStopped(self.message.replace("{seconds}", f"{self.seconds:g}")) from exc
 
 
 def settle(con: duckdb.DuckDBPyConnection) -> None:
@@ -650,7 +717,9 @@ class CaseStore:
     # -- connections ---------------------------------------------------------
     def cursor(self) -> duckdb.DuckDBPyConnection:
         self.last_used = time.time()
-        return self._con.cursor()
+        con = self._con.cursor()
+        limit = _time_limit.get()
+        return limit.watch(con) if limit is not None else con
 
     def close(self) -> None:
         with self.lock:

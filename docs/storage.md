@@ -50,6 +50,21 @@ the code `storeVersion` and a message that names both versions. Run the version 
 it, or restore the backup taken before that version was installed (see
 [Backup and upgrade](setup.md#backup-and-upgrade)).
 
+What one store may take from the server is bounded, and each bound is a setting in `.env`:
+
+- **Query time.** One query on a store (search, count, aggregate, stack, timeline, facets,
+  pivot, a row, the summary, the indicator list, SQL from the SQL view or the analyst's
+  `sql` tool) runs at most `FORENSIC_STORE_QUERY_MAX_S` seconds (60). A query past it is
+  stopped and answered with 504, the code `queryStopped` and a message that names the limit;
+  narrow the filter or the time range, or raise the limit. The export of a whole case reads
+  in pages and has no overall limit.
+- **Rule time.** One rule of a server-store rule run runs at most `FORENSIC_STORE_RULE_MAX_S`
+  seconds (300). A rule past it is stopped, listed among the run's errors with a message that
+  names the limit and says it has no findings in that run, and the run goes on with the next
+  rule.
+
+0 turns a time limit off.
+
 Migration transfers bounded pages to a new server store, preserves event and mail IDs,
 and retains findings, reviews, narratives and links. Only a completed transfer switches
 the case's storage and removes browser evidence. A failed transfer leaves the browser
