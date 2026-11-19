@@ -36,6 +36,12 @@ over rather than left empty. Open demo case opens the Northstar lab in the brows
 The sidebar collapses to an icon rail with the button at its foot, remembered per
 browser.
 
+A page that fails while it is drawn shows what failed in its place, with "try again",
+"reload the page" and the details to copy, and the console says so; the sidebar and the
+other pages stay usable. When the browser does not let the app open its database at start
+(a private window, site data turned off, storage full, a database written by a newer
+version), the page says so and why instead of waiting.
+
 On every list, `j` and `k` move the selection and `/` focuses the search. The Review page
 adds `r`, `e`, `f` and `x` for its decisions.
 
