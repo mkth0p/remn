@@ -61,6 +61,24 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   hovered. A chain wider than the pane scrolls sideways, by drag or wheel, with the lane names
   pinned at the left, and the selected step is scrolled into view. The report's chain pictures
   use the same layout within the 1,700 pixels they had, with titles on up to three lines.
+- Fewer pages that look right while they are wrong. In the browser store, the mail histogram, the
+  Timeline and the aggregate and timeline tools search mail bodies the same way as the Mails list,
+  so their counts agree with it. Emptying a server-store case keeps every browser record when the
+  server does not confirm that its store is gone, and says so. A running import can be cancelled
+  from the jobs panel: an upload stops, a server job is stopped and waited for, and the rows
+  already written are removed with the evidence entry. A hash beside a failed upload stops at
+  once. A loose file of unknown kind is no longer read as mail: a mailbox file without an
+  extension is recognised by its first lines, and anything else is turned away with its name.
+  Indicators keep the case of a URL's path and still find the lower-case rows of older versions.
+  When collection stops at 50,000 distinct values, the console and the Indicators page say which
+  import it was. An imported case bundle arrives with external lookups switched off. The
+  browser-direct Ollama transport refuses an address off this machine and its local network. A
+  page that throws while it draws shows the error with "try again" in its place, and a database
+  the browser cannot open is explained instead of "booting…" for ever. The Timeline names a part
+  it could not read. The Events and Mails pages query once when they open. With local time on,
+  every time ends in its offset from UTC and every time column names its zone. The Dashboard no
+  longer says no EVTX is loaded when the case holds cloud events, no longer says to run rules that
+  run on their own, and names the connection that did not answer.
 - CSV exports quote any value holding a semicolon or a tab, and put column names through the
   same escaping, so a value from the evidence cannot start a formula in Excel builds that split
   CSV on semicolons. The HTML report carries its own content security policy (no script, no
