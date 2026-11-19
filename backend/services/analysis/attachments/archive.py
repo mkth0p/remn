@@ -7,6 +7,7 @@ import io
 import logging
 import re
 import tarfile
+import time
 import zipfile
 from collections.abc import Callable
 from typing import Any
@@ -18,6 +19,10 @@ log = logging.getLogger(__name__)
 
 MAX_NESTED_BYTES = 15 * 1024 * 1024
 MAX_ENTRIES_ANALYZED = 40
+# A tar walk is bounded three ways: what it decompresses (the nested limit, whatever compression
+# the tar carries), how many headers it reads, and how long it runs.
+MAX_TAR_MEMBERS = 10_000
+MAX_TAR_SECONDS = 10.0
 _UTF16_EXE_RE = re.compile(
     rb"(?i)\.\x00(?:e\x00x\x00e|l\x00n\x00k|d\x00l\x00l|j\x00s|v\x00b\x00s|b\x00a\x00t|c\x00m\x00d|h\x00t\x00a|p\x00s\x001|s\x00c\x00r|m\x00s\x00i|w\x00s\x00f|c\x00p\x00l)\x00"
 )
@@ -169,7 +174,9 @@ def analyze_archive(
                 if end != -1:
                     name = data[10:end].decode("latin-1", "replace")
             if inner[:262].find(b"ustar") != -1 or (ext in ("tgz",)):
-                return _analyze_tar(inner, out, flags, analyze_nested, depth)
+                if len(inner) > MAX_NESTED_BYTES:
+                    _truncated(out, flags, inner, data)
+                return _analyze_tar(inner[:MAX_NESTED_BYTES], out, flags, analyze_nested, depth)
             add_entry(name or "(gzip member)", len(inner), len(data), False, False)
             out["entryCount"] = 1
             if analyze_nested and depth < 2 and len(inner) <= MAX_NESTED_BYTES:
@@ -265,17 +272,66 @@ def analyze_archive(
     return out
 
 
+def _truncated(out: dict[str, Any], flags: set[str], expanded: bytes, compressed: bytes) -> None:
+    """Say that only the first MAX_NESTED_BYTES of what the data expands to were looked at."""
+    flags.add("archive_partially_analyzed")
+    out["truncatedAt"] = MAX_NESTED_BYTES
+    if len(expanded) > 100 * max(len(compressed), 1):
+        flags.add("zip_bomb")
+
+
+def _plain_tar(data: bytes, out: dict[str, Any], flags: set[str]) -> tuple[bytes, bool]:
+    """The tar in data, with any gzip, bz2 or xz layer expanded to at most the nested limit, and
+    whether it was cut there.
+
+    The tar reader's automatic mode accepted a compressed stream behind any name and walked it with
+    no bound, decompressing every member it passed over to reach the next header: a .tgz whose
+    payload was a bz2 tar of a few hundred kilobytes described terabytes."""
+    fmt = "bz2" if data.startswith(b"BZh") else "xz" if data.startswith(b"\xfd7zXZ\x00") else "gz" if data.startswith(b"\x1f\x8b") else None
+    if fmt is None:
+        return data, False
+    if fmt == "gz":
+        with gzip.GzipFile(fileobj=io.BytesIO(data)) as gz:
+            inner = gz.read(MAX_NESTED_BYTES + 1)
+        truncated = len(inner) > MAX_NESTED_BYTES
+    else:
+        inner, truncated = bounded_decompress(fmt, data, MAX_NESTED_BYTES)
+    if truncated:
+        _truncated(out, flags, inner, data)
+    return inner[:MAX_NESTED_BYTES], truncated
+
+
 def _analyze_tar(
     data: bytes, out: dict[str, Any], flags: set[str], analyze_nested: Callable[[str, bytes, int], dict[str, Any]] | None, depth: int
 ) -> dict[str, Any]:
     out["format"] = "tar"
     entries: list[dict[str, Any]] = []
+    given = len(data)
     try:
-        with tarfile.open(fileobj=io.BytesIO(data), mode="r:*") as tf:
-            members = tf.getmembers()
-            out["entryCount"] = len(members)
+        data, truncated = _plain_tar(data, out, flags)
+        # data cut at the nested limit ends inside a member; the walk stops there, not in error
+        truncated = truncated or "truncatedAt" in out
+        started = time.monotonic()
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:") as tf:
+            walked = 0
             analyzed = 0
-            for m in members[:2000]:
+            while True:
+                if walked >= MAX_TAR_MEMBERS or time.monotonic() - started > MAX_TAR_SECONDS:
+                    flags.add("archive_partially_analyzed")
+                    break
+                try:
+                    m = tf.next()
+                except tarfile.ReadError:
+                    if truncated:
+                        break
+                    raise
+                if m is None:
+                    break
+                walked += 1
+                out["entryCount"] = walked
+                out["uncompressedSize"] += m.size
+                if walked > 2000:
+                    continue
                 entries.append(
                     {
                         "name": m.name[:300],
@@ -287,7 +343,6 @@ def _analyze_tar(
                         "category": DANGEROUS_EXT.get(extension_of(m.name)),
                     }
                 )
-                out["uncompressedSize"] += m.size
                 if analyze_nested and depth < 2 and m.isfile() and 0 < m.size <= MAX_NESTED_BYTES and analyzed < MAX_ENTRIES_ANALYZED:
                     cat = DANGEROUS_EXT.get(extension_of(m.name))
                     if cat is None:
@@ -295,14 +350,25 @@ def _analyze_tar(
                     f = tf.extractfile(m)
                     if f is None:
                         continue
+                    try:
+                        blob = f.read()
+                    except tarfile.ReadError:
+                        if truncated:
+                            break  # the member runs past what was decompressed
+                        raise
                     analyzed += 1
-                    nested = analyze_nested(m.name, f.read(), depth + 1)
+                    nested = analyze_nested(m.name, blob, depth + 1)
                     out["nested"].append(nested)
                     for fl in nested.get("flags", []):
                         flags.add("nested_" + fl)
     except Exception as exc:  # noqa: BLE001
         out["error"] = str(exc)[:200]
         flags.add("archive_corrupt")
+    # the sizes the headers declare against the bytes given, judged as for a zip
+    if out["uncompressedSize"] and given:
+        out["ratio"] = round(out["uncompressedSize"] / given, 1)
+        if out["ratio"] > 100 and out["uncompressedSize"] > 50 * 1024 * 1024:
+            flags.add("zip_bomb")
     out["entries"] = entries[:300]
     flags |= _entry_flags([e["name"] for e in entries if not e["dir"]])
     out["flags"] = sorted(flags)

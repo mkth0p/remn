@@ -210,7 +210,10 @@ finishes.
   browser-only mode, 256 otherwise) is not parsed; it becomes an error row that says why. An
   archive member larger than half the staging budget is not copied out, and bzip2, xz and
   LZMA data inside attachments and archives is expanded only up to the analysis limit, with
-  the attachment flagged as a decompression bomb when it goes past it.
+  the attachment flagged as a decompression bomb when it goes past it. A tar inside an
+  attachment is walked over at most that analysis limit of data, whatever compression it
+  carries, and over at most 10,000 headers and 10 seconds; an attachment whose walk stops early
+  is flagged as partly analysed.
 - **Every member accounted for.** An archive's members are listed in the stream's last line
   as parsed (with their row count), skipped or failed, with the reason: too large, encrypted,
   a compression method that is not read, not a mail file, not an event log. Nothing is left
