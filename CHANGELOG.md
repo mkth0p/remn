@@ -26,6 +26,26 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   the 7z test runs. The backend tests also run on Windows and macOS. The image has a health check,
   the public proxy closes a connection that sends no headers within ten seconds, and a nightly or
   weekly run that fails opens an issue instead of failing unseen.
+- The API gives away less and refuses more. `GET /api/jobs` lists the jobs of the case whose key
+  is presented, a job is read, followed or cancelled only with its case's key
+  (`/api/jobs/<id>?case=<key>`, a 404 otherwise), no job answer carries a case key, and reading a
+  store never creates one. A request, parse or job that fails answers with what failed, the
+  exception's type and a reference that is also in the server log, not with the exception's text,
+  and the log reduces exceptions to type and place in every mode (`FORENSIC_DEBUG=1` keeps the
+  text outside browser-only mode). `backend/run.py` no longer starts on an address other machines
+  can reach without `FORENSIC_AUTH_TOKEN` unless `FORENSIC_ALLOW_NO_TOKEN=1` says so; a container
+  is judged by `FORENSIC_PUBLISHED_ON`, which `docker-compose.yml` sets from `REMN_BIND`. On
+  upgrade, a bare `docker run -p 8000:8000`, or compose with `REMN_BIND` off loopback and no
+  `REMN_TOKEN`, now exits until it sets a token, `REMN_NO_TOKEN=1` (`FORENSIC_ALLOW_NO_TOKEN=1`)
+  or a loopback publication with `FORENSIC_PUBLISHED_ON=127.0.0.1`; `docs/setup.md` lists each
+  case. Wrong tokens are limited to ten a minute per client address
+  (`FORENSIC_AUTH_FAILURES_PER_MIN`); the placeholder the page sends before it holds a token is
+  not counted. A reputation lookup that would leave the machine needs `networkAllowed: true`,
+  which the page sends from the case setting; values are checked by kind, a provider's redirect to
+  another host is not followed, and a Spamhaus verdict no longer carries the DQS key. `GET
+  /api/health` without the client header answers `{"ok": true}` only, which is what the image's
+  health check now asks; `/api/meta` parses the bundled rules once; and a numeric parameter that
+  is not a number is a 400.
 - Each case adapts to its own machines and to the analyst's review. After every run, a rule that
   stands on its own on at least half the case's hosts is folded per host as that network's
   background, whatever the clean machines said, and each finding of a rule the analyst marks false
