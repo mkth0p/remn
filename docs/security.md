@@ -25,7 +25,11 @@ Nothing, unless the analyst switches it on:
 
 - reputation lookups (URLhaus, MalwareBazaar, ThreatFox, VirusTotal, AbuseIPDB,
   GreyNoise, ipinfo, RDAP, Spamhaus, Google Safe Browsing) go out only when "allow
-  external lookups" is enabled for the case, and only the indicator values;
+  external lookups" is enabled for the case, and only the indicator values. The server
+  holds to that choice too: a lookup that would reach one of these providers is refused
+  (403, code `lookupsNotAllowed`) before any provider is asked unless the request says
+  that the case allows it (`networkAllowed: true`), which the page sends from the case's
+  setting. The offline lists and GeoIP stay on the machine and need no such word;
 - the browser-direct AI transport sends prompts and tool results to the analyst's own
   Ollama on the analyst's own machine;
 - the server proxy sends them to the Ollama the REMN host is configured with;

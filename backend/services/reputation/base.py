@@ -69,6 +69,8 @@ class Provider:
     kinds: tuple[str, ...] = ()
     needs_key: str | None = None  # key name in the config dict
     min_interval: float = 0.0  # seconds between two calls (rate limit)
+    # whether a lookup sends the value off this machine; the request has to say the case allows it
+    external = True
     description = ""
     homepage = ""
 
@@ -103,6 +105,7 @@ class Provider:
             "kinds": list(self.kinds),
             "configured": self.configured(),
             "needsKey": self.needs_key,
+            "external": self.external,
             "description": self.description,
             "homepage": self.homepage,
         }
