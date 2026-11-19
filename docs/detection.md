@@ -589,9 +589,10 @@ identity evidence still applies.
 The browser engine lets confidential evidence be analysed without a row ever reaching
 the server; the SQL engine handles gigabyte cases. They are held to the same output by a
 fixture: `tools/parity_fixture.py` builds a mixed scenario (Windows events, Microsoft 365
-rows, mails), runs every bundled rule on the SQL engine and records the rows and finding
-keys under `tests/fixtures/parity/`; `frontend/src/rules/parity.test.ts` runs the
-browser engine on the same rows and fails on any difference. Regenerate the fixture after
+rows, mails), runs every bundled rule on the SQL engine and records the rows and each
+finding's key, severity, count and escalation under `tests/fixtures/parity/`;
+`frontend/src/rules/parity.test.ts` runs the browser engine on the same rows and fails on
+any difference. Regenerate the fixture after
 changing an engine or a rule, and review the diff. The same script records the Events
 page's stacks of a few fields in `stacks.json`, and `frontend/src/data/stack.parity.test.ts`
 stacks the rows in the browser store and compares.

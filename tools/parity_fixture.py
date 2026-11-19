@@ -4,8 +4,8 @@ The browser engine (rules/engine.ts) exists so that confidential evidence can be
 row ever reaching the server; the SQL engine (services/store/rules.py) exists for GB-scale cases.
 Both must produce the same findings for the same rules and rows. This script builds a small mixed
 scenario (Windows events, M365 rows, mails), runs every bundled rule on the DuckDB engine and writes
-the rows and the resulting finding keys to tests/fixtures/parity/. frontend/src/rules/parity.test.ts
-runs the browser engine on the same rows and fails on any difference. The stacks of a few fields
+the rows and the resulting findings (key, severity, count, escalation) to tests/fixtures/parity/.
+frontend/src/rules/parity.test.ts runs the browser engine on the same rows and fails on any difference. The stacks of a few fields
 over the same events (services/store/queries.stack) go to stacks.json for
 frontend/src/data/stack.parity.test.ts, which stacks them in the browser store.
 
@@ -166,11 +166,14 @@ def main() -> None:
         r["id"] = i
     assert [x[0] for x in stored_ev] == list(range(1, len(ev_rows) + 1)), "event ids are not sequential"
     assert [x[0] for x in stored_ml] == list(range(1, len(ml_rows) + 1)), "mail ids are not sequential"
-    expected: dict[str, list[str]] = {}
+    # severity, count and escalation too: two engines that agree on which findings exist can still
+    # disagree on how bad they are
+    expected: dict[str, list[dict[str, Any]]] = {}
     for f in res["findings"]:
-        expected.setdefault(f["ruleId"], []).append(f["key"])
+        rated = {"key": f["key"], "severity": f["severity"], "count": f["count"], "escalation": f.get("escalation")}
+        expected.setdefault(f["ruleId"], []).append(rated)
     for k in expected:
-        expected[k].sort()
+        expected[k].sort(key=lambda x: x["key"])
     (OUT / "events.json").write_text(json.dumps(ev_rows, default=str), encoding="utf-8")
     (OUT / "mails.json").write_text(json.dumps(ml_rows, default=str), encoding="utf-8")
     (OUT / "expected.json").write_text(
