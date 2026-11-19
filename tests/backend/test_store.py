@@ -232,6 +232,31 @@ def test_server_rules_engine(store):
     assert res["byRule"]["bf"] == 1 and res["errors"][0]["ruleId"] == "bad"
 
 
+def test_a_rule_whose_source_is_not_a_case_table_is_refused_and_changes_nothing(store):
+    w = EventWriter(store, 1)
+    for i in range(3):
+        w.add(_event(i))
+    w.flush()
+    rows = "SELECT id, summary FROM events ORDER BY id"
+    before = store.cursor().execute(rows).fetchall()
+    # the source goes into the SQL text: with no field to resolve, a stacked statement there used to
+    # rewrite every row
+    stacked = "events; UPDATE events SET summary = 'tampered'; SELECT count(*) FROM events"
+    rule = {"id": "invented-injection", "title": "t", "severity": "low", "source": stacked}
+    res = R.run_rules(store, [rule, {**rule, "id": "invented-table", "source": "evidence"}], {})
+    assert res["findings"] == [] and res["diagnostics"] == []
+    assert res["errors"] == [
+        {"ruleId": "invented-injection", "error": "source must be events or mails"},
+        {"ruleId": "invented-table", "error": "source must be events or mails"},
+    ]
+    with pytest.raises(FilterError, match="source must be events or mails"):
+        R.run_rule(store, rule, {})
+    with pytest.raises(FilterError, match="source must be events or mails"):
+        R.diagnose_zero(store, rule, {})
+    assert store.cursor().execute(rows).fetchall() == before
+    assert all(summary != "tampered" for _, summary in before)
+
+
 def test_rule_diagnostics_explain_silent_rules(store):
     w = EventWriter(store, 1)
     for i in range(3):

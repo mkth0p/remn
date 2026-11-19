@@ -40,6 +40,18 @@ _GROUPABLE = {
 }
 
 
+# The tables a rule may read. The source is written into the SQL text, so anything else is refused
+# before a query is built: a stacked statement there rewrote the evidence rows.
+RULE_SOURCES = ("events", "mails")
+
+
+def rule_source(rule: dict[str, Any]) -> str:
+    source = rule.get("source")
+    if source not in RULE_SOURCES:
+        raise FilterError("source must be events or mails")
+    return source
+
+
 def sev_rank(s: Any) -> int:
     return SEVERITIES.index(s) if s in SEVERITIES else 0
 
@@ -136,7 +148,7 @@ def _where_sql(rule: dict[str, Any], settings: dict[str, Any], ctx: Ctx, ts_fiel
 
 
 def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any], notes: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-    source = rule["source"]
+    source = rule_source(rule)
     ts_field = "date" if source == "mails" else "ts"
     ctx = Ctx(source=source, settings=settings)
     req = rule.get("require_setting")
@@ -555,7 +567,7 @@ def _empty_positive_settings(cond: dict[str, Any] | None, settings: dict[str, An
 
 def diagnose_zero(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any]:
     """Explain why a rule produced zero findings (funnel: settings -> where -> exclude -> time -> threshold)."""
-    source = rule["source"]
+    source = rule_source(rule)
     ts_field = "date" if source == "mails" else "ts"
     base = {"ruleId": rule["id"], "matched": 0, "afterExclude": 0, "afterTime": 0}
     req = rule.get("require_setting")
