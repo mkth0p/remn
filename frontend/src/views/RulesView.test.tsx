@@ -61,3 +61,16 @@ it('shows each rule’s measure, the reasons on hover, and lists the leads alone
   await waitFor(() => expect(screen.queryByText('win-lead')).toBeNull())
   expect(screen.getByText('win-noisy')).toBeTruthy()
 }, 30_000)
+
+it('shows beside a rule cut at its cap how many findings it kept and how many it left out', async () => {
+  const detail = '345 of 2,345 findings left out past the cap of 2,000; kept the 2,000 rarest groups'
+  await db.kv.put({
+    key: 'ruleDiags-1',
+    value: { ts: 10, byRule: { 'win-lead': 2000 }, diagnostics: [{ ruleId: 'win-lead', reason: 'truncated', detail, dropped: 345, matched: 2000, afterExclude: 2000, afterTime: 2000 }] },
+  })
+  await act(async () => {
+    render(<RulesView />)
+  })
+  await waitFor(() => expect(screen.getByText('2,000, 345 left out')).toBeTruthy(), { timeout: 8000 })
+  expect(screen.getByText('2,000, 345 left out').getAttribute('title')).toBe(`2000 finding(s) kept: ${detail}`)
+}, 30_000)

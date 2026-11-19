@@ -9,6 +9,7 @@ from django.conf import settings as conf
 from django.http import HttpRequest, JsonResponse
 from django.views.decorators.http import require_POST
 
+from api.errors import failure
 from api.jobs import manager
 from services.analysis import baseline
 from services.analysis import rescore as calibration
@@ -19,27 +20,32 @@ log = logging.getLogger(__name__)
 
 @require_POST
 def rescore(request: HttpRequest):
+    # Only the messages composed here are returned. An exception raised while the mails are scored
+    # can quote a mail, so it is a server failure with a reference (JsonErrorsMiddleware).
     try:
         body = json.loads(request.body or b"{}")
-        if not isinstance(body, dict) or not isinstance(body.get("settings", {}), dict):
-            raise ValueError("expected an object and settings object")
-        settings = body.get("settings") or {}
-        if body.get("storeKey"):
-            if conf.FORENSIC_BROWSER_ONLY:
-                return JsonResponse({"error": "server stores are unavailable in browser-only mode", "code": "browserOnly"}, status=403)
+    except ValueError:
+        return JsonResponse({"error": "invalid JSON"}, status=400)
+    if not isinstance(body, dict) or not isinstance(body.get("settings", {}), dict):
+        return JsonResponse({"error": "expected an object and settings object"}, status=400)
+    settings = body.get("settings") or {}
+    if body.get("storeKey"):
+        if conf.FORENSIC_BROWSER_ONLY:
+            return JsonResponse({"error": "server stores are unavailable in browser-only mode", "code": "browserOnly"}, status=403)
+        try:
             st = registry.get(str(body["storeKey"]), create=False)
-            if any(j["status"] in ("queued", "running") for j in manager.list(st.key)):
-                return JsonResponse({"error": "Wait for this case's current jobs to finish before rescoring."}, status=409)
-            job = manager.submit("rescore_mails", st.key, lambda j: calibration.store(st, settings, j), "Rescore mails")
-            return JsonResponse({"jobId": job.id}, status=202)
-        rows = body.get("mails")
-        if not isinstance(rows, list) or len(rows) > 200 or any(not isinstance(r, dict) or not isinstance(r.get("id"), int) for r in rows):
-            raise ValueError("mails must contain at most 200 rows with integer IDs")
-        return JsonResponse(calibration.batch(rows, settings))
-    except FileNotFoundError:
-        return JsonResponse({"error": "unknown case store"}, status=404)
-    except (ValueError, TypeError) as exc:
-        return JsonResponse({"error": str(exc)[:200]}, status=400)
+        except ValueError:
+            return JsonResponse({"error": "invalid case key"}, status=400)
+        except FileNotFoundError:
+            return JsonResponse({"error": "unknown case store"}, status=404)
+        if any(j["status"] in ("queued", "running") for j in manager.list(st.key)):
+            return JsonResponse({"error": "Wait for this case's current jobs to finish before rescoring."}, status=409)
+        job = manager.submit("rescore_mails", st.key, lambda j: calibration.store(st, settings, j), "Rescore mails")
+        return JsonResponse({"jobId": job.id}, status=202)
+    rows = body.get("mails")
+    if not isinstance(rows, list) or len(rows) > 200 or any(not isinstance(r, dict) or not isinstance(r.get("id"), int) for r in rows):
+        return JsonResponse({"error": "mails must contain at most 200 rows with integer IDs"}, status=400)
+    return JsonResponse(calibration.batch(rows, settings))
 
 
 @require_POST
@@ -65,5 +71,4 @@ def mails(request: HttpRequest):
         enrichment = baseline.enrich(rows, settings)
         return JsonResponse({"rows": [{"id": mid, **e} for mid, e in enrichment.items()], "summary": baseline.summarize(enrichment)})
     except Exception as exc:  # noqa: BLE001
-        log.exception("enrichment failed")
-        return JsonResponse({"error": str(exc)[:300]}, status=500)
+        return JsonResponse(failure("the enrichment", exc, log), status=500)

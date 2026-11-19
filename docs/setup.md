@@ -124,7 +124,9 @@ If the container starts but the page does not load, check these in order:
   on another computer gets a refused connection. Publishing on the network takes three
   variables: `REMN_BIND=0.0.0.0`, `REMN_HOSTS` with the name or address browsers will use
   (Django answers 400 to any other), and `REMN_TOKEN`, which every analyst pastes once
-  when the page asks for it. For example, on a machine reached as 192.0.2.10:
+  when the page asks for it. Without a token, a server published on anything but a
+  loopback address does not start, and its log says why. For example, on a machine
+  reached as 192.0.2.10:
 
   ```
   REMN_BIND=0.0.0.0 REMN_HOSTS=192.0.2.10 REMN_TOKEN=$(openssl rand -hex 24) docker compose up -d --build
@@ -134,9 +136,10 @@ If the container starts but the page does not load, check these in order:
   section below covers HTTPS and access from outside.
 - **Behind your own protection.** When a reverse proxy, a VPN or a firewall in front
   already decides who gets in, both checks can be switched off: `REMN_HOSTS='*'` accepts
-  any host name and an empty `REMN_TOKEN` (the default) asks for nothing. The server then
-  prints a warning at start, because anyone who reaches the port can read and delete
-  every server-store case; that is the trade-off being made. `docker-compose.open.yml`
+  any host name, and `REMN_NO_TOKEN=1` with an empty `REMN_TOKEN` starts the server on
+  the network without a token. The server then prints a warning at start, because anyone
+  who reaches the port can read and delete every server-store case; that is the
+  trade-off being made, and it has to be stated. `docker-compose.open.yml`
   is that configuration in one file, full build included, on port 8300 of the machine
   itself, with `deploy/apache-remn.conf` as the matching Apache virtual host:
 
@@ -144,7 +147,10 @@ If the container starts but the page does not load, check these in order:
   sudo docker compose -f docker-compose.open.yml up -d --build
   ```
 - **`docker run` without `-p`.** The container listens on 8000 inside; publish it with
-  `-p 127.0.0.1:8000:8000`.
+  `-p 127.0.0.1:8000:8000 -e FORENSIC_PUBLISHED_ON=127.0.0.1`. The server inside the
+  container cannot see where its port is published, so it is told: without a token it
+  starts only when `FORENSIC_PUBLISHED_ON` is a loopback address, or when
+  `FORENSIC_ALLOW_NO_TOKEN=1` says that running open is intended.
 
 The default build is the core: everything in `requirements.txt`, no PST, YARA or 7z. The
 full build adds the optional packages; they are named at build time because the runtime
@@ -158,7 +164,10 @@ or, with compose, `REMN_EXTRA_PIP="yara-python libpff-python" docker compose up 
 (`set REMN_EXTRA_PIP=yara-python libpff-python` first in a Windows command prompt). The
 names are chosen from `backend/requirements-optional.txt` and installed at the versions
 and hashes that file fixes; a name it does not list fails the build. The health endpoint,
-`/api/health`, reports what the running server has under `optional`.
+`/api/health`, reports what the running server has under `optional` to a request that
+carries the `X-Forensic-Client` header (the token, when one is set). Without the header it
+answers `{"ok": true}` and nothing else; that is what the image's health check
+(`tools/healthcheck.py`) asks, so the check needs no token.
 
 The image differs from a virtual-environment install in one more way: it carries
 [Hayabusa](https://github.com/Yamato-Security/hayabusa) (AGPL-3.0, run as a separate
@@ -314,9 +323,19 @@ FORENSIC_AUTH_TOKEN=<long-random-string>     # shared access token, required for
 FORENSIC_ALLOWED_HOSTS=remn.example.com      # extra Host header values (comma list)
 ```
 
+`backend/run.py` does not start on an address other machines can reach (`--host 0.0.0.0`,
+or a container published beyond loopback) without `FORENSIC_AUTH_TOKEN`: it exits with
+code 2 and a message naming the choices. `FORENSIC_ALLOW_NO_TOKEN=1` overrides that, for a
+server whose own proxy, VPN or firewall decides who gets in, and for a browser-only
+instance that is open by design.
+
 The first time a browser reaches a token-protected server, the app shows a token prompt;
 the value is kept in that browser's IndexedDB and sent as the `X-Forensic-Client`
-header. A wrong token gets `401 {"code":"auth"}`.
+header. A wrong token gets `401 {"code":"auth"}`. Ten wrong tokens in a minute from one
+address (`FORENSIC_AUTH_FAILURES_PER_MIN`, 0 for no limit) get that address `429` with a
+Retry-After for every request that carries a token, the right one included, until the
+allowance refills; behind a proxy, set `FORENSIC_TRUST_PROXY=1` so that each client is counted
+on its own address rather than all of them on the proxy's.
 
 **Recommended: Tailscale Serve.** Keep `run.py` on `127.0.0.1` and run
 `tailscale serve --bg 8000`; you get HTTPS (a secure context, which the app needs for
@@ -335,11 +354,32 @@ then restart Ollama. Chrome, Edge and Firefox let an HTTPS page call `http://loc
 Safari does not, so that analyst switches to the server-proxy transport in Settings → AI.
 
 **Accepted trade-offs of this first version** (one shared token, keep the deployment
-private): no per-user accounts or audit log, no rate limiting unless
-`FORENSIC_RATE_LIMIT_PER_MIN` is set, DuckDB case stores are not
+private): no per-user accounts or audit log, no request budget unless
+`FORENSIC_RATE_LIMIT_PER_MIN` is set (wrong tokens are limited, as above), DuckDB case stores are not
 encrypted at rest, and anyone with the token can read or delete every case store.
 Confidential rows only reach the server when a case uses the server store; browser-store
 cases keep evidence in the analyst's browser. See [Storage modes](storage.md).
+
+**Upgrading from a version that only warned.** Before this change the server printed a
+warning and listened when it was reachable beyond loopback without a token. It now
+refuses, so these setups have to change:
+
+- `docker run -p 8000:8000` without a token: publish on loopback and say so
+  (`-p 127.0.0.1:8000:8000 -e FORENSIC_PUBLISHED_ON=127.0.0.1`), or set
+  `FORENSIC_AUTH_TOKEN`, or `FORENSIC_ALLOW_NO_TOKEN=1`.
+- `docker compose` with `REMN_BIND` off loopback and no `REMN_TOKEN`: set `REMN_TOKEN`, or
+  `REMN_NO_TOKEN=1` for a setup behind its own proxy, VPN or firewall. The default
+  (`REMN_BIND` unset, loopback) needs nothing.
+- `run.py --host` with an address other machines reach, without a token: set
+  `FORENSIC_AUTH_TOKEN` or `FORENSIC_ALLOW_NO_TOKEN=1`.
+- A browser-only instance started outside `docker-compose.public.yml`:
+  `FORENSIC_ALLOW_NO_TOKEN=1`.
+- `docker-compose.open.yml`, `docker-compose.public.yml`, `deploy/update.sh`,
+  `deploy/public-server-setup.sh` and a server on `127.0.0.1` need nothing: the compose
+  files set what they need.
+
+A container that refuses to start under `restart: unless-stopped` restarts in a loop, with
+the reason in `docker logs`.
 
 ## Repository layout
 

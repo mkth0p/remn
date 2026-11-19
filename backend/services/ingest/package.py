@@ -119,7 +119,7 @@ class PackageSource:
         # handed something that is not one.
         self.engines: list[str] = []
         # keys of the cloud audit and sign-in records read so far, across every member
-        self.seen_records: set[int] = set()
+        self.seen_records = m365.RecordKeys()
         self.evtx_held: dict[str, tuple[dict[str, Any], str]] = {}
         self.findings: list[dict[str, Any]] = []
         self.engine_summaries: list[dict[str, Any]] = []
@@ -669,6 +669,8 @@ class PackageSource:
                     entry.update(source.stats.coverage())
                     if source.stats.repaired:
                         notes["xmlRepaired"] = source.stats.repaired
+                    if cloud_note := m365.note(m365.counts(source.stats)):
+                        notes["cloud"] = cloud_note
                 if source is not None and source.stats.errors:
                     raise ValueError(f"parser reported {source.stats.errors} error(s); any emitted rows are partial")
                 entry["status"] = "parsed"
@@ -708,6 +710,8 @@ class PackageSource:
                         )
                     if truncated:
                         said.append(f"kept the first {truncated:,} lines; the file is longer than that")
+                    if notes.get("cloud"):
+                        said.append(notes["cloud"])
                     entry["note"] = "; ".join(said)
                 # The parsers hold the member file open across their yields, and CPython only
                 # clears this frame after the finally block, so the handles are still live here.

@@ -518,7 +518,7 @@ async function read(name: string, args: Record<string, unknown>, ctx: ToolContex
       if (!['ip', 'domain', 'url', 'hash'].includes(kind) || !value) return { error: 'kind must be ip|domain|url|hash and value non-empty' }
       // Only a value the case holds leaves the machine, so evidence cannot be encoded into a lookup
       if (!(await valueInCase(kase, kind, value, signal))) return { error: `"${value.slice(0, 80)}" does not appear in this case; only indicators found in the evidence can be looked up` }
-      const resp = await lookupReputation([{ kind, value }], kase.settings.providers?.length ? kase.settings.providers : undefined)
+      const resp = await lookupReputation([{ kind, value }], kase.settings.providers?.length ? kase.settings.providers : undefined, kase.settings.networkAllowed)
       return { summary: resp.summary[`${kind}:${value}`] ?? null, verdicts: resp.results.map((r) => ({ provider: r.provider, verdict: r.verdict, score: r.score, tags: r.tags, details: r.details })) }
     }
     case 'sql': {

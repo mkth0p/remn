@@ -177,16 +177,16 @@ def test_job_cancel_mid_ingest_leaves_consistent_store(tmp_path, tmp_registry):
     # let it get going, then cancel
     deadline = time.time() + 60
     while time.time() < deadline:
-        j = c.get(f"/api/jobs/{job_id}", **HDR).json()
+        j = c.get(f"/api/jobs/{job_id}?case={key}", **HDR).json()
         if j["status"] == "running" and (j.get("progress") or {}).get("rows", 0) > 500:
             break
         if j["status"] in ("done", "error", "cancelled"):
             break
         time.sleep(0.2)
-    c.delete(f"/api/jobs/{job_id}", **HDR)
+    c.delete(f"/api/jobs/{job_id}?case={key}", **HDR)
     deadline = time.time() + 60
     while time.time() < deadline:
-        j = c.get(f"/api/jobs/{job_id}", **HDR).json()
+        j = c.get(f"/api/jobs/{job_id}?case={key}", **HDR).json()
         if j["status"] in ("cancelled", "done", "error"):
             break
         time.sleep(0.2)

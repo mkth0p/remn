@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest'
-import { compileCond, parseDuration, parseThreshold, ruleApplicable, ruleChannels, ruleEventIds, ruleFields, ruleReadFields, runRule, validateRule, type Rule, type RuleDiag } from './engine'
+import {
+  compileCond,
+  MAX_FINDINGS,
+  parseDuration,
+  parseThreshold,
+  ruleApplicable,
+  ruleChannels,
+  ruleEventIds,
+  ruleFields,
+  ruleReadFields,
+  runRule,
+  validateRule,
+  type Rule,
+  type RuleDiag,
+} from './engine'
 
 const T0 = Date.UTC(2026, 8, 1, 22, 0, 0)
 let id = 1
@@ -157,6 +171,38 @@ describe('diagnostics', () => {
     const found = runRule({ id: 'ok', title: 'o', severity: 'low', source: 'events', where: { eventId: 4625 } }, { rows, onDiag: (x) => (fired = x) })
     expect(found).toHaveLength(2)
     expect(fired).toBeUndefined()
+  })
+})
+
+describe('the finding cap', () => {
+  const run = (rule: Rule, rows: Record<string, unknown>[]) => {
+    const diags: RuleDiag[] = []
+    const found = runRule(rule, { rows, onDiag: (d) => diags.push(d) })
+    return { found, cut: diags.find((d) => d.reason === 'truncated') }
+  }
+  it('keeps 2,000 findings per rule and says how many it left out', () => {
+    const rows = Array.from({ length: 2001 }, (_, i) => ev(4625, i, { targetUser: `user${String(i).padStart(4, '0')}` }))
+    const { found, cut } = run({ id: 'hunt', title: 'h', severity: 'low', source: 'events', where: { eventId: 4625 }, group_by: ['targetUser'] }, rows)
+    expect(MAX_FINDINGS).toBe(2000)
+    expect(found).toHaveLength(2000)
+    expect(cut).toMatchObject({ dropped: 1, detail: '1 of 2,001 findings left out past the cap of 2,000; kept the 2,000 rarest groups' })
+  })
+  it('keeps the first rows in time order, a row without a time last, as the SQL engine does', () => {
+    const rows = [ev(1102, 50), { id: id++, eventId: 1102 }, ev(1102, 10), ev(1102, 30)]
+    const { found, cut } = run({ id: 'clear', title: 'c', severity: 'high', source: 'events', where: { eventId: 1102 }, max_findings: 2 }, rows)
+    expect(found.map((f) => f.refs[0])).toEqual([rows[2].id, rows[3].id])
+    expect(cut).toMatchObject({ dropped: 2, detail: '2 of 4 findings left out past the cap of 2; kept the first 2 matching rows in time order' })
+  })
+  it('keeps whole bursts in the order of the grouped fields and says nothing at exactly the cap', () => {
+    const rows = ['ws03', 'ws01', 'ws02'].flatMap((computer, h) => [0, 1, 2].map((k) => ev(4771, h * 600 + k, { computer })))
+    const burst: Rule = { id: 'burst', title: 'b', severity: 'low', source: 'events', where: { eventId: 4771 }, group_by: ['computer'], window: '1m', threshold: '>= 2', max_findings: 2 }
+    const { found, cut } = run(burst, rows)
+    expect(found.map((f) => [f.entities.computer, f.count])).toEqual([
+      ['ws01', 3],
+      ['ws02', 3],
+    ])
+    expect(cut).toMatchObject({ dropped: 1, detail: '1 of 3 findings left out past the cap of 2; kept the first 2 bursts in the order of the grouped fields' })
+    expect(run({ ...burst, max_findings: 3 }, rows).cut).toBeUndefined()
   })
 })
 

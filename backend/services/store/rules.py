@@ -17,7 +17,7 @@ from services.store.sqlfilter import Ctx, FilterError, _setting, compile_cond, r
 SEVERITIES = ["info", "low", "medium", "high", "critical"]
 _DUR = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(ms|s|m|h|d|w)?\s*$", re.I)
 _THR = re.compile(r"^\s*(>=|<=|==|=|>|<|!=)?\s*(\d+)\s*$")
-MAX_FINDINGS = 2000
+MAX_FINDINGS = 2000  # findings a rule keeps when it sets no max_findings; mirrors rules/engine.ts MAX_FINDINGS
 MAX_REFS = 5000  # mirrors rules/engine.ts MAX_REFS
 COLLAPSE_AFTER = 200
 # Entity fields that make sense as a collapse key (avoid grouping by free text such as subject/commandLine).
@@ -38,6 +38,26 @@ _GROUPABLE = {
     ],
     "mails": ["fromAddr", "fromDomain", "fromRegistrable", "fromNameNorm", "originIp", "replyToDomain", "folder"],
 }
+
+
+# The tables a rule may read. The source is written into the SQL text, so anything else is refused
+# before a query is built: a stacked statement there rewrote the evidence rows.
+RULE_SOURCES = ("events", "mails")
+
+
+def rule_source(rule: dict[str, Any]) -> str:
+    source = rule.get("source")
+    if source not in RULE_SOURCES:
+        raise FilterError("source must be events or mails")
+    return source
+
+
+def finding_cap(rule: dict[str, Any]) -> int:
+    """The findings a rule keeps: its max_findings when that is a positive whole number, else MAX_FINDINGS (both engines)."""
+    n = rule.get("max_findings")
+    if isinstance(n, (int, float)) and not isinstance(n, bool) and n > 0 and float(n).is_integer():
+        return int(n)
+    return MAX_FINDINGS
 
 
 def sev_rank(s: Any) -> int:
@@ -136,7 +156,7 @@ def _where_sql(rule: dict[str, Any], settings: dict[str, Any], ctx: Ctx, ts_fiel
 
 
 def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any], notes: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-    source = rule["source"]
+    source = rule_source(rule)
     ts_field = "date" if source == "mails" else "ts"
     ctx = Ctx(source=source, settings=settings)
     req = rule.get("require_setting")
@@ -161,6 +181,7 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any], n
     threshold = parse_threshold(rule.get("threshold"))
     window = parse_duration(rule.get("window"))
     then_flags = [(k, v) for o in (rule.get("then_flags") or []) for k, v in dict(o).items()]
+    cap = finding_cap(rule)
     cur = store.cursor()
     findings: list[dict[str, Any]] = []
 
@@ -180,11 +201,11 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any], n
             return out
         ents = _entity_exprs(entity_fields, ctx)
         cols = ", ".join(["id", q(ts_field)] + [f"{e} AS e{i}" for i, (_, e) in enumerate(ents)] + (["flags"] if source == "mails" else []))
-        cur.execute(f"SELECT {cols} FROM {source} WHERE {where} ORDER BY {q(ts_field)} NULLS LAST LIMIT {MAX_FINDINGS + 1}", ctx.params)
+        cur.execute(f"SELECT {cols} FROM {source} WHERE {where} ORDER BY {q(ts_field)} NULLS LAST, id LIMIT {cap + 1}", ctx.params)
         recs = cur.fetchall()
-        if len(recs) > MAX_FINDINGS:
-            recs = recs[:MAX_FINDINGS]
-            _note_cut(notes, f"kept the first {MAX_FINDINGS:,} matching rows in time order")
+        if len(recs) > cap:
+            recs = recs[:cap]
+            _note_cut(notes, cap, total, f"kept the first {cap:,} matching rows in time order")
         for rec in recs:
             rid, ts = rec[0], rec[1]
             ev = _clean_entities([(ents[i][0], rec[2 + i]) for i in range(len(ents))])
@@ -243,16 +264,19 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any], n
             having.append("NOT (" + " AND ".join(f"{k} = ''" for k in gkeys) + ")")
         gb = f"GROUP BY {', '.join(gkeys)}" if gkeys else ""
         hv = f"HAVING {' AND '.join(having)}" if having else ""
-        # Past MAX_FINDINGS groups, which ones to keep: a rule counting up to a threshold (a burst, a
-        # spray) is about its biggest groups, anything else about its rarest, the ones a hunt is after.
+        # Past the cap, which groups to keep: a rule counting up to a threshold (a burst, a spray) is
+        # about its biggest groups, anything else about its rarest, the ones a hunt is after. The last
+        # column counts every group, so that the cut can say how many were left out.
         biggest = bool(threshold) and ((threshold[0] == ">=" and threshold[1] > 1) or (threshold[0] == ">" and threshold[1] >= 1))
         order = f"count(*) {'DESC' if biggest else 'ASC'}" + (f", {', '.join(gkeys)}" if gkeys else "")
-        cur.execute(f"SELECT {', '.join(select)} FROM {source} WHERE {where} {gb} {hv} ORDER BY {order} LIMIT {MAX_FINDINGS + 1}", ctx.params)
+        cur.execute(f"SELECT {', '.join(select)}, count(*) OVER () FROM {source} WHERE {where} {gb} {hv} ORDER BY {order} LIMIT {cap + 1}", ctx.params)
         ng = len(gexprs)
         recs = cur.fetchall()
-        if len(recs) > MAX_FINDINGS:
-            recs = recs[:MAX_FINDINGS]
-            _note_cut(notes, f"kept the {MAX_FINDINGS:,} {'largest' if biggest else 'rarest'} groups")
+        groups = int(recs[0][-1]) if recs else 0
+        recs = [rec[:-1] for rec in recs]
+        if len(recs) > cap:
+            recs = recs[:cap]
+            _note_cut(notes, cap, groups, f"kept the {cap:,} {'largest' if biggest else 'rarest'} groups")
         for rec in recs:
             keyvals = rec[:ng]
             disp = rec[ng : 2 * ng]
@@ -295,6 +319,8 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any], n
         open_burst: dict[str, Any] | None = None
         group_any = False
         buffered: list[dict[str, Any]] = []
+        over = 0  # bursts of the current group past the cap: counted, not built
+        dropped = 0
         first_disp: tuple = ()
         first_extra: tuple = ()
 
@@ -302,11 +328,14 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any], n
             return len({x[2] for x in items if x[2] not in (None, "")}) if dexpr else len(items)
 
         def close_burst() -> None:
-            nonlocal open_burst
+            nonlocal open_burst, over
             if open_burst is None:
                 return
             b = open_burst
             open_burst = None
+            if len(findings) + len(buffered) >= cap:
+                over += 1
+                return
             ents = _clean_entities([(gexprs[i][0], first_disp[i]) for i in range(ng)])
             if dexpr:
                 seen: list[str] = []
@@ -339,11 +368,13 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any], n
             )
 
         def flush_group() -> None:
-            nonlocal win, open_burst, group_any
+            nonlocal win, open_burst, group_any, over, dropped
             close_burst()
             if group_any or not any_sql:
                 findings.extend(buffered)
+                dropped += over
             buffered.clear()
+            over = 0
             win = []
             group_any = False
 
@@ -386,15 +417,12 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any], n
                 if _cmp(thr[0], distinct_count(win), thr[1]):
                     open_burst = {"rows": list(win), "start": win[0][1], "last": ts}
                     first_disp, first_extra = disp, extra
-                if len(findings) + len(buffered) >= MAX_FINDINGS:
-                    break
-            if len(findings) + len(buffered) >= MAX_FINDINGS:
-                break
+        # the stream is read to its end past the cap, so that the kept bursts are whole and the cut
+        # can say how many were left out
         if cur_key is not None:
             flush_group()
-        if len(findings) >= MAX_FINDINGS:
-            _note_cut(notes, f"stopped at {MAX_FINDINGS:,} bursts, in the order of the grouped fields")
-        findings = findings[:MAX_FINDINGS]
+        if dropped:
+            _note_cut(notes, cap, len(findings) + dropped, f"kept the first {cap:,} bursts in the order of the grouped fields")
 
     # follow-up ("then")
     then = rule.get("then") or {}
@@ -433,10 +461,12 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any], n
     return findings
 
 
-def _note_cut(notes: dict[str, Any] | None, how: str) -> None:
-    """Record that a rule produced more findings than a run keeps, and which ones it kept."""
+def _note_cut(notes: dict[str, Any] | None, cap: int, found: int, how: str) -> None:
+    """Record that a rule found more than it keeps: how many it left out, and which ones it kept.
+    rules/engine.ts writes the same words."""
     if notes is not None:
-        notes["truncated"] = f"more than {MAX_FINDINGS:,} findings; {how}"
+        notes["truncated"] = f"{found - cap:,} of {found:,} findings left out past the cap of {cap:,}; {how}"
+        notes["dropped"] = found - cap
 
 
 def _rule_event_ids(cond: dict[str, Any] | None) -> list[int] | None:
@@ -555,7 +585,7 @@ def _empty_positive_settings(cond: dict[str, Any] | None, settings: dict[str, An
 
 def diagnose_zero(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any]:
     """Explain why a rule produced zero findings (funnel: settings -> where -> exclude -> time -> threshold)."""
-    source = rule["source"]
+    source = rule_source(rule)
     ts_field = "date" if source == "mails" else "ts"
     base = {"ruleId": rule["id"], "matched": 0, "afterExclude": 0, "afterTime": 0}
     req = rule.get("require_setting")
@@ -650,6 +680,7 @@ def run_rules(
                     "ruleId": rule.get("id", "?"),
                     "reason": "truncated",
                     "detail": notes["truncated"],
+                    "dropped": notes["dropped"],
                     "matched": len(found),
                     "afterExclude": len(found),
                     "afterTime": len(found),
