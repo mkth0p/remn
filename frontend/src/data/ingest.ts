@@ -188,7 +188,7 @@ export async function ingestToServer(file: File, kase: Case, kind: 'evtx' | 'mai
     if (r.findings?.length) {
       const engine = String(r.findings[0].engine ?? 'hayabusa')
       const n = await persistEngineFindings(kase.id!, evidenceId, engine, r.findings)
-      log('ok', `[${name}] ${n} finding(s) from ${engine} stored`)
+      log('ok', `[${file.name}] ${n} finding(s) from ${engine} stored`)
     }
     useStore.getState().upsertJob({ id: jobId, phase: 'done', rows: r.count ?? 0, progress: 1 })
     log('ok', `[${file.name}] ${r.count} rows stored on the server in ${r.seconds ?? '?'} s (format ${r.format})`)

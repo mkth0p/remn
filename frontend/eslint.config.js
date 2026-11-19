@@ -28,6 +28,8 @@ export default tseslint.config(
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
       // the DSL, the tool results and the store rows are typed as unknown and narrowed; explicit any is rare and deliberate
       '@typescript-eslint/no-explicit-any': 'warn',
+      // these browser globals type-check anywhere, so a missing local of the same name goes unnoticed
+      'no-restricted-globals': ['error', 'name', 'event', 'status'],
     },
   },
 )
