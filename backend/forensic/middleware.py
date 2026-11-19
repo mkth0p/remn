@@ -29,6 +29,10 @@ HEADER_NAME = "HTTP_X_FORENSIC_CLIENT"
 # Answered without the header: a container health check or a load balancer probes with a plain GET
 # and cannot be made to send one. The view tells such a caller that the server is up and no more.
 LIVENESS_PATH = "/api/health"
+# What the page sends before it holds a token, and what the documented commands send. Refused when a
+# token is set, but not counted as a wrong token: they are one fixed value, never a guess, and the
+# page sends them on every load of a token-protected instance until the analyst enters the token.
+PLACEHOLDERS = frozenset({"remn", "1"})
 # under "api.", so the log filter reduces an exception recorded here to its type and place
 log = logging.getLogger("api.errors")
 
@@ -117,7 +121,7 @@ class ApiClientHeaderMiddleware:
             token = settings.FORENSIC_AUTH_TOKEN
             if token:
                 right = hmac.compare_digest(value.encode("utf-8", "surrogateescape"), token.encode("utf-8"))
-                if (limited := self._limited(request, right)) is not None:
+                if (limited := self._limited(request, right or value in PLACEHOLDERS)) is not None:
                     return limited
                 if not right:
                     return JsonResponse({"error": "invalid access token", "code": "auth"}, status=401)

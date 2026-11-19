@@ -79,6 +79,15 @@ def test_the_right_token_does_not_count_against_the_allowance():
 
 
 @override_settings(FORENSIC_AUTH_TOKEN="s3cret-token", FORENSIC_AUTH_FAILURES_PER_MIN=2)
+def test_the_placeholder_the_page_sends_before_it_has_a_token_is_refused_but_not_counted():
+    c = Client()
+    for placeholder in ("remn", "1") * 5:
+        assert c.get("/api/meta", HTTP_X_FORENSIC_CLIENT=placeholder).status_code == 401
+    # the allowance is untouched: two real wrong tokens are still answered 401 before the limit
+    assert _wrong(c, 3) == [401, 401, 429]
+
+
+@override_settings(FORENSIC_AUTH_TOKEN="s3cret-token", FORENSIC_AUTH_FAILURES_PER_MIN=2)
 def test_the_allowance_is_kept_per_client_address_and_per_64_for_ipv6():
     c = Client()
     assert _wrong(c, 3, REMOTE_ADDR="198.51.100.7") == [401, 401, 429]

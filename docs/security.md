@@ -51,8 +51,10 @@ pack importer download from their sources on request, never during an investigat
   the token (see [remote access](setup.md#remote-access)). Wrong tokens are counted per
   client address (per /64 for IPv6): past `FORENSIC_AUTH_FAILURES_PER_MIN` (10 by default)
   in a minute, that address gets 429 with a Retry-After for every request that carries a
-  token, the right one included, until its allowance refills. Behind a proxy without
-  `FORENSIC_TRUST_PROXY=1` every client shares the proxy's address and so one allowance.
+  token, the right one included, until its allowance refills. The fixed values the page and
+  the documented commands send before they hold a token (`remn`, `1`) are refused but not
+  counted. Behind a proxy without `FORENSIC_TRUST_PROXY=1` every client shares the proxy's
+  address and so one allowance.
   The remote mode is one shared token, with no per-user accounts or audit log; keep such a
   deployment private.
 - Parsed content is treated as hostile: React escaping, HTML previews in a sandboxed
