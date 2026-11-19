@@ -87,13 +87,21 @@ def detect_mail_format(name: str, head: bytes) -> str:
 SNIFF_BYTES = 64 * 1024
 
 
+UNRECOGNISED = "unrecognised"
+
+
 def detect_evtx_format(name: str, head: bytes) -> str:
     arc = detect_archive(name, head)
     if arc:
         return arc
     if evtx_parser.looks_like_event_xml(head):
         return evtx_parser.XML_FORMAT
-    return m365.detect_format(name, head) or "evtx"
+    fmt = m365.detect_format(name, head)
+    if fmt:
+        return fmt
+    # a table or a JSON document that is none of the cloud exports is not an event log either:
+    # read as one, it failed on the EVTX header and the analyst was told the wrong thing
+    return UNRECOGNISED if m365.looks_like_export(name, head) and not head.startswith(_EVTX) else "evtx"
 
 
 # ---------------------------------------------------------------------------
@@ -209,7 +217,7 @@ class EvtxSource:
         include_raw: bool = True,
         max_member: int = MAX_MEMBER_BYTES,
         deadline: float | None = None,
-        seen: set[int] | None = None,
+        seen: m365.RecordKeys | None = None,
     ) -> None:
         self.name = name
         self.path = path
@@ -223,7 +231,7 @@ class EvtxSource:
         self.files: list[dict[str, Any]] = []
         # the keys of the cloud records read so far, for every file of this upload (a package
         # passes its own set, shared by all its members)
-        self.seen_records: set[int] = set() if seen is None else seen
+        self.seen_records = m365.RecordKeys() if seen is None else seen
         head = (data or b"")[:SNIFF_BYTES] if data is not None else _read_head(path, SNIFF_BYTES)
         self.format = detect_evtx_format(name, head)
 
@@ -235,6 +243,8 @@ class EvtxSource:
         if self.format in m365.FORMATS:
             yield from self._iter_m365(self.path, self.data, self.format, self.name)
             return
+        if self.format == UNRECOGNISED:
+            raise ValueError(m365.UNRECOGNISED)
         for member in iter_archive(self.path, self.data, self.format, self.files, self.max_member, self.deadline):
             low = member.name.lower()
             if low.endswith(".evtx"):
@@ -245,9 +255,7 @@ class EvtxSource:
                 fmt = evtx_parser.XML_FORMAT if evtx_parser.looks_like_event_xml(head) else m365.detect_format(member.name, head) or ""
                 if not fmt:
                     table = low.endswith((".csv", ".json", ".jsonl", ".ndjson"))
-                    skip_record(
-                        self.files, member.name, member.size, "not a recognised Microsoft 365 or Entra export" if table else "not an event log or cloud export"
-                    )
+                    skip_record(self.files, member.name, member.size, m365.UNRECOGNISED if table else "not an event log or cloud export")
                     continue
                 suffix = ".xml" if fmt == evtx_parser.XML_FORMAT else ".member"
             else:
@@ -256,6 +264,7 @@ class EvtxSource:
             tmp_path, sha = member_to_tempfile(member, self.tmp_dir, suffix)
             try:
                 before, dup_before, rep_before = self.stats.count, self.stats.duplicates, self.stats.repaired
+                cloud_before = m365.counts(self.stats)
                 if fmt in ("evtx", evtx_parser.XML_FORMAT):
                     yield from self._iter_one(tmp_path, member.name, fmt)
                 else:
@@ -265,6 +274,8 @@ class EvtxSource:
                     entry["duplicates"] = self.stats.duplicates - dup_before
                 if self.stats.repaired > rep_before:
                     entry["repaired"] = self.stats.repaired - rep_before
+                if cloud_note := m365.note({k: v - cloud_before[k] for k, v in m365.counts(self.stats).items()}):
+                    entry["note"] = cloud_note
                 self.files.append(entry)
             finally:
                 try:
