@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import itertools
 import json
 import os
 import shutil
@@ -241,7 +242,7 @@ class PackageSource:
                 finally:
                     self.budget["decodeSeconds"] += time.monotonic() - started
 
-    def _members_7z(self, src) -> Iterator[tuple[Member, str | None]]:
+    def _members_7z(self, src, every: bool = False) -> Iterator[tuple[Member, str | None]]:
         """DFIR-ORC ships 7z. py7zr offers no streaming member access, so the archive is expanded
         once into the staging area, within the package byte budget, and read from there."""
         try:
@@ -267,7 +268,7 @@ class PackageSource:
         root = os.path.realpath(self._extracted)
         found = sorted(os.path.join(dirpath, filename) for dirpath, _dirs, files in os.walk(root) for filename in files)
         for i, path in enumerate(found):
-            if i >= MAX_FILES:
+            if i >= MAX_FILES and not every:
                 self.inventory_complete = False
                 break
             real = os.path.realpath(path)
@@ -385,7 +386,12 @@ class PackageSource:
                 entry["note"] = info["note"]
         self.triage_summary = {"target": run.target, "functions": run.summary}
 
-    def _members(self) -> Iterator[tuple[Member, str | None]]:
+    def _members(self, every: bool = False) -> Iterator[tuple[Member, str | None]]:
+        """The archive's members in order, up to the inventory cap unless every is set.
+
+        The first pass sets every: it only reads names, and the layout check must see the whole
+        tree, since a collector that writes profile directories before Windows lists System32 last.
+        """
         if self.path:
             with open(self.path, "rb") as fh:
                 head = fh.read(512)
@@ -396,7 +402,7 @@ class PackageSource:
         if fmt == "zip":
             with zipfile.ZipFile(src) as zf:
                 for i, info in enumerate(zf.infolist()):
-                    if i >= MAX_FILES:
+                    if i >= MAX_FILES and not every:
                         self.inventory_complete = False
                         break
                     if info.is_dir():
@@ -406,13 +412,20 @@ class PackageSource:
                         reason = "symbolic link"
                     yield Member(info.filename, info.file_size, lambda info=info: zf.open(info)), reason
         elif fmt == "7z":
-            yield from self._members_7z(src)
+            yield from self._members_7z(src, every)
         elif fmt == "tar":
             with tarfile.open(name=self.path, fileobj=None if self.path else src, mode="r:*") as tf:
-                for i, info in enumerate(tf):
-                    if i >= MAX_FILES:
-                        self.inventory_complete = False
+                for i in itertools.count():
+                    info = tf.next()
+                    if info is None:
                         break
+                    if i >= MAX_FILES:
+                        if not every:
+                            self.inventory_complete = False
+                            break
+                        # tarfile keeps every header it has read; past the cap only the name is
+                        # wanted, so the list does not grow with the archive
+                        tf.members.clear()
                     if info.isdir():
                         continue
                     reason = None if info.isfile() else "non-regular member"
@@ -443,10 +456,9 @@ class PackageSource:
 
     def _iterate(self) -> Iterator[dict[str, Any]]:
         # A small explicit manifest supplies collection context regardless of archive order.
-        names: list[str] = []
-        for member, reason in self._members():
-            if len(names) < MAX_FILES:
-                names.append(member.name)
+        found_layout = False
+        for member, reason in self._members(every=True):
+            found_layout = found_layout or triage.is_triage_layout([member.name])
             if not reason and member.name == "collection-manifest.json":
                 self.manifest_count += 1
                 if member.size > 65536:
@@ -465,7 +477,7 @@ class PackageSource:
             self.context = {}
             self.expectations = []
         self.context = {**self.inherited_context, **self.context}
-        self.triage = triage.is_triage_layout(names)
+        self.triage = found_layout
         for index, (member, reason) in enumerate(self._members()):
             if self.budget["files"] >= MAX_FILES:
                 self.inventory_complete = False

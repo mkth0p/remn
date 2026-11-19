@@ -43,7 +43,9 @@ records before it kept.
 A collection laid out like a drive is read as one target by dissect rather than member by
 member: KAPE's target output, Velociraptor's offline collector archive (`uploads/` with the
 drive letters URL-encoded, `results/` beside it), acquire, or a plain copy of a volume with
-its `Windows\System32` in place. The layout is recognised from the member names; the archive
+its `Windows\System32` in place. The layout is recognised from every member name, including
+those past the 20,000 entries the inventory lists, so a collection whose profile directories
+come before `Windows` is still read as a drive; the archive
 is handed to dissect whole, and a fixed set of its functions runs in the same bounded worker as
 the native decoders: services, run keys, scheduled tasks, Defender's MPLog, quarantine,
 exclusions and MpCmdRun log, Amcache, ShimCache, UserAssist, BAM, ShellBags, PowerShell
