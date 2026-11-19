@@ -41,7 +41,10 @@ pack importer download from their sources on request, never during an investigat
 
 ## Hardening in place
 
-- The server binds to `127.0.0.1` and keeps no database. Every `/api` call needs the
+- The server binds to `127.0.0.1` and keeps no database. It does not start on an address
+  other machines can reach without an access token, unless `FORENSIC_ALLOW_NO_TOKEN=1`
+  says that this is intended; a container is judged by the address its port is published
+  on (`FORENSIC_PUBLISHED_ON`, which `docker-compose.yml` sets). Every `/api` call needs the
   `X-Forensic-Client` header (cookie-less CSRF protection); cross-origin preflights are
   refused. The one exception is a GET of `/api/health`, which a caller without the header
   gets as `{"ok": true}` only. With `FORENSIC_AUTH_TOKEN` set, the header value must equal

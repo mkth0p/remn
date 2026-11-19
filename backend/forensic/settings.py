@@ -44,6 +44,14 @@ ALLOWED_HOSTS = ["127.0.0.1", "localhost"] + [h.strip() for h in os.environ.get(
 # send it as the X-Forensic-Client header value; when unset (local use), the
 # header only needs to be present (cookie-less CSRF protection).
 FORENSIC_AUTH_TOKEN = os.environ.get("FORENSIC_AUTH_TOKEN", "").strip()
+# backend/run.py does not start on an address other machines can reach unless a token is set. This
+# says that running there without one is intended: a proxy, a VPN or a firewall in front decides
+# who gets in, or the instance is browser-only and open by design.
+FORENSIC_ALLOW_NO_TOKEN = _env_bool("FORENSIC_ALLOW_NO_TOKEN", False)
+# For a container: the host address its port is published on. The server inside listens on every
+# interface of the container and cannot see how the port is published, so the compose file passes
+# it in, and backend/run.py judges this address in place of the one it listens on.
+FORENSIC_PUBLISHED_ON = os.environ.get("FORENSIC_PUBLISHED_ON", "").strip()
 # Wrong tokens a minute from one client address (one /64 for IPv6) before that address gets 429
 # for every request that carries a token, the right one included. 0 turns the limit off.
 FORENSIC_AUTH_FAILURES_PER_MIN = _env_int("FORENSIC_AUTH_FAILURES_PER_MIN", 10)
