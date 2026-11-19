@@ -131,7 +131,7 @@ def test_the_external_decoders_and_the_engine_start_without_the_server_environme
     from services.parsers import native
 
     monkeypatch.setenv("FORENSIC_AUTH_TOKEN", "invented-token-for-this-test")
-    assert "FORENSIC_AUTH_TOKEN" not in native._environment(str(tmp_path))
+    assert "FORENSIC_AUTH_TOKEN" not in native._worker_environment(str(tmp_path))
 
     seen = tmp_path / "seen.json"
     script = tmp_path / "engine.py"
@@ -151,7 +151,7 @@ def test_a_decoder_finds_its_home_in_its_own_staging_folder(tmp_path):
 
     done = subprocess.run(
         [sys.executable, "-c", "from pathlib import Path; import tempfile; print(Path.home()); print(tempfile.gettempdir())"],
-        env=native._environment(str(tmp_path)),
+        env=native._worker_environment(str(tmp_path)),
         capture_output=True,
         text=True,
         check=True,

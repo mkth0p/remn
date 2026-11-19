@@ -33,7 +33,7 @@ MAX_BATCH_SECONDS = 60.0
 MAX_BATCH_OUTPUT = 16 * 1024**2
 
 
-def _environment(tmp_dir: str) -> dict[str, str]:
+def _worker_environment(tmp_dir: str) -> dict[str, str]:
     """The worker reads hostile files: it gets none of the server's variables. Inside a parse
     process there are none to give it anyway; with FORENSIC_PARSE_ISOLATION off there are. Its
     home and temporary folder are its own staging folder: dissect asks for the home folder when it
@@ -76,7 +76,7 @@ def decode(kind: str, path: str, tmp_dir: str) -> str:
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            env=_environment(tmp_dir),
+            env=_worker_environment(tmp_dir),
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         monitor = psutil.Process(process.pid)
@@ -173,7 +173,7 @@ def batch_records(kind: str, paths: list[str], tmp_dir: str) -> list[tuple[int, 
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            env=_environment(tmp_dir),
+            env=_worker_environment(tmp_dir),
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         monitor = psutil.Process(process.pid)
@@ -232,7 +232,7 @@ def triage_records(path: str, tmp_dir: str, functions: list[tuple[str, int]], *,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            env=_environment(tmp_dir),
+            env=_worker_environment(tmp_dir),
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         monitor = psutil.Process(process.pid)
