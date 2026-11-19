@@ -1125,7 +1125,7 @@
     "count": 1,
     "escalation": null,
     "key": "win-powershell-encoded-command|84",
-    "severity": "high"
+    "severity": "medium"
    }
   ],
   "win-powershell-suspicious-scriptblock": [

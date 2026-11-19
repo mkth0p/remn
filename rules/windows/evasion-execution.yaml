@@ -87,12 +87,23 @@ where:
   scriptBlockText|not_contains: ["Microsoft.PowerShell.Utility", "PSReadLine", "Set-StrictMode -Version", "# Copyright (c) Microsoft Corporation", "$PSScriptRoot\\", "chocolatey", "winget", "Windows Defender Advanced Threat Protection", "__cmdletization"]
 ---
 id: win-powershell-encoded-command
-title: PowerShell launched with an encoded / hidden command line
-description: 4688 or Sysmon 1 process creation of powershell/pwsh with -EncodedCommand, -w hidden, -nop, download cradle or IEX.
-severity: high
+title: PowerShell launched with an encoded or hidden command, or a download cradle
+description: >-
+  4688 or Sysmon 1 process creation of powershell or pwsh whose command line passes an encoded command
+  (-EncodedCommand, or any abbreviation PowerShell accepts, followed by base64), asks for a hidden window
+  (-WindowStyle Hidden or 1, abbreviated or not), or runs a download cradle, FromBase64String or IEX /
+  Invoke-Expression. -NoProfile, -NonInteractive, -ExecutionPolicy Bypass and a URL are not enough on their own:
+  installers, updaters and management agents pass them on every run. Parameters are read as PowerShell reads
+  them, so -Encoding (an argument of Out-File) is not -EncodedCommand.
+severity: medium
 source: events
 attack: [T1059.001, T1027]
 tags: [execution, powershell]
+falsepositives:
+  - management agents that send their commands encoded (Ansible over WinRM, some RMM tools)
+  - installers that run a hidden PowerShell window (the Office Click-to-Run setup on the clean machines)
+references:
+  - https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_powershell_exe
 where:
   any_of:
     - { eventId: 4688 }
@@ -101,7 +112,13 @@ where:
   any_of_2:
     - { processName|contains: [powershell.exe, pwsh.exe, powershell_ise.exe] }
     - { image|contains: [powershell.exe, pwsh.exe, powershell_ise.exe] }
-  commandLine|contains: [-enc, "-e ", "-ec ", "-encodedcommand", "-w hidden", "-windowstyle hidden", "-nop", "-noprofile", "-noni", "-noninteractive", "-ep bypass", "-exec bypass", "-executionpolicy bypass", "iex", "invoke-expression", "downloadstring", "downloadfile", "net.webclient", "invoke-webrequest", "frombase64string", "bitstransfer", "http://", "https://"]
+  any_of_3:
+    # -EncodedCommand and its abbreviations, then the base64
+    - commandLine|re: '\s[-/](e|ec|en|enc|enco|encod|encode|encoded|encodedc|encodedco|encodedcom|encodedcomm|encodedcomma|encodedcomman|encodedcommand)\s+["'']?[a-z0-9+/]{16}'
+    # -WindowStyle Hidden (or 1) and their abbreviations
+    - commandLine|re: '\s[-/]w(i|in|ind|indo|indow|indows|indowst|indowsty|indowstyl|indowstyle)?\s+["'']?(h|hi|hid|hidd|hidde|hidden|1)(["'']|\s|$)'
+    - commandLine|contains: ["downloadstring", "downloadfile", "net.webclient", "invoke-webrequest", "frombase64string", "bitstransfer", "invoke-expression"]
+    - commandLine|re: '\biex\b'
 ---
 id: win-lolbin-suspicious-commandline
 title: Living-off-the-land binary with suspicious arguments
