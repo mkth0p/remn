@@ -62,9 +62,10 @@ and answers leave the server for Anthropic; the server keeps nothing. Not for ev
 that may not leave the organisation. Install with `npm install -g @anthropic-ai/claude-code`,
 run `claude` once to sign in, restart REMN. `CLAUDE_CODE_ENABLED=0` switches the
 connector off, `CLAUDE_CODE_BIN` points at the binary, `CLAUDE_CODE_TIMEOUT` (600 s) caps
-a turn. Endpoints: `GET /api/ai/claude/status`, `POST /api/ai/claude/chat` (server-sent
-events, the same chunks as the Ollama proxy), `POST /api/ai/claude/query`. The
-connector is not available in the Docker image.
+a turn. Endpoints: `GET /api/ai/claude/status` (whether the connector is on, installed
+and signed in; it does not name the account or say how it signed in),
+`POST /api/ai/claude/chat` (server-sent events, the same chunks as the Ollama proxy),
+`POST /api/ai/claude/query`. The connector is not available in the Docker image.
 
 ## The agent
 

@@ -49,7 +49,7 @@ export function SettingsView() {
         if (!dead) setClaudeStatus(st)
       })
       .catch((e) => {
-        if (!dead) setClaudeStatus({ enabled: false, available: false, version: null, loggedIn: false, account: null, method: null, error: (e as Error).message })
+        if (!dead) setClaudeStatus({ enabled: false, available: false, loggedIn: false, error: (e as Error).message })
       })
     return () => {
       dead = true
@@ -323,11 +323,7 @@ export function SettingsView() {
                   <div className="field" style={{ flex: 1 }}>
                     <span>on the server machine</span>
                     <div className="small" style={{ paddingTop: 6 }}>
-                      {!claudeStatus
-                        ? '…'
-                        : claudeStatus.available && claudeStatus.loggedIn
-                          ? `${claudeStatus.version ?? 'installed'} · signed in${claudeStatus.method ? ` (${claudeStatus.method})` : ''}${claudeStatus.account ? ` as ${claudeStatus.account}` : ''}`
-                          : (claudeStatus.error ?? 'not available')}
+                      {!claudeStatus ? '…' : claudeStatus.available && claudeStatus.loggedIn ? 'installed and signed in' : (claudeStatus.error ?? 'not available')}
                     </div>
                   </div>
                 </div>

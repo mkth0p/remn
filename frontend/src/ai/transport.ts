@@ -718,13 +718,11 @@ export function pickClaudeModel(requested: string | undefined, configured: strin
   return c && isClaudeName(c) ? c : 'sonnet'
 }
 
+/** Whether the connector can be used; the server says nothing about the account signed in. */
 export interface ClaudeStatus {
   enabled: boolean
   available: boolean
-  version: string | null
   loggedIn: boolean
-  account: string | null
-  method: string | null
   error: string | null
 }
 

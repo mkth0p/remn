@@ -241,6 +241,38 @@ def test_status_view_reports_disabled_connector():
     cc.reset_status_cache()
 
 
+def test_status_says_whether_the_connector_is_signed_in_and_usable_and_nothing_about_the_account(monkeypatch):
+    # invented sign-in: what "claude auth status" prints for an account
+    signed_in = {"loggedIn": True, "authMethod": "claude.ai", "email": "operator@corp.example", "orgName": "Invented Org", "subscriptionType": "max"}
+
+    def fake_run(args, timeout=20):
+        if args[-1] == "--version":
+            return 0, "9.9.9 (Claude Code)\n", ""
+        return 0, json.dumps(signed_in), ""
+
+    monkeypatch.setattr(cc, "binary", lambda: "/opt/invented/bin/claude")
+    monkeypatch.setattr(cc, "_run", fake_run)
+    with override_settings(CLAUDE_CODE_ENABLED=True):
+        cc.reset_status_cache()
+        r = Client().get("/api/ai/claude/status?refresh=1", **HDR)
+    cc.reset_status_cache()
+    body = r.json()
+    assert body["enabled"] is True and body["available"] is True and body["loggedIn"] is True and body["error"] is None
+    # who is signed in, how, and where the binary lives stay on the server
+    assert set(body) == {"enabled", "available", "loggedIn", "error", "models", "defaultModel"}
+    for private in ("operator@corp.example", "Invented Org", "claude.ai", "max", "/opt/invented", "9.9.9"):
+        assert private not in r.content.decode("utf-8")
+
+
+def test_status_of_an_installed_connector_that_is_not_signed_in_says_so(monkeypatch):
+    monkeypatch.setattr(cc, "binary", lambda: "claude")
+    monkeypatch.setattr(cc, "_run", lambda args, timeout=20: (0, "9.9.9\n", "") if args[-1] == "--version" else (1, '{"loggedIn": false}', ""))
+    with override_settings(CLAUDE_CODE_ENABLED=True):
+        st = cc.status(force=True)
+    cc.reset_status_cache()
+    assert st["available"] is True and st["loggedIn"] is False and "not signed in" in st["error"]
+
+
 def test_chat_view_streams_sse_from_fake_cli(fake_cli):
     fake_cli.script = [_delta("Hello "), _delta("analyst."), _result("Hello analyst.")]
     c = Client()
