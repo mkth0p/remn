@@ -41,8 +41,8 @@ describe('pyJson', () => {
 })
 
 // ---------------------------------------------------------------------------
-function metaResponse(version: string): Response {
-  return new Response(JSON.stringify({ prompts: META.prompts, tools: [], querySchema: META.querySchema, schemaDoc: META.schemaDoc, numCtx: 4096, defaultModel: 'd', limits: META.limits, version }), {
+function metaResponse(version: string, defaultModel = 'd'): Response {
+  return new Response(JSON.stringify({ prompts: META.prompts, tools: [], querySchema: META.querySchema, schemaDoc: META.schemaDoc, numCtx: 4096, defaultModel, limits: META.limits, version }), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   })
@@ -143,6 +143,28 @@ describe('BrowserOllamaTransport.chatTurn', () => {
     await getTransport().chatTurn(chatParams(), (c) => chunks.push(c))
     const err = chunks.find((c) => c.type === 'error') as Extract<ChatChunk, { type: 'error' }>
     expect(err.error).toContain('ollama pull testmodel')
+  })
+
+  it('with no model chosen anywhere uses the first model this Ollama lists, and the answer names it', async () => {
+    useStore.getState().setAiConfig({ model: '' })
+    fetchMock
+      .mockResolvedValueOnce(metaResponse('v6', ''))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ models: [{ name: 'only-model:latest' }] }), { status: 200 }))
+      .mockResolvedValueOnce(ndjsonResponse([{ message: { content: 'ok' } }, { done: true, model: 'only-model:latest' }]))
+    const chunks: ChatChunk[] = []
+    await getTransport().chatTurn(chatParams(), (c) => chunks.push(c))
+    expect(JSON.parse(String((fetchMock.mock.calls[2] as [string, RequestInit])[1].body)).model).toBe('only-model:latest')
+    expect(chunks.find((c) => c.type === 'done')).toMatchObject({ model: 'only-model:latest' })
+  })
+
+  it('with no model chosen and none installed says to pull one instead of asking for an empty name', async () => {
+    useStore.getState().setAiConfig({ model: '' })
+    fetchMock.mockResolvedValueOnce(metaResponse('v7', '')).mockResolvedValueOnce(new Response(JSON.stringify({ models: [] }), { status: 200 }))
+    const chunks: ChatChunk[] = []
+    await getTransport().chatTurn(chatParams(), (c) => chunks.push(c))
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect((chunks[0] as { error: string }).error).toContain('ollama pull')
+    expect(chunks[1].type).toBe('done')
   })
 
   it('queryJson salvages JSON wrapped in prose', async () => {

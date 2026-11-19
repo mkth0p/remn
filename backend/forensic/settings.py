@@ -164,7 +164,8 @@ FRONTEND_DIST = ROOT_DIR / "frontend" / "dist"
 # Ollama
 # ---------------------------------------------------------------------------
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4-hauhaucs:latest")
+# The model used when the analyst picks none. Empty: the first model the Ollama lists, named in the answer.
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "").strip()
 OLLAMA_NUM_CTX = _env_int("OLLAMA_NUM_CTX", 32768)
 OLLAMA_TIMEOUT = _env_int("OLLAMA_TIMEOUT", 600)
 # Hayabusa, Sigma over EVTX, as an optional detection engine. Found on PATH or at HAYABUSA_PATH,

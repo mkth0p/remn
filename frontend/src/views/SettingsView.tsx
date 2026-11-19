@@ -378,7 +378,7 @@ export function SettingsView() {
               {aiCfg.transport !== 'claude' && (
                 <div className="row">
                   <label className="field" style={{ flex: 1 }}>
-                    <span>default model (blank = server default)</span>
+                    <span>default model (blank: the server's OLLAMA_MODEL, else the first model listed)</span>
                     <input className="input mono" list="ai-models" value={aiCfg.model} onChange={(e) => saveAi({ model: e.target.value })} placeholder={health?.ollama.defaultModel ?? 'qwen3:8b'} />
                     <datalist id="ai-models">
                       {aiModels.map((m) => (

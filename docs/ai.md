@@ -25,8 +25,13 @@ exports), an `Environment=` line through `systemctl edit ollama` on Linux. Safar
 HTTPS page from calling localhost, so a Safari user takes the server proxy, or on a
 browser-only instance, where there is none, another browser or a local REMN. A page served
 from another host checks the model when the analyst opens the AI analyst, not on every page
-load, and a browser-only server offers no default model: the page uses the model chosen in
-Settings, or the first one the analyst's Ollama has installed.
+load.
+
+Which model answers: the one the analyst picks on the AI page or in Settings, else the
+server's `OLLAMA_MODEL` when the operator set one (a browser-only server never offers one),
+else the first model the Ollama in use lists. REMN names no model of its own, so an Ollama
+with a single model works without any setting. Every answer, and the AI ledger, names the
+model that wrote it; an Ollama with no model at all gets an error that says to pull one.
 
 **Local OpenAI-compatible server.** The same, to LM Studio, a llama.cpp server, vLLM or Jan
 on the analyst's machine or local network, through `/v1/chat/completions` with streaming and
@@ -46,7 +51,8 @@ context window is what the server loaded; set it under "context window" so the a
 budgets for it.
 
 **Server proxy.** The REMN server relays to the Ollama configured in its `.env`
-(`OLLAMA_HOST`, `OLLAMA_MODEL`, `OLLAMA_NUM_CTX`); nothing is persisted on the server.
+(`OLLAMA_HOST`, `OLLAMA_MODEL`, empty by default, `OLLAMA_NUM_CTX`); nothing is persisted on
+the server.
 For machines without a local model.
 
 **Claude Code.** Off unless the operator turns it on. When it is on, the REMN server runs

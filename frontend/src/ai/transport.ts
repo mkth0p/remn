@@ -205,7 +205,13 @@ class BrowserOllamaTransport implements AiTransport {
       return
     }
     const cfg = useStore.getState().aiConfig
+    // the analyst's pick, the server's OLLAMA_MODEL, else the first model this Ollama lists; the answer names the one used
     const model = p.model || cfg.model || meta.defaultModel || (await this.firstInstalledModel())
+    if (!model) {
+      onChunk({ type: 'error', error: `no model is chosen and the Ollama at ${this.base} lists none: pull one there (ollama pull <model>) or pick one in Settings` })
+      onChunk({ type: 'done', model: '', stats: {} })
+      return
+    }
     const wire = this.wireMessages(p.messages, meta)
     const system = composeSystem(p.mode, p.context, meta)
     if (system) {
