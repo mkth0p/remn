@@ -210,3 +210,32 @@ def test_a_task_is_left_out_for_a_vendor_name_only_where_its_name_starts_with_it
     ]
     found = fired(store, "win-scheduled-task-created", rows)
     assert sorted(f["entities"]["taskName"] for f in found) == [r"\SyncHPrinter", r"\Users\Public\Adobe", r"\Windows Defender Intel Check"]
+
+
+def service_installed(name: str, path: str) -> dict:
+    return event(
+        7045,
+        {"ServiceName": name, "ImagePath": path, "ServiceType": "user mode service", "StartType": "auto start", "AccountName": "LocalSystem"},
+        ("Service Control Manager", "System"),
+        computer="WS01.corp.example",
+    )
+
+
+def test_a_service_is_not_suspicious_for_an_eight_character_name_or_a_folder_in_its_arguments(store):
+    rows = [
+        service_installed("Sysmon64", r"C:\Windows\Sysmon64.exe"),
+        service_installed("exdrvflt", r"\SystemRoot\system32\DRIVERS\exdrvflt.sys"),
+        service_installed("Example Sharing Service", r'"C:\Program Files\Common Files\Example\svc.exe" -user_path "C:\Users\j.doe\AppData\Roaming\Example"'),
+        service_installed("ExKslDrv", r"C:\ProgramData\Microsoft\Windows Defender\Definition Updates\Default\ExKslDrv.sys"),
+    ]
+    assert fired(store, "win-service-installed-suspicious", rows) == []
+
+
+def test_a_service_whose_program_is_in_a_folder_users_can_write_is_reported(store):
+    rows = [
+        service_installed("Updater", r'"C:\Users\Public\upd.exe" -k'),
+        service_installed("Helper", r"C:\Windows\Temp\helper.exe"),
+        service_installed("Cleaner", r"C:\ProgramData\Example\cleaner.exe /run"),
+    ]
+    found = fired(store, "win-service-installed-suspicious", rows)
+    assert sorted(f["entities"]["serviceName"] for f in found) == ["Cleaner", "Helper", "Updater"]

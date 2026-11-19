@@ -1,23 +1,34 @@
 id: win-service-installed-suspicious
 title: Suspicious service installed (7045 / 4697)
-description: New service whose binary path points to a temp folder, a user profile (a service runs as SYSTEM from a folder any user can write), a script host, cmd/powershell, a UNC path or a well-known remote-execution service (PsExec, PAExec, WinRM...).
+description: >-
+  New service whose program sits in a temp folder, a user profile, ProgramData or another folder users can write
+  (a service runs as SYSTEM from it), whose command line runs a script host, cmd or PowerShell, an encoded command
+  or a UNC path, or which is a well-known remote-execution service (PsExec, PAExec, RemCom, smbexec...). The folder
+  is the program's own, not one named in its arguments (Zoom's sharing service passes a profile folder), and a
+  name of eight letters and digits is no longer a reason on its own: drivers and Sysmon64 have such names.
 severity: high
 source: events
 attack: [T1543.003, T1569.002]
 tags: [persistence, lateral-movement]
+falsepositives:
+  - a security product's installer that runs its installer service from the temp folder (Malwarebytes on the clean machines)
+references:
+  - https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4697
 entities: [computer, serviceName, serviceFile]
 where:
   eventId|in: [7045, 4697]
   any_of:
-    - serviceFile|contains: ["\\temp\\", "\\tmp\\", "\\appdata\\", "\\users\\", "\\programdata\\", "\\downloads\\", "\\perflogs\\", "\\recycle", "\\windows\\tasks\\", "\\windows\\debug\\"]
+    # the folder of the program itself (up to the closing quote, or the first space when it is not quoted),
+    # not a folder named in its arguments
+    - serviceFile|re: '^("[^"]*|[^" ]*)\\(temp|tmp|appdata|users|programdata|downloads|perflogs|\$recycle\.bin|recycler|windows\\tasks|windows\\debug)\\'
     - serviceFile|contains: [cmd.exe, cmd /c, powershell, pwsh, mshta, rundll32, regsvr32, wscript, cscript, certutil, bitsadmin, msiexec /q, "%comspec%", "\\\\", "-enc", "-e ", "iex", "downloadstring", "base64", "ADMIN$", "C$"]
     - serviceName|contains: [PSEXESVC, PAExec, csexecsvc, winexesvc, RemComSvc, BTOBTO, smbexec, mssecsvc, wmiexec, atexec, sysmon64bak, "\\\\"]
     - serviceFile|re: "(?i)^[a-z]:\\\\[a-z0-9]{6,}\\.exe$"
-    - serviceName|re: "^[A-Za-z0-9]{8}$"
-# Firmware and hardware tools install drivers from their own folders under vendor names; that is
-# the only exclusion, so a driver dropped under System32\drivers with a random name still counts.
+# Firmware and hardware tools install drivers from their own folders under vendor names, and Defender
+# loads its own driver from its folder under ProgramData, which only the system can write; those are
+# the only exclusions, so a driver dropped under System32\drivers with a random name still counts.
 exclude:
-  serviceFile|contains: ["\\swtools\\", "\\program files\\lenovo\\", "\\program files (x86)\\lenovo\\", "\\program files\\intel\\", "\\program files (x86)\\intel\\", "\\program files\\dell\\", "\\program files (x86)\\dell\\", "\\program files\\hp\\", "\\program files (x86)\\hp\\", "\\program files\\nvidia", "\\program files\\amd\\"]
+  serviceFile|contains: ["\\programdata\\microsoft\\windows defender\\", "\\swtools\\", "\\program files\\lenovo\\", "\\program files (x86)\\lenovo\\", "\\program files\\intel\\", "\\program files (x86)\\intel\\", "\\program files\\dell\\", "\\program files (x86)\\dell\\", "\\program files\\hp\\", "\\program files (x86)\\hp\\", "\\program files\\nvidia", "\\program files\\amd\\"]
 ---
 id: win-service-installed-any
 title: New service installed (inventory)
