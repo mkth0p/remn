@@ -511,3 +511,109 @@ def test_a_record_with_its_keys_in_alphabetical_order_is_read(tmp_path):
         zf.writestr("audit/o365.json", line + "\n")
     zipped = EvtxSource("audit.zip", None, buf.getvalue(), str(tmp_path))
     assert [r["operation"] for r in zipped] == ["Set-Mailbox"]
+
+
+# The exports below are invented and shaped like what Graph, the Graph PowerShell SDK and
+# Microsoft-Extractor-Suite write for a tenant; no record comes from a real tenant.
+def _directory_audit(n: int) -> dict:
+    """A Graph directoryAudit (Get-MgAuditLogDirectoryAudit, Get-EntraAuditLogs)."""
+    return {
+        "id": f"Directory_{uuid.uuid4()}_{n}",
+        "category": "UserManagement",
+        "correlationId": str(uuid.uuid4()),
+        "result": "success",
+        "resultReason": "",
+        "activityDisplayName": "Update user",
+        "activityDateTime": "2026-09-01T10:00:00Z",
+        "loggedByService": "Core Directory",
+        "operationType": "Update",
+        "initiatedBy": {
+            "user": {"id": str(uuid.uuid4()), "displayName": None, "userPrincipalName": "admin@contoso.com", "ipAddress": "203.0.113.9"},
+            "app": None,
+        },
+        "targetResources": [{"id": str(uuid.uuid4()), "displayName": None, "type": "User", "userPrincipalName": "alice@contoso.com", "modifiedProperties": []}],
+        "additionalDetails": [{"key": "UserType", "value": "Member"}],
+    }
+
+
+def _sources_of(path) -> tuple[list[dict], dict]:
+    from services.ingest.package import PackageSource
+    from services.parsers.mail.common import ParseContext
+
+    source = PackageSource(path.name, str(path), None, str(path.parent), ParseContext(analyze_attachments=False))
+    return list(source), source.stats()
+
+
+def test_a_directory_audit_export_is_not_read_as_sign_ins(tmp_path):
+    """A directoryAudits page names a userPrincipalName and an ipAddress, and every record of it
+    became a successful, undated sign-in of nobody. It is not an export REMN reads, and is said so."""
+    page = {"@odata.context": "https://graph.microsoft.com/v1.0/$metadata#auditLogs/directoryAudits", "value": [_directory_audit(i) for i in range(3)]}
+    f = tmp_path / "AuditLogs.json"
+    f.write_text(json.dumps(page, indent=2), encoding="utf-8")
+    assert m365.detect_format(f.name, f.read_bytes()[:65536]) is None
+    rows, stats = _sources_of(f)
+    assert rows == [] and stats["files"][0]["status"] == "unsupported"
+    # given to the event-log import, it is not read as an event log either
+    with pytest.raises(ValueError, match="not a recognised Microsoft 365 or Entra export"):
+        list(EvtxSource(f.name, str(f), None, str(tmp_path)))
+
+
+def test_risk_and_user_exports_are_not_read_as_sign_ins():
+    risky_user = {"id": str(uuid.uuid4()), "isDeleted": False, "riskLevel": "high", "riskState": "atRisk", "userPrincipalName": "alice@contoso.com"}
+    detection = {
+        "id": "a1b2c3",
+        "riskEventType": "unfamiliarFeatures",
+        "riskLevel": "medium",
+        "ipAddress": "203.0.113.20",
+        "activityDateTime": "2026-09-01T10:00:00Z",
+        "detectedDateTime": "2026-09-01T10:01:00Z",
+        "userPrincipalName": "alice@contoso.com",
+        "tokenIssuerType": "AzureAD",
+        "location": {"city": "Lyon", "countryOrRegion": "FR"},
+    }
+    for record in (risky_user, detection):
+        assert m365.detect_format("risk.json", json.dumps([record]).encode()) is None
+    # a user list as Microsoft-Extractor-Suite and Get-MgUser | Export-Csv write it
+    users = b"Id,DisplayName,UserPrincipalName,AccountEnabled,CreatedDateTime,UserType\n1d2c,Alice,alice@contoso.com,True,1/15/2024 10:11:12 AM,Member\n"
+    assert m365.detect_format("Users.csv", users) is None
+
+
+def test_a_record_that_is_not_a_sign_in_is_counted_not_read():
+    from services.parsers.evtx_parser import Stats
+
+    stats = Stats()
+    data = json.dumps([make_m365.entra_signins()[0], _directory_audit(1)]).encode()
+    assert m365.detect_format("signins.json", data) == "entra-signin-json"
+    rows = list(m365.iter_records(None, data, "entra-signin-json", stats=stats))
+    assert len(rows) == 1 and rows[0]["user"] == make_m365.entra_signins()[0]["userPrincipalName"] and stats.errors == 1
+
+
+def test_a_graph_property_csv_in_pascal_case_is_read():
+    """Get-MgAuditLogSignIn | Export-Csv names its columns in PascalCase and writes each object
+    property as its .NET type name. Read by the camelCase names only, every row was a blank,
+    undated "Sign-in ok"; read now, the type names are not taken for a status or a place."""
+    model = "Microsoft.Graph.PowerShell.Models.MicrosoftGraph"
+    data = (
+        "AppDisplayName,AppId,ClientAppUsed,ConditionalAccessStatus,CorrelationId,CreatedDateTime,DeviceDetail,Id,IPAddress,"
+        "IsInteractive,Location,ResourceDisplayName,RiskEventTypes,RiskLevelDuringSignIn,RiskState,Status,UserDisplayName,UserId,UserPrincipalName\n"
+        f"Office 365 Exchange Online,00000002,Browser,success,c-1,9/1/2026 10:00:00 AM,{model}DeviceDetail,{uuid.uuid4()},203.0.113.30,"
+        f"True,{model}SignInLocation,Office 365 Exchange Online,System.String[],none,none,{model}SignInStatus,Alice,u-1,alice@contoso.com\n"
+    ).encode()
+    assert m365.detect_format("SignInLogs.csv", data) == "entra-signin-csv"
+    (row,) = list(m365.iter_records(None, data, "entra-signin-csv"))
+    assert row["user"] == "alice@contoso.com" and row["ipAddress"] == "203.0.113.30" and row["tsIso"] == "2026-09-01T10:00:00.000Z"
+    assert row["data"]["appDisplayName"] == "Office 365 Exchange Online" and row["data"]["clientAppUsed"] == "Browser"
+    assert "country" not in row["data"] and "riskEventTypes" not in row["data"] and "browser" not in row["data"]
+    # the export does not say whether the sign-in succeeded, and the row does not claim it did
+    assert row["status"] is None and row["summary"].startswith("Sign-in (outcome not in the export): alice@contoso.com from 203.0.113.30")
+    # the same export as JSON (ConvertTo-Json) keeps the objects, under PascalCase names
+    obj = {
+        "CreatedDateTime": "2026-09-01T10:00:00Z",
+        "UserPrincipalName": "alice@contoso.com",
+        "IPAddress": "203.0.113.30",
+        "AppDisplayName": "Office 365 Exchange Online",
+        "Status": {"ErrorCode": 50126, "FailureReason": "Invalid username or password."},
+        "Location": {"City": "Lyon", "CountryOrRegion": "FR"},
+    }
+    (row,) = list(m365.iter_records(None, json.dumps([obj]).encode(), "entra-signin-json"))
+    assert row["status"] == "50126" and row["data"]["country"] == "FR" and row["data"]["city"] == "Lyon"

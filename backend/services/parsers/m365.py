@@ -87,15 +87,14 @@ _PRIVILEGED_ROLES = (
 # ---------------------------------------------------------------------------
 def detect_format(name: str, head: bytes) -> str | None:
     """Return one of FORMATS for a UAL / Entra export, else None."""
-    n = (name or "").lower()
-    if not n.endswith((".csv", ".json", ".jsonl", ".ndjson", ".txt", ".log")) and head[:1] not in (b"[", b"{"):
+    if not looks_like_export(name, head):
         return None
     text = head.lstrip(b"\xef\xbb\xbf").decode("utf-8", "replace").lstrip()
     low = text.lower()
     if text.startswith(("[", "{")):
         if '"auditdata"' in low or ('"operation"' in low and ('"workload"' in low or '"creationtime"' in low)):
             return "m365-ual-json"
-        if '"userprincipalname"' in low or '"appdisplayname"' in low or '"conditionalaccessstatus"' in low or '"clientappused"' in low:
+        if is_signin(_KEY_RE.findall(text)):
             return "entra-signin-json"
         # Azure Monitor diagnostic records (Log Analytics, Event Hub, storage account): the
         # sign-in is under "properties", past the head
@@ -105,13 +104,33 @@ def detect_format(name: str, head: bytes) -> str | None:
     header = low.split("\n", 1)[0]
     if "auditdata" in header:
         return "m365-ual-csv"
-    if (
-        ("userprincipalname" in header and ("createddatetime" in header or "ipaddress" in header))
-        or ("sign-in identifier" in header)
-        or ("username" in header and "ip address" in header and ("application" in header or "status" in header))
-    ):
+    if is_signin(next(csv.reader([text.split("\n", 1)[0]]), [])):
         return "entra-signin-csv"
     return None
+
+
+UNRECOGNISED = "not a recognised Microsoft 365 or Entra export"
+
+
+def looks_like_export(name: str, head: bytes) -> bool:
+    """Whether a file is a table or a JSON document by its name or first byte: what a cloud export
+    is, and what an event log is not."""
+    n = (name or "").lower()
+    return n.endswith((".csv", ".json", ".jsonl", ".ndjson", ".txt", ".log")) or head.lstrip(b"\xef\xbb\xbf")[:1] in (b"[", b"{")
+
+
+_KEY_RE = re.compile(r'"([^"\\]{1,64})"\s*:')
+# A sign-in says, together, when it happened, the address it came from, and who signed in to
+# which application. A directory audit, a risk detection, a risky-user list and a user list
+# name a userPrincipalName too, and each of their records was read as a successful sign-in.
+_SIGNIN_WHO = frozenset({"userprincipalname", "appdisplayname", "clientappused", "conditionalaccessstatus"})
+
+
+def is_signin(keys: Iterable[Any]) -> bool:
+    """Whether a record, or a table, with these field names (Graph, portal, any case) is a sign-in."""
+    low = {str(k).strip().lower() for k in keys}
+    low = {(_PORTAL_MAP.get(k) or k).lower() for k in low}
+    return "createddatetime" in low and "ipaddress" in low and bool(low & _SIGNIN_WHO)
 
 
 # ---------------------------------------------------------------------------
@@ -593,14 +612,13 @@ _SIGNIN_CATEGORIES = ("signinlogs", "noninteractiveusersigninlogs", "serviceprin
 def _signin_of(obj: Any) -> dict[str, Any] | None:
     """The sign-in an exported object holds: a Graph or portal sign-in as it is, or the
     "properties" of an Azure Monitor diagnostic record of a sign-in category. None for another
-    diagnostic category, or for something that is not an object."""
+    diagnostic category, for a record of another kind, or for something that is not an object."""
     if not isinstance(obj, dict):
         return None
     category = str(obj.get("category") or "").lower()
-    if not category or not isinstance(obj.get("properties"), dict):
-        return obj
-    if category not in _SIGNIN_CATEGORIES:
-        return None
+    if category not in _SIGNIN_CATEGORIES or not isinstance(obj.get("properties"), dict):
+        # a record without the envelope is a sign-in only by its own fields
+        return obj if is_signin(obj) else None
     props = dict(obj["properties"])
     # the envelope's time, when the sign-in itself has none
     if not props.get("createdDateTime") and obj.get("time"):
@@ -608,13 +626,61 @@ def _signin_of(obj: Any) -> dict[str, Any] | None:
     return props
 
 
-def entra_row(o: dict[str, Any], day_first: bool | None = None) -> dict[str, Any]:
-    g = dict(o)
-    # portal CSV headers -> Graph names
-    for k in list(g.keys()):
-        mapped = _PORTAL_MAP.get(k.strip().lower())
-        if mapped and mapped not in g:
+# The Graph names entra_row reads, by their lower case. The Graph PowerShell SDK writes them in
+# PascalCase (CreatedDateTime, IPAddress, Status.ErrorCode), and read by the camelCase names only,
+# each of its rows was a blank, undated sign-in.
+_GRAPH_NAMES = {
+    n.lower(): n
+    for n in (
+        *_PORTAL_MAP.values(),
+        "status",
+        "deviceDetail",
+        "deviceDisplayName",
+        "riskEventTypes",
+        "riskEventTypes_v2",
+        "signInEventTypes",
+        "authenticationDetails",
+        "appliedConditionalAccessPolicies",
+        "createdDateTime",
+        "userPrincipalName",
+        "userDisplayName",
+        "ipAddress",
+        # inside status, location, deviceDetail, authenticationDetails and the policies
+        "errorCode",
+        "failureReason",
+        "additionalDetails",
+        "countryOrRegion",
+        "displayName",
+        "authenticationMethod",
+        "succeeded",
+        "result",
+    )
+}
+_GRAPH_NAMES["riskeventtypesv2"] = "riskEventTypes_v2"
+# Export-Csv writes an object it cannot flatten as its .NET type name: a status, a location or a
+# device that the export does not hold, never a value.
+_TYPE_NAME_RE = re.compile(r"^(?:Microsoft\.Graph\.(?:Beta\.)?PowerShell\.Models\.\w+|System\.[\w.`]+(?:\[[^\]]*\])+)$")
+
+
+def _graph_keys(d: dict[str, Any]) -> dict[str, Any]:
+    """d under the Graph names, from the portal's column names or any case of the Graph ones; a
+    name already in Graph form wins over a column that maps to it."""
+    g = {k: v for k, v in d.items() if not (isinstance(v, str) and _TYPE_NAME_RE.match(v.strip()))}
+    for k in list(g):
+        low = str(k).strip().lower()
+        mapped = _PORTAL_MAP.get(low) or _GRAPH_NAMES.get(low)
+        if mapped and mapped != k and mapped not in g:
             g[mapped] = g.pop(k)
+    for k, v in g.items():
+        if isinstance(v, dict):
+            g[k] = _graph_keys(v)
+        elif isinstance(v, list):
+            g[k] = [_graph_keys(x) if isinstance(x, dict) else x for x in v]
+    return g
+
+
+def entra_row(o: dict[str, Any], day_first: bool | None = None) -> dict[str, Any]:
+    g = _graph_keys(o)
     status = g.get("status")
     if isinstance(status, dict):
         err = status.get("errorCode")
@@ -624,8 +690,13 @@ def entra_row(o: dict[str, Any], day_first: bool | None = None) -> dict[str, Any
         failure = g.get("failureReason")
         if isinstance(status, str) and status.lower() in ("failure", "failed") and err in (None, ""):
             err = -1
-    if isinstance(err, str) and err.strip().isdigit():
+        elif isinstance(status, str) and status.lower() == "success" and err in (None, ""):
+            err = 0
+    if isinstance(err, str) and err.strip().lstrip("-").isdigit():
         err = int(err)
+    # neither an error code nor a status: the export does not say how the sign-in ended, and a
+    # sign-in read as successful by default counts toward every rule on successes
+    known = err not in (None, "")
     if isinstance(failure, str) and failure.lower() in ("other.", "", "none"):
         failure = None
     loc = g.get("location")
@@ -642,7 +713,7 @@ def entra_row(o: dict[str, Any], day_first: bool | None = None) -> dict[str, Any
     user = str(g.get("userPrincipalName") or g.get("userDisplayName") or "").strip()
     ts, iso = parse_ts(g.get("createdDateTime"), day_first)
     ip = clean_ip(g.get("ipAddress"))
-    success = err in (0, None, "0")
+    success = known and err in (0, "0")
     risk_signin = g.get("riskLevelDuringSignIn")
     risk_agg = g.get("riskLevelAggregated")
     data: dict[str, Any] = {
@@ -703,8 +774,9 @@ def entra_row(o: dict[str, Any], day_first: bool | None = None) -> dict[str, Any
     risk_txt = " [device code]" if device_code else ""
     if (risk_signin and str(risk_signin).lower() not in ("none", "hidden")) or (g.get("riskState") and str(g.get("riskState")).lower() not in ("none",)):
         risk_txt += f" risk={risk_signin or risk_agg or ''}/{g.get('riskState') or ''}"
+    outcome = "ok" if success else f"FAILED ({err})" if known else "(outcome not in the export)"
     summary = (
-        f"Sign-in {'ok' if success else 'FAILED (' + str(err) + ')'}: {user or '?'} from {ip or '?'}"
+        f"Sign-in {outcome}: {user or '?'} from {ip or '?'}"
         f"{' (' + str(country) + ')' if country else ''} via {g.get('clientAppUsed') or '?'} to {g.get('appDisplayName') or '?'}{risk_txt}"
     )
     return {
@@ -712,20 +784,20 @@ def entra_row(o: dict[str, Any], day_first: bool | None = None) -> dict[str, Any
         "tsIso": iso,
         "eventId": None,
         "recordId": None,
-        "level": 4 if success else 3,
-        "levelName": "Information" if success else "Warning",
+        "level": 3 if known and not success else 4,
+        "levelName": "Warning" if known and not success else "Information",
         "provider": ENTRA_PROVIDER,
         "channel": "Entra SignIn",
         "computer": None,
         "category": "Entra sign-in",
-        "description": "Sign-in" if success else "Sign-in failure",
+        "description": "Sign-in failure" if known and not success else "Sign-in",
         "operation": "SignIn",
         "user": user or None,
         "upn": user or None,
         "subjectUser": user or None,
         "targetUser": user or None,
         "ipAddress": ip,
-        "status": str(err) if err is not None else "0",
+        "status": str(err) if known else None,
         "statusText": failure,
         "failureReason": failure,
         "workstation": (str(g.get("userAgent") or "")[:200] or None),

@@ -87,13 +87,21 @@ def detect_mail_format(name: str, head: bytes) -> str:
 SNIFF_BYTES = 64 * 1024
 
 
+UNRECOGNISED = "unrecognised"
+
+
 def detect_evtx_format(name: str, head: bytes) -> str:
     arc = detect_archive(name, head)
     if arc:
         return arc
     if evtx_parser.looks_like_event_xml(head):
         return evtx_parser.XML_FORMAT
-    return m365.detect_format(name, head) or "evtx"
+    fmt = m365.detect_format(name, head)
+    if fmt:
+        return fmt
+    # a table or a JSON document that is none of the cloud exports is not an event log either:
+    # read as one, it failed on the EVTX header and the analyst was told the wrong thing
+    return UNRECOGNISED if m365.looks_like_export(name, head) and not head.startswith(_EVTX) else "evtx"
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +243,8 @@ class EvtxSource:
         if self.format in m365.FORMATS:
             yield from self._iter_m365(self.path, self.data, self.format, self.name)
             return
+        if self.format == UNRECOGNISED:
+            raise ValueError(m365.UNRECOGNISED)
         for member in iter_archive(self.path, self.data, self.format, self.files, self.max_member, self.deadline):
             low = member.name.lower()
             if low.endswith(".evtx"):
@@ -245,9 +255,7 @@ class EvtxSource:
                 fmt = evtx_parser.XML_FORMAT if evtx_parser.looks_like_event_xml(head) else m365.detect_format(member.name, head) or ""
                 if not fmt:
                     table = low.endswith((".csv", ".json", ".jsonl", ".ndjson"))
-                    skip_record(
-                        self.files, member.name, member.size, "not a recognised Microsoft 365 or Entra export" if table else "not an event log or cloud export"
-                    )
+                    skip_record(self.files, member.name, member.size, m365.UNRECOGNISED if table else "not an event log or cloud export")
                     continue
                 suffix = ".xml" if fmt == evtx_parser.XML_FORMAT else ".member"
             else:

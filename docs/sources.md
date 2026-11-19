@@ -109,6 +109,18 @@ events table:
   `ManagedIdentitySignInLogs`; a record of another category, such as `AuditLogs`, is
   counted as not read); a `.zip` of a whole acquisition folder is walked.
 
+A record is read as a sign-in only when it carries a time (`createdDateTime`), a client
+address (`ipAddress`) and the user or the application signed in to. Entra directory audit
+records, risk detections, risky users and user lists name a `userPrincipalName` too, but
+they are not sign-ins: a file of them is listed as a member REMN has no parser for (in the
+event-log import, as "not a recognised Microsoft 365 or Entra export"), and such a record
+inside a sign-in file is counted as not read. Field names are read in any case, so the
+PascalCase columns of `Get-MgAuditLogSignIn | Export-Csv` land on the same names as the
+Graph JSON; a column that export wrote as a .NET type name (`Status`, `Location`,
+`DeviceDetail`) is left out. A sign-in whose export gives neither a status nor an error code
+has no `status`, and its summary says the outcome is not in the export: it is not counted as
+a successful sign-in.
+
 Rows carry `provider`, `channel` (the workload), `category` (`M365 Exchange`,
 `M365 Entra`, `Entra sign-in`, …), `operation`, `subjectUser` and `targetUser`,
 `ipAddress`, `status`, `objectName`, and every AuditData field under `data.<Name>`
