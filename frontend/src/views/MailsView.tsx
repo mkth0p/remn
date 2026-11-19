@@ -9,7 +9,7 @@ import type { MailRow } from '../db/schema'
 import type { Condition, Filter } from '../rules/filter'
 import { toggleFacetValue } from '../data/facetToggle'
 import { useImportsFinished, useStore } from '../state/store'
-import { fmtTs, tzLabel } from '../util/format'
+import { fmtTs, timeColumnWidth, tzLabel } from '../util/format'
 import { exportCsv, exportJson } from '../util/export'
 import { BaselineButton } from '../components/BaselineButton'
 import { RescoreButton } from '../components/RescoreButton'
@@ -219,9 +219,12 @@ export function MailsView() {
     },
     [setFilter],
   )
+  // the zone is read on every draw: a label made once in the memo kept the zone the page opened with
+  const tz = tzLabel()
+  const dateWidth = timeColumnWidth(138)
   const columns: Column<MailRow>[] = useMemo(
     () => [
-      { key: 'date', label: `date (${tzLabel()})`, width: 138, render: (r) => fmtTs(r.date) },
+      { key: 'date', label: `date (${tz})`, width: dateWidth, render: (r) => fmtTs(r.date) },
       {
         key: 'risk',
         label: 'risk',
@@ -310,7 +313,7 @@ export function MailsView() {
         ),
       },
     ],
-    [toggleFacet],
+    [toggleFacet, tz, dateWidth],
   )
   if (!kase || !ds) return null
   const sort = filter.sort ?? { field: 'date', dir: 'desc' as const }

@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { act, cleanup, render } from '@testing-library/react'
+import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultSettings, RemnDB, setDb, type Case } from '../db/schema'
 import { useStore, type IngestJob } from '../state/store'
+import { setLocalTime } from '../util/format'
 import { EventsView } from './EventsView'
 import { MailsView } from './MailsView'
 
@@ -47,6 +48,7 @@ beforeEach(() => {
 })
 afterEach(async () => {
   cleanup()
+  setLocalTime(false)
   await db.delete()
 })
 
@@ -71,5 +73,21 @@ describe('the Events and Mails pages', () => {
     render(<MailsView />)
     await settle()
     expect(searches.mails).toBe(1)
+  })
+
+  it('name the zone their time column shows', async () => {
+    setLocalTime(true)
+    render(<EventsView />)
+    await settle()
+    expect(screen.getByText('event time (local)')).toBeTruthy()
+  })
+
+  it('the Mails page names the zone of its date column as it is when the page draws again', async () => {
+    const { rerender } = render(<MailsView />)
+    await settle()
+    expect(screen.getByText('date (UTC)')).toBeTruthy()
+    setLocalTime(true)
+    rerender(<MailsView />)
+    expect(screen.getByText('date (local)')).toBeTruthy()
   })
 })

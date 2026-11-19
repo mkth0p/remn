@@ -6,7 +6,7 @@ import { checkReputation } from '../data/iocs'
 import { getSource } from '../data/source'
 import { getDb, type Ioc, type IocsCapped } from '../db/schema'
 import { toast, useStore } from '../state/store'
-import { defang, fmtNum, fmtTs } from '../util/format'
+import { defang, fmtNum, fmtTs, timeColumnWidth, tzLabel } from '../util/format'
 import { safeHref } from '../util/safe'
 import { exportCsv, exportJson, iocsToStix } from '../util/export'
 import { IconShield } from '../components/Icons'
@@ -92,8 +92,8 @@ export function IocsView() {
     },
     { key: 'count', label: 'seen', width: 60, render: (r) => fmtNum(r.count) },
     { key: 'sources', label: 'sources', width: 180, render: (r) => (r.sources ?? []).join(', ') },
-    { key: 'firstSeen', label: 'first', width: 150, render: (r) => fmtTs(r.firstSeen) },
-    { key: 'lastSeen', label: 'last', width: 150, render: (r) => fmtTs(r.lastSeen) },
+    { key: 'firstSeen', label: `first (${tzLabel()})`, width: timeColumnWidth(150), render: (r) => fmtTs(r.firstSeen) },
+    { key: 'lastSeen', label: `last (${tzLabel()})`, width: timeColumnWidth(150), render: (r) => fmtTs(r.lastSeen) },
   ]
   const configured = health?.providers.filter((p) => p.configured) ?? []
   // browser-only: the server refuses lookups (403), so none are offered

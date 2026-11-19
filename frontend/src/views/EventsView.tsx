@@ -15,7 +15,7 @@ import type { EventRow, RowMark } from '../db/schema'
 import type { Condition, Filter } from '../rules/filter'
 import { toggleFacetValue } from '../data/facetToggle'
 import { toast, useImportsFinished, useStore } from '../state/store'
-import { fmtTs } from '../util/format'
+import { fmtTs, timeColumnWidth, tzLabel } from '../util/format'
 import { downloadBlob, exportCsv, exportJson } from '../util/export'
 import { timelineRecords, toTimelineCsv, toTimesketchJsonl } from '../util/responderExports'
 import { Badge } from '../components/ui'
@@ -231,9 +231,17 @@ export function EventsView() {
     [setFilter],
   )
 
+  // the zone is read on every draw, so the column says the zone its times are in
+  const tz = tzLabel()
+  const tsWidth = timeColumnWidth(160)
   const columns: Column<EventRow>[] = useMemo(
     () => [
-      { key: 'ts', label: 'event time', width: 160, render: (r) => (r.recordKind === 'observation' ? <span title={`Collected: ${fmtTs(r.observedAt)}`}>snapshot (no event time)</span> : fmtTs(r.ts)) },
+      {
+        key: 'ts',
+        label: `event time (${tz})`,
+        width: tsWidth,
+        render: (r) => (r.recordKind === 'observation' ? <span title={`Collected: ${fmtTs(r.observedAt)}`}>snapshot (no event time)</span> : fmtTs(r.ts)),
+      },
       {
         key: 'eventId',
         label: 'id',
@@ -247,7 +255,7 @@ export function EventsView() {
       { key: 'summary', label: 'summary', width: 'minmax(300px, 1fr)' },
       { key: 'channel', label: 'channel', width: 130 },
     ],
-    [toggleFacet],
+    [toggleFacet, tz, tsWidth],
   )
   if (!kase || !ds) return null
   const sort = filter.sort ?? { field: 'ts', dir: 'desc' as const }

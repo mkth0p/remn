@@ -68,7 +68,9 @@ store keeps apart from the mail row. Values picked in one facet are alternatives
 them); picking one again removes it. A facet lists its 500 most frequent values, and its
 search box reaches every stored value; a field with more distinct values than one import
 counts says so. Times follow the display setting and the column headers say which zone
-they show; the time range is always entered in UTC. An entry added to the case timeline
+they show; a UTC time ends in `Z` and a local time ends in its offset from UTC
+(`2026-03-04 10:15:00+01:00`), so a time copied elsewhere keeps its zone. The time range is
+always entered in UTC. An entry added to the case timeline
 from a row that has no event time (a collection snapshot) says "no event time" rather
 than taking the time of the click.
 
