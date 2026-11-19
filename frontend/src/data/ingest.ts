@@ -27,21 +27,27 @@ export function cancelImport(jobId: number): void {
   ctrl.abort()
 }
 
-export function detectKind(file: File): 'evtx' | 'mail' | 'package' {
+/**
+ * The kind of a dropped file, from its name. A file in a dropped folder goes to the package reader,
+ * which recognises each file by its content. A loose file whose name is none of these is unknown:
+ * it used to be sent as mail, where the parser takes anything for a message.
+ */
+export function detectKind(file: File): 'evtx' | 'mail' | 'package' | 'unknown' {
   if (file.webkitRelativePath || isArchive(file)) return 'package'
   const n = file.name.toLowerCase()
   if (n.endsWith('.evtx')) return 'evtx'
   // Microsoft 365 audit / Entra sign-in exports ride the event pipeline (format sniffed server-side)
   if (/\.(csv|tsv|json|jsonl|ndjson|pf|cab|reg|hiv|xml|txt|log)$/.test(n)) return 'package'
   if (isArchive(file) && /evtx|winevt|eventlog|event[-_ ]?logs?|sysmon|security[-_ ]?log/i.test(n)) return 'evtx'
-  return 'mail'
+  if (/\.(eml|msg|mbox|mbx|pst|ost)$/.test(n)) return 'mail'
+  return 'unknown'
 }
 
 /**
  * Whether this file is parsed in the browser rather than uploaded: an .evtx file, in a case kept
  * in this browser that asked for it. The header is checked again when the file is read.
  */
-export function parsedInBrowser(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package' = detectKind(file)): boolean {
+export function parsedInBrowser(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package' | 'unknown' = detectKind(file)): boolean {
   return kase.storage !== 'server' && kase.settings.parseEvtxInBrowser === true && kind === 'evtx' && file.name.toLowerCase().endsWith('.evtx')
 }
 
@@ -90,6 +96,19 @@ export function requestIngest(files: File[], kase: Case, kindOverride?: 'evtx' |
       )
     files = files.filter((f) => !over.includes(f))
   }
+  if (!kindOverride) {
+    const unknown = files.filter((f) => detectKind(f) === 'unknown')
+    if (unknown.length) {
+      const names = unknown.slice(0, 5).map((f) => f.name)
+      toast(
+        'err',
+        `${unknown.length} file(s) not imported: their kind is unknown (${names.join(', ')}${unknown.length > names.length ? `, and ${unknown.length - names.length} more` : ''}). REMN reads event logs (.evtx), mail (.eml, .msg, .mbox, .pst, .ost), cloud and triage exports and archives; inside a dropped folder or an archive a file is recognised by its content.`,
+        0,
+      )
+      for (const f of unknown) log('warn', `[${f.name}] not imported: its kind is unknown`)
+      files = files.filter((f) => !unknown.includes(f))
+    }
+  }
   if (!files.length) return
   // Before the server has answered, a page served from another host cannot tell what an upload
   // there means, so it asks first: a file dropped in the first moment, or while health failed,
@@ -111,7 +130,7 @@ export function requestIngest(files: File[], kase: Case, kindOverride?: 'evtx' |
 }
 
 /** Keep folder imports bounded: one ingest worker / server job at a time. */
-export async function ingestFiles(files: File[], kase: Case, kind: (file: File) => 'evtx' | 'mail' | 'package' = detectKind): Promise<void> {
+export async function ingestFiles(files: File[], kase: Case, kind: (file: File) => 'evtx' | 'mail' | 'package' | 'unknown' = detectKind): Promise<void> {
   if (files.length > 1) log('info', `${files.length} evidence files queued for import`)
   if (kase.storage !== 'server')
     void requestPersistentStorage().then((kept) => {
@@ -124,7 +143,10 @@ export async function ingestFiles(files: File[], kase: Case, kind: (file: File) 
     for (const file of files) {
       if (ctrl.signal.aborted) break
       started++
-      await ingestFile(file, batchCase, kind(file), ctrl)
+      const k = kind(file)
+      // the drop turned these away with a message; nothing is guessed for one that comes another way
+      if (k === 'unknown') log('warn', `[${file.name}] not imported: its kind is unknown`)
+      else await ingestFile(file, batchCase, k, ctrl)
     }
     if (ctrl.signal.aborted && started < files.length) log('warn', `import cancelled: ${files.length - started} more file(s) of this drop were not imported`)
   } catch (error) {
@@ -134,7 +156,7 @@ export async function ingestFiles(files: File[], kase: Case, kind: (file: File) 
   }
 }
 
-export async function ingestFile(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package' = detectKind(file), ctrl?: AbortController): Promise<number> {
+export async function ingestFile(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package', ctrl?: AbortController): Promise<number> {
   if (kase.storage === 'server' && kase.serverKey) return ingestToServer(file, kase, kind, ctrl)
   return ingestToBrowser(file, kase, kind, ctrl)
 }

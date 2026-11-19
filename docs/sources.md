@@ -10,6 +10,10 @@ the browser before it leaves, and again on the server, and the Evidence page kee
 chain of custody. This page says what each source is, which formats are accepted, and
 what the rows carry.
 
+A loose file is taken by its name. One whose name is none of the formats below is not
+imported, and the drop says which files were turned away; inside a dropped folder or an
+archive, each file is recognised by its content instead (see [packages](packages.md)).
+
 ## Windows event logs
 
 Drop `.evtx` files, or a `.zip` or `.tar` archive of them; the archive is walked and
