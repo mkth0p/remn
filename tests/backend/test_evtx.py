@@ -218,7 +218,9 @@ def test_a_panic_in_the_decoder_keeps_the_rows_read_and_says_the_file_was_cut(mo
     rows = list(source)
     assert [r["recordId"] for r in rows] == [4242]
     assert source.stats.errors == 1
-    assert source.files == [{"name": "Security.evtx", "status": "error", "error": "the EVTX decoder stopped part-way through the file; records after that point were not read"}]
+    assert source.files == [
+        {"name": "Security.evtx", "status": "error", "error": "the EVTX decoder stopped part-way through the file; records after that point were not read"}
+    ]
 
 
 EVENT_NS = "http://schemas.microsoft.com/win/2004/08/events/event"
