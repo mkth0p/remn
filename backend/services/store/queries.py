@@ -498,7 +498,7 @@ def _check_read_only(cur: duckdb.DuckDBPyConnection, sql: str) -> None:
 
 
 def run_sql(store: CaseStore, sql: str, limit: int = 200, timeout_s: float = 30.0) -> dict[str, Any]:
-    """Read-only SQL for the AI tool / power users: one SELECT (WITH, DESCRIBE, SHOW) on the case's tables, capped rows and time."""
+    """Read-only SQL for the analyst's `sql` tool and the SQL view: one SELECT (WITH, DESCRIBE, SHOW) on the case's tables, capped rows and time."""
     s = sql.strip().rstrip(";").strip()
     cur = store.cursor()
     _one_select(cur, s)
