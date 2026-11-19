@@ -70,6 +70,7 @@ export function TimelineView() {
   const [sel, setSel] = useState<{ from: number; to: number } | null>(null)
   const [stats, setStats] = useState<{ events: number; mails: number; findings: number; notes: number; span: [number, number] | null }>({ events: 0, mails: 0, findings: 0, notes: 0, span: null })
   const [markers, setMarkers] = useState<Marker[]>([])
+  const [failed, setFailed] = useState<string[]>([])
   const [theme, setTheme] = useState(0)
   const ref = useRef<HTMLDivElement>(null)
   const chart = useRef<echarts.ECharts | null>(null)
@@ -89,19 +90,31 @@ export function TimelineView() {
     const ac = new AbortController()
     const ds = getSource(kase)
     const caseId = kase.id
+    // a part that could not be read is named above the chart, not drawn as if it were empty
+    const failures: string[] = []
+    function part<T>(what: string, p: Promise<T[]>): Promise<T[]> {
+      return p.catch((e: unknown) => {
+        if (!ac.signal.aborted) failures.push(`${what} could not be read: ${e instanceof Error ? e.message : String(e)}`)
+        return []
+      })
+    }
     Promise.all([
-      ds.timelineEvents(useFilters ? eventsFilter : {}, bucket, ac.signal).catch(() => []),
-      ds.timelineMails(useFilters ? mailsFilter : {}, bucket, ac.signal).catch(() => []),
-      getDb()
-        .findings.where('caseId')
-        .equals(caseId)
-        .filter((f) => f.ts != null && f.status !== 'false_positive')
-        .toArray(),
-      listNotes(caseId, 'timeline').catch(() => [] as CaseNote[]),
+      part('events', ds.timelineEvents(useFilters ? eventsFilter : {}, bucket, ac.signal)),
+      part('mails', ds.timelineMails(useFilters ? mailsFilter : {}, bucket, ac.signal)),
+      part(
+        'findings',
+        getDb()
+          .findings.where('caseId')
+          .equals(caseId)
+          .filter((f) => f.ts != null && f.status !== 'false_positive')
+          .toArray(),
+      ),
+      part<CaseNote>('case timeline', listNotes(caseId, 'timeline')),
     ]).then(([ev, ml, fd, allNotes]) => {
       // an entry with no event time has no place on a time axis
       const notes = allNotes.filter((n) => !n.untimed)
       if (!alive) return
+      setFailed(failures)
       const t = tokens()
       const allT = [...ev.map((b) => b.t), ...ml.map((b) => b.t), ...fd.map((f) => f.ts as number), ...notes.map((n) => n.ts)]
       const tMin = allT.length ? Math.min(...allT) : undefined
@@ -305,6 +318,11 @@ export function TimelineView() {
           <IconClock /> case timeline
         </button>
       </div>
+      {failed.length > 0 && (
+        <div role="alert" className="hint" style={{ color: 'var(--danger)', padding: '6px 16px' }}>
+          {failed.join(' · ')}
+        </div>
+      )}
       {sel && (
         <div className="bulkbar">
           <b>

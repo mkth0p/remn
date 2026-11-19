@@ -118,7 +118,8 @@ history), and pivots to the filtered Events or Mails lists or to the analyst.
 
 The Timeline page draws events and mails over time, one chart per source that has data,
 with the curated case-timeline entries (see Case notes below) marked on it. Clicking a
-point narrows the lists to that time.
+point narrows the lists to that time. When the events, the mails, the findings or the case
+timeline cannot be read, a line above the chart says which and why, and the rest is drawn.
 
 ## Findings
 
