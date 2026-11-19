@@ -52,6 +52,13 @@ it, or restore the backup taken before that version was installed (see
 
 What one store may take from the server is bounded, and each bound is a setting in `.env`:
 
+- **Memory and threads.** Each open store gets its own DuckDB memory limit
+  (`FORENSIC_STORE_MEMORY_MB`, 2048 MiB) and worker threads (`FORENSIC_STORE_THREADS`; the
+  default 0 is one fewer than the processors, between 2 and 8). The stores open at once add
+  up, so keep their sum under what the machine or container gives REMN.
+- **Closing idle stores.** A store nobody has used for `FORENSIC_STORE_IDLE_S` seconds (600)
+  is closed and its memory released, as soon as no request or job still holds it; its next
+  query opens it again. 0 keeps every store open until the server stops.
 - **Query time.** One query on a store (search, count, aggregate, stack, timeline, facets,
   pivot, a row, the summary, the indicator list, SQL from the SQL view or the analyst's
   `sql` tool) runs at most `FORENSIC_STORE_QUERY_MAX_S` seconds (60). A query past it is

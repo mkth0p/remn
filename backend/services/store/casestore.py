@@ -7,6 +7,7 @@ work identically for browser-stored and server-stored cases.
 
 from __future__ import annotations
 
+import atexit
 import importlib.util
 import json
 import logging
@@ -16,6 +17,7 @@ import shutil
 import sys
 import threading
 import time
+import weakref
 from collections.abc import Callable, Iterable
 from contextvars import ContextVar
 from datetime import UTC, datetime
@@ -603,9 +605,13 @@ def _release(con: duckdb.DuckDBPyConnection, key: str) -> None:
 
 
 class CaseStore:
-    """One DuckDB database per case. Writes are serialised with a lock; reads use per-call cursors."""
+    """One DuckDB database per case. Writes are serialised with a lock; reads use per-call cursors.
 
-    def __init__(self, root: Path, key: str) -> None:
+    `memory_mb` and `threads` are what DuckDB may use for this store (threads 0: one fewer than the
+    processors, between 2 and 8). The connection is closed by close(), or when nothing holds the
+    store any more."""
+
+    def __init__(self, root: Path, key: str, memory_mb: int = 2048, threads: int = 0) -> None:
         if not KEY_RE.match(key):
             raise ValueError("invalid case key")
         self.key = key
@@ -614,12 +620,12 @@ class CaseStore:
         self.path = self.dir / "case.duckdb"
         self.lock = threading.RLock()
         self._con = duckdb.connect(str(self.path))
-        try:
-            threads = max(2, min(8, (os.cpu_count() or 4) - 1))
-            self._con.execute(f"SET threads TO {threads}")
-            self._con.execute("SET memory_limit = '2GB'")
-        except duckdb.Error:
-            pass
+        threads = threads if threads > 0 else max(2, min(8, (os.cpu_count() or 4) - 1))
+        for statement in (f"SET threads TO {int(threads)}", f"SET memory_limit = '{int(memory_mb)}MiB'"):
+            try:
+                self._con.execute(statement)
+            except duckdb.Error as exc:
+                log.warning("case store %s: %s did not apply: %s", key, statement, exc)
         # the store never reads or writes files through SQL: block read_csv / COPY TO / ATTACH / extension
         # loading so the raw SQL endpoint and the analyst's `sql` tool cannot touch the server's filesystem.
         # The settings are read back, and a store whose lockdown did not take effect (a setting renamed
@@ -649,6 +655,7 @@ class CaseStore:
             _release(self._con, key)
             raise
         self.last_used = time.time()
+        self._closer = weakref.finalize(self, _release, self._con, key)
 
     def _init_schema(self) -> None:
         """Bring the store to SCHEMA_VERSION: check the version it records before anything is changed,
@@ -723,10 +730,7 @@ class CaseStore:
 
     def close(self) -> None:
         with self.lock:
-            try:
-                self._con.close()
-            except duckdb.Error:
-                pass
+            self._closer()
 
     # -- ids ----------------------------------------------------------------
     def reserve_ids(self, table: str, n: int) -> int:
@@ -898,14 +902,32 @@ class CaseStore:
 
 
 class StoreRegistry:
+    """The open stores, one per case. A store unused for `idle_s` seconds is let go: it is closed as
+    soon as no request or job holds it any more, and a later get() opens it again. One still held is
+    handed out again rather than opened a second time, so a file never has two stores."""
+
     def __init__(self) -> None:
         self.root: Path | None = None
+        self.memory_mb = 2048
+        self.threads = 0
+        self.idle_s = 600
         self._stores: dict[str, CaseStore] = {}
+        self._let_go: weakref.WeakValueDictionary[str, CaseStore] = weakref.WeakValueDictionary()
         self._lock = threading.Lock()
+        self._sweeper: threading.Thread | None = None
+        self._stop = threading.Event()
+        _registries.add(self)
 
-    def configure(self, root: Path) -> None:
+    def configure(self, root: Path, *, memory_mb: int | None = None, threads: int | None = None, idle_s: float | None = None) -> None:
+        """Where the stores live, and the limits of the stores opened from now on (None keeps the current one)."""
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
+        if memory_mb is not None:
+            self.memory_mb = memory_mb
+        if threads is not None:
+            self.threads = threads
+        if idle_s is not None:
+            self.idle_s = idle_s
 
     def get(self, key: str, create: bool = True) -> CaseStore:
         if self.root is None:
@@ -913,13 +935,59 @@ class StoreRegistry:
         if not KEY_RE.match(key or ""):
             raise ValueError("invalid case key")
         with self._lock:
-            st = self._stores.get(key)
+            st = self._stores.get(key) or self._let_go.get(key)
             if st is None:
                 if not create and not (self.root / key / "case.duckdb").exists():
                     raise FileNotFoundError(key)
-                st = CaseStore(self.root, key)
-                self._stores[key] = st
-            return st
+                st = CaseStore(self.root, key, memory_mb=self.memory_mb, threads=self.threads)
+            self._stores[key] = st
+            self._let_go.pop(key, None)
+            st.last_used = time.time()
+            idle = self._take_idle(time.time())
+            self._start_sweeper()
+        # the stores let go are released here, outside the lock: closing one may write out its log
+        del idle
+        return st
+
+    def _take_idle(self, now: float) -> list[CaseStore]:
+        """Move the stores unused for idle_s out of the held set; the caller drops the list outside the lock."""
+        if self.idle_s <= 0:
+            return []
+        idle = [st for st in self._stores.values() if now - st.last_used >= self.idle_s]
+        for st in idle:
+            del self._stores[st.key]
+            self._let_go[st.key] = st
+        return idle
+
+    def evict_idle(self, now: float | None = None) -> int:
+        """Let go of the stores unused for idle_s; the number let go."""
+        with self._lock:
+            idle = self._take_idle(time.time() if now is None else now)
+        return len(idle)
+
+    def _start_sweeper(self) -> None:
+        """A thread that lets idle stores go without waiting for the next request (called with the
+        lock held). It holds the registry weakly and ends once no store is held, so a registry
+        dropped is not kept alive by it."""
+        if self.idle_s <= 0 or self._sweeper is not None:
+            return
+        ref, every = weakref.ref(self), max(0.5, min(60.0, self.idle_s / 2))
+        stop = self._stop = threading.Event()
+
+        def sweep() -> None:
+            while not stop.wait(every):
+                reg = ref()
+                if reg is None:
+                    return
+                reg.evict_idle()
+                with reg._lock:
+                    if not reg._stores:
+                        reg._sweeper = None
+                        return
+                del reg
+
+        self._sweeper = threading.Thread(target=sweep, name="store-sweeper", daemon=True)
+        self._sweeper.start()
 
     def exists(self, key: str) -> bool:
         return bool(self.root) and KEY_RE.match(key or "") is not None and (self.root / key / "case.duckdb").exists()
@@ -928,7 +996,7 @@ class StoreRegistry:
         if not KEY_RE.match(key or ""):
             raise ValueError("invalid case key")
         with self._lock:
-            st = self._stores.pop(key, None)
+            st = self._stores.pop(key, None) or self._let_go.pop(key, None)
             if st:
                 st.close()
         target = (self.root or Path(".")) / key
@@ -949,9 +1017,26 @@ class StoreRegistry:
 
     def close_all(self) -> None:
         with self._lock:
-            for st in self._stores.values():
+            for st in [*self._stores.values(), *self._let_go.values()]:
                 st.close()
             self._stores.clear()
+            self._let_go.clear()
+            self._stop.set()
+            self._sweeper = None
+
+
+_registries: weakref.WeakSet[StoreRegistry] = weakref.WeakSet()
+
+
+@atexit.register
+def _stop_sweepers() -> None:
+    """End the sweeper threads before the interpreter ends. A daemon thread still waiting at exit
+    keeps this module, and DuckDB with it, alive past the end, and DuckDB then reports a leak."""
+    for reg in list(_registries):
+        reg._stop.set()
+        sweeper = reg._sweeper
+        if sweeper is not None:
+            sweeper.join(timeout=2)
 
 
 registry = StoreRegistry()

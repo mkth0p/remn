@@ -1,14 +1,17 @@
-"""What one server case store may take from the server: how long a query or a rule may run.
+"""What one server case store may take from the server: how long a query or a rule may run, the
+memory and threads each open store gets, and how long a store nobody uses stays open.
 
 Every store here is invented. A store too large to scan within a limit is made without writing it:
 its events table becomes a view of one invented event repeated ten billion times."""
 
 from __future__ import annotations
 
+import gc
 import json
 import threading
 import time
 import uuid
+import weakref
 
 import duckdb
 import pytest
@@ -177,3 +180,88 @@ def test_a_rule_run_has_no_time_limit_unless_one_is_given(tmp_path):
         assert out["errors"] == [] and out["byRule"] == {"invented": 5}
     finally:
         reg.close_all()
+
+
+def test_each_open_store_takes_its_memory_and_threads_from_the_configuration(tmp_path):
+    reg = StoreRegistry()
+    reg.configure(tmp_path, memory_mb=256, threads=2)
+    st = reg.get(str(uuid.uuid4()))
+    try:
+        assert st.cursor().execute("SELECT current_setting('memory_limit'), current_setting('threads')").fetchone() == ("256.0 MiB", 2)
+    finally:
+        reg.close_all()
+
+
+def test_the_server_gives_its_stores_the_limits_of_its_settings(settings):
+    assert (registry.memory_mb, registry.threads, registry.idle_s) == (
+        settings.FORENSIC_STORE_MEMORY_MB,
+        settings.FORENSIC_STORE_THREADS,
+        settings.FORENSIC_STORE_IDLE_S,
+    )
+
+
+def _store_with_rows(reg: StoreRegistry, n: int = 20) -> tuple[str, CaseStore]:
+    key = str(uuid.uuid4())
+    st = reg.get(key)
+    w = EventWriter(st, 1)
+    for i in range(n):
+        w.add({"recordId": i, "ts": T0 + i, "eventId": 4624, "computer": "WS01", "summary": f"invented {i}"})
+    w.flush()
+    return key, st
+
+
+def test_a_store_unused_for_the_idle_time_is_closed_and_opens_again_with_its_rows(tmp_path):
+    reg = StoreRegistry()
+    reg.configure(tmp_path, idle_s=60)
+    key, st = _store_with_rows(reg)
+    path, gone = st.path, weakref.ref(st)
+    del st
+    assert reg.evict_idle(now=time.time() + 61) == 1
+    gc.collect()
+    assert gone() is None
+    # closed, not only forgotten: another connection may open the file again
+    duckdb.connect(str(path), read_only=True).close()
+    again = reg.get(key, create=False)
+    assert again.counts()["events"] == 20
+    reg.close_all()
+
+
+def test_a_store_still_held_by_a_request_or_a_job_is_not_closed_and_is_handed_out_again(tmp_path):
+    reg = StoreRegistry()
+    reg.configure(tmp_path, idle_s=60)
+    key, st = _store_with_rows(reg)
+    assert reg.evict_idle(now=time.time() + 61) == 1
+    # still open for whoever holds it, and never a second store on the same file
+    assert st.cursor().execute("SELECT count(*) FROM events").fetchone() == (20,)
+    assert reg.get(key) is st
+    reg.close_all()
+
+
+def test_a_store_used_within_the_idle_time_stays_open(tmp_path):
+    reg = StoreRegistry()
+    reg.configure(tmp_path, idle_s=60)
+    _store_with_rows(reg)
+    assert reg.evict_idle(now=time.time() + 30) == 0
+    reg.close_all()
+
+
+def test_idle_stores_are_closed_without_waiting_for_a_request(tmp_path):
+    reg = StoreRegistry()
+    reg.configure(tmp_path, idle_s=1)
+    _, st = _store_with_rows(reg)
+    gone = weakref.ref(st)
+    del st
+    deadline = time.time() + 15
+    while gone() is not None and time.time() < deadline:
+        time.sleep(0.2)
+        gc.collect()
+    assert gone() is None
+    reg.close_all()
+
+
+def test_an_idle_time_of_zero_keeps_every_store_open(tmp_path):
+    reg = StoreRegistry()
+    reg.configure(tmp_path, idle_s=0)
+    _store_with_rows(reg)
+    assert reg.evict_idle(now=time.time() + 10**6) == 0
+    reg.close_all()

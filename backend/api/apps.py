@@ -19,7 +19,9 @@ class ApiConfig(AppConfig):
         from services.store.casestore import registry as store_registry
 
         yara_scan.configure(settings.YARA_RULES_DIR)
-        store_registry.configure(settings.CASES_DIR)
+        store_registry.configure(
+            settings.CASES_DIR, memory_mb=settings.FORENSIC_STORE_MEMORY_MB, threads=settings.FORENSIC_STORE_THREADS, idle_s=settings.FORENSIC_STORE_IDLE_S
+        )
         try:
             removed_uploads = cleanup_stale()
             if removed_uploads:
