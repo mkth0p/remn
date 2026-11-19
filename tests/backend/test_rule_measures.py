@@ -287,3 +287,23 @@ def test_the_merge_fails_unless_every_share_measured_all_it_was_dealt(tmp_path):
     recs, clean, _, _, problems = M.merge([one, two])
     assert recs[0].owner == "x" and recs[0].rows == 1 and not problems
     assert clean["m"]["found"] == {"a": [1, 2], "b": [3, 3]} and clean["m"]["scopes"] == {"a": 9, "b": 4}
+
+
+def test_a_recording_with_an_export_remn_does_not_read_counts_it_unread(tmp_path):
+    """Splunk's attack range keeps Entra audit logs beside sign-ins. The import refuses such a
+    file with a message; measuring a recording that holds one stopped the whole run."""
+    M = _measure_tool()
+    M._worker_init(str(tmp_path))
+    audit = tmp_path / "audit.json"
+    # invented: a directory audit page, which is not a sign-in export
+    audit.write_text(
+        json.dumps(
+            {
+                "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#auditLogs/directoryAudits",
+                "value": [{"id": "1", "activityDisplayName": "Add user"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    _key, _store, rows, unread = M._load([audit])
+    assert (rows, unread) == (0, 1)

@@ -21,6 +21,8 @@ services:
     environment:
       FORENSIC_ALLOWED_HOSTS: "*"
       FORENSIC_AUTH_TOKEN: ""
+      # running without a token is what this file is for; without this line the server does not start
+      FORENSIC_ALLOW_NO_TOKEN: "1"
       # an Ollama on the host machine, for the server proxy transport
       OLLAMA_HOST: http://host.docker.internal:11434
     extra_hosts:

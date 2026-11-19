@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import ipaddress
 from datetime import UTC
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -14,8 +16,38 @@ from services.reputation.base import Provider, Verdict
 UA = "remn-forensic-analyzer/0.1 (+local)"
 
 
-def _client(timeout: float) -> httpx.Client:
-    return httpx.Client(timeout=timeout, headers={"User-Agent": UA}, follow_redirects=True)
+def _seg(value: Any) -> str:
+    """`value` as one URL path segment: a slash, a question mark or a dot pair in it cannot reach
+    another path or another query of the provider. Values are checked by kind before this, and
+    this holds even for one that was not."""
+    text = quote(str(value), safe=":")
+    return text.replace(".", "%2E") if text in (".", "..") else text
+
+
+def _named(host: str) -> bool:
+    """A host given by a name with a domain, not an address and not a name of the local network."""
+    try:
+        ipaddress.ip_address(host)
+        return False
+    except ValueError:
+        return "." in host.strip(".")
+
+
+def _client(timeout: float, other_hosts: bool = False) -> httpx.Client:
+    """An HTTP client for one lookup. A redirect is followed over HTTPS to the host that answered
+    with it, at most five times. The requests carry the provider's key in a header, which httpx
+    keeps across a redirect, and the value looked up in the URL; a redirect elsewhere is refused.
+    other_hosts lets a redirect go to another named host, for a provider whose requests carry no
+    key and that answers by redirecting (RDAP)."""
+
+    def follow(response: httpx.Response) -> None:
+        if not response.has_redirect_location:
+            return
+        target = response.url.join(response.headers["Location"])
+        if target.scheme != "https" or not (target.host == response.url.host or (other_hosts and _named(target.host))):
+            raise httpx.TooManyRedirects("redirect to another host or to plain HTTP not followed", request=response.request)
+
+    return httpx.Client(timeout=timeout, headers={"User-Agent": UA}, follow_redirects=True, max_redirects=5, event_hooks={"response": [follow]})
 
 
 class URLhaus(Provider):
@@ -108,7 +140,7 @@ class MalwareBazaar(Provider):
                 "sha256": data.get("sha256_hash"),
                 "deliveryMethod": data.get("delivery_method"),
             },
-            link=f"https://bazaar.abuse.ch/sample/{data.get('sha256_hash') or value}/",
+            link=f"https://bazaar.abuse.ch/sample/{_seg(data.get('sha256_hash') or value)}/",
         )
 
 
@@ -150,7 +182,7 @@ class ThreatFox(Provider):
                 "reporter": best.get("reporter"),
                 "count": len(items),
             },
-            link=f"https://threatfox.abuse.ch/ioc/{best.get('id')}/" if best.get("id") else None,
+            link=f"https://threatfox.abuse.ch/ioc/{_seg(best.get('id'))}/" if best.get("id") else None,
         )
 
 
@@ -168,14 +200,14 @@ class VirusTotal(Provider):
             path = f"urls/{ident}"
             link = f"https://www.virustotal.com/gui/url/{hashlib.sha256(value.encode()).hexdigest()}"
         elif kind == "domain":
-            path = f"domains/{value}"
-            link = f"https://www.virustotal.com/gui/domain/{value}"
+            path = f"domains/{_seg(value)}"
+            link = f"https://www.virustotal.com/gui/domain/{_seg(value)}"
         elif kind == "ip":
-            path = f"ip_addresses/{value}"
-            link = f"https://www.virustotal.com/gui/ip-address/{value}"
+            path = f"ip_addresses/{_seg(value)}"
+            link = f"https://www.virustotal.com/gui/ip-address/{_seg(value)}"
         else:
-            path = f"files/{value}"
-            link = f"https://www.virustotal.com/gui/file/{value}"
+            path = f"files/{_seg(value)}"
+            link = f"https://www.virustotal.com/gui/file/{_seg(value)}"
         with _client(self.timeout) as c:
             r = c.get(f"https://www.virustotal.com/api/v3/{path}", headers={"x-apikey": self.key})
             if r.status_code == 404:
@@ -260,7 +292,7 @@ class AbuseIPDB(Provider):
                 "usageType": d.get("usageType"),
                 "isTor": d.get("isTor"),
             },
-            link=f"https://www.abuseipdb.com/check/{value}",
+            link=f"https://www.abuseipdb.com/check/{_seg(value)}",
         )
 
 
@@ -274,9 +306,9 @@ class GreyNoise(Provider):
 
     def lookup(self, kind: str, value: str) -> Verdict:
         with _client(self.timeout) as c:
-            r = c.get(f"https://api.greynoise.io/v3/community/{value}", headers={"key": self.key, "Accept": "application/json"})
+            r = c.get(f"https://api.greynoise.io/v3/community/{_seg(value)}", headers={"key": self.key, "Accept": "application/json"})
             if r.status_code == 404:
-                return Verdict(self.name, kind, value, "unknown", details={"status": "not observed"}, link=f"https://viz.greynoise.io/ip/{value}")
+                return Verdict(self.name, kind, value, "unknown", details={"status": "not observed"}, link=f"https://viz.greynoise.io/ip/{_seg(value)}")
             r.raise_for_status()
             d = r.json()
         cls = (d.get("classification") or "").lower()
@@ -294,7 +326,7 @@ class GreyNoise(Provider):
             {"malicious": 85, "benign": 5}.get(cls),
             tags=tags,
             details={"name": d.get("name"), "classification": cls, "lastSeen": d.get("last_seen"), "noise": d.get("noise"), "riot": d.get("riot")},
-            link=d.get("link") or f"https://viz.greynoise.io/ip/{value}",
+            link=d.get("link") or f"https://viz.greynoise.io/ip/{_seg(value)}",
         )
 
 
@@ -309,7 +341,7 @@ class IPInfo(Provider):
     def lookup(self, kind: str, value: str) -> Verdict:
         token = (self.config.get("keys") or {}).get("ipinfo", "")
         with _client(self.timeout) as c:
-            r = c.get(f"https://ipinfo.io/{value}/json", params={"token": token} if token else None, headers={"Accept": "application/json"})
+            r = c.get(f"https://ipinfo.io/{_seg(value)}/json", params={"token": token} if token else None, headers={"Accept": "application/json"})
             r.raise_for_status()
             d = r.json()
         if d.get("bogon"):
@@ -338,7 +370,7 @@ class IPInfo(Provider):
                 "timezone": d.get("timezone"),
                 "anycast": d.get("anycast"),
             },
-            link=f"https://ipinfo.io/{value}",
+            link=f"https://ipinfo.io/{_seg(value)}",
         )
 
 
@@ -354,8 +386,9 @@ class RDAP(Provider):
         from services.analysis.lookalike import registrable
 
         dom = registrable(value) or value
-        with _client(self.timeout) as c:
-            r = c.get(f"https://rdap.org/domain/{dom}", headers={"Accept": "application/rdap+json, application/json"})
+        # rdap.org answers by redirecting to the registry of the domain; the request carries no key
+        with _client(self.timeout, other_hosts=True) as c:
+            r = c.get(f"https://rdap.org/domain/{_seg(dom)}", headers={"Accept": "application/rdap+json, application/json"})
             if r.status_code == 404:
                 return Verdict(self.name, kind, value, "suspicious", 40, tags=["unregistered_or_unknown"], details={"domain": dom, "status": "not found"})
             r.raise_for_status()
@@ -412,7 +445,7 @@ class RDAP(Provider):
                 "status": (d.get("status") or [])[:8],
                 "nameservers": [n.get("ldhName") for n in (d.get("nameservers") or [])[:6] if isinstance(n, dict)],
             },
-            link=f"https://rdap.org/domain/{dom}",
+            link=f"https://rdap.org/domain/{_seg(dom)}",
         )
 
 

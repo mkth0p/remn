@@ -206,6 +206,29 @@ describe('FindingsView', () => {
   )
 
   it(
+    'says above the list and on its findings that a rule found more than its cap, and how many it left out',
+    async () => {
+      const detail = '345 of 2,345 findings left out past the cap of 2,000; kept the 2,000 rarest groups'
+      await db.kv.put({
+        key: 'ruleDiags-1',
+        value: { ts: 10, byRule: { 'win-log-cleared': 1 }, diagnostics: [{ ruleId: 'win-log-cleared', reason: 'truncated', detail, dropped: 345, matched: 1, afterExclude: 1, afterTime: 1 }] },
+      })
+      await act(async () => {
+        render(<FindingsView />)
+      })
+      await waitFor(() => expect(screen.getByText('1 rule found more than its cap in the last run')).toBeTruthy(), WAIT)
+      expect(document.querySelector('[data-cut-rules]')?.textContent).toContain('345 findings left out and not listed · win-log-cleared')
+      fireEvent.click(screen.getByRole('button', { name: 'rule' }))
+      await waitFor(() => expect(document.querySelectorAll('.group-row').length).toBe(4), WAIT)
+      fireEvent.click(screen.getByText('Security audit log cleared'))
+      await waitFor(() => expect(document.querySelector('.group-row + table tr')).toBeTruthy(), WAIT)
+      fireEvent.click(document.querySelector('.group-row + table tr')!)
+      await waitFor(() => expect(screen.getByText(`this rule found more than its cap in the last run: ${detail}`)).toBeTruthy(), WAIT)
+    },
+    TEST_TIMEOUT,
+  )
+
+  it(
     'opens a finding from the rule grouping and writes a status change to the database',
     async () => {
       await act(async () => {

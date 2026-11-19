@@ -206,7 +206,7 @@ async function dropCancelledImport(file: File, kase: Case, evidenceId: number, j
   try {
     if (left.uploadId) await fetch(`/api/upload/${left.uploadId}`, { method: 'DELETE', headers: API_HEADERS }).catch(() => undefined)
     // the server job stops at its next check; its rows are removed once it has, or it would write after the removal
-    if (left.serverJob) await waitForJob(left.serverJob).catch(() => undefined)
+    if (left.serverJob && kase.serverKey) await waitForJob(left.serverJob, kase.serverKey).catch(() => undefined)
     const rows = left.serverJob
       ? null
       : (await db.events.where('[caseId+evidenceId]').equals([kase.id!, evidenceId]).count()) + (await db.mails.where('[caseId+evidenceId]').equals([kase.id!, evidenceId]).count())
@@ -302,6 +302,7 @@ export async function ingestToServer(file: File, kase: Case, kind: 'evtx' | 'mai
     serverJob = submitted.jobId
     const job = await waitForJob(
       serverJob,
+      kase.serverKey!,
       (j) => {
         const p = j.progress as { rows?: number; format?: string }
         useStore.getState().upsertJob({ id: jobId, phase: 'parsing', rows: Number(p.rows ?? 0) })

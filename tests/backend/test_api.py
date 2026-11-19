@@ -19,7 +19,9 @@ def _ndjson(resp) -> list[dict]:
 
 def test_missing_client_header_is_rejected():
     c = Client()
-    assert c.get("/api/health").status_code == 403
+    assert c.get("/api/meta").status_code == 403
+    # the health route answers a probe without the header with liveness only
+    assert c.get("/api/health").json() == {"ok": True}
     assert c.post("/api/ingest/evtx").status_code == 403
     assert c.options("/api/health").status_code == 403
 

@@ -9,7 +9,6 @@ vi.mock('./upload', () => ({ chunkedUpload: vi.fn(async () => ({ uploadId: 'u1',
 const done: JobInfo = {
   id: 'j1',
   kind: 'ingest',
-  caseKey: null,
   label: '',
   status: 'done',
   progress: {},
@@ -65,7 +64,7 @@ describe('an import into the server store', () => {
   it('can be cancelled while the server parses: the job is stopped, then its rows and evidence are removed', async () => {
     const order: string[] = []
     // the job runs until the import is cancelled, then ends as cancelled
-    vi.mocked(waitForJob).mockImplementation(async (_id, _onProgress, signal) => {
+    vi.mocked(waitForJob).mockImplementation(async (_id, _caseKey, _onProgress, signal) => {
       if (!signal) {
         order.push('settled')
         throw new Error('cancelled')

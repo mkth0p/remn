@@ -115,18 +115,59 @@ events table:
   `ManagedIdentitySignInLogs`; a record of another category, such as `AuditLogs`, is
   counted as not read); a `.zip` of a whole acquisition folder is walked.
 
+Outside the Azure Monitor records, whose category says what they are, a record is read as a
+sign-in only when it carries a time (`createdDateTime`), a client address (`ipAddress`) and
+the user or the application signed in to. Entra directory audit
+records, risk detections, risky users and user lists name a `userPrincipalName` too, but
+they are not sign-ins: a file of them is listed as a member REMN has no parser for (in the
+event-log import, as "not a recognised Microsoft 365 or Entra export"), and such a record
+inside a sign-in file is counted as not read. Field names are read in any case, so the
+PascalCase columns of `Get-MgAuditLogSignIn | Export-Csv` land on the same names as the
+Graph JSON; a column that export wrote as a .NET type name (`Status`, `Location`,
+`DeviceDetail`) is left out. A sign-in whose export gives neither a status nor an error code
+has no `status`, and its summary says the outcome is not in the export: it is not counted as
+a successful sign-in.
+
 Rows carry `provider`, `channel` (the workload), `category` (`M365 Exchange`,
 `M365 Entra`, `Entra sign-in`, …), `operation`, `subjectUser` and `targetUser`,
 `ipAddress`, `status`, `objectName`, and every AuditData field under `data.<Name>`
 (Parameters, ModifiedProperties and OperationProperties flattened; Entra
-`data.country`, `data.clientAppUsed`, `data.riskState`, …).
+`data.country`, `data.clientAppUsed`, `data.riskState`, …). A value nested deeper is kept as
+JSON up to 4,000 characters (`Target` and `Actor` ids, `Folders` paths and the applied
+conditional access policies up to 2,000), and the whole record in `raw` up to 200,000. A
+value cut at its limit ends with `…`, and the evidence's statistics (`cut`) and its member
+list say how many records hold one.
+
+A record that cannot be read is counted in the evidence's parse errors, and the records after
+it are still read. A CSV field may hold up to 16 MiB, so an AuditData column longer than the
+131,072 characters Python's CSV reader stops at by default no longer ends the file; a row
+the reader cannot take (a longer field, a stray quote) is one such error. JSON exports are
+read one record at a time whatever their size, so a large array no longer has to fit in the
+server's memory: an array, a Graph page (`{"value": [...]}`), several of them one after the
+other, or one object per line. A record longer than 16 MiB on a line of its own is one
+error; inside an array it stops the file there, the records before it kept and the file
+marked failed with the record number. So does JSON that is broken part-way.
+
+A time written with a zone or an offset keeps it; one written without is read as UTC, the
+zone the audit log's `CreationTime`, Graph and the portal's `Date (UTC)` use. Dates a
+culture or a spreadsheet wrote are read too (`9/1/2026 10:00 AM`, `01.09.2026 10:00`,
+`2026/09/01 10:00:00`, with or without seconds or an offset). A sign-in CSV that writes its
+dates as numbers is read in the order its own dates show: one day above 12 anywhere in the
+file settles it for the whole file. When no date shows it, the dates are read month-first,
+the portal's order, and the evidence's statistics (`dateOrderGuessed`) and its member list
+say how many records were dated that way: in a day-first export those dates are wrong. A
+record whose date is missing or cannot be read is kept without a time and counted the same
+way (`undated`), since it is not on the timeline.
 
 A record is in the case once. Search-UnifiedAuditLog's large-set pages repeat records,
 and exports cut into time slices overlap, so a UAL record whose `AuditData.Id` was already
 read, and a Graph sign-in whose `id` was, is not added again: not from the same file, not
 from another file of the upload, not from evidence added earlier. The evidence detail and
 the archive or package member list say how many repeats were left out. A record without a
-GUID for an id is never dropped.
+GUID for an id is never dropped. The ids of the first 6,291,456 records of an upload are
+held to find repeats, in 64 MiB of the server's memory at most; a record read after that is
+still compared with them and with the case, but not with the others read after it, and the
+evidence's statistics (`repeatsUnchecked`) and its member list say how many there were.
 
 Sign-ins keep what ties them to the token and session they gave: `data.sessionId` and
 `data.uniqueTokenIdentifier` (the audit records the token made carry them as

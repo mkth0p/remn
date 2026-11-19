@@ -24,6 +24,7 @@ export async function checkReputation(kase: Case, iocs: Ioc[], onProgress?: (don
       resp = await lookupReputation(
         slice.map((x) => ({ kind: x.kind, value: x.value })),
         providers,
+        kase.settings.networkAllowed,
       )
     } catch (e) {
       log('err', `reputation lookup failed: ${(e as Error).message}`)
