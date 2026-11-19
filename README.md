@@ -88,15 +88,24 @@ For development, run the API with `manage.py runserver` and the frontend with
 
 ## Where things stand
 
-Mail scoring is validated on public corpora (Nazario, Phishing Pot, SpamAssassin, Tika,
-Microsoft 365 samples), and Windows detection on recorded attacks, including two libraries
-the rules were not written for: on EVTX-to-MITRE-Attack, REMN detected 109 of 279 at medium
-level and above where Hayabusa detected 86 and Chainsaw 52 (25 September 2026), and on the
-Windows datasets of Splunk attack_data it detects 227 of 535 (42%). On seven clean
-Windows machines its own rules raise 200 high and critical findings, and a weekly job
-fails when a rule stops detecting a recording or a high one gets noisier. Numbers, dates
-and method are in [docs/validation.md](docs/validation.md) and [docs/reviews/](docs/reviews/).
-Not yet exercised on real multi-gigabyte acquisitions. Attachments are analysed statically;
+Every event rule is measured with `tools/measure_rules.py` on public recordings of attacks
+and on the logs of seven clean Windows lab machines, at pinned versions of each source. The
+committed measure, `rules/measures.json`, was taken on 2026-09-25: of the 3,008 event rules
+measured then, 1,023 fire on a recording of what they look for, and the app marks the
+findings of the others as leads. A recording counts as detected when a rule of its ATT&CK
+technique raises a finding of any severity anywhere in the file; whether the finding is on
+the attack's own events is not checked. Counted that way, the rules enabled by default
+detect 241 of the 535 Windows datasets of Splunk attack_data and 115 of the 279 files of
+EVTX-to-MITRE-Attack, two libraries no rule had been written against when they were first
+measured, and 271 of the 278 files of EVTX-ATTACK-SAMPLES, which the rules were reviewed
+against. On the clean machines REMN's own rules raised 200 findings at high or critical.
+Rules added or changed after that day have no measure until it is taken again; method and
+limits are in [docs/detection.md](docs/detection.md#measured-rules). A weekly job fails when
+a rule stops detecting a recording or a high one gets noisier.
+
+The mail risk score was run on public phishing and legitimate mail corpora, with the rates in
+[docs/validation.md](docs/validation.md); its weights were adjusted on those same corpora, so
+the rates are not a held-out measure. Not yet exercised on real multi-gigabyte acquisitions. Attachments are analysed statically;
 nothing is opened or run. The remote mode uses one shared token and no encryption at
 rest. See [SECURITY.md](SECURITY.md).
 
