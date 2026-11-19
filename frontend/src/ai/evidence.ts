@@ -249,9 +249,14 @@ export function findInstructions(value: unknown, ref: string | null = null): Sus
   return scanEvidence(value, ref).suspects
 }
 
-/** The evidence a message carries between markers (a story put to the agent by the analyst). */
+/**
+ * The evidence a message carries between markers (a story put to the agent by the analyst). A block
+ * ends before the next opening marker, which wrapEvidence never leaves inside one (it breaks the
+ * evidence's own with a zero-width space), so a text of many unclosed openings is read once rather
+ * than from each of them.
+ */
 export function evidenceBlocks(text: string): string[] {
-  return [...text.matchAll(/<evidence\b[^>]*>([\s\S]*?)<\/evidence>/gi)].map((m) => m[1])
+  return [...text.matchAll(/<evidence(?=[\s>])[^<>]*>((?:(?!<evidence[\s>])[\s\S])*?)<\/evidence>/gi)].map((m) => m[1])
 }
 
 /**
