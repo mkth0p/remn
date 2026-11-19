@@ -213,13 +213,16 @@ def ingest(request: HttpRequest, key: str):
                 fmt = src.format
                 if hayabusa.available():
                     job.update(phase="engines")
-                    staged = hayabusa.stage([(name, str(path))], tmp_dir)
-                    try:
-                        found, summary = hayabusa.run(staged, tmp_dir)
-                    finally:
-                        shutil.rmtree(staged, ignore_errors=True)
-                    findings = hayabusa.resolve_refs(st, evidence_id, found)
-                    engine_summaries = [summary]
+                    # an archive gives the engine its .evtx members, and a format it cannot read is said, not run
+                    staged, said = hayabusa.stage_upload(name, str(path), None, src.format, tmp_dir)
+                    engine_summaries = [said]
+                    if staged is not None:
+                        try:
+                            found, summary = hayabusa.run(staged, tmp_dir)
+                        finally:
+                            shutil.rmtree(staged, ignore_errors=True)
+                        findings = hayabusa.resolve_refs(st, evidence_id, found)
+                        engine_summaries = [hayabusa.finish(summary, said)]
             else:
                 src2 = MailSource(name, str(path), None, ctx, tmp_dir)
                 mw = MailWriter(st, evidence_id, keep_bodies=keep_bodies)
