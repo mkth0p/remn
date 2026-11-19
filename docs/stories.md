@@ -668,10 +668,10 @@ as a server case does, and prints each story with the checks below;
 `REMN_APT29=DIR pytest -m heavy tests/backend/test_apt29_stories.py` runs the same checks, day 1 in
 about a minute. On day 1 (196,081 records: pbeesly's payload, UAC bypass, discovery, credential
 access and persistence on SCRANTON, then PsExec to NASHUA; NEWYORK is the domain controller and
-UTICA is left alone) REMN's own rules raise 258 findings and the build reads one story:
+UTICA is left alone) REMN's own rules raise 228 findings and the build reads one story:
 pbeesly's, holding the flags of SCRANTON (her RDP session) and NASHUA (her PsExec sessions) that
 name no one, while the domain controller's and UTICA's own maintenance are leads. No story is
-about a SID or a service account, pbeesly's story holds the 31 flagged script blocks she ran on
+about a SID or a service account, pbeesly's story holds the 17 flagged script blocks she ran on
 SCRANTON and NASHUA (their header names her SID), and it reaches NASHUA through the explicit
 credentials, the PsExec service and WinRM. Without the joins above it read five stories: hers
 and four host stories, all four high. On day 2 it reads two incidents: dschrute's and mscott's
