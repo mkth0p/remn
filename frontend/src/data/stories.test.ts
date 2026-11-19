@@ -302,8 +302,10 @@ describe('values', () => {
     expect([isInternalIp('10.0.0.5'), isInternalIp('203.0.113.69'), isInternalIp('198.51.100.10'), isInternalIp('8.8.8.8')]).toEqual([true, false, false, false])
     // carrier-grade NAT's shared space is not the internet; either side of it is
     expect([isInternalIp('100.64.0.1'), isInternalIp('100.127.255.254'), isInternalIp('100.63.0.1'), isInternalIp('100.128.0.1')]).toEqual([true, true, false, false])
-    // a server case whose accounts were cut says so
+    // a server case whose accounts were cut says so, and a browser case that who is who read its posted rows only
     expect(storyCoverageWarnings({ truncated: ['accounts'] })).toEqual([expect.stringContaining('more than 200,000 ways')])
+    expect(storyCoverageWarnings({ identityScope: 'rows' })).toEqual([expect.stringContaining('not the whole case')])
+    expect(storyCoverageWarnings({ identityScope: 'case' })).toEqual([])
     expect(windows([T0, T0 + DAY, T0 + 10 * DAY])).toEqual([
       [T0 - DAY, T0 + 4 * DAY],
       [T0 + 9 * DAY, T0 + 13 * DAY],

@@ -1143,6 +1143,8 @@ export function storyCoverageWarnings(stats: StoryResult['stats'] | undefined): 
     accounts: `The case writes its accounts in more than ${num(ACCOUNT_RECORD_CAP)} ways: who is who reads the most frequent ones and those of the records the stories read.`,
   }
   const out = (stats?.truncated ?? []).map((k) => labels[k]).filter(Boolean)
+  if (stats?.identityScope === 'rows')
+    out.push('Who is who was read from the records this build read, not the whole case: a bare account name is joined to the only account of that name among them, though the case may hold another.')
   if (stats?.storiesTruncated) out.push('Only the highest-scoring 200 stories are kept: the flags of the others are listed with those in no story.')
   return out
 }

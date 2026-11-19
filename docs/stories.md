@@ -132,7 +132,12 @@ accounts from SQL, with their counts, so millions of events are a few thousand r
 reads them over the whole case, not only the records selected around the flags: a bare name
 two accounts write is ambiguous whatever days the stories read, and a script block's SID is
 its account's though the logon that says so was a week before. Past 200,000 combinations it
-reads the most frequent ones and those of the selected records, and the page says so.
+reads the most frequent ones and those of the selected records, and the page says so. A
+browser case posts the records selected around its flags, and the resolver reads only those:
+a bare name joins the only account of that name among them, the join says so ("the only
+account of that name in the rows this build read (not the whole case)"), the build says who is
+who was read from its rows (`identityScope`: `rows`, `case` on a server case), and the page
+and the report list it among where the build stops.
 
 ## Sessions, hops and what ran
 

@@ -1263,7 +1263,7 @@ def test_a_server_case_reads_who_is_who_on_the_whole_case(registry):
         writer.add({**e, "recordKey": None})
     writer.flush()
     res = stories_for_store(store, SETTINGS, findings)
-    assert res["stats"]["events"] == 3 and res["stats"]["truncated"] == []
+    assert res["stats"]["events"] == 3 and res["stats"]["truncated"] == [] and res["stats"]["identityScope"] == "case"
     by_subject = {s["subject"]["label"]: s for s in res["stories"] if s["kind"] == "person"}
     # the SID is daniel's, though the logon that says so is not among the rows read
     assert "event:2" in {r for st in by_subject["northstar\\daniel.roy"]["steps"] for r in st["refs"]}
@@ -1274,6 +1274,23 @@ def test_a_server_case_reads_who_is_who_on_the_whole_case(registry):
     rows = [e for e in events if e["id"] in (2, 3, 4)]
     alone = {s["subject"]["label"] for s in build_stories(rows, [], findings, SETTINGS)["stories"]}
     assert "ws-004\\admin" in alone and "northstar\\daniel.roy" not in alone
+
+
+def test_a_browser_case_says_who_is_who_was_read_from_the_rows_it_posted():
+    """A browser case posts the rows around its flags, not the case: a bare name joined because it is
+    the only account of that name among them says so, and so does the build, since an account of
+    that name may be elsewhere in the case (the server test above has one a month before)."""
+    events = [
+        ev(3, 10, eventId=4698, computer="WS-004.northstar.example", subjectUser="admin", taskName="\\Updater"),
+        ev(4, 20, eventId=4624, computer="WS-004.northstar.example", targetUser="admin", targetDomain="WS-004", targetLogonId="0x20", logonType=2),
+    ]  # fmt: skip
+    findings = [finding("win-scheduled-task-suspicious-content", "high", [3], tags=["persistence"])]
+    r = _post({"events": events, "mails": [], "findings": findings, "settings": SETTINGS})
+    assert r.status_code == 200, r.content
+    body = r.json()
+    [join] = [j for i in body["identities"] for j in i["joins"] if j["kinds"] == ["name", "netbios"] or j["kinds"] == ["netbios", "name"]]
+    assert join["basis"] == "the only account of that name in the rows this build read (not the whole case)"
+    assert body["stats"]["identityScope"] == "rows"
 
 
 def test_the_browser_sends_every_field_the_story_engine_reads():

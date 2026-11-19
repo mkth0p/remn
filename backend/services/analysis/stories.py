@@ -137,6 +137,8 @@ _CONTEXT_BEFORE = 60 * 60_000
 _NEAR_MS = 15 * 60_000
 # the sessions a person sits at: at the console, over RDP, with cached credentials
 _SEATED = frozenset({2, 10, 11, 12})
+# what a browser case's identities are read from: the rows it posted around its flags, not the whole case
+ROWS_SCOPE = "the rows this build read (not the whole case)"
 # an incident joins at most this many stories, the highest-scoring first (Defender XDR caps what
 # one incident correlates too); the others stay stories of their own and the incident says so
 INCIDENT_CAP = 20
@@ -318,8 +320,15 @@ class _Case:
                 recs.append(rec := read(row))
                 if row.get("id") is not None:
                     records[f"{prefix}:{row['id']}"] = rec
-        # a server case resolves the whole case's accounts, not only the rows selected around its flags
-        self.resolver = resolver or resolve(settings=settings, records=ev_recs + ml_recs, netbios_pairs=[p for e in events for p in netbios_hints(e)])
+        # a server case resolves the whole case's accounts, not only the rows selected around its flags;
+        # a browser case posts those rows only, and its joins say so
+        self.identity_scope = "case" if resolver else "rows"
+        self.resolver = resolver or resolve(
+            settings=settings,
+            records=ev_recs + ml_recs,
+            netbios_pairs=[p for e in events for p in netbios_hints(e)],
+            scope=ROWS_SCOPE,
+        )
         self.lineage: Lineage = build_lineage(events, settings)
         # the people each record names, and each person's and address's records in time order
         self.named: dict[str, dict[str, tuple[str, str]]] = {}
@@ -609,6 +618,8 @@ def build_stories(
             "mails": len(mails),
             "findings": len(findings),
             "identities": len(case.resolver.identities),
+            # who is who was read from the whole case ("case") or only from the rows posted for the build ("rows")
+            "identityScope": case.identity_scope,
             "sessions": len(case.lineage.sessions),
             "hops": len(case.lineage.hops),
             "processes": len(case.lineage.processes),
@@ -2681,7 +2692,14 @@ def stories_for_store(store: Any, settings: dict[str, Any] | None, findings: lis
     if istats["truncated"]:
         # the rarest combinations were cut: the selected rows' own are read too, so each names someone
         truncated["accounts"] = 1
-        resolver = resolve(events.values(), mails.values(), settings, records=records, netbios_pairs=pairs)
+        resolver = resolve(
+            events.values(),
+            mails.values(),
+            settings,
+            records=records,
+            netbios_pairs=pairs,
+            scope="the case's most frequent account forms and the rows this build read",
+        )
     else:
         resolver = resolve(settings=settings, records=records, netbios_pairs=pairs)
     result = build_stories(

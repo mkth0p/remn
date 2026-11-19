@@ -476,8 +476,12 @@ def resolve(
     settings: dict[str, Any] | None = None,
     records: Iterable[Record] = (),
     netbios_pairs: Iterable[tuple[str, str]] = (),
+    scope: str = "the case",
 ) -> Resolver:
-    """Resolve the accounts events and mails name (or ready-made records) into identities."""
+    """Resolve the accounts events and mails name (or ready-made records) into identities.
+
+    `scope` says what the records are, for the joins that rest on what they do not hold (a bare
+    name is the only account of that name in them): the case, or only the rows a build read."""
     settings = settings or {}
     internal = {str(d).lower().strip(".") for d in (settings.get("internal_domains") or settings.get("internalDomains") or []) if d}
     service_names = frozenset(str(s).lower() for s in (settings.get("service_accounts") or settings.get("serviceAccounts") or []) if s)
@@ -666,7 +670,7 @@ def resolve(
                     why = f"the bare name {f.value} is that account's name, but {where} is neither internal nor the domain of a host it was seen on"
                     abroad.append((f, anchor, why))
                     continue
-                j = _Join(f, anchor, "the only account of that name in the case", MEDIUM, first_ref.get(f))
+                j = _Join(f, anchor, f"the only account of that name in {scope}", MEDIUM, first_ref.get(f))
                 if try_union(j):
                     kept.append(j)
             elif len(cands) > 1:
