@@ -38,7 +38,15 @@ def prefetch_zip(count, size):
 
 
 def staged_bytes(directory):
-    return sum(e.stat().st_size for e in os.scandir(directory) if e.is_file())
+    """What the staging folder holds now; a file the parse deletes while it is counted holds nothing."""
+    total = 0
+    for e in os.scandir(directory):
+        try:
+            if e.is_file():
+                total += e.stat().st_size
+        except FileNotFoundError:
+            pass
+    return total
 
 
 SEVEN_ZIP = b"7z\xbc\xaf\x27\x1c\x00\x04"
