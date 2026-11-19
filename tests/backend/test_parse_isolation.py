@@ -14,6 +14,7 @@ import json
 import os
 import shutil
 import socket
+import subprocess
 import sys
 import tempfile
 import time
@@ -129,7 +130,7 @@ def test_the_external_decoders_and_the_engine_start_without_the_server_environme
     from services.parsers import native
 
     monkeypatch.setenv("FORENSIC_AUTH_TOKEN", "invented-token-for-this-test")
-    assert "FORENSIC_AUTH_TOKEN" not in native._environment()
+    assert "FORENSIC_AUTH_TOKEN" not in native._environment(str(tmp_path))
 
     seen = tmp_path / "seen.json"
     script = tmp_path / "engine.py"
@@ -140,6 +141,22 @@ def test_the_external_decoders_and_the_engine_start_without_the_server_environme
     hayabusa.run(str(tmp_path / "Security.evtx"), str(tmp_path))
 
     assert "FORENSIC_AUTH_TOKEN" not in json.loads(seen.read_text(encoding="utf-8"))
+
+
+def test_a_decoder_finds_its_home_in_its_own_staging_folder(tmp_path):
+    # dissect asks for the home folder when it opens a target; a Windows interpreter started with
+    # no USERPROFILE has none, and the worker died before its first record
+    from services.parsers import native
+
+    done = subprocess.run(
+        [sys.executable, "-c", "from pathlib import Path; import tempfile; print(Path.home()); print(tempfile.gettempdir())"],
+        env=native._environment(str(tmp_path)),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    home, temp = done.stdout.splitlines()
+    assert Path(home) == tmp_path and Path(temp) == tmp_path
 
 
 def test_rows_cross_from_the_parse_process_unchanged(tmp_path, hostile):

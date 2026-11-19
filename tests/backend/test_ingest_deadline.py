@@ -50,7 +50,7 @@ def test_a_parse_past_the_deadline_ends_with_what_it_has(tmp_path, monkeypatch):
 
     kinds = [line["type"] for line in lines]
     assert kinds[0] == "meta" and kinds[-1] == "done"
-    assert kinds.count("event") == 2, "the rows sent before the limit are kept"
+    assert kinds.count("event") == 2, f"the rows sent before the limit are kept: {lines[-1]}"
     assert any(line["type"] == "error" and "FORENSIC_INGEST_MAX_S" in line["error"] for line in lines)
     assert lines[-1]["stats"]["inventoryComplete"] is False
     assert not [p for p in os.scandir(tmp_path) if p.is_file()], "everything the parse was holding is released"
@@ -60,7 +60,7 @@ def test_no_limit_means_no_limit(tmp_path):
     with override_settings(FILE_UPLOAD_TEMP_DIR=tmp_path, FORENSIC_INGEST_MAX_S=0):
         lines = post_package(prefetch_package(3))
 
-    assert sum(1 for line in lines if line["type"] == "event") == 6
+    assert sum(1 for line in lines if line["type"] == "event") == 6, lines[-1]
     assert not any(line["type"] == "error" for line in lines)
     assert lines[-1]["stats"]["inventoryComplete"] is True
 

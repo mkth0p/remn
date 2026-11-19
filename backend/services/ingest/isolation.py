@@ -129,7 +129,7 @@ def child_env(home: str | None = None) -> dict[str, str]:
     if home:
         env.update(HOME=home, TMPDIR=home, TEMP=home, TMP=home)
         if os.name == "nt":
-            env["USERPROFILE"] = home
+            env.update(USERPROFILE=home, APPDATA=home, LOCALAPPDATA=home)
     return env
 
 
