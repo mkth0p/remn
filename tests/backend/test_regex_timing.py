@@ -5,8 +5,8 @@ Python's `re` holds the interpreter lock for the whole match: one From display n
 kilobytes with no `@` in it stopped every request thread of the server for minutes. This harness
 feeds each pattern of the modules below (compiled at module level or written inline in a `re.` call)
 long runs of such characters. A linear pattern answers each input in a few milliseconds; the
-quadratic one took about ten seconds at this length. The bound is a full second of processor time,
-so a busy machine does not make the test fail.
+quadratic ones took six seconds and more at this length. The bound is a full second of processor
+time, so a busy machine does not make the test fail.
 """
 
 from __future__ import annotations
@@ -68,9 +68,8 @@ INPUTS = _adversarial()
 
 
 def test_the_harness_sees_the_patterns_that_read_a_display_name_and_a_rule_field():
-    seen = {p.pattern for _, p in PATTERNS}
-    assert any("@" in p for p in seen if p in {q.pattern for q in _patterns(lookalike)})
-    assert m365._EMAIL_RE.pattern in seen
+    assert any("@" in p.pattern for p in _patterns(lookalike))
+    assert m365._EMAIL_RE.pattern in {p.pattern for _, p in PATTERNS}
     assert len(INPUTS) > 200
 
 
