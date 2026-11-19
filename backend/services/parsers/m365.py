@@ -880,8 +880,8 @@ class _JsonStream:
     """The records of a JSON text read a piece at a time: the objects of an array, of a Graph
     page's "value" array, a lone object, or several such documents one after the other."""
 
-    def __init__(self, fh: io.TextIOBase) -> None:
-        self.fh, self.buf, self.pos, self.eof, self.count = fh, "", 0, False, 0
+    def __init__(self, fh: io.TextIOBase, stats: Any = None) -> None:
+        self.fh, self.stats, self.buf, self.pos, self.eof, self.count = fh, stats, "", 0, False, 0
 
     def _more(self) -> bool:
         if self.eof:
@@ -937,6 +937,8 @@ class _JsonStream:
             self.count += 1
             if isinstance(value, dict):
                 yield value
+            elif self.stats is not None:
+                self.stats.errors += 1  # an element that is not a record
             if self._peek() == ",":
                 self.pos += 1
                 continue
@@ -994,7 +996,7 @@ def _iter_json_objects(fh: io.TextIOBase, stats: Any = None) -> Iterator[Any]:
     except ValueError:
         lines = False  # the first line is not an object on its own: an indented document
     if not lines:
-        yield from _JsonStream(fh).records()
+        yield from _JsonStream(fh, stats).records()
         return
     while line := fh.readline(MAX_RECORD_CHARS + 1):
         if len(line) > MAX_RECORD_CHARS:
@@ -1013,11 +1015,12 @@ def _iter_json_objects(fh: io.TextIOBase, stats: Any = None) -> Iterator[Any]:
             if stats is not None:
                 stats.errors += 1
             continue
-        if isinstance(obj, dict):
-            if "value" in obj and isinstance(obj["value"], list):  # Graph page {"value": [...]}
-                yield from (x for x in obj["value"] if isinstance(x, dict))
-            else:
-                yield obj
+        items = obj["value"] if isinstance(obj, dict) and isinstance(obj.get("value"), list) else [obj]  # a Graph page {"value": [...]}
+        for x in items:
+            if isinstance(x, dict):
+                yield x
+            elif stats is not None:
+                stats.errors += 1  # a line or an element that is not a record
 
 
 # Graph audit log query records (auditLogRecord, Microsoft-Extractor-Suite Get-UALGraph) carry

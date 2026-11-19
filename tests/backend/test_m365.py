@@ -871,3 +871,13 @@ def test_records_past_the_ids_held_are_read_and_counted(tmp_path):
     assert [r["recordKey"] for r in rows] == [m365.record_key("ual", r["Id"]) for r in recs + recs[3:]]
     assert stats.duplicates == 3 and stats.repeats_unchecked == 4 and stats.to_dict()["repeatsUnchecked"] == 4
     assert m365.note(m365.counts(stats)) == "4 record(s) were read once the ids held to find repeats were full, and were not compared with one another"
+
+
+def test_an_element_that_is_not_a_record_is_counted():
+    from services.parsers.evtx_parser import Stats
+
+    signin = make_m365.entra_signins()[0]
+    for text, unread in ((json.dumps([signin, None, "x", 3]), 3), (json.dumps({"value": [signin, None]}), 1), (json.dumps(signin) + "\n[1, 2]\n", 1)):
+        stats = Stats()
+        rows = list(m365.iter_records(None, text.encode(), "entra-signin-json", stats=stats))
+        assert len(rows) == 1 and stats.errors == unread, text[-40:]
