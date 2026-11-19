@@ -141,6 +141,18 @@ and the report list it among where the build stops.
 
 ## Sessions, hops and what ran
 
+A host is keyed by its short name (`ws-004` for WS-004.northstar.example) while the case has one
+host of that name, and by its full name when its records name hosts of that short name in two
+domains or more (DC01.a.example and DC01.b.example): their sessions, processes, hops and stories
+stay apart, and a machine account's ticket is read in the domain of the domain controller that
+issued it. A record that names such a host without its domain (a logon's workstation reading
+DC01) is kept apart from all of them, since nothing says which it is, and an address is never
+given to that bare name. Each host says how it was keyed (`basis`): "keyed by its short name,
+ws-004: the only host of that name in the case (ws-004.northstar.example)", "keyed by its full
+name, dc01.a.example: the case names 2 hosts DC01 (dc01.a.example, dc01.b.example)", or, when
+no record gives its domain, "keyed by its short name, ws-004: no record gives its domain". The
+page shows it on the story's host.
+
 Host lineage reads, for each host:
 
 - **logon sessions**: a logon (4624) and its logoff (4634, 4647), keyed by host and logon id,
@@ -707,6 +719,9 @@ account on SCRANTON she enabled (one record names both).
 - An Entra device is matched to a host by name only: a device renamed, or one whose name two
   hosts of different domains share, is not joined; a device id is not read against the
   machine's own records.
+- A host's domain is read from the records that name it in full (the computer, a workstation, a
+  server's name). Two hosts of one short name whose records never give a domain are one host,
+  and a record that names one of two such hosts by its short name only joins neither.
 - A finding's measure is its rule's by rule id: a rule of your own that replaces a bundled rule
   of the same id is weighed by the bundled rule's measure unless the finding carries its own
   (`measured`), which the page does not send yet. Mail rules and Hayabusa's are not measured and

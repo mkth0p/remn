@@ -257,6 +257,8 @@ export interface Process {
 export interface HostCoverage {
   key: string
   name: string
+  /** why it is keyed as it is: its short name, or its full name when two hosts of the case share the short one */
+  basis?: string
   ips: string[]
   events: number
   first: number

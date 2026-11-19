@@ -1449,7 +1449,7 @@ export function StoriesView() {
                     </span>
                   ))}
                   {story.hosts.map((h) => (
-                    <span key={h} className="pill" onClick={() => setEntity({ kind: 'host', value: h })} title="a host of the story">
+                    <span key={h} className="pill" onClick={() => setEntity({ kind: 'host', value: h })} title={res?.hosts.find((x) => x.key === h)?.basis ?? 'a host of the story'}>
                       <IconHost /> {h}
                     </span>
                   ))}

@@ -266,7 +266,7 @@ def _title(row: dict[str, Any], source: str) -> str:
     return f"{row.get('description') or ('Event ' + str(eid)) if eid else (row.get('operation') or 'record')}"[:240]
 
 
-def _fold_key(row: dict[str, Any], source: str) -> str | None:
+def _fold_key(row: dict[str, Any], source: str, host: str = "") -> str | None:
     """Records that fold into one step when they repeat: logons, sign-ins, mailbox reads, share access."""
     if source == "mails":
         return None
@@ -277,7 +277,7 @@ def _fold_key(row: dict[str, Any], source: str) -> str | None:
         return None
     eid = _eid(row)
     if eid in _ROUTINE_EVENTS:
-        return f"host|{eid}|{host_key(row.get('computer'))}|{row.get('ipAddress') or ''}|{row.get('logonType') or ''}|{row.get('shareName') or ''}"
+        return f"host|{eid}|{host}|{row.get('ipAddress') or ''}|{row.get('logonType') or ''}|{row.get('shareName') or ''}"
     return None
 
 
@@ -490,8 +490,8 @@ def build_stories(
             flags[iid].append((_ts(row), ref, kind, how))
             ties[(iid, ref)] = (conf, how)
         if not people:
-            if kind == "start" and host_key(row.get("computer")):
-                nameless.append((_ts(row), ref, host_key(row.get("computer"))))
+            if kind == "start" and (host := case.lineage.host_key(row.get("computer"))):
+                nameless.append((_ts(row), ref, host))
             else:
                 unstoried[ref] = "names no person, and no host a story could follow"
     chain_of: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -933,7 +933,7 @@ class _Seats:
             self.starts[iid] = sorted(ts for ts, _, kind, _ in fl if kind == "start")
             for ts, ref, kind, _ in fl:
                 row, source = case.rows[ref]
-                host = host_key(row.get("computer"))
+                host = case.lineage.host_key(row.get("computer"))
                 if kind == "start" and source == "events" and host and not _is_cloud(row) and _eid(row) not in _ROUTINE_EVENTS:
                     self.hands[host].append((ts, iid))
         for lst in self.hands.values():
@@ -1274,7 +1274,7 @@ def _steps(case: _Case, members: _Members, attacker: set[str], max_steps: int) -
                 "tsEnd": _ts(row),
                 "count": 1,
                 "title": _title(row, source),
-                "host": host_key(row.get("computer")) or (dev["host"] if dev else None),
+                "host": lin.host_key(row.get("computer")) or (dev["host"] if dev else None),
                 "ip": ip_of(row.get("ipAddress")) or None,
                 "origin": "mail" if source == "mails" else "cloud" if _is_cloud(row) else "host",
                 "phase": phase,
@@ -1290,7 +1290,7 @@ def _steps(case: _Case, members: _Members, attacker: set[str], max_steps: int) -
                 # how common its program pair, logon path or outside domain is in the case
                 "rarity": case._rarity.of_step(case, ref, row, source, p),
                 "routine": not fs and m["tie"] != "flag" and _fold_key(row, source) is not None,
-                "_fold": _fold_key(row, source),
+                "_fold": _fold_key(row, source, lin.host_key(row.get("computer"))),
             }
         )
     raw.sort(key=lambda s: (s["ts"], s["id"]))
@@ -1606,7 +1606,7 @@ def _low_items(case: _Case) -> tuple[dict[str, list[_LowItem]], dict[str, list[_
         who = case.people(ref)
         for iid, conf, how in who:
             people[iid].append((_ts(row), ref, rules, tactics, conf, how))
-        host = host_key(row.get("computer"))
+        host = case.lineage.host_key(row.get("computer"))
         if not who and host:
             hosts[host].append((_ts(row), ref, rules, tactics, STRONG, ""))
     for lst in (*people.values(), *hosts.values()):
@@ -1713,10 +1713,10 @@ def _query_name(row: dict[str, Any]) -> str:
     return str(row.get("query") or data.get("QueryName") or row.get("destinationHostname") or "").strip().rstrip(".").lower()
 
 
-def _logon_source(row: dict[str, Any]) -> str:
+def _logon_source(lin: Lineage, row: dict[str, Any]) -> str:
     """Where a logon came from: the workstation it names, else its address; '' for a local one."""
-    src = host_key(row.get("workstation")) or ip_of(row.get("ipAddress"))
-    return "" if src == host_key(row.get("computer")) else src
+    src = lin.host_key(row.get("workstation")) or ip_of(row.get("ipAddress"))
+    return "" if src == lin.host_key(row.get("computer")) else src
 
 
 class _Rarity:
@@ -1741,11 +1741,11 @@ class _Rarity:
         dns_hosts: set[str] = set()
         self._domain: dict[str, str | None] = {}
         for ref, (row, source) in case.rows.items():
-            host = host_key(row.get("computer")) if source == "events" else ""
+            host = lin.host_key(row.get("computer")) if source == "events" else ""
             if not host:
                 continue
             if _eid(row) == 4624:
-                src = _logon_source(row)
+                src = _logon_source(lin, row)
                 for iid in case.named.get(ref, {}):
                     self.logged_on[host].add(iid)
                     if src:
@@ -1765,7 +1765,7 @@ class _Rarity:
                 "." not in name
                 or name.endswith((".arpa", ".local", ".lan", ".internal", ".localdomain", ".home"))
                 or bool(ip_of(name))
-                or host_key(name) in case.lineage.hosts
+                or case.lineage.host_key(name) in case.lineage.hosts
                 or any(same_org_domain(name, d) for d in case.internal)
             )
             self._domain[name] = None if inside else registrable(name) or name
@@ -1775,14 +1775,14 @@ class _Rarity:
         """{kind, value, seen, of, unit, text} for a program started, a logon or a domain looked up; None when the case has one host to compare."""
         if source != "events":
             return None
-        host = host_key(row.get("computer"))
+        host = case.lineage.host_key(row.get("computer"))
         if proc and _is_process_creation(row):
             parent, child = _program(proc.get("parentImage")), str(proc.get("name") or "").lower()
             seen = len(self.pairs.get((parent, child), ()))
             if parent and child and seen and self.proc_hosts > 1:
                 return _rare("process", f"{parent} → {child}", seen, self.proc_hosts, "hosts")
         if _eid(row) == 4624 and host:
-            src, of = _logon_source(row), len(self.logged_on.get(host, ()))
+            src, of = _logon_source(case.lineage, row), len(self.logged_on.get(host, ()))
             seen = len(self.logons.get((src, host), ())) if src else 0
             if seen and of > 1:
                 return _rare("logon", f"{src} → {host}", seen, of, f"accounts that log on to {host}")

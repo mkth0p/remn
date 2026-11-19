@@ -174,6 +174,82 @@ def _host_key(v: str) -> str:
     return s.rstrip("$").split(".", 1)[0]
 
 
+def _host_parts(v: Any) -> tuple[str, str]:
+    """(ws-004, northstar.example) for WS-004.northstar.example and WS-004.northstar.example$; (ws-004, '')
+    for WS-004 and \\\\WS-004; ('', '') for an address or localhost."""
+    short = host_key(v)
+    if not short:
+        return "", ""
+    s = str(v).strip().strip("\\").strip().lower().rstrip("$").rstrip(".")
+    return short, s.partition(".")[2]
+
+
+# the fields that name a host with its domain when the record gives one: its own name, the server
+# explicit credentials were used towards, a DHCP lease's host, a WMI caller
+_HOST_NAME_FIELDS = ("computer", "workstation", "targetServer")
+_HOST_NAME_DATA = ("TargetServerName", "Host Name", "ClientMachine")
+
+
+class HostNames:
+    """How a case's records name its hosts, and the key each host is read under.
+
+    A host is keyed by its short name (ws-004) while the case names one host of that name: the
+    records that give its domain and those that do not are then the same host. When the records
+    give two domains or more for one short name (DC01.a.example and DC01.b.example: two forests,
+    two clients of one case), each is keyed by its domain-qualified name, and a record that names
+    only DC01, with no domain of its own, is kept apart from both under the short name, since
+    nothing says which it is. `basis` says which it was for each host."""
+
+    def __init__(self, rows: Iterable[dict[str, Any]] = ()):
+        self.domains: dict[str, set[str]] = defaultdict(set)
+        for ev in rows:
+            d = _data(ev)
+            for v in [*(ev.get(f) for f in _HOST_NAME_FIELDS), *(d.get(f) for f in _HOST_NAME_DATA)]:
+                if v and isinstance(v, str) and "." in v:
+                    short, dom = _host_parts(v)
+                    if short and dom:
+                        self.domains[short].add(dom)
+        self._keys: dict[tuple[str, str], str] = {}
+
+    def key(self, v: Any, domain: Any = None) -> str:
+        """The host a name is, as this case reads it; `domain` is the DNS domain the same record gives
+        for a name written without one (a Kerberos ticket's realm for HOST$)."""
+        raw = v if isinstance(v, str) else str(v or "")
+        dom_hint = str(domain or "").strip().lower().strip(".")
+        hit = self._keys.get((raw, dom_hint))
+        if hit is not None:
+            return hit
+        short, dom = _host_parts(raw)
+        if short and len(self.domains.get(short, ())) > 1:
+            dom = dom or (dom_hint if "." in dom_hint else "")
+            out = f"{short}.{dom}" if dom else short
+        else:
+            out = short
+        if len(self._keys) < 65_536:
+            self._keys[(raw, dom_hint)] = out
+        return out
+
+    def shared(self, key: str) -> bool:
+        """A short name written without a domain that two hosts of the case or more go by: it names none of them."""
+        return "." not in key and len(self.domains.get(key, ())) > 1
+
+    def basis(self, key: str) -> str:
+        """Why a host is keyed as it is, in words."""
+        short, _, dom = key.partition(".")
+        doms = sorted(self.domains.get(short, ()))
+        names = ", ".join(f"{short}.{d}" for d in doms[:5]) + (" ..." if len(doms) > 5 else "")
+        if dom:
+            return f"keyed by its full name, {key}: the case names {len(doms)} hosts {short.upper()} ({names})"
+        if len(doms) > 1:
+            return (
+                f"named {short.upper()} without a domain, which {len(doms)} hosts of the case share ({names}): "
+                "kept apart from them, since nothing says which it is"
+            )
+        if doms:
+            return f"keyed by its short name, {short}: the only host of that name in the case ({names})"
+        return f"keyed by its short name, {short}: no record gives its domain"
+
+
 def ip_of(v: Any) -> str:
     return _ip_of(v if isinstance(v, str) else str(v or ""))
 
@@ -306,6 +382,8 @@ class Lineage:
     """Sessions, hops and process trees of the hosts in a set of events, and what each host's evidence covers."""
 
     def __init__(self) -> None:
+        # how the case's records name its hosts: the key each host is read under (build_lineage reads them)
+        self.names = HostNames()
         self.hosts: dict[str, dict[str, Any]] = {}
         self.sessions: dict[str, dict[str, Any]] = {}
         self.hops: dict[str, dict[str, Any]] = {}
@@ -333,6 +411,10 @@ class Lineage:
         # the sessions each service ticket was tied to, and how surely; each host's clock against the domain controllers'
         self._ticket_ties: dict[str, list[tuple[dict[str, Any], str]]] = defaultdict(list)
         self._clock: dict[str, dict[str, Any]] = {}
+
+    def host_key(self, v: Any, domain: Any = None) -> str:
+        """The key of the host a record names, as this case reads it (HostNames)."""
+        return self.names.key(v, domain)
 
     # lookups the story engine uses
     def session_at(self, host: str, lid: int | None, ts: int, user: Any = None) -> dict[str, Any] | None:
@@ -405,7 +487,7 @@ class Lineage:
 
     def device_of(self, row: dict[str, Any]) -> dict[str, Any] | None:
         """The Entra device a sign-in names, with the host of that name when the case has its logs."""
-        key = host_key(_data(row).get("deviceName"))
+        key = self.host_key(_data(row).get("deviceName"))
         return self.devices.get(key) if key else None
 
     def tree(self, proc_id: str, up: int = 6, down: int = 30) -> dict[str, Any]:
@@ -470,11 +552,12 @@ def _guid(v: Any) -> str:
 
 def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | None = None) -> Lineage:
     """Sessions, hops, process trees and coverage from the events of a case (or of a story's window)."""
-    lin = Lineage()
     rows = sorted(
         (e for e in events if e.get("computer") or e.get("eventId") or e.get("artifactType") == "dhcp" or _data(e).get("deviceName")),
         key=lambda e: (_ts(e), str(e.get("id") or "")),
     )
+    lin = Lineage()
+    lin.names = HostNames(rows)
     counts: dict[str, Counter] = defaultdict(Counter)
     names: dict[str, Counter] = defaultdict(Counter)
     spans: dict[str, list[int]] = {}
@@ -484,6 +567,9 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
     ip_spans: dict[tuple[str, str], list[int]] = {}
 
     def vote(ip: str, host: str, basis: str, ts: int) -> None:
+        # a name two hosts of the case go by, given without its domain, does not say which of them the address is
+        if lin.names.shared(host):
+            return
         ip_votes[ip][host] += 1
         ip_basis.setdefault((ip, host), basis)
         if ts:
@@ -500,7 +586,7 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
     tickets: list[dict[str, Any]] = []
     ntlm: list[dict[str, Any]] = []
     for ev in rows:
-        host = host_key(ev.get("computer"))
+        host = lin.host_key(ev.get("computer"))
         eid = _eid(ev)
         prov = _provider(ev)
         ts = _ts(ev)
@@ -541,7 +627,7 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
         elif eid == 4624:
             c["logons"] += 1
             logons.append(ev)
-            ip, ws = ip_of(ev.get("ipAddress")), host_key(ev.get("workstation"))
+            ip, ws = ip_of(ev.get("ipAddress")), lin.host_key(ev.get("workstation"))
             if ip and ws and ws != host:
                 vote(ip, ws, "a logon came from this address under that workstation name (4624)", ts)
         elif eid in (4634, 4647):
@@ -600,8 +686,8 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
         results = str(ev.get("queryResults") or _data(ev).get("QueryResults") or "")
         if not name or "type:" in results.lower() or name.startswith("_") or _is_ip(name):
             continue
-        target = host_key(name)
-        if not target or target in _NOT_A_HOST or (target not in counts and name.count(".") < 2):
+        target = lin.host_key(name)
+        if not target or target.split(".", 1)[0] in _NOT_A_HOST or (target not in counts and name.count(".") < 2):
             continue
         for entry in results.split(";"):
             ip = ip_of(entry)
@@ -611,19 +697,20 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
         d = _data(ev)
         if str(d.get("ID") or "").strip() not in _DHCP_LEASES:
             continue
-        ip, target = ip_of(ev.get("ipAddress") or d.get("IP Address")), host_key(ev.get("workstation") or d.get("Host Name"))
+        ip, target = ip_of(ev.get("ipAddress") or d.get("IP Address")), lin.host_key(ev.get("workstation") or d.get("Host Name"))
         if ip and target:
             vote(ip, target, "the DHCP server leased it to that host (its audit log)", _ts(ev))
     # the domain controller's tickets: a host's own account asks for its tickets from the host's
     # address, and explicit credentials used on a host (4648) ask for theirs from that host's, the
     # ticket carrying the logon GUID the 4648 names as its target's
-    asked = {g: host_key(ev.get("computer")) for ev in explicit if (g := _guid(_data(ev).get("TargetLogonGuid")))}
+    asked = {g: lin.host_key(ev.get("computer")) for ev in explicit if (g := _guid(_data(ev).get("TargetLogonGuid")))}
     for ev in tickets:
         ip = ip_of(ev.get("ipAddress"))
         if not ip or not is_internal_ip(ip) or not _granted(ev):
             continue
         name = str(ev.get("targetUser") or "").split("@", 1)[0].strip()
-        if name.endswith("$") and (own := host_key(name)):
+        # a domain controller issues tickets for the accounts of its own domain: a host's account is of the DC's
+        if name.endswith("$") and (own := lin.host_key(name, _host_parts(ev.get("computer"))[1])):
             vote(ip, own, "the domain controller gave the host's own account a Kerberos ticket there (4768, 4769)", _ts(ev))
         elif _eid(ev) == 4769 and (src := asked.get(_guid(ev.get("logonGuid")))):
             vote(ip, src, "explicit credentials used on the host asked for their Kerberos ticket from it (4648, 4769)", _ts(ev))
@@ -636,7 +723,7 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
 
     # sessions: a logon, its logoff, 4672 privileges, and its activity
     for ev in logons:
-        host, lid = host_key(ev.get("computer")), logon_id(ev.get("targetLogonId"))
+        host, lid = lin.host_key(ev.get("computer")), logon_id(ev.get("targetLogonId"))
         if not host or lid is None or lid in _SYSTEM_LOGONS:
             continue
         lt = _int(ev.get("logonType"))
@@ -686,13 +773,13 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
     for key in lin._by_key:
         lin._by_key[key].sort(key=lambda s: s["start"])
     for ev in logoffs:
-        host, lid = host_key(ev.get("computer")), logon_id(ev.get("targetLogonId"))
+        host, lid = lin.host_key(ev.get("computer")), logon_id(ev.get("targetLogonId"))
         s = lin.session_at(host, lid, _ts(ev), ev.get("targetUser"))
         if s and s["end"] is None and _ts(ev) >= s["start"]:
             s["end"], s["logoffRef"] = _ts(ev), ref_of(ev)
             lin._session_of_ref[s["logoffRef"]] = s["id"]
     for ev in specials:
-        host, lid = host_key(ev.get("computer")), logon_id(ev.get("subjectLogonId"))
+        host, lid = lin.host_key(ev.get("computer")), logon_id(ev.get("subjectLogonId"))
         s = lin.session_at(host, lid, _ts(ev), ev.get("subjectUser"))
         if s and abs(_ts(ev) - s["start"]) <= _SLACK:
             s["privileged"] = True
@@ -703,7 +790,7 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
             if other and other is not s and abs(other["start"] - s["start"]) <= _SLACK:
                 s["linked"] = other["id"]
     for ev, lid in activity:
-        host = host_key(ev.get("computer"))
+        host = lin.host_key(ev.get("computer"))
         s = lin.session_at(host, lid, _ts(ev), ev.get("subjectUser"))
         if s is None:
             # a session known only by its activity is kept for accounts people use, not for a
@@ -729,7 +816,7 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
     # RDP evidence outside 4624: reconnects and disconnects (4778, 4779), the session manager and
     # remote connection manager
     for ev in reconnects:
-        host = host_key(ev.get("computer"))
+        host = lin.host_key(ev.get("computer"))
         lid = logon_id(_data(ev).get("LogonID") or _data(ev).get("LogonId"))
         s = lin.session_at(host, lid, _ts(ev), ev.get("serviceAccount") or _data(ev).get("AccountName"))
         entry = {
@@ -758,7 +845,7 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
                 STRONG,
             )
     for ev in rdp_other:
-        host = host_key(ev.get("computer"))
+        host = lin.host_key(ev.get("computer"))
         ip = ip_of(ev.get("ipAddress"))
         eid = _eid(ev)
         if eid in (22, 23, 24) or not ip:
@@ -802,7 +889,7 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
     for ev in winrm:
         if _eid(ev) != 91:
             continue
-        host, ts = host_key(ev.get("computer")), _ts(ev)
+        host, ts = lin.host_key(ev.get("computer")), _ts(ev)
         near = [x for x in lin.sessions_near(host, ts - _RDP_MATCH, ts + _RDP_MATCH) if x["logonSeen"] and x["type"] in (3, 8)]
         if near:
             best = min(near, key=lambda x: abs(x["start"] - ts))
@@ -836,7 +923,7 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
             _session_hop(lin, s, kind, f"a network logon from it {', '.join(sorted(acts))}", MEDIUM if timed else STRONG)
     # an admin share opened without its logon in the evidence: the share record names the source
     for ev in shares:
-        host = host_key(ev.get("computer"))
+        host = lin.host_key(ev.get("computer"))
         what = remote_action(ev)
         if not what:
             continue
@@ -865,7 +952,7 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
         if lin._hops_of_ref.get(ref):
             # installed in a session that is already a way in (4697 names its logon id)
             continue
-        host = host_key(ev.get("computer"))
+        host = lin.host_key(ev.get("computer"))
         ts = _ts(ev)
         near = [h for h in admin_hops.get(host, []) if 0 <= ts - h["ts"] <= _SERVICE_AFTER_SHARE or h["ts"] <= ts <= h["tsEnd"] + _SERVICE_AFTER_SHARE]
         if not near:
@@ -886,8 +973,8 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
     # explicit credentials towards another host (4648): confirmed by the logon that carries their
     # target logon GUID, or that the ticket of that GUID led to (4769), else by a logon there from this host
     for ev in explicit:
-        src = host_key(ev.get("computer"))
-        dst = host_key(ev.get("targetServer") or _data(ev).get("TargetServerName"))
+        src = lin.host_key(ev.get("computer"))
+        dst = lin.host_key(ev.get("targetServer") or _data(ev).get("TargetServerName"))
         ts = _ts(ev)
         match, conf, ticket, how = _guid_logon(lin, _guid(_data(ev).get("TargetLogonGuid")), src, by_guid, ticket_of_guid)
         if match:
@@ -925,8 +1012,8 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
             continue
         port = _int(ev.get("destinationPort"))
         kind = _REMOTE_PORTS.get(port)
-        src = host_key(ev.get("computer"))
-        dst = host_key(ev.get("destinationHostname")) or lin.host_of_ip(ip_of(ev.get("destinationIp")), _ts(ev)) or ""
+        src = lin.host_key(ev.get("computer"))
+        dst = lin.host_key(ev.get("destinationHostname")) or lin.host_of_ip(ip_of(ev.get("destinationIp")), _ts(ev)) or ""
         if not kind or not dst or dst == src or dst not in counts:
             continue
         _hop(
@@ -947,7 +1034,7 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
     # remote execution named on the source: a command line, a script block or WinRM's own record
     # of the session it opened (6); strong when the logon on the target from this host follows
     for ev in remote_cmds + [e for e in winrm if _eid(e) == 6]:
-        src, ts = host_key(ev.get("computer")), _ts(ev)
+        src, ts = lin.host_key(ev.get("computer")), _ts(ev)
         if not src:
             continue
         user = ev.get("user") or _account(ev.get("subjectUser"), ev.get("subjectDomain")) or None
@@ -963,7 +1050,7 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
             if not value or value.startswith("$") or value in (".", "*"):
                 continue
             ip = ip_of(value)
-            dst = (lin.host_of_ip(ip, ts) or ip) if ip else host_key(value)
+            dst = (lin.host_of_ip(ip, ts) or ip) if ip else lin.host_key(value)
             if not dst or dst == src or (dst, kind) in seen:
                 continue
             seen.add((dst, kind))
@@ -988,7 +1075,7 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
     # a WMI call from another host that failed on this one (WMI-Activity 5858 names its client)
     for ev in wmi_failed:
         d = _data(ev)
-        dst, src = host_key(ev.get("computer")), host_key(d.get("ClientMachine"))
+        dst, src = lin.host_key(ev.get("computer")), lin.host_key(d.get("ClientMachine"))
         if dst and src and src != dst:
             _hop(
                 lin,
@@ -1014,6 +1101,8 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
         lin.hosts[host] = {
             "key": host,
             "name": name,
+            # why the host is keyed as it is: its short name, or its full name when the case has two of that name
+            "basis": lin.names.basis(host),
             "ips": sorted(ip for ip, v in lin.ip_hosts.items() if v["host"] == host),
             "events": c["events"],
             "first": span[0],
@@ -1049,7 +1138,7 @@ def build_lineage(events: Iterable[dict[str, Any]], settings: dict[str, Any] | N
     # the devices sign-ins come from: a device named like a host of the case is that host
     for ev in signins:
         d = _data(ev)
-        key = host_key(d.get("deviceName"))
+        key = lin.host_key(d.get("deviceName"))
         if not key:
             continue
         dev = lin.devices.setdefault(
@@ -1092,14 +1181,15 @@ def _int(v: Any) -> int:
 
 def _source(lin: Lineage, ip: str, workstation: str, host: str, ts: int | None = None) -> str | None:
     """The host a logon or connection came from, when the case names it or shows whose address it is."""
-    ws = host_key(workstation)
-    if ws and ws != host:
+    ws = lin.host_key(workstation)
+    # a workstation name two hosts of the case go by says less than an address the case attributes
+    if ws and ws != host and not lin.names.shared(ws):
         return ws
     if ip:
         h = lin.host_of_ip(ip, ts)
         if h and h != host:
             return h
-    return None
+    return ws if ws and ws != host else None
 
 
 def _unseen_session(lin: Lineage, host: str, lid: int, ev: dict[str, Any]) -> dict[str, Any]:
@@ -1327,10 +1417,10 @@ def _auth(lin: Lineage, s: dict[str, Any], ev: dict[str, Any], kind: str, confid
     a = {
         "kind": kind,
         "ref": ref,
-        "host": host_key(ev.get("computer")) or None,
+        "host": lin.host_key(ev.get("computer")) or None,
         "ts": _ts(ev),
         "ip": ip_of(ev.get("ipAddress")) or (ip_of(ws) if kind == "ntlm" else "") or None,
-        "workstation": ws if kind == "ntlm" and host_key(ws) else None,
+        "workstation": ws if kind == "ntlm" and lin.host_key(ws) else None,
         "service": str(ev.get("serviceName") or "").strip() or None if kind == "kerberos" else None,
         "confidence": confidence,
         "basis": basis,
@@ -1353,9 +1443,9 @@ def _ticket(lin: Lineage, s: dict[str, Any], ev: dict[str, Any], confidence: str
     if not _auth(lin, s, ev, "kerberos", confidence, basis):
         return
     lin._ticket_ties[ref_of(ev)].append((s, confidence))
-    dc = host_key(ev.get("computer")) or "the domain controller"
+    dc = lin.host_key(ev.get("computer")) or "the domain controller"
     if asker is not None:
-        src = host_key(asker.get("computer"))
+        src = lin.host_key(asker.get("computer"))
         _auth(lin, s, asker, "explicit-credentials", confidence, f"their logon GUID is the ticket's, which {dc} issued for this logon")
         _name_source(lin, s, src, f"explicit credentials used on {src} asked for the Kerberos ticket of this logon (4648, 4769)", confidence)
         return
@@ -1390,7 +1480,7 @@ def _authentications(
             asked.setdefault(g, ev)
     # explicit credentials whose target logon GUID is a logon's: they were used on its source
     for g, ev in asked.items():
-        src = host_key(ev.get("computer"))
+        src = lin.host_key(ev.get("computer"))
         for s in by_guid.get(g, []):
             if src and s["host"] != src:
                 _auth(lin, s, ev, "explicit-credentials", STRONG, "the same logon GUID")
@@ -1420,7 +1510,8 @@ def _authentications(
         if ref_of(ev) in tied:
             continue
         svc = str(ev.get("serviceName") or "").strip()
-        host, user, ip = host_key(svc) if svc.endswith("$") else "", _user_key(ev.get("targetUser")), ip_of(ev.get("ipAddress"))
+        own = lin.host_key(svc, _host_parts(ev.get("computer"))[1]) if svc.endswith("$") else ""
+        host, user, ip = own, _user_key(ev.get("targetUser")), ip_of(ev.get("ipAddress"))
         if not host or not user:
             continue
         t = _ts(ev) + skew.get(host, 0)
@@ -1442,7 +1533,7 @@ def _authentications(
         for x in by_guid.get(s.get("logonGuid") or "", []) or [s]:
             _ticket(lin, x, ev, MEDIUM, how, asked.get(_guid(ev.get("logonGuid"))))
     # NTLM: the domain controller (a host that issues tickets) or the logon's own host validated the account from a workstation
-    dcs = {host_key(ev.get("computer")) for ev in tickets}
+    dcs = {lin.host_key(ev.get("computer")) for ev in tickets}
     by_user: dict[str, list[tuple[int, dict[str, Any]]]] = defaultdict(list)
     for ev in ntlm:
         u, ws = _user_key(ev.get("targetUser")), str(ev.get("workstation") or "").strip()
@@ -1451,7 +1542,13 @@ def _authentications(
     for lst in by_user.values():
         lst.sort(key=lambda x: x[0])
     for s in lin.sessions.values():
-        if not s["logonSeen"] or s["type"] not in (3, 8) or s["from"] or host_key(s["workstation"]) or "kerberos" in str(s.get("authPackage") or "").lower():
+        if (
+            not s["logonSeen"]
+            or s["type"] not in (3, 8)
+            or s["from"]
+            or lin.host_key(s["workstation"])
+            or "kerberos" in str(s.get("authPackage") or "").lower()
+        ):
             continue
         lst = by_user.get(_user_key(s["user"]))
         if not lst:
@@ -1461,12 +1558,12 @@ def _authentications(
         near = []
         while i < len(lst) and lst[i][0] <= t + _SLACK:
             ev = lst[i][1]
-            if host_key(ev.get("computer")) in dcs or host_key(ev.get("computer")) == s["host"]:
+            if lin.host_key(ev.get("computer")) in dcs or lin.host_key(ev.get("computer")) == s["host"]:
                 near.append(ev)
             i += 1
         # the workstation a validation names, as a host when the case knows it (a name, or an address it attributes)
         client = {
-            id(ev): host_key(ev.get("workstation")) or lin.host_of_ip(ip_of(ev.get("workstation")), _ts(ev)) or ip_of(ev.get("workstation")) for ev in near
+            id(ev): lin.host_key(ev.get("workstation")) or lin.host_of_ip(ip_of(ev.get("workstation")), _ts(ev)) or ip_of(ev.get("workstation")) for ev in near
         }
         clients = set(client.values()) - {"", s["host"]}
         # validations from two workstations in that minute: which was this logon's is not known
@@ -1476,7 +1573,7 @@ def _authentications(
         _auth(lin, s, ev, "ntlm", MEDIUM, "by account and time")
         src = next(iter(clients))
         if not _is_ip(src):
-            dc = host_key(ev.get("computer")) or "the domain controller"
+            dc = lin.host_key(ev.get("computer")) or "the domain controller"
             _name_source(lin, s, src, f"{dc}'s NTLM validation of the account from {ev.get('workstation')} a moment before (4776), by account and time", MEDIUM)
     return by_guid, ticket_of_guid
 
@@ -1497,7 +1594,7 @@ def _guid_logon(
         return None, MEDIUM, None, ""
     for s, conf in lin._ticket_ties.get(ref_of(ticket), []):
         if s["host"] != src:
-            dc = host_key(ticket.get("computer")) or "the domain controller"
+            dc = lin.host_key(ticket.get("computer")) or "the domain controller"
             return s, conf, ticket, f", and the Kerberos ticket {dc} issued for them ({ticket.get('serviceName') or '?'}, 4769) led to the logon there"
     return None, MEDIUM, None, ""
 
@@ -1596,7 +1693,7 @@ def _hop(
             if session and not h.get("session"):
                 h["session"] = session["id"]
             return h
-    ip_basis = lin.ip_hosts.get(ip, {}).get("basis") if ip and src_host and not host_key(workstation) and not from_host else None
+    ip_basis = lin.ip_hosts.get(ip, {}).get("basis") if ip and src_host and not lin.host_key(workstation) and not from_host else None
     h = {
         "id": _hid("hop", kind, src_host or ip, to, account.lower(), ts),
         "kind": kind,
@@ -1638,7 +1735,7 @@ def _processes(lin: Lineage, sysmon1: list[dict[str, Any]], procs4688: list[dict
             _add_activity(lin, s, ev, p.get("parentImage"))
 
     for ev in sysmon1:
-        host, guid = host_key(ev.get("computer")), _guid(ev.get("processGuid"))
+        host, guid = lin.host_key(ev.get("computer")), _guid(ev.get("processGuid"))
         if not host:
             continue
         pid = _pid(ev.get("callerProcessId") or _data(ev).get("ProcessId"))
@@ -1676,7 +1773,7 @@ def _processes(lin: Lineage, sysmon1: list[dict[str, Any]], procs4688: list[dict
         if p["parentGuid"] and p["parentGuid"] in lin._process_of_guid:
             p["parent"] = lin._process_of_guid[p["parentGuid"]]
     for ev in procs4688:
-        host = host_key(ev.get("computer"))
+        host = lin.host_key(ev.get("computer"))
         pid, creator, ts = _pid(ev.get("newProcessId")), _pid(ev.get("callerProcessId")), _ts(ev)
         if not host or pid is None:
             continue
