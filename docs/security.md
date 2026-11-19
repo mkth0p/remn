@@ -60,6 +60,18 @@ pack importer download from their sources on request, never during an investigat
 - Parsed content is treated as hostile: React escaping, HTML previews in a sandboxed
   iframe with DOMPurify, images blocked, links disabled and defanged. Attachments are
   analysed statically, never opened or executed.
+- The regular expressions that read evidence take a time that grows with the length of the
+  text, not with its square: a pattern that backtracks would let one crafted field hold a
+  server worker or the browser for minutes. `tests/backend/test_regex_timing.py` and
+  `frontend/src/test/regexTiming.test.ts` find every pattern the code writes, and the `re`
+  patterns of the bundled rules, build hostile text from the parts of each pattern that
+  repeat, and fail on a pattern that runs past its budget at 100,000 characters, naming it
+  and its file. A pattern that reads no evidence, or whose caller limits the text it
+  searches, is listed in the test with the reason. The store runs a rule's `re` pattern
+  with RE2, which does not backtrack. The browser engine does: seven bundled rules and some
+  converted community rules keep a pattern that a crafted value of that length slows down,
+  in the rules worker rather than the page, because no rewrite that RE2 also accepts keeps
+  what they match.
 - The browser application carries a Content Security Policy (no inline script, scripts
   and workers from the app origin only, WebAssembly allowed for hashing, frames only for
   the sandboxed mail and report documents, no object or base tags) as a `<meta>` tag in
