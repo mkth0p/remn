@@ -19,6 +19,7 @@ from django.http import HttpRequest, JsonResponse, StreamingHttpResponse
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from api.jobs import Job, manager
+from api.params import BadParameter, whole_number
 from api.views.upload import discard_upload, get_upload
 from services.analysis import hayabusa
 from services.common import ndjson_line
@@ -417,7 +418,7 @@ def _query(request: HttpRequest, key: str, fn):
     body = _json(request) if request.method == "POST" else {}
     try:
         return JsonResponse(fn(st, body), safe=False)
-    except FilterError as exc:
+    except (FilterError, BadParameter) as exc:
         return JsonResponse({"error": str(exc)}, status=400)
     except Exception as exc:  # noqa: BLE001
         log.exception("store query failed")
@@ -433,8 +434,8 @@ def search(request: HttpRequest, key: str):
             st,
             str(b.get("source") or "events"),
             b.get("filter"),
-            int(b.get("limit") or 2000),
-            int(b.get("offset") or 0),
+            whole_number(b.get("limit"), "limit", 2000),
+            whole_number(b.get("offset"), "offset", 0, minimum=0),
             b.get("sort"),
             b.get("settings"),
             bool(b.get("full")),
@@ -453,7 +454,12 @@ def aggregate(request: HttpRequest, key: str):
         request,
         key,
         lambda st, b: Q.aggregate(
-            st, str(b.get("source") or "events"), b.get("filter"), str(b.get("field") or "eventId"), int(b.get("limit") or 25), b.get("settings")
+            st,
+            str(b.get("source") or "events"),
+            b.get("filter"),
+            str(b.get("field") or "eventId"),
+            whole_number(b.get("limit"), "limit", 25),
+            b.get("settings"),
         ),
     )
 
@@ -464,7 +470,7 @@ def stack(request: HttpRequest, key: str):
         request,
         key,
         lambda st, b: Q.stack(
-            st, b.get("filter"), str(b.get("field") or "image"), str(b.get("order") or "rare"), int(b.get("limit") or 500), b.get("settings")
+            st, b.get("filter"), str(b.get("field") or "image"), str(b.get("order") or "rare"), whole_number(b.get("limit"), "limit", 500), b.get("settings")
         ),
     )
 
@@ -482,10 +488,9 @@ def facets(request: HttpRequest, key: str):
     if err:
         return err
     try:
-        return JsonResponse(
-            Q.facets(st, request.GET.get("source", "events"), request.GET.get("field", "eventId"), int(request.GET.get("limit", "50"))), safe=False
-        )
-    except FilterError as exc:
+        limit = whole_number(request.GET.get("limit"), "limit", 50)
+        return JsonResponse(Q.facets(st, request.GET.get("source", "events"), request.GET.get("field", "eventId"), limit), safe=False)
+    except (FilterError, BadParameter) as exc:
         return JsonResponse({"error": str(exc)}, status=400)
 
 
@@ -514,6 +519,11 @@ def iocs(request: HttpRequest, key: str):
     if err:
         return err
     g = request.GET
+    try:
+        limit = whole_number(g.get("limit"), "limit", 500)
+        offset = whole_number(g.get("offset"), "offset", 0, minimum=0)
+    except BadParameter as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
     return JsonResponse(
         Q.list_iocs(
             st,
@@ -521,8 +531,8 @@ def iocs(request: HttpRequest, key: str):
             g.get("q") or None,
             g.get("bad") in ("1", "true"),
             g.get("unchecked") in ("1", "true"),
-            int(g.get("limit", "500")),
-            int(g.get("offset", "0")),
+            limit,
+            offset,
             g.get("sort", "verdict"),
         )
     )
@@ -542,7 +552,7 @@ def reputation(request: HttpRequest, key: str):
 
 @require_POST
 def sql(request: HttpRequest, key: str):
-    return _query(request, key, lambda st, b: Q.run_sql(st, str(b.get("sql") or ""), int(b.get("limit") or 200)))
+    return _query(request, key, lambda st, b: Q.run_sql(st, str(b.get("sql") or ""), whole_number(b.get("limit"), "limit", 200)))
 
 
 @require_GET

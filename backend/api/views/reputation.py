@@ -5,6 +5,7 @@ import json
 from django.http import HttpRequest, JsonResponse
 from django.views.decorators.http import require_GET, require_POST
 
+from api.params import BadParameter, seconds
 from services.reputation.base import KINDS, registry, summarize
 
 MAX_ITEMS = 200
@@ -37,5 +38,9 @@ def lookup(request: HttpRequest):
     wanted = body.get("providers")
     if wanted is not None and not isinstance(wanted, list):
         return JsonResponse({"error": "providers must be a list"}, status=400)
-    results = registry.lookup(items, providers=[str(p) for p in wanted] if wanted else None, deadline=float(body.get("deadline") or 60))
+    try:
+        deadline = seconds(body.get("deadline"), "deadline", 60)
+    except BadParameter as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    results = registry.lookup(items, providers=[str(p) for p in wanted] if wanted else None, deadline=deadline)
     return JsonResponse({"results": results, "summary": summarize(results)})

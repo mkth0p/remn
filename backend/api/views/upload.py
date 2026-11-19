@@ -21,6 +21,8 @@ from django.conf import settings
 from django.http import HttpRequest, JsonResponse
 from django.views.decorators.http import require_http_methods, require_POST
 
+from api.params import BadParameter, whole_number
+
 log = logging.getLogger(__name__)
 _ID = re.compile(r"^[a-f0-9]{32}$")
 MAX_CHUNK = 64 * 1024 * 1024
@@ -175,7 +177,10 @@ def init(request: HttpRequest):
     except ValueError:
         return JsonResponse({"error": "invalid JSON"}, status=400)
     name = str(body.get("name") or "upload")[:255]
-    size = int(body.get("size") or 0)
+    try:
+        size = whole_number(body.get("size"), "size", 0)
+    except BadParameter as exc:
+        return JsonResponse({"error": f"{exc} of bytes"}, status=400)
     limit = settings.FORENSIC_MAX_CHUNKED_GB * 1024**3
     if settings.FORENSIC_BROWSER_ONLY:
         # An instance open to strangers stages the same ceiling it accepts in one request, rather
