@@ -146,7 +146,7 @@ timings), `ai_repro.py` (replay of a model turn).
 
 | set | what | drop in as | source |
 |---|---|---|---|
-| EVTX-ATTACK-SAMPLES | about 200 small .evtx files, one attack technique each, GPL-3.0 | the zip, or any .evtx | github.com/sbousseaden/EVTX-ATTACK-SAMPLES |
+| EVTX-ATTACK-SAMPLES | 278 small .evtx files at the commit measured, one attack technique each, GPL-3.0 | the zip, or any .evtx | github.com/sbousseaden/EVTX-ATTACK-SAMPLES |
 | EVTX-to-MITRE-Attack | 270+ samples, Security, Sysmon, PowerShell | the repository zip | github.com/mdecrevoisier/EVTX-to-MITRE-Attack |
 | Splunk attack_data, Windows | about 750 attack-range recordings (Sysmon, Security, PowerShell), labelled with ATT&CK techniques, as XmlWinEventLog; Git LFS files | the `.log` files (event records as XML) | github.com/splunk/attack_data |
 | hayabusa-sample-evtx | the two sets above plus DeepBlueCLI samples | the repository zip | github.com/Yamato-Security/hayabusa-sample-evtx |

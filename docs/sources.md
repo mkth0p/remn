@@ -136,7 +136,7 @@ touched: `data.InternetMessageId` keeps those ids (the first 1,000; beyond that
 `messageId`. An audit record opens the messages it names in the mailbox evidence, and a
 message opens the audit records that name it.
 
-`rules/m365/bec.yaml` ships 28 rules for this data: inbox rules that forward or hide
+`rules/m365/bec.yaml` ships 29 rules for this data: inbox rules that forward or hide
 mail, mailbox and transport-rule forwarding, delegate permissions, MailItemsAccessed
 bursts and delegate syncs, OAuth consent, privileged role assignment, MFA and
 security-info changes, conditional-access and audit tampering, legacy protocols,

@@ -20,11 +20,12 @@ the server parses each file and keeps none of it.
 - **Import investigation packages** with mixed mail, EVTX and structured host exports,
   member hashes and explicit coverage; explore the relationship graph of records tied
   across source files through shared digests, files, processes, URLs and accounts.
-- **Detect** with a YAML rule catalogue (Windows, mail, Microsoft 365) plus the SigmaHQ
-  and Sublime Security community packs, two rule engines (browser and SQL) kept in
-  parity, and a calibrated mail risk score measured on public phishing corpora. Every
-  event rule is measured on recorded attacks and on clean machines, so a finding says
-  whether its rule has been shown to detect what it looks for, or is a lead.
+- **Detect** with a YAML rule catalogue (Windows, mail, Microsoft 365) plus community
+  packs converted from SigmaHQ's Windows rules and from 189 of Sublime Security's 1,227
+  mail rules, two rule engines (browser and SQL) whose findings CI compares key by key,
+  and a mail risk score tuned on public phishing and legitimate mail. Event rules are
+  measured on recorded attacks and on clean machines, so a finding says whether its rule
+  has been seen to detect what it looks for, is a lead, or has no measure yet.
 - **Read the case as stories**: one per person or host incident, read along ATT&CK's
   phases, each step saying why it belongs and how surely; the forms one account goes by
   joined with a confidence per join, logon sessions, RDP, admin-share, WMI and WinRM hops

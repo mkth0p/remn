@@ -24,8 +24,8 @@ finding whose key survives are kept, and orphan pruning leaves them alone.
 Findings come from three places: the rules bundled with REMN (Windows, mail, Microsoft
 365), the community rule packs converted from SigmaHQ and Sublime Security, and the mail
 risk score computed at ingest. All rules are written in one YAML language and run on two
-engines that are held to identical output: one in the browser, so evidence never has to
-reach the server, and one in SQL, for gigabyte cases. This page describes the language,
+engines whose findings continuous integration compares key by key: one in the browser, so
+evidence never has to reach the server, and one in SQL, for gigabyte cases. This page describes the language,
 the rule sets, the scoring, the sender baseline that enriches mails after ingest, and
 the parity between the engines.
 
@@ -56,11 +56,12 @@ time: { outside_business_hours: true, weekend: true }   # uses case settings
 exclude: { targetUser|in_setting: service_accounts }
 ```
 
-On the server store a run keeps at most 2,000 findings per rule (the browser engine keeps
-them all). Past that, a rule with a threshold of two or more keeps its largest groups (the
-bursts it counts), and any other grouped rule its rarest (the values a hunt is after); the
-Rules view marks the rule "cut short", with the count as `2000+`, and the run says how many
-rules were cut. A `then` follow-up is checked for every finding the rule keeps.
+On the server store a run keeps at most 2,000 findings per rule. Past that, a rule with a
+threshold of two or more keeps its largest groups (the bursts it counts), and any other
+grouped rule its rarest (the values a hunt is after); the Rules view marks the rule "cut
+short", with the count as `2000+`, and the run says how many rules were cut. The browser
+engine also stops a rule at 2,000 findings (or at the rule's `max_findings`, which the SQL
+engine does not read), keeping the first it reaches, and does not say that it stopped. A `then` follow-up is checked for every finding the rule keeps.
 
 Operators: `eq ne in nin contains not_contains contains_any contains_all startswith
 not_startswith endswith not_endswith re not_re gt gte lt lte exists empty in_setting
@@ -90,7 +91,7 @@ maintains: brute force and password spraying, out-of-hours logons, RDP from outs
 PsExec and admin shares, persistence, log clearing, Defender tampering, PowerShell
 cradles and credential dumping on the Windows side; display-name spoofing, lookalike
 domains, macro, PDF and HTML-smuggling attachments, the BEC lexicon, forged headers,
-score bands and the sender-baseline rules on the mail side; and the 28 business email
+score bands and the sender-baseline rules on the mail side; and the 29 business email
 compromise rules over Microsoft 365 and Entra rows listed on the [data sources
 page](sources.md). Every rule carries MITRE ATT&CK technique ids, as of ATT&CK v19 (April
 2026), which split Defense Evasion into Stealth and Defense Impairment and moved Impair
@@ -219,7 +220,11 @@ upstream repository, the exact commit, the licence and the counts, the upstream
 `LICENSE` verbatim, and `skipped.json` naming every upstream rule that was not converted
 and why. A rule is skipped rather than weakened: `fieldref`, `expand` and the time-part
 modifiers, any modifier outside the Sigma 2.1 list, `file_access` sources, Sublime ML
-classifiers, `file.explode`, link analysis, and so on. What translates exactly is
+classifiers, `file.explode`, link analysis, and so on. Two translations are looser than
+the original and are not reported on the rule: a Sigma `|re` regex matches without regard
+to case, and a Sublime `any()` with several conditions on one collection (attachments,
+links) matches when each condition holds for some member rather than all of them for the
+same one; both make a rule match more, never less. What translates exactly is
 translated: `base64`, `base64offset` and `utf16`/`wide` values become the literal strings
 the encoded value can appear as (all three alignments), matched case-sensitively; `neq`
 becomes a negated equality; `cased` selects the case-sensitive operators; the regex flags
