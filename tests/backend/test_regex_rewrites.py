@@ -378,7 +378,7 @@ def test_a_repaired_event_record_is_as_before():
     before = re.compile(r"(<Data(?:\s[^>]*)?(?<!/)>)(.*?)(</Data>)", re.S)
 
     def repaired_before(text: str) -> str:
-        text = evtx_parser._XML_AMP.sub("&amp;", evtx_parser._XML_INVALID.sub("�", text))
+        text = evtx_parser._XML_AMP.sub("&amp;", evtx_parser._XML_INVALID.sub("\ufffd", text))
         return before.sub(lambda m: m.group(1) + m.group(2).replace("<", "&lt;").replace(">", "&gt;") + m.group(3), text)
 
     rng = random.Random("data")
@@ -390,7 +390,7 @@ def test_a_repaired_event_record_is_as_before():
 def test_an_event_export_head_is_recognised_as_before():
     for head in [
         "<Events><Event xmlns='http://schemas.microsoft.com/win/2004/08/events/event'>",
-        "﻿<?xml version='1.0' encoding='utf-8'?>\n<Events>\n",
+        "\ufeff<?xml version='1.0' encoding='utf-8'?>\n<Events>\n",
         "<?xml version='1.0'?><!-- exported by an invented tool --><!-- second --><Event>",
         "<!--\nmulti\nline - comment\n-->\n  <Events>",
         "<!-- a --->\n<Event>",
