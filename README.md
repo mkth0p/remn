@@ -47,26 +47,50 @@ the server parses each file and keeps none of it.
 
 ## Quick start
 
-Requires Python 3.13, Node 22, and optionally a local model for the AI features:
-[Ollama](https://ollama.com), or LM Studio, a llama.cpp server, vLLM or Jan through their
-OpenAI-compatible API.
+Requires git, Python 3.13 and Node 22 or later with npm. The AI features are optional and
+need a local model ([Ollama](https://ollama.com), or LM Studio, a llama.cpp server, vLLM
+or Jan through their OpenAI-compatible API) or a Claude Code sign-in.
+
+Linux and macOS:
 
 ```
-python -m venv .venv
-.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
+git clone https://github.com/mkth0p/remn.git
+cd remn
+python3.13 -m venv .venv
+.venv/bin/python -m pip install -r backend/requirements.txt
 cd frontend && npm ci && npm run build && cd ..
+.venv/bin/python backend/run.py
+```
+
+Windows, in PowerShell or the Command Prompt:
+
+```
+git clone https://github.com/mkth0p/remn.git
+cd remn
+py -3.13 -m venv .venv
+.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
+cd frontend
+npm ci
+npm run build
+cd ..
 .venv\Scripts\python.exe backend\run.py
 ```
 
-Open http://127.0.0.1:8000, create a case, drop files, or press "open the demo case" to
-see the synthetic lab already read. That lab, with linked mail, Windows and Microsoft 365
-activity, comes with the repository:
+Open http://127.0.0.1:8000, then press "Open demo case" to see a synthetic lab already
+read, with linked mail, Windows and Microsoft 365 activity, or create a case and drop
+files. The demo case is a bundle in the repository and needs nothing uploaded. The lab's
+evidence files themselves are written by a generator, for importing as a case:
 
 ```
-.venv\Scripts\python.exe samples\synthetic\make_linked_lab.py --out samples\generated\lab
+.venv/bin/python samples/synthetic/make_linked_lab.py --quick-only --out samples/generated/lab
 ```
 
-With Docker instead: `docker compose up --build`, then the same address.
+(`.venv\Scripts\python.exe samples\synthetic\make_linked_lab.py --quick-only --out samples\generated\lab`
+on Windows; without `--quick-only` a large pack of a million events follows the small one.)
+
+With Docker instead, after the clone: `docker compose up --build`, then the same address.
+The image also carries the Hayabusa engine, which the build downloads from GitHub
+([docs/setup.md](docs/setup.md#docker)).
 
 For development, run the API with `manage.py runserver` and the frontend with
 `npm run dev`; see [docs/setup.md](docs/setup.md).
