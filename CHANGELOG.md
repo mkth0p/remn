@@ -50,6 +50,22 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   medium and higher finding raised and nothing else, and the default gives 92 lines per clean
   machine against 241. Findings an analyst decided on stay on their own. Cases started before keep
   every finding on its own until their level is set ([detection level](docs/detection.md#detection-level)).
+- Host collections no longer give wrong or empty output without saying so. A JSON export is read a
+  record at a time to the 4 GiB member ceiling instead of yielding nothing past 64 MiB, and
+  records that cannot be read are counted on the member. Eric Zimmerman tool output is recognised
+  by its header wherever it sits, and a file the parser does not recognise is reported as such.
+  Velociraptor event rows are dated from their epoch seconds or EventTime and their EventData is
+  mapped. Numeric dates are read day-first or month-first as the file's own dates show; a date
+  that stays ambiguous is left untimed and counted, never guessed. An event's unnamed Data is kept
+  to 64 KiB in `message`, on the server and in the browser. A panic in the EVTX decoder keeps the
+  rows read and says the file was cut. A hive decode stopped at a limit keeps the keys it read,
+  and hives up to 4 GiB are accepted. A drive layout is recognised past the 20,000-entry
+  inventory. Event logs past the Hayabusa hold are named on their member and counted in the engine
+  summary (`notScanned`). Hayabusa is given the .evtx files inside an archive instead of the
+  archive, and is not run on XML or cloud exports. PST items libpff refuses become counted error
+  rows. A cut mail body, attachments past 60 and PST attachments over 60 MiB are flagged
+  (`body_truncated`, `attachments_truncated`, `not_read`), and the attachment count is the real
+  one. A Sigma `ProcessId` in a process creation rule reads the new process's id.
 - The priority of a finding divides by 1 + ln n when its rule raised n findings on the same host
   or for the same user, so one loud rule no longer fills the top of the queue. The first finding of
   an attack reached the top ten in 38% of EVTX-to-MITRE-Attack recordings and 76% of
