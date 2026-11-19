@@ -278,3 +278,34 @@ def test_lsass_opened_with_the_right_to_read_its_memory_is_reported_whatever_els
     ]
     found = fired(store, "win-lsass-memory-access", rows)
     assert sorted(f["entities"]["sourceImage"] for f in found) == [r"C:\Users\Public\a.exe", r"C:\Users\Public\b.exe"]
+
+
+def process_created(parent: str, child: str, command: str) -> dict:
+    return event(4688, {"SubjectUserName": "j.doe", "ParentProcessName": parent, "NewProcessName": child, "CommandLine": command}, computer="WS01.corp.example")
+
+
+def test_an_updater_or_an_editor_named_like_a_document_reader_does_not_raise_the_office_rule(store):
+    rows = [
+        # a reader's update service starting a console host, and an editor whose name holds "notepad"
+        process_created(
+            r"C:\Program Files (x86)\Example Software\Example PDF Reader\FoxitPDFReaderUpdateService.exe",
+            r"C:\Windows\System32\conhost.exe",
+            r"\??\C:\Windows\system32\conhost.exe 0xffffffff -ForceV1",
+        ),
+        process_created(r"C:\Windows\System32\notepad.exe", r"C:\Windows\System32\cmd.exe", "cmd.exe /c whoami"),
+        # Outlook opening a folder, a chat client starting its updater
+        process_created(r"C:\Program Files\Microsoft Office\root\Office16\OUTLOOK.EXE", r"C:\Windows\explorer.exe", r"explorer.exe C:\Users\j.doe\Documents"),
+        process_created(r"C:\Program Files\WindowsApps\MicrosoftTeams_1.0_x64__8wekyb3d8bbwe\msteams.exe", r"C:\Windows\System32\cmd.exe", "cmd.exe /c ver"),
+    ]
+    assert fired(store, "win-office-spawns-shell", rows) == []
+
+
+def test_a_document_reader_spawning_a_shell_or_a_script_host_is_reported_as_high(store):
+    rows = [
+        process_created(r"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE", r"C:\Windows\System32\cmd.exe", "cmd.exe /c cscript.exe x.vbs"),
+        process_created(
+            r"C:\Program Files\Adobe\Acrobat DC\Acrobat\AcroRd32.exe", r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", "powershell -nop -c x"
+        ),
+    ]
+    found = fired(store, "win-office-spawns-shell", rows)
+    assert len(found) == 2 and {f["severity"] for f in found} == {"high"}

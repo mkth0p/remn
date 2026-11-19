@@ -1101,7 +1101,7 @@
     "count": 1,
     "escalation": null,
     "key": "win-office-spawns-shell|84",
-    "severity": "critical"
+    "severity": "high"
    }
   ],
   "win-packet-capture-tool": [
