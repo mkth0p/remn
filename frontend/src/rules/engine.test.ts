@@ -167,6 +167,30 @@ describe('validateRule', () => {
     expect(validateRule({ id: 'a', title: 't', severity: 'low', source: 'events', where: { 'x|re': '(' } }).ok).toBe(false)
     expect(validateRule({ id: 'a', title: 't', severity: 'low', source: 'events', threshold: 'lots' }).ok).toBe(false)
   })
+  it('refuses a rule asking for something no engine does rather than running it without it', () => {
+    const base = { id: 'a', title: 't', severity: 'low', source: 'events', where: { eventId: 4625 } }
+    const follow = { where: { eventId: 4624 }, join: ['targetUser'], within: '5m', severity: 'high' }
+    const err = (r: object) => {
+      const v = validateRule({ ...base, ...r })
+      return v.ok ? null : v.error
+    }
+    // one finding per row: a follow-up, a window, a distinct count or a group condition has nothing to act on
+    expect(err({ then: follow })).toMatch(/then need group_by or threshold/)
+    expect(err({ window: '5m' })).toMatch(/window need group_by or threshold/)
+    expect(err({ distinct: 'ipAddress' })).toMatch(/distinct need group_by or threshold/)
+    expect(err({ any_in_group: { eventId: 4624 } })).toMatch(/any_in_group need group_by or threshold/)
+    expect(err({ group_by: ['targetUser'], then: { severity: 'high' } })).toMatch(/then needs a where/)
+    // events carry no flags to escalate on
+    expect(err({ then_flags: [{ reply_to_mismatch: 'high' }] })).toMatch(/mail rules only/)
+    expect(err({ group_by: ['targetUser'], then: follow })).toBeNull()
+    expect(err({ threshold: '>= 3', window: '5m', distinct: 'ipAddress' })).toBeNull()
+    expect(err({ source: 'mails', where: { 'risk|gte': 50 }, then_flags: [{ reply_to_mismatch: 'high' }] })).toBeNull()
+  })
+  it('checks the regexes of a follow-up and of a group condition too', () => {
+    const base = { id: 'a', title: 't', severity: 'low', source: 'events', where: { eventId: 4625 }, group_by: ['targetUser'] }
+    expect(validateRule({ ...base, then: { where: { 'commandLine|re': '(' } } }).ok).toBe(false)
+    expect(validateRule({ ...base, any_in_group: { 'commandLine|re_cs': '[' } }).ok).toBe(false)
+  })
 })
 
 describe('applicability', () => {

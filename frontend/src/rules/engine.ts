@@ -603,6 +603,14 @@ export function validateRule(r: unknown): { ok: true; rule: Rule } | { ok: false
   }
   if (rule.threshold != null && !parseThreshold(rule.threshold)) return { ok: false, error: `${rule.id}: invalid threshold` }
   if (rule.window && !parseDuration(rule.window)) return { ok: false, error: `${rule.id}: invalid window` }
+  // a key the engines would skip without a word is refused, so the author learns the rule does less than it says
+  // (mirrors rule_problem in backend/services/store/rules.py)
+  if (!rule.group_by?.length && !parseThreshold(rule.threshold)) {
+    const unused = (['then', 'window', 'distinct', 'any_in_group'] as const).filter((k) => rule[k])
+    if (unused.length) return { ok: false, error: `${rule.id}: ${unused.join(', ')} need group_by or threshold: without them the rule gives one finding per row` }
+  }
+  if (rule.then != null && !rule.then.where) return { ok: false, error: `${rule.id}: then needs a where: the follow-up to look for` }
+  if (rule.then_flags?.length && rule.source !== 'mails') return { ok: false, error: `${rule.id}: then_flags applies to mail rules only: events carry no flags` }
   // regex sanity
   const walk = (c: RuleCond | undefined) => {
     if (!c) return
@@ -616,6 +624,8 @@ export function validateRule(r: unknown): { ok: true; rule: Rule } | { ok: false
   try {
     walk(rule.where)
     walk(rule.exclude)
+    walk(rule.then?.where)
+    walk(rule.any_in_group)
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }

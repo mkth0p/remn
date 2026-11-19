@@ -79,7 +79,34 @@ define none of that name. Today that is `tranco_10k`, the top 10,000 of the
 [Tranco](https://tranco-list.eu) ranking (list id and fetch date in
 `backend/services/reference/tranco.json`; Le Pochat et al., NDSS 2019). A case setting
 named `tranco_10k` overrides it; `tools/import_community_rules.py tranco --download`
-refreshes it.
+refreshes it. An empty setting has no members, so `nin_setting` is true on every row until
+the setting is filled: a rule whose only guard is `nin_setting` should also carry
+`require_setting`.
+
+Other keys a rule may carry:
+
+- `any_in_group`: a condition that at least one row of a group must meet for the group to
+  become a finding (grouped rules only).
+- `then_flags`: on a mail rule, a list of `flag: severity` pairs; a finding whose mail
+  carries the flag is raised to that severity and names the flag as its escalation.
+- `require_setting`: the name of a case setting; while that setting is empty the rule does
+  not run, and its diagnostic says which setting is missing.
+- `entities`: the fields a finding shows. They default to `group_by`, or to a fixed set per
+  source (host, accounts, address, process and service for events; sender, domain, subject
+  and origin address for mails).
+- `collapse_after`: a rule without `group_by` or `threshold` gives one finding per matching
+  row; past this many rows (200 by default) it gives one finding per combination of its
+  entity fields instead, marked "collapsed" with the number of rows it matched.
+- `confidence`: low, medium or high, shown beside the severity.
+- `max_findings`: see the paragraph on the number of findings a run keeps, above.
+
+`then`, `window`, `distinct` and `any_in_group` act on a group, so a rule without
+`group_by` or `threshold` cannot use them. Both engines refuse such a rule with an error
+rather than run it without them, and they refuse a `then` without a `where` and
+`then_flags` on an events rule (events carry no flags). The language has one follow-up step
+and no ordered sequence of three events or more; a `window` with `distinct: eventId` counts
+different events in any order. It cannot compare one field with another, and it counts
+rows or distinct values but does not sum or average them.
 
 Rules are edited in the Rules page, and a custom rule with the same id as a bundled or
 pack rule overrides it.

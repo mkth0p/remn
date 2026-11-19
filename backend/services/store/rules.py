@@ -135,7 +135,26 @@ def _where_sql(rule: dict[str, Any], settings: dict[str, Any], ctx: Ctx, ts_fiel
     return where
 
 
+def rule_problem(rule: dict[str, Any]) -> str | None:
+    """Why neither engine would run a rule as written, or None. A key the engines would skip
+    without a word is refused instead, so the author learns the rule does less than it says.
+    Mirrors validateRule in frontend/src/rules/engine.ts."""
+    if not rule.get("group_by") and not parse_threshold(rule.get("threshold")):
+        unused = [k for k in ("then", "window", "distinct", "any_in_group") if rule.get(k)]
+        if unused:
+            return f"{', '.join(unused)} need group_by or threshold: without them the rule gives one finding per row"
+    then = rule.get("then")
+    if then is not None and not (isinstance(then, dict) and then.get("where")):
+        return "then needs a where: the follow-up to look for"
+    if rule.get("then_flags") and rule.get("source") != "mails":
+        return "then_flags applies to mail rules only: events carry no flags"
+    return None
+
+
 def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any], notes: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    problem = rule_problem(rule)
+    if problem:
+        raise FilterError(problem)
     source = rule["source"]
     ts_field = "date" if source == "mails" else "ts"
     ctx = Ctx(source=source, settings=settings)

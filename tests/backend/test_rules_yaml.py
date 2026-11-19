@@ -109,6 +109,13 @@ def test_rules_have_no_duplicate_keys_and_valid_shape():
             assert re.match(r"^T\d{4}(\.\d{3})?$", t), f"{rid}: bad ATT&CK id {t}"
 
 
+def test_no_shipped_rule_asks_for_what_the_engines_would_refuse():
+    from services.store.rules import rule_problem
+
+    refused = {d["id"]: why for _, d in _docs() if (why := rule_problem(d))}
+    assert not refused, refused
+
+
 @pytest.mark.parametrize("path", sorted(RULES.rglob("*.yaml")))
 def test_each_file_parses_strictly(path):
     list(yaml.load_all(path.read_text(encoding="utf-8"), Loader=StrictLoader))
