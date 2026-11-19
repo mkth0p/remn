@@ -23,6 +23,9 @@ site's IndexedDB, and the Dashboard says which applies. Export a case bundle to 
 either way. The bundle also carries the custom rules its findings came from (a custom rule is global
 in the browser that made it; it arrives as a rule of the imported case), the pack and
 disabled-rule choices in force at export, and the decisions on relationship hypotheses.
+An imported case starts with external reputation lookups switched off, whatever the bundle
+had: lookups send the case's indicators to third parties, so the analyst who imports the
+case decides, and the import message says so.
 A finding the analyst decided is never pruned because its rule is missing from the
 importing browser: it is a conclusion, not an orphan. Removing one evidence file removes
 the findings built on it and keeps the engine (Hayabusa) findings of the other files.

@@ -302,3 +302,14 @@ it('without Web Locks, a restore mark is removed only once it is old', async () 
   expect(await db.cases.get(fresh)).toBeDefined()
   expect(await db.cases.get(old)).toBeUndefined()
 })
+
+it('restores a case with external lookups switched off, whatever the bundle says, and its other settings as they were', async () => {
+  kase.settings = { ...kase.settings, networkAllowed: true, internalDomains: ['corp.example'] }
+  await db.cases.put(kase)
+  const id = await restoreCaseBundle(await backup())
+  const restored = await db.cases.get(id)
+  expect(restored?.settings.networkAllowed).toBe(false)
+  expect(restored?.settings.internalDomains).toEqual(['corp.example'])
+  // the case exported is left as it was
+  expect((await db.cases.get(1))?.settings.networkAllowed).toBe(true)
+})

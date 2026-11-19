@@ -555,7 +555,13 @@ export function ReportView() {
                   multiple={false}
                   onFiles={(f) =>
                     importCaseBundle(f[0], setProgress)
-                      .then((id) => toast('ok', `case imported (#${id}) - switch to it from the case selector`))
+                      .then((id) =>
+                        toast(
+                          'ok',
+                          `case imported (#${id}) - switch to it from the case selector. External lookups are off in the imported case whatever the bundle had; switch them on there if it may use them.`,
+                          9000,
+                        ),
+                      )
                       .catch((e) => toast('err', e.message, 0))
                   }
                 >
