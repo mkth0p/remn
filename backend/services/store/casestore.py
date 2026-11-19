@@ -61,6 +61,10 @@ class StoreVersionError(RuntimeError):
     """A case store this version cannot read. It is refused before anything in it is changed."""
 
 
+class StoreBusyError(RuntimeError):
+    """A case store another program holds open (a backup, a restore, a second server on the same folder)."""
+
+
 class QueryStopped(Exception):
     """A query on a store stopped at its time limit. The message says which limit and what to do."""
 
@@ -79,6 +83,12 @@ def schema_version(con: duckdb.DuckDBPyConnection) -> int | None:
         raise StoreVersionError(
             f"this case store records a schema version this version of REMN cannot read ({str(row[0])[:40]!r}). It was not opened and nothing in it was changed."
         ) from None
+
+
+def _held_elsewhere(exc: duckdb.Error) -> bool:
+    """Whether opening a store failed because another connection holds the file."""
+    text = str(exc)
+    return "Could not set lock" in text or "different configuration" in text
 
 
 _time_limit: ContextVar[TimeLimit | None] = ContextVar("store_time_limit", default=None)
@@ -619,7 +629,15 @@ class CaseStore:
         self.dir.mkdir(parents=True, exist_ok=True)
         self.path = self.dir / "case.duckdb"
         self.lock = threading.RLock()
-        self._con = duckdb.connect(str(self.path))
+        try:
+            self._con = duckdb.connect(str(self.path))
+        except duckdb.Error as exc:
+            if _held_elsewhere(exc):
+                raise StoreBusyError(
+                    "the case store is open in another program (a backup or restore with tools/store_backup.py, or a second REMN server on the "
+                    "same folder), so it was not opened. Try again when that program has finished."
+                ) from exc
+            raise
         threads = threads if threads > 0 else max(2, min(8, (os.cpu_count() or 4) - 1))
         for statement in (f"SET threads TO {int(threads)}", f"SET memory_limit = '{int(memory_mb)}MiB'"):
             try:

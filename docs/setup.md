@@ -375,6 +375,97 @@ refuses, so these setups have to change:
 A container that refuses to start under `restart: unless-stopped` restarts in a loop, with
 the reason in `docker logs`.
 
+## Backup and upgrade
+
+This section is for a server that keeps cases in the server store. A browser-store case lives
+in the analyst's browser and is kept with a case bundle (see
+[Storage modes](storage.md#portable-case-backups)); a public instance keeps no case at all.
+The case bundles are still worth exporting from a server-store case: the findings, notes and
+decisions of every case live in the browser, not in its store.
+
+### Backing up the case stores
+
+`tools/store_backup.py` copies each case store into a backup folder, byte for byte, with a
+`manifest.json` per case that lists each file's size and SHA-256, the store's schema version
+and the row count of every table. It checks each copy by opening it before it reports the
+case as backed up, and it never writes over an earlier backup, so give it a new folder each
+time. `verify` checks a backup folder again later, for instance after it has been copied to
+other media.
+
+```bash
+.venv/bin/python tools/store_backup.py backup /srv/remn-backups/2026-11-19
+.venv/bin/python tools/store_backup.py verify /srv/remn-backups/2026-11-19
+```
+
+On Windows the interpreter is `.venv\Scripts\python.exe` and the folder a Windows path. The
+tool reads the cases folder from the same `.env` as the server; `--cases-dir` names another.
+
+The server holds a store open while it is used, and for `FORENSIC_STORE_IDLE_S` seconds (600)
+after its last use. A backup taken while the server runs copies every case nobody is working
+on, skips the others with a line naming each one and why, and ends with exit code 1; run it
+again later for those, or stop the server first to back up every case in one run. While the
+tool copies a case, the server answers requests for that case with 503 and asks to try again.
+
+With Docker, the stores are in the `remn-data` volume and the tool is in the image. Stop the
+service, run the tool in a one-off container with a host folder for the backups, and start
+the service again. The container runs as uid 1000, which needs to be able to write the folder:
+
+```bash
+mkdir -p remn-backups && sudo chown 1000 remn-backups
+docker compose stop remn
+docker compose run --rm -v "$PWD/remn-backups:/backups" remn python tools/store_backup.py backup /backups/2026-11-19
+docker compose start remn
+```
+
+A backup holds the evidence rows of every case it covers: keep it on an encrypted volume, as
+the stores themselves (see [Security model](security.md#where-evidence-lives)).
+
+### Restoring a case
+
+```bash
+.venv/bin/python tools/store_backup.py restore /srv/remn-backups/2026-11-19            # every case in the backup
+.venv/bin/python tools/store_backup.py restore /srv/remn-backups/2026-11-19 <case key>  # one case
+```
+
+A restore first checks the backup against its manifest (digests, row counts, schema version)
+and changes nothing if they differ. It does not write over a case that is already in the cases
+folder: such a case is skipped, with a line saying so. `--replace` restores over it and keeps
+the case it replaces beside the others as `<key>.before-restore-<time>`, which the server does
+not list; remove that folder once the restored case has been checked. Restore with the server
+stopped, or only cases nobody is using: a case the server holds open is refused. A backup
+written by a newer version of REMN is not restored by an older one.
+
+### Upgrading
+
+1. Note the version that runs now: `git rev-parse HEAD` in the clone (the build is also in
+   `/api/health`).
+2. Stop the server, back up every case into a new folder as above, and check that the last
+   line counts every store as backed up. Keep this backup until the new version has been
+   running for as long as a rollback could still be wanted.
+3. Update the code: `git pull --ff-only` (or check out the release), install the
+   requirements again (`pip install -r backend/requirements.txt`, and the optional file if
+   you use it) and rebuild the browser application (`cd frontend && npm ci && npm run build`).
+   With Docker, `git pull --ff-only` and `docker compose up -d --build`.
+4. Start the server. A store written by an older version is upgraded the first time it is
+   opened, in one transaction, and the server log says so (`case store <key> upgraded from
+   schema 1 to 2`); see [Storage modes](storage.md#server-store). Open the cases you need
+   and check their counts on the Dashboard.
+
+### Rolling back
+
+1. Stop the server and go back to the version noted in step 1 of the upgrade:
+   `git checkout <commit>`, then the requirements and the browser application as in step 3
+   (with Docker, `docker compose up -d --build` after the checkout).
+2. Start it and open the cases. A store the older version reads opens as it is. A store the
+   newer version upgraded to a schema the older one does not read is refused, with nothing in
+   it changed: the case answers 409 (`storeVersion`) with a message that names both versions.
+3. For each refused case, stop the server, restore the case from the backup taken before the
+   upgrade, and start the server again:
+   `tools/store_backup.py restore --replace <backup folder> <case key>` (with Docker, run it
+   as the backup was run). What was added to that case after the upgrade is not in the
+   restored store; it stays in the store kept aside as `<key>.before-restore-<time>` until that
+   folder is removed.
+
 ## Repository layout
 
 ```

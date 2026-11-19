@@ -91,6 +91,13 @@ document. Older server backups omitted row IDs, so their investigation links can
 recovered reliably; import rejects those explicitly. Original evidence files are separate
 from these parsed-data backups and should be retained separately.
 
+The server's operator backs up the server stores themselves, every case at once, with
+`tools/store_backup.py`: a byte copy of each store with its digests and row counts, checked
+before it counts, and a restore that checks the backup first and never writes over a case.
+A backup skips a case the server holds open, and while the tool copies a case the server
+answers that case with 503 (`storeBusy`). [Backup and upgrade](setup.md#backup-and-upgrade)
+gives the commands, and the upgrade and rollback procedure.
+
 Measured on a laptop with 200,000 synthetic events and 55 Windows rules
 (`samples/synthetic/scale_test.py`):
 
