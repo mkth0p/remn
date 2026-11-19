@@ -309,15 +309,16 @@ def test_a_server_store_ingest_of_an_archive_hands_the_engine_its_logs(engine, s
     upload_id = r.json()["uploadId"]
     c.generic("PUT", f"/api/upload/{upload_id}/chunk?offset=0", data, content_type="application/octet-stream", **HDR)
     sha = c.post(f"/api/upload/{upload_id}/complete", **HDR).json()["sha256"]
+    key = str(uuid.uuid4())
     r = c.post(
-        f"/api/store/{uuid.uuid4()}/ingest",
+        f"/api/store/{key}/ingest",
         data=json.dumps({"uploadId": upload_id, "kind": "evtx", "evidence": {"id": 7, "name": "logs.zip", "sha256Client": sha}}),
         content_type="application/json",
         **HDR,
     )
     job_id = r.json()["jobId"]
     for _ in range(600):
-        j = c.get(f"/api/jobs/{job_id}", **HDR).json()
+        j = c.get(f"/api/jobs/{job_id}?case={key}", **HDR).json()
         if j["status"] in ("done", "error", "cancelled"):
             break
         time.sleep(0.1)

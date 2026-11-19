@@ -8,6 +8,7 @@ import uuid
 import zipfile
 from pathlib import Path
 
+import duckdb
 import make_samples
 import pytest
 from django.test import Client
@@ -16,7 +17,7 @@ from services.ingest.pipeline import EvtxSource, MailSource, detect_mail_format,
 from services.parsers.mail.common import ParseContext
 from services.store import queries as Q
 from services.store import rules as R
-from services.store.casestore import StoreRegistry
+from services.store.casestore import CaseStore, StoreRegistry
 from services.store.sqlfilter import Ctx, FilterError, compile_condition, compile_filter
 from services.store.writers import EventWriter, MailWriter
 
@@ -156,6 +157,52 @@ def test_reputation_worst_ranks_malicious_above_suspicious(store):
     assert Q.get_row(store, "mails", mail["id"])["reputationWorst"] == "malicious"
 
 
+class _UnappliedSetting:
+    """A connection on which one statement of the lockdown fails, or does nothing, as it would after an
+    engine upgrade renamed the setting."""
+
+    def __init__(self, con: duckdb.DuckDBPyConnection, statement: str, fails: bool) -> None:
+        self.con, self.statement, self.fails = con, statement, fails
+
+    def execute(self, sql: str, *args):
+        if sql.startswith(self.statement):
+            if self.fails:
+                raise duckdb.CatalogException("invented: unrecognized configuration parameter")
+            return self
+        return self.con.execute(sql, *args)
+
+    def __getattr__(self, name: str):
+        return getattr(self.con, name)
+
+
+def test_a_store_opens_only_with_file_access_off_and_its_configuration_locked(tmp_path, monkeypatch):
+    st = CaseStore(tmp_path, str(uuid.uuid4()))
+    cur = st.cursor()
+    assert cur.execute("SELECT current_setting('enable_external_access'), current_setting('lock_configuration')").fetchall() == [(False, True)]
+    secret = tmp_path / "invented-secret.txt"
+    secret.write_text("not for the case", encoding="utf-8")
+    with pytest.raises(duckdb.PermissionException):
+        cur.execute(f"SELECT * FROM read_text('{secret}')")
+    with pytest.raises(duckdb.Error):
+        cur.execute("SET enable_external_access = true")
+    st.close()
+    connect = duckdb.connect
+    for statement in ("SET enable_external_access", "SET lock_configuration"):
+        for fails in (True, False):
+            opened: list[_UnappliedSetting] = []
+
+            def unapplied(path: str, s: str = statement, f: bool = fails, out: list[_UnappliedSetting] = opened) -> _UnappliedSetting:
+                out.append(_UnappliedSetting(connect(path), s, f))
+                return out[-1]
+
+            monkeypatch.setattr(duckdb, "connect", unapplied)
+            with pytest.raises(RuntimeError, match="lockdown"):
+                CaseStore(tmp_path, str(uuid.uuid4()))
+            # the connection is closed, not left open without its lockdown
+            with pytest.raises(duckdb.ConnectionException):
+                opened[0].con.execute("SELECT 1")
+
+
 def test_server_rules_engine(store):
     w = EventWriter(store, 1)
     # brute force burst from 10.9.9.9 then a success; scattered failures elsewhere; night logon
@@ -232,6 +279,31 @@ def test_server_rules_engine(store):
     assert res["byRule"]["bf"] == 1 and res["errors"][0]["ruleId"] == "bad"
 
 
+def test_a_rule_whose_source_is_not_a_case_table_is_refused_and_changes_nothing(store):
+    w = EventWriter(store, 1)
+    for i in range(3):
+        w.add(_event(i))
+    w.flush()
+    rows = "SELECT id, summary FROM events ORDER BY id"
+    before = store.cursor().execute(rows).fetchall()
+    # the source goes into the SQL text: with no field to resolve, a stacked statement there used to
+    # rewrite every row
+    stacked = "events; UPDATE events SET summary = 'tampered'; SELECT count(*) FROM events"
+    rule = {"id": "invented-injection", "title": "t", "severity": "low", "source": stacked}
+    res = R.run_rules(store, [rule, {**rule, "id": "invented-table", "source": "evidence"}], {})
+    assert res["findings"] == [] and res["diagnostics"] == []
+    assert res["errors"] == [
+        {"ruleId": "invented-injection", "error": "source must be events or mails"},
+        {"ruleId": "invented-table", "error": "source must be events or mails"},
+    ]
+    with pytest.raises(FilterError, match="source must be events or mails"):
+        R.run_rule(store, rule, {})
+    with pytest.raises(FilterError, match="source must be events or mails"):
+        R.diagnose_zero(store, rule, {})
+    assert store.cursor().execute(rows).fetchall() == before
+    assert all(summary != "tampered" for _, summary in before)
+
+
 def test_rule_diagnostics_explain_silent_rules(store):
     w = EventWriter(store, 1)
     for i in range(3):
@@ -296,6 +368,45 @@ def test_rules_past_the_finding_cap_keep_the_rarest_groups_and_say_so(store, mon
     assert got["burst"] == {"u3", "u4", "u5"}
     cut = {d["ruleId"]: d for d in res["diagnostics"] if d["reason"] == "truncated"}
     assert "rarest" in cut["rare"]["detail"] and "largest" in cut["burst"]["detail"]
+    # five groups for the hunt, four reach the threshold: the cut says how many were left out
+    assert cut["rare"]["dropped"] == 2 and cut["burst"]["dropped"] == 1
+    assert cut["rare"]["detail"] == "2 of 5 findings left out past the cap of 3; kept the 3 rarest groups"
+
+
+def test_a_rule_keeps_its_own_max_findings_and_the_default_cap_on_the_server(store):
+    w = EventWriter(store, 1)
+    # 2,001 accounts failing once, and three hosts with a burst of three failures each
+    for i in range(2001):
+        w.add(_event(i, eventId=4625, targetUser=f"user{i:04d}"))
+    for h, host in enumerate(("ws03", "ws01", "ws02")):
+        for k in range(3):
+            w.add(_event(5000 + h * 600 + k, eventId=4771, computer=host))
+    w.flush()
+    settings = {"internal_ips": [], "service_accounts": []}
+    hunt = {"id": "hunt", "title": "h", "severity": "low", "source": "events", "where": {"eventId": 4625}, "group_by": ["targetUser"]}
+    few = {**hunt, "id": "few", "max_findings": 5}
+    burst = {
+        "id": "burst",
+        "title": "b",
+        "severity": "low",
+        "source": "events",
+        "where": {"eventId": 4771},
+        "group_by": ["computer"],
+        "window": "1m",
+        "threshold": ">= 2",
+    }
+    bursts = [{**burst, "id": f"bursts-{n}", "max_findings": n} for n in (2, 3)]
+    res = R.run_rules(store, [hunt, few, *bursts], settings)
+    cut = {d["ruleId"]: d for d in res["diagnostics"] if d["reason"] == "truncated"}
+    assert res["byRule"]["hunt"] == 2000 and cut["hunt"]["dropped"] == 1
+    assert res["byRule"]["few"] == 5 and cut["few"]["dropped"] == 1996
+    # bursts past the cap are counted to the end, and the bursts kept are whole, in the order of the hosts
+    kept = [f for f in res["findings"] if f["ruleId"] == "bursts-2"]
+    assert [(f["entities"]["computer"], f["count"]) for f in kept] == [("ws01", 3), ("ws02", 3)]
+    assert cut["bursts-2"]["dropped"] == 1
+    assert cut["bursts-2"]["detail"] == "1 of 3 findings left out past the cap of 2; kept the first 2 bursts in the order of the grouped fields"
+    # exactly as many bursts as the cap: nothing was left out, so nothing is said to be
+    assert res["byRule"]["bursts-3"] == 3 and "bursts-3" not in cut
 
 
 def test_then_is_checked_for_every_finding(store):
@@ -316,6 +427,84 @@ def test_then_is_checked_for_every_finding(store):
     }
     f = R.run_rule(store, rule, {"internal_ips": [], "service_accounts": []})
     assert len(f) == 600 and all(x["severity"] == "high" for x in f)
+
+
+def _sql_store(store):
+    w = EventWriter(store, 1)
+    for i, (line, service) in enumerate(
+        [
+            ("powershell Set-MpPreference -DisableRealtimeMonitoring $true", None),
+            ("powershell Import-Module .\\invented.psm1; copy a.txt b.txt", None),
+            ("sc create invented", "install"),
+        ]
+    ):
+        w.add(_event(i, commandLine=line, serviceName=service, summary="update" if i == 0 else f"event {i}"))
+    w.flush()
+
+
+@pytest.mark.parametrize(
+    "sql, rows",
+    [
+        # words a keyword list refused, inside literals and names
+        ("""SELECT count(*) AS n FROM events WHERE "commandLine" ILIKE '%Set-MpPreference%'""", [{"n": 1}]),
+        ("SELECT count(*) AS n FROM events WHERE summary = 'update'", [{"n": 1}]),
+        ('SELECT 1 AS "load"', [{"load": 1}]),
+        ("""SELECT count(*) AS n FROM events WHERE "commandLine" ILIKE '%Import-Module%' AND "commandLine" ILIKE '%copy %'""", [{"n": 1}]),
+        ("""SELECT count(*) AS n FROM events WHERE "serviceName" = 'install'""", [{"n": 1}]),
+        # a semicolon inside a literal is not a second statement
+        ("""SELECT count(*) AS n FROM events WHERE "commandLine" LIKE '%;%'""", [{"n": 1}]),
+        ("WITH t AS (SELECT computer FROM events) SELECT count(*) AS n FROM t", [{"n": 3}]),
+        ("FROM events SELECT count(*) AS n;", [{"n": 3}]),
+        ("SELECT count(*) AS n FROM main.events -- a closing comment", [{"n": 3}]),
+        ("SELECT sum(range) AS n FROM range(4)", [{"n": 6}]),
+    ],
+)
+def test_the_sql_view_answers_a_select_whose_text_holds_a_statement_word(store, sql, rows):
+    _sql_store(store)
+    assert Q.run_sql(store, sql)["rows"] == rows
+
+
+def test_the_sql_view_still_describes_and_lists_the_tables(store):
+    _sql_store(store)
+    assert "commandLine" in {r["column_name"] for r in Q.run_sql(store, "DESCRIBE events", limit=500)["rows"]}
+    assert {"events", "mails"} <= {r["name"] for r in Q.run_sql(store, "SHOW TABLES")["rows"]}
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        # file-reading functions a keyword list let through, and a file path used as a table
+        "SELECT * FROM read_csv_auto('{path}')",
+        "SELECT * FROM read_json_auto('{path}')",
+        "SELECT * FROM read_ndjson_auto('{path}')",
+        "SELECT * FROM read_json_objects('{path}')",
+        "SELECT * FROM parquet_scan('{path}')",
+        "SELECT * FROM sniff_csv('{path}')",
+        "SELECT * FROM '{path}'",
+        "DESCRIBE '{path}'",
+        "SELECT count(*) FROM events WHERE id IN (SELECT 1 FROM read_text('{path}'))",
+        # a statement held in a string
+        "SELECT * FROM query('SELECT * FROM read_text(''{path}'')')",
+        # anything but one SELECT
+        "DELETE FROM events",
+        "UPDATE events SET summary = 'tampered'",
+        "COPY events TO '{path}'",
+        "ATTACH '{path}' AS other",
+        "SET enable_external_access = true",
+        "INSTALL httpfs",
+        "PRAGMA table_info('events')",
+        "CREATE TABLE invented AS SELECT * FROM events",
+        "SELECT 1; SELECT 2",
+        "SELECT 1; DROP TABLE events",
+    ],
+)
+def test_the_sql_view_refuses_all_but_one_select_on_the_case_tables(store, tmp_path, sql):
+    _sql_store(store)
+    path = tmp_path / "invented.csv"
+    path.write_text("a,b\n1,2\n", encoding="utf-8")
+    with pytest.raises(FilterError):
+        Q.run_sql(store, sql.format(path=path))
+    assert Q.run_sql(store, "SELECT count(*) AS n FROM events WHERE summary <> 'tampered'")["rows"] == [{"n": 3}]
 
 
 def test_sql_compiler_edge_cases():
@@ -405,7 +594,7 @@ def test_chunked_upload_store_ingest_and_query(settings, tmp_path):
     assert r.status_code == 200
     job_id = r.json()["jobId"]
     for _ in range(600):
-        j = c.get(f"/api/jobs/{job_id}", **HDR).json()
+        j = c.get(f"/api/jobs/{job_id}?case={key}", **HDR).json()
         if j["status"] in ("done", "error", "cancelled"):
             break
         time.sleep(0.1)
@@ -427,7 +616,7 @@ def test_chunked_upload_store_ingest_and_query(settings, tmp_path):
     )
     job_id = r.json()["jobId"]
     for _ in range(300):
-        j = c.get(f"/api/jobs/{job_id}", **HDR).json()
+        j = c.get(f"/api/jobs/{job_id}?case={key}", **HDR).json()
         if j["status"] in ("done", "error"):
             break
         time.sleep(0.1)

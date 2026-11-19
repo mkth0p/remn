@@ -6,7 +6,9 @@ provider. Nothing here is Django-specific; ``configure()`` receives the keys.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
+import re
 import threading
 import time
 from collections.abc import Iterable
@@ -16,7 +18,64 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
+
+def _failed(exc: BaseException) -> str:
+    """What a client is told of a lookup that raised. The text of an HTTP client's exception names
+    the URL it called, and that URL can carry the provider's key and the value looked up."""
+    import httpx
+
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"the provider answered HTTP {exc.response.status_code}"
+    if isinstance(exc, httpx.TooManyRedirects):
+        return "the provider redirected the lookup, and the redirect was not followed"
+    if isinstance(exc, httpx.TimeoutException):
+        return "the provider did not answer in time"
+    if isinstance(exc, httpx.TransportError):
+        return f"the provider could not be reached ({type(exc).__name__})"
+    return f"the lookup failed ({type(exc).__name__})"
+
+
 KINDS = ("url", "domain", "ip", "hash")
+_HASH = re.compile(r"[0-9a-fA-F]{32}|[0-9a-fA-F]{40}|[0-9a-fA-F]{64}")
+_LABEL = re.compile(r"[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?")
+_URL = re.compile(r"[a-zA-Z][a-zA-Z0-9+.-]*://[^/?#\s]+\S*")
+
+
+def refusal(kind: str, value: str) -> str | None:
+    """Why `value` is not a `kind` a provider can be asked about, or None when it is.
+
+    The value goes into provider URLs, DNS names and links. One that is not what its kind says (a
+    domain with a slash in it, an address followed by a path) could change what is asked, and of
+    whom, so it is refused before the cache or any provider sees it."""
+    if any(ord(ch) < 0x21 or ord(ch) == 0x7F for ch in value):
+        return "it contains a space or a control character"
+    if kind == "ip":
+        try:
+            ipaddress.ip_address(value)
+        except ValueError:
+            return "not an IP address"
+        return None
+    if kind == "domain":
+        try:
+            ipaddress.ip_address(value)
+            return "an IP address, not a domain name"
+        except ValueError:
+            pass
+        try:
+            name = value.rstrip(".").encode("idna").decode("ascii").lower()
+        except UnicodeError:
+            return "not a domain name"
+        labels = name.split(".")
+        if len(name) > 253 or len(labels) < 2 or not all(_LABEL.fullmatch(label) for label in labels):
+            return "not a domain name"
+        return None
+    if kind == "hash":
+        return None if _HASH.fullmatch(value) else "not an MD5, SHA-1 or SHA-256 digest"
+    if kind == "url":
+        return None if _URL.fullmatch(value) else "not a URL with a scheme and a host"
+    return "not a kind that can be looked up"
+
+
 # "timeout": the batch deadline passed before this lookup ran or answered
 VERDICTS = ("malicious", "suspicious", "clean", "unknown", "error", "not_configured", "timeout")
 
@@ -54,6 +113,8 @@ class Provider:
     kinds: tuple[str, ...] = ()
     needs_key: str | None = None  # key name in the config dict
     min_interval: float = 0.0  # seconds between two calls (rate limit)
+    # whether a lookup sends the value off this machine; the request has to say the case allows it
+    external = True
     description = ""
     homepage = ""
 
@@ -88,6 +149,7 @@ class Provider:
             "kinds": list(self.kinds),
             "configured": self.configured(),
             "needsKey": self.needs_key,
+            "external": self.external,
             "description": self.description,
             "homepage": self.homepage,
         }
@@ -174,7 +236,7 @@ class Registry:
             v.fetched_at = time.time()
         except Exception as exc:  # noqa: BLE001
             log.info("%s lookup failed for %s %s: %s", provider.name, kind, value[:80], exc)
-            v = Verdict(provider.name, kind, value, "error", details={"error": str(exc)[:200]})
+            v = Verdict(provider.name, kind, value, "error", details={"error": _failed(exc)})
         self.cache.put(v)
         return v
 
@@ -185,15 +247,20 @@ class Registry:
         wanted = [p for p in self.providers.values() if (providers is None or p.name in providers)]
         jobs: list[tuple[Provider, str, str]] = []
         seen: set[tuple[str, str, str]] = set()
+        results: list[dict[str, Any]] = []
         for kind, value in items:
             if kind not in KINDS or not value:
                 continue
             value = value.strip()
+            # a value refused here is reported per provider, so the analyst sees it was not looked up
+            said = refusal(kind, value)
             for p in wanted:
                 if kind in p.kinds and (p.name, kind, value) not in seen:
                     seen.add((p.name, kind, value))
-                    jobs.append((p, kind, value))
-        results: list[dict[str, Any]] = []
+                    if said:
+                        results.append(Verdict(p.name, kind, value, "error", details={"error": f"not looked up: {said}"}).to_dict())
+                    else:
+                        jobs.append((p, kind, value))
         if not jobs:
             return results
         # Not a `with` block: leaving it waits for every queued lookup, so the deadline only
@@ -210,7 +277,7 @@ class Registry:
                 try:
                     results.append(fut.result().to_dict())
                 except Exception as exc:  # noqa: BLE001
-                    results.append(Verdict(p.name, k, v, "error", details={"error": str(exc)[:200]}).to_dict())
+                    results.append(Verdict(p.name, k, v, "error", details={"error": _failed(exc)}).to_dict())
         except TimeoutError:
             pass
         finally:

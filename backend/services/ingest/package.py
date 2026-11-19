@@ -120,7 +120,7 @@ class PackageSource:
         # handed something that is not one.
         self.engines: list[str] = []
         # keys of the cloud audit and sign-in records read so far, across every member
-        self.seen_records: set[int] = set()
+        self.seen_records = m365.RecordKeys()
         self.evtx_held: dict[str, tuple[dict[str, Any], str]] = {}
         # event logs that came after the hold was full: parsed, but never seen by the engines
         self.not_scanned = 0
@@ -711,6 +711,8 @@ class PackageSource:
                     entry.update(source.stats.coverage())
                     if source.stats.repaired:
                         notes["xmlRepaired"] = source.stats.repaired
+                    if cloud_note := m365.note(m365.counts(source.stats)):
+                        notes["cloud"] = cloud_note
                 if source is not None and source.stats.errors:
                     raise ValueError(f"parser reported {source.stats.errors} error(s); any emitted rows are partial")
                 if notes.get("unreadableRecords"):
@@ -766,6 +768,8 @@ class PackageSource:
                             f"not scanned by {', '.join(self.engines)}: the {MAX_DEFERRED_BYTES // 1024**2} MiB of logs held for it was "
                             "full when this log was read; its rows are in the case"
                         )
+                    if notes.get("cloud"):
+                        said.append(notes["cloud"])
                     if said:
                         entry["note"] = "; ".join(said)
                 # The parsers hold the member file open across their yields, and CPython only

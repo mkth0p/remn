@@ -9,6 +9,7 @@ from django.conf import settings as django_settings
 from django.http import HttpRequest, JsonResponse
 from django.views.decorators.http import require_POST
 
+from api.errors import failure
 from services.analysis import stories as S
 from services.store.casestore import registry
 
@@ -66,6 +67,5 @@ def build(request: HttpRequest):
                 return JsonResponse({"error": "events and mails must be lists"}, status=400)
             result = S.build_stories(events, mails, findings, settings, measures=S.rule_measures(), **{k: v for k, v in opts.items() if k != "seed_min_risk"})
     except Exception as exc:  # noqa: BLE001
-        log.exception("story build failed")
-        return JsonResponse({"error": str(exc)[:300]}, status=500)
+        return JsonResponse(failure("the story build", exc, log), status=500)
     return JsonResponse(result)

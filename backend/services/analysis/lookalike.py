@@ -332,5 +332,9 @@ def display_name_looks_like_email(name: str | None) -> str | None:
     """If the display name contains an e-mail address, return it (spoof trick)."""
     if not name:
         return None
-    m = re.search(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", name)
+    # the match may only start where a run of address characters starts. Without the lookbehind the
+    # search retried from every character of a long run with no "@" in it, which is quadratic: a
+    # 300 KB display name held the interpreter for minutes. A match found from inside a run is also
+    # found from its start, so the answer is the same.
+    m = re.search(r"(?<![\w.+-])[\w.+-]+@[\w-]+(?:\.[\w-]+)+", name)
     return m.group(0).lower() if m else None

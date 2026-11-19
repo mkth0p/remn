@@ -32,6 +32,8 @@ services:
       FORENSIC_MAX_UPLOAD_MB: ${REMN_MAX_UPLOAD_MB:-512}
       FORENSIC_ALLOWED_HOSTS: ${REMN_DOMAIN:?set REMN_DOMAIN to the name browsers will use}
       FORENSIC_AUTH_TOKEN: ""
+      # open to anyone by design: in browser-only mode the server keeps nothing a token would protect
+      FORENSIC_ALLOW_NO_TOKEN: "1"
       CLAUDE_CODE_ENABLED: "0"
       # staging lives in RAM here, so keep the budget inside the tmpfs below
       FORENSIC_TMP_MAX_GB: ${REMN_TMP_MAX_GB:-1}

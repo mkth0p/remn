@@ -3,7 +3,7 @@ import { join, resolve } from 'node:path'
 import yaml from 'js-yaml'
 import { describe, expect, it } from 'vitest'
 import type { Row, SettingsLike } from './filter'
-import { runRule, validateRule, type Rule } from './engine'
+import { MAX_FINDINGS, runRule, validateRule, type Rule, type RuleDiag } from './engine'
 
 /**
  * Engine parity: the browser engine must find exactly what the SQL engine found on the same rows.
@@ -56,5 +56,34 @@ describe('engine parity with the SQL engine', () => {
       if (JSON.stringify(got) !== JSON.stringify(want)) diffs.push(`${rule.id}: browser ${JSON.stringify(got)} vs sql ${JSON.stringify(want)}`)
     }
     expect(diffs, diffs.join('\n')).toEqual([])
+  })
+})
+
+describe('engine parity past the finding cap', () => {
+  // rules on rows of their own (tools/parity_fixture.py cap_case), each choosing what to keep in another way
+  const cap = JSON.parse(readFileSync(join(FIX, 'cap.json'), 'utf-8')) as {
+    default: number
+    rows: Row[]
+    rules: unknown[]
+    findings: Record<string, string[]>
+    cuts: Record<string, { detail: string; dropped: number }>
+  }
+
+  it('caps a rule that sets no max_findings at the same number', () => {
+    expect(MAX_FINDINGS).toBe(cap.default)
+  })
+
+  it('keeps the same findings and reports the same cut for every rule past its cap', () => {
+    expect(cap.rules).toHaveLength(Object.keys(cap.cuts).length)
+    for (const r of cap.rules) {
+      const v = validateRule(r)
+      if (!v.ok) throw new Error(v.error)
+      const diags: RuleDiag[] = []
+      const keys = runRule(v.rule, { rows: cap.rows, onDiag: (d) => diags.push(d) })
+        .map((f) => f.key)
+        .sort()
+      const cut = diags.find((d) => d.reason === 'truncated')
+      expect({ rule: v.rule.id, keys, cut: cut && { detail: cut.detail, dropped: cut.dropped } }).toEqual({ rule: v.rule.id, keys: cap.findings[v.rule.id], cut: cap.cuts[v.rule.id] })
+    }
   })
 })

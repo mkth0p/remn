@@ -420,7 +420,7 @@ def _worker_init(tmp: str) -> None:
 
 def _load(files: list[Path]):
     """A store holding the rows of the files, and the count of rows and unread records."""
-    from services.ingest.pipeline import EvtxSource
+    from services.ingest.pipeline import UNRECOGNISED, EvtxSource
     from services.store.writers import EventWriter
 
     key = str(uuid.uuid4())
@@ -429,6 +429,11 @@ def _load(files: list[Path]):
     n = unread = 0
     for f in files:
         src = EvtxSource(f.name, str(f), None, _W["tmp"], include_raw=True)
+        if src.format == UNRECOGNISED:
+            # a table or JSON document that is none of the exports REMN reads: the import refuses
+            # it with a message, and here it is one file left unread
+            unread += 1
+            continue
         for row in src:
             n += 1
             row = json.loads(json.dumps(row, default=str))

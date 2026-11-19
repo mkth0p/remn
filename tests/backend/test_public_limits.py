@@ -181,7 +181,7 @@ def test_the_log_filter_keeps_evidence_text_out():
         record = logging.LogRecord("api.views.chains", logging.ERROR, __file__, 1, "chain build failed", None, sys.exc_info())
     RedactEvidence().filter(record)
     assert "alice" not in record.getMessage() and record.exc_info is None and "ValueError" in record.getMessage()
-    # records from elsewhere are left alone
+    # a record that carries no exception is left as it is, in the request log as anywhere else
     other = logging.LogRecord("django.request", logging.WARNING, __file__, 1, "Not Found: %s", ("/x",), None)
     assert RedactEvidence().filter(other) and other.getMessage() == "Not Found: /x"
 

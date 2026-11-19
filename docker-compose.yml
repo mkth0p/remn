@@ -7,7 +7,10 @@
 #   REMN_BIND       host address to publish on, default 127.0.0.1 (this machine only); 0.0.0.0 for the network
 #   REMN_HOSTS      extra names or addresses browsers reach it by (comma list); needed with REMN_BIND=0.0.0.0;
 #                   '*' accepts any name, for a setup whose own proxy or firewall decides who gets in
-#   REMN_TOKEN      shared access token; required by the server before it answers on anything but loopback
+#   REMN_TOKEN      shared access token; with REMN_BIND set to anything but a loopback address the server
+#                   does not start without one
+#   REMN_NO_TOKEN   1 to start on the network without a token, for a setup whose own proxy, VPN or firewall
+#                   decides who gets in
 #   REMN_EXTRA_PIP  optional Python packages for the full build ("yara-python libpff-python")
 # Example, reachable on the network by address:
 #   REMN_BIND=0.0.0.0 REMN_HOSTS=192.0.2.10 REMN_TOKEN=$(openssl rand -hex 24) docker compose up -d --build
@@ -25,8 +28,13 @@ services:
     environment:
       # names or addresses the browser reaches this container by; localhost and 127.0.0.1 are always accepted
       FORENSIC_ALLOWED_HOSTS: ${REMN_HOSTS:-}
-      # the shared access token; the server refuses to answer beyond loopback without one (see docs/setup.md)
+      # the shared access token; published beyond loopback, the server does not start without one (see docs/setup.md)
       FORENSIC_AUTH_TOKEN: ${REMN_TOKEN:-}
+      # where the port above is published: inside the container the server listens on every interface
+      # and cannot see this for itself, and it is this address that decides whether a token is needed
+      FORENSIC_PUBLISHED_ON: ${REMN_BIND:-127.0.0.1}
+      # REMN_NO_TOKEN=1 says that running on the network without a token is intended
+      FORENSIC_ALLOW_NO_TOKEN: ${REMN_NO_TOKEN:-}
       # an Ollama on the host machine, for the server proxy transport
       OLLAMA_HOST: http://host.docker.internal:11434
     extra_hosts:

@@ -191,6 +191,8 @@ export interface ProviderInfo {
   kinds: string[]
   configured: boolean
   needsKey: string | null
+  /** a lookup sends the value off the server's machine */
+  external?: boolean
   description: string
   homepage: string
   files?: number
@@ -261,7 +263,8 @@ export interface LookupResponse {
     }
   >
 }
-export const lookupReputation = (items: { kind: string; value: string }[], providers?: string[]) =>
-  apiPost<LookupResponse>('/api/reputation/lookup', { items, providers: providers && providers.length ? providers : undefined })
+/** networkAllowed is the case's setting as it stands: the server refuses a lookup that would reach an external provider unless it is true. */
+export const lookupReputation = (items: { kind: string; value: string }[], providers: string[] | undefined, networkAllowed: boolean) =>
+  apiPost<LookupResponse>('/api/reputation/lookup', { items, providers: providers && providers.length ? providers : undefined, networkAllowed })
 export const aiQuery = (question: string, context: Record<string, unknown>, model?: string) =>
   apiPost<{ query: Record<string, unknown> | null; raw: string; model: string }>('/api/ai/query', { question, context, model })

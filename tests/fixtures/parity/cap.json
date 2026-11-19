@@ -1,0 +1,273 @@
+{
+ "cuts": {
+  "cap-bursts": {
+   "detail": "3 of 6 findings left out past the cap of 3; kept the first 3 bursts in the order of the grouped fields",
+   "dropped": 3
+  },
+  "cap-collapsed": {
+   "detail": "4 of 6 findings left out past the cap of 2; kept the 2 rarest groups",
+   "dropped": 4
+  },
+  "cap-largest": {
+   "detail": "2 of 4 findings left out past the cap of 2; kept the 2 largest groups",
+   "dropped": 2
+  },
+  "cap-rarest": {
+   "detail": "4 of 6 findings left out past the cap of 2; kept the 2 rarest groups",
+   "dropped": 4
+  },
+  "cap-rows": {
+   "detail": "2 of 5 findings left out past the cap of 3; kept the first 3 matching rows in time order",
+   "dropped": 2
+  }
+ },
+ "default": 2000,
+ "findings": {
+  "cap-bursts": [
+   "cap-bursts|192.0.2.10|29805000",
+   "cap-bursts|192.0.2.10|29805005",
+   "cap-bursts|198.51.100.20|29805000"
+  ],
+  "cap-collapsed": [
+   "cap-collapsed|amy",
+   "cap-collapsed|zed"
+  ],
+  "cap-largest": [
+   "cap-largest|dan",
+   "cap-largest|eve"
+  ],
+  "cap-rarest": [
+   "cap-rarest|amy",
+   "cap-rarest|zed"
+  ],
+  "cap-rows": [
+   "cap-rows|2",
+   "cap-rows|4",
+   "cap-rows|5"
+  ]
+ },
+ "rows": [
+  {
+   "computer": "WS01",
+   "eventId": 1102,
+   "id": 1,
+   "subjectUser": "operator",
+   "ts": 1788300050000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 1102,
+   "id": 2,
+   "subjectUser": "operator",
+   "ts": 1788300010000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 1102,
+   "id": 3,
+   "subjectUser": "operator"
+  },
+  {
+   "computer": "WS01",
+   "eventId": 1102,
+   "id": 4,
+   "subjectUser": "operator",
+   "ts": 1788300010000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 1102,
+   "id": 5,
+   "subjectUser": "operator",
+   "ts": 1788300030000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4625,
+   "id": 6,
+   "ipAddress": "203.0.113.30",
+   "targetUser": "bob",
+   "ts": 1788300000000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4625,
+   "id": 7,
+   "ipAddress": "203.0.113.30",
+   "targetUser": "cat",
+   "ts": 1788300010000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4625,
+   "id": 8,
+   "ipAddress": "198.51.100.20",
+   "targetUser": "eve",
+   "ts": 1788300020000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4625,
+   "id": 9,
+   "ipAddress": "198.51.100.20",
+   "targetUser": "dan",
+   "ts": 1788300030000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4625,
+   "id": 10,
+   "ipAddress": "192.0.2.10",
+   "targetUser": "zed",
+   "ts": 1788300040000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4625,
+   "id": 11,
+   "ipAddress": "192.0.2.10",
+   "targetUser": "bob",
+   "ts": 1788300050000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4625,
+   "id": 12,
+   "ipAddress": "203.0.113.30",
+   "targetUser": "cat",
+   "ts": 1788300300000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4625,
+   "id": 13,
+   "ipAddress": "203.0.113.30",
+   "targetUser": "dan",
+   "ts": 1788300310000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4625,
+   "id": 14,
+   "ipAddress": "198.51.100.20",
+   "targetUser": "eve",
+   "ts": 1788300320000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4625,
+   "id": 15,
+   "ipAddress": "203.0.113.30",
+   "targetUser": "cat",
+   "ts": 1788300320000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4625,
+   "id": 16,
+   "ipAddress": "198.51.100.20",
+   "targetUser": "dan",
+   "ts": 1788300330000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4625,
+   "id": 17,
+   "ipAddress": "192.0.2.10",
+   "targetUser": "eve",
+   "ts": 1788300340000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4625,
+   "id": 18,
+   "ipAddress": "198.51.100.20",
+   "targetUser": "amy",
+   "ts": 1788300340000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4625,
+   "id": 19,
+   "ipAddress": "192.0.2.10",
+   "targetUser": "dan",
+   "ts": 1788300350000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4625,
+   "id": 20,
+   "ipAddress": "192.0.2.10",
+   "targetUser": "eve",
+   "ts": 1788300360000
+  }
+ ],
+ "rules": [
+  {
+   "id": "cap-rows",
+   "max_findings": 3,
+   "severity": "high",
+   "source": "events",
+   "title": "log cleared",
+   "where": {
+    "eventId": 1102
+   }
+  },
+  {
+   "group_by": [
+    "targetUser"
+   ],
+   "id": "cap-rarest",
+   "max_findings": 2,
+   "severity": "low",
+   "source": "events",
+   "title": "failures by account",
+   "where": {
+    "eventId": 4625
+   }
+  },
+  {
+   "group_by": [
+    "targetUser"
+   ],
+   "id": "cap-largest",
+   "max_findings": 2,
+   "severity": "medium",
+   "source": "events",
+   "threshold": ">= 2",
+   "title": "repeated failures by account",
+   "where": {
+    "eventId": 4625
+   }
+  },
+  {
+   "group_by": [
+    "ipAddress"
+   ],
+   "id": "cap-bursts",
+   "max_findings": 3,
+   "severity": "medium",
+   "source": "events",
+   "threshold": ">= 2",
+   "title": "failure bursts by address",
+   "where": {
+    "eventId": 4625
+   },
+   "window": "1m"
+  },
+  {
+   "collapse_after": 3,
+   "entities": [
+    "targetUser"
+   ],
+   "id": "cap-collapsed",
+   "max_findings": 2,
+   "severity": "low",
+   "source": "events",
+   "title": "failed logons",
+   "where": {
+    "eventId": 4625
+   }
+  }
+ ]
+}

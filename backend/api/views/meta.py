@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 
 import yaml
@@ -17,6 +18,10 @@ from services.rules import measures, packs
 
 log = logging.getLogger(__name__)
 
+_lock = threading.Lock()
+# the signature the rules were parsed under, and the rules
+_parsed: tuple[str, list[dict]] | None = None
+
 
 def load_rules(rules_dir: Path) -> list[dict]:
     out: list[dict] = []
@@ -30,7 +35,10 @@ def load_rules(rules_dir: Path) -> list[dict]:
             docs = [d for d in yaml.safe_load_all(text) if isinstance(d, dict)]
         except Exception as exc:  # noqa: BLE001
             log.warning("rule file %s invalid: %s", path, exc)
-            out.append({"file": str(path.relative_to(rules_dir)), "error": str(exc)[:200], "yaml": ""})
+            # what is wrong with the YAML is for the reader of the rule list; any other failure
+            # (the file cannot be read) carries the server's full path in its text
+            said = str(exc)[:200] if isinstance(exc, yaml.YAMLError) else f"the file could not be read ({type(exc).__name__})"
+            out.append({"file": str(path.relative_to(rules_dir)), "error": said, "yaml": ""})
             continue
         if len(docs) == 1:
             out.append({"file": str(path.relative_to(rules_dir)).replace("\\", "/"), "yaml": text, "rule": docs[0]})
@@ -50,6 +58,37 @@ def load_rules(rules_dir: Path) -> list[dict]:
     return out
 
 
+def _signature(rules_dir: Path) -> str:
+    """Changes when a bundled rule file is added, removed or edited, and when the measures file is."""
+    files = []
+    if rules_dir.is_dir():
+        for path in sorted(rules_dir.rglob("*.y*ml")):
+            if packs.is_pack_path(path, rules_dir):
+                continue
+            try:
+                st = path.stat()
+            except OSError:
+                continue
+            files.append(f"{path.relative_to(rules_dir)}:{st.st_size}:{st.st_mtime_ns}")
+    return "\n".join([str(rules_dir), measures.signature(), *files])
+
+
+def bundled_rules(rules_dir: Path) -> list[dict]:
+    """load_rules, parsed once and kept until a rule file or the measures file changes.
+
+    Parsing the bundled rules takes about a second, and every page load asks for them. Looking at
+    the files' sizes and modification times takes a few milliseconds."""
+    global _parsed
+    signature = _signature(rules_dir)
+    with _lock:
+        if _parsed and _parsed[0] == signature:
+            return _parsed[1]
+    rules = load_rules(rules_dir)
+    with _lock:
+        _parsed = (signature, rules)
+    return rules
+
+
 @require_GET
 def meta(request):
     events = [{"provider": prov, "eventId": eid, "description": desc, "category": cat} for (prov, eid), (desc, cat) in eventids._EVENTS.items()]
@@ -65,7 +104,7 @@ def meta(request):
             "mailWeights": MAIL_WEIGHTS,
             "mailStrongFlags": sorted(STRONG_FLAGS),
             "dangerousExtensions": DANGEROUS_EXT,
-            "rules": load_rules(settings.RULES_DIR),
+            "rules": bundled_rules(settings.RULES_DIR),
             "packs": packs.list_packs(),
             "measures": measures.summary(),
         }

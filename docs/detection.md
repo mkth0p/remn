@@ -60,11 +60,15 @@ time: { outside_business_hours: true, weekend: true }   # uses case settings
 exclude: { targetUser|in_setting: service_accounts }
 ```
 
-On the server store a run keeps at most 2,000 findings per rule (the browser engine keeps
-them all). Past that, a rule with a threshold of two or more keeps its largest groups (the
-bursts it counts), and any other grouped rule its rarest (the values a hunt is after); the
-Rules view marks the rule "cut short", with the count as `2000+`, and the run says how many
-rules were cut. A `then` follow-up is checked for every finding the rule keeps.
+A run keeps at most 2,000 findings per rule, or the number the rule sets in `max_findings`,
+and both engines keep the same ones. Past that cap, a rule with a threshold of two or more
+keeps its largest groups (the bursts it counts) and any other grouped rule its rarest (the
+values a hunt is after), equal groups in the order of their values; a rule with a `window`
+keeps its first bursts in the order of the grouped fields, and a rule with one finding per
+row its first rows in time order. The number of findings left out is shown beside the rule
+in the Rules view, above the list in the Findings view and on the findings of that rule, and
+the message at the end of the run says how many rules were cut. A `then` follow-up is
+checked for every finding the rule keeps.
 
 Operators: `eq ne in nin contains not_contains contains_any contains_all startswith
 not_startswith endswith not_endswith re not_re gt gte lt lte exists empty in_setting

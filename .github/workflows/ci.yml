@@ -181,7 +181,7 @@ jobs:
         run: docker build --pull -t remn:ci .
       - name: Serves
         run: |
-          docker run -d --name remn -p 127.0.0.1:8000:8000 remn:ci
+          docker run -d --name remn -p 127.0.0.1:8000:8000 -e FORENSIC_PUBLISHED_ON=127.0.0.1 remn:ci
           for i in $(seq 1 20); do curl -fs -H "X-Forensic-Client: 1" http://127.0.0.1:8000/api/health > /dev/null && break; sleep 2; done
           curl -fs -H "X-Forensic-Client: 1" http://127.0.0.1:8000/api/health | head -c 200; echo
           # what the image's HEALTHCHECK runs

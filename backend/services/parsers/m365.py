@@ -34,16 +34,23 @@ import csv
 import hashlib
 import io
 import ipaddress
-import itertools
 import json
 import logging
 import os
 import re
+from array import array
 from collections.abc import Iterable, Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 log = logging.getLogger(__name__)
+
+# The longest field a CSV export may hold. Python's csv stops at 131,072 characters, which one
+# DLP or MailItemsAccessed record passes, and the export then ended at that record. The limit is
+# the csv module's own, for the whole process, so it is only ever raised here.
+MAX_FIELD_CHARS = 16 * 1024 * 1024
+if csv.field_size_limit() < MAX_FIELD_CHARS:
+    csv.field_size_limit(MAX_FIELD_CHARS)
 
 UAL_PROVIDER = "Microsoft 365 Unified Audit Log"
 ENTRA_PROVIDER = "Microsoft Entra ID Sign-in"
@@ -87,15 +94,14 @@ _PRIVILEGED_ROLES = (
 # ---------------------------------------------------------------------------
 def detect_format(name: str, head: bytes) -> str | None:
     """Return one of FORMATS for a UAL / Entra export, else None."""
-    n = (name or "").lower()
-    if not n.endswith((".csv", ".json", ".jsonl", ".ndjson", ".txt", ".log")) and head[:1] not in (b"[", b"{"):
+    if not looks_like_export(name, head):
         return None
     text = head.lstrip(b"\xef\xbb\xbf").decode("utf-8", "replace").lstrip()
     low = text.lower()
     if text.startswith(("[", "{")):
         if '"auditdata"' in low or ('"operation"' in low and ('"workload"' in low or '"creationtime"' in low)):
             return "m365-ual-json"
-        if '"userprincipalname"' in low or '"appdisplayname"' in low or '"conditionalaccessstatus"' in low or '"clientappused"' in low:
+        if is_signin(_KEY_RE.findall(text)):
             return "entra-signin-json"
         # Azure Monitor diagnostic records (Log Analytics, Event Hub, storage account): the
         # sign-in is under "properties", past the head
@@ -105,13 +111,33 @@ def detect_format(name: str, head: bytes) -> str | None:
     header = low.split("\n", 1)[0]
     if "auditdata" in header:
         return "m365-ual-csv"
-    if (
-        ("userprincipalname" in header and ("createddatetime" in header or "ipaddress" in header))
-        or ("sign-in identifier" in header)
-        or ("username" in header and "ip address" in header and ("application" in header or "status" in header))
-    ):
+    if is_signin(next(csv.reader([text.split("\n", 1)[0]]), [])):
         return "entra-signin-csv"
     return None
+
+
+UNRECOGNISED = "not a recognised Microsoft 365 or Entra export"
+
+
+def looks_like_export(name: str, head: bytes) -> bool:
+    """Whether a file is a table or a JSON document by its name or first byte: what a cloud export
+    is, and what an event log is not."""
+    n = (name or "").lower()
+    return n.endswith((".csv", ".json", ".jsonl", ".ndjson", ".txt", ".log")) or head.lstrip(b"\xef\xbb\xbf")[:1] in (b"[", b"{")
+
+
+_KEY_RE = re.compile(r'"([^"\\]{1,64})"\s*:')
+# A sign-in says, together, when it happened, the address it came from, and who signed in to
+# which application. A directory audit, a risk detection, a risky-user list and a user list
+# name a userPrincipalName too, and each of their records was read as a successful sign-in.
+_SIGNIN_WHO = frozenset({"userprincipalname", "appdisplayname", "clientappused", "conditionalaccessstatus"})
+
+
+def is_signin(keys: Iterable[Any]) -> bool:
+    """Whether a record, or a table, with these field names (Graph, portal, any case) is a sign-in."""
+    low = {str(k).strip().lower() for k in keys}
+    low = {(_PORTAL_MAP.get(k) or k).lower() for k in low}
+    return "createddatetime" in low and "ipaddress" in low and bool(low & _SIGNIN_WHO)
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +163,7 @@ def clean_ip(v: Any) -> str | None:
         return s[:100]
 
 
-_NUMERIC_DATE_RE = re.compile(r"^\s*(\d{1,2})[/.](\d{1,2})[/.](\d{4})\b")
+_NUMERIC_DATE_RE = re.compile(r"^\s*(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})\b")
 
 
 def date_order(values: Iterable[Any]) -> bool | None:
@@ -158,10 +184,54 @@ def date_order(values: Iterable[Any]) -> bool | None:
     return day_first
 
 
+def guessed_order(v: Any) -> bool:
+    """Whether a numeric date reads differently day-first and month-first (05/01, not 05/05, and
+    never a dotted date, which is always day-first)."""
+    m = _NUMERIC_DATE_RE.match(str(v or ""))
+    return bool(m) and "." not in m.group(0) and m.group(1) != m.group(2) and int(m.group(1)) <= 12 and int(m.group(2)) <= 12
+
+
+# a date as a culture writes it, with its time to the minute or the second, a 12-hour clock or
+# not, and the zone when the exporter wrote one: 9/1/2026 10:00 AM, 01.09.2026 10:00:00,
+# 2026/09/01 10:00:00, 9/1/2026, 10:00:00 AM +02:00
+_CULTURE_RE = re.compile(r"^(\d{1,4})([/.-])(\d{1,2})\2(\d{1,4}),?\s+(\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,7}))?)?\s*([AaPp][Mm])?\s*(Z|[+-]\d{2}:?\d{2})?$")
+
+
+def _culture_date(s: str, day_first: bool | None) -> datetime | None:
+    m = _CULTURE_RE.match(s)
+    if not m:
+        return None
+    a, sep, b, c, hour, minute, second, fraction, half, zone = m.groups()
+    if len(a) == 4:
+        year, month, day = int(a), int(b), int(c)
+    elif len(c) != 4:
+        return None
+    elif sep == "." or day_first:
+        day, month, year = int(a), int(b), int(c)
+    else:
+        month, day, year = int(a), int(b), int(c)
+    h = int(hour)
+    if half:
+        if not 1 <= h <= 12:
+            return None
+        h = h % 12 + (12 if half.lower() == "pm" else 0)
+    tz = UTC
+    if zone and zone != "Z":
+        sign = -1 if zone[0] == "-" else 1
+        digits = zone[1:].replace(":", "")
+        tz = timezone(sign * timedelta(hours=int(digits[:2]), minutes=int(digits[2:])))
+    try:
+        return datetime(year, month, day, h, int(minute), int(second or 0), int((fraction or "0")[:6].ljust(6, "0")), tzinfo=tz)
+    except ValueError:
+        return None
+
+
 def parse_ts(v: Any, day_first: bool | None = None) -> tuple[int | None, str | None]:
     """ISO-8601 (with or without zone / fractional seconds), portal 'M/D/YYYY, h:mm:ss AM', or a
     culture's numeric date -> (ms, iso). day_first is the order date_order found for the file;
-    None keeps the portal's own month-first order for slashes. Dotted dates are always day-first."""
+    None keeps the portal's own month-first order for slashes and dashes. Dotted dates are always
+    day-first. A time written with a zone keeps it; one without is UTC, the zone the audit log,
+    Graph and the portal's "Date (UTC)" write."""
     if v is None:
         return None, None
     if isinstance(v, (int, float)):
@@ -170,22 +240,10 @@ def parse_ts(v: Any, day_first: bool | None = None) -> tuple[int | None, str | N
     s = str(v).strip()
     if not s:
         return None, None
-    s2 = s.replace("Z", "+00:00")
-    dt = None
     try:
-        dt = datetime.fromisoformat(s2)
+        dt: datetime | None = datetime.fromisoformat(s.replace("Z", "+00:00"))
     except ValueError:
-        slashes = (
-            ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y, %H:%M:%S", "%d/%m/%Y %H:%M")
-            if day_first
-            else ("%m/%d/%Y, %I:%M:%S %p", "%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M")
-        )
-        for fmt in (*slashes, "%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"):
-            try:
-                dt = datetime.strptime(s, fmt)
-                break
-            except ValueError:
-                continue
+        dt = _culture_date(s, day_first)
     if dt is None:
         return None, None
     if dt.tzinfo is None:
@@ -194,15 +252,25 @@ def parse_ts(v: Any, day_first: bool | None = None) -> tuple[int | None, str | N
     return int(dt.timestamp() * 1000), dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
+class _Cut(str):
+    """A value cut at its length limit. Its closing ellipsis says so wherever it is read, and the
+    record that holds it is counted (stats.cut): a nested value cut into JSON that does not parse
+    used to pass for the whole of it."""
+
+
+def _cut(text: str, limit: int) -> str:
+    return text if len(text) <= limit else _Cut(text[:limit] + "…")
+
+
 def _scalar(v: Any) -> Any:
     if v is None or isinstance(v, (str, int, float, bool)):
         return v
     if isinstance(v, list):
         if all(x is None or isinstance(x, (str, int, float, bool)) for x in v):
             return ", ".join("" if x is None else str(x) for x in v)
-        return json.dumps(v, ensure_ascii=False)[:4000]
+        return _cut(json.dumps(v, ensure_ascii=False), 4000)
     if isinstance(v, dict):
-        return json.dumps(v, ensure_ascii=False)[:4000]
+        return _cut(json.dumps(v, ensure_ascii=False), 4000)
     return str(v)
 
 
@@ -216,7 +284,9 @@ def _named_list(items: Any, name_key: str = "Name", value_key: str = "Value") ->
     return out
 
 
-_EMAIL_RE = re.compile(r"[\w.+'-]+@[\w-]+(?:\.[\w-]+)+")
+# an address starts where a run of address characters starts: retrying from every character of a
+# long run with no "@" in it made the search quadratic in the length of the field
+_EMAIL_RE = re.compile(r"(?<![\w.+'-])[\w.+'-]+@[\w-]+(?:\.[\w-]+)+")
 
 
 def _json_value(v: Any) -> Any:
@@ -282,7 +352,7 @@ def outlook_rule_fields(data: dict[str, Any]) -> dict[str, Any]:
         if "move" in kind:
             folder = action.get("Folder") or action.get("FolderName") or action.get("TargetFolder") or action.get("FolderId")
             if folder:
-                out["MoveToFolder"] = str(folder)[:200]
+                out["MoveToFolder"] = _cut(str(folder), 200)
     condition = _json_value(data.get("RuleCondition"))
     words: dict[str, list[str]] = {}
     for k, v in _walk(condition):
@@ -300,7 +370,7 @@ def outlook_rule_fields(data: dict[str, Any]) -> dict[str, Any]:
             elif "from" in low and "SubjectOrBodyContainsWords" in words:
                 words["FromAddressContainsWords"] = words.pop("SubjectOrBodyContainsWords")
     for k, v in words.items():
-        out[k] = ";".join(v)[:500]
+        out[k] = _cut(";".join(v), 500)
     return {k: v for k, v in out.items() if k not in data}
 
 
@@ -324,10 +394,10 @@ def flatten_audit(a: dict[str, Any]) -> dict[str, Any]:
         elif k in ("Target", "Actor"):
             if isinstance(v, list):
                 ids = [str(it.get("ID")) for it in v if isinstance(it, dict) and it.get("ID") is not None]
-                data[k] = "; ".join(ids)[:2000]
-                data[k + ".Type"] = ", ".join(str(it.get("Type")) for it in v if isinstance(it, dict))[:200]
+                data[k] = _cut("; ".join(ids), 2000)
+                data[k + ".Type"] = _cut(", ".join(str(it.get("Type")) for it in v if isinstance(it, dict)), 200)
         elif k == "Folders" and isinstance(v, list):
-            data["Folders"] = "; ".join(str(f.get("Path")) for f in v if isinstance(f, dict) and f.get("Path"))[:2000]
+            data["Folders"] = _cut("; ".join(str(f.get("Path")) for f in v if isinstance(f, dict) and f.get("Path")), 2000)
             data["FolderItemCount"] = sum(len(f.get("FolderItems") or []) for f in v if isinstance(f, dict))
             _message_ids(data, (it for f in v if isinstance(f, dict) for it in (f.get("FolderItems") or [])))
         elif k == "AffectedItems" and isinstance(v, list):
@@ -583,7 +653,7 @@ def _ca_policies(v: Any) -> str | None:
         for p in v
         if isinstance(p, dict) and str(p.get("result") or "").lower() not in ("notapplied", "notenabled", "")
     ]
-    return "; ".join(out)[:2000] or None
+    return _cut("; ".join(out), 2000) or None
 
 
 # Azure Monitor diagnostic categories whose records carry a sign-in in "properties"
@@ -593,14 +663,13 @@ _SIGNIN_CATEGORIES = ("signinlogs", "noninteractiveusersigninlogs", "serviceprin
 def _signin_of(obj: Any) -> dict[str, Any] | None:
     """The sign-in an exported object holds: a Graph or portal sign-in as it is, or the
     "properties" of an Azure Monitor diagnostic record of a sign-in category. None for another
-    diagnostic category, or for something that is not an object."""
+    diagnostic category, for a record of another kind, or for something that is not an object."""
     if not isinstance(obj, dict):
         return None
     category = str(obj.get("category") or "").lower()
-    if not category or not isinstance(obj.get("properties"), dict):
-        return obj
-    if category not in _SIGNIN_CATEGORIES:
-        return None
+    if category not in _SIGNIN_CATEGORIES or not isinstance(obj.get("properties"), dict):
+        # a record without the envelope is a sign-in only by its own fields
+        return obj if is_signin(obj) else None
     props = dict(obj["properties"])
     # the envelope's time, when the sign-in itself has none
     if not props.get("createdDateTime") and obj.get("time"):
@@ -608,13 +677,61 @@ def _signin_of(obj: Any) -> dict[str, Any] | None:
     return props
 
 
-def entra_row(o: dict[str, Any], day_first: bool | None = None) -> dict[str, Any]:
-    g = dict(o)
-    # portal CSV headers -> Graph names
-    for k in list(g.keys()):
-        mapped = _PORTAL_MAP.get(k.strip().lower())
-        if mapped and mapped not in g:
+# The Graph names entra_row reads, by their lower case. The Graph PowerShell SDK writes them in
+# PascalCase (CreatedDateTime, IPAddress, Status.ErrorCode), and read by the camelCase names only,
+# each of its rows was a blank, undated sign-in.
+_GRAPH_NAMES = {
+    n.lower(): n
+    for n in (
+        *_PORTAL_MAP.values(),
+        "status",
+        "deviceDetail",
+        "deviceDisplayName",
+        "riskEventTypes",
+        "riskEventTypes_v2",
+        "signInEventTypes",
+        "authenticationDetails",
+        "appliedConditionalAccessPolicies",
+        "createdDateTime",
+        "userPrincipalName",
+        "userDisplayName",
+        "ipAddress",
+        # inside status, location, deviceDetail, authenticationDetails and the policies
+        "errorCode",
+        "failureReason",
+        "additionalDetails",
+        "countryOrRegion",
+        "displayName",
+        "authenticationMethod",
+        "succeeded",
+        "result",
+    )
+}
+_GRAPH_NAMES["riskeventtypesv2"] = "riskEventTypes_v2"
+# Export-Csv writes an object it cannot flatten as its .NET type name: a status, a location or a
+# device that the export does not hold, never a value.
+_TYPE_NAME_RE = re.compile(r"^(?:Microsoft\.Graph\.(?:Beta\.)?PowerShell\.Models\.\w+|System\.[\w.`]+(?:\[[^\]]*\])+)$")
+
+
+def _graph_keys(d: dict[str, Any]) -> dict[str, Any]:
+    """d under the Graph names, from the portal's column names or any case of the Graph ones; a
+    name already in Graph form wins over a column that maps to it."""
+    g = {k: v for k, v in d.items() if not (isinstance(v, str) and _TYPE_NAME_RE.match(v.strip()))}
+    for k in list(g):
+        low = str(k).strip().lower()
+        mapped = _PORTAL_MAP.get(low) or _GRAPH_NAMES.get(low)
+        if mapped and mapped != k and mapped not in g:
             g[mapped] = g.pop(k)
+    for k, v in g.items():
+        if isinstance(v, dict):
+            g[k] = _graph_keys(v)
+        elif isinstance(v, list):
+            g[k] = [_graph_keys(x) if isinstance(x, dict) else x for x in v]
+    return g
+
+
+def entra_row(o: dict[str, Any], day_first: bool | None = None) -> dict[str, Any]:
+    g = _graph_keys(o)
     status = g.get("status")
     if isinstance(status, dict):
         err = status.get("errorCode")
@@ -624,8 +741,13 @@ def entra_row(o: dict[str, Any], day_first: bool | None = None) -> dict[str, Any
         failure = g.get("failureReason")
         if isinstance(status, str) and status.lower() in ("failure", "failed") and err in (None, ""):
             err = -1
-    if isinstance(err, str) and err.strip().isdigit():
+        elif isinstance(status, str) and status.lower() == "success" and err in (None, ""):
+            err = 0
+    if isinstance(err, str) and err.strip().lstrip("-").isdigit():
         err = int(err)
+    # neither an error code nor a status: the export does not say how the sign-in ended, and a
+    # sign-in read as successful by default counts toward every rule on successes
+    known = err not in (None, "")
     if isinstance(failure, str) and failure.lower() in ("other.", "", "none"):
         failure = None
     loc = g.get("location")
@@ -642,7 +764,7 @@ def entra_row(o: dict[str, Any], day_first: bool | None = None) -> dict[str, Any
     user = str(g.get("userPrincipalName") or g.get("userDisplayName") or "").strip()
     ts, iso = parse_ts(g.get("createdDateTime"), day_first)
     ip = clean_ip(g.get("ipAddress"))
-    success = err in (0, None, "0")
+    success = known and err in (0, "0")
     risk_signin = g.get("riskLevelDuringSignIn")
     risk_agg = g.get("riskLevelAggregated")
     data: dict[str, Any] = {
@@ -703,8 +825,9 @@ def entra_row(o: dict[str, Any], day_first: bool | None = None) -> dict[str, Any
     risk_txt = " [device code]" if device_code else ""
     if (risk_signin and str(risk_signin).lower() not in ("none", "hidden")) or (g.get("riskState") and str(g.get("riskState")).lower() not in ("none",)):
         risk_txt += f" risk={risk_signin or risk_agg or ''}/{g.get('riskState') or ''}"
+    outcome = "ok" if success else f"FAILED ({err})" if known else "(outcome not in the export)"
     summary = (
-        f"Sign-in {'ok' if success else 'FAILED (' + str(err) + ')'}: {user or '?'} from {ip or '?'}"
+        f"Sign-in {outcome}: {user or '?'} from {ip or '?'}"
         f"{' (' + str(country) + ')' if country else ''} via {g.get('clientAppUsed') or '?'} to {g.get('appDisplayName') or '?'}{risk_txt}"
     )
     return {
@@ -712,20 +835,20 @@ def entra_row(o: dict[str, Any], day_first: bool | None = None) -> dict[str, Any
         "tsIso": iso,
         "eventId": None,
         "recordId": None,
-        "level": 4 if success else 3,
-        "levelName": "Information" if success else "Warning",
+        "level": 3 if known and not success else 4,
+        "levelName": "Warning" if known and not success else "Information",
         "provider": ENTRA_PROVIDER,
         "channel": "Entra SignIn",
         "computer": None,
         "category": "Entra sign-in",
-        "description": "Sign-in" if success else "Sign-in failure",
+        "description": "Sign-in failure" if known and not success else "Sign-in",
         "operation": "SignIn",
         "user": user or None,
         "upn": user or None,
         "subjectUser": user or None,
         "targetUser": user or None,
         "ipAddress": ip,
-        "status": str(err) if err is not None else "0",
+        "status": str(err) if known else None,
         "statusText": failure,
         "failureReason": failure,
         "workstation": (str(g.get("userAgent") or "")[:200] or None),
@@ -745,42 +868,146 @@ def _open_text(path: str | None, data: bytes | None) -> io.TextIOBase:
     return io.TextIOWrapper(io.BytesIO(data or b""), encoding="utf-8-sig", errors="replace", newline="")
 
 
+# The longest record a JSON export may hold (a sign-in is a few kilobytes, an audit record rarely
+# more than a few hundred). JSON arrays used to be loaded whole, about ten times their size in the
+# web process, so one large Graph export could take the server down; they are read one record at
+# a time, and only a record past this length stops the file.
+MAX_RECORD_CHARS = MAX_FIELD_CHARS
+_CHUNK = 1024 * 1024
+_DECODER = json.JSONDecoder()
+_SPACE = re.compile(r"[ \t\r\n]*")
+
+
+class _JsonStream:
+    """The records of a JSON text read a piece at a time: the objects of an array, of a Graph
+    page's "value" array, a lone object, or several such documents one after the other."""
+
+    def __init__(self, fh: io.TextIOBase, stats: Any = None) -> None:
+        self.fh, self.stats, self.buf, self.pos, self.eof, self.count = fh, stats, "", 0, False, 0
+
+    def _more(self) -> bool:
+        if self.eof:
+            return False
+        self.buf, self.pos = self.buf[self.pos :], 0
+        if len(self.buf) > MAX_RECORD_CHARS:
+            raise ValueError(f"a JSON record after record {self.count:,} is longer than {MAX_RECORD_CHARS:,} characters; the file was read up to it")
+        # the read doubles with what one value already holds, so a long record is decoded a few
+        # times rather than once per megabyte
+        chunk = self.fh.read(max(_CHUNK, len(self.buf)))
+        self.eof = not chunk
+        self.buf += chunk
+        return bool(chunk)
+
+    def _peek(self) -> str:
+        """The next character that is not white space, "" at the end."""
+        while True:
+            self.pos = _SPACE.match(self.buf, self.pos).end()  # type: ignore[union-attr]
+            if self.pos < len(self.buf):
+                return self.buf[self.pos]
+            if not self._more():
+                return ""
+
+    def _fail(self, what: str) -> ValueError:
+        return ValueError(f"invalid JSON after record {self.count:,}: {what}")
+
+    def _take(self, char: str) -> None:
+        if self._peek() != char:
+            raise self._fail(f"expected {char!r}")
+        self.pos += 1
+
+    def _value(self) -> Any:
+        self._peek()
+        while True:
+            try:
+                value, end = _DECODER.raw_decode(self.buf, self.pos)
+            except json.JSONDecodeError as exc:
+                if self._more():
+                    continue  # the value goes on in the next piece
+                raise self._fail(exc.msg) from None
+            if end == len(self.buf) and isinstance(value, (int, float)) and self._more():
+                continue  # a number at the end of a piece may go on in the next one
+            self.pos = end
+            return value
+
+    def _items(self) -> Iterator[Any]:
+        """The objects of the array whose "[" was just passed."""
+        if self._peek() == "]":
+            self.pos += 1
+            return
+        while True:
+            value = self._value()
+            self.count += 1
+            if isinstance(value, dict):
+                yield value
+            elif self.stats is not None:
+                self.stats.errors += 1  # an element that is not a record
+            if self._peek() == ",":
+                self.pos += 1
+                continue
+            self._take("]")
+            return
+
+    def records(self) -> Iterator[Any]:
+        while (c := self._peek()) != "":
+            if c == "[":
+                self.pos += 1
+                yield from self._items()
+            elif c == "{":
+                # a Graph page {"value": [...]} gives its records as the array is read; any other
+                # object is a record of its own
+                self.pos += 1
+                obj: dict[str, Any] = {}
+                paged = False
+                while self._peek() != "}":
+                    key = self._value()
+                    if not isinstance(key, str):
+                        raise self._fail("expected a name")
+                    self._take(":")
+                    if key == "value" and self._peek() == "[":
+                        self.pos += 1
+                        paged = True
+                        yield from self._items()
+                    else:
+                        obj[key] = self._value()
+                    if self._peek() != ",":
+                        break
+                    self.pos += 1
+                self._take("}")
+                if not paged:
+                    self.count += 1
+                    yield obj
+            else:
+                raise self._fail("expected an array or an object")
+
+
 def _iter_json_objects(fh: io.TextIOBase, stats: Any = None) -> Iterator[Any]:
     """A JSON array, a single object (a Graph page {"value": [...]} included, however it is
-    indented), or NDJSON. A line of NDJSON that does not parse is counted as an error, never
-    dropped without a trace: a pretty-printed Graph page read line by line used to give 0 rows
-    and 0 errors, which reads as "no sign-ins"."""
-    head = fh.read(1)
-    fh.seek(0)
-    if head == "[":
-        try:
-            arr = json.load(fh)
-        except ValueError as exc:
-            raise ValueError(f"invalid JSON array: {str(exc)[:120]}") from None
-        yield from (x for x in arr if isinstance(x, dict))
-        return
+    indented), several of them one after the other, or NDJSON, read one record at a time. A line
+    of NDJSON that does not parse is counted as an error, never dropped without a trace: a
+    pretty-printed Graph page read line by line used to give 0 rows and 0 errors, which reads as
+    "no sign-ins"."""
     first = ""
     while not first:
-        line = fh.readline()
+        line = fh.readline(MAX_RECORD_CHARS)
         if not line:
             break
         first = line.strip().rstrip(",")
     fh.seek(0)
     try:
-        whole = not isinstance(json.loads(first), dict)
+        lines = first.startswith("{") and isinstance(json.loads(first), dict)
     except ValueError:
-        whole = True  # the first line is not an object on its own: one indented document
-    if whole:
-        try:
-            doc = json.load(fh)
-        except ValueError as exc:
-            raise ValueError(f"invalid JSON document: {str(exc)[:120]}") from None
-        if isinstance(doc, dict) and isinstance(doc.get("value"), list):
-            yield from (x for x in doc["value"] if isinstance(x, dict))
-        elif isinstance(doc, dict):
-            yield doc
+        lines = False  # the first line is not an object on its own: an indented document
+    if not lines:
+        yield from _JsonStream(fh, stats).records()
         return
-    for line in fh:
+    while line := fh.readline(MAX_RECORD_CHARS + 1):
+        if len(line) > MAX_RECORD_CHARS:
+            # longer than any record: counted, and passed over to the end of its line
+            while line and not line.endswith("\n"):
+                line = fh.readline(_CHUNK)
+            if stats is not None:
+                stats.errors += 1
+            continue
         line = line.strip().rstrip(",")
         if not line or line in ("[", "]"):
             continue
@@ -790,11 +1017,12 @@ def _iter_json_objects(fh: io.TextIOBase, stats: Any = None) -> Iterator[Any]:
             if stats is not None:
                 stats.errors += 1
             continue
-        if isinstance(obj, dict):
-            if "value" in obj and isinstance(obj["value"], list):  # Graph page {"value": [...]}
-                yield from (x for x in obj["value"] if isinstance(x, dict))
-            else:
-                yield obj
+        items = obj["value"] if isinstance(obj, dict) and isinstance(obj.get("value"), list) else [obj]  # a Graph page {"value": [...]}
+        for x in items:
+            if isinstance(x, dict):
+                yield x
+            elif stats is not None:
+                stats.errors += 1  # a line or an element that is not a record
 
 
 # Graph audit log query records (auditLogRecord, Microsoft-Extractor-Suite Get-UALGraph) carry
@@ -831,20 +1059,87 @@ def _audit_from_row(obj: dict[str, Any]) -> tuple[dict[str, Any] | None, Any]:
     return None, None
 
 
+def _csv_rows(fh: io.TextIOBase, stats: Any) -> Iterator[dict[str, Any]]:
+    """The rows of a CSV export. A row the csv module cannot read (a field past MAX_FIELD_CHARS, a
+    stray quote) is counted as an error and the rows after it are still read."""
+    reader = csv.DictReader(fh)
+    # the header is read outside the loop: a header that cannot be read fails the file
+    if reader.fieldnames is None:
+        return
+    while True:
+        try:
+            rec = next(reader)
+        except StopIteration:
+            return
+        except csv.Error:
+            if stats is not None:
+                stats.errors += 1
+            continue
+        yield {k: v for k, v in rec.items() if k is not None}
+
+
 def _key_hash(key: str) -> int:
     return int.from_bytes(hashlib.blake2b(key.encode(), digest_size=8).digest(), "big")
 
 
+# How many record ids are held to find repeats. They were Python ints in a set, about 70 bytes
+# each, without a bound: a package of sixteen million audit records held a gigabyte in the web
+# process. Held as 8-byte slots of a table at most three quarters full, this many fill 64 MiB.
+MAX_REMEMBERED = 6 * 1024 * 1024
+
+
+class RecordKeys:
+    """The ids (_key_hash) of the cloud records read so far, in an open-addressing table. Once it
+    holds its limit, further ids are still looked up but no longer added."""
+
+    def __init__(self, limit: int = MAX_REMEMBERED) -> None:
+        self.limit = limit
+        self._slots = array("Q", bytes(8 * 1024))
+        self._size = 0
+
+    def __len__(self) -> int:
+        return self._size
+
+    def _slot(self, h: int) -> int:
+        slots, mask = self._slots, len(self._slots) - 1
+        i = h & mask
+        while slots[i] not in (0, h):
+            i = (i + 1) & mask
+        return i
+
+    def __contains__(self, h: object) -> bool:
+        return isinstance(h, int) and self._slots[self._slot(h or 1)] == (h or 1)
+
+    def add(self, h: int) -> bool:
+        """Hold h (0 marks an empty slot, so it is held as 1); False when the table is full."""
+        h = h or 1
+        i = self._slot(h)
+        if self._slots[i] == h:
+            return True
+        if self._size >= self.limit:
+            return False
+        self._slots[i] = h
+        self._size += 1
+        if self._size * 4 > len(self._slots) * 3:
+            old, self._slots = self._slots, array("Q", bytes(16 * len(self._slots)))
+            for x in old:
+                if x:
+                    self._slots[self._slot(x)] = x
+        return True
+
+
 def iter_records(
-    path: str | None, data: bytes | None, fmt: str, stats: Any = None, include_raw: bool = True, seen: set[int] | None = None
+    path: str | None, data: bytes | None, fmt: str, stats: Any = None, include_raw: bool = True, seen: RecordKeys | None = None
 ) -> Iterator[dict[str, Any]]:
     """Yield event rows from a UAL / Entra export in the given format (see FORMATS). A record
     whose key (record_key) is already in ``seen`` is the same record exported again: it is
     counted in ``stats.duplicates`` and not yielded: Search-UnifiedAuditLog's ReturnLargeSet
     pages repeat records within one file, and overlapping time slices repeat them across files.
-    Pass one set for every file of an upload so an archive of slices gives each record once."""
-    seen = set() if seen is None else seen
+    Pass one RecordKeys for every file of an upload so an archive of slices gives each record
+    once. A record read once it is full is counted in ``stats.repeats_unchecked``."""
+    seen = RecordKeys() if seen is None else seen
     for row in _iter_rows(path, data, fmt, stats, include_raw):
+        marks = row.pop("_marks", ())
         key = row.get("recordKey")
         if key:
             h = _key_hash(key)
@@ -852,10 +1147,32 @@ def iter_records(
                 if stats is not None:
                     stats.duplicates = getattr(stats, "duplicates", 0) + 1
                 continue
-            seen.add(h)
+            if not seen.add(h):
+                marks = (*marks, "repeats_unchecked")
         if stats is not None:
             _count(row, stats)
+            for mark in marks:
+                setattr(stats, mark, getattr(stats, mark, 0) + 1)
         yield row
+
+
+# what each count on a cloud export's stats says on its member of an archive or a package
+_NOTES = (
+    ("cut", "{:,} record(s) hold a value cut at its length limit, marked by a closing …"),
+    ("undated", "{:,} record(s) have no time: their date is missing or could not be read"),
+    ("date_order_guessed", "{:,} record(s) were dated month-first: no date in the file has a day above 12 to show its order"),
+    ("repeats_unchecked", "{:,} record(s) were read once the ids held to find repeats were full, and were not compared with one another"),
+)
+
+
+def counts(stats: Any) -> dict[str, int]:
+    """The counts of what reading cloud exports compromised on, so far."""
+    return {name: int(getattr(stats, name, 0) or 0) for name, _ in _NOTES}
+
+
+def note(counts: dict[str, int]) -> str:
+    """Those counts in words, for one file: "" when there is nothing to say."""
+    return "; ".join(text.format(counts[name]) for name, text in _NOTES if counts.get(name))
 
 
 def _count(row: dict[str, Any], stats: Any) -> None:
@@ -870,9 +1187,8 @@ def _iter_rows(path: str | None, data: bytes | None, fmt: str, stats: Any, inclu
     fh = _open_text(path, data)
     try:
         if fmt == "m365-ual-csv":
-            reader = csv.DictReader(fh)
-            for rec in reader:
-                ad, rtype = _audit_from_row({k: v for k, v in rec.items() if k is not None})
+            for rec in _csv_rows(fh, stats):
+                ad, rtype = _audit_from_row(rec)
                 if ad is None:
                     if stats is not None:
                         stats.errors += 1
@@ -896,23 +1212,54 @@ def _iter_rows(path: str | None, data: bytes | None, fmt: str, stats: Any, inclu
                     continue
                 yield _finish(entra_row(signin), obj, stats, include_raw)
         elif fmt == "entra-signin-csv":
-            reader = csv.DictReader(fh)
-            # the date order is decided from the file's own dates before any row is read
-            head = list(itertools.islice(reader, 5000))
-            date_keys = [k for k in (reader.fieldnames or []) if _PORTAL_MAP.get(k.strip().lower()) == "createdDateTime" or k == "createdDateTime"]
-            day_first = date_order(rec.get(k) for rec in head for k in date_keys)
-            for rec in itertools.chain(head, reader):
-                obj = {k: v for k, v in rec.items() if k is not None}
-                yield _finish(entra_row(obj, day_first), obj, stats, include_raw)
+            day_first = _csv_date_order(path, data)
+            for obj in _csv_rows(fh, stats):
+                row = _finish(entra_row(obj, day_first), obj, stats, include_raw)
+                if day_first is None and any(guessed_order(v) for k, v in obj.items() if _date_column(k)):
+                    row["_marks"] = (*row.get("_marks", ()), "date_order_guessed")
+                yield row
         else:
             raise ValueError(f"unknown M365 format {fmt}")
     finally:
         fh.close()
 
 
+def _date_column(name: str) -> bool:
+    low = str(name).strip().lower()
+    return (_PORTAL_MAP.get(low) or _GRAPH_NAMES.get(low)) == "createdDateTime"
+
+
+def _csv_date_order(path: str | None, data: bytes | None) -> bool | None:
+    """The date order of a sign-in CSV, from a first pass over its date column that stops at the
+    first date settling it (or at the first date not written as numbers, whose order does not
+    matter). Deciding from the first 5,000 rows read a day-first export whose first days were all
+    12 or below month-first, every date of it wrong."""
+    fh = _open_text(path, data)
+    try:
+        for rec in _csv_rows(fh, None):
+            for k, v in rec.items():
+                if v and _date_column(k):
+                    if not _NUMERIC_DATE_RE.match(str(v)):
+                        return None
+                    order = date_order([v])
+                    if order is not None:
+                        return order
+    finally:
+        fh.close()
+    return None
+
+
 def _finish(row: dict[str, Any], source: dict[str, Any], stats: Any, include_raw: bool) -> dict[str, Any]:
     if include_raw:
-        row["raw"] = json.dumps(source, ensure_ascii=False, separators=(",", ":"))[:200_000]
+        row["raw"] = _cut(json.dumps(source, ensure_ascii=False, separators=(",", ":")), 200_000)
+    # what the row is counted for, by iter_records once it knows the row is kept
+    marks: tuple[str, ...] = ()
+    if isinstance(row.get("raw"), _Cut) or any(isinstance(v, _Cut) for v in row["data"].values()):
+        marks += ("cut",)
+    if row.get("ts") is None:
+        marks += ("undated",)
+    if marks:
+        row["_marks"] = marks
     return row
 
 

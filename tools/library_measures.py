@@ -143,10 +143,14 @@ def _rows(reader: str, files: list[str]):
         for f in files:
             yield from nxlog_rows(Path(f))
         return
-    from services.ingest.pipeline import EvtxSource
+    from services.ingest.pipeline import UNRECOGNISED, EvtxSource
 
     for f in files:
         src = EvtxSource(Path(f).name, f, None, str(_W["stores"] / "tmp"), include_raw=True)
+        if src.format == UNRECOGNISED:
+            # refused by the import with a message; here one file left unread
+            _W["unread"] += 1
+            continue
         yield from src
         _W["unread"] += src.stats.errors
 

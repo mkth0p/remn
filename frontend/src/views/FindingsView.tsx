@@ -14,6 +14,7 @@ import { resetFindingSeverityOverrides } from '../data/findingReviews'
 import { getSource } from '../data/source'
 import { getDb, type Finding, type Severity } from '../db/schema'
 import { buildIncidents, chainMembership, effectiveSeverity, sevCounts, type Incident } from '../rules/incidents'
+import type { RuleDiag } from '../rules/engine'
 import { loadChains, type Chain } from '../data/chains'
 import { chainSeverity, loadChainReviews, type ChainReview } from '../data/review'
 import { toast, useStore } from '../state/store'
@@ -37,6 +38,7 @@ interface LastRun {
   ts: number
   byRule: Record<string, number>
   errors?: string[]
+  diagnostics?: RuleDiag[]
 }
 
 /** Findings referencing the same seed mail or the same identity as this one. */
@@ -386,6 +388,9 @@ export function FindingsView() {
     setFlyTab('overview')
   }
   const inheritedReview = (f: Finding) => lastRun && f.status !== 'new' && f.createdAt < lastRun.ts
+  // rules that found more than their cap in the last run: the findings they left out are not listed
+  const cuts = (lastRun?.diagnostics ?? []).filter((d) => d.reason === 'truncated')
+  const leftOut = cuts.reduce((n, d) => n + (d.dropped ?? 0), 0)
   const staleParts: string[] = []
   if (stale) {
     if (stale.lastRun == null && all.length === 0 && stale.evidenceAfter > 0) staleParts.push('rules have not run on this evidence yet')
@@ -615,6 +620,25 @@ export function FindingsView() {
               .map((e) => e.split(':')[0])
               .join(', ')}
             {stale.errors.length > 3 ? ` +${stale.errors.length - 3}` : ''} · their findings are from an earlier run or missing
+          </span>
+          <span className="spacer" />
+          <button className="btn xs" onClick={() => setView('rules')}>
+            see diagnostics
+          </button>
+        </div>
+      )}
+      {!running && cuts.length > 0 && (
+        <div className="bulkbar" data-cut-rules={cuts.length} style={{ background: 'var(--sev-medium-bg)', borderColor: 'rgba(217,130,43,0.35)', color: 'var(--sev-medium)' }}>
+          <b>
+            {cuts.length} rule{cuts.length === 1 ? '' : 's'} found more than {cuts.length === 1 ? 'its' : 'their'} cap in the last run
+          </b>
+          <span className="ellipsis" title={cuts.map((d) => `${d.ruleId}: ${d.detail ?? ''}`).join('\n')}>
+            {leftOut > 0 ? `${fmtNum(leftOut)} finding${leftOut === 1 ? '' : 's'} left out and not listed · ` : ''}
+            {cuts
+              .slice(0, 3)
+              .map((d) => d.ruleId)
+              .join(', ')}
+            {cuts.length > 3 ? ` +${cuts.length - 3}` : ''}
           </span>
           <span className="spacer" />
           <button className="btn xs" onClick={() => setView('rules')}>
@@ -1088,6 +1112,15 @@ export function FindingsView() {
                           this rule reported an error in the last run; the finding may be from an earlier run
                         </div>
                       )}
+                      {(() => {
+                        const cut = cuts.find((d) => d.ruleId === selected.ruleId)
+                        if (!cut) return null
+                        return (
+                          <div className="small" style={{ color: 'var(--warn)' }}>
+                            this rule found more than its cap in the last run: {cut.detail}
+                          </div>
+                        )
+                      })()}
                       {(() => {
                         const m = readings.get(selected.ruleId)
                         if (!m?.label) return null
