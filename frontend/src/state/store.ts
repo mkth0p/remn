@@ -33,6 +33,8 @@ export interface IngestJob {
   bytes: number
   error?: string
   startedAt: number
+  /** the analyst cancelled it; what it wrote is being removed */
+  cancelling?: boolean
 }
 
 interface State {

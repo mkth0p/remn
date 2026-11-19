@@ -83,6 +83,13 @@ background job parses it; the Evidence page shows the job's progress and its err
 and `GET /api/jobs` lists them. An interrupted upload resumes from the last received
 offset when the same file is dropped again.
 
+A running import can be cancelled from its line in the jobs list, in either store. The file
+stops being read and sent; a server job is asked to stop and, once it has, what the import
+had written is removed as removing the evidence would remove it (rows, the findings, facets
+and indicators that count them, the staged upload), and the evidence entry goes. An import
+cancelled before it wrote a row only loses its entry. In a drop of several files, the files
+after the cancelled one are not imported, and the console says how many.
+
 A browser-store import writes its rows as they arrive and completes the evidence (status,
 count, facets, indicators) at the end, so a tab closed, reloaded or crashed part-way would
 leave rows nothing counts and a file that, added again, doubles them. Each import holds a
