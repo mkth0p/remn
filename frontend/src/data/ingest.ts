@@ -350,9 +350,20 @@ async function importToBrowser(file: File, kase: Case, kind: 'evtx' | 'mail' | '
   })
 }
 
-export async function hashOnly(file: File, onProgress?: (p: number) => void): Promise<string> {
+/** SHA-256 of a file in a worker. Aborting the signal stops the worker and rejects. */
+export async function hashOnly(file: File, onProgress?: (p: number) => void, signal?: AbortSignal): Promise<string> {
   const worker = new Worker(new URL('../workers/ingest.worker.ts', import.meta.url), { type: 'module' })
   return new Promise((resolve, reject) => {
+    const stop = () => {
+      worker.terminate()
+      reject(new DOMException('aborted', 'AbortError'))
+    }
+    if (signal?.aborted) return stop()
+    signal?.addEventListener('abort', stop, { once: true })
+    worker.onerror = (e) => {
+      worker.terminate()
+      reject(new Error(e.message))
+    }
     worker.onmessage = (ev: MessageEvent<Record<string, unknown>>) => {
       if (ev.data.type === 'hash-progress') onProgress?.(Number(ev.data.done) / Math.max(1, Number(ev.data.total)))
       if (ev.data.type === 'hash') {

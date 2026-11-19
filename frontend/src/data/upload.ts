@@ -98,10 +98,18 @@ export async function chunkedUpload(file: File, onProgress?: (p: UploadProgress)
   await persist(offset)
   const progress: UploadProgress = { uploaded: offset, hashed: 0, total: file.size }
   const report = () => onProgress?.({ ...progress })
-  const hashing = hashOnly(file, (p) => {
-    progress.hashed = Math.round(p * file.size)
-    report()
-  })
+  const stopHash = new AbortController()
+  const hashing = hashOnly(
+    file,
+    (p) => {
+      progress.hashed = Math.round(p * file.size)
+      report()
+    },
+    stopHash.signal,
+  )
+  // a hash that fails while chunks are still going out is reported where it is awaited, and not
+  // as an unhandled rejection when the upload has already failed and nothing awaits it
+  hashing.catch(() => undefined)
   try {
     while (offset < file.size) {
       if (signal?.aborted) throw new DOMException('aborted', 'AbortError')
@@ -117,6 +125,8 @@ export async function chunkedUpload(file: File, onProgress?: (p: UploadProgress)
     await db.kv.delete(kvKey).catch(() => undefined)
     return { uploadId, sha256Client, sha256Server: done.sha256, size: done.size, resumedFrom: resume?.received }
   } catch (e) {
+    // without the upload the hash is of no use: stop the worker rather than read the rest of the file
+    stopHash.abort()
     const cancelled = (e as Error).name === 'AbortError' || signal?.aborted
     if (cancelled) {
       // explicit cancel: throw away the server partial and the resume record
