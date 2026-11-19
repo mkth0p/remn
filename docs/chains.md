@@ -63,14 +63,16 @@ other seeds listed as related. Deduplication uses the recipient's full address, 
 organisations' accounts named Alice retain separate chains. A bare alias on the same event
 cannot bypass a qualified foreign account, and each event contributes only once.
 
-Server-store cases are correlated inside DuckDB; browser-store cases post the relevant
-rows to the local API (`POST /api/chains/build`). A build considers at most 50,000
-events inside the window on either path; when that cap is reached the build says so
-next to its statistics. `services/analysis/chains.py` is pure
-functions over plain rows, tested on the synthetic scenarios. Authentication selection has
-its own 50,000-event budget. Seed, reply, event and output-chain limits are recorded in the
-saved result, shown persistently on the Review page and included in exported reports. A result with
-any limit warning is incomplete; an absent chain is not evidence of absent activity.
+The chains are built from the rows a story build selects ([both stores](stories.md#both-stores)):
+a server case selects them in DuckDB, a browser case selects them in the browser and posts
+them, and the story build hands the same rows to the chain builder. A chain therefore reads
+what the stories read around the flags and the riskiest mails, under the same caps, and an
+authentication campaign no rule flagged, away from every flag, is not read.
+`services/analysis/chains.py` is pure functions over plain rows, tested on the synthetic
+scenarios; `POST /api/chains/build` runs it on posted rows only and refuses a server case's
+store key. Seed and output-chain limits are recorded in the saved result, with the story
+build's own cuts, shown persistently on the Review page and included in exported reports. A
+result with any limit warning is incomplete; an absent chain is not evidence of absent activity.
 
 ## The score
 

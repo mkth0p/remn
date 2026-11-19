@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import uuid
 from datetime import UTC, datetime, timedelta
 
 import make_m365
@@ -12,9 +11,6 @@ from django.test import Client
 
 from services.analysis import chains as C
 from services.parsers import m365
-from services.parsers.mail.common import ParseContext, build_row
-from services.store.casestore import StoreRegistry
-from services.store.writers import EventWriter, MailWriter
 
 HDR = {"HTTP_X_FORENSIC_CLIENT": "1"}
 T0 = datetime(2026, 9, 1, 9, 0, tzinfo=UTC)
@@ -182,71 +178,6 @@ def test_no_chain_without_steps_or_below_score():
     assert len(res2["chains"]) == 1 and res2["chains"][0]["steps"][0]["kind"] == "mail"
 
 
-@pytest.fixture
-def store(tmp_path):
-    reg = StoreRegistry()
-    reg.configure(tmp_path / "cases")
-    st = reg.get(str(uuid.uuid4()))
-    yield st
-    reg.close_all()
-
-
-def test_chains_for_store_selects_identities_via_sql(store):
-    ctx = ParseContext(internal_domains=["contoso.com"])
-    mw = MailWriter(store, 1)
-    seed = build_row(
-        [
-            ("From", f"Billing <{PHISHER}>"),
-            ("To", f"<{VICTIM}>"),
-            ("Subject", "Invoice overdue"),
-            ("Date", "Tue, 1 Sep 2026 09:05:00 +0000"),
-            ("Message-ID", "<p1@evil-login.net>"),
-        ],
-        None,
-        '<html><body><a href="https://evil-login.net/login">pay now</a></body></html>',
-        [],
-        ctx,
-        folder="Inbox",
-        size=None,
-        extra={},
-    )
-    mw.add(seed)
-    mw.add(
-        build_row(
-            [
-                ("From", f"Alice <{VICTIM}>"),
-                ("To", f"<{PHISHER}>"),
-                ("Subject", "RE: Invoice overdue"),
-                ("Date", "Tue, 1 Sep 2026 09:12:00 +0000"),
-                ("Message-ID", "<r1@contoso.com>"),
-                ("In-Reply-To", "<p1@evil-login.net>"),
-            ],
-            "ok, paying",
-            None,
-            [],
-            ctx,
-            folder="Sent Items",
-            size=None,
-            extra={},
-        )
-    )
-    mw.flush()
-    ew = EventWriter(store, 2)
-    _, events, _ = scenario()
-    for e in events:
-        e.pop("id", None)
-        ew.add(e)
-    ew.flush()
-    findings = [{"ruleId": "mail-credential-phishing", "title": "Credential phishing", "severity": "critical", "source": "mails", "refs": [1], "ts": ms(5)}]
-    res = C.chains_for_store(store, {"expected_countries": ["FR"]}, findings, seed_min_risk=45)
-    assert len(res["chains"]) == 1
-    c = res["chains"][0]
-    assert c["identity"] == VICTIM and res["stats"]["events"] > 30
-    assert any(s["kind"] == "mail" and "same thread" in s["artifacts"] for s in c["steps"])
-    assert any("DNS query evil-login.net" in s["title"] and s["artifacts"] for s in c["steps"])
-    assert any("role assigned" in s["title"] for s in c["steps"])
-
-
 def test_build_endpoint_accepts_posted_rows():
     mails, events, findings = scenario()
     c = Client()
@@ -259,8 +190,9 @@ def test_build_endpoint_accepts_posted_rows():
     assert r.status_code == 200, r.content
     body = r.json()
     assert len(body["chains"]) == 1 and body["chains"][0]["identity"] == VICTIM and body["stats"]["chains"] == 1
+    # a server case's chains come with its stories: the endpoint reads no case store
     r2 = c.post("/api/chains/build", json.dumps({"storeKey": "00000000-0000-0000-0000-000000000000"}), content_type="application/json", **HDR)
-    assert r2.status_code == 404
+    assert r2.status_code == 400 and r2.json()["code"] == "storyBuild"
 
 
 def test_routine_activity_and_own_domain_links_do_not_make_a_chain():
@@ -506,18 +438,6 @@ def test_auth_campaign_excludes_other_account_ip_host_and_tenant_success():
         assert chain["severity"] == "medium"
     assert C.build_chains([], failures[:9])["chains"] == []
     assert C.build_chains([], [{**r, "ts": ms(i * 60)} for i, r in enumerate(failures)])["chains"] == []
-
-
-def test_store_auth_campaign_and_visible_cap(store, monkeypatch):
-    writer = EventWriter(store, 1)
-    for row in auth_events():
-        writer.add(row)
-    writer.flush()
-    assert C.chains_for_store(store, {}, [])["chains"][0]["seed"]["source"] == "events"
-    monkeypatch.setattr(C, "EVENT_CAP", 5)
-    result = C.chains_for_store(store, {}, [])
-    assert result["stats"]["authEventsTruncated"] == 1
-    assert result["chains"] == []
 
 
 def test_foreign_qualified_identity_is_not_bypassed_by_bare_alias():
