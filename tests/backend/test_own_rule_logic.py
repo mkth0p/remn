@@ -150,3 +150,15 @@ def test_an_ntlm_network_logon_without_a_session_key_is_reported_as_a_low_hint(s
     found = fired(store, "win-pass-the-hash-hint", [logon])
     assert len(found) == 1 and found[0]["severity"] == "low"
     assert "from a workstation" not in found[0]["description"] and "session key" in found[0]["description"]
+
+
+def test_a_program_on_admin_share_is_reported_on_its_own_so_the_rule_promises_no_sequence(store):
+    # the rule pairs nothing: a program opened on ADMIN$ is a finding without any service after it
+    share = event(
+        5145,
+        {"SubjectUserName": "j.doe", "IpAddress": "10.0.0.23", "ShareName": "\\\\*\\ADMIN$", "RelativeTargetName": "upd.exe", "AccessMask": "0x2"},
+        computer="FS01.corp.example",
+    )
+    found = fired(store, "win-psexec-pattern", [share])
+    assert len(found) == 1 and found[0]["severity"] == "medium"
+    assert "followed by" not in found[0]["description"]

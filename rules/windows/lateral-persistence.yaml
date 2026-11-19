@@ -30,12 +30,23 @@ where:
   eventId|in: [7045, 4697]
 ---
 id: win-psexec-pattern
-title: PsExec-style remote execution (PSEXESVC on ADMIN$)
-description: Service named PSEXESVC (or similar) or a file written to ADMIN$ share followed by service creation from the same host.
-severity: high
+title: PsExec-style remote execution (PSEXESVC service, or a program on ADMIN$)
+description: >-
+  A service named like the ones PsExec, PAExec, RemCom or CSExec install (7045, 4697, 7036), or a program or
+  script (.exe, .dll, .bat, .ps1) opened over the network on the ADMIN$ share (5145), which is how these tools copy
+  their service binary to the target before starting it. Either one is a finding on its own: the rule does not
+  check that a service follows the copy, and 5145 records a program read from ADMIN$ as well as one written
+  there. One finding per host.
+severity: medium
 source: events
 attack: [T1569.002, T1021.002]
 tags: [lateral-movement]
+falsepositives:
+  - administrators who use PsExec or PAExec
+  - software deployment that copies an installer to ADMIN$ and starts it as a service (for example a configuration manager's client push)
+references:
+  - https://learn.microsoft.com/en-us/sysinternals/downloads/psexec
+  - https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-5145
 where:
   any_of:
     - { eventId|in: [7045, 4697, 7036], serviceName|contains: [PSEXESVC, PAExec, RemCom, csexec] }
