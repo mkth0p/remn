@@ -134,6 +134,16 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   same escaping, so a value from the evidence cannot start a formula in Excel builds that split
   CSV on semicolons. The HTML report carries its own content security policy (no script, no
   remote loads), and the build's source link is only ever an http(s) URL.
+- Public instance limits: a chunk upload over 64 MiB is refused before it is read (by Caddy and by
+  the server), unfinished uploads reserve the size they announced in the staging budget, and the
+  chains and mail enrichment paths refuse a server case key in browser-only mode, as stories and
+  relationships already did. A non-ASCII access token is a 401 rather than a server error.
+- Levels measured rather than inherited: 116 low rules that raise nothing on the evtx-baseline
+  clean machines are now medium, and ten rules whose only findings are on those machines are now
+  low (SigmaHQ rules through `rules/community/levels.json`, which a re-import keeps; REMN's own
+  in their files). Detections go from 235 to 245 of 535 attack_data recordings, 109 to 112 of 279
+  EVTX-to-MITRE-Attack files and 260 to 264 of 278 EVTX-ATTACK-SAMPLES files, and medium and
+  higher findings on the clean machines from 2,134 to 1,684.
 - The staging area is sized from its disk, and archives expand only as far as it and their own
   size allow. Outside browser-only mode `FORENSIC_TMP_MAX_GB` now defaults to 0, which lets the
   staging area use the free space of its disk less a tenth of that disk (at most 10 GiB), so a
@@ -150,16 +160,6 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   headers and 10 seconds, and is flagged as partly analysed when it stops early. The folders of an
   expanded 7z and of event logs staged for Hayabusa are swept like the upload staging area, and a
   restart removes what a stopped parse left behind.
-- Public instance limits: a chunk upload over 64 MiB is refused before it is read (by Caddy and by
-  the server), unfinished uploads reserve the size they announced in the staging budget, and the
-  chains and mail enrichment paths refuse a server case key in browser-only mode, as stories and
-  relationships already did. A non-ASCII access token is a 401 rather than a server error.
-- Levels measured rather than inherited: 116 low rules that raise nothing on the evtx-baseline
-  clean machines are now medium, and ten rules whose only findings are on those machines are now
-  low (SigmaHQ rules through `rules/community/levels.json`, which a re-import keeps; REMN's own
-  in their files). Detections go from 235 to 245 of 535 attack_data recordings, 109 to 112 of 279
-  EVTX-to-MITRE-Attack files and 260 to 264 of 278 EVTX-ATTACK-SAMPLES files, and medium and
-  higher findings on the clean machines from 2,134 to 1,684.
 - 39 rules for techniques the default rules missed in attack_data
   (`rules/windows/technique-gaps.yaml`): directory and Kerberos abuse, PowerShell discovery and
   tooling, obfuscated command lines, registry, Python and browser-policy persistence, LSA
