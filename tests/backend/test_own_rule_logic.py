@@ -129,3 +129,24 @@ def test_an_event_log_crash_and_a_client_on_its_pipe_are_paired_in_either_order_
     found = fired(store, "win-eventlog-crash-after-remote-pipe", [crash, pipe])
     assert len(found) == 1 and found[0]["severity"] == "medium"
     assert "right after" not in found[0]["title"] and "either order" in found[0]["description"]
+
+
+def test_an_ntlm_network_logon_without_a_session_key_is_reported_as_a_low_hint(store):
+    # a client that negotiates no NTLM session key looks like this too, and the log cannot say
+    # whether the source is a workstation, so the finding is a hint and says what it matched
+    logon = event(
+        4624,
+        {
+            "SubjectUserSid": "S-1-0-0",
+            "TargetUserName": "j.doe",
+            "LogonType": "3",
+            "LogonProcessName": "NtLmSsp ",
+            "AuthenticationPackageName": "NTLM",
+            "KeyLength": "0",
+            "IpAddress": "10.0.0.23",
+        },
+        computer="FS01.corp.example",
+    )
+    found = fired(store, "win-pass-the-hash-hint", [logon])
+    assert len(found) == 1 and found[0]["severity"] == "low"
+    assert "from a workstation" not in found[0]["description"] and "session key" in found[0]["description"]

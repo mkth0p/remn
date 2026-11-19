@@ -292,12 +292,22 @@ group_by: [ipAddress]
 threshold: ">= 1"
 ---
 id: win-pass-the-hash-hint
-title: Pass-the-hash pattern (NTLM network logon, LogonType 9 or NTLM with empty key)
-description: 4624 with LogonType 9 (NewCredentials, e.g. mimikatz sekurlsa::pth) or NTLM type 3 logon with KeyLength 0 from a workstation.
-severity: medium
+title: Possible pass-the-hash (NewCredentials logon, or NTLM network logon without a session key)
+description: >-
+  4624 with LogonType 9 through seclogo (NewCredentials: mimikatz sekurlsa::pth on the machine the hash is used
+  from, and also runas /netonly), or an NTLM network logon (LogonType 3) of a user account with KeyLength 0, that is
+  without an NTLM session key, as a hash passed with tools that do not negotiate one leaves on the target. Both
+  have ordinary causes, and the log cannot say whether the source is a workstation or a server, so the finding is
+  a hint to read with the logons around it.
+severity: low
 source: events
 attack: [T1550.002]
 tags: [authentication, ntlm, lateral-movement]
+falsepositives:
+  - runas /netonly, which administrators use to reach another domain with other credentials
+  - NTLM clients that negotiate no session key, such as some appliances and non-Windows SMB clients
+references:
+  - https://github.com/SigmaHQ/sigma/blob/272daf82bf77fb0bb97f1f0c4d82bc61154772e1/rules/windows/builtin/security/account_management/win_security_pass_the_hash_2.yml
 where:
   eventId: 4624
   any_of:
