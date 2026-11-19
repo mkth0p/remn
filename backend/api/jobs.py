@@ -99,7 +99,7 @@ class JobManager:
                 except JobCancelled:
                     job.status = "cancelled"
                 except Exception as exc:  # noqa: BLE001
-                    # the job's id stays out of the log: whoever holds it can find the job
+                    # the reference in the error, not the job's id, ties the log line to what the client is shown
                     job.error = failure(f"the {kind} job", exc, log)["error"]
                     job.status = "error"
                 finally:
