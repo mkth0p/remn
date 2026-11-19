@@ -394,7 +394,8 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
         ts: (first[tsField] as number) ?? null,
         tsEnd: (last[tsField] as number) ?? null,
         entities: ent,
-        count: rows.length,
+        // the number the threshold tested: distinct values when the rule counts them
+        count: n,
       })
       if (findings.length >= maxFindings) break
       continue

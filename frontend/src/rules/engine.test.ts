@@ -125,6 +125,18 @@ describe('runRule', () => {
     expect(f[0].entities.fromRegistrable).toContain('interne-fr.co')
     expect(f[0].refs).toEqual([1, 2])
   })
+  it('counts the distinct values of a group without a window, as the SQL engine does', () => {
+    const same: Rule = { id: 'same', title: 's', severity: 'high', source: 'mails', where: { 'fromNameNorm|exists': true }, group_by: ['fromNameNorm'], distinct: 'fromRegistrable', threshold: '>= 2' }
+    const rows = [
+      { id: 1, date: T0, fromNameNorm: 'lefevre marie', fromRegistrable: 'interne.fr' },
+      { id: 2, date: T0 + 1000, fromNameNorm: 'lefevre marie', fromRegistrable: 'interne-fr.co' },
+      { id: 3, date: T0 + 2000, fromNameNorm: 'lefevre marie', fromRegistrable: 'interne-fr.co' },
+    ]
+    const f = runRule(same, { rows })
+    // the count is what the threshold tested: two domains, not three mails
+    expect(f[0].count).toBe(2)
+    expect(f[0].refs).toEqual([1, 2, 3])
+  })
   it('escalates severity with then_flags', () => {
     const r: Rule = { id: 'macro', title: 'm', severity: 'high', source: 'mails', where: { 'flags|contains': 'att_office_macro' }, then_flags: [{ att_macro_autoexec: 'critical' }] }
     const f = runRule(r, {
