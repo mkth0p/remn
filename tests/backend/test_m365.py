@@ -778,3 +778,64 @@ def test_the_member_list_says_how_many_records_were_cut(tmp_path):
     rows, stats = _sources_of(tmp_path / "export.zip")
     member = next(f for f in stats["files"] if f["name"] == "ual/long.json")
     assert member["status"] == "parsed" and member["note"] == notes["ual/long.json"]
+
+
+def _portal_csv(dates: list[str]) -> bytes:
+    """An Entra portal sign-in CSV, as re-saved by a spreadsheet in some culture (invented rows)."""
+    head = "Date (UTC),Request ID,Username,IP address,Status,Sign-in error code,Application\n"
+    return (head + "".join(f"{d},r{i},alice@contoso.com,203.0.113.5,Success,0,Office 365\n" for i, d in enumerate(dates))).encode()
+
+
+def test_culture_dates_keep_their_zone_and_their_minutes():
+    """Dates the parser could not read left the row off the timeline without a word."""
+    assert m365.parse_ts("9/1/2026 10:00:00 AM +02:00")[1] == "2026-09-01T08:00:00.000Z"
+    assert m365.parse_ts("9/1/2026 10:00 PM")[1] == "2026-09-01T22:00:00.000Z"
+    assert m365.parse_ts("1/09/2026 10:00:00 AM", day_first=True)[1] == "2026-09-01T10:00:00.000Z"
+    assert m365.parse_ts("2026/09/01 10:00:00")[1] == "2026-09-01T10:00:00.000Z"
+    assert m365.parse_ts("01-09-2026 10:00", day_first=True)[1] == "2026-09-01T10:00:00.000Z"
+    assert m365.parse_ts("2026-09-01T10:00:00.1234567-05:00")[1] == "2026-09-01T15:00:00.123Z"
+    assert m365.parse_ts("31/02/2026 10:00:00", day_first=True) == (None, None)
+
+
+def test_a_record_without_a_readable_time_is_counted(tmp_path):
+    from services.parsers.evtx_parser import Stats
+
+    stats = Stats()
+    recs = make_m365.ual_records()[:3]
+    recs[1] = {**recs[1], "CreationTime": "sometime in September"}
+    rows = list(m365.iter_records(None, json.dumps(recs).encode(), "m365-ual-json", stats=stats))
+    assert [r["ts"] is None for r in rows] == [False, True, False]
+    assert stats.undated == 1 and stats.to_dict()["undated"] == 1
+
+
+def test_the_date_order_is_decided_from_the_whole_file():
+    """Only the first 5,000 rows decided: a fr-FR export whose first days were all 12 or below
+    was read month-first, every date of it wrong."""
+    from services.parsers.evtx_parser import Stats
+
+    stats = Stats()
+    dates = ["05/01/2024 10:11:12"] * 5000 + ["15/01/2024 10:11:12"]
+    rows = list(m365.iter_records(None, _portal_csv(dates), "entra-signin-csv", stats=stats))
+    assert {r["tsIso"][:10] for r in rows} == {"2024-01-05", "2024-01-15"} and stats.date_order_guessed == 0
+
+
+def test_a_date_order_the_file_cannot_show_is_said(tmp_path):
+    """Every date at day 12 or below: read month-first, the portal's own order, and counted, so the
+    analyst knows the dates of a day-first export would be wrong."""
+    from services.parsers.evtx_parser import Stats
+
+    stats = Stats()
+    rows = list(m365.iter_records(None, _portal_csv(["05/01/2024 10:11:12", "06/01/2024 10:11:12", "06/06/2024 10:11:12"]), "entra-signin-csv", stats=stats))
+    assert [r["tsIso"][:10] for r in rows] == ["2024-05-01", "2024-06-01", "2024-06-06"]
+    # a day equal to its month reads the same either way, and a dotted date is always day-first
+    assert stats.date_order_guessed == 2 and stats.to_dict()["dateOrderGuessed"] == 2
+    stats = Stats()
+    rows = list(m365.iter_records(None, _portal_csv(["05.01.2024 10:11:12"]), "entra-signin-csv", stats=stats))
+    assert rows[0]["tsIso"][:10] == "2024-01-05" and stats.date_order_guessed == 0
+    f = tmp_path / "signins.csv"
+    f.write_bytes(_portal_csv(["05/01/2024 10:11:12", "13/01/2024 10:11:12"]).replace(b"13/01", b"1301"))
+    rows, stats = _sources_of(f)
+    assert stats["files"][0]["note"] == (
+        "1 record(s) have no time: their date is missing or could not be read; "
+        "1 record(s) were dated month-first: no date in the file has a day above 12 to show its order"
+    )

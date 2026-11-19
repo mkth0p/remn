@@ -141,6 +141,17 @@ other, or one object per line. A record longer than 16 MiB on a line of its own 
 error; inside an array it stops the file there, the records before it kept and the file
 marked failed with the record number. So does JSON that is broken part-way.
 
+A time written with a zone or an offset keeps it; one written without is read as UTC, the
+zone the audit log's `CreationTime`, Graph and the portal's `Date (UTC)` use. Dates a
+culture or a spreadsheet wrote are read too (`9/1/2026 10:00 AM`, `01.09.2026 10:00`,
+`2026/09/01 10:00:00`, with or without seconds or an offset). A sign-in CSV that writes its
+dates as numbers is read in the order its own dates show: one day above 12 anywhere in the
+file settles it for the whole file. When no date shows it, the dates are read month-first,
+the portal's order, and the evidence's statistics (`dateOrderGuessed`) and its member list
+say how many records were dated that way: in a day-first export those dates are wrong. A
+record whose date is missing or cannot be read is kept without a time and counted the same
+way (`undated`), since it is not on the timeline.
+
 A record is in the case once. Search-UnifiedAuditLog's large-set pages repeat records,
 and exports cut into time slices overlap, so a UAL record whose `AuditData.Id` was already
 read, and a Graph sign-in whose `id` was, is not added again: not from the same file, not

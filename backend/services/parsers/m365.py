@@ -34,13 +34,12 @@ import csv
 import hashlib
 import io
 import ipaddress
-import itertools
 import json
 import logging
 import os
 import re
 from collections.abc import Iterable, Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -163,7 +162,7 @@ def clean_ip(v: Any) -> str | None:
         return s[:100]
 
 
-_NUMERIC_DATE_RE = re.compile(r"^\s*(\d{1,2})[/.](\d{1,2})[/.](\d{4})\b")
+_NUMERIC_DATE_RE = re.compile(r"^\s*(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})\b")
 
 
 def date_order(values: Iterable[Any]) -> bool | None:
@@ -184,10 +183,54 @@ def date_order(values: Iterable[Any]) -> bool | None:
     return day_first
 
 
+def guessed_order(v: Any) -> bool:
+    """Whether a numeric date reads differently day-first and month-first (05/01, not 05/05, and
+    never a dotted date, which is always day-first)."""
+    m = _NUMERIC_DATE_RE.match(str(v or ""))
+    return bool(m) and "." not in m.group(0) and m.group(1) != m.group(2) and int(m.group(1)) <= 12 and int(m.group(2)) <= 12
+
+
+# a date as a culture writes it, with its time to the minute or the second, a 12-hour clock or
+# not, and the zone when the exporter wrote one: 9/1/2026 10:00 AM, 01.09.2026 10:00:00,
+# 2026/09/01 10:00:00, 9/1/2026, 10:00:00 AM +02:00
+_CULTURE_RE = re.compile(r"^(\d{1,4})([/.-])(\d{1,2})\2(\d{1,4}),?\s+(\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,7}))?)?\s*([AaPp][Mm])?\s*(Z|[+-]\d{2}:?\d{2})?$")
+
+
+def _culture_date(s: str, day_first: bool | None) -> datetime | None:
+    m = _CULTURE_RE.match(s)
+    if not m:
+        return None
+    a, sep, b, c, hour, minute, second, fraction, half, zone = m.groups()
+    if len(a) == 4:
+        year, month, day = int(a), int(b), int(c)
+    elif len(c) != 4:
+        return None
+    elif sep == "." or day_first:
+        day, month, year = int(a), int(b), int(c)
+    else:
+        month, day, year = int(a), int(b), int(c)
+    h = int(hour)
+    if half:
+        if not 1 <= h <= 12:
+            return None
+        h = h % 12 + (12 if half.lower() == "pm" else 0)
+    tz = UTC
+    if zone and zone != "Z":
+        sign = -1 if zone[0] == "-" else 1
+        digits = zone[1:].replace(":", "")
+        tz = timezone(sign * timedelta(hours=int(digits[:2]), minutes=int(digits[2:])))
+    try:
+        return datetime(year, month, day, h, int(minute), int(second or 0), int((fraction or "0")[:6].ljust(6, "0")), tzinfo=tz)
+    except ValueError:
+        return None
+
+
 def parse_ts(v: Any, day_first: bool | None = None) -> tuple[int | None, str | None]:
     """ISO-8601 (with or without zone / fractional seconds), portal 'M/D/YYYY, h:mm:ss AM', or a
     culture's numeric date -> (ms, iso). day_first is the order date_order found for the file;
-    None keeps the portal's own month-first order for slashes. Dotted dates are always day-first."""
+    None keeps the portal's own month-first order for slashes and dashes. Dotted dates are always
+    day-first. A time written with a zone keeps it; one without is UTC, the zone the audit log,
+    Graph and the portal's "Date (UTC)" write."""
     if v is None:
         return None, None
     if isinstance(v, (int, float)):
@@ -196,22 +239,10 @@ def parse_ts(v: Any, day_first: bool | None = None) -> tuple[int | None, str | N
     s = str(v).strip()
     if not s:
         return None, None
-    s2 = s.replace("Z", "+00:00")
-    dt = None
     try:
-        dt = datetime.fromisoformat(s2)
+        dt: datetime | None = datetime.fromisoformat(s.replace("Z", "+00:00"))
     except ValueError:
-        slashes = (
-            ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y, %H:%M:%S", "%d/%m/%Y %H:%M")
-            if day_first
-            else ("%m/%d/%Y, %I:%M:%S %p", "%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M")
-        )
-        for fmt in (*slashes, "%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"):
-            try:
-                dt = datetime.strptime(s, fmt)
-                break
-            except ValueError:
-                continue
+        dt = _culture_date(s, day_first)
     if dt is None:
         return None, None
     if dt.tzinfo is None:
@@ -1055,7 +1086,7 @@ def iter_records(
     Pass one set for every file of an upload so an archive of slices gives each record once."""
     seen = set() if seen is None else seen
     for row in _iter_rows(path, data, fmt, stats, include_raw):
-        cut = row.pop("_cut", False)
+        marks = row.pop("_marks", ())
         key = row.get("recordKey")
         if key:
             h = _key_hash(key)
@@ -1066,13 +1097,17 @@ def iter_records(
             seen.add(h)
         if stats is not None:
             _count(row, stats)
-            if cut:
-                stats.cut = getattr(stats, "cut", 0) + 1
+            for mark in marks:
+                setattr(stats, mark, getattr(stats, mark, 0) + 1)
         yield row
 
 
 # what each count on a cloud export's stats says on its member of an archive or a package
-_NOTES = (("cut", "{:,} record(s) hold a value cut at its length limit, marked by a closing …"),)
+_NOTES = (
+    ("cut", "{:,} record(s) hold a value cut at its length limit, marked by a closing …"),
+    ("undated", "{:,} record(s) have no time: their date is missing or could not be read"),
+    ("date_order_guessed", "{:,} record(s) were dated month-first: no date in the file has a day above 12 to show its order"),
+)
 
 
 def counts(stats: Any) -> dict[str, int]:
@@ -1122,25 +1157,54 @@ def _iter_rows(path: str | None, data: bytes | None, fmt: str, stats: Any, inclu
                     continue
                 yield _finish(entra_row(signin), obj, stats, include_raw)
         elif fmt == "entra-signin-csv":
-            reader = _csv_rows(fh, stats)
-            # the date order is decided from the file's own dates before any row is read
-            head = list(itertools.islice(reader, 5000))
-            date_keys = {k for rec in head[:1] for k in rec if _PORTAL_MAP.get(k.strip().lower()) == "createdDateTime" or k == "createdDateTime"}
-            day_first = date_order(rec.get(k) for rec in head for k in date_keys)
-            for obj in itertools.chain(head, reader):
-                yield _finish(entra_row(obj, day_first), obj, stats, include_raw)
+            day_first = _csv_date_order(path, data)
+            for obj in _csv_rows(fh, stats):
+                row = _finish(entra_row(obj, day_first), obj, stats, include_raw)
+                if day_first is None and any(guessed_order(v) for k, v in obj.items() if _date_column(k)):
+                    row["_marks"] = (*row.get("_marks", ()), "date_order_guessed")
+                yield row
         else:
             raise ValueError(f"unknown M365 format {fmt}")
     finally:
         fh.close()
 
 
+def _date_column(name: str) -> bool:
+    low = str(name).strip().lower()
+    return (_PORTAL_MAP.get(low) or _GRAPH_NAMES.get(low)) == "createdDateTime"
+
+
+def _csv_date_order(path: str | None, data: bytes | None) -> bool | None:
+    """The date order of a sign-in CSV, from a first pass over its date column that stops at the
+    first date settling it (or at the first date not written as numbers, whose order does not
+    matter). Deciding from the first 5,000 rows read a day-first export whose first days were all
+    12 or below month-first, every date of it wrong."""
+    fh = _open_text(path, data)
+    try:
+        for rec in _csv_rows(fh, None):
+            for k, v in rec.items():
+                if v and _date_column(k):
+                    if not _NUMERIC_DATE_RE.match(str(v)):
+                        return None
+                    order = date_order([v])
+                    if order is not None:
+                        return order
+    finally:
+        fh.close()
+    return None
+
+
 def _finish(row: dict[str, Any], source: dict[str, Any], stats: Any, include_raw: bool) -> dict[str, Any]:
     if include_raw:
         row["raw"] = _cut(json.dumps(source, ensure_ascii=False, separators=(",", ":")), 200_000)
-    # counted by iter_records once it knows the row is kept
+    # what the row is counted for, by iter_records once it knows the row is kept
+    marks: tuple[str, ...] = ()
     if isinstance(row.get("raw"), _Cut) or any(isinstance(v, _Cut) for v in row["data"].values()):
-        row["_cut"] = True
+        marks += ("cut",)
+    if row.get("ts") is None:
+        marks += ("undated",)
+    if marks:
+        row["_marks"] = marks
     return row
 
 
