@@ -136,6 +136,8 @@ rest. See [SECURITY.md](SECURITY.md).
 ## Contributing and licence
 
 [CONTRIBUTING.md](CONTRIBUTING.md) has the setup, the checks that run in CI and the
-rules of the repository. REMN is under the Apache License 2.0; the rule packs, fonts
+rules of the repository, and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) the conduct expected
+in issues and pull requests. Security problems are reported privately, as
+[SECURITY.md](SECURITY.md) describes. REMN is under the Apache License 2.0; the rule packs, fonts
 and corpora it uses have their own terms, listed in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
