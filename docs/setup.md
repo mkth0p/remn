@@ -313,7 +313,11 @@ FORENSIC_ALLOWED_HOSTS=remn.example.com      # extra Host header values (comma l
 
 The first time a browser reaches a token-protected server, the app shows a token prompt;
 the value is kept in that browser's IndexedDB and sent as the `X-Forensic-Client`
-header. A wrong token gets `401 {"code":"auth"}`.
+header. A wrong token gets `401 {"code":"auth"}`. Ten wrong tokens in a minute from one
+address (`FORENSIC_AUTH_FAILURES_PER_MIN`, 0 for no limit) get that address `429` with a
+Retry-After for every request that carries a token, the right one included, until the
+allowance refills; behind a proxy, set `FORENSIC_TRUST_PROXY=1` so that each client is counted
+on its own address rather than all of them on the proxy's.
 
 **Recommended: Tailscale Serve.** Keep `run.py` on `127.0.0.1` and run
 `tailscale serve --bg 8000`; you get HTTPS (a secure context, which the app needs for
@@ -332,7 +336,8 @@ then restart Ollama. Chrome, Edge and Firefox let an HTTPS page call `http://loc
 Safari does not, so that analyst switches to the server-proxy transport in Settings → AI.
 
 **Accepted trade-offs of this first version** (one shared token, keep the deployment
-private): no per-user accounts or audit log, no rate limiting, DuckDB case stores are not
+private): no per-user accounts or audit log, no request budget unless
+`FORENSIC_RATE_LIMIT_PER_MIN` is set (wrong tokens are limited, as above), DuckDB case stores are not
 encrypted at rest, and anyone with the token can read or delete every case store.
 Confidential rows only reach the server when a case uses the server store; browser-store
 cases keep evidence in the analyst's browser. See [Storage modes](storage.md).

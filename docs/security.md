@@ -45,8 +45,13 @@ pack importer download from their sources on request, never during an investigat
   `X-Forensic-Client` header (cookie-less CSRF protection); cross-origin preflights are
   refused. The one exception is a GET of `/api/health`, which a caller without the header
   gets as `{"ok": true}` only. With `FORENSIC_AUTH_TOKEN` set, the header value must equal
-  the token (see [remote access](setup.md#remote-access)). The remote mode is one shared token, with no
-  per-user accounts, audit log or rate limit; keep such a deployment private.
+  the token (see [remote access](setup.md#remote-access)). Wrong tokens are counted per
+  client address (per /64 for IPv6): past `FORENSIC_AUTH_FAILURES_PER_MIN` (10 by default)
+  in a minute, that address gets 429 with a Retry-After for every request that carries a
+  token, the right one included, until its allowance refills. Behind a proxy without
+  `FORENSIC_TRUST_PROXY=1` every client shares the proxy's address and so one allowance.
+  The remote mode is one shared token, with no per-user accounts or audit log; keep such a
+  deployment private.
 - Parsed content is treated as hostile: React escaping, HTML previews in a sandboxed
   iframe with DOMPurify, images blocked, links disabled and defanged. Attachments are
   analysed statically, never opened or executed.

@@ -9,7 +9,8 @@ which answers such a caller with nothing but the fact that the server is up.
 
 When ``FORENSIC_AUTH_TOKEN`` is set (remote/home-server deployments), the
 header value must equal the token; a wrong value gets 401 with code "auth"
-so the frontend can prompt for the token.
+so the frontend can prompt for the token. Wrong values are counted per client
+address, and past ``FORENSIC_AUTH_FAILURES_PER_MIN`` the address gets 429.
 """
 
 from __future__ import annotations
@@ -66,8 +67,43 @@ def client_key(request) -> str:
 
 
 class ApiClientHeaderMiddleware:
+    # per client address: the failed token attempts it has left, and when that was last reckoned
+    _lock = threading.Lock()
+    _failures: dict[str, tuple[float, float]] = {}
+
     def __init__(self, get_response):
         self.get_response = get_response
+
+    @classmethod
+    def reset(cls) -> None:
+        with cls._lock:
+            cls._failures.clear()
+
+    def _limited(self, request, right: bool) -> JsonResponse | None:
+        """The 429 for an address that has used up its failed attempts, or None; counts this one when it is wrong.
+
+        FORENSIC_AUTH_FAILURES_PER_MIN wrong tokens a minute, refilled continuously, so the token
+        cannot be guessed at the speed the server answers. While an address is limited the right
+        token is refused as well: were it let through, every guess would still be answered."""
+        limit = int(settings.FORENSIC_AUTH_FAILURES_PER_MIN or 0)
+        if limit <= 0:
+            return None
+        addr = client_key(request)
+        now = time.monotonic()
+        with self._lock:
+            left, last = self._failures.get(addr, (float(limit), now))
+            left = min(float(limit), left + (now - last) * limit / 60.0)
+            if left < 1.0:
+                self._failures[addr] = (left, now)
+                resp = JsonResponse({"error": "too many failed access token attempts from this address, try again shortly", "code": "rate"}, status=429)
+                resp["Retry-After"] = str(int((1.0 - left) * 60.0 / limit) + 1)
+                return resp
+            if not right:
+                self._failures[addr] = (left - 1.0, now)
+                if len(self._failures) > 10_000:
+                    for k in [k for k, (_, t) in self._failures.items() if now - t > 600]:
+                        del self._failures[k]
+        return None
 
     def __call__(self, request):
         if request.path.startswith("/api/"):
@@ -79,8 +115,12 @@ class ApiClientHeaderMiddleware:
                     return self.get_response(request)
                 return JsonResponse({"error": "missing X-Forensic-Client header"}, status=403)
             token = settings.FORENSIC_AUTH_TOKEN
-            if token and not hmac.compare_digest(value.encode("utf-8", "surrogateescape"), token.encode("utf-8")):
-                return JsonResponse({"error": "invalid access token", "code": "auth"}, status=401)
+            if token:
+                right = hmac.compare_digest(value.encode("utf-8", "surrogateescape"), token.encode("utf-8"))
+                if (limited := self._limited(request, right)) is not None:
+                    return limited
+                if not right:
+                    return JsonResponse({"error": "invalid access token", "code": "auth"}, status=401)
             # for the health view: this caller sent the header, and the token when one is configured
             request.forensic_client = True
         return self.get_response(request)
