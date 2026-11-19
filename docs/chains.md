@@ -95,7 +95,13 @@ finding-bearing step nor a strong step stays medium at most (capped at 54).
 ## Chains and findings
 
 A chain is also stored as a finding (rule `chain`), so it reaches the findings list and
-the report. Beyond that, a chain and the findings whose rows are its steps are one item:
+the report. The finding carries the ATT&CK techniques the chain's own steps show: a mail-led
+chain is phishing (T1566, its seed); email collection (T1114) when a step forwards the
+mailbox, sets an inbox rule, or reads the mailbox with a finding on the read; valid accounts
+(T1078) when a sign-in or logon that worked carries a finding or a sign it was not the person
+(an unexpected country, legacy authentication, an identity protection risk). An
+authentication campaign is brute force (T1110), and valid accounts when a guessed password
+worked. Beyond that, a chain and the findings whose rows are its steps are one item:
 when the chains are built, every finding whose rows all sit among a chain's steps, or on
 its seed mail, joins that chain's incident. A phishing mail's rule hits and the findings
 on the recipient's later logons are therefore never listed twice, once inside the chain
