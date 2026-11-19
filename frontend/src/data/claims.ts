@@ -4,7 +4,12 @@
  * incident note names addresses, accounts and hashes that its own rows should hold; the executive
  * summary names values the evidence should hold. Each claim is:
  *
- * - verified: every row it cites is in the case and says what the claim says;
+ * - verified: a finding's rows are all in the case, match its rule, hold the values it names and
+ *   begin at its time; a text's rows hold every address, account and hash it names. No more than
+ *   that: a text whose values are all there may still say something else of them, and the page
+ *   and the report say "rows match" or "hold the values named", never "verified";
+ * - nothing to check (texts only): it names no address, account or hash, so nothing in it was
+ *   read against the rows; it is neither borne out nor contradicted;
  * - unsupported: a row it cites is no longer in the case (removed, or numbered anew when its file
  *   was added again), or a value it names is in none of its rows;
  * - contradicted: its rows say otherwise: a row no longer matches the rule, none holds a value the
@@ -23,6 +28,8 @@ import { recordRef, type RecordRef } from './recordKeys'
 import { citationsIn, SeenSet } from '../ai/evidence'
 
 export type ClaimStatus = 'verified' | 'unsupported' | 'contradicted'
+/** A text's check: its rows hold every value it names, it names none, or one is in none of them. */
+export type TextStatus = 'verified' | 'nothing_to_check' | 'unsupported'
 
 export interface ClaimCheck {
   status: ClaimStatus
@@ -38,7 +45,7 @@ export interface ClaimCheck {
 }
 
 export interface TextCheck {
-  status: ClaimStatus
+  status: TextStatus
   /** the values it names that the check looked for */
   named: string[]
   reasons: string[]
@@ -200,7 +207,7 @@ function rowText(r: Row): string {
 /** A text against the rows it is about: every address, hash and case name it names should be in them. */
 export function checkText(text: string, rows: Row[], names: Iterable<string> = []): TextCheck {
   const named = namedValues(text, names)
-  if (!named.length) return { status: 'verified', named, reasons: [] }
+  if (!named.length) return { status: 'nothing_to_check', named, reasons: [] }
   const hay = rows.map(rowText).join('\n')
   const absent = named.filter((v) => !hay.includes(v))
   return {
@@ -219,7 +226,7 @@ export function checkText(text: string, rows: Row[], names: Iterable<string> = [
  */
 export async function checkTextInCase(text: string, source: DataSource): Promise<TextCheck> {
   const named = namedValues(text)
-  if (!named.length) return { status: 'verified', named, reasons: [] }
+  if (!named.length) return { status: 'nothing_to_check', named, reasons: [] }
   const absent: string[] = []
   let scanned = 0
   for (const v of named.slice(0, 40)) {
@@ -372,6 +379,10 @@ const CITATION = /\[((?:ev|event|evt|mail|msg|finding|chain)\s*[:#][^\]\n]{1,300
 export interface AnswerCheck {
   /** sentences that cite rows, read against them */
   sentences: number
+  /** those whose cited rows hold every address, account and hash they name */
+  holding: number
+  /** those that name no such value: nothing in them was read against their rows */
+  nothingToCheck: number
   /** those that name what their cited rows do not hold, or cite rows no longer in the case */
   unsupported: { sentence: string; reason: string }[]
 }
@@ -383,7 +394,7 @@ export interface AnswerCheck {
  */
 export async function checkCitedSentences(text: string, source: DataSource, names: Iterable<string> = []): Promise<AnswerCheck> {
   const nameList = [...names]
-  const out: AnswerCheck = { sentences: 0, unsupported: [] }
+  const out: AnswerCheck = { sentences: 0, holding: 0, nothingToCheck: 0, unsupported: [] }
   const sentences = text.split(/(?<=[.!?])\s+|\n+/).filter((s) => /\[(?:ev|event|evt|mail|msg)\s*[:#]/i.test(s))
   for (const sentence of sentences.slice(0, 30)) {
     const refs = citationsIn(sentence, new SeenSet()).map((c) => c.ref)
@@ -397,7 +408,9 @@ export async function checkCitedSentences(text: string, source: DataSource, name
     if (!rows.length) out.unsupported.push({ sentence: bare.slice(0, 240), reason: 'the rows it cites are not in the case' })
     else {
       const c = checkText(bare, rows, nameList)
-      if (c.status !== 'verified') out.unsupported.push({ sentence: bare.slice(0, 240), reason: c.reasons[0] })
+      if (c.status === 'unsupported') out.unsupported.push({ sentence: bare.slice(0, 240), reason: c.reasons[0] })
+      else if (c.status === 'nothing_to_check') out.nothingToCheck++
+      else out.holding++
     }
   }
   return out

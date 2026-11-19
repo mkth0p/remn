@@ -108,10 +108,15 @@ runs by itself (`frontend/src/ai/chat.ts`):
   cites them inline (`[ev:123]`); each citation is checked against that set and shown as a
   chip that opens the row, or struck through as unverified when no tool returned it, and
   the answer says how many of each it has. That a tool returned a row says only that the
-  model saw it, so each sentence that cites event or mail rows is also read against those
-  rows (`frontend/src/data/claims.ts`): an address, an account of the case or a hash it names
-  that they do not hold is listed under the answer, and the AI ledger records how many
-  sentences did not hold. A hypothesis or a proposal that cites a row the tools never
+  model saw it, so each sentence that cites event or mail rows (the first 30) is also read
+  against those rows (`frontend/src/data/claims.ts`). Under the answer each such sentence is
+  counted as one whose rows hold every address, account of the case and hash it names, one
+  that names none of them (nothing to check: nothing in it was read against the rows), or
+  one that names what its rows do not hold, which is listed with the value missing; the AI
+  ledger records the counts. That is all the check shows: a sentence whose values are in
+  its rows may still say something else about them (source and target swapped, a wrong
+  time or count, a failure called a success), so no sentence is called verified. A
+  hypothesis or a proposal that cites a row the tools never
   returned has that citation dropped, and a proposal that cites nothing it has seen is
   refused.
 - **Context.** A long investigation outgrows a local model's window. Before each turn the

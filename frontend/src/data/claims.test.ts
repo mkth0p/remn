@@ -5,7 +5,7 @@ import yaml from 'js-yaml'
 import { describe, expect, it } from 'vitest'
 import type { Evidence, Finding } from '../db/schema'
 import { ruleEventIds, validateRule, type Rule } from '../rules/engine'
-import { checkFinding, checkText, checkTextInCase, namedValues, readRows } from './claims'
+import { checkCitedSentences, checkFinding, checkText, checkTextInCase, namedValues, readRows } from './claims'
 import { recordRef } from './recordKeys'
 import { settingsForRules } from './rules'
 import type { DataSource } from './source'
@@ -135,6 +135,22 @@ describe('values named in a text', () => {
     const c = checkText('Then 198.51.100.9 connected to WS-042.', rows, ['WS-042'])
     expect(c).toMatchObject({ status: 'unsupported', reasons: ['it names 198.51.100.9, ws-042, which none of its 2 rows holds'] })
   })
+
+  it('has nothing to check in a text that names no address, account or hash, and does not call it borne out', () => {
+    const rows = [logon(1)]
+    expect(checkText('The attacker exfiltrated the mailbox.', rows, ['DC01'])).toEqual({ status: 'nothing_to_check', named: [], reasons: [] })
+  })
+
+  it('counts the sentences of an answer by what the check found in each', async () => {
+    const source = {
+      searchEvents: async (f: { conditions: { value: number[] }[] }) => ({ rows: f.conditions[0].value.filter((id) => id !== 9).map((id) => logon(id)), truncated: false }),
+      searchMails: async () => ({ rows: [], truncated: false }),
+    } as unknown as DataSource
+    const answer = 'Failed logons came from 203.0.113.7 [ev:1]. The attacker exfiltrated the mailbox [ev:2]. Then 198.51.100.9 logged on [ev:3]. A row that is gone [ev:9]. No citation here.'
+    const c = await checkCitedSentences(answer, source)
+    expect(c).toMatchObject({ sentences: 4, holding: 1, nothingToCheck: 1 })
+    expect(c.unsupported.map((u) => u.reason)).toEqual(['it names 198.51.100.9, which none of its 1 row holds', 'the rows it cites are not in the case'])
+  })
 })
 
 describe('record references', () => {
@@ -162,6 +178,7 @@ it('finds the summary’s values among the indicators first, and in the rows’ 
   const c = await checkTextInCase('From 203.0.113.7, alice@northstar.example wrote to mallory@evil.example.', source)
   expect(c).toMatchObject({ status: 'unsupported', reasons: ['it names mallory@evil.example, which no row of the evidence holds'] })
   expect(searched).toEqual(['alice@northstar.example', 'mallory@evil.example'])
+  expect(await checkTextInCase('The intrusion was contained within the day.', source)).toEqual({ status: 'nothing_to_check', named: [], reasons: [] })
 })
 
 it('reads the cited rows back through the data source, in batches, and a missing id is missing', async () => {

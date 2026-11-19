@@ -40,8 +40,11 @@ export interface ChatMessage {
   draft?: boolean
   confidence?: string
   openQuestions?: string[]
-  /** assistant: citations in the answer, checked against what the tools returned, and the sentences citing rows read against those rows */
-  cites?: { verified: number; unverified: string[]; sentences?: number; unsupported?: { sentence: string; reason: string }[] }
+  /**
+   * assistant: citations in the answer, checked against what the tools returned, and the sentences citing rows read against
+   * those rows: how many hold the values they name, how many name none (nothing to check), and those that do not hold
+   */
+  cites?: { verified: number; unverified: string[]; sentences?: number; holding?: number; nothingToCheck?: number; unsupported?: { sentence: string; reason: string }[] }
 }
 
 export type AgentMode = 'analyst' | 'explain' | 'rule' | 'report' | 'triage' | 'narrative' | 'json' | 'free'
@@ -184,7 +187,7 @@ export async function runAgent(messages: ChatMessage[], kase: Case, opts: AgentO
     return {
       verified: cites.filter((c) => c.verified).length,
       unverified: cites.filter((c) => !c.verified).map((c) => c.key),
-      ...(rows ? { sentences: rows.sentences, unsupported: rows.unsupported } : {}),
+      ...(rows ? { sentences: rows.sentences, holding: rows.holding, nothingToCheck: rows.nothingToCheck, unsupported: rows.unsupported } : {}),
     }
   }
   for (let iter = 0; iter < turns; iter++) {
@@ -278,6 +281,7 @@ export async function runAgent(messages: ChatMessage[], kase: Case, opts: AgentO
           cites: assistant.cites.verified,
           unverified: assistant.cites.unverified.slice(0, 20),
           unsupported: assistant.cites.unsupported?.length,
+          nothingToCheck: assistant.cites.nothingToCheck,
         }).catch(() => undefined)
       }
       push(assistant)
@@ -353,6 +357,7 @@ export async function runAgent(messages: ChatMessage[], kase: Case, opts: AgentO
             cites: verified.verified,
             unverified: verified.unverified.slice(0, 20),
             unsupported: verified.unsupported?.length,
+            nothingToCheck: verified.nothingToCheck,
           }).catch(() => undefined)
           push({
             role: 'assistant',

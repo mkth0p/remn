@@ -12,7 +12,7 @@ import { packageCoverageIssues } from './packageCoverage'
 import { defang, escapeHtml, fmtBytes, fmtNum, fmtUtc as fmtTs, renderMarkdown } from '../util/format'
 import type { GapStatement } from './evidenceGaps'
 import { isLead, type MeasureReading } from './ruleMeasures'
-import { CHECKED_ROWS, type ClaimCheck, type ReportClaims } from './claims'
+import { CHECKED_ROWS, type ClaimCheck, type ReportClaims, type TextStatus } from './claims'
 import { ANSWER_LABEL, type ReportQuestion, type ReportQuestions } from './questions/answers'
 
 /**
@@ -766,10 +766,11 @@ function claimNote(ids: number[], claims?: ReportClaims): string {
   return `<span class="sub claim ${worst.status}" title="${h(worst.reasons.join(' '))}">${CLAIM_WORD[worst.status]}${where}</span>`
 }
 
-/** A text's check, under the text, when it names something its rows do not hold. */
+/** A text's check, under the text, when it names something its rows do not hold, or names nothing that could be checked. */
 function textNote(key: string, claims?: ReportClaims): string {
   const t = claims?.texts.find((x) => x.key === key)
   if (!t || t.check.status === 'verified') return ''
+  if (t.check.status === 'nothing_to_check') return '<div class="cap claim nothing_to_check">It names no address, account or hash: nothing in it was checked against the evidence.</div>'
   return `<div class="cap claim ${t.check.status}">Checked against its rows: ${h(t.check.reasons.join(' '))}.</div>`
 }
 
@@ -1103,6 +1104,7 @@ function method(d: ReportData, v: Verdict, conf: Confidence): string {
   const checked = d.findings.map((f) => (f.id != null ? d.claims?.findings[f.id] : undefined)).filter((c): c is ClaimCheck => !!c)
   const claimCount = (s: ClaimCheck['status']) => checked.filter((c) => c.status === s).length
   const texts = d.claims?.texts ?? []
+  const textCount = (s: TextStatus) => texts.filter((t) => t.check.status === s).length
   const byId = new Map(d.findings.filter((f) => f.id != null).map((f) => [f.id!, f]))
   const claimLimits = [
     ...Object.entries(d.claims?.findings ?? {})
@@ -1112,14 +1114,18 @@ function method(d: ReportData, v: Verdict, conf: Confidence): string {
         const f = byId.get(Number(id))!
         return `The finding "${f.title}" (${f.ruleId}) is ${c.status === 'contradicted' ? 'contradicted by its rows' : 'unsupported'}: ${c.reasons.join('; ')}.`
       }),
-    ...texts.filter((t) => t.check.status !== 'verified').map((t) => `${t.what[0].toUpperCase()}${t.what.slice(1)} is unsupported: ${t.check.reasons.join('; ')}.`),
+    ...texts.filter((t) => t.check.status === 'unsupported').map((t) => `${t.what[0].toUpperCase()}${t.what.slice(1)} is unsupported: ${t.check.reasons.join('; ')}.`),
   ]
   const sources = [
     `${n(d.evidence.length)} evidence file${d.evidence.length === 1 ? '' : 's'} (${h(kinds.join(', ') || 'none')}), ${n(rowsTotal)} rows parsed`,
     `${n(rulesFired)} rule${rulesFired === 1 ? '' : 's'} produced the printed findings${engine ? `; ${n(engine)} finding${engine === 1 ? '' : 's'} came from an external detection engine` : ''}`,
     ...(checked.length
       ? [
-          `each printed finding was read back against the rows it cites (the first ${n(CHECKED_ROWS)} of each): ${n(claimCount('verified'))} verified, ${n(claimCount('unsupported'))} unsupported, ${n(claimCount('contradicted'))} contradicted${texts.length ? `; ${n(texts.length)} text${texts.length === 1 ? '' : 's'} (chain narratives, incident and story notes, the summary) checked for the addresses, accounts and hashes ${texts.length === 1 ? 'it names' : 'they name'}, ${n(texts.filter((t) => t.check.status === 'verified').length)} holding` : ''}`,
+          `each printed finding was read back against the rows it cites (the first ${n(CHECKED_ROWS)} of each): ${n(claimCount('verified'))} whose rows match the rule, the values and the time, ${n(claimCount('unsupported'))} unsupported, ${n(claimCount('contradicted'))} contradicted${
+            texts.length
+              ? `; ${n(texts.length)} text${texts.length === 1 ? '' : 's'} (chain narratives, incident and story notes, the summary) read for the addresses, accounts and hashes ${texts.length === 1 ? 'it names' : 'they name'}: ${n(textCount('verified'))} whose rows hold every value named, ${n(textCount('nothing_to_check'))} naming none (nothing to check), ${n(textCount('unsupported'))} naming a value no row holds`
+              : ''
+          }`,
         ]
       : []),
     ...(readings.length
@@ -1147,7 +1153,7 @@ function method(d: ReportData, v: Verdict, conf: Confidence): string {
       : []),
     ...(d.questions?.counts.cannot ? [`${n(d.questions.counts.cannot)} investigative question${d.questions.counts.cannot === 1 ? '' : 's'} cannot be answered from this evidence.`] : []),
     ...claimLimits.slice(0, 12),
-    ...(claimLimits.length > 12 ? [`${n(claimLimits.length - 12)} more claims are not verified; the Report page lists them.`] : []),
+    ...(claimLimits.length > 12 ? [`${n(claimLimits.length - 12)} more claims do not hold against their rows; the Report page lists them.`] : []),
     ...(leadFindings
       ? [
           `${n(leadFindings)} printed finding${leadFindings === 1 ? ' comes from a rule' : 's come from rules'} never seen to detect what ${leadFindings === 1 ? 'it looks' : 'they look'} for on recorded attacks (marked lead): each says where to look, and stands on the rows it cites and the analyst's decision.`,
