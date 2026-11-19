@@ -16,7 +16,8 @@ import shutil
 import sys
 import threading
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,43 @@ from services.parsers.evtx_parser import FIELD_MAP
 log = logging.getLogger(__name__)
 
 KEY_RE = re.compile(r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$")
+
+# The layout of the store this code writes. It goes up by one, with a step in MIGRATIONS, when a
+# store needs changing before this code can read it, or when an older REMN would misread a store
+# this code wrote. A column added for new rows needs neither: an older store gets it when opened,
+# and an older REMN does not read it.
+SCHEMA_VERSION = 1
+
+
+def _to_version_1(con: duckdb.DuckDBPyConnection) -> None:
+    """Version 1 is the layout stores had when the version began to be recorded. A store written
+    before reaches it with what every open does anyway, adding the tables and columns it lacks, so
+    this step has nothing of its own to change."""
+
+
+# MIGRATIONS[n] brings a store at version n - 1 to version n. The steps run in order, in the same
+# transaction as the version they lead to, when the store is opened.
+MIGRATIONS: dict[int, Callable[[duckdb.DuckDBPyConnection], None]] = {1: _to_version_1}
+
+
+class StoreVersionError(RuntimeError):
+    """A case store this version cannot read. It is refused before anything in it is changed."""
+
+
+def schema_version(con: duckdb.DuckDBPyConnection) -> int | None:
+    """The schema version a store records, or None when it records none: a new file, or a store
+    written before the version was recorded."""
+    if not con.execute("SELECT count(*) FROM duckdb_tables() WHERE schema_name = 'main' AND table_name = 'meta'").fetchone()[0]:
+        return None
+    row = con.execute("SELECT value FROM meta WHERE key = 'schema-version'").fetchone()
+    if row is None:
+        return None
+    try:
+        return int(row[0])
+    except (TypeError, ValueError):
+        raise StoreVersionError(
+            f"this case store records a schema version this version of REMN cannot read ({str(row[0])[:40]!r}). It was not opened and nothing in it was changed."
+        ) from None
 
 
 def settle(con: duckdb.DuckDBPyConnection) -> None:
@@ -489,6 +527,14 @@ def _arrow_table(columns: list[tuple[str, tuple[str, Any]]], rows: list[dict[str
     return pa.table(arrays)
 
 
+def _release(con: duckdb.DuckDBPyConnection, key: str) -> None:
+    """Close a store's connection: its memory goes back and the file is free for another program."""
+    try:
+        con.close()
+    except duckdb.Error as exc:
+        log.debug("case store %s: close: %s", key, exc)
+
+
 class CaseStore:
     """One DuckDB database per case. Writes are serialised with a lock; reads use per-call cursors."""
 
@@ -526,36 +572,78 @@ class CaseStore:
             self._con.close()
             log.error("case store %s not opened: its lockdown did not take effect (%s)", key, applied)
             raise RuntimeError("case store not opened: its lockdown did not take effect")
-        self._init_schema()
-        self._next: dict[str, int] = {}
-        for t in ("events", "mails", "attachments", "urls"):
-            self._next[t] = int(self._con.execute(f"SELECT coalesce(max(id), 0) FROM {t}").fetchone()[0]) + 1
+        # a store this code cannot read, or whose upgrade fails, is closed rather than kept half-open
+        try:
+            self._init_schema()
+            self._next: dict[str, int] = {}
+            for t in ("events", "mails", "attachments", "urls"):
+                self._next[t] = int(self._con.execute(f"SELECT coalesce(max(id), 0) FROM {t}").fetchone()[0]) + 1
+        except BaseException:
+            _release(self._con, key)
+            raise
         self.last_used = time.time()
 
     def _init_schema(self) -> None:
+        """Bring the store to SCHEMA_VERSION: check the version it records before anything is changed,
+        then run the upgrade steps it needs and add the tables and columns it lacks, all in one
+        transaction, and record what was done in the store and in the log."""
+        con = self._con
         with self.lock:
-            for t, cols in TABLES.items():
-                self._con.execute(_ddl(t, cols, pk='kind, value, "evidenceId"' if t == "iocs" else ('"mailId"' if t == "mail_bodies" else None)))
-            self._con.execute(
-                'CREATE TABLE IF NOT EXISTS evidence (id INTEGER PRIMARY KEY, name VARCHAR, kind VARCHAR, format VARCHAR, size BIGINT, "sha256Client" VARCHAR, "sha256Server" VARCHAR, count BIGINT, stats VARCHAR, "addedAt" BIGINT, status VARCHAR)'
-            )
-            self._con.execute(
-                'CREATE TABLE IF NOT EXISTS ioc_reputation (kind VARCHAR, value VARCHAR, verdict VARCHAR, tags VARCHAR[], summary VARCHAR, verdicts VARCHAR, "checkedAt" BIGINT, PRIMARY KEY (kind, value))'
-            )
-            self._con.execute("CREATE TABLE IF NOT EXISTS meta (key VARCHAR PRIMARY KEY, value VARCHAR)")
-            # columns added after a store was created (enrichment passes): add them in place
-            for t, cols in TABLES.items():
-                have = {r[1] for r in self._con.execute(f"PRAGMA table_info('{t}')").fetchall()}
-                for n, typ in cols:
-                    if n not in have:
-                        self._con.execute(f"ALTER TABLE {t} ADD COLUMN {q(n)} {typ[0]}")
-                        if t == "events" and n in PARSER_SOURCES:
-                            # rows written before the column existed: the same value from the EventData
-                            src = ", ".join(f"nullif(trim(json_extract_string(data, '$.\"{k}\"')), '-')" for k in PARSER_SOURCES[n])
-                            self._con.execute(f"UPDATE events SET {q(n)} = coalesce({src}) WHERE data IS NOT NULL")
+            found = schema_version(con)
+            if found is None and con.execute("SELECT count(*) FROM duckdb_tables() WHERE schema_name = 'main'").fetchone()[0]:
+                found = 0  # written before the version was recorded
+            if found is not None and found > SCHEMA_VERSION:
+                raise StoreVersionError(
+                    f"this case store was written by a newer version of REMN (store schema {found}; this version reads up to {SCHEMA_VERSION}). "
+                    "It was not opened and nothing in it was changed. Run the version that wrote it, or restore the backup taken before that "
+                    "version was installed (docs/setup.md, Backup and upgrade)."
+                )
+            added: dict[str, list[str]] = {}
+            con.execute("BEGIN TRANSACTION")
+            try:
+                for step in range((found or 0) + 1, SCHEMA_VERSION + 1) if found is not None else ():
+                    MIGRATIONS[step](con)
+                for t, cols in TABLES.items():
+                    con.execute(_ddl(t, cols, pk='kind, value, "evidenceId"' if t == "iocs" else ('"mailId"' if t == "mail_bodies" else None)))
+                con.execute(
+                    'CREATE TABLE IF NOT EXISTS evidence (id INTEGER PRIMARY KEY, name VARCHAR, kind VARCHAR, format VARCHAR, size BIGINT, "sha256Client" VARCHAR, "sha256Server" VARCHAR, count BIGINT, stats VARCHAR, "addedAt" BIGINT, status VARCHAR)'
+                )
+                con.execute(
+                    'CREATE TABLE IF NOT EXISTS ioc_reputation (kind VARCHAR, value VARCHAR, verdict VARCHAR, tags VARCHAR[], summary VARCHAR, verdicts VARCHAR, "checkedAt" BIGINT, PRIMARY KEY (kind, value))'
+                )
+                con.execute("CREATE TABLE IF NOT EXISTS meta (key VARCHAR PRIMARY KEY, value VARCHAR)")
+                # columns added after a store was created (enrichment passes): add them in place
+                for t, cols in TABLES.items():
+                    have = {r[1] for r in con.execute(f"PRAGMA table_info('{t}')").fetchall()}
+                    for n, typ in cols:
+                        if n not in have:
+                            con.execute(f"ALTER TABLE {t} ADD COLUMN {q(n)} {typ[0]}")
+                            added.setdefault(t, []).append(n)
+                            if t == "events" and n in PARSER_SOURCES:
+                                # rows written before the column existed: the same value from the EventData
+                                src = ", ".join(f"nullif(trim(json_extract_string(data, '$.\"{k}\"')), '-')" for k in PARSER_SOURCES[n])
+                                con.execute(f"UPDATE events SET {q(n)} = coalesce({src}) WHERE data IS NOT NULL")
+                if found != SCHEMA_VERSION:
+                    con.execute("INSERT OR REPLACE INTO meta VALUES ('schema-version', ?)", [str(SCHEMA_VERSION)])
+                if found is not None and (found != SCHEMA_VERSION or added):
+                    row = con.execute("SELECT value FROM meta WHERE key = 'schema-history'").fetchone()
+                    history = json.loads(row[0]) if row else []
+                    history.append({"from": found, "to": SCHEMA_VERSION, "at": datetime.now(UTC).isoformat(timespec="seconds"), "added": added})
+                    con.execute("INSERT OR REPLACE INTO meta VALUES ('schema-history', ?)", [json.dumps(history)])
+                con.execute("COMMIT")
+            except BaseException:
+                try:
+                    con.execute("ROLLBACK")
+                except duckdb.Error as exc:
+                    log.debug("case store %s: rollback: %s", self.key, exc)
+                raise
+            if found is not None and found != SCHEMA_VERSION:
+                log.info("case store %s upgraded from schema %d to %d", self.key, found, SCHEMA_VERSION)
+            if found is not None and added:
+                log.info("case store %s: columns added %s", self.key, added)
             for ddl in INDEXES:
                 try:
-                    self._con.execute(ddl)
+                    con.execute(ddl)
                 except duckdb.Error as exc:  # pragma: no cover
                     log.debug("index: %s", exc)
 

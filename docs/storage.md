@@ -39,6 +39,17 @@ the conversion when a file above the threshold is dropped. Settings in `.env`:
 `FORENSIC_CASES_DIR`, `FORENSIC_STORE_THRESHOLD_MB` (the suggestion threshold, default
 150), `FORENSIC_MAX_CHUNKED_GB` (default 64), `FORENSIC_CHUNK_MB` (default 16).
 
+Each store records the schema version it is written in (`schema-version` in its `meta`
+table). When the server opens a store written by an older version, it brings it up to date
+in one transaction: the upgrade step of each later version, then the tables and columns the
+store lacks. The store keeps a record of what was done (`schema-history`: from which version
+to which, when, and which columns were added), and the server log says it. An upgrade that
+fails part-way is rolled back and leaves the store as it was. A store written by a newer
+version of REMN is not opened and nothing in it is changed: the store routes answer 409 with
+the code `storeVersion` and a message that names both versions. Run the version that wrote
+it, or restore the backup taken before that version was installed (see
+[Backup and upgrade](setup.md#backup-and-upgrade)).
+
 Migration transfers bounded pages to a new server store, preserves event and mail IDs,
 and retains findings, reviews, narratives and links. Only a completed transfer switches
 the case's storage and removes browser evidence. A failed transfer leaves the browser
