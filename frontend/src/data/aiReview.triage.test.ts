@@ -61,7 +61,7 @@ describe('the triage pass', () => {
     const items = reviewQueue(buildIncidents(await db.findings.where('caseId').equals(1).toArray()), [], {})
     expect(items).toHaveLength(2)
     replies.push(JSON.stringify(items.map((it) => ({ id: it.id, decision: 'false_positive', severity: 'info', include: false, reason: 'told so' }))))
-    await runTriage(kase, items, {}, { apply: false })
+    await runTriage(kase, items, {})
     const proposals = await loadInbox(1)
     expect(proposals).toHaveLength(2)
     expect(proposals.every((p) => p.exposed === true)).toBe(true)

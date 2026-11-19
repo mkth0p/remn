@@ -379,17 +379,14 @@ export interface TriageRun {
   entries: TriageEntry[]
   errors: string[]
   rejected: string[]
-  /** the executive summary was drafted at the end of the pass */
+  /** a pass of an earlier version that wrote its decisions drafted the executive summary at its end */
   summaryDrafted?: boolean
-  /** the pass only proposed: nothing was written, each entry is a suggestion on its item */
+  /** the pass only proposed: nothing was written, each entry is a suggestion on its item (false only in runs stored by earlier versions) */
   proposed?: boolean
 }
 
 export async function loadTriageRun(caseId: number): Promise<TriageRun | null> {
   return ((await getDb().kv.get(`ai-triage-${caseId}`))?.value as TriageRun | undefined) ?? null
-}
-export async function saveTriageRun(caseId: number, run: TriageRun): Promise<void> {
-  await getDb().kv.put({ key: `ai-triage-${caseId}`, value: run })
 }
 
 const snapshot = (f: Finding): FindingSnapshot => ({
@@ -510,21 +507,20 @@ export function batchSize(): number {
 }
 
 /**
- * Ask the model for a decision on each item, in batches, and either record them as suggestions
- * (apply: false) or write them (apply: true). Returns the log; the caller shows it.
+ * Ask the model for a decision on each item, in batches, and record each as a suggestion on its
+ * item for the analyst to apply or dismiss; nothing is written to the case. Returns the log; the
+ * caller shows it.
  */
 export async function runTriage(
   kase: Case,
   items: ReviewItem[],
   reviews: Record<string, ChainReview>,
   opts: {
-    apply: boolean
     batch?: number
     model?: string
     signal?: AbortSignal
     onProgress?: (p: TriageProgress) => void
-    /** run after the decisions (apply mode): drafts the executive summary */ draftSummary?: () => Promise<unknown>
-  },
+  } = {},
 ): Promise<TriageRun> {
   const caseId = kase.id!
   const size = Math.max(1, opts.batch ?? batchSize())
@@ -538,9 +534,8 @@ export async function runTriage(
     entries: [],
     errors: [],
     rejected: [],
-    proposed: !opts.apply,
+    proposed: true,
   }
-  let currentReviews = reviews
   for (let b = 0; b < batches.length; b++) {
     if (opts.signal?.aborted) {
       run.errors.push(`stopped after ${b} of ${batches.length} batches`)
@@ -548,7 +543,7 @@ export async function runTriage(
     }
     const batch = batches[b]
     opts.onProgress?.({ done: b * size, total: items.length, batch: b + 1, batches: batches.length })
-    const payload = batch.map((it) => describeItem(it, currentReviews))
+    const payload = batch.map((it) => describeItem(it, reviews))
     const prompt = `${INSTRUCTION}\n\nItems:\n${JSON.stringify(payload, null, 1).slice(0, 90_000)}`
     // the model reads the whole batch at once: text in one item addressed to a model can steer the
     // decision on another, so every proposal of the batch is marked, and accept-all leaves them
@@ -574,62 +569,46 @@ export async function runTriage(
     for (const it of batch) if (!answered.has(it.id)) run.rejected.push(`${it.id}: no decision in the reply`)
     for (const d of decisions) {
       const it = batch.find((x) => x.id === d.id)!
-      if (opts.apply) {
-        const entry = await applyDecision(caseId, it, d, currentReviews)
-        run.entries.push(entry)
-        if (it.kind === 'chain') currentReviews = await loadChainReviews(caseId)
-      } else {
-        const target = it.kind === 'chain' ? `chain:${it.chain!.id}` : `incident:${it.incident!.id}`
-        await saveSuggestion(caseId, {
-          target,
-          severity: d.severity,
-          decision: d.decision,
-          include: d.include,
-          unlink: d.unlink.length ? d.unlink : undefined,
-          narrative: d.narrative,
-          note: d.note,
-          reason: d.reason,
-          at: Date.now(),
-          by: 'triage',
-          model: run.model || undefined,
-          exposed: read.suspects.length > 0 || undefined,
-          unchecked: read.unread > 0 || undefined,
-        })
-        run.entries.push({
-          id: it.id,
-          kind: it.kind,
-          title: it.title,
-          decision: d.decision,
-          severityBefore: it.severity,
-          severityAfter: d.severity ?? it.severity,
-          includeBefore: true,
-          includeAfter: d.include ?? true,
-          unlinked: d.unlink.map((id) => ({ id, title: String(id) })),
-          reason: d.reason,
-          before: { findings: [] },
-        })
-      }
+      const target = it.kind === 'chain' ? `chain:${it.chain!.id}` : `incident:${it.incident!.id}`
+      await saveSuggestion(caseId, {
+        target,
+        severity: d.severity,
+        decision: d.decision,
+        include: d.include,
+        unlink: d.unlink.length ? d.unlink : undefined,
+        narrative: d.narrative,
+        note: d.note,
+        reason: d.reason,
+        at: Date.now(),
+        by: 'triage',
+        model: run.model || undefined,
+        exposed: read.suspects.length > 0 || undefined,
+        unchecked: read.unread > 0 || undefined,
+      })
+      run.entries.push({
+        id: it.id,
+        kind: it.kind,
+        title: it.title,
+        decision: d.decision,
+        severityBefore: it.severity,
+        severityAfter: d.severity ?? it.severity,
+        includeBefore: true,
+        includeAfter: d.include ?? true,
+        unlinked: d.unlink.map((id) => ({ id, title: String(id) })),
+        reason: d.reason,
+        before: { findings: [] },
+      })
     }
   }
   opts.onProgress?.({ done: items.length, total: items.length, batch: batches.length, batches: batches.length })
-  await appendLedger(caseId, 'triage', `triage of ${items.length} item(s): ${run.entries.length} ${opts.apply ? 'decided' : 'proposed'}`, {
+  await appendLedger(caseId, 'triage', `triage of ${items.length} item(s): ${run.entries.length} proposed`, {
     model: run.model || undefined,
     transport: run.transport,
     asked: items.length,
     answered: run.entries.length,
     rejected: run.rejected.length,
     errors: run.errors.length,
-    apply: opts.apply,
   })
-  if (opts.apply && opts.draftSummary && !opts.signal?.aborted && run.entries.length) {
-    try {
-      await opts.draftSummary()
-      run.summaryDrafted = true
-    } catch (e) {
-      run.errors.push(`executive summary: ${(e as Error).message}`)
-    }
-  }
-  if (opts.apply) await saveTriageRun(caseId, run)
   return run
 }
 
