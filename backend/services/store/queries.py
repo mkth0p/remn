@@ -81,9 +81,14 @@ EVENT_LIST_COLUMNS = [
 ]
 MAIL_LIST_EXCLUDE = {"hops", "htmlInfo", "hiddenText", "references"}
 BUCKET_MS = {"minute": 60_000, "hour": 3_600_000, "day": 86_400_000}
-_SQL_FORBIDDEN = re.compile(
-    r"(?i)\b(attach|detach|copy|export|import|install|load|pragma|set|reset|create|insert|update|delete|drop|alter|call|checkpoint|vacuum|force|read_csv|read_json|read_parquet|read_text|read_blob|glob|getenv)\b"
-)
+# Table functions the SQL view may call: they make rows from their arguments. Every other one is
+# refused, among them those that read files (read_csv_auto, parquet_scan, sniff_csv...) and those
+# that run a statement held in a string (query, json_execute_serialized_sql).
+_SQL_TABLE_FUNCTIONS = frozenset({"range", "generate_series", "unnest", "json_each", "json_tree"})
+# what SHOW TABLES, SHOW ALL TABLES, SHOW DATABASES and SHOW SCHEMAS name in the parsed statement
+_SQL_SHOW_LISTS = frozenset({'"tables"', "__show_tables_expanded", '"databases"', '"schemas"'})
+# a table name with no dot, slash or quote in it cannot be taken for a file
+_SQL_TABLE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def _ctx(source: str, settings: dict[str, Any] | None) -> Ctx:
@@ -440,19 +445,68 @@ def list_iocs(
     return {"rows": rows, "total": total, "kinds": kinds, "offset": offset, "limit": limit}
 
 
-def run_sql(store: CaseStore, sql: str, limit: int = 200, timeout_s: float = 30.0) -> dict[str, Any]:
-    """Read-only SQL for the AI tool / power users: SELECT or WITH only, single statement, capped rows and time."""
-    s = sql.strip().rstrip(";").strip()
-    if ";" in s:
+def _one_select(cur: duckdb.DuckDBPyConnection, sql: str) -> None:
+    """Refuse anything but one SELECT statement, as DuckDB's own parser reads it."""
+    try:
+        statements = cur.extract_statements(sql)
+    except duckdb.Error as exc:
+        raise FilterError(str(exc).splitlines()[0]) from exc
+    if len(statements) != 1:
         raise FilterError("only one statement is allowed")
-    head = s[:8].lower()
-    if not (head.startswith("select") or head.startswith("with") or head.startswith("describe") or head.startswith("show")):
+    if statements[0].type != duckdb.StatementType.SELECT:
         raise FilterError("only SELECT / WITH queries are allowed")
-    if _SQL_FORBIDDEN.search(s):
-        raise FilterError("statement contains a forbidden keyword")
-    limit = max(1, min(int(limit), 2000))
-    wrapped = f"SELECT * FROM ({s}) AS _q LIMIT {limit + 1}" if head.startswith(("select", "with")) else s
+
+
+def _check_read_only(cur: duckdb.DuckDBPyConnection, sql: str) -> None:
+    """Refuse a statement that is not one SELECT reading the case's own tables.
+
+    The check walks the statement as DuckDB's parser returns it, so that a word in a string or a
+    column name (`Set-MpPreference`, 'update', "load") is not taken for a statement, and a table
+    function or a file path used as a table is seen wherever it is nested. A keyword list did
+    both wrong. The engine's own lockdown (casestore) stays the barrier behind this one."""
+    _one_select(cur, sql)
+    try:
+        tree = json.loads(cur.execute("SELECT json_serialize_sql(?)", [sql]).fetchall()[0][0])
+        tables = {str(r[0]).lower() for r in cur.execute("SELECT table_name FROM duckdb_tables() WHERE schema_name = 'main'").fetchall()}
+    except (duckdb.Error, ValueError) as exc:
+        raise FilterError(f"the statement could not be checked: {exc}") from exc
+    if tree.get("error"):
+        raise FilterError(f"the statement could not be checked: {tree.get('error_message')}")
+    nodes: list[dict[str, Any]] = []
+    stack: list[Any] = [tree]
+    while stack:
+        n = stack.pop()
+        if isinstance(n, dict):
+            nodes.append(n)
+            stack.extend(n.values())
+        elif isinstance(n, list):
+            stack.extend(n)
+    ctes = {str(m.get("key") or "").lower() for n in nodes for m in (n.get("cte_map") or {}).get("map") or []}
+    for n in nodes:
+        kind = n.get("type")
+        if kind == "TABLE_FUNCTION":
+            fn = n.get("function") or {}
+            name = str(fn.get("function_name") or "")
+            if name.lower() not in _SQL_TABLE_FUNCTIONS or fn.get("schema") or fn.get("catalog"):
+                raise FilterError(f"the table function {name}() is not allowed")
+        elif kind in ("BASE_TABLE", "SHOW_REF"):
+            name = str(n.get("table_name") or "")
+            if kind == "SHOW_REF" and (not name or name.lower() in _SQL_SHOW_LISTS):
+                continue
+            if n.get("schema_name") not in (None, "", "main") or n.get("catalog_name") or not _SQL_TABLE_NAME.match(name) or name.lower() not in tables | ctes:
+                raise FilterError(f"{name!r} is not a table of the case")
+
+
+def run_sql(store: CaseStore, sql: str, limit: int = 200, timeout_s: float = 30.0) -> dict[str, Any]:
+    """Read-only SQL for the analyst's `sql` tool and the SQL view: one SELECT (WITH, DESCRIBE, SHOW) on the case's tables, capped rows and time."""
+    s = sql.strip().rstrip(";").strip()
     cur = store.cursor()
+    _one_select(cur, s)
+    limit = max(1, min(int(limit), 2000))
+    # the line breaks end a closing "--" comment before the parenthesis; the statement checked is the
+    # one that runs
+    wrapped = f"SELECT * FROM (\n{s}\n) AS _q LIMIT {limit + 1}"
+    _check_read_only(cur, wrapped)
     timer = threading.Timer(timeout_s, cur.interrupt)
     timer.start()
     try:

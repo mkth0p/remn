@@ -97,7 +97,7 @@ describe('mail score refresh', () => {
     vi.mocked(waitForJob).mockResolvedValue({ result: summary } as never)
     expect(await rescoreMails({ ...kase, storage: 'server', serverKey: 'server-case' })).toEqual(summary)
     expect(apiPost).toHaveBeenCalledWith('/api/enrich/mails/rescore', { storeKey: 'server-case', settings: { internal_domains: [] } })
-    expect(waitForJob).toHaveBeenCalledWith('job1', expect.any(Function))
+    expect(waitForJob).toHaveBeenCalledWith('job1', 'server-case', expect.any(Function))
   })
 })
 

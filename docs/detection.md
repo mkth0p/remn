@@ -8,9 +8,13 @@ on PATH or `HAYABUSA_PATH`, rules beside it or at `HAYABUSA_RULES`; the containe
 it pinned by version and by the SHA-256 of the release archive) every ingested event log is
 also handed to it, and its detections come back as findings with rule ids under
 `engine:hayabusa:`, the level mapped to a severity, the MITRE techniques it tags, and refs to
-the rows REMN parsed from the same records, linked by computer, channel and record id. The
-rules run in REMN's own engines are untouched; they cover mail, cloud and collected artifacts,
-which Hayabusa does not.
+the rows REMN parsed from the same records, linked by computer, channel and record id. An
+archive of event logs gives it its `.evtx` members, up to half the staging area (4 GiB at
+most); records exported as XML and cloud exports are not its input, and its summary says they
+were not scanned. In a package the logs are held for it in at most 256 MiB of staging; a log
+read after that is parsed but not scanned, its member says so, and the engine's line in the
+ingest log counts those logs (`notScanned` in its summary, as for an archive past its share). The rules run in REMN's own
+engines are untouched; they cover mail, cloud and collected artifacts, which Hayabusa does not.
 
 It runs the way the native decoders do: a separate process, watched for memory, time and
 output, killed rather than trusted past a limit, with whatever it wrote before that kept and
@@ -56,11 +60,15 @@ time: { outside_business_hours: true, weekend: true }   # uses case settings
 exclude: { targetUser|in_setting: service_accounts }
 ```
 
-On the server store a run keeps at most 2,000 findings per rule (the browser engine keeps
-them all). Past that, a rule with a threshold of two or more keeps its largest groups (the
-bursts it counts), and any other grouped rule its rarest (the values a hunt is after); the
-Rules view marks the rule "cut short", with the count as `2000+`, and the run says how many
-rules were cut. A `then` follow-up is checked for every finding the rule keeps.
+A run keeps at most 2,000 findings per rule, or the number the rule sets in `max_findings`,
+and both engines keep the same ones. Past that cap, a rule with a threshold of two or more
+keeps its largest groups (the bursts it counts) and any other grouped rule its rarest (the
+values a hunt is after), equal groups in the order of their values; a rule with a `window`
+keeps its first bursts in the order of the grouped fields, and a rule with one finding per
+row its first rows in time order. The number of findings left out is shown beside the rule
+in the Rules view, above the list in the Findings view and on the findings of that rule, and
+the message at the end of the run says how many rules were cut. A `then` follow-up is
+checked for every finding the rule keeps.
 
 Operators: `eq ne in nin contains not_contains contains_any contains_all startswith
 not_startswith endswith not_endswith re not_re re_cs gt gte lt lte exists empty in_setting

@@ -542,3 +542,31 @@ level: low
     w.flush()
     found = R.run_rule(store, res["rule"], {})
     assert sorted(r for f in found for r in f["refs"]) == [1, 3, 5]
+
+
+def test_process_creation_process_id_is_the_new_process_in_sysmon_and_in_4688(store):
+    """Sigma's ProcessId of a process creation is the new process. A Sysmon 1 writes it as its
+    EventData ProcessId, which the parser keeps as callerProcessId; processId is the PID of the
+    service that wrote the record. A 4688 writes it as NewProcessId, its own ProcessId being the
+    creator."""
+    res = sigma.convert_text(
+        """
+title: A process id
+logsource: {product: windows, category: process_creation}
+detection:
+  selection: {ProcessId: 4242}
+  condition: selection
+level: low
+"""
+    )[0]
+    assert res["ok"], res
+    sysmon = "Microsoft-Windows-Sysmon/Operational"
+    w = EventWriter(store, 1)
+    w.add(_ev(eventId=1, channel=sysmon, processId=3000, callerProcessId="4242"))
+    w.add(_ev(eventId=1, channel=sysmon, processId=4242, callerProcessId="1"))
+    w.add(_ev(eventId=4688, channel="Security", processId=700, newProcessId="4242", callerProcessId="77"))
+    w.add(_ev(eventId=4688, channel="Security", processId=700, newProcessId="5000", callerProcessId="4242"))
+    w.flush()
+    found = R.run_rule(store, res["rule"], {})
+    # before: rows 2 and 3, the Sysmon service's own PID and the 4688
+    assert sorted(r for f in found for r in f["refs"]) == [1, 3]

@@ -9,6 +9,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import shutil
 import sys
 import tempfile
 import zipfile
@@ -54,6 +55,13 @@ target = args[args.index("-f") + 1] if "-f" in args else args[args.index("-d") +
 assert os.path.exists(target), target
 if "-d" in args:
     assert any(n.lower().endswith(".evtx") for n in os.listdir(target)), os.listdir(target)
+if os.environ.get("FAKE_HAYABUSA_SEEN"):
+    # what the engine was handed: each file's name and whether it is an event log at all
+    files = [os.path.join(target, n) for n in sorted(os.listdir(target))] if os.path.isdir(target) else [target]
+    with open(os.environ["FAKE_HAYABUSA_SEEN"], "a", encoding="utf-8") as seen:
+        for path in files:
+            with open(path, "rb") as fh:
+                seen.write(os.path.basename(path) + " " + str(fh.read(8) == b"ElfFile\x00") + "\n")
 shutil.copyfile(os.environ["FAKE_HAYABUSA_OUTPUT"], output)
 time.sleep(float(os.environ.get("FAKE_HAYABUSA_SLEEP", "0")))
 """
@@ -169,6 +177,153 @@ def test_a_package_hands_its_event_logs_to_the_engine_once(engine, tmp_path):
     assert package.engine_summaries[0]["members"] == 2, "both logs went to one engine run"
     assert package.budget["deferredBytes"] == 0 and not package.evtx_held, "the held logs are released"
     assert not list(staging.iterdir()), "nothing staged is left behind"
+
+
+def test_an_event_log_past_the_hold_allowance_is_said_to_be_unscanned(engine, tmp_path, monkeypatch):
+    """The engine reads the logs held back for it, and the hold has a ceiling. A log past it was
+    parsed but never scanned, and neither the member nor the engine's summary said so."""
+    from services.ingest import package as P
+    from services.ingest.package import PackageSource
+    from services.parsers.mail.common import ParseContext
+
+    log = evtx_bytes()
+    monkeypatch.setattr(P, "MAX_DEFERRED_BYTES", len(log) + 1024)
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as z:
+        z.writestr("Logs/Security.evtx", log)
+        z.writestr("Logs/System.evtx", log)
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    package = PackageSource("pkg.zip", None, out.getvalue(), str(staging), ParseContext(analyze_attachments=False))
+    package.engines = ["hayabusa"]
+    rows = list(package)
+
+    assert sum(1 for r in rows if r["type"] == "event") == 2, "both logs are still in the case"
+    summary = package.engine_summaries[0]
+    assert summary["members"] == 1 and summary["notScanned"] == 1
+    assert summary["status"] != "parsed" and "1 event log(s)" in summary["reason"] and "not scanned" in summary["reason"]
+    files = {f["name"]: f for f in package.files}
+    assert files["Logs/Security.evtx"]["status"] == "parsed" and "note" not in files["Logs/Security.evtx"]
+    assert files["Logs/System.evtx"]["status"] == "parsed" and "not scanned by hayabusa" in files["Logs/System.evtx"]["note"]
+    assert not list(staging.iterdir()), "nothing staged is left behind"
+
+
+def test_when_no_event_log_fits_the_hold_the_engine_summary_still_says_so(engine, tmp_path, monkeypatch):
+    from services.ingest import package as P
+    from services.ingest.package import PackageSource
+    from services.parsers.mail.common import ParseContext
+
+    monkeypatch.setattr(P, "MAX_DEFERRED_BYTES", 1024)
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as z:
+        z.writestr("Logs/Security.evtx", evtx_bytes())
+    package = PackageSource("pkg.zip", None, out.getvalue(), str(tmp_path), ParseContext(analyze_attachments=False))
+    package.engines = ["hayabusa"]
+    list(package)
+
+    assert not package.findings
+    [summary] = package.engine_summaries
+    assert summary["engine"] == "hayabusa" and summary["status"] == "unsupported" and summary["notScanned"] == 1
+    assert "not scanned" in summary["reason"]
+
+
+def _seen(path: Path) -> list[tuple[str, bool]]:
+    if not path.exists():
+        return []
+    return [(name, flag == "True") for name, flag in (line.rsplit(" ", 1) for line in path.read_text(encoding="utf-8").splitlines())]
+
+
+def _logs_zip() -> bytes:
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as z:
+        z.writestr("host1/Security.evtx", evtx_bytes())
+        z.writestr("host1/System.evtx", evtx_bytes())
+        z.writestr("host1/notes.txt", "collected by the lab script\n")
+    return out.getvalue()
+
+
+def test_an_archive_of_event_logs_hands_the_engine_its_logs_not_the_archive(engine, tmp_path, monkeypatch):
+    """Event logs ingested as a zip went to the engine as the zip itself, renamed .evtx, so it read
+    nothing and the summary looked like a clean run."""
+    seen = tmp_path / "seen.txt"
+    monkeypatch.setenv("FAKE_HAYABUSA_SEEN", str(seen))
+    with override_settings(FILE_UPLOAD_TEMP_DIR=tmp_path):
+        response = Client().post("/api/ingest/evtx", {"file": SimpleUploadedFile("logs.zip", _logs_zip())}, **HDR)
+        assert response.status_code == 200
+        lines = [json.loads(line) for line in b"".join(response.streaming_content).splitlines() if line.strip()]
+
+    assert sum(1 for line in lines if line["type"] == "event") == 2
+    assert [flag for _name, flag in _seen(seen)] == [True, True], _seen(seen)
+    assert sorted(name.split("-", 1)[1] for name, _flag in _seen(seen)) == ["Security.evtx", "System.evtx"]
+    [summary] = [line for line in lines if line["type"] == "engine"]
+    assert summary["status"] == "parsed" and summary["members"] == 2
+    assert [line for line in lines if line["type"] == "finding"]
+
+
+def test_event_records_exported_as_xml_are_not_handed_to_the_engine(engine, tmp_path, monkeypatch):
+    seen = tmp_path / "seen.txt"
+    monkeypatch.setenv("FAKE_HAYABUSA_SEEN", str(seen))
+    xml = (
+        '<Events><Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event"><System>'
+        '<Provider Name="Microsoft-Windows-Security-Auditing"/><EventID>4688</EventID>'
+        '<TimeCreated SystemTime="2026-08-19T01:34:26.000Z"/><EventRecordID>1</EventRecordID>'
+        "<Channel>Security</Channel><Computer>WS01</Computer></System></Event></Events>"
+    )
+    with override_settings(FILE_UPLOAD_TEMP_DIR=tmp_path):
+        response = Client().post("/api/ingest/evtx", {"file": SimpleUploadedFile("Security.xml", xml.encode())}, **HDR)
+        lines = [json.loads(line) for line in b"".join(response.streaming_content).splitlines() if line.strip()]
+
+    assert lines[0]["format"] == "event-xml" and sum(1 for line in lines if line["type"] == "event") == 1
+    assert _seen(seen) == [], "the engine was not started on a file it cannot read"
+    [summary] = [line for line in lines if line["type"] == "engine"]
+    assert summary["status"] == "unsupported" and "not scanned" in summary["reason"] and "event-xml" in summary["reason"]
+
+
+def test_staging_an_archive_counts_the_logs_past_its_ceiling(tmp_path, monkeypatch):
+    archive = tmp_path / "logs.zip"
+    archive.write_bytes(_logs_zip())
+    log_size = len(evtx_bytes())
+    monkeypatch.setattr(hayabusa, "_stage_ceiling", lambda: log_size + 1024)
+    staged, said = hayabusa.stage_upload("logs.zip", str(archive), None, "zip", str(tmp_path))
+    try:
+        assert len(os.listdir(staged)) == 1
+        assert said["members"] == 1 and said["notScanned"] == 1 and "1 event log(s)" in said["reason"]
+    finally:
+        shutil.rmtree(staged, ignore_errors=True)
+
+
+def test_a_server_store_ingest_of_an_archive_hands_the_engine_its_logs(engine, settings, tmp_path, monkeypatch):
+    import time
+    import uuid
+
+    from services.store.casestore import registry
+
+    seen = tmp_path / "seen.txt"
+    monkeypatch.setenv("FAKE_HAYABUSA_SEEN", str(seen))
+    settings.CASES_DIR = tmp_path / "cases"
+    settings.FILE_UPLOAD_TEMP_DIR = tmp_path
+    registry.configure(settings.CASES_DIR)
+    data = _logs_zip()
+    c = Client()
+    r = c.post("/api/upload/init", data=json.dumps({"name": "logs.zip", "size": len(data)}), content_type="application/json", **HDR)
+    upload_id = r.json()["uploadId"]
+    c.generic("PUT", f"/api/upload/{upload_id}/chunk?offset=0", data, content_type="application/octet-stream", **HDR)
+    sha = c.post(f"/api/upload/{upload_id}/complete", **HDR).json()["sha256"]
+    key = str(uuid.uuid4())
+    r = c.post(
+        f"/api/store/{key}/ingest",
+        data=json.dumps({"uploadId": upload_id, "kind": "evtx", "evidence": {"id": 7, "name": "logs.zip", "sha256Client": sha}}),
+        content_type="application/json",
+        **HDR,
+    )
+    job_id = r.json()["jobId"]
+    for _ in range(600):
+        j = c.get(f"/api/jobs/{job_id}?case={key}", **HDR).json()
+        if j["status"] in ("done", "error", "cancelled"):
+            break
+        time.sleep(0.1)
+    assert j["status"] == "done", j
+    assert [flag for _name, flag in _seen(seen)] == [True, True], _seen(seen)
 
 
 def test_refs_resolve_against_a_server_store(tmp_path):

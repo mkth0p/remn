@@ -61,12 +61,18 @@ def _sysmon(*ids: int) -> dict[str, Any]:
     return {**_SYSMON, "eventId": ids[0]} if len(ids) == 1 else {**_SYSMON, "eventId|in": list(ids)}
 
 
+# Sigma's ProcessId of a process creation is the new process. A 4688 writes it as NewProcessId, its
+# own ProcessId being the creator; a Sysmon 1 writes it as ProcessId, which the parser keeps as
+# callerProcessId, and has no NewProcessId. processId is the PID of the service that wrote the
+# record. So callerProcessId is read only where a row has no newProcessId (see compile_field).
+_CREATED_PROCESS = ["newProcessId", "callerProcessId"]
+
 # category -> {"where": condition, "aliases": {SigmaField: [remn fields...]}}
 CATEGORY_MAP: dict[str, dict[str, Any]] = {
     "process_creation": {
         "where": {"any_of": [_sysmon(1), {"channel": "Security", "eventId": 4688}]},
         "aliases": {"Image": ["image", "processName"], "ParentImage": ["parentImage", "parentProcessName"],
-                    "User": ["user", "subjectUser"], "ProcessId": ["processId", "newProcessId"],
+                    "User": ["user", "subjectUser"], "ProcessId": _CREATED_PROCESS,
                     "ParentProcessId": ["parentProcessId"], "LogonId": ["subjectLogonId"]},
     },
     "process_termination": {"where": _sysmon(5)},
@@ -375,6 +381,14 @@ def _cond(field: str, op: str, value: Any) -> dict[str, Any]:
 
 def compile_field(raw_field: str, value: Any, aliases: dict[str, list[str]], warnings: list[str]) -> dict[str, Any]:
     name, *mods = raw_field.split("|")
+    if aliases.get(name) is _CREATED_PROCESS:
+        first, second = _CREATED_PROCESS
+        return _any_of(
+            [
+                _all_of([_cond(first, "exists", True), compile_field(raw_field, value, {**aliases, name: [first]}, warnings)]),
+                _all_of([_cond(first, "exists", False), compile_field(raw_field, value, {**aliases, name: [second]}, warnings)]),
+            ]
+        )
     mods = [m for m in mods if m]
     for m in mods:
         if m not in KNOWN_MODIFIERS:

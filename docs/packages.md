@@ -25,20 +25,27 @@ version. Original fields remain in `data`. Original archive bytes and unsupporte
 member contents are not retained by either store; keep the acquisition separately.
 Case migration, export/import and deletion include normalized rows and provenance.
 
-A delimited export (CSV, TSV) is read one row at a time and streamed to the case, so it is read
-to the 4 GiB member ceiling: MFTECmd's `$MFT` and `$J` output runs to gigabytes, and the 64 MiB
-ceiling it used to share with JSON kept only the first few percent of a volume. A JSON export,
-which is read whole, is parsed under a 64 MiB budget counted while reading, not checked against
-the file size. An export past its budget contributes every record read before the ceiling and is
-reported as an error member with the reason, rather than contributing nothing but a hash, and the
-report's "what the evidence cannot show" names every member read only in part.
+A delimited export (CSV, TSV) and a JSON export (an array of objects, a `records` array, an
+object, or one object per line as Velociraptor writes its `results/<Artifact>.json`) are read one
+record at a time and streamed to the case, so they are read to the 4 GiB member ceiling: MFTECmd's
+`$MFT` and `$J` output and Velociraptor's event log, MFT and USN results run to gigabytes. Other
+text exports are parsed under a 64 MiB budget counted while reading, not checked against the file
+size. An export past its budget contributes every record read before the ceiling and is reported as
+an error member with the reason, rather than contributing nothing but a hash, and the report's
+"what the evidence cannot show" names every member read only in part. A JSON line that does not
+parse, and a line or array item that is not an object, is passed over and counted: the records
+around it are kept, and the member is an error member whose reason and `unreadable` field give the
+number. A JSON record larger than 64 MiB, or a document that breaks off, ends the member with the
+records before it kept.
 
 ## Triage collections
 
 A collection laid out like a drive is read as one target by dissect rather than member by
 member: KAPE's target output, Velociraptor's offline collector archive (`uploads/` with the
 drive letters URL-encoded, `results/` beside it), acquire, or a plain copy of a volume with
-its `Windows\System32` in place. The layout is recognised from the member names; the archive
+its `Windows\System32` in place. The layout is recognised from every member name, including
+those past the 20,000 entries the inventory lists, so a collection whose profile directories
+come before `Windows` is still read as a drive; the archive
 is handed to dissect whole, and a fixed set of its functions runs in the same bounded worker as
 the native decoders: services, run keys, scheduled tasks, Defender's MPLog, quarantine,
 exclusions and MpCmdRun log, Amcache, ShimCache, UserAssist, BAM, ShellBags, PowerShell
@@ -58,7 +65,10 @@ Exports written by other tools land in the same fields. The Zimmerman parsers ar
 by their headers wherever the file sits (EvtxECmd rows become events, PECmd prefetch,
 AmcacheParser and AppCompatCacheParser presence and execution evidence, RECmd registry values, LECmd,
 JLECmd and SBECmd files and folders, MFTECmd `$MFT` entries and `$J` changes, SrumECmd network
-usage), so KAPE module output needs no renaming.
+usage), as CSV or as the one object per line of their `--json` output, so KAPE module output and
+a parser run by hand need no renaming. Output of theirs whose header matches none of these (RBCmd,
+SQLECmd, SrumECmd's other tables) is read only under one of the directory names below, and
+reported as unsupported elsewhere.
 
 Disk artifacts keep every time they record, each as its own row that says which time it is, so
 they sit on the timeline beside the event logs (a host super-timeline):
@@ -79,14 +89,22 @@ they sit on the timeline beside the event logs (a host super-timeline):
 - **EvtxECmd**: the `Payload` column (the record's EventData or UserData as JSON) goes through
   the native EVTX parser's own field mapping, so the command line, logon type, source address
   and the rest fill the columns they fill for a `.evtx`, and the event's category, description
-  and summary are the native parser's. Velociraptor's EventData is mapped the same way.
+  and summary are the native parser's. Velociraptor's EventData is mapped the same way, whether
+  it comes with the record's `System` object as `parse_evtx()` writes it (dated by
+  `TimeCreated.SystemTime`, seconds since 1970) or as the flat rows of its `Windows.EventLogs`
+  artifacts (dated by `EventTime`).
 
 The event detail shows the time's meaning beside the time, and the Timesketch and Timeline
 Explorer exports write it as `timestamp_desc`. Velociraptor result files are mapped by the artifact that produced them,
 including its event log exports, which become events. DFIR-ORC archives are 7z, expanded once
 into the staging area within the package byte budget, and their `GetThis`, `NTFSInfo`,
 `USNInfo` and `RegInfo` CSVs are read by name. Timestamps these tools write without a zone
-are taken as UTC, which is what their documentation fixes.
+are taken as UTC, which is what their documentation fixes. A date written in numbers (DFIR-ORC's
+`08/19/2026 01:34:26`, or a Zimmerman CSV saved again from a spreadsheet as `19/08/2026 01:34`)
+is read in the order the export's own dates show, since one date with a day above 12 settles it;
+DFIR-ORC's are month-first by its documentation. In an export that does not settle the order, a
+date that reads both ways (`03/04/2026`) has no time on the timeline: it stays as written in
+`data`, and the member's note and `undated` field give the number of such rows.
 
 ## Collection adapters
 
@@ -293,14 +311,19 @@ and have the same tested behavior in the browser and SQL engines.
 ## Limits and synthetic verification
 
 Packages allow 20,000 archive entries, 4 GiB per member and 16 GiB expanded data.
-JSON exports cap at 64 MiB per member, delimited exports at the 4 GiB member ceiling, manifests at 64 KiB. Members stream to
+Delimited and JSON exports are read to the 4 GiB member ceiling, one JSON record to 64 MiB, other
+text exports to 64 MiB, manifests to 64 KiB. Members stream to
 temporary files; archive paths are never used as extraction destinations. Links,
 encrypted members and traversal paths are skipped. Temporary files are cleaned up.
 An inventory cut short is marked incomplete.
 
 Native decoders run in subprocesses, monitored at 50 ms intervals with 30-second,
-512 MiB RSS and 64 MiB input/output limits; CAB output is allowed 512 MiB because it
-is an archive rather than records. These are sampled limits, not an OS sandbox.
+512 MiB RSS and 64 MiB output limits; CAB output is allowed 512 MiB because it
+is an archive rather than records. A prefetch file or a CAB may be 64 MiB; a registry hive is
+read where its cells are rather than loaded, so it may be as large as the member ceiling. A
+registry or prefetch decode stopped at one of these limits keeps the records it decoded before
+it, and the member is an error member whose reason names the limit and the number of records
+kept; a CAB stopped at one is not kept. These are sampled limits, not an OS sandbox.
 Prefetch is decoded in groups of up to 64 artifacts per process, since a collection
 carries hundreds of them and an interpreter start each cost more than the decoding.
 An artifact a group does not reach is decoded on its own, so one damaged artifact
@@ -308,7 +331,8 @@ costs only itself, and only artifacts the single-artifact path would accept are 
 back. A package may decode 5,000 native artifacts or spend 300 seconds decoding,
 whichever comes first, counting cabinets and counting decodes that fail; past that,
 members are inventoried and hashed with the reason recorded. Held-back artifacts
-occupy at most 256 MiB of staging per request rather than per archive. Text exports keep their first 100,000 lines and are marked
+occupy at most 256 MiB of staging per request rather than per archive; an event log read
+after that is parsed but not scanned by Hayabusa, and its member and the engine summary say so. Text exports keep their first 100,000 lines and are marked
 truncated rather than discarded; registry traversal caps at 100,000 keys and depth
 128. No evidence command or executable is run. Native decoder dependencies
 include AGPL-licensed Dissect and LGPL-licensed cabarchive; see `THIRD_PARTY_NOTICES.md`.

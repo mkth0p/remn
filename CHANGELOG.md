@@ -26,6 +26,26 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   the 7z test runs. The backend tests also run on Windows and macOS. The image has a health check,
   the public proxy closes a connection that sends no headers within ten seconds, and a nightly or
   weekly run that fails opens an issue instead of failing unseen.
+- The API gives away less and refuses more. `GET /api/jobs` lists the jobs of the case whose key
+  is presented, a job is read, followed or cancelled only with its case's key
+  (`/api/jobs/<id>?case=<key>`, a 404 otherwise), no job answer carries a case key, and reading a
+  store never creates one. A request, parse or job that fails answers with what failed, the
+  exception's type and a reference that is also in the server log, not with the exception's text,
+  and the log reduces exceptions to type and place in every mode (`FORENSIC_DEBUG=1` keeps the
+  text outside browser-only mode). `backend/run.py` no longer starts on an address other machines
+  can reach without `FORENSIC_AUTH_TOKEN` unless `FORENSIC_ALLOW_NO_TOKEN=1` says so; a container
+  is judged by `FORENSIC_PUBLISHED_ON`, which `docker-compose.yml` sets from `REMN_BIND`. On
+  upgrade, a bare `docker run -p 8000:8000`, or compose with `REMN_BIND` off loopback and no
+  `REMN_TOKEN`, now exits until it sets a token, `REMN_NO_TOKEN=1` (`FORENSIC_ALLOW_NO_TOKEN=1`)
+  or a loopback publication with `FORENSIC_PUBLISHED_ON=127.0.0.1`; `docs/setup.md` lists each
+  case. Wrong tokens are limited to ten a minute per client address
+  (`FORENSIC_AUTH_FAILURES_PER_MIN`); the placeholder the page sends before it holds a token is
+  not counted. A reputation lookup that would leave the machine needs `networkAllowed: true`,
+  which the page sends from the case setting; values are checked by kind, a provider's redirect to
+  another host is not followed, and a Spamhaus verdict no longer carries the DQS key. `GET
+  /api/health` without the client header answers `{"ok": true}` only, which is what the image's
+  health check now asks; `/api/meta` parses the bundled rules once; and a numeric parameter that
+  is not a number is a 400.
 - Each case adapts to its own machines and to the analyst's review. After every run, a rule that
   stands on its own on at least half the case's hosts is folded per host as that network's
   background, whatever the clean machines said, and each finding of a rule the analyst marks false
@@ -34,6 +54,23 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   per clean host fell from 81 to 69, and an analyst dismissing benign lines from the top read 30%,
   32% and 21% fewer lines before the first finding of the attack on attack_data,
   EVTX-to-MITRE-Attack and EVTX-ATTACK-SAMPLES ([detection level](docs/detection.md#detection-level)).
+- Rules, the SQL view and the case store refuse what they used to let through, and accept what
+  they used to refuse. A rule sent to the server with a source other than `events` or `mails` is
+  refused before any query is built; a stacked statement there used to rewrite every evidence row
+  of the case with no trace. A case store opens only when DuckDB reads back file access off and
+  the configuration locked. The SQL view checks a statement with DuckDB's own parser rather than a
+  keyword list: it answers searches for `Set-MpPreference`, 'update', `Import-Module` or a
+  semicolon inside a string, and refuses `read_csv_auto`, `parquet_scan`, `sniff_csv`, `query()`,
+  a file path used as a table, the catalog views (`information_schema`, `duckdb_*`; DESCRIBE, SHOW
+  and SUMMARIZE answer the same questions) and any table function other than `range`,
+  `generate_series`, `unnest`, `json_each` and `json_tree`. The address search in a From display
+  name and in Microsoft 365 inbox rule fields is linear: a 300 KB display name used to stop every
+  request thread for minutes, and a timing test now guards both modules. Both rule engines keep a
+  rule's `max_findings`, or 2,000, and keep the same findings past it: the first rows in time
+  order, the largest or rarest groups, bursts in the order of the grouped fields. The browser
+  engine used to drop findings past 2,000 silently, and the SQL engine ignored `max_findings`. The
+  number left out is shown beside the rule in the Rules view, above the list in the Findings view
+  and on the findings of that rule ([detection](docs/detection.md)).
 - The home page shows detection by library and by tactic from one run of every rule on five
   public libraries at one commit: 438 of 913 held-out recordings detected at medium and above
   (EVTX-to-MITRE-Attack 112 of 279, attack_data 246 of 535, OTRF Security-Datasets 80 of 99), 72
@@ -42,6 +79,22 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   are a third held-out library (`tools/security_datasets.py`), and `tools/library_measures.py`
   fetches, runs and scores them all
   ([review](docs/reviews/2026-09-28-measures-across-libraries.md)).
+- Microsoft 365 and Entra exports are read for what they are, and what reading them cost is said.
+  A directory audit, risk or user export that names a `userPrincipalName` was read as successful,
+  undated sign-ins of nobody. A record is now a sign-in only when it carries a time, a client
+  address and a user or application; other exports are listed as unread, and a record inside a
+  sign-in file that is not a sign-in is counted as not read. The PascalCase columns of
+  `Get-MgAuditLogSignIn | Export-Csv` are read, its .NET type names are left out, and a sign-in
+  whose export gives no outcome is no longer counted as a success (its `status` is empty, so rules
+  on `status: "0"` no longer count it). An AuditData field longer than 131,072 characters no
+  longer ends a CSV; a row the CSV reader cannot take is one parse error and the rows after it are
+  read. JSON arrays and Graph pages are read one record at a time instead of loaded whole in the
+  server process (a 75 MB sign-in array peaked at 228 MB, now 3 MB). A value cut at its length
+  limit ends with an ellipsis. Culture dates with minutes only, a 12-hour clock, the year first or
+  an offset are read with their zone, and a sign-in CSV's date order is decided from the whole
+  file. The ids kept to find repeated records stop growing at 64 MiB. The evidence statistics
+  (`cut`, `undated`, `dateOrderGuessed`, `repeatsUnchecked`) and the archive or package member
+  notes count each of these.
 - A detection level per case, from 1 (fewest lines) to 5 (every finding on its own), set when the
   case is started (2 by default) and changed on the Rules page. No level drops a finding: the
   findings of a rule that fired too often on the evtx-baseline clean machines for its severity are
@@ -50,6 +103,22 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   medium and higher finding raised and nothing else, and the default gives 92 lines per clean
   machine against 241. Findings an analyst decided on stay on their own. Cases started before keep
   every finding on its own until their level is set ([detection level](docs/detection.md#detection-level)).
+- Host collections no longer give wrong or empty output without saying so. A JSON export is read a
+  record at a time to the 4 GiB member ceiling instead of yielding nothing past 64 MiB, and
+  records that cannot be read are counted on the member. Eric Zimmerman tool output is recognised
+  by its header wherever it sits, and a file the parser does not recognise is reported as such.
+  Velociraptor event rows are dated from their epoch seconds or EventTime and their EventData is
+  mapped. Numeric dates are read day-first or month-first as the file's own dates show; a date
+  that stays ambiguous is left untimed and counted, never guessed. An event's unnamed Data is kept
+  to 64 KiB in `message`, on the server and in the browser. A panic in the EVTX decoder keeps the
+  rows read and says the file was cut. A hive decode stopped at a limit keeps the keys it read,
+  and hives up to 4 GiB are accepted. A drive layout is recognised past the 20,000-entry
+  inventory. Event logs past the Hayabusa hold are named on their member and counted in the engine
+  summary (`notScanned`). Hayabusa is given the .evtx files inside an archive instead of the
+  archive, and is not run on XML or cloud exports. PST items libpff refuses become counted error
+  rows. A cut mail body, attachments past 60 and PST attachments over 60 MiB are flagged
+  (`body_truncated`, `attachments_truncated`, `not_read`), and the attachment count is the real
+  one. A Sigma `ProcessId` in a process creation rule reads the new process's id.
 - The priority of a finding divides by 1 + ln n when its rule raised n findings on the same host
   or for the same user, so one loud rule no longer fills the top of the queue. The first finding of
   an attack reached the top ten in 38% of EVTX-to-MITRE-Attack recordings and 76% of

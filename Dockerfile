@@ -2,7 +2,7 @@
 #
 #   docker build -t remn .                                                  # core
 #   docker build --build-arg EXTRA_PIP="yara-python libpff-python py7zr" -t remn .  # full: YARA, PST and 7z support
-#   docker run --rm -p 8000:8000 -v remn-data:/app/backend/data remn
+#   docker run --rm -p 127.0.0.1:8000:8000 -e FORENSIC_PUBLISHED_ON=127.0.0.1 -v remn-data:/app/backend/data remn
 #
 # Python packages are installed in a build stage that has a compiler (libpff builds from source) and
 # copied into a runtime image that has neither a compiler nor pip. GeoLite2 and the offline lists are

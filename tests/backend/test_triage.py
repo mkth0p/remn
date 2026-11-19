@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 import sys
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -317,3 +318,30 @@ def test_ez_exports_keep_the_same_meanings():
         {},
     )
     assert lnk["ts"] == collection.timestamp_utc("2026-09-02 11:00:00"), "last opened, not the target's own time"
+
+
+@pytest.mark.parametrize("archive", ["zip", "tar.gz"])
+def test_a_system_directory_listed_past_the_inventory_cap_still_marks_a_drive(collection, tmp_path, monkeypatch, archive):
+    """A collector that writes profile directories before Windows puts System32 deep in the member
+    list. The layout check read only the names the inventory kept, so a host with more profile files
+    than the cap was never read as a drive and its event logs and hives were not reached."""
+    monkeypatch.setattr("services.ingest.package.MAX_FILES", 3)
+    if archive == "zip":
+        data = zipped(collection)
+    else:
+        out = io.BytesIO()
+        with tarfile.open(fileobj=out, mode="w:gz") as tf:
+            for path in sorted(collection.rglob("*")):
+                if path.is_file():
+                    tf.add(path, path.relative_to(collection).as_posix())
+        data = out.getvalue()
+    source = PackageSource(f"Collection-WS01.{archive}", None, data, str(tmp_path), ParseContext(analyze_attachments=False))
+    rows = list(source)
+    assert source.inventory_complete is False
+    assert not [f for f in source.files if "Windows/System32" in f["name"]]
+    assert source.triage is True
+    assert [f for f in source.files if f["name"].startswith("triage!/")]
+    if archive == "zip":
+        # dissect opens a tar laid out as C/... with a loader that finds no Windows install, so only
+        # the zip carries the rows through; for the tar the point is that the pass is attempted
+        assert {r["serviceName"] for r in rows if r.get("artifactType") == "service"} == {"Spooler", "SyncHelper"}

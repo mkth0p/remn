@@ -11,9 +11,12 @@ from collections.abc import Iterator
 from email.utils import format_datetime
 from typing import Any
 
-from services.parsers.mail.common import Header, ParseContext, RawAttachment, build_row
+from services.parsers.mail.common import MAX_ATTACHMENTS, Header, ParseContext, RawAttachment, build_row
 
 log = logging.getLogger(__name__)
+
+# the most of one attachment read into memory; a larger one is listed with its size, unread
+MAX_ATTACHMENT_BYTES = 60 * 1024 * 1024
 
 # MAPI property identifiers we read from record sets when transport headers are missing
 PR_SENDER_NAME = 0x0C1A
@@ -143,13 +146,14 @@ def _headers_from_message(message: Any, props: dict[int, Any]) -> tuple[list[Hea
     return headers, extra
 
 
-def _attachments(message: Any) -> list[RawAttachment]:
+def _attachments(message: Any) -> tuple[list[RawAttachment], int]:
+    """The attachments build_row analyses, and how many the message has in all."""
     out: list[RawAttachment] = []
     try:
         n = message.number_of_attachments
     except Exception:  # noqa: BLE001
-        return out
-    for i in range(min(n, 60)):
+        return out, 0
+    for i in range(min(n, MAX_ATTACHMENTS)):
         try:
             att = message.get_attachment(i)
             name = None
@@ -169,7 +173,18 @@ def _attachments(message: Any) -> list[RawAttachment]:
                 except Exception:  # noqa: BLE001
                     size = 0
             data = b""
-            if size and size <= 60 * 1024 * 1024:
+            if size > MAX_ATTACHMENT_BYTES:
+                # handed on as no bytes it would read as an empty file with no hash
+                out.append(
+                    RawAttachment(
+                        name or f"attachment-{i}",
+                        b"",
+                        unread=f"larger than the {MAX_ATTACHMENT_BYTES // 1024**2} MiB read from a PST or OST; not hashed or analysed",
+                        size=size,
+                    )
+                )
+                continue
+            if size:
                 try:
                     data = att.read_buffer(size)
                 except Exception:  # noqa: BLE001
@@ -181,7 +196,7 @@ def _attachments(message: Any) -> list[RawAttachment]:
             out.append(RawAttachment(name or f"attachment-{i}", data or b"", None, False, None))
         except Exception as exc:  # noqa: BLE001
             log.debug("pst attachment %d failed: %s", i, exc)
-    return out
+    return out, n
 
 
 def _bodies(message: Any) -> tuple[str | None, str | None]:
@@ -215,6 +230,15 @@ def _bodies(message: Any) -> tuple[str | None, str | None]:
     return text, html
 
 
+class _Unreadable:
+    """An item libpff refused. It becomes an error row rather than a debug line, so the import
+    counts it and a damaged mailbox does not look complete."""
+
+    def __init__(self, subject: str, exc: Exception) -> None:
+        self.subject = subject
+        self.error = str(exc)[:200]
+
+
 def _walk(folder: Any, path: str) -> Iterator[tuple[str, Any]]:
     try:
         name = folder.name or ""
@@ -222,21 +246,32 @@ def _walk(folder: Any, path: str) -> Iterator[tuple[str, Any]]:
         name = ""
     current = f"{path}/{name}".strip("/") if name else path
     try:
-        for i in range(folder.number_of_sub_messages):
-            try:
-                yield current, folder.get_sub_message(i)
-            except Exception as exc:  # noqa: BLE001
-                log.debug("pst message %d in %s failed: %s", i, current, exc)
+        count = folder.number_of_sub_messages
     except Exception as exc:  # noqa: BLE001
-        log.debug("pst folder %s messages failed: %s", current, exc)
+        log.warning("pst folder %s messages failed: %s", current, exc)
+        yield current, _Unreadable("(unreadable folder contents)", exc)
+        count = 0
+    for i in range(count):
+        try:
+            message = folder.get_sub_message(i)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("pst message %d in %s failed: %s", i, current, exc)
+            message = _Unreadable("(unreadable message)", exc)
+        yield current, message
     try:
-        for i in range(folder.number_of_sub_folders):
-            try:
-                yield from _walk(folder.get_sub_folder(i), current)
-            except Exception as exc:  # noqa: BLE001
-                log.debug("pst subfolder %d in %s failed: %s", i, current, exc)
-    except Exception:  # noqa: BLE001
-        pass
+        count = folder.number_of_sub_folders
+    except Exception as exc:  # noqa: BLE001
+        log.warning("pst folder %s sub-folders failed: %s", current, exc)
+        yield current, _Unreadable("(unreadable folder)", exc)
+        count = 0
+    for i in range(count):
+        try:
+            sub = folder.get_sub_folder(i)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("pst subfolder %d in %s failed: %s", i, current, exc)
+            yield current, _Unreadable("(unreadable folder)", exc)
+            continue
+        yield from _walk(sub, current)
 
 
 # Folders whose content the user (or an attacker) deleted: Outlook's Deleted Items in the common
@@ -248,26 +283,34 @@ _DELETED_FOLDER_RE = re.compile(
 ORPHAN_FOLDER = "(orphaned - deleted item not attached to any folder)"
 
 
+def _error_row(folder: str, subject: str, error: str) -> dict[str, Any]:
+    return {
+        "folder": folder,
+        "subject": subject,
+        "flags": ["parse_error"],
+        "risk": 10,
+        "error": error,
+        "attachments": [],
+        "urls": [],
+        "sourceFormat": "pst",
+    }
+
+
 def _message_row(message: Any, folder: str, ctx: ParseContext, index: int) -> dict[str, Any]:
+    if isinstance(message, _Unreadable):
+        row = _error_row(folder, message.subject, message.error)
+        row["sourceIndex"] = index
+        return row
     try:
         props = _props(message)
         headers, extra = _headers_from_message(message, props)
         text, html = _bodies(message)
-        attachments = _attachments(message) if ctx.analyze_attachments else []
+        attachments, attachment_count = _attachments(message) if ctx.analyze_attachments else ([], 0)
         extra["sourceFormat"] = "pst"
-        row = build_row(headers, text, html, attachments, ctx, folder=folder, size=None, extra=extra)
+        row = build_row(headers, text, html, attachments, ctx, folder=folder, size=None, extra=extra, attachment_count=attachment_count)
     except Exception as exc:  # noqa: BLE001
         log.warning("pst message %d failed: %s", index, exc)
-        row = {
-            "folder": folder,
-            "subject": "(unparseable message)",
-            "flags": ["parse_error"],
-            "risk": 10,
-            "error": str(exc)[:200],
-            "attachments": [],
-            "urls": [],
-            "sourceFormat": "pst",
-        }
+        row = _error_row(folder, "(unparseable message)", str(exc)[:200])
     row["sourceIndex"] = index
     try:
         row["pstIdentifier"] = message.identifier
@@ -303,9 +346,9 @@ def iter_pst_file(pst: Any, ctx: ParseContext) -> Iterator[dict[str, Any]]:
         try:
             item = pst.get_orphan_item(i)
         except Exception as exc:  # noqa: BLE001
-            log.debug("pst orphan %d failed: %s", i, exc)
-            continue
-        if item is None or not _looks_like_message(item):
+            log.warning("pst orphan %d failed: %s", i, exc)
+            item = _Unreadable("(unreadable orphan item)", exc)
+        if item is None or not (isinstance(item, _Unreadable) or _looks_like_message(item)):
             continue
         index += 1
         row = _message_row(item, ORPHAN_FOLDER, ctx, index)

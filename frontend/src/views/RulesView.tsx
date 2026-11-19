@@ -414,7 +414,7 @@ export function RulesView() {
                     if (n && n > 0)
                       return (
                         <Badge sev={cut ? DIAG_LABEL.truncated.sev : 'ok'} title={cut ? `${n} finding(s) kept: ${cut.detail}` : `${n} finding(s) in the last run`}>
-                          {cut ? `${n}+` : n}
+                          {cut ? (cut.dropped ? `${fmtNum(n)}, ${fmtNum(cut.dropped)} left out` : `${n}+`) : n}
                         </Badge>
                       )
                     const d = lastRun.diagnostics.find((x) => x.ruleId === r.rule.id)

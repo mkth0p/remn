@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { API_HEADERS, apiGet, onAuthError, setApiToken } from './client'
+import { API_HEADERS, apiGet, lookupReputation, onAuthError, setApiToken } from './client'
 import { uuid4 } from '../util/uuid'
 
 const fetchMock = vi.fn()
@@ -28,6 +28,18 @@ describe('setApiToken', () => {
     await apiGet('/api/health')
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect((init.headers as Record<string, string>)['X-Forensic-Client']).toBe('tok-abc')
+  })
+})
+
+describe('lookupReputation', () => {
+  it("sends the case's choice on external lookups, which the server enforces", async () => {
+    for (const allowed of [true, false]) {
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ results: [], summary: {} }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      await lookupReputation([{ kind: 'domain', value: 'invented.example' }], undefined, allowed)
+      const [url, init] = fetchMock.mock.calls.at(-1) as [string, RequestInit]
+      expect(url).toBe('/api/reputation/lookup')
+      expect(JSON.parse(init.body as string)).toEqual({ items: [{ kind: 'domain', value: 'invented.example' }], networkAllowed: allowed })
+    }
   })
 })
 

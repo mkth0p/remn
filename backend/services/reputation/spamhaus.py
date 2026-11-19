@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+from urllib.parse import quote
 
 from services.reputation.base import Provider, Verdict
 
@@ -48,6 +49,12 @@ class Spamhaus(Provider):
         key = (self.config.get("keys") or {}).get("spamhaus_dqs", "")
         return f"{key}.{base}.dq.spamhaus.net" if key else f"{base}.spamhaus.org"
 
+    def _shown(self, text: str) -> str:
+        """`text` as a lookup answer may carry it. With a DQS key the query name holds the key, an
+        account secret of the operator's, and a lookup answer goes to every client that asks."""
+        key = (self.config.get("keys") or {}).get("spamhaus_dqs", "")
+        return text.replace(key, "<key>") if key else text
+
     def lookup(self, kind: str, value: str) -> Verdict:
         import dns.exception
         import dns.resolver
@@ -73,16 +80,16 @@ class Spamhaus(Provider):
         try:
             answers = resolver.resolve(qname, "A")
         except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
-            return Verdict(self.name, kind, value, "clean", 0, details={"query": qname})
+            return Verdict(self.name, kind, value, "clean", 0, details={"query": self._shown(qname)})
         except dns.exception.DNSException as exc:
-            return Verdict(self.name, kind, value, "error", details={"error": str(exc)[:120], "query": qname})
+            return Verdict(self.name, kind, value, "error", details={"error": self._shown(str(exc))[:120], "query": self._shown(qname)})
         results = [r.to_text() for r in answers]
         errs = [ERROR_CODES[r] for r in results if r in ERROR_CODES]
         if errs:
-            return Verdict(self.name, kind, value, "error", details={"error": errs[0], "codes": results, "query": qname})
+            return Verdict(self.name, kind, value, "error", details={"error": errs[0], "codes": results, "query": self._shown(qname)})
         listed = [(r, codes.get(r)) for r in results if r in codes]
         if not listed:
-            return Verdict(self.name, kind, value, "unknown", details={"codes": results, "query": qname})
+            return Verdict(self.name, kind, value, "unknown", details={"codes": results, "query": self._shown(qname)})
         tags = sorted({c[0] for _, c in listed if c})
         desc = "; ".join(c[1] for _, c in listed if c)
         only_pbl = all(c and c[0] == "PBL" for _, c in listed)
@@ -94,6 +101,6 @@ class Spamhaus(Provider):
             verdict,
             40 if only_pbl else 90,
             tags=tags,
-            details={"listed": desc, "codes": results, "query": qname},
-            link=f"https://check.spamhaus.org/results/?query={value}",
+            details={"listed": desc, "codes": results, "query": self._shown(qname)},
+            link=f"https://check.spamhaus.org/results/?query={quote(value, safe=':')}",
         )
