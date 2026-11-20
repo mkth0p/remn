@@ -15,6 +15,9 @@ WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./
+# the home page and the detection level quote the committed rule measure, read when the page is
+# built (vite.config.ts); the build fails without it
+COPY rules/ /src/rules/
 # the source commit, shown in the app and checked against the server's; the checkout's .git is not
 # copied into the build, so deploy/update.sh passes it: --build-arg REMN_BUILD_ID=$(git rev-parse HEAD)
 ARG REMN_BUILD_ID=""

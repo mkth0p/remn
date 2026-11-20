@@ -25,11 +25,16 @@ The app opens on a home page until some case in the browser holds evidence, and 
 last case's dashboard after that; the wordmark leads back to the home page. It has its own
 type (IBM Plex Sans and Mono) and palette, apart from the case pages, and shows what REMN
 reads, how the rules are measured and what the measures show. The rule totals, the
-recordings, the clean-host baseline and the example rule's record come from
-`rules/measures.json` through `/api/meta`, so they follow every measurement; the
-comparisons with Hayabusa and Chainsaw, the held-out attack_data run, the evtx-baseline
-false positives and the mail corpora are the dated results of the reviews they cite
-(`frontend/src/data/landingFigures.ts`). New case names a case, picks its store and can
+recordings, what the rules enabled by default detect in each library, the clean-host
+baseline and the findings on it are read from the committed measure
+(`rules/measures.json`, `rules/measures-detail.json` and the SigmaHQ packs) when the page is
+built, counted as the README counts them (`frontend/src/data/measureFigures.ts`), so a new
+measure changes the page with no figure typed; the example rule's record comes from the
+server with the rule. The tactic map and the APT29 hosts come from a separate run of every
+rule (`tools/library_measures.py`, `frontend/src/data/libraryMeasures.json`) and say so;
+the lines per detection level come from a run whose script and output are not in the
+repository, which the page says too; the mail corpora are the dated results of
+[validation](validation.md), on corpora the score's weights were adjusted on. New case names a case, picks its store and can
 take evidence as it is created; the first visit's case, while still untouched, is taken
 over rather than left empty. Open demo case opens the Northstar lab in the browser.
 
@@ -307,7 +312,8 @@ misses its sample, fires on clean machines, changed, needs settings) with the se
 behind it on hover, and a filter lists the leads, the rules that miss their own test sample
 or those that fire on clean machines. Above the packs, the case's detection level (1, fewest
 lines, to 5, every finding on its own; see [detection level](detection.md#detection-level)) is a
-slider with what the level keeps on its own and how many lines it was measured to give; moving it
+slider with what the level keeps on its own, what every level detects in the committed rule
+measure, and how many lines it gave in the run it was measured with; moving it
 offers to rerun the rules at the new level, and the "level" column gives the lowest level at which
 each rule's findings stand on their own. Below that level they are folded, one per rule and host,
 and a folded finding's title says how many it stands for; a rule that fires on most of the case's

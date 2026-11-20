@@ -5,6 +5,8 @@ import { defaultSettings, RemnDB, setDb, type Case } from '../db/schema'
 import { FIRST_CASE_NAME } from '../data/cases'
 import { useStore } from '../state/store'
 import type { Health } from '../api/client'
+import measure from 'virtual:rule-measure'
+import { fmtNum } from '../util/format'
 import { HomeView } from './HomeView'
 
 let db: RemnDB
@@ -63,5 +65,26 @@ describe('HomeView', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'New case' })[0])
     expect(screen.getByRole('radio', { name: /Browser/ })).toBeTruthy()
     expect(screen.queryByRole('radio', { name: /Server/ })).toBeNull()
+  })
+
+  it('quotes the committed rule measure, without a server to ask', () => {
+    const { container } = render(<HomeView />)
+    const page = container.textContent ?? ''
+    expect(page).toContain(`${fmtNum(measure.rules)} detection rules`)
+    for (const l of measure.libraries) {
+      const bar = screen.getByTitle(`${l.name}: ${fmtNum(l.detected)} of ${fmtNum(l.recordings)} recordings detected`)
+      expect(bar).toBeTruthy()
+    }
+    expect(page).toContain(`${fmtNum(measure.detect)} have fired on a recording of what they look for`)
+    expect(page).toContain(`Measured ${measure.measured}`)
+    expect(screen.getByRole('cell', { name: fmtNum(measure.clean.own.highCritical) })).toBeTruthy()
+  })
+
+  it('names no evaluation REMN did not take part in, and no comparison the committed measure does not hold', () => {
+    const { container } = render(<HomeView />)
+    const page = container.textContent ?? ''
+    expect(page).not.toMatch(/ATT&CK Evaluations|MITRE's APT29 evaluation/)
+    expect(page).not.toMatch(/Hayabusa|Chainsaw|Head-to-head/)
+    expect(page).toContain('APT29')
   })
 })

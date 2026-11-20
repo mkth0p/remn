@@ -15,14 +15,13 @@ import { DEFAULT_DETECTION_LEVEL, type DetectionLevel } from '../data/detectionL
 import { DetectionLevelPicker } from '../components/DetectionLevelPicker'
 import { useDialogFocus } from '../components/dialogFocus'
 import { DETECTION_LEVELS, BEFORE_LEVELS, MEASURED_ON } from '../data/detectionLevel'
-import { EXAMPLE_RULE, HEAD_TO_HEAD, HELD_OUT, heldOut, LIBRARY_MEASURES, liveFigures, MAIL_CORPORA, type Cut, type LiveFigures } from '../data/landingFigures'
+import { EXAMPLE_RULE, exampleMeasure, LIBRARY_MEASURES, MAIL_CORPORA, type Cut, type ExampleMeasure } from '../data/landingFigures'
+import measure from 'virtual:rule-measure'
 import { fmtNum } from '../util/format'
 
-type Level = 'info' | 'medium' | 'high'
-type Section = 'libraries' | 'coverage' | 'baseline' | 'intrusion' | 'mail' | 'method' | 'modules' | 'data'
+type Section = 'libraries' | 'baseline' | 'intrusion' | 'mail' | 'method' | 'modules' | 'data'
 const SECTIONS: [Section, string][] = [
   ['libraries', 'Libraries'],
-  ['coverage', 'Head-to-head'],
   ['baseline', 'Baseline'],
   ['intrusion', 'APT29'],
   ['mail', 'Mail'],
@@ -30,17 +29,18 @@ const SECTIONS: [Section, string][] = [
   ['modules', 'Modules'],
   ['data', 'Data handling'],
 ]
-const LEVELS: [Level, string][] = [
-  ['info', '≥ info'],
-  ['medium', '≥ medium'],
-  ['high', '≥ high'],
-]
 const CUTS: [Cut, string][] = [
   ['any', 'any level'],
   ['medium', '≥ medium'],
   ['high', '≥ high'],
 ]
 const pct = (n: number, of: number) => (of ? `${Math.round((n / of) * 100)}%` : '–')
+/** recorded attacks in the committed measure, every library together */
+const RECORDINGS = measure.libraries.reduce((n, l) => n + l.recordings, 0)
+/** the libraries no rule had been written against when they were first measured, together */
+const HELD = measure.libraries.filter((l) => l.heldOut)
+const HELD_DETECTED = HELD.reduce((n, l) => n + l.detected, 0)
+const HELD_RECORDINGS = HELD.reduce((n, l) => n + l.recordings, 0)
 
 /**
  * The page REMN opens on until a case holds evidence, and behind the wordmark after that: what the
@@ -52,7 +52,7 @@ export function HomeView() {
   const kase = useStore((s) => s.currentCase)
   const counts = useStore((s) => s.counts)
   const setView = useStore((s) => s.setView)
-  const live = liveFigures(meta)
+  const example = exampleMeasure(meta)
   const dep = deployment(health)
   const browserOnly = health?.mode === 'browser-only'
   const [newCase, setNewCase] = useState(false)
@@ -117,9 +117,8 @@ export function HomeView() {
               <span className="ld-kicker">EVTX · PST/OST · MBOX · EML/MSG · M365 UAL · Entra</span>
               <h1>Detection and investigation for Windows event logs, mailboxes and Microsoft 365.</h1>
               <p className="ld-lede">
-                {live
-                  ? `${fmtNum(live.rules)} detection rules, each scored against ${fmtNum(live.recordings)} public attack recordings${live.baseline ? ` and ${fmtNum(live.baseline.events)} events from ${fmtNum(live.baseline.machines)} clean hosts` : ''}. Every finding reports its rule's measured detection and false-positive counts.`
-                  : "Detection rules scored against public attack recordings and clean hosts. Every finding reports its rule's measured detection and false-positive counts."}
+                {fmtNum(measure.rules)} detection rules, each scored against {fmtNum(RECORDINGS)} public attack recordings and {fmtNum(measure.baseline.events)} events from{' '}
+                {fmtNum(measure.baseline.machines)} clean hosts. Every finding reports its rule's measured detection and false-positive counts.
               </p>
               <div className="ld-ctas">
                 <button type="button" className="ld-btn ld-btn-primary" onClick={() => setNewCase(true)}>
@@ -131,9 +130,9 @@ export function HomeView() {
               </div>
               <p className="ld-fine">Apache-2.0. {where}</p>
             </div>
-            <ExampleFinding live={live} />
+            <ExampleFinding example={example} />
           </div>
-          <HeroFigures live={live} />
+          <HeroFigures />
         </div>
       </header>
 
@@ -148,11 +147,10 @@ export function HomeView() {
 
       <main className="ld-wrap">
         <Libraries ref={(el) => void (refs.current.libraries = el)} />
-        <Coverage ref={(el) => void (refs.current.coverage = el)} />
-        <Baseline ref={(el) => void (refs.current.baseline = el)} live={live} />
+        <Baseline ref={(el) => void (refs.current.baseline = el)} />
         <Intrusion ref={(el) => void (refs.current.intrusion = el)} />
         <Mail ref={(el) => void (refs.current.mail = el)} />
-        <Method ref={(el) => void (refs.current.method = el)} live={live} />
+        <Method ref={(el) => void (refs.current.method = el)} />
         <Modules ref={(el) => void (refs.current.modules = el)} />
         <section className="ld-blk" ref={(el) => void (refs.current.data = el)}>
           <div className="ld-eyebrow">Data handling</div>
@@ -196,8 +194,8 @@ export function HomeView() {
           <span>REMN</span>
         </span>
         <span>
-          {live ? `Measured ${live.measured}` : 'Measures'} · rules/measures.json · tools/library_measures.py at {LIBRARY_MEASURES.commit} · sources: EVTX-to-MITRE-Attack, splunk/attack_data, OTRF
-          Security-Datasets, EVTX-ATTACK-SAMPLES, SigmaHQ, NextronSystems/evtx-baseline
+          Measured {measure.measured} · rules/measures.json · tools/library_measures.py at {LIBRARY_MEASURES.commit} · sources: EVTX-to-MITRE-Attack, splunk/attack_data, OTRF Security-Datasets,
+          EVTX-ATTACK-SAMPLES, SigmaHQ, NextronSystems/evtx-baseline
         </span>
       </footer>
 
@@ -206,8 +204,7 @@ export function HomeView() {
   )
 }
 
-function ExampleFinding({ live }: { live: LiveFigures | null }) {
-  const ex = live?.example
+function ExampleFinding({ example: ex }: { example: ExampleMeasure | null }) {
   return (
     <div className="ld-shot" aria-label="Example finding">
       <span className="ld-example">example finding</span>
@@ -240,7 +237,7 @@ function ExampleFinding({ live }: { live: LiveFigures | null }) {
                 <b>Rule record</b>
                 <p>
                   Detects {fmtNum(ex.hits)} of {fmtNum(ex.of)} recordings of what it looks for. {fmtNum(ex.cleanFindings)} finding{ex.cleanFindings === 1 ? '' : 's'} on the clean baseline
-                  {live?.baseline ? ` (${fmtNum(live.baseline.machines)} hosts, ${fmtNum(live.baseline.events)} events)` : ''}.
+                  {` (${fmtNum(measure.baseline.machines)} hosts, ${fmtNum(measure.baseline.events)} events)`}.
                 </p>
               </div>
             </div>
@@ -274,129 +271,14 @@ function Table({ head, children, numeric }: { head: string[]; children: ReactNod
   )
 }
 
-function Coverage({ ref }: { ref: SectionRef }) {
-  const [level, setLevel] = useState<Level>('medium')
-  const h = HEAD_TO_HEAD
-  const files = h.library.files
-  const values = h.detected[level]
-  const ticks = [0, 0.25, 0.5, 0.75, 1]
-  return (
-    <section className="ld-blk" ref={ref}>
-      <div className="ld-eyebrow">
-        Head-to-head · {h.library.name} @ {h.library.sha}
-      </div>
-      <h2>Three tools on one held-out library</h2>
-      <p className="ld-intro">
-        {files} technique-labelled logs ({fmtNum(h.library.events)} events) that no REMN rule was written against. A file counts as detected when a rule tagged with its ATT&amp;CK v19 technique,
-        parent or sub-technique fires on it. Same scorer for all three tools, all shipped rules enabled.
-      </p>
-      <div className="ld-proof">
-        <div className="ld-panel">
-          <div className="ld-chart-head">
-            <div>
-              <div className="ld-chart-t">Files detected / {files}</div>
-              <div className="ld-chart-s">level {LEVELS.find(([l]) => l === level)![1]}</div>
-            </div>
-            <div className="ld-seg" role="group" aria-label="Minimum level">
-              {LEVELS.map(([l, label]) => (
-                <button key={l} type="button" aria-pressed={l === level} onClick={() => setLevel(l)}>
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="ld-bars">
-            {h.tools.map((tool, i) => (
-              <div key={tool} className={i === 0 ? 'ld-row ld-us' : 'ld-row'}>
-                <span className="ld-who">{tool}</span>
-                <div className="ld-track">
-                  <div className="ld-fill" style={{ width: `${(values[i] / files) * 100}%` }} />
-                </div>
-                <span className="ld-v">
-                  {values[i]}
-                  <small>{Math.round((values[i] / files) * 100)}%</small>
-                </span>
-              </div>
-            ))}
-          </div>
-          <div className="ld-ticks" aria-hidden="true">
-            <span />
-            <div>
-              {ticks.map((t) => (
-                <span key={t} style={{ left: `${t * 100}%` }}>
-                  {Math.round(t * files)}
-                </span>
-              ))}
-            </div>
-            <span />
-          </div>
-          <p className="ld-note">
-            {h.versions} Run {h.date}.
-          </p>
-        </div>
-        <div className="ld-side">
-          <Table head={['Scoring variant, ≥ medium', ...h.tools]}>
-            <tr>
-              <td>Title map for untagged rules</td>
-              {h.detected.medium.map((v, i) => (
-                <td key={i} className={i === 0 ? 'n b' : 'n'}>
-                  {v}
-                </td>
-              ))}
-            </tr>
-            <tr>
-              <td>Author tags only</td>
-              {h.authorTags.map((v, i) => (
-                <td key={i} className={i === 0 ? 'n b' : 'n'}>
-                  {v}
-                </td>
-              ))}
-            </tr>
-            <tr>
-              <td>Union of the three</td>
-              <td className="n" colSpan={3}>
-                {h.union}
-              </td>
-            </tr>
-          </Table>
-        </div>
-      </div>
-      <div className="ld-gap" />
-      <Table head={['Tactic, ≥ medium', 'Files', ...h.tools]}>
-        {h.tactics.map(([tactic, n, ...v]) => {
-          const top = Math.max(...v)
-          return (
-            <tr key={tactic}>
-              <td>{tactic}</td>
-              <td className="n">{n}</td>
-              {v.map((x, i) => (
-                <td key={i} className={x === top && x > 0 ? 'n b' : 'n'}>
-                  {x}
-                </td>
-              ))}
-            </tr>
-          )
-        })}
-      </Table>
-      <p className="ld-note">
-        Per-tactic counts with each tool's threat-hunting rules enabled. {h.onlyRemn} files are detected by REMN only, {h.onlyRemnOwnRules} of them by REMN-authored rules.
-      </p>
-    </section>
-  )
-}
-
-function HeroFigures({ live }: { live: LiveFigures | null }) {
-  const m = LIBRARY_MEASURES
-  const h = heldOut(m)
-  const read = m.libraries.reduce((n, l) => n + l.read, 0)
-  const events = m.libraries.reduce((n, l) => n + l.events, 0)
-  const b = live?.baseline
+function HeroFigures() {
+  const b = measure.baseline
   const tiles: [string, string][] = [
-    [fmtNum(read), `recorded attacks in ${m.libraries.filter((l) => l.read).length} public libraries, ${(events / 1e6).toFixed(1)}M events`],
-    [pct(h.detected.medium, h.read), `of ${fmtNum(h.read)} held-out recordings detected at medium or above`],
-    [`${m.techniques.detected} / ${m.techniques.recorded}`, 'ATT&CK techniques recorded in the held-out libraries, detected at medium or above'],
+    [fmtNum(RECORDINGS), `recorded attacks in ${measure.libraries.length} public libraries, each at a pinned commit`],
+    [pct(HELD_DETECTED, HELD_RECORDINGS), `of ${fmtNum(HELD_RECORDINGS)} held-out recordings detected, at any severity, by the rules a new case enables`],
+    [`${fmtNum(measure.detect)} / ${fmtNum(measure.rules)}`, 'event rules seen to fire on a recording of what they look for'],
+    [`${(b.events / 1e6).toFixed(1)}M`, `events from ${b.machines} clean Windows hosts, scored for false positives`],
   ]
-  if (b) tiles.push([`${(b.events / 1e6).toFixed(1)}M`, `events from ${b.machines} clean Windows hosts, scored for false positives`])
   return (
     <dl className="ld-figs" aria-label="Measured figures">
       {tiles.map(([v, t]) => (
@@ -428,53 +310,43 @@ function PctTicks() {
 }
 
 function Libraries({ ref }: { ref: SectionRef }) {
-  const [cut, setCut] = useState<Cut>('medium')
-  const m = LIBRARY_MEASURES
-  const rows = m.libraries.filter((l) => l.read > 0)
-  const h = heldOut(m)
+  const w = measure.attackDataWindows
   return (
     <section className="ld-blk" ref={ref}>
       <div className="ld-eyebrow">
-        Libraries · {rows.length} public corpora · rules at {m.commit} · run {m.measured}
+        Libraries · {measure.libraries.length} public corpora · rule measure of {measure.measured}
       </div>
       <h2>Detection by library</h2>
       <p className="ld-intro">
-        Every rule run on every recording of each library, with a new case's settings. A recording counts as detected when a rule tagged with its ATT&amp;CK technique (the same id, its parent or a
-        sub-technique) raises a finding at or above the level cut. Default rule set: {fmtNum(m.rules.default)} rules, REMN's own and SigmaHQ's windows and emerging-threats packs. Held out: no rule was
-        written against the library; a rule written after studying one is not counted on it.
+        Every event rule run on every recording of each library by <code>tools/measure_rules.py</code>, the committed measure (<code>rules/measures.json</code>). A recording counts as detected when a
+        rule a new case enables, tagged with its ATT&amp;CK technique (the same id, its parent or a sub-technique), raises a finding of any severity anywhere in the file; whether the finding is on the
+        attack's own events is not checked. Held out: no rule was written against the library before it was first measured, and a rule written since after studying it is not counted on it.
       </p>
       <div className="ld-panel ld-mt">
         <div className="ld-chart-head">
           <div>
             <div className="ld-chart-t">Recordings detected, share of each library</div>
             <div className="ld-chart-s">
-              held out together: {fmtNum(h.detected[cut])} of {fmtNum(h.read)} ({pct(h.detected[cut], h.read)})
+              held out together: {fmtNum(HELD_DETECTED)} of {fmtNum(HELD_RECORDINGS)} ({pct(HELD_DETECTED, HELD_RECORDINGS)})
             </div>
-          </div>
-          <div className="ld-seg" role="group" aria-label="Level cut">
-            {CUTS.map(([c, label]) => (
-              <button key={c} type="button" aria-pressed={c === cut} onClick={() => setCut(c)}>
-                {label}
-              </button>
-            ))}
           </div>
         </div>
         <div className="ld-bars">
-          {rows.map((l) => (
-            <div key={l.key} className={l.practice ? 'ld-lrow' : 'ld-lrow ld-us'}>
+          {measure.libraries.map((l) => (
+            <div key={l.key} className={l.heldOut ? 'ld-lrow ld-us' : 'ld-lrow'}>
               <div className="ld-lname">
                 <b>{l.name}</b>
                 <span>
-                  {fmtNum(l.read)} recordings · {fmtNum(l.events)} events · {l.practice ? 'rules reviewed against it' : 'held out'}
+                  {fmtNum(l.recordings)} recordings at {l.ref} · {l.heldOut ? 'held out' : l.note}
                 </span>
               </div>
-              <div className="ld-track" title={`${l.name}: ${fmtNum(l.detected[cut])} of ${fmtNum(l.read)} recordings detected`}>
-                <div className="ld-fill" style={{ width: `${(l.detected[cut] / l.read) * 100}%` }} />
+              <div className="ld-track" title={`${l.name}: ${fmtNum(l.detected)} of ${fmtNum(l.recordings)} recordings detected`}>
+                <div className="ld-fill" style={{ width: `${(l.detected / l.recordings) * 100}%` }} />
               </div>
               <span className="ld-v">
-                {pct(l.detected[cut], l.read)}
+                {pct(l.detected, l.recordings)}
                 <small>
-                  {fmtNum(l.detected[cut])}/{fmtNum(l.read)}
+                  {fmtNum(l.detected)}/{fmtNum(l.recordings)}
                 </small>
               </span>
             </div>
@@ -482,22 +354,19 @@ function Libraries({ ref }: { ref: SectionRef }) {
         </div>
         <PctTicks />
         <p className="ld-note">
-          Gray: libraries REMN's rules were reviewed against, shown for reference. attack_data: its Windows datasets up to {m.attackDataMaxMb} MB. Security-Datasets: OTRF's atomic Windows datasets,
-          labelled with techniques by their metadata. At medium and above, REMN's own rules alone detect{' '}
-          {rows
-            .filter((l) => !l.practice)
-            .map((l) => `${fmtNum(l.ownRulesMedium)} (${SHORT[l.key] ?? l.key})`)
-            .join(', ')}
-          ; the other detections come from SigmaHQ's packs alone. A rule without a technique tag is scored on the technique its title names, as in the head-to-head.
+          Gray: libraries that are not held out, shown for reference. attack_data (Windows): its datasets up to {w.maxMb} MB; the {w.overSize} larger ones and the {w.missing} missing at the pinned
+          commit are not measured. REMN's own rules alone detect {HELD.map((l) => `${fmtNum(l.own)} (${l.name})`).join(' and ')}; the other detections come from SigmaHQ's packs. Rules added or changed
+          since the measure have none until it is taken again.
         </p>
       </div>
       <div className="ld-gap" />
-      <TacticMap cut={cut} />
+      <TacticMap />
     </section>
   )
 }
 
-function TacticMap({ cut }: { cut: Cut }) {
+function TacticMap() {
+  const [cut, setCut] = useState<Cut>('any')
   const m = LIBRARY_MEASURES
   const cols = [...m.libraries.filter((l) => !l.practice && l.read > 0).map((l) => l.key), 'all']
   const at = { any: 1, medium: 2, high: 3 }[cut]
@@ -507,13 +376,22 @@ function TacticMap({ cut }: { cut: Cut }) {
         <div>
           <div className="ld-chart-t">Held-out recordings detected, by tactic ({CUTS.find(([c]) => c === cut)![1]})</div>
           <div className="ld-chart-s">
-            Tactic of each recording's technique, ATT&amp;CK v19. {m.techniques.detected} of the {m.techniques.recorded} techniques recorded are detected at medium or above.
+            A separate run of every rule on every library, OTRF Security-Datasets added, by <code>tools/library_measures.py</code> on {m.measured} with the rules at {m.commit}; its counts differ from
+            the measure above, taken with other versions of the rules. Tactic of each recording's technique, ATT&amp;CK v19. Rule levels were changed on 2026-09-26, after the measure's results on
+            EVTX-to-MITRE-Attack and attack_data were known, so their counts at medium and above are not held out.
           </div>
         </div>
         <div className="ld-scale" aria-hidden="true">
           <span>0%</span>
           <i />
           <span>100%</span>
+        </div>
+        <div className="ld-seg" role="group" aria-label="Level cut">
+          {CUTS.map(([c, label]) => (
+            <button key={c} type="button" aria-pressed={c === cut} onClick={() => setCut(c)}>
+              {label}
+            </button>
+          ))}
         </div>
       </div>
       <div className="ld-tw ld-mt-s">
@@ -583,8 +461,8 @@ function Levels() {
         ))}
       </div>
       <p className="ld-note">
-        No level drops a finding, so every level detects the same recordings. Rule noise taken from the other six hosts for each host counted. {MEASURED_ON.cleanMachines} hosts of evtx-baseline, run{' '}
-        {MEASURED_ON.date}.
+        No level drops a finding, so every level detects the same recordings: at any severity, those under Libraries. Lines counted on the {MEASURED_ON.cleanMachines} hosts of evtx-baseline on{' '}
+        {MEASURED_ON.date}, each host under rule noise taken from the other six; the script and the output of that run are not in the repository.
       </p>
     </div>
   )
@@ -595,11 +473,12 @@ function Intrusion({ ref }: { ref: SectionRef }) {
   if (!days.length) return null
   return (
     <section className="ld-blk" ref={ref}>
-      <div className="ld-eyebrow">Intrusion replay · MITRE ATT&amp;CK Evaluations, APT29 · recorded by OTRF Security-Datasets</div>
+      <div className="ld-eyebrow">Intrusion replay · APT29 emulation · recorded by OTRF Security-Datasets</div>
       <h2>Findings per host on an emulated intrusion</h2>
       <p className="ld-intro">
-        The two days of MITRE's APT29 evaluation: Sysmon, Security and PowerShell logs of the lab's hosts, loaded as a case with a new case's settings and the default rule set. On day 1 the operator
-        works on SCRANTON and NASHUA; NEWYORK, the domain controller, and UTICA are left alone.
+        Two days of an emulated APT29 intrusion as OTRF Security-Datasets recorded them: Sysmon, Security and PowerShell logs of the lab's hosts, loaded as a case with a new case's settings and the
+        default rule set. REMN took no part in the emulation or in any evaluation of products on it. On day 1 the operator works on SCRANTON and NASHUA; NEWYORK, the domain controller, and UTICA are
+        left alone.
       </p>
       <div className="ld-proof">
         {days.map((d) => {
@@ -646,16 +525,15 @@ function Intrusion({ ref }: { ref: SectionRef }) {
   )
 }
 
-function Baseline({ ref, live }: { ref: SectionRef; live: LiveFigures | null }) {
-  const c = HELD_OUT.clean
-  const b = live?.baseline
+function Baseline({ ref }: { ref: SectionRef }) {
+  const b = measure.baseline
+  const { own, defaults } = measure.clean
   return (
     <section className="ld-blk" ref={ref}>
-      <div className="ld-eyebrow">False positives · evtx-baseline {b?.tag ?? 'v0.8.4'}</div>
+      <div className="ld-eyebrow">False positives · evtx-baseline {b.tag}</div>
       <h2>Findings on clean hosts</h2>
       <p className="ld-intro">
-        {b ? `${fmtNum(b.machines)} Windows hosts with no attack activity, ${fmtNum(b.events)} events.` : 'Windows hosts with no attack activity.'} Every finding here is either a false positive or
-        benign activity the rule describes correctly.
+        {fmtNum(b.machines)} Windows hosts with no attack activity, {fmtNum(b.events)} events. Every finding here is either a false positive or benign activity the rule describes correctly.
       </p>
       <div className="ld-proof">
         <Levels />
@@ -673,25 +551,24 @@ function Baseline({ ref, live }: { ref: SectionRef; live: LiveFigures | null }) 
               ))}
             </Table>
           )}
-          <Table head={['Rule set, run ' + HELD_OUT.date, 'Rules firing', 'High + crit', '≥ medium']}>
+          <Table head={[`Rule set, measure of ${measure.measured}`, 'Rules firing', 'High + crit', '≥ medium']}>
             <tr>
               <td>REMN rules</td>
-              <td className="n">{c.own.rules}</td>
-              <td className="n b">{fmtNum(c.own.highCritical)}</td>
-              <td className="n">{fmtNum(c.own.mediumUp)}</td>
+              <td className="n">{fmtNum(own.rules)}</td>
+              <td className="n b">{fmtNum(own.highCritical)}</td>
+              <td className="n">{fmtNum(own.mediumUp)}</td>
             </tr>
             <tr>
               <td>REMN + SigmaHQ default packs</td>
-              <td className="n">–</td>
-              <td className="n">{fmtNum(c.withPacks.highCritical)}</td>
-              <td className="n">–</td>
+              <td className="n">{fmtNum(defaults.rules)}</td>
+              <td className="n">{fmtNum(defaults.highCritical)}</td>
+              <td className="n">{fmtNum(defaults.mediumUp)}</td>
             </tr>
           </Table>
         </div>
       </div>
       <p className="ld-note">
-        {c.critical.logCleared} of the {c.critical.of} critical findings are Security log clears (1102) that occurred before export. {fmtNum(c.twoFindingsEvents)} of the {fmtNum(c.own.events)} events
-        belong to two grouped findings: an AV installer reading LSASS and one process reading TeamViewer memory. Findings are grouped per image and host. Run {HELD_OUT.date}.
+        Every finding of each rule on the {fmtNum(b.machines)} hosts, at the severity the rule had when it was measured; levels changed since are not applied (<code>rules/measures-detail.json</code>).
       </p>
     </section>
   )
@@ -702,7 +579,9 @@ function Mail({ ref }: { ref: SectionRef }) {
     <section className="ld-blk" ref={ref}>
       <div className="ld-eyebrow">Mail scoring · public corpora</div>
       <h2>Risk bands on phishing and legitimate mail</h2>
-      <p className="ld-intro">Default settings, no sender baseline, no internal domains configured. Run {MAIL_CORPORA.date}.</p>
+      <p className="ld-intro">
+        Default settings, no sender baseline, no internal domains configured. The score's weights were adjusted on these same corpora, so the rates are not a held-out measure. Run {MAIL_CORPORA.date}.
+      </p>
       <div className="ld-gap" />
       <Table head={['Corpus', 'Class', 'Mails', '≥ high', '≥ medium']} numeric={2}>
         {MAIL_CORPORA.rows.map(([corpus, kind, mails, high, medium]) => (
@@ -719,7 +598,7 @@ function Mail({ ref }: { ref: SectionRef }) {
   )
 }
 
-function Method({ ref, live }: { ref: SectionRef; live: LiveFigures | null }) {
+function Method({ ref }: { ref: SectionRef }) {
   return (
     <section className="ld-blk" ref={ref}>
       <div className="ld-eyebrow">Method</div>
@@ -727,29 +606,24 @@ function Method({ ref, live }: { ref: SectionRef; live: LiveFigures | null }) {
       <dl className="ld-spec">
         <dt>Rule corpus</dt>
         <dd>
-          {live
-            ? `${fmtNum(live.rules)} event rules measured: REMN's own and SigmaHQ's converted packs. ${fmtNum(live.detect)} have fired on a recording of what they look for; the rest are marked as leads.`
-            : "REMN's own event rules and SigmaHQ's converted packs. Rules seen to fire on a recording of what they look for are marked as detecting; the rest as leads."}
+          {fmtNum(measure.rules)} event rules measured: REMN's own and SigmaHQ's converted packs. {fmtNum(measure.detect)} have fired on a recording of what they look for; the rest are marked as
+          leads.
         </dd>
         <dt>Recordings</dt>
         <dd>
-          {live
-            ? `${fmtNum(live.recordings)}: ${live.libraries.map((l) => `${l.name} ${fmtNum(l.recordings)} (${l.ref})`).join(', ')}.`
-            : 'Public libraries of recorded attacks, each pinned to a commit.'}
+          {fmtNum(RECORDINGS)}: {measure.libraries.map((l) => `${l.name} ${fmtNum(l.recordings)} (${l.ref})`).join(', ')}.
         </dd>
         <dt>Also run</dt>
         <dd>
-          OTRF Security-Datasets (atomic Windows datasets, labelled by their metadata) and MITRE's APT29 evaluation, with every rule, by <code>tools/library_measures.py</code>. They are scored on this
-          page, not yet in the per-rule measure.
+          OTRF Security-Datasets (atomic Windows datasets, labelled by their metadata) and the APT29 emulation OTRF recorded, with every rule, by <code>tools/library_measures.py</code>. They are
+          scored on this page, not yet in the per-rule measure.
         </dd>
         <dt>Clean hosts</dt>
         <dd>
-          {live?.baseline
-            ? `evtx-baseline ${live.baseline.tag}: ${fmtNum(live.baseline.machines)} Windows machines, ${fmtNum(live.baseline.events)} events.`
-            : 'evtx-baseline: clean Windows machines.'}
+          evtx-baseline {measure.baseline.tag}: {fmtNum(measure.baseline.machines)} Windows machines, {fmtNum(measure.baseline.events)} events.
         </dd>
         <dt>Detection</dt>
-        <dd>A rule tagged with the recording's technique (ATT&amp;CK v19, revoked ids mapped to successors) raises a finding at or above the level cut.</dd>
+        <dd>A rule tagged with the recording's technique (ATT&amp;CK v19, revoked ids mapped to successors) raises a finding on it, of any severity in the rule measure.</dd>
         <dt>Held-out</dt>
         <dd>
           Rules written after studying a library are listed in <code>WRITTEN_AGAINST</code> and not scored on it.
@@ -760,8 +634,7 @@ function Method({ ref, live }: { ref: SectionRef; live: LiveFigures | null }) {
         <dd>Weekly and on pull requests. A change that removes a measured detection fails the build.</dd>
         <dt>Output</dt>
         <dd>
-          <code>rules/measures.json</code>
-          {live ? `, measured ${live.measured}` : ''}. Each finding shows its rule's measure.
+          <code>rules/measures.json</code> and <code>rules/measures-detail.json</code>, measured {measure.measured}. Each finding shows its rule's measure.
         </dd>
       </dl>
     </section>

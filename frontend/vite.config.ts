@@ -3,7 +3,9 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { fileURLToPath, URL } from 'node:url'
 import { execSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
+import yaml from 'js-yaml'
+import { measureFigures, type MeasureDetail, type MeasureFile } from './src/data/measureFigures.ts'
 
 /**
  * Content Security Policy of the built app. No inline script anywhere (React refresh needs
@@ -34,6 +36,48 @@ const cspPlugin = () => ({
 const BUILD_ID = Date.now().toString(36)
 
 /**
+ * The committed rule measure as the pages quote it (src/data/measureFigures.ts), read from
+ * rules/measures.json, rules/measures-detail.json and the SigmaHQ packs when a page imports
+ * `virtual:rule-measure`. A checkout or image without them fails the build rather than build pages
+ * with no figures or old ones.
+ */
+const RULES = new URL('../rules/', import.meta.url)
+/** Rule ids of the packs a new case does not enable, and of rules switched off in their pack, as tests/backend/test_quoted_measures.py reads them. */
+function offByDefault(): Set<string> {
+  const off = new Set<string>()
+  for (const pack of ['sigma-windows', 'sigma-emerging-threats', 'sigma-threat-hunting']) {
+    const dir = new URL(`community/${pack}/`, RULES)
+    const on = (JSON.parse(readFileSync(new URL('pack.json', dir), 'utf-8')) as { defaultEnabled?: boolean }).defaultEnabled === true
+    for (const file of readdirSync(dir)
+      .filter((f) => /\.ya?ml$/.test(f))
+      .sort())
+      for (const doc of yaml.loadAll(readFileSync(new URL(file, dir), 'utf-8'))) {
+        const rule = doc as { id?: unknown; enabled?: unknown } | null
+        if (rule && typeof rule === 'object' && typeof rule.id === 'string' && (!on || rule.enabled === false)) off.add(rule.id)
+      }
+  }
+  return off
+}
+const ruleMeasurePlugin = () => {
+  const id = '\0virtual:rule-measure'
+  let code: string | null = null
+  return {
+    name: 'remn-rule-measure',
+    resolveId: (source: string) => (source === 'virtual:rule-measure' ? id : null),
+    load(this: { addWatchFile: (f: string) => void }, loading: string) {
+      if (loading !== id) return null
+      const read = <T>(name: string) => {
+        const file = new URL(name, RULES)
+        this.addWatchFile(fileURLToPath(file))
+        return JSON.parse(readFileSync(file, 'utf-8')) as T
+      }
+      code ??= `export default ${JSON.stringify(measureFigures(read<MeasureFile>('measures.json'), read<MeasureDetail>('measures-detail.json'), offByDefault()))}`
+      return code
+    },
+  }
+}
+
+/**
  * The source commit this page is built from, shown beside the server's so a visitor can check both
  * against the published source. The image build passes it (REMN_BUILD_ID: the checkout's .git is
  * not copied in); a checkout reads it from git.
@@ -42,7 +86,9 @@ function sourceCommit(): string {
   const fromEnv = (process.env.REMN_BUILD_ID ?? '').trim().toLowerCase()
   if (/^[0-9a-f]{40}$/.test(fromEnv)) return fromEnv
   try {
-    return execSync('git rev-parse HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
+    return execSync('git rev-parse HEAD', { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString()
+      .trim()
   } catch {
     return ''
   }
@@ -52,7 +98,7 @@ const VERSION = (JSON.parse(readFileSync(new URL('./package.json', import.meta.u
 const REMN_BUILD = `${VERSION}+${COMMIT ? COMMIT.slice(0, 12) : 'unknown'}`
 
 export default defineConfig({
-  plugins: [react(), cspPlugin()],
+  plugins: [react(), cspPlugin(), ruleMeasurePlugin()],
   define: { __REMN_BUILD__: JSON.stringify(REMN_BUILD) },
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },

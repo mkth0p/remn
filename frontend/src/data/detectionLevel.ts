@@ -45,10 +45,13 @@ export interface LevelInfo {
   measured: { alone: number; perCleanMachine: number }
 }
 
-export const MEASURED_ON = { attackData: 535, evtxToMitre: 279, attackSamples: 278, cleanMachines: 7, date: '2026-09-26' }
-
-/** What every level detects, since none drops a finding: recordings with a finding of their technique. */
-export const DETECTED = { attackData: 249, evtxToMitre: 123, attackSamples: 266 }
+/**
+ * The run the levels were chosen and measured with, on the clean machines of the rule measure. Its
+ * script and output are not in the repository, so its lines cannot be derived again from
+ * rules/measures-detail.json (docs/detection.md#detection-level). What every level detects is the
+ * committed rule measure's (virtual:rule-measure), since no level drops a finding.
+ */
+export const MEASURED_ON = { cleanMachines: 7, date: '2026-09-26' }
 
 export const DETECTION_LEVELS: LevelInfo[] = [
   {
@@ -89,8 +92,8 @@ export const DETECTION_LEVELS: LevelInfo[] = [
   },
 ]
 
-/** Raising every medium and higher finding and nothing else, the measure's reference before levels (measured the same way, with the rule levels of 2026-09-26). */
-export const BEFORE_LEVELS = { attackData: 245, evtxToMitre: 112, attackSamples: 264, perCleanMachine: 241 }
+/** Raising every medium and higher finding and nothing else, the reference before levels, in the same run. */
+export const BEFORE_LEVELS = { perCleanMachine: 241 }
 
 const RANK: Record<Severity, number> = { info: 0, low: 1, medium: 2, high: 3, critical: 4 }
 /** No severity of the rule stands on its own. */
@@ -163,12 +166,10 @@ export function raised(f: { ruleId?: unknown; severity?: unknown }, floors: Reco
   return floor == null || severityRank(f.severity) >= floor
 }
 
-const pct = (n: number, of: number) => `${Math.round((n / of) * 100)}%`
-
-/** What a level detected and cost when it was measured, in a sentence. */
+/** What a level cost when it was measured, in a sentence. */
 export function levelMeasured(level: DetectionLevel): string {
   const m = levelInfo(level).measured
-  return `Every level detected ${pct(DETECTED.attackData, MEASURED_ON.attackData)}, ${pct(DETECTED.evtxToMitre, MEASURED_ON.evtxToMitre)} and ${pct(DETECTED.attackSamples, MEASURED_ON.attackSamples)} of the attack_data, EVTX-to-MITRE-Attack and EVTX-ATTACK-SAMPLES recordings (every medium and higher finding: ${pct(BEFORE_LEVELS.attackData, MEASURED_ON.attackData)}, ${pct(BEFORE_LEVELS.evtxToMitre, MEASURED_ON.evtxToMitre)} and ${pct(BEFORE_LEVELS.attackSamples, MEASURED_ON.attackSamples)}). This one gave about ${fmtNum(m.perCleanMachine)} lines per clean machine, ${fmtNum(m.alone)} of them findings on their own (every medium and higher finding: ${fmtNum(BEFORE_LEVELS.perCleanMachine)}).`
+  return `This level gave about ${fmtNum(m.perCleanMachine)} lines per clean machine, ${fmtNum(m.alone)} of them findings on their own (every medium and higher finding on its own: ${fmtNum(BEFORE_LEVELS.perCleanMachine)}), in a run of ${MEASURED_ON.date} on ${MEASURED_ON.cleanMachines} clean machines whose script and output are not in the repository.`
 }
 
 const MAX_FOLDED_REFS = 5000
