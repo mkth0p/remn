@@ -36,9 +36,19 @@ over rather than left empty. Open demo case opens the Northstar lab in the brows
 The sidebar collapses to an icon rail with the button at its foot, remembered per
 browser.
 
-A page that fails while it is drawn shows what failed in its place, with "try again",
-"reload the page" and the details to copy, and the console says so; the sidebar and the
-other pages stay usable. When the browser does not let the app open its database at start
+The address names the case and the page, and on Findings, Stories, Events and Mails the
+finding, story (with its step), event or mail open there, as in
+`/case/12-lx3k9q2a/findings?finding=314`; the home page is `/home`. A reload opens the same
+place, Back and Forward move between the pages as they were visited, and the tab's title
+names the page (never the case). A link or a bookmark opens its place only in the browser
+that holds the case: each browser numbers its cases itself, so the address also carries
+when the case was created, and a link from another browser, or to a case deleted since, is
+refused with a message and the app opens as it would without it. A finding, event or mail
+that is not of the linked case is not opened.
+
+A page that fails while it is drawn shows what failed in its place, with "go back" (to the
+page shown before it in this tab), "try again", "reload the page" and the details to copy,
+and the console says so; the sidebar and the other pages stay usable. When the browser does not let the app open its database at start
 (a private window, site data turned off, storage full, a database written by a newer
 version), the page says so and why instead of waiting. When another REMN tab of an older
 version keeps the database open while this one needs to upgrade it, the start says so and

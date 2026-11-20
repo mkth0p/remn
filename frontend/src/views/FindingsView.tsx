@@ -29,6 +29,7 @@ import type { RuleDiag } from '../rules/engine'
 import { loadChains, type Chain } from '../data/chains'
 import { chainSeverity, loadChainReviews, type ChainReview } from '../data/review'
 import { toast, useStore } from '../state/store'
+import { useRouteItem } from '../state/route'
 import { classNames, fmtNum, fmtTs, timeColumnWidth, tzLabel } from '../util/format'
 import { exportCsv, exportJson } from '../util/export'
 import { attackHref } from '../util/safe'
@@ -148,6 +149,7 @@ export function FindingsView() {
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set())
   const [tab, setTab] = useState<'findings' | 'attack'>('findings')
   const [selected, setSelected] = useState<Finding | null>(null)
+  useRouteItem('finding', selected?.id)
   // a finding cited in an AI answer opens here
   const focusFinding = useStore((s) => s.focusFinding)
   useEffect(() => {

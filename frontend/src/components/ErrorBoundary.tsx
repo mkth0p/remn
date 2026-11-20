@@ -1,10 +1,13 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { log } from '../state/store'
+import { canGoBack } from '../state/route'
 import { CopyButton } from './ui'
 
 interface Props {
   /** what failed, as the sentence starts: "The Events page" */
   what: string
+  /** offer to go back to the page shown before this one, when there is one in this tab */
+  back?: boolean
   children: ReactNode
 }
 
@@ -34,6 +37,11 @@ export class ErrorBoundary extends Component<Props, { error: Error | null; stack
         <div className="big">{this.props.what} failed</div>
         <div className="mono">{error.message}</div>
         <div className="row" style={{ justifyContent: 'center', gap: 8, marginTop: 12 }}>
+          {this.props.back && canGoBack() && (
+            <button className="btn sm" onClick={() => history.back()}>
+              go back
+            </button>
+          )}
           <button className="btn sm" onClick={() => this.setState({ error: null, stack: '' })}>
             try again
           </button>

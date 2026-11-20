@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ApiError, getHealth, getMeta, onAuthError, setApiToken } from './api/client'
 import { defaultSettings, getDb, newServerKey, type Case } from './db/schema'
 import { toast, useStore, type View } from './state/store'
+import { findCase, focusRouteItem, NOT_HELD, parseRoute, startHistorySync } from './state/route'
 import { detectKind, ingestFiles, refreshCounts, requestIngest } from './data/ingest'
 import { migrateCaseToServer } from './data/migrate'
 import { getSource } from './data/source'
@@ -95,6 +96,9 @@ function bootFailure(e: unknown): string {
   return `${said} The browser may refuse this site storage (a private window, or site data turned off in its settings), its storage may be full, or another REMN tab may hold the database while it is upgraded: close other REMN tabs, check the site settings and reload.`
 }
 
+// the page's own title (index.html), for the home page
+const HOME_TITLE = typeof document === 'undefined' ? 'REMN' : document.title
+
 const BOOT_BLOCKED = 'Another REMN tab holds the database of this browser open in an older version, so this page cannot upgrade it yet: close the other REMN tabs or reload them, and this page starts.'
 
 export default function App() {
@@ -146,6 +150,9 @@ export default function App() {
     // an older REMN tab that keeps the database open holds this one's upgrade back; the start waits, and says for what
     const blocked = () => setBootWait(BOOT_BLOCKED)
     db.on('blocked', blocked)
+    // React runs this twice in development: only the start still mounted keeps the address in step
+    let alive = true
+    let stopHistory: (() => void) | undefined
     onAuthError((accounts) => useStore.getState().setAuthRequired(true, accounts))
     const tokenReady = db.kv.get('apiToken').then((tok) => {
       if (typeof tok?.value === 'string' && tok.value) setApiToken(tok.value)
@@ -199,11 +206,20 @@ export default function App() {
         return db.cases.toArray()
       })
       setCases(all)
+      // the place the address names (a reload, a link, a bookmark), when it is a case this browser holds
+      const route = parseRoute(location.pathname, location.search)
+      const linked = route.caseRef ? findCase(all, route.caseRef) : undefined
+      if (route.caseRef && !linked) toast('warn', NOT_HELD, 0)
       const last = (await db.kv.get('lastCase'))?.value as number | undefined
-      const current = all.find((c) => c.id === last) ?? all[0]
-      setCurrentCase({ ...current, settings: { ...defaultSettings(), ...current.settings } })
-      // the home page first, until some case holds evidence
-      useStore.getState().setView((await casesWithEvidence()).size ? 'dashboard' : 'home')
+      const current = linked ?? all.find((c) => c.id === last) ?? all[0]
+      const open = { ...current, settings: { ...defaultSettings(), ...current.settings } }
+      setCurrentCase(open)
+      const item = linked && route.item && (await focusRouteItem(open, route.item)) ? route.item : null
+      if (linked && route.item && !item) useStore.getState().log('warn', `the ${route.item.kind} the address names is not in case "${open.name}", so it was not opened`)
+      // otherwise the home page first, until some case holds evidence
+      useStore.getState().setView(linked ? (route.view ?? 'dashboard') : route.view === 'home' ? 'home' : (await casesWithEvidence()).size ? 'dashboard' : 'home')
+      if (!alive) return
+      stopHistory = startHistorySync(item)
       setReady(true)
       // an import a closed or crashed tab left half-done: its rows go, and the evidence says it stopped
       repairInterruptedImports((st) => {
@@ -261,6 +277,8 @@ export default function App() {
       .catch(() => undefined) // a database that cannot be read is what the start reports
     const t = setInterval(load, 30000)
     return () => {
+      alive = false
+      stopHistory?.()
       clearInterval(t)
       db.on('blocked').unsubscribe(blocked)
     }
@@ -277,6 +295,12 @@ export default function App() {
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
   }, [importing])
+
+  // the tab says which page it shows; the case's name stays out of it, and so out of the browser's history
+  useEffect(() => {
+    const label = NAV.find((n) => n.id === view)?.label
+    document.title = label ? `${label} · REMN` : HOME_TITLE
+  }, [view])
 
   // incidents group one person's accounts by the case's internal domains (rules/identity.ts)
   useEffect(() => setCaseInternalDomains(kase?.settings.internalDomains), [kase?.settings.internalDomains])
@@ -516,7 +540,7 @@ export default function App() {
       </header>
       <main className="main relative">
         {/* one view failing to render leaves the shell and the other views usable; a new view starts afresh */}
-        <ErrorBoundary key={view} what={`The ${NAV.find((n) => n.id === view)?.label ?? view} page`}>
+        <ErrorBoundary key={view} back what={`The ${NAV.find((n) => n.id === view)?.label ?? view} page`}>
           {view === 'dashboard' && <Dashboard />}
           {view === 'evidence' && <EvidenceView />}
           {view === 'events' && <EventsView />}

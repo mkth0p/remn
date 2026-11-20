@@ -9,6 +9,7 @@ import type { MailRow } from '../db/schema'
 import type { Condition, Filter } from '../rules/filter'
 import { toggleFacetValue } from '../data/facetToggle'
 import { useImportsFinished, useStore } from '../state/store'
+import { useRouteItem } from '../state/route'
 import { fmtTs, timeColumnWidth, tzLabel } from '../util/format'
 import { exportCsv, exportJson } from '../util/export'
 import { BaselineButton } from '../components/BaselineButton'
@@ -88,6 +89,7 @@ export function MailsView() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<MailRow | null>(null)
+  useRouteItem('mail', selected?.id)
   const [version, setVersion] = useState(0)
   const [menu, setMenu] = useState(false)
   // bottom pane height (% of the page), remembered per browser; the grip above the pane drags it

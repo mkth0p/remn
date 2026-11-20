@@ -75,6 +75,7 @@ import {
 import { downloadAttackFlow, downloadCampaignGrouping, spineSteps } from '../data/storyFlow'
 import { getDb, type EventRow, type MailRow, type Severity } from '../db/schema'
 import { toast, useStore } from '../state/store'
+import { useRouteItem } from '../state/route'
 import { fmtNum, fmtTs } from '../util/format'
 import { DecisionsPanel, OrphanDecisions, StepCallTag, StepDecisionPanel, StoryCallBar, StoryCallTag, StoryTools } from './StoryDecisions'
 
@@ -1001,6 +1002,8 @@ export function StoriesView() {
   const [mode, setMode] = useState<Mode>('stories')
   const [storyId, setStoryId] = useState<string | null>(null)
   const [stepId, setStepId] = useState<string | null>(null)
+  // the open story, and its step after '#', as a link from the timeline names them
+  useRouteItem('story', storyId ? (stepId ? `${storyId}#${stepId}` : storyId) : null)
   const [phase, setPhase] = useState<string | null>(null)
   const [full, setFull] = useState(false)
   const [tab, setTab] = useState<Tab>('story')
