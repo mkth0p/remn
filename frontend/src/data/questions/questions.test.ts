@@ -120,6 +120,27 @@ describe('coverage by the evidence of the case', () => {
     expect(coverage(QUESTIONS.get('Q0016')!, p).held[0]).toMatchObject({ id: 'm365-audit', count: 40 })
   })
 
+  it('counts directory audits, ID Protection and the message trace as the exports they are, not as the audit log', () => {
+    const p = evidenceProfile(
+      [
+        { value: 'Entra Audit', count: 6 },
+        { value: 'Entra RiskDetection', count: 3 },
+        { value: 'Exchange MessageTrace', count: 5 },
+      ],
+      [
+        { value: 'Entra audit', count: 6 },
+        { value: 'Entra risk', count: 3 },
+        { value: 'Exchange message trace', count: 5 },
+      ],
+      0,
+    )
+    expect(coverage(QUESTIONS.get('Q0010')!, p).text).toBe('covered by the Entra directory audit records (6 rows)')
+    expect(coverage(QUESTIONS.get('Q0009')!, p).held.map((h) => h.id)).toEqual(['entra-risk'])
+    expect(coverage(QUESTIONS.get('Q0013')!, p).held.map((h) => h.id)).toEqual(['message-trace'])
+    // none of them is the Unified Audit Log a content search would be in
+    expect(coverage(QUESTIONS.get('Q0016')!, p).covered).toBe(false)
+  })
+
   it('takes the first and last attacker activity from findings that matter', () => {
     const f = (id: number, ts: number | null, severity: Finding['severity'], status: Finding['status'] = 'new') => ({ id, ts, severity, status }) as Finding
     const span = activitySpan([f(1, 50, 'low'), f(2, 100, 'high'), f(3, 10, 'critical', 'false_positive'), f(4, 300, 'medium'), f(5, null, 'critical')])

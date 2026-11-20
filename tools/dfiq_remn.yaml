@@ -32,8 +32,10 @@ evidence:
   m365-audit: { label: Unified Audit Log, categoryPrefixes: ['M365 '] }
   m365-exchange: { label: Exchange audit records, categories: [M365 Exchange] }
   m365-files: { label: SharePoint and OneDrive audit records, categories: [M365 SharePoint, M365 OneDrive] }
-  m365-directory: { label: Entra directory audit records, categories: [M365 Entra] }
+  m365-directory: { label: Entra directory audit records, categories: [M365 Entra, Entra audit] }
   entra-signin: { label: Entra sign-in logs, channels: [Entra SignIn] }
+  entra-risk: { label: Entra ID Protection risk detections and risky users, categories: [Entra risk] }
+  message-trace: { label: Exchange Online message trace, categories: [Exchange message trace] }
   mail: { label: mailboxes, mails: true }
   browser: { label: browser history, categories: ['collection:browser-history', 'collection:browser-download'] }
   files: { label: file system records (MFT, USN, LNK, jump lists), categories: ['collection:file', 'collection:shellbag'] }
@@ -444,7 +446,7 @@ scenarios:
                   - { field: operation, op: in, value: [Reset user password., Disable account., Delete user., Revoke user sessions.] }
           - id: Q0006
             name: Is there persistence that would outlive the containment?
-            evidence: [system, security, sysmon, autoruns, services, tasks, m365-audit]
+            evidence: [system, security, sysmon, autoruns, services, tasks, m365-audit, m365-directory]
             attack: [T1543.003, T1053.005, T1547.001, T1136, T1098]
             ruleTags: [persistence]
       - id: F0003
@@ -472,17 +474,20 @@ scenarios:
         questions:
           - id: Q0009
             name: Were there successful sign-ins from unexpected countries, addresses or clients?
-            evidence: [entra-signin, m365-audit]
+            evidence: [entra-signin, m365-audit, entra-risk]
             attack: [T1078.004]
-            ruleTags: [sign-in, geo]
-            search:
-              source: events
-              label: successful sign-ins
-              filter:
-                logic: or
-                conditions:
-                  - { field: operation, op: in, value: [UserLoggedIn] }
-                  - { field: channel, op: eq, value: Entra SignIn }
+            ruleTags: [sign-in, geo, risk]
+            searches:
+              - source: events
+                label: successful sign-ins
+                filter:
+                  logic: or
+                  conditions:
+                    - { field: operation, op: in, value: [UserLoggedIn] }
+                    - { field: channel, op: eq, value: Entra SignIn }
+              - source: events
+                label: risk detections and risky users
+                filter: { conditions: [{ field: category, op: eq, value: Entra risk }], sort: { field: ts, dir: asc } }
           - id: Q0010
             name: Was MFA bypassed or changed, or a new authentication method registered?
             evidence: [m365-directory, entra-signin]
@@ -490,13 +495,13 @@ scenarios:
             ruleTags: [mfa]
             search:
               source: events
-              label: authentication methods changed
+              label: authentication methods and devices added or changed
               filter:
                 conditions:
-                  - { field: operation, op: contains_any, value: [security info, StrongAuthentication, Update user., authentication method] }
+                  - { field: operation, op: contains_any, value: [security info, StrongAuthentication, Update user., authentication method, Passkey, passwordless, Windows Hello, Register device.] }
           - id: Q0011
             name: Was the account the target of password spraying or brute force?
-            evidence: [entra-signin, m365-audit, security]
+            evidence: [entra-signin, m365-audit, security, entra-risk]
             attack: [T1110.001, T1110.003]
             ruleTags: [brute-force, spraying]
             search:
@@ -514,22 +519,30 @@ scenarios:
         questions:
           - id: Q0012
             name: Were inbox rules created or changed to forward, hide or delete mail?
-            evidence: [m365-exchange]
+            evidence: [m365-exchange, message-trace]
             attack: [T1564.008]
             ruleTags: [inbox-rule]
-            search:
-              source: events
-              label: inbox rules
-              filter: { conditions: [{ field: operation, op: in, value: [New-InboxRule, Set-InboxRule, Remove-InboxRule, Enable-InboxRule, UpdateInboxRules] }] }
+            note: The message trace shows what a rule did, not the rule; only the extended report marks a message an inbox rule sent (source MAILBOXRULE).
+            searches:
+              - source: events
+                label: inbox rules
+                filter: { conditions: [{ field: operation, op: in, value: [New-InboxRule, Set-InboxRule, Remove-InboxRule, Enable-InboxRule, UpdateInboxRules] }] }
+              - source: events
+                label: messages an inbox rule sent (extended message trace)
+                filter: { conditions: [{ field: data.source, op: eq, value: MAILBOXRULE }], sort: { field: ts, dir: asc } }
           - id: Q0013
             name: Was mail forwarded out of the organisation (mailbox forwarding, transport rules)?
-            evidence: [m365-exchange]
+            evidence: [m365-exchange, message-trace]
             attack: [T1114.003]
-            ruleTags: [forwarding, transport-rule]
-            search:
-              source: events
-              label: forwarding and transport rules
-              filter: { conditions: [{ field: operation, op: in, value: [Set-Mailbox, New-TransportRule, Set-TransportRule] }] }
+            ruleTags: [forwarding, transport-rule, message-trace]
+            note: The audit log shows the forwarding set up; the message trace shows the mail that left. The message trace rules need the internal domains in Settings.
+            searches:
+              - source: events
+                label: forwarding and transport rules
+                filter: { conditions: [{ field: operation, op: in, value: [Set-Mailbox, New-TransportRule, Set-TransportRule] }] }
+              - source: events
+                label: message trace
+                filter: { conditions: [{ field: category, op: eq, value: Exchange message trace }], sort: { field: ts, dir: asc } }
           - id: Q0014
             name: Were applications consented to, or credentials added to an application or delegated access granted?
             evidence: [m365-directory, m365-exchange]
@@ -540,7 +553,7 @@ scenarios:
               label: consents, application credentials and mailbox permissions
               filter:
                 conditions:
-                  - { field: operation, op: in, value: [Consent to application., Add service principal credentials., Add application., Add-MailboxPermission, Add-RecipientPermission, Add-MailboxFolderPermission] }
+                  - { field: operation, op: in, value: [Consent to application., Add delegated permission grant., Add OAuth2PermissionGrant., Add app role assignment to service principal., Add service principal credentials., Add application., Add-MailboxPermission, Add-RecipientPermission, Add-MailboxFolderPermission] }
       - id: F0006
         name: What did the attacker read or take?
         tags: [TA0009, TA0010]
@@ -582,7 +595,7 @@ scenarios:
         questions:
           - id: Q0018
             name: Were mails sent from the account by the attacker?
-            evidence: [m365-exchange, mail]
+            evidence: [m365-exchange, mail, message-trace]
             attack: [T1534]
             searches:
               - source: events
@@ -591,6 +604,9 @@ scenarios:
               - source: mails
                 label: sent mails
                 filter: { conditions: [{ field: folder, op: contains, value: sent }] }
+              - source: events
+                label: message trace
+                filter: { conditions: [{ field: category, op: eq, value: Exchange message trace }], sort: { field: ts, dir: asc } }
           - id: Q0019
             name: Were payment or bank detail changes asked for, in either direction?
             evidence: [mail]
@@ -602,10 +618,14 @@ scenarios:
               filter: { text: bank }
           - id: Q0020
             name: Did the same campaign reach other people in the organisation?
-            evidence: [mail]
+            evidence: [mail, message-trace]
             attack: [T1566]
             ruleTags: [campaign, phishing]
-            search:
-              source: mails
-              label: mails in a campaign
-              filter: { conditions: [{ field: campaignSize, op: gt, value: 1 }], sort: { field: date, dir: asc } }
+            note: The message trace lists every recipient of a message, delivered or not, without its content; the mails page groups the messages it holds into campaigns.
+            searches:
+              - source: mails
+                label: mails in a campaign
+                filter: { conditions: [{ field: campaignSize, op: gt, value: 1 }], sort: { field: date, dir: asc } }
+              - source: events
+                label: message trace, by subject
+                filter: { conditions: [{ field: category, op: eq, value: Exchange message trace }], sort: { field: objectName, dir: asc } }
