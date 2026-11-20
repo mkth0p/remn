@@ -24,7 +24,7 @@ from api.params import BadParameter, whole_number
 from api.views.upload import discard_upload, get_upload
 from services.analysis import hayabusa
 from services.common import ndjson_line
-from services.ingest import isolation
+from services.ingest import isolation, staging
 from services.ingest.isolation import ParseStopped
 from services.ingest.package import request_budget
 from services.ingest.pipeline import MailStats, detect_mail_format
@@ -219,7 +219,7 @@ def ingest(request: HttpRequest, key: str):
                 "package_id": str(meta.get("sha256") or ""),
                 "engines": hayabusa.engines(),
                 "filesystem": read_filesystem,
-                "budget": request_budget(),
+                "budget": request_budget(claim=True),
             }
         elif kind == "evtx":
             parse_options = {"include_raw": include_raw, "engines": hayabusa.available()}
@@ -276,6 +276,8 @@ def ingest(request: HttpRequest, key: str):
             )
             raise
         finally:
+            if "budget" in parse_options:
+                staging.release(parse_options["budget"]["claim"])
             discard_upload(upload_id)
         integrity = "verified" if (sha_client and sha_client == meta.get("sha256")) else ("mismatch" if sha_client else "pending")
         st.upsert_evidence(

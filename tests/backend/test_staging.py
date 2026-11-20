@@ -74,6 +74,25 @@ def test_a_staging_area_full_for_now_says_what_holds_it_and_when_it_frees(tmp_pa
         assert "5.0 GiB" in body["error"] and "3.0 GiB" in body["error"], body["error"]
 
 
+def test_health_gives_the_chunked_ceiling_the_staging_area_can_really_take(tmp_path, monkeypatch):
+    """Health said 64 GB whatever the staging area could hold, so the client offered uploads that
+    init then refused with 413."""
+
+    def ceiling(**configured):
+        with override_settings(FILE_UPLOAD_TEMP_DIR=tmp_path, FORENSIC_BROWSER_ONLY=False, **configured):
+            return Client().get("/api/health", **HDR).json()["limits"]["maxChunkedGb"]
+
+    _disk(monkeypatch, total_gib=100, free_gib=30)
+    # a tenth of the disk stays free for the case stores: 20 GiB can be staged
+    assert ceiling(FORENSIC_TMP_MAX_GB=0, FORENSIC_MAX_CHUNKED_GB=64) == 20
+    assert ceiling(FORENSIC_TMP_MAX_GB=4, FORENSIC_MAX_CHUNKED_GB=64) == 4
+    assert ceiling(FORENSIC_TMP_MAX_GB=0, FORENSIC_MAX_CHUNKED_GB=8) == 8
+    # what health gives is what init takes
+    with override_settings(FILE_UPLOAD_TEMP_DIR=tmp_path, FORENSIC_TMP_MAX_GB=4, FORENSIC_MAX_CHUNKED_GB=64, FORENSIC_BROWSER_ONLY=False):
+        assert _init(Client(), size=4 * GIB).status_code == 200
+        assert _init(Client(), size=4 * GIB + 1).status_code == 413
+
+
 def test_an_abandoned_upload_is_removed_without_waiting_for_a_restart(tmp_path):
     with override_settings(FILE_UPLOAD_TEMP_DIR=tmp_path, FORENSIC_UPLOAD_MAX_AGE_S=60):
         c = Client()

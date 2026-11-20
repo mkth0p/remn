@@ -73,7 +73,11 @@ while it is parsed. By default the staging area may use the free space of its di
 tenth of that disk (at most 10 GiB), so the largest file is set by the chunked-upload limit
 (`FORENSIC_MAX_CHUNKED_GB`, 64) and by that disk; `FORENSIC_TMP_MAX_GB` sets a fixed total
 instead. A file larger than the staging area can hold is refused with a message that says
-which of the two decides it. Put the staging area on a disk with room for the largest
+which of the two decides it, and the server's health answer gives the lesser of the two as
+the largest file it takes. Each package parse sets aside the room it may hold while it runs,
+at most half the staging area, so parses that run together are never promised the same
+room; a parse that begins while the rest is set aside reads the members that fit and lists
+the others with the reason. Put the staging area on a disk with room for the largest
 mailbox or collection you expect, and the case stores (`FORENSIC_CASES_DIR`) on one with
 room for what it becomes.
 

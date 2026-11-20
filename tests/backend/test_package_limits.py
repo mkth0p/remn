@@ -490,3 +490,46 @@ def test_a_real_7z_is_read_up_to_its_ratio_and_lists_the_rest(tmp_path):
     assert files["Processes/processes.csv"]["status"] == "parsed" and len(rows) == 1
     assert files["zeros.bin"]["status"] == "skipped" and "200 times its own size" in files["zeros.bin"]["reason"]
     assert not list(tmp_path.iterdir())
+
+
+def test_parses_that_begin_together_are_not_promised_the_same_room(small_staging):
+    """Each parse was given all the room the staging area had free when it began, so two that began
+    together could each count on the same room and fill the area twice over. A parse now sets its
+    room aside, at most half the area, so that a second one still finds some."""
+    from services.ingest import staging
+
+    first = P.request_budget(claim=True)
+    second = P.request_budget(claim=True)
+    third = P.request_budget(claim=True)
+    try:
+        assert (first["heldCap"], second["heldCap"], third["heldCap"]) == (512 * KIB, 512 * KIB, 0)
+        assert staging.claimed_bytes() == MIB
+        # a parse that claims nothing for itself still does not count on what the others set aside
+        assert P.request_budget()["heldCap"] == 0
+    finally:
+        for budget in (first, second, third):
+            staging.release(budget["claim"])
+    assert staging.claimed_bytes() == 0
+    assert P.request_budget()["heldCap"] == MIB
+
+
+def test_a_package_parse_of_the_server_sets_its_room_aside_until_it_ends(small_staging, monkeypatch):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from django.test import Client
+
+    from services.ingest import isolation, staging
+
+    seen = []
+    start = isolation.start
+
+    def recorded(kind, **kwargs):
+        seen.append((kwargs["options"]["budget"]["heldCap"], staging.claimed_bytes()))
+        return start(kind, **kwargs)
+
+    monkeypatch.setattr(isolation, "start", recorded)
+    blob = stored_zip({"Processes/processes.csv": CSV})
+    response = Client().post("/api/ingest/package", {"file": SimpleUploadedFile("pkg.zip", blob), "engines": "0"}, HTTP_X_FORENSIC_CLIENT="1")
+    assert response.status_code == 200
+    b"".join(response.streaming_content)
+    assert len(seen) == 1 and seen[0][0] > 0 and seen[0][1] == seen[0][0]
+    assert staging.claimed_bytes() == 0
