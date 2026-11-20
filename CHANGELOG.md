@@ -58,6 +58,20 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   per clean host fell from 81 to 69, and an analyst dismissing benign lines from the top read 30%,
   32% and 21% fewer lines before the first finding of the attack on attack_data,
   EVTX-to-MITRE-Attack and EVTX-ATTACK-SAMPLES ([detection level](docs/detection.md#detection-level)).
+- A rule's regular expressions read the first 65,536 characters of a value in both engines, as
+  many as the parsers keep of a command line or a script block, so a pattern that backtracks in
+  the browser can no longer hold the rules worker for minutes on a long mail body. A rule that
+  read a longer value says so: the Rules view shows "long values read in part" with how many of
+  its rows held one, and the message at the end of the run counts those rules. The server looks
+  for such values once per run, within the rule time limit and the cancel. Seven of REMN's own
+  patterns that tried a run again from each occurrence of a token now bound the text between the
+  tokens to 1,000 characters, so the timing test leaves no own rule out. The token duplication UAC
+  bypass rule says in its title that it pairs the binary and the logon in either order. The 92
+  event rules that had no measure are measured: 20 fire on a recording of what they look for, 61
+  fire only on the library they were written against and 9 on no public recording
+  ([detection](docs/detection.md)). `tools/measure_rules.py --rules` measures some rules alone and
+  keeps the measures of the others, and a clean machine's archive is downloaded whole, with
+  retries, before it is unpacked.
 - Rules, the SQL view and the case store refuse what they used to let through, and accept what
   they used to refuse. A rule sent to the server with a source other than `events` or `mails` is
   refused before any query is built; a stacked statement there used to rewrite every evidence row
