@@ -494,6 +494,20 @@ out, and past 300 the report says how many more there are. The ATT&CK techniques
 each technique of the printed findings (false positives left out) and of the confirmed ones,
 with its tactic, its findings, its rules and whether a confirmed item carries it.
 
+The same panel sets the language and the firm. The report, HTML and Word, is written in English
+or in French; the Report page itself stays English. Every heading, label and sentence the report
+writes itself comes from the dictionary of that language, dates and numbers are written the way
+it writes them (01/03/2026 08:00:00 UTC, 12 345, 1,50 Ko in French), and the HTML document and
+the Word document say their language. What the analysis states and what the analyst writes are
+printed as they are: the limits of the evidence, the reasons a claim does not hold, a story's
+spine, rule and incident titles, and the questions of DFIQ stay in English. A firm name, a cover
+line and a logo (PNG or JPEG, 200 KB at most; the panel says so and refuses a larger file) take
+the place of REMN's wordmark on the cover, at the foot and in the title; the logo is embedded in
+the HTML report and in the Word file. With none of them set the report looks as it always has.
+Printed from a Chromium browser, every page past the cover carries a running header (the firm or
+REMN, the case, the marking) and every page its number and the page count; other browsers print
+without them. The Word report numbers its pages in its footer.
+
 ## Case notes
 
 Case notes hold what the analyst decides to keep: a curated timeline (entries added with

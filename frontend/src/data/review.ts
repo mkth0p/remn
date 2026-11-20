@@ -1,6 +1,7 @@
 import { getDb, type Finding, type Severity } from '../db/schema'
 import type { Chain, ChainStep } from './chains'
 import { buildIncidents, chainMembership, effectiveSeverity, ORDER, type Incident } from '../rules/incidents'
+import { logoImage, type ReportLanguage } from './reportText'
 
 /**
  * Review decisions and report selection.
@@ -36,7 +37,20 @@ export interface ReportSettings {
   onlyReviewed: boolean
   /** what the analyst writes for a client: the engagement, the scope, the conclusion, the recommendations and the handling */
   client: ClientReport
+  /** the language the report is written in; the interface stays English */
+  language: ReportLanguage
+  /** the firm the report goes out under; REMN's own look when nothing is set */
+  branding: ReportBranding
 }
+
+/** The firm's name, a line for the cover, and its logo as a PNG or JPEG data URL (reportText.ts LOGO_MAX_BYTES at most). */
+export interface ReportBranding {
+  firmName: string
+  coverLine: string
+  logo: string
+}
+
+export const EMPTY_BRANDING: ReportBranding = { firmName: '', coverLine: '', logo: '' }
 
 /** A row of the report's version history. */
 export interface ReportVersion {
@@ -143,6 +157,8 @@ export const DEFAULT_REPORT: ReportSettings = {
   includeFp: false,
   onlyReviewed: false,
   client: EMPTY_CLIENT,
+  language: 'en',
+  branding: EMPTY_BRANDING,
 }
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
@@ -162,6 +178,12 @@ export function clientReport(v: unknown): ClientReport {
   out.tlp = (TLP_LEVELS as string[]).includes(out.tlp) ? out.tlp : ''
   out.analyticConfidence = (['low', 'moderate', 'high'] as string[]).includes(out.analyticConfidence) ? out.analyticConfidence : ''
   return out
+}
+
+/** The branding of stored settings, every field a string, and the logo only when it is an image the report can embed. */
+export function reportBranding(v: unknown): ReportBranding {
+  const r = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>
+  return { firmName: str(r.firmName), coverLine: str(r.coverLine), logo: logoImage(r.logo) ? str(r.logo) : '' }
 }
 
 export interface ChainReview {
@@ -185,7 +207,7 @@ export const verdictStatus = (v: Verdict): Status => (v === 'confirmed' ? 'escal
 
 export async function loadReportSettings(caseId: number): Promise<ReportSettings> {
   const v = (await getDb().kv.get(`report-settings-${caseId}`))?.value as Partial<ReportSettings> | undefined
-  return { ...DEFAULT_REPORT, ...(v ?? {}), client: clientReport(v?.client) }
+  return { ...DEFAULT_REPORT, ...(v ?? {}), client: clientReport(v?.client), language: v?.language === 'fr' ? 'fr' : 'en', branding: reportBranding(v?.branding) }
 }
 export async function saveReportSettings(caseId: number, s: ReportSettings): Promise<void> {
   await getDb().kv.put({ key: `report-settings-${caseId}`, value: s })

@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { defaultSettings, type Case, type Evidence, type Finding } from '../db/schema'
 import { buildIncidents } from '../rules/incidents'
-import { clientReport, DEFAULT_REPORT, EMPTY_CLIENT, type ClientReport } from './review'
+import { clientReport, DEFAULT_REPORT, EMPTY_BRANDING, EMPTY_CLIENT, reportBranding, type ClientReport, type ReportBranding } from './review'
 import { buildReportHtml, evidenceScope, SCOPE_READ, impactInventory, indicatorAppendix, limitLines, computeConfidence, spineStartingPoint, techniqueTable, type ReportData } from './reportHtml'
 import { reportDocumentXml, buildReportDocx } from './reportDocx'
+import type { ReportLanguage } from './reportText'
 import type { DecidedStory } from './storyDecisions'
 import { spinedStory } from '../test/spineStory'
 
@@ -233,9 +234,9 @@ describe('the client report', () => {
     expect(html).toContain('<b>completeness ')
     expect(html).not.toMatch(/<b>confidence (high|medium|low)<\/b>/)
     expect(html).toContain('how complete the review is, not how sure its conclusion is')
-    expect(html).not.toContain("analyst's confidence")
+    expect(html).not.toContain('analyst&#39;s confidence')
     const own = buildReportHtml(data({ analyticConfidence: 'moderate', confidenceBasis: 'the proxy logs were not collected' }))
-    expect(own).toContain("<b>analyst's confidence moderate</b>the proxy logs were not collected")
+    expect(own).toContain('<b>analyst&#39;s confidence moderate</b>the proxy logs were not collected')
     expect(reportDocumentXml(data())).toContain('Completeness ')
   })
 
@@ -293,5 +294,86 @@ describe('the client report', () => {
     const odd = clientReport({ client: 42, tlp: 'purple', analyticConfidence: 'certain', versions: [{ version: '1', date: 3 }, null], containment: 'none', recShort: 'x' })
     expect(odd).toMatchObject({ client: '', tlp: '', analyticConfidence: '', recShort: 'x', containment: [] })
     expect(odd.versions).toEqual([{ version: '1', date: '', author: '', note: '' }])
+  })
+})
+
+// an invented 4 by 2 pixel PNG
+const PNG_4X2 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAACCAIAAADwyuo0AAAAEElEQVR4nGP4z8AARwzIHABvqgf5gNwAKAAAAABJRU5ErkJggg=='
+const styled = (language: ReportLanguage, branding: Partial<ReportBranding> = {}, client: Partial<ClientReport> = {}): ReportData => {
+  const d = data(client)
+  return { ...d, settings: { ...d.settings, language, branding: { ...EMPTY_BRANDING, ...branding } } }
+}
+/** the text of the parts of a stored Word file, run together: enough to find a name or a value in it */
+const docxText = (d: ReportData) => new TextDecoder().decode(buildReportDocx(d))
+
+describe('the report in French and under a firm', () => {
+  it('writes the HTML and the Word report in French when the analyst chose it, with French dates and numbers', () => {
+    const fr = styled('fr', {}, { engagementStart: '2026-03-01', engagementEnd: '2026-03-09', client: 'Example Holdings' })
+    const html = buildReportHtml(fr)
+    expect(html).toContain('<html lang="fr">')
+    for (const title of ['Mission', 'Périmètre', 'Déroulé des faits', 'Indicateurs de compromission', 'Méthode et limites']) expect(html).toContain(`<h2>${title}</h2>`)
+    expect(html).toContain('Compromission confirmée')
+    expect(html).toContain('Établi pour Example Holdings')
+    expect(html).toContain('du 01/03/2026 au 09/03/2026')
+    expect(html).toContain('produit le 10/04/2026 00:00:00 UTC')
+    // nothing of the English labels is left in the words the report writes itself
+    for (const en of ['<h2>Scope</h2>', '<h2>What happened</h2>', 'Where it stops', 'bottom line', 'How this was produced', 'Prepared for', 'not looked up']) expect(html).not.toContain(en)
+    const doc = reportDocumentXml(fr)
+    expect(doc).toContain('Déroulé des faits')
+    expect(doc).toContain('Comment ce rapport a été produit')
+    expect(doc).not.toContain('What happened')
+    expect(docxText(fr)).toContain('<w:lang w:val="fr-FR"/>')
+  })
+
+  it('stays in English, with the look it had, when no language and no firm are set', () => {
+    const html = buildReportHtml(data())
+    expect(html).toContain('<html lang="en">')
+    expect(html).toContain('<span class="wordmark">REMN</span><span class="tag">forensic analysis report</span>')
+    expect(html).toContain('<title>REMN report · Client case</title>')
+    expect(html).not.toContain('class="logo"')
+    const docx = docxText(data())
+    expect(docx).toContain('<w:lang w:val="en-GB"/>')
+    expect(docx).not.toContain('word/media/')
+    expect(docx).toContain('REMN · Client case · Compromise confirmed')
+  })
+
+  it("puts the firm's name, logo and cover line where REMN's stand, in the HTML and in the Word report", () => {
+    const branded = styled('en', { firmName: 'Example Response', coverLine: 'Incident response report', logo: PNG_4X2 })
+    const html = buildReportHtml(branded)
+    expect(html).toContain(`<img class="logo" src="${PNG_4X2}" alt="Example Response"><span class="firm">Example Response</span><span class="tag">Incident response report</span>`)
+    expect(html).not.toContain('<span class="wordmark">REMN</span>')
+    expect(html).toContain('<title>Example Response · Client case</title>')
+    expect(html).toContain('<span class="wm firm">Example Response</span>')
+    const docx = docxText(branded)
+    expect(docx).toContain('word/media/logo.png')
+    expect(docx).toContain('<Default Extension="png" ContentType="image/png"/>')
+    expect(docx).toContain('Target="media/logo.png"')
+    expect(reportDocumentXml(branded)).toContain('<a:blip r:embed="rIdLogo"/>')
+    expect(reportDocumentXml(branded)).toContain('Incident response report')
+    expect(docx).toContain('Example Response · Client case · Compromise confirmed')
+    // a logo that is not an image is left out of both
+    const odd = styled('en', { logo: 'data:image/png;base64,AAAA' })
+    expect(buildReportHtml(odd)).not.toContain('class="logo"')
+    expect(docxText(odd)).not.toContain('word/media/')
+  })
+
+  it('numbers the printed pages and runs a header with the brand, the case and the marking, in the report language', () => {
+    const html = buildReportHtml(styled('en', { firmName: 'Example Response' }, { tlp: 'red' }))
+    expect(html).toContain('@top-left{content:"Example Response · Client case"')
+    expect(html).toContain('@top-right{content:"TLP:RED"')
+    expect(html).toContain('@bottom-right{content:"page " counter(page) " of " counter(pages)')
+    expect(html).toContain('@page:first{@top-left{content:none}')
+    expect(buildReportHtml(styled('fr'))).toContain('content:"page " counter(page) " sur " counter(pages)')
+    expect(buildReportHtml(styled('fr'))).toContain('.cover.draft::after{content:"PROJET"}')
+    // the case name cannot close the style element it is written into
+    const hostile = buildReportHtml({ ...data(), kase: { ...kase, name: 'x"</style><script>alert(1)</script>' } })
+    expect(hostile).not.toContain('</style><script>')
+    expect(hostile).toContain('content:"REMN · x\\"\\3c /style\\3e ')
+  })
+
+  it('reads the language and the branding of stored settings whatever a bundle holds', () => {
+    expect(reportBranding(undefined)).toEqual(EMPTY_BRANDING)
+    expect(reportBranding({ firmName: 3, coverLine: 'x', logo: 'data:image/png;base64,AAAA' })).toEqual({ firmName: '', coverLine: 'x', logo: '' })
+    expect(reportBranding({ logo: PNG_4X2 }).logo).toBe(PNG_4X2)
   })
 })

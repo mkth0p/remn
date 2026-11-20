@@ -2,28 +2,20 @@ import type { Severity } from '../db/schema'
 import { chainSeverity, effectiveSeverity, stepVisible } from './review'
 import { packageCoverageIssues } from './packageCoverage'
 import {
-  AI_TABLE_HEAD,
   aiTexts,
   assetRow,
   conclusionParts,
-  CONTAINMENT_HEAD,
   containmentRows,
   engagementFacts,
-  IMPACT_HEAD,
   impactInventory,
   indicatorAppendix,
-  INDICATOR_HEAD,
   indicatorRow,
-  INDICATORS_INTRO,
   markingLine,
   MAX_INDICATORS,
   recommendationTerms,
   scopeRows,
-  TECHNIQUE_HEAD,
   techniqueRow,
   techniqueTable,
-  TECHNIQUES_INTRO,
-  VERSION_HEAD,
   bottomLine,
   claimLine,
   computeConfidence,
@@ -38,9 +30,7 @@ import {
   moments,
   producedLines,
   questionsIntro,
-  REFERENCE_HEAD,
   referenceRows,
-  STORIES_INTRO,
   storiesCaveatTexts,
   storyDecisionTexts,
   storyPart,
@@ -52,9 +42,7 @@ import {
   type ReportData,
 } from './reportHtml'
 import { groupByIncident, storyOwnGaps } from './stories'
-import { STORY_VERDICT_LABEL } from './storyDecisions'
-import { ANSWER_LABEL } from './questions/answers'
-import { fmtBytes, fmtNum as n, fmtUtc as fmtTs } from '../util/format'
+import { logoImage, reportText, type LogoImage, type ReportText } from './reportText'
 import { zipStore } from '../util/zip'
 
 /**
@@ -66,7 +54,6 @@ import { zipStore } from '../util/zip'
 
 export const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 
-const STATUS_WORD: Record<string, string> = { new: 'not reviewed', reviewed: 'reviewed', escalated: 'confirmed', false_positive: 'false positive' }
 /** the report's severity colours, as Word writes them */
 const SEV_HEX: Record<string, string> = { critical: 'A8231F', high: 'D1403F', medium: 'D9822B', low: '2F6FDB', info: '8A95A3' }
 
@@ -114,7 +101,6 @@ const heading = (text: string, level: 1 | 2 | 3) => para(text, `Heading${level}`
 const bullet = (content: Inline | Inline[], glyph = '•') =>
   `<w:p><w:pPr><w:pStyle w:val="ListBullet"/></w:pPr>${run(glyph)}<w:r><w:tab/></w:r>${runs(Array.isArray(content) ? content : [content])}</w:p>`
 const caption = (text: string) => para(text, 'Caption')
-const sevRun = (s: string): Inline => ({ text: s.toUpperCase(), bold: true, color: SEV_HEX[s] ?? SEV_HEX.info })
 
 /** A table with a header row that repeats on each page; cells are plain text. */
 function table(head: string[], rows: string[][]): string {
@@ -166,45 +152,66 @@ function markdown(text: string): string {
   return out.join('')
 }
 
-const span = (from: number | null | undefined, to: number | null | undefined) => (from && to && to !== from ? `${fmtTs(from)} to ${fmtTs(to)}` : fmtTs(from) || 'no event time')
+const span = (t: ReportText, from: number | null | undefined, to: number | null | undefined) => (from && to && to !== from ? `${t.ts(from)} ${t.to} ${t.ts(to)}` : t.ts(from) || t.noEventTime)
+
+/** the largest the logo stands on the cover, in EMU (a centimetre is 360,000): 4.5 by 1.6 cm */
+const LOGO_BOX = { cx: 1_620_000, cy: 576_000 }
+
+/** The logo as an inline picture, scaled to fit the box and keep its proportions. */
+function logoDrawing(logo: LogoImage, name: string): string {
+  const scale = Math.min(LOGO_BOX.cx / logo.width, LOGO_BOX.cy / logo.height)
+  const cx = Math.max(1, Math.round(logo.width * scale))
+  const cy = Math.max(1, Math.round(logo.height * scale))
+  return `<w:p><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="1" name="${x(name)}"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="1" name="logo.${logo.ext}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rIdLogo"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`
+}
 
 // ---------------------------------------------------------------------------
 // the document
 // ---------------------------------------------------------------------------
 
-/** The body of word/document.xml: the same sections as the HTML report, in the same order. */
+/** The body of word/document.xml: the same sections as the HTML report, in the same order, in the report's language. */
 export function reportDocumentXml(d: ReportData): string {
   const { kase, settings } = d
-  const verdict = computeVerdict(d)
-  const confidence = computeConfidence(d)
-  const generated = new Date(d.generatedAt ?? Date.now()).toISOString().replace('T', ' ').slice(0, 19) + 'Z'
-  const rowsTotal = d.evidence.reduce((t, e) => t + (e.count ?? 0), 0)
+  const t = reportText(settings.language)
+  const n = t.num
+  const verdict = computeVerdict(d, t)
+  const confidence = computeConfidence(d, t)
+  const generated = t.ts(d.generatedAt ?? Date.now())
+  const rowsTotal = d.evidence.reduce((x, e) => x + (e.count ?? 0), 0)
   const verified = d.evidence.filter((e) => e.integrity === 'verified').length
   const bySev: Record<string, number> = {}
   for (const f of d.findings) bySev[effectiveSeverity(f)] = (bySev[effectiveSeverity(f)] ?? 0) + 1
   const line = bottomLine(d.summary)
+  const sev = (s: string) => t.sev[s] ?? s
+  const sevRun = (s: string): Inline => ({ text: sev(s).toUpperCase(), bold: true, color: SEV_HEX[s] ?? SEV_HEX.info })
   const body: string[] = []
   /** a text's check against its rows, under the text, when it does not hold or names nothing to check */
   const checkOf = (key: string) => {
-    const c = textCheck(key, d.claims)
+    const c = textCheck(key, d.claims, t)
     if (c) body.push(caption(c.text))
   }
 
-  // cover
+  // cover: the firm's logo and name when the analyst set them, else REMN's line
   const client = settings.client
-  const conclusion = conclusionParts(client)
-  body.push(para('REMN forensic analysis report', 'Subtitle'))
+  const conclusion = conclusionParts(client, t)
+  const firm = settings.branding.firmName.trim()
+  const logo = logoImage(settings.branding.logo)
+  if (logo) body.push(logoDrawing(logo, firm || 'logo'))
+  if (firm) body.push(para({ text: firm, bold: true, size: 28 }))
+  body.push(para(settings.branding.coverLine.trim() || t.cover.subtitle, 'Subtitle'))
   body.push(para(kase.name, 'Title'))
-  const preparedFor = [client.client.trim() ? `Prepared for ${client.client.trim()}` : '', client.engagementRef.trim() ? `engagement ${client.engagementRef.trim()}` : ''].filter(Boolean).join(' · ')
+  const preparedFor = [client.client.trim() ? t.cover.preparedFor(client.client.trim()) : '', client.engagementRef.trim() ? t.cover.engagement(client.engagementRef.trim()) : '']
+    .filter(Boolean)
+    .join(' · ')
   if (preparedFor) body.push(para({ text: preparedFor, size: 24 }))
   body.push(
     para([
-      `Generated ${generated} · ${kase.analyst ? `analyst ${kase.analyst}` : 'analyst not set'}`,
+      t.docx.generated(generated, kase.analyst ? t.cover.analyst(kase.analyst) : t.cover.noAnalyst),
       ...(d.issue
         ? [
             ' · ',
             {
-              text: d.issue.status === 'final' && d.issue.finalAt ? `final, issued ${new Date(d.issue.finalAt).toISOString().replace('T', ' ').slice(0, 19)}Z` : 'DRAFT, not issued',
+              text: d.issue.status === 'final' && d.issue.finalAt ? t.docx.final(t.ts(d.issue.finalAt)) : t.docx.draft,
               bold: true,
               color: d.issue.status === 'final' ? '1B7F66' : 'D9822B',
             },
@@ -212,252 +219,232 @@ export function reportDocumentXml(d: ReportData): string {
         : []),
     ]),
   )
-  body.push(
-    caption(`All times UTC · findings from ${settings.minSeverity} severity up${settings.onlyReviewed ? ', reviewed items only' : ''}${settings.includeFp ? ', false positives included' : ''}`),
-  )
+  body.push(caption(t.cover.meta(settings.minSeverity, settings.onlyReviewed, settings.includeFp)))
   body.push(para([{ text: verdict.label, bold: true, size: 32, color: verdict.severity ? SEV_HEX[verdict.severity] : '1B7F66' }]))
   if (line) body.push(markdown(line))
   body.push(para(verdict.detail))
-  body.push(para([{ text: `Completeness ${confidence.level}: `, bold: true }, confidence.reasons.slice(0, 3).join(' · ')]))
-  body.push(caption('How complete the review is, not how sure its conclusion is.'))
+  body.push(para([{ text: t.docx.completeness(t.level[confidence.level] ?? confidence.level), bold: true }, confidence.reasons.slice(0, 3).join(' · ')]))
+  body.push(caption(t.docx.completenessSub))
   if (conclusion.confidence) {
-    body.push(para([{ text: `Analyst's confidence ${conclusion.confidence}${conclusion.basis ? ': ' : ''}`, bold: true }, conclusion.basis]))
-    body.push(caption("The analyst's own assessment of the conclusion."))
+    body.push(para([{ text: t.docx.analystConfidence(conclusion.confidence, !!conclusion.basis), bold: true }, conclusion.basis]))
+    body.push(caption(t.docx.analystConfidenceSub))
   }
-  body.push(
-    table(
-      ['evidence files', 'rows analysed', 'findings', 'incidents · chains', 'confirmed', 'flagged indicators'],
-      [[n(d.evidence.length), n(rowsTotal), n(d.findings.length), n(d.incidents.length + d.chains.length), n(verdict.confirmed), n(d.iocs.length)]],
-    ),
-  )
+  body.push(table(t.cover.kpi, [[n(d.evidence.length), n(rowsTotal), n(d.findings.length), n(d.incidents.length + d.chains.length), n(verdict.confirmed), n(d.iocs.length)]]))
   body.push(
     caption(
-      `By severity: ${(['critical', 'high', 'medium', 'low', 'info'] as Severity[]).map((s) => `${s} ${bySev[s] ?? 0}`).join(' · ')}. Decisions: ${verdict.confirmed} confirmed, ${verdict.reviewed} reviewed or unsure, ${verdict.falsePositives} false positive${verdict.falsePositives === 1 ? '' : 's'}${d.undecided ? `, ${d.undecided} without a decision` : ', every item decided'}. ${n(verified)}/${n(d.evidence.length)} evidence files verified by digest.`,
+      t.docx.bySeverity(
+        (['critical', 'high', 'medium', 'low', 'info'] as Severity[]).map((s) => `${sev(s)} ${bySev[s] ?? 0}`).join(' · '),
+        verdict.confirmed,
+        verdict.reviewed,
+        verdict.falsePositives,
+        d.undecided,
+        `${n(verified)}/${n(d.evidence.length)}`,
+      ),
     ),
   )
   const profile = threatProfile(d)
   const tactics = (state: 'confirmed' | 'observed') =>
     profile
       .filter((b) => b.state === state)
-      .map((b) => `${b.def.label} (${n(b.findings)}${b.techniques.length ? `: ${b.techniques.join(', ')}` : ''})`)
+      .map((b) => `${t.tactic[b.def.id] ?? b.def.label} (${n(b.findings)}${b.techniques.length ? `: ${b.techniques.join(', ')}` : ''})`)
       .join('; ')
-  if (profile.some((b) => b.state !== 'none'))
-    body.push(
-      caption(`Threat profile: ${[tactics('confirmed') ? `confirmed: ${tactics('confirmed')}` : '', tactics('observed') ? `observed: ${tactics('observed')}` : ''].filter(Boolean).join('. ')}.`),
-    )
+  if (profile.some((b) => b.state !== 'none')) body.push(caption(t.docx.profile(tactics('confirmed'), tactics('observed'))))
 
-  const engagement = engagementFacts(client)
+  const engagement = engagementFacts(client, t)
   if (engagement.facts.length || engagement.distribution.length || engagement.versions.length) {
-    body.push(heading('Engagement', 1))
+    body.push(heading(t.section.engagement, 1))
     if (engagement.facts.length) body.push(facts(engagement.facts))
     if (engagement.distribution.length) {
-      body.push(heading('Distribution', 3))
-      for (const x of engagement.distribution) body.push(bullet(x))
+      body.push(heading(t.client.distribution, 3))
+      for (const v of engagement.distribution) body.push(bullet(v))
     }
     if (engagement.versions.length) {
-      body.push(heading('Version history', 3))
-      body.push(table(VERSION_HEAD, engagement.versions))
+      body.push(heading(t.client.versions, 3))
+      body.push(table(t.client.versionHead, engagement.versions))
     }
   }
 
   if (d.summary) {
-    body.push(heading('Executive summary', 1))
+    body.push(heading(t.section.summary, 1))
     body.push(markdown(d.summary))
-    if (d.summaryBy === 'ai') body.push(caption("Drafted by the analyst model from the reviewed items; the decisions it rests on are the analyst's."))
+    if (d.summaryBy === 'ai') body.push(caption(t.summary.byAiDocx))
     checkOf('summary')
-    if (d.summaryAt && d.findings.some((f) => f.createdAt > d.summaryAt!))
-      body.push(caption('Written before the findings last changed: the numbers and ids in it may describe an earlier state of the case.'))
+    if (d.summaryAt && d.findings.some((f) => f.createdAt > d.summaryAt!)) body.push(caption(t.summary.staleDocx))
   }
 
-  body.push(heading('Scope', 1))
+  body.push(heading(t.section.scope, 1))
   if (client.objectives.trim()) body.push(markdown(client.objectives))
-  body.push(facts(scopeRows(d).map((r) => [r.label, `${r.items.join('\n')}${r.note ? `\n(${r.note})` : ''}`])))
+  body.push(facts(scopeRows(d, t).map((r) => [r.label, `${r.items.join('\n')}${r.note ? `\n(${r.note})` : ''}`])))
 
   if (conclusion.initialAccess || conclusion.rootCause) {
-    body.push(heading('Conclusion', 1))
+    body.push(heading(t.section.conclusion, 1))
     if (conclusion.initialAccess) {
-      body.push(heading('Initial access', 3))
+      body.push(heading(t.client.initialAccess, 3))
       body.push(markdown(conclusion.initialAccess))
     }
     if (conclusion.rootCause) {
-      body.push(heading('Root cause', 3))
+      body.push(heading(t.client.rootCause, 3))
       body.push(markdown(conclusion.rootCause))
     }
   }
 
-  const happened = moments(d)
-  body.push(heading('What happened', 1))
+  const happened = moments(d, t)
+  body.push(heading(t.section.happened, 1))
   if (happened.items.length) {
     body.push(
       para(
-        `${happened.items.some((m) => m.decision === 'confirmed') ? 'The confirmed items in the order they happened.' : 'Nothing was confirmed; the reviewed items in the order they happened.'} Dates are event times, UTC.${happened.total > happened.items.length ? ` The first ${happened.items.length} of ${happened.total} are listed.` : ''}`,
+        `${happened.items.some((m) => m.confirmed) ? t.happened.confirmed : t.happened.reviewed} ${t.happened.times}${happened.total > happened.items.length ? ` ${t.happened.firstDocx(happened.items.length, happened.total)}` : ''}`,
       ),
     )
     body.push(
       table(
-        ['when (UTC)', 'severity', 'what', 'decision', 'note'],
+        t.happened.head,
         happened.items.map((m) => [
-          m.ts === Number.MAX_SAFE_INTEGER ? 'no event time' : span(m.ts, m.end),
-          m.severity,
+          m.ts === Number.MAX_SAFE_INTEGER ? t.noEventTime : span(t, m.ts, m.end),
+          sev(m.severity),
           `${m.title}${m.entities.length ? `\n${m.entities.join(' · ')}` : ''}`,
           m.decision,
           m.note,
         ]),
       ),
     )
-  } else body.push(para(happened.decided ? 'No dated item to place.' : 'No item has been decided yet: run the review before printing.'))
+  } else body.push(para(happened.decided ? t.happened.noDated : t.happened.noDecision))
 
-  const impact = impactInventory(d)
+  const impact = impactInventory(d, t)
   if (impact.accounts.length || impact.hosts.length || client.impact.trim()) {
-    body.push(heading('Impact', 1))
-    body.push(
-      para(
-        'The accounts and hosts the confirmed items name, printed or not: the people a confirmed chain or story is about, the hosts it ran on, and the accounts and hosts of the findings confirmed with them. Machine, service and built-in accounts are left out.',
-      ),
-    )
+    body.push(heading(t.section.impact, 1))
+    body.push(para(t.client.impactIntro))
     if (client.impact.trim()) {
       body.push(markdown(client.impact))
-      body.push(caption("The analyst's account of the impact."))
+      body.push(caption(t.client.impactNoteDocx))
     }
-    if (impact.accounts.length) body.push(table(['account', ...IMPACT_HEAD.slice(1)], impact.accounts.map(assetRow)))
-    if (impact.hosts.length) body.push(table(['host', ...IMPACT_HEAD.slice(1)], impact.hosts.map(assetRow)))
-    if (!impact.accounts.length && !impact.hosts.length) body.push(para('No confirmed item names an account or a host.'))
+    const asset = (a: (typeof impact.accounts)[number]) => assetRow(a, t)
+    if (impact.accounts.length) body.push(table([t.client.account, ...t.client.impactHead.slice(1)], impact.accounts.map(asset)))
+    if (impact.hosts.length) body.push(table([t.client.host, ...t.client.impactHead.slice(1)], impact.hosts.map(asset)))
+    if (!impact.accounts.length && !impact.hosts.length) body.push(para(t.client.impactNone))
   }
-  const actions = containmentRows(client)
+  const actions = containmentRows(client, t)
   if (actions.length) {
-    body.push(heading('Containment', 1))
-    body.push(para('The containment and eradication actions taken, as the analyst recorded them.'))
-    body.push(table(CONTAINMENT_HEAD, actions))
+    body.push(heading(t.section.containment, 1))
+    body.push(para(t.client.containmentIntro))
+    body.push(table(t.client.containmentHead, actions))
   }
-  const terms = recommendationTerms(client)
+  const terms = recommendationTerms(client, t)
   if (terms.length) {
-    body.push(heading('Recommendations', 1))
-    for (const [t, text] of terms) {
-      body.push(heading(t, 3))
+    body.push(heading(t.section.recommendations, 1))
+    for (const [term, text] of terms) {
+      body.push(heading(term, 3))
       body.push(markdown(text))
     }
   }
 
   if (d.questions) {
     const q = d.questions
-    body.push(heading('Questions', 1))
-    body.push(para(questionsIntro(q)))
+    body.push(heading(t.section.questions, 1))
+    body.push(para(questionsIntro(q, t)))
     for (const sc of q.scenarios) {
       body.push(heading(`${sc.name} (${sc.id}, ${sc.origin === 'dfiq' ? 'DFIQ' : 'REMN'})`, 2))
       for (const f of sc.facets) {
         body.push(heading(f.name, 3))
         for (const qu of f.questions) {
-          body.push(para([{ text: `${qu.id} `, mono: true }, { text: qu.name, bold: true }, ` · ${ANSWER_LABEL[qu.status] ?? qu.status}`]))
+          body.push(para([{ text: `${qu.id} `, mono: true }, { text: qu.name, bold: true }, ` · ${t.answer[qu.status] ?? qu.status}`]))
           if (qu.text.trim()) body.push(markdown(qu.text))
-          else if (qu.status === 'open') body.push(caption('unanswered'))
-          for (const c of qu.citations) body.push(bullet(`${c.source === 'findings' ? 'finding ' : ''}${c.label}${c.ts ? ` · ${fmtTs(c.ts)}` : ''}`))
-          if (!qu.citations.length && qu.status === 'answered') body.push(caption('no record cited'))
-          if (qu.coverage && (qu.status !== 'answered' || qu.covered === false)) body.push(caption(`Evidence: ${qu.coverage}`))
+          else if (qu.status === 'open') body.push(caption(t.question.unanswered))
+          for (const c of qu.citations) body.push(bullet(`${c.source === 'findings' ? `${t.question.finding} ` : ''}${c.label}${c.ts ? ` · ${t.ts(c.ts)}` : ''}`))
+          if (!qu.citations.length && qu.status === 'answered') body.push(caption(t.question.noCitation))
+          if (qu.coverage && (qu.status !== 'answered' || qu.covered === false)) body.push(caption(t.question.evidence(qu.coverage)))
         }
       }
     }
   }
 
   if (d.stories?.length) {
-    body.push(heading('Stories', 1))
-    body.push(para(STORIES_INTRO))
-    for (const c of storiesCaveatTexts(d)) body.push(caption(c.text))
+    body.push(heading(t.section.stories, 1))
+    body.push(para(t.story.intro))
+    for (const c of storiesCaveatTexts(d, t)) body.push(caption(c.text))
     for (const { incident: i, items } of groupByIncident(d.stories, (r) => r.story, d.storyIncidents)) {
       if (i) {
-        body.push(heading(`One intrusion: ${i.label}`, 2))
+        body.push(heading(t.story.intrusion(i.label), 2))
         body.push(
           para([
             sevRun(i.severity),
-            ` · ${span(i.start, i.end)} · ${n(i.stories.length)} stories${i.hosts.length ? ` · hosts ${i.hosts.slice(0, 6).join(', ')}${i.hosts.length > 6 ? ` +${i.hosts.length - 6}` : ''}` : ''}`,
+            ` · ${span(t, i.start, i.end)} · ${t.story.count(i.stories.length)}${i.hosts.length ? ` · ${t.story.hosts} ${i.hosts.slice(0, 6).join(', ')}${i.hosts.length > 6 ? ` +${i.hosts.length - 6}` : ''}` : ''}`,
           ]),
         )
-        const bases = incidentBases(items)
-        if (bases.length) body.push(caption(`Why they read as one: ${bases.slice(0, 4).join('; ')}${bases.length > 4 ? ` and ${bases.length - 4} more` : ''}.`))
+        const bases = incidentBases(items, t)
+        if (bases.length) body.push(caption(`${t.story.whyOne(`${bases.slice(0, 4).join('; ')}${bases.length > 4 ? ` ${t.andMore(bases.length - 4)}` : ''}`)}.`))
         const unprinted = i.stories.length - items.length
-        if (unprinted > 0) body.push(caption(`${n(unprinted)} more of its stories ${unprinted === 1 ? 'is' : 'are'} not printed: below the severity floor, without a note, or past the first twenty.`))
-        if (i.cut) body.push(caption(`${n(i.cut)} more linked ${i.cut === 1 ? 'story is' : 'stories are'} left out of it: an incident holds twenty stories at most.`))
+        if (unprinted > 0) body.push(caption(t.story.unprinted(unprinted)))
+        if (i.cut) body.push(caption(t.story.cut(i.cut)))
       }
       for (const { story: s, key, note, decisions: dec } of items) {
-        const w = storyWhere(s)
-        body.push(heading(`${s.title}${storyPart(dec)}`, i ? 3 : 2))
+        const w = storyWhere(s, t)
+        body.push(heading(`${s.title}${storyPart(dec, t)}`, i ? 3 : 2))
         body.push(
           para([
             sevRun(s.severity),
-            ...(dec?.call ? [' · ', { text: STORY_VERDICT_LABEL[dec.call.verdict], bold: true }] : []),
-            ` · ${s.confidence} confidence · ${w.who} · ${span(s.start, s.end)} · ${n(s.records)} record(s) in ${n(s.steps.length)} step(s)${w.hosts ? ` · hosts ${w.hosts}${w.hostsMore ? ` +${w.hostsMore}` : ''}` : ''}${w.from ? ` · from ${w.from}` : ''}`,
+            ...(dec?.call ? [' · ', { text: t.storyVerdict[dec.call.verdict] ?? dec.call.verdict, bold: true }] : []),
+            ` · ${t.story.confidence(t.level[s.confidence] ?? s.confidence)} · ${w.who} · ${span(t, s.start, s.end)} · ${t.story.records(s.records, s.steps.length)}${w.hosts ? ` · ${t.story.hosts} ${w.hosts}${w.hostsMore ? ` +${w.hostsMore}` : ''}` : ''}${w.from ? ` · ${t.story.from} ${w.from}` : ''}`,
           ]),
         )
         if (note) {
           body.push(markdown(note))
-          body.push(caption("The analyst's reading of the story."))
+          body.push(caption(t.story.noteDocx))
           checkOf(`story:${key}`)
         } else if (s.summary || s.headline) body.push(para(s.summary || s.headline))
-        const spine = storySpineRows(s)
+        const spine = storySpineRows(s, t)
         if (spine) {
-          body.push(para({ text: `Spine: ${n(spine.rows.length)} of ${n(spine.of)} steps`, bold: true }))
+          body.push(para({ text: t.story.spine(spine.rows.length, spine.of), bold: true }))
           body.push(
             table(
-              ['when (UTC)', 'phase', 'step', 'why it is in the story'],
+              t.story.spineHead,
               spine.rows.map((r) => [
-                span(r.ts, r.tsEnd),
-                `${r.severity ? `${r.severity} · ` : ''}${r.phase}`,
-                `${r.title}${r.host ? ` on ${r.host}` : ''}${r.wayIn ? ' [way in]' : ''}${r.anchor ? ' [anchor]' : ''}${r.finding ? `\n${r.finding}${r.more ? ` +${n(r.more)}` : ''}` : ''}`,
+                span(t, r.ts, r.tsEnd),
+                `${r.severity ? `${sev(r.severity)} · ` : ''}${r.phase}`,
+                `${r.title}${r.host ? ` ${t.story.on} ${r.host}` : ''}${r.wayIn ? ` [${t.story.wayIn}]` : ''}${r.anchor ? ` [${t.story.anchor}]` : ''}${r.finding ? `\n${r.finding}${r.more ? ` +${n(r.more)}` : ''}` : ''}`,
                 r.why,
               ]),
             ),
           )
           if (spine.basis) body.push(caption(spine.basis))
-          body.push(para({ text: 'Phases', bold: true }))
+          body.push(para({ text: t.story.phases, bold: true }))
         }
         body.push(
           table(
-            ['phase', 'when (UTC)', 'steps', 'what marks it'],
-            storyPhaseRows(s, dec).map((p) => [`${p.severity ? `${p.severity} · ` : ''}${p.label}`, span(p.first, p.last), n(p.steps), p.marks]),
+            t.story.phaseHead,
+            storyPhaseRows(s, dec, t).map((p) => [`${p.severity ? `${sev(p.severity)} · ` : ''}${p.label}`, span(t, p.first, p.last), n(p.steps), p.marks]),
           ),
         )
-        for (const l of storyDecisionTexts(dec)) body.push(caption(l))
+        for (const l of storyDecisionTexts(dec, t)) body.push(caption(l))
         const gaps = storyOwnGaps(s)
-        if (gaps.length) body.push(caption(`Where it stops: ${gaps.join(' ')}`))
+        if (gaps.length) body.push(caption(`${t.story.stops} ${gaps.join(' ')}`))
       }
     }
-    if (d.storiesLeft)
-      body.push(
-        caption(
-          `${n(d.storiesLeft)} more ${d.storiesLeft === 1 ? 'story is' : 'stories are'} not printed: below the severity floor${settings.onlyReviewed ? ', without a note or a decision (reviewed items only)' : ''} or past the first twenty.`,
-        ),
-      )
-    if (d.storiesDismissed)
-      body.push(
-        caption(`${n(d.storiesDismissed)} ${d.storiesDismissed === 1 ? 'story' : 'stories'} decided benign or false positive by the analyst ${d.storiesDismissed === 1 ? 'is' : 'are'} not printed.`),
-      )
+    if (d.storiesLeft) body.push(caption(t.story.left(d.storiesLeft, settings.onlyReviewed)))
+    if (d.storiesDismissed) body.push(caption(t.story.dismissed(d.storiesDismissed)))
   }
 
   if (d.chains.length) {
-    body.push(heading('Attack chains', 1))
-    body.push(
-      para(
-        "A chain is a suspicious mail and what the recipient's accounts and machines did after it, scored on the seed, the ties to the mail, the steps, the findings and the sources involved. Findings whose rows are steps of a chain are decided with it.",
-      ),
-    )
-    if (settings.includeGraphs && d.chains.length > 1)
-      body.push(caption(`Shared between chains: ${d.campaignInsights.length ? d.campaignInsights.join(' · ') : 'no sender, domain, IP or host is shared between the chains'}.`))
+    body.push(heading(t.section.chains, 1))
+    body.push(para(t.chain.introDocx))
+    if (settings.includeGraphs && d.chains.length > 1) body.push(caption(`${t.chain.shared}: ${d.campaignInsights.length ? d.campaignInsights.join(' · ') : t.chain.nothingShared}.`))
     for (const c of d.chains) {
       const r = d.reviews[c.id]
-      body.push(heading(`${c.identityLabel}: ${c.seed.subject || 'chain'}`, 2))
+      body.push(heading(`${c.identityLabel}: ${c.seed.subject || t.chain.fallbackTitle}`, 2))
       body.push(
         para([
           sevRun(chainSeverity(c, r)),
-          ` · ${r?.verdict ? `verdict ${r.verdict}` : 'no verdict'} · ${span(c.start, c.end)} · ${n(c.steps.length)} step${c.steps.length === 1 ? '' : 's'} · score ${c.score}`,
+          ` · ${r?.verdict ? t.chain.verdict(t.chainVerdict[r.verdict] ?? r.verdict) : t.chain.noVerdict} · ${span(t, c.start, c.end)} · ${t.chain.stepCount(c.steps.length)} · ${t.chain.score(c.score)}`,
         ]),
       )
       body.push(
         caption(
-          `Seed ${c.seed.source === 'events' ? 'event' : 'mail'} “${c.seed.subject}” from ${c.seed.fromAddr ?? ''} at ${fmtTs(c.seed.ts)} (risk ${c.seed.risk}) · ${c.artifactLinks} artifact tie(s)${c.entities.attackerAddresses.length ? ` · attacker ${c.entities.attackerAddresses.join(', ')}` : ''}${c.entities.ips.length ? ` · IPs ${c.entities.ips.join(', ')}` : ''}${c.entities.hosts.length ? ` · hosts ${c.entities.hosts.join(', ')}` : ''}`,
+          `${t.chain.seed(c.seed.source === 'events' ? 'event' : 'mail', c.seed.subject, c.seed.fromAddr ?? '', t.ts(c.seed.ts), c.seed.risk)} · ${t.chain.ties(c.artifactLinks)}${c.entities.attackerAddresses.length ? ` · ${t.chain.attacker} ${c.entities.attackerAddresses.join(', ')}` : ''}${c.entities.ips.length ? ` · ${t.chain.ips} ${c.entities.ips.join(', ')}` : ''}${c.entities.hosts.length ? ` · ${t.chain.hosts} ${c.entities.hosts.join(', ')}` : ''}`,
         ),
       )
       if (r?.narrative) {
         body.push(markdown(r.narrative))
-        if (r.narrativeBy === 'ai') body.push(caption('Narrative drafted by the analyst model.'))
+        if (r.narrativeBy === 'ai') body.push(caption(t.chain.narrativeByAiDocx))
         checkOf(`chain:${c.id}`)
       } else if (c.summary) body.push(para(c.summary))
       const visible = c.steps.filter((st) => stepVisible(st, settings.chainDetail))
@@ -468,73 +455,77 @@ export function reportDocumentXml(d: ReportData): string {
       const offset = (m: number) => `${m >= 0 ? '+' : ''}${Math.round(m)}`
       body.push(
         table(
-          ['time (UTC)', 'offset', 'source', 'step', 'ties to the mail / findings'],
+          t.chain.head,
           printed.map((f) => {
             const st = f.step
             return [
-              f.n > 1 && f.tsEnd !== f.ts ? `${fmtTs(f.ts)}\nto ${fmtTs(f.tsEnd)}` : fmtTs(f.ts),
-              f.n > 1 && f.offsetEnd !== f.offsetMin ? `${offset(f.offsetMin)} → ${offset(f.offsetEnd)} min` : `${offset(f.offsetMin)} min`,
-              st.kind === 'mail' ? 'mailbox' : st.origin === 'm365' ? 'Microsoft 365' : 'host',
+              f.n > 1 && f.tsEnd !== f.ts ? `${t.ts(f.ts)}\n${t.to} ${t.ts(f.tsEnd)}` : t.ts(f.ts),
+              f.n > 1 && f.offsetEnd !== f.offsetMin ? `${offset(f.offsetMin)} → ${offset(f.offsetEnd)} ${t.chain.minutes}` : `${offset(f.offsetMin)} ${t.chain.minutes}`,
+              t.lane[st.kind === 'mail' ? 'mail' : st.origin === 'm365' ? 'm365' : 'host'],
               `${st.title}${f.n > 1 ? ` ×${f.n}` : st.count > 1 ? ` ×${st.count}` : ''}${st.computer || st.ipAddress ? `\n${[st.computer, st.ipAddress].filter(Boolean).join(' · ')}` : ''}`,
-              [...st.artifacts, ...st.findings.map((x) => x.title)].join('; '),
+              [...st.artifacts, ...st.findings.map((y) => y.title)].join('; '),
             ]
           }),
         ),
       )
-      if (left || hidden)
-        body.push(
-          caption(
-            `${left ? `${left} more step row(s) not printed (open the chain in REMN for the full list)` : ''}${left && hidden ? ' · ' : ''}${hidden ? `${hidden} routine step(s) not printed at the “${settings.chainDetail}” detail level` : ''}.`,
-          ),
-        )
+      if (left || hidden) body.push(caption(`${left ? t.chain.left(left) : ''}${left && hidden ? ' · ' : ''}${hidden ? t.chain.hidden(hidden, settings.chainDetail) : ''}.`))
       const members = d.membersOf.get(c.id) ?? []
       if (members.length) {
-        body.push(caption(`${members.length} finding(s) linked to this chain, decided with it.`))
+        body.push(caption(`${t.chain.members(members.length)}.`))
         body.push(ruleTable(members))
       }
-      if (r?.by === 'ai' && r.aiReason) body.push(caption(`Triage note (model): ${r.aiReason}`))
+      if (r?.by === 'ai' && r.aiReason) body.push(caption(t.chain.triage(r.aiReason)))
     }
-    if (settings.includeGraphs) body.push(caption('The chain graphs are in the HTML report.'))
+    if (settings.includeGraphs) body.push(caption(t.chain.graphsInHtml))
   }
 
-  body.push(heading('Incidents', 1))
+  body.push(heading(t.section.incidents, 1))
   if (d.incidents.length) {
-    body.push(para("Findings on the same mail, or about the same user, host or IP within six hours, are one incident. Each table groups the incident's findings by rule."))
+    body.push(para(t.incident.introDocx))
     for (const i of d.incidents) {
       body.push(heading(i.title, 2))
-      body.push(para([sevRun(i.severity), ` · ${STATUS_WORD[i.status] ?? i.status} · ${i.subtitle} · ${span(i.ts, i.tsEnd)} · ${n(i.refs.length)} row(s)`]))
+      body.push(para([sevRun(i.severity), ` · ${t.status[i.status] ?? i.status} · ${i.subtitle} · ${span(t, i.ts, i.tsEnd)} · ${t.incident.rows(i.refs.length)}`]))
       const ents = Object.entries(i.entities).slice(0, 6)
       if (ents.length) body.push(caption(ents.map(([k, v]) => `${k}=${String(v)}`).join(' · ')))
       if (i.lead.notes) {
         body.push(markdown(i.lead.notes))
-        if (i.lead.notesBy === 'ai') body.push(caption('Note drafted by the model during triage.'))
+        if (i.lead.notesBy === 'ai') body.push(caption(t.incident.noteByAiDocx))
       }
       checkOf(`incident:${i.lead.id ?? i.title}`)
-      if (i.lead.decidedBy === 'ai' && i.lead.aiReason) body.push(caption(`Triage note (model): ${i.lead.aiReason}`))
+      if (i.lead.decidedBy === 'ai' && i.lead.aiReason) body.push(caption(t.chain.triage(i.lead.aiReason)))
       body.push(ruleTable(i.findings, i.entities))
     }
-  } else body.push(para('No incident outside the attack chains passes the severity floor.'))
+  } else body.push(para(t.incident.none))
 
   if (settings.includeEvidence) {
-    body.push(heading('Evidence and chain of custody', 1))
+    body.push(heading(t.section.evidence, 1))
     if (d.evidence.length)
       body.push(
         table(
-          ['file', 'kind', 'size', 'rows', 'SHA-256', 'integrity', 'read', 'added (UTC)'],
+          t.evidence.head,
           d.evidence.map((e) => {
-            const issue = e.kind === 'package' ? packageCoverageIssues(e).join('; ') : evidenceIssue(e)
-            return [e.name, e.format || e.kind, fmtBytes(e.size), n(e.count), e.sha256Client ?? '', e.integrity, issue ? `incomplete: ${issue}` : 'complete', fmtTs(e.addedAt)]
+            const issue = e.kind === 'package' ? packageCoverageIssues(e).join('; ') : evidenceIssue(e, t)
+            return [
+              e.name,
+              e.format || e.kind,
+              t.bytes(e.size),
+              n(e.count),
+              e.sha256Client ?? '',
+              t.integrity[e.integrity] ?? e.integrity,
+              issue ? t.evidence.incomplete(issue) : t.evidence.complete,
+              t.ts(e.addedAt),
+            ]
           }),
         ),
       )
-    else body.push(para('No evidence file.'))
+    else body.push(para(t.evidence.none))
     const packages = d.evidence.filter((e) => e.kind === 'package')
     if (packages.length) {
-      body.push(heading('Investigation package coverage', 3))
+      body.push(heading(t.evidence.packages, 3))
       body.push(
         table(
-          ['package', 'coverage'],
-          packages.map((e) => [e.name, packageCoverageIssues(e).join('; ') || 'No reported import issues']),
+          t.evidence.packageHead,
+          packages.map((e) => [e.name, packageCoverageIssues(e).join('; ') || t.evidence.noIssues]),
         ),
       )
     }
@@ -542,111 +533,132 @@ export function reportDocumentXml(d: ReportData): string {
 
   const relationships = (d.relationships ?? []).filter((r) => r.status === 'accepted' && r.includeInReport)
   if (relationships.length) {
-    body.push(heading('Reviewed evidence relationships', 1))
-    body.push(para('Analyst-selected connections. Observation and collection times remain distinct; shared entities do not establish causation.'))
+    body.push(heading(t.section.relationships, 1))
+    body.push(para(t.relationship.intro))
     for (const r of relationships) {
       body.push(heading(`${r.sourceLabel} → ${r.relation} → ${r.targetLabel}`, 3))
       body.push(para(`${r.reason} (${r.confidence})`))
       if (r.notes) body.push(markdown(r.notes))
-      if (Object.keys(r.aliases ?? {}).length) body.push(para(`Explicit aliases: ${JSON.stringify(r.aliases)}`))
-      if (r.references.length) body.push(table(REFERENCE_HEAD, referenceRows(r)))
+      if (Object.keys(r.aliases ?? {}).length) body.push(para(t.relationship.aliases(JSON.stringify(r.aliases))))
+      if (r.references.length) body.push(table(t.relationship.head, referenceRows(r, t)))
     }
   }
 
   if (settings.includeIocs) {
-    const ind = indicatorAppendix(d)
-    body.push(heading('Indicators of compromise', 1))
+    const ind = indicatorAppendix(d, t)
+    body.push(heading(t.section.iocs, 1))
     if (ind.rows.length) {
-      body.push(para(INDICATORS_INTRO))
-      body.push(table(INDICATOR_HEAD, ind.rows.map(indicatorRow)))
-      if (ind.left) body.push(caption(`${n(ind.left)} more indicator${ind.left === 1 ? ' is' : 's are'} not listed: the appendix holds ${n(MAX_INDICATORS)}.`))
-    } else body.push(para('No confirmed item names an outside address, domain, sender, URL or hash, and no reputation service flagged one.'))
+      body.push(para(t.indicator.intro))
+      body.push(
+        table(
+          t.indicator.head,
+          ind.rows.map((r) => indicatorRow(r, t)),
+        ),
+      )
+      if (ind.left) body.push(caption(t.indicator.left(ind.left, MAX_INDICATORS)))
+    } else body.push(para(t.indicator.none))
   }
-  const techniques = techniqueTable(d)
+  const techniques = techniqueTable(d, t)
   if (techniques.length) {
-    body.push(heading('ATT&CK techniques', 1))
-    body.push(para(TECHNIQUES_INTRO))
-    body.push(table(TECHNIQUE_HEAD, techniques.map(techniqueRow)))
+    body.push(heading(t.section.techniques, 1))
+    body.push(para(t.technique.intro))
+    body.push(
+      table(
+        t.technique.head,
+        techniques.map((r) => techniqueRow(r, t)),
+      ),
+    )
   }
 
   if (settings.includeTimeline && d.timeline.length) {
-    body.push(heading('Case timeline', 1))
+    body.push(heading(t.section.timeline, 1))
     body.push(
       table(
-        ['when (UTC)', 'entry', 'from'],
-        d.timeline.map((t) => [t.untimed ? 'no event time' : fmtTs(t.ts), t.text, t.link ? `${t.link.source} ${t.link.label ?? t.link.id}` : '']),
+        t.timeline.head,
+        d.timeline.map((e) => [e.untimed ? t.noEventTime : t.ts(e.ts), e.text, e.link ? `${e.link.source} ${e.link.label ?? e.link.id}` : '']),
       ),
     )
   }
   if (settings.includeTasks && d.tasks.length) {
-    body.push(heading('Tasks', 1))
-    for (const t of d.tasks) body.push(bullet([`${t.text} `, { text: `· ${fmtTs(t.updatedAt)}`, color: '8A95A3' }], t.done ? '☑' : '☐'))
+    body.push(heading(t.section.tasks, 1))
+    for (const e of d.tasks) body.push(bullet([`${e.text} `, { text: `· ${t.ts(e.updatedAt)}`, color: '8A95A3' }], e.done ? '☑' : '☐'))
   }
   if (settings.includeNotes && d.notes.length) {
-    body.push(heading('Analyst notes', 1))
+    body.push(heading(t.section.notes, 1))
     for (const note of d.notes) {
-      body.push(caption(fmtTs(note.createdAt)))
+      body.push(caption(t.ts(note.createdAt)))
       body.push(markdown(note.text))
     }
   }
 
-  body.push(heading('Findings by rule', 1))
+  body.push(heading(t.section.findings, 1))
   if (d.findings.length) {
-    body.push(para('Every printed finding, one line per rule: how many findings and rows, when, and the values matched. The incidents above carry the same findings in context.'))
+    body.push(para(t.finding.intro))
     body.push(ruleTable(d.findings))
-  } else body.push(para('No finding passes the severity floor.'))
+  } else body.push(para(t.finding.none))
 
   if (d.ai && d.ai.runs) {
-    const a = aiTexts(d.ai)
-    body.push(heading('How AI was used', 1))
+    const a = aiTexts(d.ai, t)
+    body.push(heading(t.section.ai, 1))
     body.push(para(a.intro))
     body.push(caption(a.facts))
-    body.push(a.rows.length ? table(AI_TABLE_HEAD, a.rows) : para(a.none))
+    body.push(a.rows.length ? table(t.ai.head, a.rows) : para(a.none))
     body.push(caption(a.decisions))
     body.push(caption(a.ledger))
   }
 
-  body.push(heading('Method and limits', 1))
-  body.push(heading('How this was produced', 2))
-  for (const l of producedLines(d, verdict)) body.push(bullet(l))
-  body.push(heading('Where it stops', 2))
-  for (const l of limitLines(d, confidence)) body.push(bullet(l))
+  body.push(heading(t.section.method, 1))
+  body.push(heading(t.produced.title, 2))
+  for (const l of producedLines(d, verdict, t)) body.push(bullet(l))
+  body.push(heading(t.limit.title, 2))
+  for (const l of limitLines(d, confidence, t)) body.push(bullet(l))
 
-  body.push(heading('Case settings', 1))
+  body.push(heading(t.section.settings, 1))
   body.push(
     caption(
-      `internal domains: ${kase.settings.internalDomains.join(', ') || '—'} · VIPs: ${kase.settings.vipNames.join(', ') || '—'} · business hours ${kase.settings.businessHours.start}h–${kase.settings.businessHours.end}h (${kase.settings.businessHours.tz}) · reputation lookups ${d.iocsChecked ? `run on ${n(d.iocsChecked)} indicator${d.iocsChecked === 1 ? '' : 's'}` : 'not run'} · report floor ${settings.minSeverity}${settings.onlyReviewed ? ' · reviewed items only' : ''}${settings.includeFp ? ' · false positives included' : ''} · chain steps: ${settings.chainDetail}`,
+      t.settingsLine({
+        domains: kase.settings.internalDomains.join(', '),
+        vips: kase.settings.vipNames.join(', '),
+        start: kase.settings.businessHours.start,
+        end: kase.settings.businessHours.end,
+        tz: kase.settings.businessHours.tz,
+        lookups: d.iocsChecked ?? 0,
+        floor: settings.minSeverity,
+        onlyReviewed: settings.onlyReviewed,
+        fp: settings.includeFp,
+        detail: settings.chainDetail,
+      }),
     ),
   )
 
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body>${body.join('')}<w:sectPr><w:headerReference w:type="default" r:id="rIdHeader"/><w:footerReference w:type="default" r:id="rIdFooter"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="567" w:footer="567" w:gutter="0"/></w:sectPr></w:body></w:document>`
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><w:body>${body.join('')}<w:sectPr><w:headerReference w:type="default" r:id="rIdHeader"/><w:footerReference w:type="default" r:id="rIdFooter"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="567" w:footer="567" w:gutter="0"/></w:sectPr></w:body></w:document>`
 
   /** One line per rule: its severity, title and id with what its measure says, whether its rows bear it out, when, and what it matched. */
   function ruleTable(findings: ReportData['findings'], said: Record<string, string> = {}): string {
     return table(
-      ['severity', 'rule', 'findings · rows', 'when (UTC)', 'status', 'ATT&CK', 'what matched'],
+      t.finding.ruleHeadDocx,
       groupByRule(findings, said).map((g) => {
-        const measure = measureWords(d.measures?.[g.ruleId])
-        const claim = claimLine(g.ids, d.claims)
+        const measure = measureWords(d.measures?.[g.ruleId], t)
+        const claim = claimLine(g.ids, d.claims, t)
         return [
-          g.severity !== g.ruleSeverity ? `${g.severity}\nrule: ${g.ruleSeverity}` : g.severity,
+          g.severity !== g.ruleSeverity ? `${sev(g.severity)}\n${t.finding.ruleSeverity(g.ruleSeverity)}` : sev(g.severity),
           `${g.title}\n${g.ruleId}${measure ? ` · ${measure.lead ? measure.text.toUpperCase() : measure.text}` : ''}${g.escalations.length ? ` · ${g.escalations.slice(0, 2).join(' · ')}` : ''}${
             claim
-              ? `\n${claim.word}${claim.where ? ` · ${claim.where}${claim.more ? ` and ${n(claim.more)} more` : ''}` : ''}${claim.status !== 'verified' && claim.reasons.length ? `: ${claim.reasons.join(' ')}` : ''}`
+              ? `\n${claim.word}${claim.where ? ` · ${claim.where}${claim.more ? ` ${t.andMore(claim.more)}` : ''}` : ''}${claim.status !== 'verified' && claim.reasons.length ? `: ${claim.reasons.join(' ')}` : ''}`
               : ''
           }`,
           `${n(g.findings)} · ${n(g.rows)}`,
-          span(g.first, g.last),
+          span(t, g.first, g.last),
           Object.entries(g.statuses)
-            .map(([s, c]) => `${STATUS_WORD[s] ?? s}${c > 1 ? ` ×${c}` : ''}`)
+            .map(([s, c]) => `${t.status[s] ?? s}${c > 1 ? ` ×${c}` : ''}`)
             .join(', '),
           g.attack.slice(0, 4).join(' '),
           g.values.length
             ? `${g.values
                 .slice(0, 6)
                 .map((v) => (v.length > 90 ? v.slice(0, 89) + '…' : v))
-                .join('\n')}${g.values.length > 6 ? `\n+${g.values.length - 6} more` : ''}`
+                .join('\n')}${g.values.length > 6 ? `\n${t.plusMore(g.values.length - 6)}` : ''}`
             : '–',
         ]
       }),
@@ -654,9 +666,10 @@ export function reportDocumentXml(d: ReportData): string {
   }
 }
 
-const STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+/** The styles of the document; the default run is in the report's language, so Word checks the spelling of the right one. */
+const styles = (lang: string) => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:eastAsia="Calibri" w:cs="Calibri"/><w:color w:val="0F1720"/><w:sz w:val="20"/><w:szCs w:val="20"/><w:lang w:val="en-GB"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="100" w:line="264" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>
+<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:eastAsia="Calibri" w:cs="Calibri"/><w:color w:val="0F1720"/><w:sz w:val="20"/><w:szCs w:val="20"/><w:lang w:val="${lang}"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="100" w:line="264" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>
 <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>
 <w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:spacing w:after="120"/></w:pPr><w:rPr><w:b/><w:sz w:val="48"/><w:szCs w:val="48"/></w:rPr></w:style>
 <w:style w:type="paragraph" w:styleId="Subtitle"><w:name w:val="Subtitle"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:rPr><w:caps/><w:color w:val="1B7F66"/><w:spacing w:val="20"/><w:sz w:val="18"/></w:rPr></w:style>
@@ -674,20 +687,24 @@ const STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 
 /** The report as the bytes of a .docx file. */
 export function buildReportDocx(d: ReportData): Uint8Array {
+  const t = reportText(d.settings.language)
   const at = new Date(d.generatedAt ?? Date.now())
   const created = at.toISOString().replace(/\.\d{3}Z$/, 'Z')
-  const verdict = computeVerdict(d)
+  const verdict = computeVerdict(d, t)
+  const firm = d.settings.branding.firmName.trim()
+  const logo = logoImage(d.settings.branding.logo)
+  const title = firm ? `${firm} · ${d.kase.name}` : t.cover.title(d.kase.name)
   // the handling marking at the top of every page, when the analyst set one
   const header = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:pPr><w:pStyle w:val="Header"/><w:jc w:val="center"/></w:pPr>${run(markingLine(d.settings.client), { bold: true })}</w:p></w:hdr>`
   const footer = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:pPr><w:pStyle w:val="Footer"/></w:pPr>${run(`REMN · ${d.kase.name} · ${verdict.label}${d.issue?.status === 'draft' ? ' · draft' : ''} · page `)}<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>1</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p></w:ftr>`
+<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:pPr><w:pStyle w:val="Footer"/></w:pPr>${run(t.docx.footer(firm || 'REMN', d.kase.name, verdict.label, d.issue?.status === 'draft'))}<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>1</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p></w:ftr>`
   return zipStore(
     [
       {
         name: '[Content_Types].xml',
         data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/><Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>`,
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>${logo ? `<Default Extension="${logo.ext}" ContentType="${logo.mime}"/>` : ''}<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/><Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>`,
       },
       {
         name: '_rels/.rels',
@@ -697,7 +714,7 @@ export function buildReportDocx(d: ReportData): Uint8Array {
       {
         name: 'docProps/core.xml',
         data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>${x(`REMN report · ${d.kase.name}`)}</dc:title>${d.kase.analyst ? `<dc:creator>${x(d.kase.analyst)}</dc:creator>` : ''}<dcterms:created xsi:type="dcterms:W3CDTF">${created}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">${created}</dcterms:modified></cp:coreProperties>`,
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>${x(title)}</dc:title>${d.kase.analyst ? `<dc:creator>${x(d.kase.analyst)}</dc:creator>` : ''}<dcterms:created xsi:type="dcterms:W3CDTF">${created}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">${created}</dcterms:modified></cp:coreProperties>`,
       },
       {
         name: 'docProps/app.xml',
@@ -707,12 +724,13 @@ export function buildReportDocx(d: ReportData): Uint8Array {
       {
         name: 'word/_rels/document.xml.rels',
         data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rIdHeader" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/><Relationship Id="rIdFooter" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/></Relationships>`,
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rIdHeader" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/><Relationship Id="rIdFooter" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>${logo ? `<Relationship Id="rIdLogo" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/logo.${logo.ext}"/>` : ''}</Relationships>`,
       },
       { name: 'word/document.xml', data: reportDocumentXml(d) },
-      { name: 'word/styles.xml', data: STYLES },
+      { name: 'word/styles.xml', data: styles(t.wordLang) },
       { name: 'word/header1.xml', data: header },
       { name: 'word/footer1.xml', data: footer },
+      ...(logo ? [{ name: `word/media/logo.${logo.ext}`, data: logo.bytes }] : []),
     ],
     at,
   )

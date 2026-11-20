@@ -73,4 +73,30 @@ describe('ReportView', () => {
     },
     TEST_TIMEOUT,
   )
+
+  it(
+    'writes the report in the language chosen and under the firm set, and refuses a logo over the cap, saying the cap',
+    async () => {
+      await act(async () => {
+        render(<ReportView />)
+      })
+      await waitFor(() => expect(screen.getByTestId('client-panel')).toBeTruthy(), WAIT)
+      // the page itself stays English
+      fireEvent.change(screen.getByLabelText(/report language/), { target: { value: 'fr' } })
+      await waitFor(async () => expect((await stored())?.language).toBe('fr'), WAIT)
+      await waitFor(() => expect(preview()).toContain('<html lang="fr">'), WAIT)
+      expect(screen.getByText('client report')).toBeTruthy()
+      const firm = screen.getByLabelText('firm name') as HTMLInputElement
+      fireEvent.change(firm, { target: { value: 'Example Response' } })
+      fireEvent.blur(firm)
+      await waitFor(async () => expect((await stored())?.branding.firmName).toBe('Example Response'), WAIT)
+      await waitFor(() => expect(preview()).toContain('<span class="firm">Example Response</span>'), WAIT)
+      expect(screen.getByText(/PNG or JPEG, 200 KB at most/)).toBeTruthy()
+      const big = new File([new Uint8Array(300 * 1024)], 'logo.png', { type: 'image/png' })
+      fireEvent.change(screen.getByLabelText('logo'), { target: { files: [big] } })
+      expect(await screen.findByText('logo.png is 300 KB; the logo can be 200 KB at most')).toBeTruthy()
+      expect((await stored())?.branding.logo).toBe('')
+    },
+    TEST_TIMEOUT,
+  )
 })

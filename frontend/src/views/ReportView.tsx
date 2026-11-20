@@ -15,10 +15,12 @@ import {
   type ChainReview,
   type ClientReport,
   type ContainmentAction,
+  type ReportBranding,
   type ReportSettings,
   type ReportVersion,
   type Tlp,
 } from '../data/review'
+import { LOGO_MAX_BYTES, logoImage, REPORT_LANGUAGES, reportText, type ReportLanguage } from '../data/reportText'
 import { getDb, type CaseNote, type Evidence, type Finding, type Ioc } from '../db/schema'
 import { buildIncidents } from '../rules/incidents'
 import { toast, useStore } from '../state/store'
@@ -265,8 +267,12 @@ export function ReportView() {
     }),
     ...(claims?.texts ?? []).filter((t) => t.check.status === 'unsupported').map((t) => ({ what: t.what, status: t.check.status, reasons: t.check.reasons })),
   ]
-  const checks = preflightChecks({ evidence, rules: rulesState, undecided, aiDecided: aiDecided(findings), unprintedConfirmed: hiddenConfirmed.length + hiddenStories, claims: claimSummary })
+  const preflight = { evidence, rules: rulesState, undecided, aiDecided: aiDecided(findings), unprintedConfirmed: hiddenConfirmed.length + hiddenStories, claims: claimSummary }
+  const checks = preflightChecks(preflight)
   const status = issueStatus(checks, issue)
+  // the page lists the checks in English; the report prints what is open in its own language
+  const words = reportText(settings.language)
+  const printedStatus = settings.language === 'en' ? status : issueStatus(preflightChecks(preflight, words), issue)
   /** The stories read again from the case as it is now; the page reloads what it prints once they are. */
   const rebuildStories = async () => {
     setRebuilding(true)
@@ -329,7 +335,7 @@ export function ReportView() {
     notes: analystNotes,
     undecided,
     unprintedConfirmed: hiddenConfirmed,
-    issue: { status: status.status, finalAt: status.finalAt, open: status.open, waived: status.waived },
+    issue: { status: printedStatus.status, finalAt: printedStatus.finalAt, open: printedStatus.open, waived: printedStatus.waived },
     rules: rulesState,
     iocsTotal: iocCounts.total,
     iocsChecked: iocCounts.checked,
@@ -353,8 +359,9 @@ export function ReportView() {
   })
   const html = (generatedAt?: number) => buildReportHtml(reportData(generatedAt))
   /** a change to the client part of the report settings, kept with the case and its bundle */
-  const patchClient = (patch: Partial<ClientReport>) => {
-    const next = { ...settings, client: { ...settings.client, ...patch } }
+  const patchClient = (patch: Partial<ClientReport>) => patchSettings({ client: { ...settings.client, ...patch } })
+  const patchSettings = (patch: Partial<ReportSettings>) => {
+    const next = { ...settings, ...patch }
     setSettings(next)
     void saveReportSettings(kase.id!, next)
   }
@@ -616,7 +623,10 @@ export function ReportView() {
           key={kase.id}
           client={settings.client}
           onChange={patchClient}
-          spineDraft={spineStartingPoint(printedStories.stories)}
+          language={settings.language}
+          branding={settings.branding}
+          onSettings={patchSettings}
+          spineDraft={spineStartingPoint(printedStories.stories, words)}
           scope={scope}
           period={evidencePeriod(evidence)}
           impact={impactInventory(reportData(previewAt))}
@@ -643,6 +653,9 @@ const CONFIDENCES: AnalyticConfidence[] = ['', 'low', 'moderate', 'high']
 function ClientPanel({
   client,
   onChange,
+  language,
+  branding,
+  onSettings,
   spineDraft,
   scope,
   period,
@@ -650,6 +663,9 @@ function ClientPanel({
 }: {
   client: ClientReport
   onChange: (patch: Partial<ClientReport>) => void
+  language: ReportLanguage
+  branding: ReportBranding
+  onSettings: (patch: { language?: ReportLanguage; branding?: ReportBranding }) => void
   spineDraft: string
   scope: EvidenceScope | undefined
   period: { from: number | null; to: number | null }
@@ -770,6 +786,20 @@ function ClientPanel({
             </select>
           </label>
           {text('confidentiality', 'confidentiality line', { placeholder: 'printed on the cover and on every page' })}
+          <b className="small" style={{ marginTop: 8 }}>
+            Language and branding
+          </b>
+          <label className="col small" style={{ gap: 2 }}>
+            <span className="muted">report language (this page stays English)</span>
+            <select className="select" value={language} onChange={(e) => onSettings({ language: e.target.value as ReportLanguage })}>
+              {REPORT_LANGUAGES.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <BrandingFields key={round} branding={branding} onChange={(b) => onSettings({ branding: b })} />
         </div>
         <div className="col" style={{ gap: 6 }}>
           <b className="small">Scope</b>
@@ -841,5 +871,52 @@ function ClientPanel({
         </div>
       </div>
     </div>
+  )
+}
+
+/** The firm the report goes out under: its name, a line for the cover, and its logo, size-capped and checked before it is kept. */
+function BrandingFields({ branding, onChange }: { branding: ReportBranding; onChange: (b: ReportBranding) => void }) {
+  const [problem, setProblem] = useState('')
+  const field = (k: 'firmName' | 'coverLine', label: string, placeholder: string) => (
+    <label className="col small" style={{ gap: 2 }}>
+      <span className="muted">{label}</span>
+      <input className="input small" defaultValue={branding[k]} placeholder={placeholder} onBlur={(e) => e.target.value !== branding[k] && onChange({ ...branding, [k]: e.target.value })} />
+    </label>
+  )
+  const pick = (file: File | undefined) => {
+    setProblem('')
+    if (!file) return
+    if (file.size > LOGO_MAX_BYTES) return setProblem(`${file.name} is ${fmtNum(Math.ceil(file.size / 1024))} KB; the logo can be ${fmtNum(LOGO_MAX_BYTES / 1024)} KB at most`)
+    const reader = new FileReader()
+    reader.onload = () => {
+      const url = typeof reader.result === 'string' ? reader.result : ''
+      if (!logoImage(url)) return setProblem(`${file.name} is not a PNG or JPEG image the report can embed`)
+      onChange({ ...branding, logo: url })
+    }
+    reader.onerror = () => setProblem(`${file.name} could not be read`)
+    reader.readAsDataURL(file)
+  }
+  const logo = logoImage(branding.logo)
+  return (
+    <>
+      {field('firmName', 'firm name', "empty: REMN's own wordmark")}
+      {field('coverLine', 'cover line', 'empty: forensic analysis report')}
+      <label className="col small" style={{ gap: 2 }}>
+        <span className="muted">logo: PNG or JPEG, {fmtNum(LOGO_MAX_BYTES / 1024)} KB at most, embedded in the HTML and Word reports</span>
+        <input aria-label="logo" type="file" accept="image/png,image/jpeg" className="small" onChange={(e) => pick(e.target.files?.[0])} />
+      </label>
+      {problem && <span className="warn small">{problem}</span>}
+      {logo && (
+        <div className="row small" style={{ gap: 8, alignItems: 'center' }}>
+          <img src={logo.dataUrl} alt="the logo the report carries" style={{ maxHeight: 32, maxWidth: 140, background: '#fff' }} />
+          <span className="muted">
+            {fmtNum(logo.width)} × {fmtNum(logo.height)} px, {fmtNum(Math.ceil(logo.bytes.length / 1024))} KB
+          </span>
+          <button className="btn xs" onClick={() => onChange({ ...branding, logo: '' })}>
+            remove logo
+          </button>
+        </div>
+      )}
+    </>
   )
 }
