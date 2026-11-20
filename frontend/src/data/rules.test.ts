@@ -249,7 +249,7 @@ describe('runRulesFor', () => {
       total: 1,
       byRule: { a: 1 },
       diagnostics: [
-        { ruleId: 'a', reason: 'truncated', detail: 'kept 10,000', matched: 1, afterExclude: 1, afterTime: 1 },
+        { ruleId: 'a', reason: 'truncated', detail: 'kept 10,000', matched: 1, afterExclude: 1, afterTime: 1, dropped: 2_345 },
         { ruleId: 'b', reason: 'missing_setting', detail: 'internal domains', matched: 0, afterExclude: 0, afterTime: 0 },
         { ruleId: 'c', reason: 'not_applicable', matched: 0, afterExclude: 0, afterTime: 0 },
       ],
@@ -261,7 +261,7 @@ describe('runRulesFor', () => {
     expect(saved.byRule).toEqual({ a: 1 })
     expect(saved.diagnostics).toHaveLength(3)
     const texts = useStore.getState().toasts.map((t) => t.text)
-    expect(texts.some((t) => t.startsWith('1 rule(s) matched more than a run keeps and were cut short'))).toBe(true)
+    expect(texts).toContain('2,345 finding(s) left out: 1 rule(s) found more than a run keeps. See the Rules view.')
     expect(texts.some((t) => t.startsWith('1 finding(s) · 1 rule(s) not applicable to this evidence · 0 rule(s) had no matching events · 1 need Settings (internal domains, VIPs…)'))).toBe(true)
     const lines = useStore.getState().console.map((l) => l.text)
     expect(lines).toContain("2 finding(s) of rules that fire on most of the case's hosts were folded")
@@ -285,6 +285,20 @@ describe('runRulesFor', () => {
     expect(stored.replaceFindings).toHaveBeenCalledWith(2, ['a'], [{ ruleId: 'a', key: 'k1' }], expect.any(Function), undefined)
     expect(res).toEqual({ total: 1, byRule: { a: 1, b: 1 }, errors: ['b: timed out'], diagnostics: [] })
     expect(useStore.getState().toasts.map((t) => t.text)).toContain('1 finding(s) from 2 rule(s)')
+  })
+
+  it('counts the findings the cut rules left out, not the rules, and says when a count is missing', async () => {
+    const cut = (ruleId: string, dropped?: number) => ({ ruleId, reason: 'truncated', detail: 'kept 2,000', matched: 2000, afterExclude: 2000, afterTime: 2000, dropped })
+    const run = runRulesFor(browserCase, [rule('a'), rule('b')])
+    lastWorker().say({ type: 'done', total: 4000, byRule: { a: 2000, b: 2000 }, diagnostics: [cut('a', 12_000), cut('b', 1)] })
+    await run
+    expect(useStore.getState().toasts.map((t) => t.text)).toContain('12,001 finding(s) left out: 2 rule(s) found more than a run keeps. See the Rules view.')
+    useStore.setState({ toasts: [] })
+    // a server from before the count was sent says only that the rule was cut
+    const older = runRulesFor(browserCase, [rule('a'), rule('b')])
+    lastWorker().say({ type: 'done', total: 4000, byRule: { a: 2000, b: 2000 }, diagnostics: [cut('a', 500), cut('b')] })
+    await older
+    expect(useStore.getState().toasts.map((t) => t.text)).toContain('At least 500 finding(s) left out: 2 rule(s) found more than a run keeps. See the Rules view.')
   })
 })
 

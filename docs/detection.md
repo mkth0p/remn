@@ -67,7 +67,7 @@ values a hunt is after), equal groups in the order of their values; a rule with 
 keeps its first bursts in the order of the grouped fields, and a rule with one finding per
 row its first rows in time order. The number of findings left out is shown beside the rule
 in the Rules view, above the list in the Findings view and on the findings of that rule, and
-the message at the end of the run says how many rules were cut. A `then` follow-up is
+the message at the end of the run says how many findings were left out and by how many rules. A `then` follow-up is
 checked for every finding the rule keeps.
 
 Operators: `eq ne in nin contains not_contains contains_any contains_all startswith
