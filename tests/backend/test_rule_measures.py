@@ -348,6 +348,62 @@ def test_the_merge_refuses_shares_that_measured_other_rules(tmp_path):
     assert recs[0].fired == {"a"}
 
 
+def test_a_clean_machine_archive_cut_off_or_reset_mid_download_is_fetched_again(tmp_path, monkeypatch):
+    """The measure workflow failed a share when GitHub reset the connection while a clean machine's
+    archive was unpacked from the live response. The archive is now downloaded whole first, and a
+    reset or a short read is tried again."""
+    import io
+    import tarfile
+    import urllib.error
+
+    M = _measure_tool()
+    packed = io.BytesIO()
+    with tarfile.open(fileobj=packed, mode="w:gz") as tar:
+        body = b"ElfFile" + b"\0" * 64
+        info = tarfile.TarInfo("Logs/Security.evtx")
+        info.size = len(body)
+        tar.addfile(info, io.BytesIO(body))
+    whole = packed.getvalue()
+
+    class Reset(io.BytesIO):
+        def read(self, n=-1):
+            raise ConnectionResetError(104, "Connection reset by peer")
+
+    class Response(io.BytesIO):
+        def __init__(self, data: bytes, announced: int):
+            super().__init__(data)
+            self.headers = {"Content-Length": str(announced)}
+
+    answers = [Reset(), Response(whole[:10], len(whole)), Response(whole, len(whole))]
+    calls = []
+
+    def urlopen(url, timeout=None):
+        calls.append(url)
+        answer = answers.pop(0)
+        if isinstance(answer, Reset):
+            answer.headers = {}
+        return answer
+
+    monkeypatch.setattr(M.urllib.request, "urlopen", urlopen)
+    archive, target = tmp_path / "cache" / "win-test.tgz", tmp_path / "baseline" / "win-test"
+    M.fetch_archive("https://example.invalid/win-test.tgz", archive, target, tries=4, wait_s=0)
+    # a reset, then fewer bytes than announced, then the whole archive
+    assert len(calls) == 3
+    assert (target / "Logs" / "Security.evtx").read_bytes().startswith(b"ElfFile")
+    assert not archive.exists() and not archive.with_name("win-test.tgz.part").exists() and not target.with_name("win-test.part").exists()
+
+    # a request the server refuses is not tried again
+    def missing(url, timeout=None):
+        calls.append(url)
+        raise urllib.error.HTTPError(url, 404, "Not Found", None, None)
+
+    calls.clear()
+    monkeypatch.setattr(M.urllib.request, "urlopen", missing)
+    with pytest.raises(urllib.error.HTTPError):
+        M.download("https://example.invalid/gone.tgz", tmp_path / "cache" / "gone.tgz", tries=4, wait_s=0)
+    assert len(calls) == 1 and not (tmp_path / "cache" / "gone.tgz.part").exists()
+
+
 def test_a_recording_with_an_export_remn_does_not_read_counts_it_unread(tmp_path):
     """Splunk's attack range keeps Entra audit logs beside sign-ins. The import refuses such a
     file with a message; measuring a recording that holds one stopped the whole run."""

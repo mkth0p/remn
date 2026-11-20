@@ -779,10 +779,81 @@ def gate(before: dict[str, Any], after: dict[str, Any], rules: dict[str, dict[st
     return lost, noisier, notes
 
 
-def fetch(root: Path) -> None:
-    """Every dataset at its pinned version under root, as --datasets reads them; one already there is kept."""
-    import subprocess
+# tries of a download before the run fails, and the wait before the second (longer each time)
+FETCH_TRIES = 4
+FETCH_WAIT_S = 10.0
+
+
+def download(url: str, dest: Path, tries: int = FETCH_TRIES, wait_s: float = FETCH_WAIT_S) -> Path:
+    """
+    The file at url, saved to dest through a .part file and kept only when whole. A connection
+    dropped or reset, a server error, or fewer bytes than the response announced is tried again,
+    up to tries times; a request the server refuses (a 4xx answer) is not.
+    """
+    import http.client
+    import time
+    import urllib.error
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    partial = dest.with_name(dest.name + ".part")
+    for attempt in range(1, tries + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=600) as resp, open(partial, "wb") as fh:  # noqa: S310 - a fixed https host
+                announced = resp.headers.get("Content-Length")
+                got = 0
+                while chunk := resp.read(1 << 20):
+                    fh.write(chunk)
+                    got += len(chunk)
+            if announced is not None and got != int(announced):
+                raise http.client.IncompleteRead(b"", int(announced) - got)
+            partial.replace(dest)
+            return dest
+        except (OSError, http.client.HTTPException) as exc:
+            refused = isinstance(exc, urllib.error.HTTPError) and exc.code < 500
+            if refused or attempt == tries:
+                partial.unlink(missing_ok=True)
+                raise
+            print(f"  {url}: {exc!r}; trying again ({attempt + 1} of {tries})", flush=True)
+            time.sleep(wait_s * attempt)
+    raise AssertionError("not reached")
+
+
+def fetch_archive(url: str, archive: Path, target: Path, tries: int = FETCH_TRIES, wait_s: float = FETCH_WAIT_S) -> None:
+    """
+    A .tgz release asset unpacked into target. It is downloaded whole into archive first, then
+    unpacked into a folder beside target that takes its name once complete, so a download cut
+    short is fetched again and a machine half unpacked is never taken for a whole one. An archive
+    that will not unpack is fetched once more; once unpacked it is removed, as it takes disk the
+    run needs.
+    """
+    import shutil
     import tarfile
+
+    work = target.with_name(target.name + ".part")
+    for round_ in (1, 2):
+        if not archive.is_file():
+            download(url, archive, tries, wait_s)
+        shutil.rmtree(work, ignore_errors=True)
+        work.mkdir(parents=True)
+        try:
+            with tarfile.open(archive, "r:gz") as tar:
+                tar.extractall(work, filter="data")
+            break
+        except (tarfile.TarError, EOFError, OSError):
+            archive.unlink(missing_ok=True)
+            shutil.rmtree(work, ignore_errors=True)
+            if round_ == 2:
+                raise
+            print(f"  {archive.name} did not unpack; fetching it again", flush=True)
+    shutil.rmtree(target, ignore_errors=True)
+    work.replace(target)
+    archive.unlink()
+
+
+def fetch(root: Path, cache: Path | None = None) -> None:
+    """Every dataset at its pinned version under root, as --datasets reads them; one already there is kept.
+    The clean machines' archives are downloaded into cache (root when none is given) before they are unpacked."""
+    import subprocess
 
     root.mkdir(parents=True, exist_ok=True)
     for key, name in LAYOUT.items():
@@ -793,11 +864,9 @@ def fetch(root: Path) -> None:
                 target = dest / machine
                 if target.is_dir() and any(target.rglob("*.evtx")):
                     continue
-                target.mkdir(parents=True, exist_ok=True)
                 url = f"https://github.com/{pin['repo']}/releases/download/{pin['tag']}/{machine}.tgz"
                 print(f"fetching {url}", flush=True)
-                with urllib.request.urlopen(url, timeout=600) as resp, tarfile.open(fileobj=resp, mode="r|gz") as tar:  # noqa: S310 - a fixed https host
-                    tar.extractall(target, filter="data")
+                fetch_archive(url, (cache or root) / "evtx-baseline" / pin["tag"] / f"{machine}.tgz", target)
             continue
         if dest.is_dir() and any(dest.iterdir()):
             continue
@@ -900,7 +969,7 @@ def main(argv: list[str] | None = None) -> int:
     if a.merge and (a.shard or a.fetch):
         ap.error("--merge measures nothing: it takes no --shard or --fetch")
     if a.datasets and a.fetch:
-        fetch(a.datasets)
+        fetch(a.datasets, a.cache)
     for key, name in LAYOUT.items():
         attr = DEST[key]
         if getattr(a, attr) is None and not a.merge:
