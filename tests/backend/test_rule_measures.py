@@ -289,6 +289,65 @@ def test_the_merge_fails_unless_every_share_measured_all_it_was_dealt(tmp_path):
     assert clean["m"]["found"] == {"a": [1, 2], "b": [3, 3]} and clean["m"]["scopes"] == {"a": 9, "b": 4}
 
 
+def test_a_measure_of_some_rules_replaces_theirs_and_keeps_the_others_and_the_date(tmp_path):
+    """--rules: the rules measured replace their measures and their detail; every other rule's, and
+    the date of the full measure, stay. A measure on other datasets than the committed one is refused."""
+    M = _measure_tool()
+    sources = {"sigma": {"sha": "abc", "recordings": 2}}
+    committed = {
+        "version": 1,
+        "measured": "2026-09-25",
+        "sources": sources,
+        "rules": {"a": {"h": "1", "of": 1, "hits": 1, "fires": 1}, "b": {"h": "2", "fires": 3}},
+    }
+    committed_detail = {
+        "version": 1,
+        "measured": "2026-09-25",
+        "sources": {"sigma": {"sha": "abc"}},
+        "unread": ["sigma:broken"],
+        "rules": {"a": {"hits": ["sigma:x"]}, "b": {"clean": {"m1": 2}, "severity": "low"}},
+    }
+    payload = {"version": 1, "measured": "2026-11-20", "sources": sources, "rules": {"b": {"h": "4"}, "c": {"h": "5", "of": 1, "hits": 1, "fires": 1}}}
+    detail = {"version": 1, "measured": "2026-11-20", "sources": {"sigma": {"sha": "abc"}}, "unread": ["sigma:broken"], "rules": {"c": {"hits": ["sigma:y"]}}}
+    merged, merged_detail = M.replace_measures(committed, committed_detail, payload, detail, ["b", "c"])
+    assert merged["measured"] == merged_detail["measured"] == "2026-09-25"
+    assert merged["rules"] == {"a": {"h": "1", "of": 1, "hits": 1, "fires": 1}, "b": {"h": "4"}, "c": {"h": "5", "of": 1, "hits": 1, "fires": 1}}
+    # b no longer fires on a clean machine: its detail entry goes
+    assert merged_detail["rules"] == {"a": {"hits": ["sigma:x"]}, "c": {"hits": ["sigma:y"]}}
+    with pytest.raises(SystemExit, match="measure every rule"):
+        M.replace_measures(committed, committed_detail, {**payload, "sources": {"sigma": {"sha": "abc", "recordings": 1}}}, detail, ["b"])
+    with pytest.raises(SystemExit, match="measure every rule"):
+        M.replace_measures(committed, committed_detail, payload, {**detail, "unread": []}, ["b"])
+    ids = tmp_path / "ids.txt"
+    ids.write_text("# the rules changed\nb\n\nc\n", encoding="utf-8")
+    assert M.chosen_rules([f"@{ids}", "b"], {"a": {}, "b": {}, "c": {}}) == ["b", "c"]
+    with pytest.raises(SystemExit, match="no event rule has: z"):
+        M.chosen_rules(["z"], {"a": {}})
+
+
+def test_the_merge_refuses_shares_that_measured_other_rules(tmp_path):
+    M = _measure_tool()
+    raw = {
+        "share": 1,
+        "shares": 1,
+        "units": [["recording", 0, 0, 1]],
+        "recordings": [{"dataset": "sigma", "name": "r0", "techniques": [], "credit": [], "owner": None}],
+        "leftOut": {},
+        "maxMb": 20,
+        "rules": ["a"],
+        "results": {"recordings": {"0": {"rows": 1, "unread": 0, "fired": ["a"], "readable": ["a"], "errors": []}}, "machines": {}},
+        "problems": [],
+    }
+    path = tmp_path / "share-1.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(SystemExit, match="other rules than --rules names"):
+        M.merge([path])
+    with pytest.raises(SystemExit, match="other rules than --rules names"):
+        M.merge([path], ["a", "b"])
+    recs, _, _, _, _ = M.merge([path], ["a"])
+    assert recs[0].fired == {"a"}
+
+
 def test_a_recording_with_an_export_remn_does_not_read_counts_it_unread(tmp_path):
     """Splunk's attack range keeps Entra audit logs beside sign-ins. The import refuses such a
     file with a message; measuring a recording that holds one stopped the whole run."""
