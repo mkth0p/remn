@@ -1,4 +1,4 @@
-# Questions
+# Frequently asked questions
 
 Short answers, each with the page that has the detail.
 

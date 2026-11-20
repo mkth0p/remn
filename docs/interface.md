@@ -381,6 +381,8 @@ steering the model is on the [security page](security.md).
 
 ## Report
 
+![The Report page of the demo case, with its preflight checks](images/report.png)
+
 The Report page assembles the report from the Review page's decisions and says how many
 items still have no decision. It holds the executive summary (drafted by the model or
 written by hand), the case bundle export and import, and a preview. "Download HTML"
