@@ -10,6 +10,7 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.http import require_POST
 
 from api.errors import failure
+from forensic.access import permission
 from services.analysis import chains as C
 
 log = logging.getLogger(__name__)
@@ -32,6 +33,7 @@ def _opts(body: dict) -> dict:
     return out
 
 
+@permission("signed-in")
 @require_POST
 def build(request: HttpRequest):
     """Body: {mails, events, findings, settings, ...opts}."""

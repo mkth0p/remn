@@ -6,6 +6,7 @@ from django.conf import settings
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST
 
+from forensic.access import permission
 from services.analysis.relationships import FIELDS, ROW_CAP, build
 from services.store.casestore import EVENT_COLUMNS, MAIL_COLUMNS, q, registry, rows_to_dicts
 
@@ -14,6 +15,7 @@ class _Invalid(ValueError):
     """What is wrong with the request, in words composed here for the client."""
 
 
+@permission("read", case="body")
 @require_POST
 def relationships(request):
     try:
