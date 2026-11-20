@@ -1,69 +1,23 @@
-import { useEffect, useMemo, useState } from 'react'
-import { getSource } from '../data/source'
-import { chainCoverageWarnings, loadChains, type Chain } from '../data/chains'
-import { listNotes } from '../data/caseNotes'
-import {
-  chainSeverity,
-  effectiveSeverity,
-  loadChainReviews,
-  loadReportSettings,
-  saveReportSettings,
-  selectForReport,
-  TLP_LEVELS,
-  unprintedConfirmed,
-  type AnalyticConfidence,
-  type ChainReview,
-  type ClientReport,
-  type ContainmentAction,
-  type ReportBranding,
-  type ReportSettings,
-  type ReportVersion,
-  type Tlp,
-} from '../data/review'
-import { LOGO_MAX_BYTES, logoImage, REPORT_LANGUAGES, reportText, type ReportLanguage } from '../data/reportText'
-import { getDb, type CaseNote, type Evidence, type Finding, type Ioc } from '../db/schema'
+import { useState } from 'react'
+import { saveReportSettings, type ClientReport, type ReportSettings } from '../data/review'
 import { buildIncidents } from '../rules/incidents'
 import { toast, useStore } from '../state/store'
-import { fmtNum, fmtUtc, renderMarkdown } from '../util/format'
-import { downloadBlob, exportCaseBundle, importCaseBundle } from '../util/export'
-import { navigatorLayer, timelineRecords, toTimelineCsv, toTimesketchJsonl } from '../util/responderExports'
+import { downloadBlob } from '../util/export'
 import { buildReportDocx, DOCX_MIME } from '../data/reportDocx'
-import { Badge, Spinner } from '../components/ui'
-import { Dropzone } from '../components/Dropzone'
-import { renderGraphPng } from '../components/ChainGraph'
-import {
-  buildReportHtml,
-  evidencePeriod,
-  evidenceScope,
-  impactInventory,
-  initialAccessIsDraft,
-  loadReportFont,
-  ruleAuthors,
-  SCOPE_READ,
-  spineStartingPoint,
-  type AiUsage,
-  type EvidenceScope,
-  type ReportData,
-} from '../data/reportHtml'
-import { summariseLedger } from '../ai/ledger'
+import { buildReportHtml, evidencePeriod, impactInventory, ruleAuthors, spineStartingPoint, type ReportData } from '../data/reportHtml'
 import { draftExecutiveSummary } from '../data/reportSummary'
 import { buildCampaignGraph } from '../data/chainGraph'
-import { IconAi, IconCheck, IconDownload } from '../components/Icons'
-import { reportRelationships, type RelationshipReview } from '../data/relationshipReviews'
-import { findingsStaleness } from '../data/findingsState'
-import { aiDecided, issueStatus, loadReportIssue, preflightChecks, saveReportIssue, type ReportIssue } from '../data/reportPreflight'
-import { loadEvidenceGaps, type GapStatement } from '../data/evidenceGaps'
-import { loadRules, settingsForRules } from '../data/rules'
-import { measuredOn, readMeasure, type MeasureReading } from '../data/ruleMeasures'
-import { loadReportClaims, type ReportClaims } from '../data/claims'
-import { buildStories, loadStories, loadStoryNotes, storiesStaleness, storyInputs, storyRowIds, type StoryNotes, type StoryResult } from '../data/stories'
-import { loadStoryDecisions, storiesForReport, type StoryDecisions } from '../data/storyDecisions'
-import type { Rule } from '../rules/engine'
-import { loadAnswers, loadScenarioChoice, questionsForReport } from '../data/questions/answers'
-import { loadEvidenceProfile, type EvidenceProfile } from '../data/questions/coverage'
-import type { QuestionAnswer } from '../db/schema'
+import { saveReportIssue, type ReportIssue } from '../data/reportPreflight'
+import { measuredOn } from '../data/ruleMeasures'
+import { buildStories } from '../data/stories'
+import { ClientPanel } from './report/ClientPanel'
+import { reportFigures } from './report/model'
+import { ReportBars, ReportHeader } from './report/ReportHeader'
+import { openReport, printReport } from './report/reportOutput'
+import { CaseBundlePanel, ContentsPanel, PreflightPanel, ResponderExports, SummaryPanel } from './report/ReportPanels'
+import { useReportContents } from './report/useReportContents'
+import { useReportData } from './report/useReportData'
 
-const ORDER = ['critical', 'high', 'medium', 'low', 'info']
 /**
  * Report: built from the Review page's decisions (severity floor, what is in or out, rescored
  * severities, chain verdicts and narratives, chain detail level) plus the case notes. Every cell is
@@ -71,209 +25,73 @@ const ORDER = ['critical', 'high', 'medium', 'low', 'info']
  */
 export function ReportView() {
   const kase = useStore((s) => s.currentCase)
-  const rulesVersion = useStore((s) => s.rulesVersion)
   const setView = useStore((s) => s.setView)
-  const [evidence, setEvidence] = useState<Evidence[]>([])
-  const [findings, setFindings] = useState<Finding[]>([])
-  const [chains, setChains] = useState<Chain[]>([])
-  /** the case's stories, the analyst's notes on them, and why the stories no longer read the case as it is */
-  const [storyResult, setStoryResult] = useState<StoryResult | null>(null)
-  const [storyNotes, setStoryNotes] = useState<StoryNotes>({})
-  /** the analyst's decisions on the stories (data/storyDecisions.ts), applied to them as the Stories page applies them */
-  const [storyDecisions, setStoryDecisions] = useState<StoryDecisions>({})
-  const [storiesStale, setStoriesStale] = useState<string[]>([])
+  const {
+    evidence,
+    findings,
+    chains,
+    storyResult,
+    storyNotes,
+    storyDecisions,
+    storiesStale,
+    coverageWarnings,
+    reviews,
+    relationships,
+    settings,
+    setSettings,
+    iocs,
+    iocCounts,
+    aiUsage,
+    issue,
+    setIssue,
+    rulesState,
+    gaps,
+    measures,
+    ruleMap,
+    notes,
+    questionScenarios,
+    answers,
+    profile,
+    summary,
+    setSummary,
+    summaryBy,
+    setSummaryBy,
+    summaryAt,
+    setSummaryAt,
+    fontData,
+    scope,
+  } = useReportData(kase)
   const [rebuilding, setRebuilding] = useState(false)
-  const [coverageWarnings, setCoverageWarnings] = useState<string[]>([])
-  const [reviews, setReviews] = useState<Record<string, ChainReview>>({})
-  const [relationships, setRelationships] = useState<RelationshipReview[]>([])
-  const [settings, setSettings] = useState<ReportSettings | null>(null)
-  const [iocs, setIocs] = useState<Ioc[]>([])
-  const [iocCounts, setIocCounts] = useState<{ total: number; checked: number }>({ total: 0, checked: 0 })
-  const [aiUsage, setAiUsage] = useState<AiUsage | undefined>(undefined)
-  const [issue, setIssue] = useState<ReportIssue>({ waivers: {} })
   // the preview is drawn during render, which must not read the clock: it shows when the page opened
   const [previewAt] = useState(() => Date.now())
-  const [rulesState, setRulesState] = useState<{ lastRun: number | null; evidenceAfter: number; errors: number } | undefined>(undefined)
-  /** what the evidence cannot show, for "Where it stops" */
-  const [gaps, setGaps] = useState<GapStatement[]>([])
-  /** how far each rule's finding can be taken as a detection */
-  const [measures, setMeasures] = useState<Record<string, MeasureReading>>({})
-  /** the rules as they are now, to check each printed finding's rows against */
-  const [ruleMap, setRuleMap] = useState<Map<string, Rule>>(new Map())
-  /** the printed findings and texts read back against the rows they cite */
-  const [claims, setClaims] = useState<ReportClaims | undefined>(undefined)
   const measureSources = useStore((s) => s.meta?.measures)
-  const [notes, setNotes] = useState<CaseNote[]>([])
-  /** the investigative scenarios chosen for the case, the answers, and what evidence the case holds (data/questions) */
-  const [questionScenarios, setQuestionScenarios] = useState<string[]>([])
-  const [answers, setAnswers] = useState<Map<string, QuestionAnswer>>(new Map())
-  const [profile, setProfile] = useState<EvidenceProfile | null>(null)
-  const mailCount = useStore((s) => s.counts.mails)
-  const [summary, setSummary] = useState<string>('')
-  /** who wrote the summary last: the model's draft is labelled in the report until the analyst edits it */
-  const [summaryBy, setSummaryBy] = useState<'analyst' | 'ai' | undefined>(undefined)
-  const [summaryAt, setSummaryAt] = useState<number | undefined>(undefined)
   const [busy, setBusy] = useState(false)
-  const [progress, setProgress] = useState('')
-  const [fontData, setFontData] = useState<string | undefined>(undefined)
-  /** what the evidence covers, for the report's scope when the analyst wrote none */
-  const [scope, setScope] = useState<EvidenceScope | undefined>(undefined)
-  useEffect(() => {
-    loadReportFont().then(setFontData)
-  }, [])
-  useEffect(() => {
-    if (!kase?.id) return
-    const db = getDb()
-    db.evidence.where('caseId').equals(kase.id).toArray().then(setEvidence)
-    db.findings
-      .where('caseId')
-      .equals(kase.id)
-      .toArray()
-      .then((f) => setFindings(f.sort((a, b) => ORDER.indexOf(effectiveSeverity(a)) - ORDER.indexOf(effectiveSeverity(b)) || (a.ts ?? 0) - (b.ts ?? 0))))
-    getSource(kase)
-      .listIocs({ onlyBad: true, limit: 500 })
-      .then((r) => setIocs(r.rows))
-      .catch(() => setIocs([]))
-    // what the report says about enrichment follows the lookups that ran, not the setting
-    Promise.all([getSource(kase).listIocs({ limit: 1 }), getSource(kase).listIocs({ unchecked: true, limit: 1 })])
-      .then(([all, unchecked]) => setIocCounts({ total: all.total, checked: Math.max(0, all.total - unchecked.total) }))
-      .catch(() => setIocCounts({ total: 0, checked: 0 }))
-    loadReportIssue(kase.id).then(setIssue)
-    loadEvidenceGaps(kase.id, getSource(kase))
-      .then(setGaps)
-      .catch(() => setGaps([]))
-    loadRules(kase.id)
-      .then((rs) => {
-        setMeasures(Object.fromEntries(rs.map((r) => [r.rule.id, readMeasure(r.measured, r.origin)])))
-        setRuleMap(new Map(rs.filter((r) => !r.error).map((r) => [r.rule.id, r.rule])))
-      })
-      .catch(() => setMeasures({}))
-    summariseLedger(kase.id)
-      .then(setAiUsage)
-      .catch(() => setAiUsage(undefined))
-    findingsStaleness(kase.id)
-      .then((s) => setRulesState({ lastRun: s.lastRun, evidenceAfter: s.evidenceAfter, errors: s.errors.length }))
-      .catch(() => setRulesState(undefined))
-    db.kv.get(`report-summary-${kase.id}`).then((k) => setSummary((k?.value as string) ?? ''))
-    db.kv.get(`report-summary-by-${kase.id}`).then((k) => setSummaryBy((k?.value as 'analyst' | 'ai' | undefined) ?? undefined))
-    db.kv.get(`report-summary-at-${kase.id}`).then((k) => setSummaryAt((k?.value as number | undefined) ?? undefined))
-    listNotes(kase.id).then(setNotes)
-    loadScenarioChoice(kase.id).then(setQuestionScenarios)
-    loadAnswers(kase.id).then(setAnswers)
-    loadChains(kase.id).then((r) => {
-      setChains(r?.chains ?? [])
-      setCoverageWarnings(chainCoverageWarnings(r?.stats))
-    })
-    loadStories(kase.id).then(async (r) => {
-      setStoryResult(r)
-      setStoriesStale(r ? storiesStaleness(r, await storyInputs(kase)) : [])
-    })
-    loadStoryNotes(kase.id).then(setStoryNotes)
-    loadStoryDecisions(kase.id).then(setStoryDecisions)
-    loadChainReviews(kase.id).then(setReviews)
-    reportRelationships(kase.id).then(setRelationships)
-    loadReportSettings(kase.id).then(setSettings)
-    const src = getSource(kase)
-    Promise.all([src.facets('events', 'computer', SCOPE_READ), src.facets('events', 'targetUser', SCOPE_READ), src.facets('events', 'subjectUser', SCOPE_READ)])
-      .then(([hosts, targets, subjects]) => setScope(evidenceScope(hosts, [targets, subjects])))
-      .catch(() => setScope(undefined))
-  }, [kase, rulesVersion])
-  useEffect(() => {
-    if (!kase?.id || !questionScenarios.length) return
-    loadEvidenceProfile(getSource(kase), mailCount)
-      .then(setProfile)
-      .catch(() => setProfile(null))
-  }, [kase, questionScenarios.length, mailCount])
-  const questions = useMemo(() => questionsForReport(questionScenarios, answers, profile), [questionScenarios, answers, profile])
-  const selection = useMemo(() => (settings ? selectForReport(findings, chains, reviews, settings) : { findings: [], chains: [] }), [findings, chains, reviews, settings])
-  const printedStories = useMemo(
-    () =>
-      settings
-        ? storiesForReport(storyResult, storyNotes, storyDecisions, findings, settings.minSeverity, settings.onlyReviewed, 20)
-        : { stories: [], left: 0, orphans: 0, dismissed: 0, decided: [], decisionsOrphaned: 0 },
-    [storyResult, storyNotes, storyDecisions, findings, settings],
-  )
-  // graph pictures for the report, drawn off-screen from the same models as the Chains page
-  const [graphs, setGraphs] = useState<Record<string, string>>({})
-  useEffect(() => {
-    if (!settings?.includeGraphs || !selection.chains.length) {
-      setGraphs({})
-      return
-    }
-    const out: Record<string, string> = {}
-    for (const c of selection.chains) {
-      const png = renderGraphPng({ mode: 'chain', chain: c })
-      if (png) out[c.id] = png
-    }
-    if (selection.chains.length > 1) {
-      const png = renderGraphPng({ mode: 'campaign', chains: selection.chains })
-      if (png) out['campaign'] = png
-    }
-    setGraphs(out)
-  }, [selection.chains, settings?.includeGraphs])
-  // what the report will print, read back against the rows it cites (after the summary settles)
-  useEffect(() => {
-    if (!kase?.id || !settings) return
-    let alive = true
-    setClaims(undefined)
-    const printed = buildIncidents(selection.findings, { chains: selection.chains, severityOf: (c) => chainSeverity(c, reviews[c.id]) }).filter((i) => i.kind !== 'chain')
-    const timer = setTimeout(() => {
-      loadReportClaims({
-        source: getSource(kase),
-        findings: selection.findings,
-        rules: ruleMap,
-        settings: settingsForRules(kase),
-        evidence,
-        chains: selection.chains,
-        narratives: Object.fromEntries(Object.entries(reviews).map(([id, r]) => [id, r.narrative])),
-        incidents: printed,
-        summary,
-        stories: printedStories.stories.filter((st) => st.note).map((st) => ({ key: st.key, title: st.story.title, note: st.note!, ids: storyRowIds(st.story) })),
-      })
-        .then((c) => alive && setClaims(c))
-        .catch(() => alive && setClaims(undefined))
-    }, 400)
-    return () => {
-      alive = false
-      clearTimeout(timer)
-    }
-  }, [kase, settings, selection, reviews, ruleMap, evidence, summary, printedStories])
+  const { questions, selection, printedStories, graphs, claims } = useReportContents({
+    kase,
+    settings,
+    findings,
+    chains,
+    reviews,
+    evidence,
+    summary,
+    ruleMap,
+    stories: { result: storyResult, notes: storyNotes, decisions: storyDecisions },
+    questions: { scenarios: questionScenarios, answers, profile },
+  })
   if (!kase || !settings) return null
-  const shown = selection.findings
-  // findings linked to a printed chain are printed with it, not as incidents
-  const grouped = buildIncidents(shown, { chains: selection.chains, severityOf: (c) => chainSeverity(c, reviews[c.id]) })
-  const incidents = grouped.filter((i) => i.kind !== 'chain')
-  const membersOf = new Map(grouped.filter((i) => i.kind === 'chain' && i.chain).map((i) => [i.chain!.id, i.findings.filter((f) => f.ruleId !== 'chain')]))
-  const bySev = shown.reduce((acc, f) => ((acc[effectiveSeverity(f)] = (acc[effectiveSeverity(f)] ?? 0) + 1), acc), {} as Record<string, number>)
-  const curated = notes.filter((n) => n.kind === 'timeline').sort((a, b) => a.ts - b.ts)
-  const tasks = notes.filter((n) => n.kind === 'task').sort((a, b) => Number(a.done ?? false) - Number(b.done ?? false) || a.createdAt - b.createdAt)
-  const analystNotes = notes.filter((n) => n.kind === 'note').sort((a, b) => a.createdAt - b.createdAt)
-  // same unit as the Review page: incidents without a decision plus chains without a verdict
-  const undecided = buildIncidents(findings, { chains }).filter((i) => (i.kind === 'chain' && i.chain ? !reviews[i.chain.id]?.verdict : i.status === 'new')).length
-  const hiddenConfirmed = unprintedConfirmed(findings, chains, reviews, selection)
-  // a confirmed story the report leaves out (below the floor, past the first twenty) is a confirmed item not printed too
-  const hiddenStories = printedStories.decided.filter((s) => s.verdict === 'confirmed' && !s.printed).length
-  const printedChecks = shown.map((f) => (f.id != null ? claims?.findings[f.id] : undefined)).filter((c) => !!c)
-  const claimSummary = claims && {
-    checked: printedChecks.length,
-    unsupported: printedChecks.filter((c) => c.status === 'unsupported').length,
-    contradicted: printedChecks.filter((c) => c.status === 'contradicted').length,
-    texts: claims.texts.length,
-    textsUnsupported: claims.texts.filter((t) => t.check.status === 'unsupported').length,
-  }
-  const unverified = [
-    ...shown.flatMap((f) => {
-      const c = f.id != null ? claims?.findings[f.id] : undefined
-      return c && c.status !== 'verified' ? [{ what: `${f.title} (${f.ruleId})`, status: c.status, reasons: c.reasons }] : []
-    }),
-    ...(claims?.texts ?? []).filter((t) => t.check.status === 'unsupported').map((t) => ({ what: t.what, status: t.check.status, reasons: t.check.reasons })),
-  ]
-  const preflight = { evidence, rules: rulesState, undecided, aiDecided: aiDecided(findings), unprintedConfirmed: hiddenConfirmed.length + hiddenStories, claims: claimSummary }
-  const checks = preflightChecks(preflight)
-  const status = issueStatus(checks, issue)
-  // the page lists the checks in English; the report prints what is open in its own language
-  const words = reportText(settings.language)
-  const printedStatus = settings.language === 'en' ? status : issueStatus(preflightChecks(preflight, words), issue)
+  const { shown, incidents, membersOf, bySev, curated, tasks, analystNotes, undecided, hiddenConfirmed, unverified, checks, status, words, printedStatus } = reportFigures({
+    settings,
+    findings,
+    chains,
+    reviews,
+    selection,
+    printedStories,
+    claims,
+    notes,
+    evidence,
+    rulesState,
+    issue,
+  })
   /** The stories read again from the case as it is now; the page reloads what it prints once they are. */
   const rebuildStories = async () => {
     setRebuilding(true)
@@ -368,257 +186,37 @@ export function ReportView() {
     void saveReportSettings(kase.id!, next)
   }
   const fileBase = kase.name.replace(/[^a-z0-9_-]+/gi, '_')
-  // what a responder carries into their own tools: every finding but the false positives, and the analyst's timeline
-  const responderFindings = findings.filter((f) => f.status !== 'false_positive')
-  const exportTimeline = (format: 'jsonl' | 'csv') => {
-    const { records, untimed } = timelineRecords({ findings: responderFindings, notes: curated })
-    if (format === 'jsonl') downloadBlob(`${fileBase}-timeline.jsonl`, new Blob([toTimesketchJsonl(records)], { type: 'application/x-ndjson' }))
-    else downloadBlob(`${fileBase}-timeline.csv`, new Blob(['\ufeff' + toTimelineCsv(records)], { type: 'text/csv;charset=utf-8' }))
-    if (untimed) toast('ok', `${fmtNum(records.length)} line(s) exported; ${fmtNum(untimed)} item(s) without an event time left out`)
-  }
-  /** The report in its own tab: the browser's own print-to-PDF, or to keep it open next to the case. */
-  const openReport = () => {
-    const url = URL.createObjectURL(new Blob([html()], { type: 'text/html' }))
-    const w = window.open(url, '_blank')
-    if (w) w.opener = null
-    else toast('err', 'the browser blocked the new tab: allow pop-ups for this site, or use "download HTML"', 0)
-    setTimeout(() => URL.revokeObjectURL(url), 120_000)
-  }
-  // the report is built from case data: it prints from a frame that runs no script (so nothing in it can
-  // reach the case database) but keeps the app's origin, which the browser needs before it lets the page
-  // call print() on the frame; a sandbox without allow-same-origin makes that call a SecurityError
-  const printReport = () => {
-    const frame = document.createElement('iframe')
-    frame.setAttribute('sandbox', 'allow-same-origin allow-modals')
-    // laid out at full size (a zero-size frame prints blank in some browsers) but invisible and inert
-    frame.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;border:0;opacity:0;pointer-events:none;z-index:-1'
-    frame.srcdoc = html()
-    frame.onload = () => {
-      const win = frame.contentWindow
-      try {
-        win?.addEventListener('afterprint', () => frame.remove())
-        win?.focus()
-        win?.print()
-      } catch (e) {
-        frame.remove()
-        toast('err', `the browser refused to print from the page (${(e as Error).message}); the report opens in a new tab, print it from there`, 0)
-        openReport()
-        return
-      }
-      setTimeout(() => frame.remove(), 120_000)
-    }
-    document.body.appendChild(frame)
-  }
   return (
     <div className="view">
-      <div className="view-header">
-        <div className="desc">
-          <h1>Report</h1>
-          <span className="sub">
-            {printedStories.stories.length} stor{printedStories.stories.length === 1 ? 'y' : 'ies'} · {selection.chains.length} chain(s) · {incidents.length} incident(s) · {shown.length} finding(s)
-            from {settings.minSeverity} up · {iocs.length} flagged IOC(s) · {evidence.length} evidence file(s)
-            {undecided ? ` · ${fmtNum(undecided)} item(s) not yet reviewed` : ' · everything reviewed'}
-            {questions ? ` · ${fmtNum(questions.counts.open)} of ${fmtNum(questions.counts.open + questions.counts.answered + questions.counts.cannot)} question(s) open` : ''}
-          </span>
-        </div>
-        <span className="spacer" />
-        <button className="btn sm" onClick={() => setView('review')}>
-          <IconCheck /> review and choose contents
-        </button>
-        <button className="btn sm" onClick={generateSummary} disabled={busy}>
-          {busy ? <Spinner /> : <IconAi />} AI executive summary
-        </button>
-        <button className="btn sm primary" onClick={() => downloadBlob(`${fileBase}-report.html`, new Blob([html()], { type: 'text/html' }))}>
-          <IconDownload /> download HTML
-        </button>
-        <button
-          className="btn sm"
-          title="the same report as a Word document to edit before it goes out (the graphs stay in the HTML report)"
-          onClick={() => downloadBlob(`${fileBase}-report.docx`, new Blob([buildReportDocx(reportData()) as BlobPart], { type: DOCX_MIME }))}
-        >
-          <IconDownload /> Word
-        </button>
-        <button className="btn sm" onClick={openReport}>
-          open in a tab
-        </button>
-        <button className="btn sm" onClick={printReport}>
-          print / PDF
-        </button>
-      </div>
+      <ReportHeader
+        counts={{
+          stories: printedStories.stories.length,
+          chains: selection.chains.length,
+          incidents: incidents.length,
+          findings: shown.length,
+          iocs: iocs.length,
+          evidence: evidence.length,
+          undecided,
+        }}
+        minSeverity={settings.minSeverity}
+        questions={questions}
+        busy={busy}
+        onReview={() => setView('review')}
+        onSummary={generateSummary}
+        onHtml={() => downloadBlob(`${fileBase}-report.html`, new Blob([html()], { type: 'text/html' }))}
+        onWord={() => downloadBlob(`${fileBase}-report.docx`, new Blob([buildReportDocx(reportData()) as BlobPart], { type: DOCX_MIME }))}
+        onTab={() => openReport(html())}
+        onPrint={() => printReport(html())}
+      />
       <div className="view-body col" style={{ gap: 14 }}>
-        {undecided > 0 && (
-          <div className="bulkbar" style={{ background: 'var(--sev-medium-bg)', borderColor: 'rgba(217,130,43,0.35)', color: 'var(--sev-medium)', borderRadius: 'var(--radius)' }}>
-            <b>{fmtNum(undecided)} item(s) have no decision yet.</b>
-            <span>The report prints whatever passes the severity floor; the Review page lets you confirm, dismiss, rescore and annotate first.</span>
-            <span className="spacer" />
-            <button className="btn xs" onClick={() => setView('review')}>
-              go to Review
-            </button>
-          </div>
-        )}
-        {storiesStale.length > 0 && storyResult && (
-          <div className="bulkbar" role="status" style={{ background: 'var(--sev-medium-bg)', borderColor: 'rgba(217,130,43,0.35)', color: 'var(--sev-medium)', borderRadius: 'var(--radius)' }}>
-            <b>The stories are out of date.</b>
-            <span>{storiesStale.join('; ')}. The report says so until they are built again.</span>
-            <span className="spacer" />
-            <button className="btn xs" onClick={rebuildStories} disabled={rebuilding}>
-              {rebuilding ? <Spinner /> : null} rebuild stories
-            </button>
-          </div>
-        )}
-        <div className="panel">
-          <div className="panel-h">
-            preflight · the report is <b style={{ color: status.status === 'final' ? 'var(--ok)' : 'var(--warn)' }}>{status.status === 'final' ? 'final' : 'a draft'}</b>
-            <span className="spacer" />
-            {status.status === 'final' ? (
-              <button className="btn xs" onClick={() => updateIssue({ ...issue, finalAt: undefined })}>
-                back to draft
-              </button>
-            ) : (
-              <button
-                className="btn xs primary"
-                disabled={status.open.length > 0}
-                title={status.open.length ? 'every open check needs to pass or be waived with a reason' : 'print the report as final, with the waivers listed'}
-                onClick={() => updateIssue({ ...issue, finalAt: Date.now() })}
-              >
-                issue as final
-              </button>
-            )}
-          </div>
-          <div className="panel-b col" style={{ gap: 6 }}>
-            {checks.map((c) => (
-              <div key={c.id} className="row small" style={{ gap: 8, alignItems: 'flex-start' }}>
-                <Badge sev={c.ok ? 'ok' : issue.waivers[c.id]?.trim() ? 'medium' : 'high'}>{c.ok ? 'ok' : issue.waivers[c.id]?.trim() ? 'waived' : 'open'}</Badge>
-                <div className="col" style={{ gap: 2, flex: 1 }}>
-                  <span>
-                    {c.label} <span className="muted">· {c.detail}</span>
-                  </span>
-                  {!c.ok && (
-                    <input
-                      className="input small"
-                      placeholder="waive: the reason, printed in the report"
-                      defaultValue={issue.waivers[c.id] ?? ''}
-                      onBlur={(e) => updateIssue({ ...issue, waivers: { ...issue.waivers, [c.id]: e.target.value } })}
-                    />
-                  )}
-                </div>
-              </div>
-            ))}
-            {unverified.length > 0 && (
-              <div className="col small" style={{ gap: 2 }} data-testid="unverified-claims">
-                <span className="muted">Not borne out by the rows they cite ({fmtNum(unverified.length)}):</span>
-                {unverified.slice(0, 20).map((u, i) => (
-                  <span key={`${u.what}-${i}`}>
-                    <Badge sev={u.status === 'contradicted' ? 'high' : 'medium'}>{u.status}</Badge> {u.what}: <span className="muted">{u.reasons.join('; ')}</span>
-                  </span>
-                ))}
-                {unverified.length > 20 && <span className="muted">and {fmtNum(unverified.length - 20)} more</span>}
-              </div>
-            )}
-            <div className="hint">
-              A draft says so on its cover. Final needs every check to pass or to be waived with a reason; a new open check (evidence added, a rule run that failed) returns it to draft.
-            </div>
-          </div>
-        </div>
+        <ReportBars undecided={undecided} storiesStale={storyResult ? storiesStale : []} rebuilding={rebuilding} onReview={() => setView('review')} onRebuild={rebuildStories} />
+        <PreflightPanel status={status} checks={checks} issue={issue} onIssue={updateIssue} unverified={unverified} />
         <div className="grid-2">
-          <div className="panel">
-            <div className="panel-h">executive summary</div>
-            <div className="panel-b">
-              {summary ? (
-                <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(summary) }} />
-              ) : (
-                <div className="muted small">Click "AI executive summary" to have the local model draft it from the reviewed chains and incidents, or write your own below.</div>
-              )}
-              <textarea
-                className="textarea"
-                style={{ marginTop: 8, minHeight: 120 }}
-                value={summary}
-                onChange={(e) => {
-                  setSummary(e.target.value)
-                  setSummaryBy('analyst')
-                }}
-                onBlur={() => {
-                  setSummaryAt(Date.now())
-                  void getDb().kv.bulkPut([
-                    { key: `report-summary-${kase.id}`, value: summary },
-                    { key: `report-summary-by-${kase.id}`, value: summaryBy ?? 'analyst' },
-                    { key: `report-summary-at-${kase.id}`, value: Date.now() },
-                  ])
-                }}
-                placeholder="edit the summary…"
-              />
-            </div>
-          </div>
+          <SummaryPanel caseId={kase.id} summary={summary} setSummary={setSummary} summaryBy={summaryBy} setSummaryBy={setSummaryBy} setSummaryAt={setSummaryAt} />
           <div className="col">
-            <div className="panel">
-              <div className="panel-h">
-                contents <span className="muted">· set on the Review page</span>
-              </div>
-              <div className="panel-b row wrap" style={{ gap: 8 }}>
-                <Badge sev="accent">from {settings.minSeverity} up</Badge>
-                <Badge>{settings.includeChains ? `chains · steps: ${settings.chainDetail}` : 'no chains'}</Badge>
-                {ORDER.map((s) => (
-                  <Badge key={s} sev={s}>
-                    {s} {bySev[s] ?? 0}
-                  </Badge>
-                ))}
-                <Badge sev={settings.includeTimeline ? 'ok' : 'info'}>timeline {curated.length}</Badge>
-                <Badge sev={settings.includeTasks ? 'ok' : 'info'}>tasks {tasks.length}</Badge>
-                <Badge sev={settings.includeNotes ? 'ok' : 'info'}>notes {analystNotes.length}</Badge>
-              </div>
-            </div>
-            <div className="panel">
-              <div className="panel-h">responder exports</div>
-              <div className="panel-b col">
-                <div className="row wrap" style={{ gap: 8 }}>
-                  <button className="btn sm" onClick={() => exportTimeline('jsonl')}>
-                    <IconDownload /> timeline for Timesketch (.jsonl)
-                  </button>
-                  <button className="btn sm" onClick={() => exportTimeline('csv')}>
-                    <IconDownload /> timeline for Timeline Explorer (.csv)
-                  </button>
-                  <button
-                    className="btn sm"
-                    onClick={() => downloadBlob(`${fileBase}-attack-layer.json`, new Blob([JSON.stringify(navigatorLayer(kase, responderFindings), null, 2)], { type: 'application/json' }))}
-                  >
-                    <IconDownload /> ATT&amp;CK Navigator layer
-                  </button>
-                </div>
-                <div className="hint">
-                  Every finding except the false positives, whatever the report's floor, and the case timeline entries. Times are UTC. The layer colours each technique by the worst severity of its
-                  findings. The Events page exports its filtered rows as a timeline too.
-                </div>
-              </div>
-            </div>
-            <div className="panel">
-              <div className="panel-h">case bundle (move the case to another machine)</div>
-              <div className="panel-b col">
-                <div className="row">
-                  <button className="btn sm" onClick={() => exportCaseBundle(kase, setProgress).catch((e) => toast('err', e.message))}>
-                    <IconDownload /> export case bundle (.remn.ndjson)
-                  </button>
-                  <span className="small dim">{progress}</span>
-                </div>
-                <Dropzone
-                  compact
-                  multiple={false}
-                  onFiles={(f) =>
-                    importCaseBundle(f[0], setProgress)
-                      .then((id) =>
-                        toast(
-                          'ok',
-                          `case imported (#${id}) - switch to it from the case selector. External lookups are off in the imported case whatever the bundle had; switch them on there if it may use them.`,
-                          9000,
-                        ),
-                      )
-                      .catch((e) => toast('err', e.message, 0))
-                  }
-                >
-                  <div className="big">drop a bundle to import</div>
-                </Dropzone>
-                <div className="hint">The bundle contains every row of the case and a SHA-256 of its content, verified at import.</div>
-              </div>
-            </div>
+            <ContentsPanel settings={settings} bySev={bySev} timeline={curated.length} tasks={tasks.length} notes={analystNotes.length} />
+            <ResponderExports kase={kase} fileBase={fileBase} findings={findings} timeline={curated} />
+            <CaseBundlePanel kase={kase} />
           </div>
         </div>
         <ClientPanel
@@ -641,284 +239,5 @@ export function ReportView() {
         </div>
       </div>
     </div>
-  )
-}
-
-type TextKey = { [K in keyof ClientReport]: ClientReport[K] extends string ? K : never }[keyof ClientReport]
-const CONFIDENCES: AnalyticConfidence[] = ['', 'low', 'moderate', 'high']
-
-/**
- * What the analyst writes for a client: the engagement, the handling marking, the scope, the
- * conclusion, the impact, the containment actions and the recommendations. Each part is printed
- * only when filled in; the scope falls back to what the evidence covers, and says so.
- */
-function ClientPanel({
-  client,
-  onChange,
-  language,
-  branding,
-  onSettings,
-  spineDraft,
-  scope,
-  period,
-  impact,
-}: {
-  client: ClientReport
-  onChange: (patch: Partial<ClientReport>) => void
-  language: ReportLanguage
-  branding: ReportBranding
-  onSettings: (patch: { language?: ReportLanguage; branding?: ReportBranding }) => void
-  spineDraft: string
-  scope: EvidenceScope | undefined
-  period: { from: number | null; to: number | null }
-  impact: { accounts: unknown[]; hosts: unknown[] }
-}) {
-  // fields keep what is typed until they lose focus; a value set from outside (the spine's draft) remounts them
-  const [round, setRound] = useState(0)
-  const set = <K extends keyof ClientReport>(k: K, v: ClientReport[K]) => {
-    const patch: Partial<ClientReport> = {}
-    patch[k] = v
-    onChange(patch)
-  }
-  const text = (k: TextKey, label: string, opts: { area?: boolean; placeholder?: string; type?: string; rows?: number } = {}) => (
-    <label className="col small" style={{ gap: 2 }}>
-      <span className="muted">{label}</span>
-      {opts.area ? (
-        <textarea
-          key={`${k}-${round}`}
-          className="textarea"
-          style={{ minHeight: (opts.rows ?? 3) * 18 }}
-          defaultValue={client[k]}
-          placeholder={opts.placeholder}
-          onBlur={(e) => e.target.value !== client[k] && set(k, e.target.value)}
-        />
-      ) : (
-        <input
-          key={`${k}-${round}`}
-          className="input small"
-          type={opts.type ?? 'text'}
-          defaultValue={client[k]}
-          placeholder={opts.placeholder}
-          onBlur={(e) => e.target.value !== client[k] && set(k, e.target.value)}
-        />
-      )}
-    </label>
-  )
-  const list = (xs: string[] | undefined, more: boolean | undefined) =>
-    xs?.length ? `from the evidence: ${xs.slice(0, 6).join(', ')}${xs.length > 6 || more ? ', …' : ''}` : 'one a line; empty: what the evidence covers'
-  const rowsEditor = <T extends ReportVersion | ContainmentAction>(
-    key: 'versions' | 'containment',
-    rows: T[],
-    blank: T,
-    cols: { k: keyof T & string; label: string; type?: string; width?: number }[],
-  ) => (
-    <div className="col" style={{ gap: 4 }}>
-      {rows.map((r, i) => (
-        <div key={`${key}-${i}-${round}`} className="row" style={{ gap: 4 }}>
-          {cols.map((c) => (
-            <input
-              key={c.k}
-              className="input small"
-              type={c.type ?? 'text'}
-              placeholder={c.label}
-              style={{ flex: c.width ? `0 0 ${c.width}px` : 1, minWidth: 0 }}
-              defaultValue={String(r[c.k] ?? '')}
-              onBlur={(e) => {
-                if (e.target.value === String(r[c.k] ?? '')) return
-                const next = rows.map((x, j) => (j === i ? { ...x, [c.k]: e.target.value } : x))
-                onChange({ [key]: next } as Partial<ClientReport>)
-              }}
-            />
-          ))}
-          <button
-            className="btn xs"
-            title="remove this row"
-            onClick={() => {
-              onChange({ [key]: rows.filter((_, j) => j !== i) } as Partial<ClientReport>)
-              setRound((x) => x + 1)
-            }}
-          >
-            remove
-          </button>
-        </div>
-      ))}
-      <div>
-        <button className="btn xs" onClick={() => onChange({ [key]: [...rows, blank] } as Partial<ClientReport>)}>
-          add a row
-        </button>
-      </div>
-    </div>
-  )
-  const draftPending = initialAccessIsDraft(client)
-  return (
-    <div className="panel" data-testid="client-panel">
-      <div className="panel-h">
-        client report <span className="muted">· printed only where filled in; kept with the case and its bundle</span>
-      </div>
-      <div className="panel-b" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 14 }}>
-        <div className="col" style={{ gap: 6 }}>
-          <b className="small">Engagement</b>
-          {text('client', 'client')}
-          {text('engagementRef', 'engagement reference')}
-          <div className="row" style={{ gap: 6 }}>
-            {text('engagementStart', 'engagement start', { type: 'date' })}
-            {text('engagementEnd', 'engagement end', { type: 'date' })}
-          </div>
-          {text('requestedBy', 'requested by')}
-          {text('distribution', 'distribution', { area: true, placeholder: 'one recipient a line' })}
-          <span className="muted small">version history</span>
-          {rowsEditor<ReportVersion>('versions', client.versions, { version: '', date: '', author: '', note: '' }, [
-            { k: 'version', label: 'version', width: 64 },
-            { k: 'date', label: 'date', type: 'date', width: 140 },
-            { k: 'author', label: 'author', width: 110 },
-            { k: 'note', label: 'changes' },
-          ])}
-          <b className="small" style={{ marginTop: 8 }}>
-            Handling
-          </b>
-          <label className="col small" style={{ gap: 2 }}>
-            <span className="muted">TLP</span>
-            <select className="select" value={client.tlp} onChange={(e) => set('tlp', e.target.value as Tlp)}>
-              <option value="">none</option>
-              {TLP_LEVELS.map((t) => (
-                <option key={t} value={t}>
-                  TLP:{t.toUpperCase()}
-                </option>
-              ))}
-            </select>
-          </label>
-          {text('confidentiality', 'confidentiality line', { placeholder: 'printed on the cover and on every page' })}
-          <b className="small" style={{ marginTop: 8 }}>
-            Language and branding
-          </b>
-          <label className="col small" style={{ gap: 2 }}>
-            <span className="muted">report language (this page stays English)</span>
-            <select className="select" value={language} onChange={(e) => onSettings({ language: e.target.value as ReportLanguage })}>
-              {REPORT_LANGUAGES.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <BrandingFields key={round} branding={branding} onChange={(b) => onSettings({ branding: b })} />
-        </div>
-        <div className="col" style={{ gap: 6 }}>
-          <b className="small">Scope</b>
-          {text('objectives', 'objectives', { area: true })}
-          <div className="row" style={{ gap: 6 }}>
-            {text('periodFrom', 'period from', { type: 'date' })}
-            {text('periodTo', 'period to', { type: 'date' })}
-          </div>
-          {period.from != null && !client.periodFrom && !client.periodTo && (
-            <span className="hint">
-              empty: the evidence's {fmtUtc(period.from, { date: true })} to {fmtUtc(period.to, { date: true })}
-            </span>
-          )}
-          {text('systemsIn', 'systems in scope', { area: true, placeholder: list(scope?.hosts, scope?.hostsCapped) })}
-          {text('systemsOut', 'systems out of scope', { area: true, placeholder: 'one a line; empty: none named' })}
-          {text('accountsIn', 'accounts in scope', { area: true, placeholder: list(scope?.accounts, scope?.accountsCapped) })}
-          {text('accountsOut', 'accounts out of scope', { area: true, placeholder: 'one a line; empty: none named' })}
-        </div>
-        <div className="col" style={{ gap: 6 }}>
-          <b className="small">Conclusion</b>
-          {text('initialAccess', 'initial access: how the attacker got in', { area: true, rows: 4 })}
-          <div className="row small" style={{ gap: 6 }}>
-            <button
-              className="btn xs"
-              disabled={!spineDraft || !!client.initialAccess.trim()}
-              title={!spineDraft ? 'no printed story has a spine' : client.initialAccess.trim() ? 'the field holds text already' : "put the story's spine in the field as a starting point to rewrite"}
-              onClick={() => {
-                onChange({ initialAccess: spineDraft, initialAccessDraft: spineDraft })
-                setRound((x) => x + 1)
-              }}
-            >
-              start from the story spine
-            </button>
-            {draftPending && <span className="warn">not printed until you rewrite it</span>}
-          </div>
-          {text('rootCause', 'root cause: why it was possible', { area: true, rows: 4 })}
-          <label className="col small" style={{ gap: 2 }}>
-            <span className="muted">your confidence in the conclusion (printed as yours)</span>
-            <select className="select" value={client.analyticConfidence} onChange={(e) => set('analyticConfidence', e.target.value as AnalyticConfidence)}>
-              {CONFIDENCES.map((c) => (
-                <option key={c} value={c}>
-                  {c || 'not given'}
-                </option>
-              ))}
-            </select>
-          </label>
-          {client.analyticConfidence && text('confidenceBasis', 'on what it rests')}
-          <b className="small" style={{ marginTop: 8 }}>
-            Impact
-          </b>
-          <span className="hint">
-            The report lists the {fmtNum(impact.accounts.length)} account(s) and {fmtNum(impact.hosts.length)} host(s) the confirmed items name.
-          </span>
-          {text('impact', 'what was reached or taken, and the effect on the business', { area: true })}
-        </div>
-        <div className="col" style={{ gap: 6 }}>
-          <b className="small">Containment actions taken</b>
-          {rowsEditor<ContainmentAction>('containment', client.containment, { date: '', action: '', by: '' }, [
-            { k: 'date', label: 'date', type: 'date', width: 140 },
-            { k: 'action', label: 'action' },
-            { k: 'by', label: 'by', width: 100 },
-          ])}
-          <b className="small" style={{ marginTop: 8 }}>
-            Recommendations
-          </b>
-          {text('recShort', 'short term', { area: true })}
-          {text('recMedium', 'medium term', { area: true })}
-          {text('recLong', 'long term', { area: true })}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-/** The firm the report goes out under: its name, a line for the cover, and its logo, size-capped and checked before it is kept. */
-function BrandingFields({ branding, onChange }: { branding: ReportBranding; onChange: (b: ReportBranding) => void }) {
-  const [problem, setProblem] = useState('')
-  const field = (k: 'firmName' | 'coverLine', label: string, placeholder: string) => (
-    <label className="col small" style={{ gap: 2 }}>
-      <span className="muted">{label}</span>
-      <input className="input small" defaultValue={branding[k]} placeholder={placeholder} onBlur={(e) => e.target.value !== branding[k] && onChange({ ...branding, [k]: e.target.value })} />
-    </label>
-  )
-  const pick = (file: File | undefined) => {
-    setProblem('')
-    if (!file) return
-    if (file.size > LOGO_MAX_BYTES) return setProblem(`${file.name} is ${fmtNum(Math.ceil(file.size / 1024))} KB; the logo can be ${fmtNum(LOGO_MAX_BYTES / 1024)} KB at most`)
-    const reader = new FileReader()
-    reader.onload = () => {
-      const url = typeof reader.result === 'string' ? reader.result : ''
-      if (!logoImage(url)) return setProblem(`${file.name} is not a PNG or JPEG image the report can embed`)
-      onChange({ ...branding, logo: url })
-    }
-    reader.onerror = () => setProblem(`${file.name} could not be read`)
-    reader.readAsDataURL(file)
-  }
-  const logo = logoImage(branding.logo)
-  return (
-    <>
-      {field('firmName', 'firm name', "empty: REMN's own wordmark")}
-      {field('coverLine', 'cover line', 'empty: forensic analysis report')}
-      <label className="col small" style={{ gap: 2 }}>
-        <span className="muted">logo: PNG or JPEG, {fmtNum(LOGO_MAX_BYTES / 1024)} KB at most, embedded in the HTML and Word reports</span>
-        <input aria-label="logo" type="file" accept="image/png,image/jpeg" className="small" onChange={(e) => pick(e.target.files?.[0])} />
-      </label>
-      {problem && <span className="warn small">{problem}</span>}
-      {logo && (
-        <div className="row small" style={{ gap: 8, alignItems: 'center' }}>
-          <img src={logo.dataUrl} alt="the logo the report carries" style={{ maxHeight: 32, maxWidth: 140, background: '#fff' }} />
-          <span className="muted">
-            {fmtNum(logo.width)} × {fmtNum(logo.height)} px, {fmtNum(Math.ceil(logo.bytes.length / 1024))} KB
-          </span>
-          <button className="btn xs" onClick={() => onChange({ ...branding, logo: '' })}>
-            remove logo
-          </button>
-        </div>
-      )}
-    </>
   )
 }
