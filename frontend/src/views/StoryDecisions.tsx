@@ -4,6 +4,7 @@ import type { StoryStep } from '../data/stories'
 import { downloadTimeline, timelineMarkdown } from '../data/storyExport'
 import { decisionSummary, dismissed, mergeCheck, needsReason, STORY_VERDICT_LABEL, STORY_VERDICTS, type StepCall, type StoryDecision, type StoryVerdict, type StoryView } from '../data/storyDecisions'
 import { fmtNum, fmtTs } from '../util/format'
+import { pressable } from '../components/pressable'
 
 /**
  * The analyst's decisions on a story (data/storyDecisions.ts, docs/stories.md "Decisions"): the
@@ -373,7 +374,7 @@ export function DecisionsPanel({
           return (
             <Line key={s.id}>
               <span className={'step-call ' + c.verdict}>{c.verdict}</span>
-              <span className="click" onClick={() => onOpenStep(s.id)} style={{ cursor: 'pointer' }}>
+              <span {...pressable} className="click" onClick={() => onOpenStep(s.id)} style={{ cursor: 'pointer' }}>
                 {s.title}
               </span>
               <span className="muted">{fmtTs(s.ts)}</span>

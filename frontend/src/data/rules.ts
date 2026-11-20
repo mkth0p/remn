@@ -10,6 +10,7 @@ import type { RuleMeasure } from './ruleMeasures'
 import { refoldWidespread, replaceFindings } from './findingReviews'
 import type { RowLoader } from './findingAnchors'
 import type { DataSource } from './source'
+import { fmtNum } from '../util/format'
 
 export interface LoadedRule {
   rule: Rule
@@ -160,10 +161,16 @@ async function saveDiagnostics(caseId: number, res: RuleRunSummary): Promise<voi
     if (d.reason === 'missing_setting') log('warn', `${d.ruleId}: disarmed — ${d.detail}`)
     if (d.reason === 'truncated' || d.reason === 'values_cut') log('warn', `${d.ruleId}: ${d.detail}`)
   }
-  const cut = res.diagnostics.filter((d) => d.reason === 'truncated').length
-  if (cut) toast('warn', `${cut} rule(s) matched more than a run keeps and were cut short — see the Rules view`, 9000)
+  // what the analyst lost is the findings left out, not the rules that were cut; a server from
+  // before the count was sent gives none, so the sum is then a floor
+  const cut = res.diagnostics.filter((d) => d.reason === 'truncated')
+  if (cut.length) {
+    const lost = cut.reduce((n, d) => n + (d.dropped ?? 0), 0)
+    const atLeast = cut.some((d) => d.dropped == null)
+    toast('warn', `${atLeast ? 'At least ' : ''}${fmtNum(lost)} finding(s) left out: ${cut.length} rule(s) found more than a run keeps. See the Rules view.`, 9000)
+  }
   const long = res.diagnostics.filter((d) => d.reason === 'values_cut').length
-  if (long) toast('warn', `${long} rule(s) read values longer than ${RE_VALUE_MAX.toLocaleString('en-US')} characters only in part, so a match past that point is not found. See the Rules view`, 9000)
+  if (long) toast('warn', `${long} rule(s) read values longer than ${fmtNum(RE_VALUE_MAX)} characters only in part, so a match past that point is not found. See the Rules view.`, 9000)
   const noData = res.diagnostics.filter((d) => d.reason === 'no_selector_match').length
   const needSettings = res.diagnostics.filter((d) => d.reason === 'missing_setting').length
   const notApplicable = res.diagnostics.filter((d) => d.reason === 'not_applicable').length

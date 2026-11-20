@@ -152,6 +152,24 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   hovered. A chain wider than the pane scrolls sideways, by drag or wheel, with the lane names
   pinned at the left, and the selected step is scrolled into view. The report's chain pictures
   use the same layout within the 1,700 pixels they had, with titles on up to three lines.
+- The pages work from the keyboard and with a screen reader, and the figures they quote come from
+  the committed measure. Tables take one Tab stop and move with the arrows, Home and End, open
+  with Enter and select with Space; switches, the rows and tiles that open something, and the
+  messages (read out in a live region) are reachable; questions are asked in the app's own dialog
+  instead of the browser's; and the text colours read at 4.5:1 or more on every surface of both
+  themes. The home page reads the rule totals, what the default rules detect in each library and
+  the clean-machine figures from `rules/measures.json`, `rules/measures-detail.json` and the
+  SigmaHQ packs when it is built, and the level picker and the home page give each level's lines
+  as `tools/detection_levels.py` counts them on that measure (`tools/level_figures.py`, checked by
+  `tests/backend/test_level_figures.py`); the ATT&CK Evaluations heading and the head-to-head
+  comparison, which the measure does not hold, are gone. The Dashboard says when the case summary
+  could not be read, a record's JSON is highlighted with every piece escaped, and the message at
+  the end of a rule run counts the findings left out rather than the rules. The AI analyst holds
+  every decision that would lower a severity, leave an item out of the report or dismiss it for a
+  one-by-one look, names in the triage popup, a message and the ledger the items a
+  90,000-character prompt cut, and records in the ledger what the analyst's question carried that
+  was addressed to a model or too deep to check. The Sigma import dialog no longer names base64
+  and utf16 values as skipped, and says how many rules its 300-row list leaves out.
 - Fewer pages that look right while they are wrong. In the browser store, the mail histogram, the
   Timeline and the aggregate and timeline tools search mail bodies the same way as the Mails list,
   so their counts agree with it. Emptying a server-store case keeps every browser record when the
@@ -241,6 +259,20 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   protection and Defender tampering, EFI boot files, credential stores and known attacker tools.
   They add 46 attack_data detections, which does not count as held out for them, fire on none of
   the clean machines, and add no detection on the two other libraries yet.
+- The address names the case, the page and the finding, story, event or mail open there
+  (`/case/12-lx3k9q2a/findings?finding=314`), so a reload keeps the place, Back and Forward move
+  between pages, and a link opens its place only in the browser that holds that case; a link from
+  another browser or to a deleted case is refused with a message. A page that fails while drawing
+  shows what failed in its place with "go back", "try again" and "reload", and the rest of the app
+  stays usable; a start that cannot open the browser database, or is held back by an older tab,
+  says so instead of waiting. Each page's code is fetched when it is first opened, which brings
+  the first download from 1.9 MB to 0.34 MB; CI now holds the largest chunk under 600,000 bytes
+  and the entry under 420,000. Opening another page moves the keyboard focus to its heading,
+  dialogs keep Tab inside them and give the focus back to the button that opened them, and buttons
+  that show only an icon carry a name for screen readers. Findings, Review, Settings, Stories and
+  Report are now built from parts in their own files, with no change to what they show, and the
+  query bar, rule loading and running, EVTX flattening, the file ledger, record keys and the mail
+  HTML sanitiser have tests of their own.
 - Hostile text no longer holds the server or the browser in a regular expression. Thirty-five
   patterns of the backend (HTML attachments, mail headers and display names, URLs, Office, PDF and
   archive members, EVTX XML, reg query output, M365 dates, rule thresholds) and twelve of the
@@ -277,6 +309,19 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   browser-store stream is 7% slower and the server-store ingest 25% shorter.
   `FORENSIC_PARSE_ISOLATION=0` parses in the server process again, for debugging;
   `docs/security.md` says what each system enforces and what turning it off gives up.
+- Documentation: an architecture page (the parts, the two modes, where evidence goes in a diagram,
+  the web and parse processes and job slots, accounts and roles, the files on disk), an API
+  reference listing every route under /api/ with its method, the role it needs, whether a
+  browser-only instance answers it and its main fields, a guide to writing rules (format, fields,
+  operators, trying a rule, the checks and measures a shipped rule passes, importing Sigma and
+  Sublime rules, the regular expression shapes that backtrack in the browser engine), and a page
+  of frequently asked questions. The install starts with the clone line and gives commands that
+  work on Linux, macOS and Windows PowerShell. The screenshots are new captures of the current app
+  on the demo case. `tools/detection_levels.py` computes the detection-level table from the
+  committed measures, and the page shows its output. Two backend tests hold the pages to the code:
+  one compares the API reference with the URL configuration, the other checks the figures the
+  pages quote against the measures, the packs, the rule files, the level script and the regular
+  expression timing test.
 - A home page. REMN opens on it until a case holds evidence, and the wordmark leads back to it
   after that. It shows what the tool reads, how the rules are measured and what the measures
   show: the rule totals, recordings and clean-host baseline read live from `rules/measures.json`
@@ -335,6 +380,24 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   parsed into who, what and from where, in the server and the browser parser alike. The rules
   catch 27 files of EVTX-to-MITRE-Attack the default rules missed and fire on none of the
   evtx-baseline machines.
+- A server that a small team shares can give each person an account. `backend/manage.py accounts`
+  creates, lists, disables, enables and rotates accounts, revokes their tokens, changes their
+  roles and sets who may open a case. The accounts live in `accounts.json` in the data directory,
+  written whole and readable by the server's account only; each token is random, shown once and
+  kept as a salted digest. While that file holds no account nothing changes: no token on one's own
+  machine, or the one shared `FORENSIC_AUTH_TOKEN`, which stays as the single-user mode. Once it
+  holds one, every request needs a personal token. An admin sees every case and the audit log, an
+  analyst creates cases and works on the ones it owns or is a member of, and a viewer reads its
+  cases and changes nothing. A case records its owner and members, its key alone no longer opens
+  it, and the case and job listings show each account only what it may read. Every route declares
+  what it needs, and a test fails on one that does not. Every change, every upload, import and
+  export, every refused request and every failed sign-in is appended to `audit.log` in an HMAC
+  chain under `FORENSIC_AUDIT_KEY` (or a key in `audit.key`); an admin checks the chain with
+  `manage.py audit verify` or `GET /api/audit/verify`, and it does not protect against whoever
+  holds the key. The page asks for the personal token, shows the account and its role, and
+  disables a viewer's changes with the reason; a case's owner adds members in Settings. Findings,
+  notes and decisions stay in each browser. A file added from a second browser under an evidence
+  number the case already uses is refused instead of mixed with the first.
 - PowerShell 4103 and 800 events now carry the command they record, rebuilt from its parameter
   bindings or taken as typed, with the user and the script, in the server and the browser parser
   alike. Twelve rules read those commands (`rules/windows/powershell-commands.yaml`):
@@ -343,6 +406,25 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   PrintDemon printer ports, AMSI bypasses, named pipe shells and OpenSSH enabled. They catch 15
   files of EVTX-to-MITRE-Attack the default rules missed and fire on none of the evtx-baseline
   machines, and no other bundled rule changes its findings.
+- The case report can go to a client. The Word export now carries everything the HTML report
+  prints: the questions, the model's part, the story detail, the claim notes, the lead marks, the
+  relationship references, how the report was produced and where it stops. The report gains the
+  engagement, the scope (taken from the evidence when the analyst writes none, and saying so), a
+  TLP marking and confidentiality line on every page, a conclusion with the analyst's own
+  confidence, impact (the hosts and accounts the confirmed items name), containment,
+  recommendations, an indicator appendix, and a table of the ATT&CK techniques of the confirmed
+  findings. The cover's rating is now called completeness. The report can be written in English or
+  French: dates, numbers and sizes follow the language, `<html lang>` and the Word language are
+  set, and printed pages carry a running header and page numbers. It can be issued under a firm's
+  name, cover line and logo (PNG or JPEG, 200 KB at most, the cap shown when refused); with
+  neither set it keeps today's English look. Each Sigma rule's author is printed beside its
+  findings in the HTML and Word reports, as the Detection Rule License asks. An analyst's false
+  positives and escalations no longer weigh on the priority of other cases in the browser: a case
+  reads its own, plus those of the other cases the analyst chooses with "past decisions" on the
+  Findings page. The "How AI was used" section prints the ledger's head in full and says what its
+  unkeyed hash chain shows (an entry changed, an entry removed from among later ones, a gap in the
+  numbering) and what it does not (the newest entries removed, or the chain hashed again by
+  whoever holds the case).
 - The Events page stacks a field (least-frequency analysis): its "stack" button lists every
   value of an image, parent image, process, command line, path, service, scheduled task,
   object, file, user, workstation, address, DNS query or provider and event ID pair among

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultSettings, RemnDB, setDb, type Case, type EventRow } from '../db/schema'
 import { SeenSet } from './evidence'
 import { loadBoard } from './hypotheses'
-import { loadInbox } from './inbox'
+import { heldForReview, loadInbox } from './inbox'
 import { runTool, toolNamesFor, TOOL_GROUPS } from './tools'
 
 const lookups = vi.hoisted(() => [] as unknown[])
@@ -139,6 +139,30 @@ describe('proposals', () => {
     expect(ok.error).toBeFalsy()
     const [p] = await loadInbox(1)
     expect(p).toMatchObject({ kind: 'decision', target: 'finding:1', decision: { decision: 'escalated' }, citations: [{ source: 'findings', id: 1 }] })
+  })
+
+  it('record the severity a decision would replace, so one that lowers it waits for the analyst', async () => {
+    await db.findings.add({
+      caseId: 1,
+      key: 'k',
+      ruleId: 'r',
+      title: 'Spray',
+      source: 'events',
+      severity: 'high',
+      severityOverride: 'critical',
+      refs: [1],
+      entities: {},
+      count: 1,
+      attack: [],
+      ts: 1,
+      status: 'new',
+      createdAt: 1,
+    })
+    const seen = new SeenSet(['finding:1'])
+    await runTool('propose_decision', { finding_id: 1, decision: 'reviewed', severity: 'high', reason: 'one account only', cites: ['finding:1'] }, ctx(seen))
+    const [p] = await loadInbox(1)
+    expect(p.decision).toMatchObject({ severity: 'high', from: 'critical' })
+    expect(heldForReview(p)).toBe('it would lower the severity from critical to high')
   })
 })
 

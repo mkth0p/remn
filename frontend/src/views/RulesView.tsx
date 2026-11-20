@@ -6,6 +6,7 @@ import { enabledPackIds, ruleYaml, setPackEnabled, shortSha } from '../data/pack
 import { getDb } from '../db/schema'
 import { toast, useStore } from '../state/store'
 import { Badge, Modal, Spinner, Toggle } from '../components/ui'
+import { confirmAction } from '../components/confirm'
 import { RuleImport } from '../components/RuleImport'
 import { IconAi, IconEdit, IconPlus, IconTrash } from '../components/Icons'
 import type { RuleDiag } from '../rules/engine'
@@ -80,7 +81,7 @@ function PackCard({ pack, on, busy, selected, onToggle, onShow }: { pack: PackIn
   return (
     <div className="card" style={{ padding: '8px 12px', minWidth: 260, flex: '1 1 260px', outline: selected ? '1px solid var(--accent)' : undefined }} data-pack={pack.id}>
       <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-        <Toggle on={on} onChange={onToggle} />
+        <Toggle on={on} onChange={onToggle} name={`enable ${pack.name}`} />
         <strong style={{ flex: 1 }}>{pack.name}</strong>
         <Badge sev="info">{pack.source}</Badge>
       </div>
@@ -218,7 +219,7 @@ export function RulesView() {
   }
   const remove = async (r: LoadedRule) => {
     const id = Number(r.file.split(':')[1])
-    if (!confirm(`Delete custom rule ${r.rule.id}?`)) return
+    if (!(await confirmAction(`Delete custom rule ${r.rule.id}?`, { title: 'Delete the rule', action: 'Delete', danger: true }))) return
     await getDb().customRules.delete(id)
     bump()
   }
@@ -383,7 +384,7 @@ export function RulesView() {
             {shown.slice(0, MAX_ROWS).map((r) => (
               <tr key={r.file + r.rule.id}>
                 <td>
-                  <Toggle on={r.enabled} onChange={(v) => toggle(r, v)} />
+                  <Toggle on={r.enabled} onChange={(v) => toggle(r, v)} name={`enable ${r.rule.id}`} />
                 </td>
                 <td className="mono small">{r.rule.id}</td>
                 <td>
@@ -460,11 +461,12 @@ export function RulesView() {
                     className="btn xs"
                     onClick={() => setEdit({ id: r.origin === 'custom' ? Number(r.file.split(':')[1]) : undefined, yaml: yamlOf(r) })}
                     title={r.origin === 'custom' ? 'edit' : 'copy as custom rule'}
+                    aria-label={r.origin === 'custom' ? 'edit' : 'copy as custom rule'}
                   >
                     <IconEdit />
                   </button>
                   {r.origin === 'custom' && (
-                    <button className="btn xs danger" onClick={() => remove(r)}>
+                    <button className="btn xs danger" onClick={() => remove(r)} aria-label="delete the custom rule">
                       <IconTrash />
                     </button>
                   )}

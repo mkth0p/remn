@@ -146,6 +146,9 @@ export async function runAgent(messages: ChatMessage[], kase: Case, opts: AgentO
   // or after evidence the check could not read whole, is never accepted in bulk.
   let exposed = messages.some((m) => m.suspects?.length)
   let unchecked = messages.some((m) => m.unread)
+  const question = [...messages].reverse().find((m) => m.role === 'user' && !m.synthetic)
+  /** what the check found in the evidence of the question this run answers, for the ledger */
+  const asked: { suspects: Suspect[]; unread: number } = { suspects: [], unread: 0 }
   for (const m of messages)
     if (m.role === 'user' && !m.synthetic)
       // evidence the analyst's own message carries (a story put to the agent) is read like a tool result
@@ -155,6 +158,10 @@ export async function runAgent(messages: ChatMessage[], kase: Case, opts: AgentO
         if (found.unread) unchecked = true
         run.suspects += found.suspects.length
         run.unread += found.unread
+        if (m === question) {
+          asked.suspects.push(...found.suspects)
+          asked.unread += found.unread
+        }
       }
   const cache = new Map<string, { content: string; step: number }>()
   const base = {
@@ -179,15 +186,21 @@ export async function runAgent(messages: ChatMessage[], kase: Case, opts: AgentO
   }
   const report = () => agent?.onRun?.({ ...run, plan: [...run.plan], proposals: [...run.proposals] })
   if (agent) {
-    const question = [...messages].reverse().find((m) => m.role === 'user' && !m.synthetic)?.content ?? ''
-    await appendLedger(caseId, 'run', (agent.label ?? question).slice(0, 300), {
+    const text = question?.content ?? ''
+    await appendLedger(caseId, 'run', (agent.label ?? text).slice(0, 300), {
       model: opts.model || (cfg.transport === 'claude' ? cfg.claudeModel : cfg.model) || undefined,
       transport: cfg.transport,
       mode: opts.mode,
       budget,
       tools: toolNames?.length ?? 0,
-      question: await sha256Hex(question),
+      question: await sha256Hex(text),
     }).catch(() => undefined)
+    // evidence the analyst put in the question is noted as a tool's is; an earlier question's was
+    // noted by the run that answered it
+    if (asked.suspects.length)
+      await appendLedger(caseId, 'notice', `the question: ${asked.suspects.length} place(s) addressed to a model`, { suspects: asked.suspects.slice(0, 5) }).catch(() => undefined)
+    if (asked.unread)
+      await appendLedger(caseId, 'notice', `the question: ${asked.unread} place(s) too long or too deep to check for text addressed to a model`, { unread: asked.unread }).catch(() => undefined)
   }
   let emptyRetries = 0
   let leakRetries = 0

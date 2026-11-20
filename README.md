@@ -11,7 +11,7 @@ Evidence stays on the machines you choose: in the browser's own database, or in 
 file on the server for gigabyte cases. An instance open to the internet runs browser-only:
 the server parses each file and keeps none of it.
 
-![Findings page](docs/images/findings.png)
+![The Findings page of the demo case](docs/images/findings.png)
 
 ## What it does
 
@@ -98,18 +98,21 @@ For development, run the API with `manage.py runserver` and the frontend with
 
 ## Documentation
 
-- [Setup and run](docs/setup.md) — requirements, installation, remote access
-- [Storage modes](docs/storage.md) — browser store, server store, uploads, the checklist before real exports
-- [Data sources](docs/sources.md) — event logs, mailboxes, Microsoft 365 and Entra, deleted mail
-- [Investigation packages](docs/packages.md) — adapters, coverage, observations and relationships
-- [Detection](docs/detection.md) — rule DSL, community packs, mail risk scoring, engine parity
-- [Stories](docs/stories.md) — who is who, sessions, hops and process trees, phases, campaigns, where a story stops
-- [Attack chains](docs/chains.md) — how chains are built and scored
-- [Interface](docs/interface.md) — the pages, the review workflow, the report
-- [AI analyst](docs/ai.md) — the investigating agent, playbooks, approval inbox, AI ledger, transports
-- [Validation and test data](docs/validation.md) — public corpora, measured rates, test suites
-- [Optional archive honeypot](docs/honeypot.md) — isolated decoy, reference trail, private replay and REMN package export
-- [Security model](docs/security.md) — what leaves the machine, what is stored where
+The [documentation index](docs/README.md) lists every page. The ones to start with:
+
+- [Setup and run](docs/setup.md): requirements, installation, Docker, remote access, accounts
+- [Frequently asked questions](docs/faq.md): what leaves the machine, what REMN reads and does not do, how findings are measured, licences
+- [Architecture](docs/architecture.md): the parts, where evidence goes, the processes, accounts and roles
+- [Storage modes](docs/storage.md): browser store, server store, uploads, the checklist before real exports
+- [Data sources](docs/sources.md) and [investigation packages](docs/packages.md): what is read and how
+- [Detection](docs/detection.md): rule sets, community packs, measured rules, detection level, mail risk scoring
+- [Writing rules](docs/rules.md): the rule format, how a rule is checked and measured, importing Sigma and Sublime rules
+- [Stories](docs/stories.md) and [attack chains](docs/chains.md): how the case is read and scored
+- [Interface](docs/interface.md): the pages, the review workflow, the report
+- [AI analyst](docs/ai.md): the investigating agent, the approval inbox, the AI ledger, transports
+- [API reference](docs/api.md): every route, the role it needs, its fields
+- [Validation and test data](docs/validation.md): public corpora, measured rates, test suites
+- [Security model](docs/security.md): what leaves the machine, what is stored where
 
 ## Where things stand
 
@@ -133,8 +136,8 @@ a rule stops detecting a recording or a high one gets noisier.
 The mail risk score was run on public phishing and legitimate mail corpora, with the rates in
 [docs/validation.md](docs/validation.md); its weights were adjusted on those same corpora, so
 the rates are not a held-out measure. Not yet exercised on real multi-gigabyte acquisitions. Attachments are analysed statically;
-nothing is opened or run. The remote mode uses one shared token and no encryption at
-rest. See [SECURITY.md](SECURITY.md).
+nothing is opened or run. A shared server uses one token, or accounts with roles and an
+audit log, and no encryption at rest. See [SECURITY.md](SECURITY.md).
 
 ## Contributing and licence
 

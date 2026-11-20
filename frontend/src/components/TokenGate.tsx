@@ -1,16 +1,17 @@
 import { useState } from 'react'
 import { getHealth, setApiToken } from '../api/client'
 import { getDb } from '../db/schema'
-import { useStore } from '../state/store'
+import { toast, useStore } from '../state/store'
 import { Modal } from './ui'
 
 /**
- * Shown when the server requires an access token (FORENSIC_AUTH_TOKEN set on a
- * remote/home-server deployment) and ours is missing or wrong.
+ * Shown when the server requires an access token and ours is missing or wrong: the shared one
+ * (FORENSIC_AUTH_TOKEN on a remote/home-server deployment), or a personal one on a server with accounts.
  */
 export function TokenGate() {
   const setAuthRequired = useStore((s) => s.setAuthRequired)
   const setHealth = useStore((s) => s.setHealth)
+  const accounts = useStore((s) => s.authAccounts)
   const [token, setToken] = useState('')
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -25,6 +26,7 @@ export function TokenGate() {
       await getDb().kv.put({ key: 'apiToken', value: t })
       setHealth(h)
       setAuthRequired(false)
+      if (h.account) toast('ok', `signed in as ${h.account.name} (${h.account.role})`)
     } catch (e) {
       const status = (e as { status?: number }).status
       setErr(status === 401 ? 'wrong token' : `server error: ${(e as Error).message}`)
@@ -34,7 +36,7 @@ export function TokenGate() {
   }
   return (
     <Modal
-      title="Access token required"
+      title={accounts ? 'Personal access token required' : 'Access token required'}
       onClose={() => undefined}
       footer={
         <button className="btn primary" disabled={busy || !token.trim()} onClick={submit}>
@@ -42,8 +44,20 @@ export function TokenGate() {
         </button>
       }
     >
-      <div className="small muted">This REMN server is protected by a shared access token (set by whoever runs it, in the server's environment as FORENSIC_AUTH_TOKEN).</div>
-      <input className="input mono" type="password" autoFocus placeholder="access token" value={token} onChange={(e) => setToken(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()} />
+      <div className="small muted">
+        {accounts
+          ? 'This REMN server has accounts. Enter the personal token you were given (made on the server with manage.py accounts): it says who you are, and what you may do follows your role and the cases you are a member of.'
+          : "This REMN server is protected by a shared access token (set by whoever runs it, in the server's environment as FORENSIC_AUTH_TOKEN)."}
+      </div>
+      <input
+        className="input mono"
+        type="password"
+        autoFocus
+        placeholder={accounts ? 'personal access token' : 'access token'}
+        value={token}
+        onChange={(e) => setToken(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && submit()}
+      />
       {err && (
         <div className="small" style={{ color: 'var(--red, #e5534b)' }}>
           {err}

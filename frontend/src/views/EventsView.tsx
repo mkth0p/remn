@@ -15,6 +15,7 @@ import type { EventRow, RowMark } from '../db/schema'
 import type { Condition, Filter } from '../rules/filter'
 import { toggleFacetValue } from '../data/facetToggle'
 import { toast, useImportsFinished, useStore } from '../state/store'
+import { useRouteItem } from '../state/route'
 import { fmtTs, timeColumnWidth, tzLabel } from '../util/format'
 import { downloadBlob, exportCsv, exportJson } from '../util/export'
 import { timelineRecords, toTimelineCsv, toTimesketchJsonl } from '../util/responderExports'
@@ -100,6 +101,7 @@ export function EventsView() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<EventRow | null>(null)
+  useRouteItem('event', selected?.id)
   const [picked, setPicked] = useState<Set<string | number>>(new Set())
   const [marks, setMarks] = useState<Map<number, RowMark>>(new Map())
   const [markedOnly, setMarkedOnly] = useState(false)
@@ -288,7 +290,7 @@ export function EventsView() {
                 <button className={markedOnly ? 'btn xs primary' : 'btn xs ghost'} title="Show only the rows you marked" onClick={() => setMarkedOnly((on) => !on)}>
                   marked
                 </button>
-                <button className="btn icon ghost sm" title="export" onClick={() => setMenu(!menu)}>
+                <button className="btn icon ghost sm" title="export" aria-label="export" onClick={() => setMenu(!menu)}>
                   <IconMore />
                 </button>
                 {menu && (
@@ -397,6 +399,7 @@ export function EventsView() {
                 />
               )}
               <VirtualTable
+                label="Events"
                 rows={rows}
                 columns={columns}
                 rowKey={(r) => r.id!}

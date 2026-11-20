@@ -107,7 +107,7 @@ cites (the file and record of each row, the title of each finding) and, for a qu
 answered, whether the case holds the evidence to answer it. An open question is marked
 unanswered; an answer that cites nothing says so. "Where it stops" counts the questions still
 open, those of them no evidence in the case could answer, and those that cannot be answered from
-this evidence. The Word report does not carry the section yet.
+this evidence. The Word report carries the same section.
 
 ## Updating the catalog
 

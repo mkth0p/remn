@@ -11,6 +11,7 @@ import { Badge, Spinner, Toggle } from '../components/ui'
 import { IconPlus, IconStop, IconTrash } from '../components/Icons'
 import { AiMessage } from './ai/AiMessage'
 import { AiSidePanel } from './ai/AiSidePanel'
+import { pressable } from '../components/pressable'
 
 const STARTERS = [
   'Give me an overview of this case and the most suspicious things you see.',
@@ -158,7 +159,7 @@ export function AiView() {
             <IconPlus /> new investigation
           </button>
           {sessions.map((s) => (
-            <div key={s.id} className={`list-item ${session?.id === s.id ? 'active' : ''}`} onClick={() => openChatSession(s)} style={{ padding: '6px 10px' }}>
+            <div {...pressable} key={s.id} className={`list-item ${session?.id === s.id ? 'active' : ''}`} onClick={() => openChatSession(s)} style={{ padding: '6px 10px' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="ellipsis small">{s.title}</div>
                 <div className="muted" style={{ fontSize: 10 }}>
@@ -167,6 +168,7 @@ export function AiView() {
               </div>
               <button
                 className="btn ghost xs"
+                aria-label="delete the chat"
                 onClick={(e) => {
                   e.stopPropagation()
                   getDb()
