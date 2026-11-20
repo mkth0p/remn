@@ -12,7 +12,9 @@ import ollama  # noqa: E402
 from services.ai import prompts  # noqa: E402
 from services.ai.tools import TOOLS  # noqa: E402
 
-MODEL = sys.argv[1] if len(sys.argv) > 1 else "gemma4-hauhaucs:latest"
+if len(sys.argv) < 2:
+    sys.exit("usage: ai_repro.py <model> [true|false]")
+MODEL = sys.argv[1]
 THINK = None if len(sys.argv) < 3 else (sys.argv[2] == "true")
 tool_result = json.dumps(
     {

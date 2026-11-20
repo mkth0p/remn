@@ -282,6 +282,20 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   review it comes from. New case starts a case (taking over the untouched first one) and can
   import evidence as it is created; Open demo case opens the Northstar lab. The REMN mark, a block
   wearing away into dither, replaces the R in the sidebar.
+- The AI features promise less and hold back more. The Claude Code connector is off until an
+  operator sets `CLAUDE_CODE_ENABLED=1`, and the settings page and `docs/ai.md` say what turning
+  it on means: one sign-in on the server machine, shared by every analyst who picks it, and
+  evidence excerpts leaving the machine. Its status answer says only whether it is signed in and
+  usable, nothing about the account. No model name is built in any more: with none set, the server
+  uses the analyst's pick, else the first model its Ollama lists, and the answer names the model
+  used, so an install whose only model is the old default keeps working. A sentence or text that
+  names no address, account or hash is "nothing to check" instead of verified, and the report and
+  the AI panel count sentences by state. A proposal made after evidence text addressed to a model,
+  or after evidence too long for that check to read whole, is never accepted by "accept all"; in
+  the triage pass this holds for the whole batch, and the inbox says how many proposals wait and
+  why. On an invented set the check finds 11 of 48 payloads (none encoded, 1 of 16 in other
+  languages), and `docs/ai.md` says so. The triage mode that wrote decisions directly, which
+  nothing called, is gone.
 - Eleven rules for directory changes on a domain controller (`rules/windows/directory.yaml`):
   accounts weakened for AS-REP roasting or offline cracking, Kerberos delegation granted
   (including resource-based delegation), passwords set never to expire, permissions changed on

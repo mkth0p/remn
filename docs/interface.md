@@ -392,16 +392,21 @@ server case are checked alike:
   that chain's or incident's own rows;
 - the executive summary: the addresses and hashes it names are somewhere in the evidence.
 
-A claim is verified, unsupported (a row it cites is gone, or a value it names is in none of
-its rows) or contradicted (its rows say otherwise). Each rule's line in the report reads "rows
-checked", "rows missing" or "rows disagree" and names its first row by its place in its own
-file (`frontend/src/data/recordKeys.ts`): an event log's record number with the computer and
-channel, a mailbox's message number, a cloud record's own id, under the file whose SHA-256
-the evidence table prints. REMN's row ids change when evidence is removed and added again or a
-bundle is imported into another browser; these references do not, and a reader can check them
-in any tool. A text that names what its rows do not hold says so under it, every claim that
-does not hold is listed under "Where it stops" and on the Report page, and the preflight keeps
-the report a draft until they all hold or the analyst waives the check with a reason.
+A claim holds (a finding's rows match it as above; a text's rows hold every value it names),
+is unsupported (a row it cites is gone, or a value it names is in none of its rows) or is
+contradicted (its rows say otherwise). A text that names no address, account or hash has
+nothing to check: the report says so under it and counts it apart, and it does not count as
+holding. A text that holds has its values in its rows; the check does not show that what it
+says about them is true. The method section gives the count of each. Each rule's line in the
+report reads "rows checked", "rows missing" or "rows disagree" and names its first row by
+its place in its own file (`frontend/src/data/recordKeys.ts`): an event log's record number
+with the computer and channel, a mailbox's message number, a cloud record's own id, under
+the file whose SHA-256 the evidence table prints. REMN's row ids change when evidence is
+removed and added again or a bundle is imported into another browser; these references do
+not, and a reader can check them in any tool. A text that names what its rows do not hold
+says so under it, every claim that does not hold is listed under "Where it stops" and on the
+Report page, and the preflight keeps the report a draft until they all hold or the analyst
+waives the check with a reason.
 
 The printed report (`frontend/src/data/reportHtml.ts`) is one self-contained HTML file in
 REMN's own look, laid out for A4 and print-to-PDF. Every time in it is UTC, whatever the

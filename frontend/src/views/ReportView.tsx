@@ -223,14 +223,14 @@ export function ReportView() {
     unsupported: printedChecks.filter((c) => c.status === 'unsupported').length,
     contradicted: printedChecks.filter((c) => c.status === 'contradicted').length,
     texts: claims.texts.length,
-    textsUnsupported: claims.texts.filter((t) => t.check.status !== 'verified').length,
+    textsUnsupported: claims.texts.filter((t) => t.check.status === 'unsupported').length,
   }
   const unverified = [
     ...shown.flatMap((f) => {
       const c = f.id != null ? claims?.findings[f.id] : undefined
       return c && c.status !== 'verified' ? [{ what: `${f.title} (${f.ruleId})`, status: c.status, reasons: c.reasons }] : []
     }),
-    ...(claims?.texts ?? []).filter((t) => t.check.status !== 'verified').map((t) => ({ what: t.what, status: t.check.status, reasons: t.check.reasons })),
+    ...(claims?.texts ?? []).filter((t) => t.check.status === 'unsupported').map((t) => ({ what: t.what, status: t.check.status, reasons: t.check.reasons })),
   ]
   const checks = preflightChecks({ evidence, rules: rulesState, undecided, aiDecided: aiDecided(findings), unprintedConfirmed: hiddenConfirmed.length + hiddenStories, claims: claimSummary })
   const status = issueStatus(checks, issue)

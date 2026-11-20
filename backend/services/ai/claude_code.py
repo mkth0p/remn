@@ -7,7 +7,8 @@ hooks, plugins, MCP servers or session file (``--safe-mode``, ``--tools ""``,
 ``--no-session-persistence``). The browser still owns the conversation and executes the
 REMN tools; Claude asks for them through a JSON reply because the command line exposes no
 tool API in this mode. Everything sent this way leaves the server for Anthropic through
-the Claude Code login of the account that runs the server.
+the Claude Code login of the account that runs the server, for every analyst who picks the
+connector. It is off unless the operator sets CLAUDE_CODE_ENABLED=1.
 """
 
 from __future__ import annotations
@@ -61,7 +62,7 @@ the date: it is not part of the case."""
 
 
 def enabled() -> bool:
-    return bool(getattr(settings, "CLAUDE_CODE_ENABLED", True))
+    return bool(getattr(settings, "CLAUDE_CODE_ENABLED", False))
 
 
 def binary() -> str | None:
@@ -106,34 +107,32 @@ _status_lock = threading.Lock()
 
 
 def status(force: bool = False) -> dict[str, Any]:
-    """Installed? signed in? Cached for a minute; never runs a model turn."""
+    """
+    Installed? signed in? Cached for a minute; never runs a model turn. Any client of the API can
+    ask, so the answer says only whether the connector can be used: not who is signed in, how, or
+    where the command line lives on the server.
+    """
     with _status_lock:
         if not force and _status_cache["value"] is not None and time.time() - _status_cache["at"] < 60:
             return dict(_status_cache["value"])
     out: dict[str, Any] = {
         "enabled": enabled(),
         "available": False,
-        "path": None,
-        "version": None,
         "loggedIn": False,
-        "account": None,
-        "method": None,
         "error": None,
         "models": MODELS,
         "defaultModel": DEFAULT_MODEL,
     }
     if not enabled():
-        out["error"] = "the Claude Code connector is switched off on this server (CLAUDE_CODE_ENABLED=0)"
+        out["error"] = "the Claude Code connector is off on this server; an operator turns it on with CLAUDE_CODE_ENABLED=1"
     else:
         path = binary()
         if not path:
             out["error"] = 'the "claude" command line is not installed on the server machine (or not on its PATH; set CLAUDE_CODE_BIN)'
         else:
-            out["path"] = path
             try:
                 rc, ver, err = _run([path, "--version"])
-                out["version"] = ver.strip().splitlines()[0] if ver.strip() else None
-                if rc != 0 and not out["version"]:
+                if rc != 0 and not ver.strip():
                     out["error"] = f"claude --version failed: {(err or ver).strip()[:200]}"
                 else:
                     out["available"] = True
@@ -143,8 +142,6 @@ def status(force: bool = False) -> dict[str, Any]:
                     except ValueError:
                         info = {}
                     out["loggedIn"] = bool(info.get("loggedIn"))
-                    out["account"] = info.get("email") or info.get("account") or None
-                    out["method"] = info.get("authMethod") or None
                     if not out["loggedIn"]:
                         out["error"] = 'Claude Code is installed on the server machine but not signed in: run "claude" there once and sign in'
             except OSError as exc:

@@ -191,11 +191,10 @@ FRONTEND_DIST = ROOT_DIR / "frontend" / "dist"
 # Ollama
 # ---------------------------------------------------------------------------
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4-hauhaucs:latest")
+# The model used when the analyst picks none. Empty: the first model the Ollama lists, named in the answer.
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "").strip()
 OLLAMA_NUM_CTX = _env_int("OLLAMA_NUM_CTX", 32768)
 OLLAMA_TIMEOUT = _env_int("OLLAMA_TIMEOUT", 600)
-# Claude Code connector: the server runs the local "claude" command line as the analyst model
-# (evidence excerpts leave the machine for Anthropic). Operators can switch it off.
 # Hayabusa, Sigma over EVTX, as an optional detection engine. Found on PATH or at HAYABUSA_PATH,
 # with its rules beside the binary or at HAYABUSA_RULES. Every ingested event log is handed to
 # it when present; HAYABUSA_ENABLED=0 keeps it out of ingest without uninstalling it.
@@ -212,7 +211,10 @@ HAYABUSA_CONCURRENCY = _env_int("HAYABUSA_CONCURRENCY", 1)
 HAYABUSA_WAIT_S = _env_int("HAYABUSA_WAIT_S", 20)
 # Replaces the option set wholesale for a release whose flags moved; see services/analysis/hayabusa.py
 HAYABUSA_ARGS = os.environ.get("HAYABUSA_ARGS", "").strip()
-CLAUDE_CODE_ENABLED = _env_bool("CLAUDE_CODE_ENABLED", True)
+# Claude Code connector: the server runs the local "claude" command line as the analyst model,
+# with the sign-in of the account that runs the server, for every analyst who picks it; evidence
+# excerpts leave the machine for Anthropic. Off unless an operator turns it on.
+CLAUDE_CODE_ENABLED = _env_bool("CLAUDE_CODE_ENABLED", False)
 CLAUDE_CODE_BIN = os.environ.get("CLAUDE_CODE_BIN", "").strip()
 CLAUDE_CODE_TIMEOUT = _env_int("CLAUDE_CODE_TIMEOUT", 600)
 

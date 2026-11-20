@@ -48,7 +48,7 @@ export function SettingsView() {
         if (!dead) setClaudeStatus(st)
       })
       .catch((e) => {
-        if (!dead) setClaudeStatus({ enabled: false, available: false, version: null, loggedIn: false, account: null, method: null, error: (e as Error).message })
+        if (!dead) setClaudeStatus({ enabled: false, available: false, loggedIn: false, error: (e as Error).message })
       })
     return () => {
       dead = true
@@ -300,8 +300,9 @@ export function SettingsView() {
                       <span>
                         <b>Claude Code</b>{' '}
                         <span className="muted small">
-                          — the REMN server runs the <code>claude</code> command line installed on its machine, signed in with that machine's Claude account. Prompts, tool results (evidence excerpts)
-                          and answers go to Anthropic; the server keeps nothing. Not for evidence that may not leave your organisation.
+                          — off unless the server's operator turns it on. The REMN server then runs the <code>claude</code> command line installed on its machine, with the sign-in of the account that
+                          runs REMN: every analyst who uses this server and picks Claude Code works through that one sign-in. Prompts, tool results (evidence excerpts) and answers leave the server for
+                          Anthropic under that account; the server keeps nothing. Not for evidence that may not leave your organisation.
                         </span>
                       </span>
                     </label>
@@ -324,11 +325,7 @@ export function SettingsView() {
                   <div className="field" style={{ flex: 1 }}>
                     <span>on the server machine</span>
                     <div className="small" style={{ paddingTop: 6 }}>
-                      {!claudeStatus
-                        ? '…'
-                        : claudeStatus.available && claudeStatus.loggedIn
-                          ? `${claudeStatus.version ?? 'installed'} · signed in${claudeStatus.method ? ` (${claudeStatus.method})` : ''}${claudeStatus.account ? ` as ${claudeStatus.account}` : ''}`
-                          : (claudeStatus.error ?? 'not available')}
+                      {!claudeStatus ? '…' : claudeStatus.available && claudeStatus.loggedIn ? 'installed and signed in' : (claudeStatus.error ?? 'not available')}
                     </div>
                   </div>
                 </div>
@@ -385,7 +382,7 @@ export function SettingsView() {
               {aiCfg.transport !== 'claude' && (
                 <div className="row">
                   <label className="field" style={{ flex: 1 }}>
-                    <span>default model (blank = server default)</span>
+                    <span>default model (blank: the server's OLLAMA_MODEL, else the first model listed)</span>
                     <input className="input mono" list="ai-models" value={aiCfg.model} onChange={(e) => saveAi({ model: e.target.value })} placeholder={health?.ollama.defaultModel ?? 'qwen3:8b'} />
                     <datalist id="ai-models">
                       {aiModels.map((m) => (
@@ -417,9 +414,10 @@ export function SettingsView() {
               </div>
               {aiCfg.transport === 'claude' && (
                 <div className="hint">
-                  Install Claude Code on the server machine (<code>npm install -g @anthropic-ai/claude-code</code>), run <code>claude</code> there once to sign in, then restart REMN. The server runs
-                  it with its own tools, hooks, plugins and MCP servers off and without saving a session; REMN's tools are still executed in this browser. Operators can switch the connector off with{' '}
-                  <code>CLAUDE_CODE_ENABLED=0</code>.
+                  The connector is off unless an operator turns it on: install Claude Code on the server machine (<code>npm install -g @anthropic-ai/claude-code</code>), run <code>claude</code> there
+                  once to sign in as the account that runs REMN, set <code>CLAUDE_CODE_ENABLED=1</code> and restart REMN. REMN does not check which kind of sign-in that is; whether that account may be
+                  used for this, and on which terms, is for its holder to settle with Anthropic first. The server runs it with its own tools, hooks, plugins and MCP servers off and without saving a
+                  session; REMN's tools are still executed in this browser.
                 </div>
               )}
               {aiCfg.transport === 'browser' && (

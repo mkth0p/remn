@@ -615,8 +615,12 @@ function StoryNote({
         </button>
         {check && !dirty && (
           <span className="small" role="status">
-            <Dot sev={check.status === 'verified' ? 'ok' : 'high'} />{' '}
-            {check.status === 'verified' ? `every value it names is in the story's records (${check.named.length})` : check.reasons.join('; ')}
+            <Dot sev={check.status === 'verified' ? 'ok' : check.status === 'nothing_to_check' ? 'info' : 'high'} />{' '}
+            {check.status === 'verified'
+              ? `every value it names is in the story's records (${check.named.length})`
+              : check.status === 'nothing_to_check'
+                ? 'it names no address, account or hash: nothing to check against the records'
+                : check.reasons.join('; ')}
           </span>
         )}
       </div>
