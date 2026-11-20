@@ -59,21 +59,12 @@ const BUILT: Record<string, string> = {
   'rules/filter.ts p': "a rule's own pattern (the re operator), which the rule author writes",
 }
 
-// a token, any text, then another token: the browser tries it again from each occurrence of the first
-// token, and keeping what it matches would take an atomic group or a lookaround, which the server's
-// RE2 does not have. The browser runs rules in a worker, so a slow value delays the run, not the page.
-const RETRIED = 'retried from each occurrence of its first token; no rewrite that RE2 also reads keeps what it matches'
-
-/** Patterns of REMN's own rule packs left as they are, by rule, with why. */
-const RULE_EXEMPT: Record<string, string> = {
-  'mail-bank-detail-change': RETRIED,
-  'win-lolbin-suspicious-commandline': RETRIED,
-  'win-msiexec-quiet-install': RETRIED,
-  'win-packet-capture-tool': RETRIED,
-  'win-ps-printer-port-to-file': RETRIED,
-  'win-fsutil-symlink-evaluation': RETRIED,
-  'win-remote-computer-management': RETRIED,
-}
+/**
+ * Patterns of REMN's own rule packs left as they are, by rule, with why. A token, any text, then
+ * another token is tried again from each occurrence of the first token: bound the text between them
+ * (a gap of up to 1,000 characters on the line, the most RE2 repeats) instead of adding the rule here.
+ */
+const RULE_EXEMPT: Record<string, string> = {}
 
 interface Site {
   key: string

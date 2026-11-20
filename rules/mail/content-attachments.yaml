@@ -232,7 +232,9 @@ where:
   any_of:
     - bodyText|re: "(?i)(chang|nouveau|nouvelle|mise à jour|update|new)\\s+(de\\s+|d[e']\\s*)?(rib|iban|coordonn[ée]es bancaires|bank (account|details)|banking (details|information)|account number|beneficiary|bénéficiaire)"
     - visibleText|re: "(?i)(chang|nouveau|nouvelle|mise à jour|update|new)\\s+(de\\s+|d[e']\\s*)?(rib|iban|coordonn[ée]es bancaires|bank (account|details)|banking (details|information)|account number|beneficiary|bénéficiaire)"
-    - subject|re: "(?i)(nouveau|new|chang|update|mise à jour).*(rib|iban|bank|banc|coordonn)"
+    # a subject is kept to 500 characters, so a gap of up to 500 is any gap; an unbounded one is retried
+    # from each occurrence of the first word in the browser
+    - subject|re: "(?i)(nouveau|new|chang|update|mise à jour).{0,500}(rib|iban|bank|banc|coordonn)"
 then_flags:
   - mail_corroborated: high
 ---

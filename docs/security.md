@@ -81,10 +81,10 @@ pack importer download from their sources on request, never during an investigat
   repeat, and fail on a pattern that runs past its budget at 100,000 characters, naming it
   and its file. A pattern that reads no evidence, or whose caller limits the text it
   searches, is listed in the test with the reason. The store runs a rule's `re` pattern
-  with RE2, which does not backtrack. The browser engine does: seven bundled rules and some
-  converted community rules keep a pattern that a crafted value of that length slows down,
-  in the rules worker rather than the page, because no rewrite that RE2 also accepts keeps
-  what they match.
+  with RE2, which does not backtrack. The browser engine does: some converted community
+  rules keep a pattern that a crafted value of that length slows down, in the rules worker
+  rather than the page. A bundled rule bounds the text between two tokens instead
+  (`[^\n]{0,1000}`), which RE2 also reads.
 - The browser application carries a Content Security Policy (no inline script, scripts
   and workers from the app origin only, WebAssembly allowed for hashing, frames only for
   the sandboxed mail and report documents, no object or base tags) as a `<meta>` tag in
