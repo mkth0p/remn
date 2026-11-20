@@ -140,10 +140,13 @@ archived and reattached when the same findings reappear on the next rule run.
 3. **Deep attachment analysis**: for a first look at a huge mailbox, turn it off in
    Settings (the macro and PDF analysers dominate the cost); re-ingest with it on once
    the interesting time range is known.
-4. **Expected throughput** (laptop, one core): EVTX about 10,000 events per second; mail
-   150 to 300 messages per second with deep analysis off, so a 300,000-mail export takes
-   20 to 35 minutes. The heavy validation suite (`pytest -m heavy -s`) reproduces these
-   numbers with synthetic data from `samples/synthetic/make_big.py`.
+4. **Expected throughput** (laptop, one core, synthetic data): EVTX about 10,000 events
+   per second; mail 150 to 300 messages per second with deep analysis off, so a
+   300,000-mail export takes 20 to 35 minutes. The heavy validation suite
+   (`pytest -m heavy -s`) reproduces these numbers with synthetic data from
+   `samples/synthetic/make_big.py`. Real logs can read far slower: the public attack
+   recordings measured on 2026-09-28 loaded at about 1,560 events per second (2,377,981
+   events in 1,522.8 s, `throughput` in `frontend/src/data/libraryMeasures.json`).
 5. **If an ingest job fails**: the store stays consistent. Read the job's error in the
    console or in `GET /api/jobs?case=<key>`, cancel leftovers, fix the cause (usually disk space or
    a corrupt member file), delete the evidence and re-ingest.

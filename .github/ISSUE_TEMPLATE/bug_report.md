@@ -18,4 +18,4 @@ evidence: use the synthetic lab (`samples/synthetic/make_linked_lab.py`) or a pu
 - REMN version or commit:
 - Storage mode (browser / server):
 - OS and browser:
-- Backend log lines (from `backend/tmp` or the console):
+- Backend log lines (from the console that runs the server, or `docker logs` for the container):

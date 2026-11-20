@@ -28,8 +28,8 @@ finding whose key survives are kept, and orphan pruning leaves them alone.
 Findings come from three places: the rules bundled with REMN (Windows, mail, Microsoft
 365), the community rule packs converted from SigmaHQ and Sublime Security, and the mail
 risk score computed at ingest. All rules are written in one YAML language and run on two
-engines that are held to identical output: one in the browser, so evidence never has to
-reach the server, and one in SQL, for gigabyte cases. This page describes the language,
+engines whose findings continuous integration compares key by key: one in the browser, so
+evidence never has to reach the server, and one in SQL, for gigabyte cases. This page describes the language,
 the rule sets, the scoring, the sender baseline that enriches mails after ingest, and
 the parity between the engines.
 
@@ -98,7 +98,7 @@ maintains: brute force and password spraying, out-of-hours logons, RDP from outs
 PsExec and admin shares, persistence, log clearing, Defender tampering, PowerShell
 cradles and credential dumping on the Windows side; display-name spoofing, lookalike
 domains, macro, PDF and HTML-smuggling attachments, the BEC lexicon, forged headers,
-score bands and the sender-baseline rules on the mail side; and the 28 business email
+score bands and the sender-baseline rules on the mail side; and the 29 business email
 compromise rules over Microsoft 365 and Entra rows listed on the [data sources
 page](sources.md). Every rule carries MITRE ATT&CK technique ids, as of ATT&CK v19 (April
 2026), which split Defense Evasion into Stealth and Defense Impairment and moved Impair
@@ -181,13 +181,14 @@ fire on none of the evtx-baseline machines and, so far, on no recording of EVTX-
 or EVTX-ATTACK-SAMPLES that the other rules miss.
 
 The SigmaHQ packs keep their upstream levels except where `rules/community/levels.json`
-changes them, which the pack loader applies and a re-import leaves alone. 110 low or
-informational rules that raise nothing on the evtx-baseline machines, which log what they read,
-are raised to medium, and nine medium or high rules whose only findings in the measure are on
-those machines are lowered to low; REMN's own rules were changed the same way in their files
-(six raised to medium, the off-hours logon lowered to low). Together they add 10 detections on
-attack_data, 3 on EVTX-to-MITRE-Attack and 4 on EVTX-ATTACK-SAMPLES, and remove about a fifth of
-the medium and higher findings on the clean machines (2,134 to 1,684).
+changes them, which the pack loader applies and a re-import leaves alone. 110 low rules that
+raise nothing on the evtx-baseline machines, which log what they read, are raised to medium, and
+nine medium or high rules whose only findings in the measure are on those machines are lowered to
+low; REMN's own rules were changed the same way in their files (six raised to medium, the
+off-hours logon lowered to low). These changes were made on 2026-09-26, after the committed
+measure was taken and after its results on the attack libraries were known, so a count of
+detections at medium and above on those libraries is no longer held out; a count at any severity
+is unaffected by levels.
 
 The rules that flooded the clean machines were cut down without losing a recorded detection
 (measured in [the noise review](reviews/2026-09-25-noise-and-held-out.md)). A rule a busy
@@ -226,7 +227,11 @@ upstream repository, the exact commit, the licence and the counts, the upstream
 `LICENSE` verbatim, and `skipped.json` naming every upstream rule that was not converted
 and why. A rule is skipped rather than weakened: `fieldref`, `expand` and the time-part
 modifiers, any modifier outside the Sigma 2.1 list, `file_access` sources, Sublime ML
-classifiers, `file.explode`, link analysis, and so on. What translates exactly is
+classifiers, `file.explode`, link analysis, and so on. Two translations are looser than
+the original and are not reported on the rule: a Sigma `|re` regex matches without regard
+to case, and a Sublime `any()` with several conditions on one collection (attachments,
+links) matches when each condition holds for some member rather than all of them for the
+same one; both make a rule match more, never less. What translates exactly is
 translated: `base64`, `base64offset` and `utf16`/`wide` values become the literal strings
 the encoded value can appear as (all three alignments), matched case-sensitively; `neq`
 becomes a negated equality; `cased` selects the case-sensitive operators; the regex flags
@@ -299,8 +304,8 @@ Recorded attacks, at the versions measured:
   audit logs, other Azure Monitor records and Splunk search exports, which REMN does not read;
 - EVTX-to-MITRE-Attack (`4748560`): 279 recordings, each labelled with the ATT&CK technique of
   the folder it is filed in. No rule was written against it before it was first measured
-  ([the head-to-head](reviews/2026-09-25-head-to-head.md)); the two rules written since for
-  the gaps it showed are not measured on it (`WRITTEN_AGAINST` in the tool);
+  ([the head-to-head](reviews/2026-09-25-head-to-head.md)); the rules written since after
+  studying its files are not credited on it (`WRITTEN_AGAINST` in the tool);
 - the Windows datasets of Splunk attack_data (`7a5e9d5`): 535 recordings of the event logs of
   its attack range, kept as XmlWinEventLog, each labelled with the techniques its author tested.
   No rule was written against them before they were first measured
@@ -337,9 +342,19 @@ machines a quarter less, half when it fired on every one of them
 
 Mail rules are calibrated on mail corpora instead (below).
 
-At this commit, 1,023 of the 3,008 event rules fire on a recording of what they look
-for and 1,985 are leads; 457 of the 457 SigmaHQ rules with a sample fire on it; on the
-clean machines 170 of the 2,794 rules whose log sources they have fired at least once.
+The committed measure was taken on 2026-09-25. In it, 1,023 of the 3,008 event rules measured
+fire on a recording of what they look for, 1,984 are leads and 1 cannot run without a case
+setting; 457 of the 457 SigmaHQ rules with a sample fire on it; on the clean machines 170 of
+the 2,794 rules whose log sources they have fired at least once. A recording counts as detected
+when a rule of its technique raises a finding of any severity anywhere in the file; whether that
+finding is on the attack's own events is not checked. Counted that way, the rules enabled by
+default (the core rules and the two default SigmaHQ packs) detect 241 of the 535 attack_data
+Windows datasets, 115 of the 279 EVTX-to-MITRE-Attack files and 271 of the 278
+EVTX-ATTACK-SAMPLES files. On the clean machines REMN's own rules raised 200 findings at high or
+critical, at the severities they had when measured. Event rules added since that day (among them
+the directory, other-product, PowerShell-command and technique-gap rules of 2026-09-26) have no
+measure yet and are shown as unmeasured, and a rule changed since as changed;
+`tests/backend/test_rule_measures.py` warns while any rule is in either state.
 Measuring found SigmaHQ rules that could never fire (the AppX deployment channel, comparisons
 with true) and PowerShell rules blind to PowerShell 7's log, since fixed in the converter.
 EVTX-to-MITRE-Attack, added as a source on 2026-09-25, gave 53 leads their first recorded
@@ -353,7 +368,9 @@ query, a member added to a security group).
 cores. `--shard I/N --raw FILE` measures one of N shares of the recordings and clean machines,
 on as many machines as there are shares, and `--merge FILE...` makes the measure of the shares;
 re-run it after changing a rule or re-importing a pack, with `--detail rules/measures-detail.json`,
-and commit both files. A backend test warns while a rule has changed since it was measured.
+and commit both files. A backend test warns while a rule has changed since it was measured, and
+`tests/backend/test_quoted_measures.py` fails until the figures this page and the README quote
+from the two files are updated to match them.
 
 **The gate**: `--gate rules/measures-detail.json` measures again and fails when a rule no longer
 detects a recording it detected when the committed detail was taken, a SigmaHQ rule no longer
@@ -394,17 +411,10 @@ and higher finding on its own:
 | 5, every finding | none | 587 | 587 |
 | medium and up, nothing else | | 241 | 241 |
 
-Every level detects 249 of 535 attack_data recordings, 123 of 279 EVTX-to-MITRE-Attack files and
-266 of 278 EVTX-ATTACK-SAMPLES files (a finding of the recording's technique, standing alone or
-folded), against 245, 112 and 264 when only medium and higher findings are raised. The default
-level has 62% fewer lines on a clean machine than that. Folding does not push the attack down the
-queue: on cases built from the clean machines of one half of the seven, with one recording's
-findings merged into one of them at a busy time and rule noise taken from the other half, the
-first finding of the attack came into the top ten of the priority queue (with the repeat damping
-of the priority score, where a folded finding counts as the findings it stands for) as often at
-level 2 as with every medium and higher finding raised on its own: in 47%, 38% and 75% of the
-recordings of the three libraries against 47%, 38% and 76%, with about three times fewer lines
-per host.
+Since no level drops a finding, every level detects what the enabled rules detect: on the
+committed measure, the counts at any severity given under [Measured rules](#measured-rules). The
+default level has 62% fewer lines on a clean machine than raising every medium and higher finding
+on its own.
 
 The case's own machines are a second measure of noise, read after every run. A rule whose
 findings stand on their own on at least half the hosts the case's findings name (at least two, of
@@ -412,9 +422,7 @@ at least three) is that network's background, whatever the clean machines said, 
 fold per host wherever it raised more than one; the folded finding's title says on how many of
 the case's hosts its rule fired (`foldWidespread` in `frontend/src/data/detectionLevel.ts`).
 Rules a level never folds (the analyst's own, and every rule at level 5) and findings an analyst
-decided on are left as they are. On the merged cases above at level 2 it cut the lines per clean
-host from 81 to 69 (14%) and the mean number of lines read before the first finding of the attack
-by 12%, 12% and 9% on the three libraries, with the top-ten share unchanged.
+decided on are left as they are.
 
 A rule no clean machine could measure (mail, Microsoft 365, other products' logs, a rule changed
 since it was measured) keeps its findings from medium up on their own at levels 1 to 4, and the
@@ -424,15 +432,14 @@ enabled rules raise findings on their own at the level, and its "level" column t
 which each rule's highest severity stands on its own. A case started before levels existed has
 none and keeps every finding on its own, as it did.
 
-The table was measured on 2026-09-26 with every rule's findings (core and the two default Sigma
-packs, every severity, at the rule levels set from the measures that day) on every recording and
-clean machine of the rule measure. Detected is a finding of the recording's ATT&CK technique, not
-counting a rule on the library it was written against (`WRITTEN_AGAINST`). A rule's level never
-reads the attack libraries; the five budgets and the doubling per severity step were picked from
-a scan of this same measure. Lines are held out: each clean machine's lines are counted under rule
-noise taken from the six other machines (the app takes it from all seven). The last row is not
-held out that way, since some rule levels were lowered from the findings on these machines. The
-budgets make the levels nest: a finding on its own at one level is on its own at every level above.
+The budgets are in the code (`frontend/src/data/detectionLevel.ts`) and make the levels nest: a
+finding on its own at one level is on its own at every level above. The two measured columns of
+the table were taken on 2026-09-26 with the findings of the core rules and the two default Sigma
+packs, every severity, at the rule levels of that day, on the clean machines of the rule measure,
+each machine's lines counted under rule noise taken from the six other machines (the app takes it
+from all seven); the last row is not held out that way, since some rule levels were lowered from
+the findings on these machines. The script and the output of that run are not in the repository,
+so these two columns cannot be derived again from `rules/measures-detail.json`.
 
 ## Mail risk scoring
 

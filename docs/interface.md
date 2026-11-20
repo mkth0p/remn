@@ -157,10 +157,7 @@ for a rule that fires on clean machines), times 1.5 when its rule fired on one h
 case (or for one user, when it names no host) of at least three, or 0.75 when it fired on half
 of them or more. A rule that raised several findings on the same host (or for the same user)
 has each of them divided by 1 + ln n, n being that count: the tenth finding of one rule on a
-host tells less than the first finding of another, which is how stacking works. With it, the
-first finding of an attack came into the top ten of a case built from clean hosts with one
-recording added in 47%, 38% and 76% of the attack_data, EVTX-to-MITRE-Attack and
-EVTX-ATTACK-SAMPLES recordings, against 46%, 31% and 60% without, at detection level 3. A
+host tells less than the first finding of another, which is how stacking works. A
 finding folded below the case's detection level counts as the findings it stands for.
 Other rules on the same host or for the same user within 24 hours add a
 point each and a point more for each other ATT&CK tactic among them, up to 6. The same rule on
@@ -171,12 +168,9 @@ a quarter of its score. The case also learns from its own review: each finding o
 analyst marks false positive in this case halves the score of the rule's other findings on that
 host and takes a fifth off its findings on the other hosts (findings on the same entities are the
 memory's, not counted twice), so the queue moves past what is benign on this network as the
-analyst works down it. On cases built from clean hosts with one recording merged in, an analyst
-dismissing each benign line from the top read 27%, 24% and 12% fewer lines before the first
-finding of the attack on the attack_data, EVTX-to-MITRE-Attack and EVTX-ATTACK-SAMPLES
-recordings, and 30%, 32% and 21% fewer with the host refold of the
-[detection level](detection.md#detection-level); other factors from 0.3 to 0.7 on the same host
-and 0.6 to 1 elsewhere did about as well. The model's decisions do not count, and the memory
+analyst works down it. The weights were chosen on cases built from clean hosts with one
+attack recording merged in; the script and the cases of that comparison are not in the
+repository, so no figure from it is given here. The model's decisions do not count, and the memory
 never leaves the browser. Reviewed and false-positive findings sort below the others. The priority column shows
 the score and the reasons that moved it ("1 of 40 hosts", "+2 rules, 1 tactic", "rule
 dismissed 2x", "false positive before"), its tooltip and the finding flyout say each in a sentence ("marked false
