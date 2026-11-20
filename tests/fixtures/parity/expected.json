@@ -8,8 +8,8 @@
   "collection-persistence-script-host": "no_selector_match",
   "collection-program-user-location": "no_selector_match",
   "m365-anonymous-sharing": "no_selector_match",
-  "m365-app-registered": "no_selector_match",
   "m365-audit-disabled": "no_selector_match",
+  "m365-auth-method-added": "no_selector_match",
   "m365-conditional-access-change": "no_selector_match",
   "m365-ediscovery-search": "no_selector_match",
   "m365-junk-config-changed": "no_selector_match",
@@ -18,7 +18,6 @@
   "m365-mailbox-permission": "no_selector_match",
   "m365-mailitemsaccessed-sync-delegate": "no_selector_match",
   "m365-mass-download": "no_selector_match",
-  "m365-mfa-or-password-change": "no_selector_match",
   "m365-signin-mfa-failed-then-success": "no_selector_match",
   "m365-transport-rule-change": "no_selector_match",
   "m365-transport-rule-exfil": "no_selector_match",
@@ -182,7 +181,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "collection-encoded-execution|242",
+    "key": "collection-encoded-execution|262",
     "severity": "high"
    }
   ],
@@ -190,7 +189,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "collection-persistence-appdata|247",
+    "key": "collection-persistence-appdata|267",
     "severity": "low"
    }
   ],
@@ -198,19 +197,19 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "collection-persistence-user-path|241",
+    "key": "collection-persistence-user-path|261",
     "severity": "high"
    },
    {
     "count": 1,
     "escalation": null,
-    "key": "collection-persistence-user-path|248",
+    "key": "collection-persistence-user-path|268",
     "severity": "high"
    },
    {
     "count": 1,
     "escalation": null,
-    "key": "collection-persistence-user-path|249",
+    "key": "collection-persistence-user-path|269",
     "severity": "high"
    }
   ],
@@ -218,7 +217,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "collection-prefetch-script-execution|245",
+    "key": "collection-prefetch-script-execution|265",
     "severity": "low"
    }
   ],
@@ -226,7 +225,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "collection-remote-service|241",
+    "key": "collection-remote-service|261",
     "severity": "medium"
    }
   ],
@@ -234,7 +233,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "collection-script-host-connection|243",
+    "key": "collection-script-host-connection|263",
     "severity": "medium"
    }
   ],
@@ -242,7 +241,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "collection-service-unquoted-path|246",
+    "key": "collection-service-unquoted-path|266",
     "severity": "low"
    }
   ],
@@ -250,15 +249,45 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "m365-app-consent|239",
+    "key": "m365-app-consent|242",
     "severity": "high"
+   },
+   {
+    "count": 1,
+    "escalation": null,
+    "key": "m365-app-consent|243",
+    "severity": "high"
+   }
+  ],
+  "m365-app-permission-granted": [
+   {
+    "count": 1,
+    "escalation": null,
+    "key": "m365-app-permission-granted|247",
+    "severity": "high"
+   }
+  ],
+  "m365-app-registered": [
+   {
+    "count": 1,
+    "escalation": null,
+    "key": "m365-app-registered|246",
+    "severity": "medium"
+   }
+  ],
+  "m365-device-registered": [
+   {
+    "count": 1,
+    "escalation": null,
+    "key": "m365-device-registered|245",
+    "severity": "medium"
    }
   ],
   "m365-inbox-rule-any": [
    {
     "count": 1,
     "escalation": null,
-    "key": "m365-inbox-rule-any|80",
+    "key": "m365-inbox-rule-any|82",
     "severity": "low"
    }
   ],
@@ -266,7 +295,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "m365-inbox-rule-forwarding|80",
+    "key": "m365-inbox-rule-forwarding|82",
     "severity": "high"
    }
   ],
@@ -274,7 +303,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "m365-inbox-rule-hiding|80",
+    "key": "m365-inbox-rule-hiding|82",
     "severity": "high"
    }
   ],
@@ -282,7 +311,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "m365-mailbox-forwarding|237",
+    "key": "m365-mailbox-forwarding|239",
     "severity": "critical"
    }
   ],
@@ -294,19 +323,69 @@
     "severity": "medium"
    }
   ],
+  "m365-mfa-or-password-change": [
+   {
+    "count": 1,
+    "escalation": null,
+    "key": "m365-mfa-or-password-change|244",
+    "severity": "high"
+   }
+  ],
   "m365-privileged-role-assigned": [
    {
     "count": 1,
     "escalation": null,
-    "key": "m365-privileged-role-assigned|240",
+    "key": "m365-privileged-role-assigned|259",
     "severity": "critical"
+   },
+   {
+    "count": 1,
+    "escalation": null,
+    "key": "m365-privileged-role-assigned|260",
+    "severity": "critical"
+   }
+  ],
+  "m365-risk-detection": [
+   {
+    "count": 1,
+    "escalation": null,
+    "key": "m365-risk-detection|240",
+    "severity": "high"
+   },
+   {
+    "count": 1,
+    "escalation": null,
+    "key": "m365-risk-detection|248",
+    "severity": "high"
+   }
+  ],
+  "m365-risk-then-inbox-rule": [
+   {
+    "count": 3,
+    "escalation": null,
+    "key": "m365-risk-then-inbox-rule|alice@contoso.com",
+    "severity": "low"
+   }
+  ],
+  "m365-risky-user": [
+   {
+    "count": 1,
+    "escalation": null,
+    "key": "m365-risky-user|258",
+    "severity": "high"
    }
   ],
   "m365-role-assigned-any": [
    {
     "count": 1,
     "escalation": null,
-    "key": "m365-role-assigned-any|240",
+    "key": "m365-role-assigned-any|259",
+    "severity": "medium"
+   },
+   {
+    "count": 1,
+    "escalation": null,
+    "key": "m365-role-assigned-any|260",
     "severity": "medium"
    }
   ],
@@ -322,7 +401,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "m365-signin-legacy-auth|46",
+    "key": "m365-signin-legacy-auth|48",
     "severity": "medium"
    }
   ],
@@ -338,7 +417,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "m365-signin-risky|238",
+    "key": "m365-signin-risky|241",
     "severity": "high"
    }
   ],
@@ -354,13 +433,41 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "m365-signin-unexpected-country|238",
+    "key": "m365-signin-unexpected-country|241",
     "severity": "high"
    },
    {
     "count": 1,
     "escalation": null,
-    "key": "m365-signin-unexpected-country|46",
+    "key": "m365-signin-unexpected-country|48",
+    "severity": "high"
+   }
+  ],
+  "m365-trace-external-relay": [
+   {
+    "count": 1,
+    "escalation": null,
+    "key": "m365-trace-external-relay|253",
+    "severity": "high"
+   },
+   {
+    "count": 1,
+    "escalation": null,
+    "key": "m365-trace-external-relay|254",
+    "severity": "high"
+   },
+   {
+    "count": 1,
+    "escalation": null,
+    "key": "m365-trace-external-relay|255",
+    "severity": "high"
+   }
+  ],
+  "m365-trace-mailbox-rule-message": [
+   {
+    "count": 1,
+    "escalation": null,
+    "key": "m365-trace-mailbox-rule-message|253",
     "severity": "high"
    }
   ],
@@ -650,7 +757,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-ad-credential-roaming-attribute|164",
+    "key": "win-ad-credential-roaming-attribute|166",
     "severity": "high"
    }
   ],
@@ -722,7 +829,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-audit-log-cleared|91",
+    "key": "win-audit-log-cleared|93",
     "severity": "critical"
    }
   ],
@@ -746,7 +853,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-browser-extension-policy|165",
+    "key": "win-browser-extension-policy|167",
     "severity": "medium"
    }
   ],
@@ -754,7 +861,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-browser-update-disabled|166",
+    "key": "win-browser-update-disabled|168",
     "severity": "medium"
    }
   ],
@@ -778,7 +885,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-builtin-account-renamed|167",
+    "key": "win-builtin-account-renamed|169",
     "severity": "medium"
    }
   ],
@@ -786,7 +893,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-cloud-drive-cli-token|168",
+    "key": "win-cloud-drive-cli-token|170",
     "severity": "high"
    }
   ],
@@ -794,7 +901,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-cloud-token-files-read|169",
+    "key": "win-cloud-token-files-read|171",
     "severity": "medium"
    }
   ],
@@ -802,7 +909,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-cmd-envvar-substring-obfuscation|170",
+    "key": "win-cmd-envvar-substring-obfuscation|172",
     "severity": "high"
    }
   ],
@@ -810,7 +917,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-cmd-quote-insertion|171",
+    "key": "win-cmd-quote-insertion|173",
     "severity": "high"
    }
   ],
@@ -818,7 +925,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-cmdlet-named-exe-in-windowsapps|172",
+    "key": "win-cmdlet-named-exe-in-windowsapps|174",
     "severity": "high"
    }
   ],
@@ -826,7 +933,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-defender-control-tool|173",
+    "key": "win-defender-control-tool|175",
     "severity": "high"
    }
   ],
@@ -874,7 +981,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-dotnet-compiler-dns|156",
+    "key": "win-dotnet-compiler-dns|158",
     "severity": "medium"
    }
   ],
@@ -882,7 +989,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-efi-boot-file-written|157",
+    "key": "win-efi-boot-file-written|159",
     "severity": "high"
    }
   ],
@@ -890,7 +997,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-file-association-hijack|174",
+    "key": "win-file-association-hijack|176",
     "severity": "medium"
    }
   ],
@@ -898,7 +1005,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-fsutil-symlink-evaluation|175",
+    "key": "win-fsutil-symlink-evaluation|177",
     "severity": "high"
    }
   ],
@@ -906,7 +1013,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-gpo-disabled-or-unlinked|158",
+    "key": "win-gpo-disabled-or-unlinked|160",
     "severity": "medium"
    }
   ],
@@ -922,7 +1029,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-impacket-admin-share-output|176",
+    "key": "win-impacket-admin-share-output|178",
     "severity": "high"
    }
   ],
@@ -946,7 +1053,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-kerberos-rc4-tgt|177",
+    "key": "win-kerberos-rc4-tgt|179",
     "severity": "medium"
    }
   ],
@@ -954,7 +1061,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-kerberos-rc4-ticket-for-computer|178",
+    "key": "win-kerberos-rc4-ticket-for-computer|180",
     "severity": "medium"
    }
   ],
@@ -962,7 +1069,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-logon-outside-business-hours|2",
+    "key": "win-logon-outside-business-hours|4",
     "severity": "low"
    }
   ],
@@ -984,7 +1091,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-lsa-protection-disabled|159",
+    "key": "win-lsa-protection-disabled|161",
     "severity": "high"
    }
   ],
@@ -992,7 +1099,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-mail-store-outside-mail-folder|179",
+    "key": "win-mail-store-outside-mail-folder|181",
     "severity": "medium"
    }
   ],
@@ -1000,7 +1107,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-mock-trusted-directory|160",
+    "key": "win-mock-trusted-directory|162",
     "severity": "high"
    }
   ],
@@ -1008,7 +1115,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-msdtc-unusual-parent|180",
+    "key": "win-msdtc-unusual-parent|182",
     "severity": "high"
    }
   ],
@@ -1088,7 +1195,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-netsupport-outside-program-files|181",
+    "key": "win-netsupport-outside-program-files|183",
     "severity": "high"
    }
   ],
@@ -1096,7 +1203,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-network-scanner-tools|182",
+    "key": "win-network-scanner-tools|184",
     "severity": "medium"
    }
   ],
@@ -1104,7 +1211,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-nirsoft-password-tools|183",
+    "key": "win-nirsoft-password-tools|185",
     "severity": "high"
    }
   ],
@@ -1112,7 +1219,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-ntds-snapshot-mounted|184",
+    "key": "win-ntds-snapshot-mounted|186",
     "severity": "high"
    }
   ],
@@ -1120,7 +1227,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-office-spawns-shell|84",
+    "key": "win-office-spawns-shell|86",
     "severity": "high"
    }
   ],
@@ -1128,7 +1235,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-packet-capture-tool|185",
+    "key": "win-packet-capture-tool|187",
     "severity": "medium"
    }
   ],
@@ -1144,7 +1251,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-powershell-encoded-command|84",
+    "key": "win-powershell-encoded-command|86",
     "severity": "medium"
    }
   ],
@@ -1152,13 +1259,13 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-powershell-suspicious-scriptblock|109",
+    "key": "win-powershell-suspicious-scriptblock|111",
     "severity": "high"
    },
    {
     "count": 1,
     "escalation": null,
-    "key": "win-powershell-suspicious-scriptblock|187",
+    "key": "win-powershell-suspicious-scriptblock|189",
     "severity": "high"
    }
   ],
@@ -1166,7 +1273,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-powerup-privesc-checks|186",
+    "key": "win-powerup-privesc-checks|188",
     "severity": "high"
    }
   ],
@@ -1174,7 +1281,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-process-from-suspicious-path|182",
+    "key": "win-process-from-suspicious-path|184",
     "severity": "medium"
    }
   ],
@@ -1182,7 +1289,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-ps-adsisearcher-recon|161",
+    "key": "win-ps-adsisearcher-recon|163",
     "severity": "medium"
    }
   ],
@@ -1206,7 +1313,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-ps-delegation-discovery|162",
+    "key": "win-ps-delegation-discovery|164",
     "severity": "medium"
    }
   ],
@@ -1222,7 +1329,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-ps-kerberoast-tool|187",
+    "key": "win-ps-kerberoast-tool|189",
     "severity": "high"
    }
   ],
@@ -1294,7 +1401,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-ps-winrm-trustedhosts|188",
+    "key": "win-ps-winrm-trustedhosts|190",
     "severity": "medium"
    }
   ],
@@ -1310,7 +1417,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-python-startup-hook|163",
+    "key": "win-python-startup-hook|165",
     "severity": "medium"
    }
   ],
@@ -1318,7 +1425,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-pythonpath-env-set|189",
+    "key": "win-pythonpath-env-set|191",
     "severity": "medium"
    }
   ],
@@ -1334,13 +1441,13 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-rdp-logon-any|2",
+    "key": "win-rdp-logon-any|4",
     "severity": "info"
    },
    {
     "count": 1,
     "escalation": null,
-    "key": "win-rdp-logon-any|81",
+    "key": "win-rdp-logon-any|83",
     "severity": "info"
    }
   ],
@@ -1348,13 +1455,13 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-rdp-logon-external|2",
+    "key": "win-rdp-logon-external|4",
     "severity": "high"
    },
    {
     "count": 1,
     "escalation": null,
-    "key": "win-rdp-logon-external|81",
+    "key": "win-rdp-logon-external|83",
     "severity": "high"
    }
   ],
@@ -1362,7 +1469,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-remote-computer-management|190",
+    "key": "win-remote-computer-management|192",
     "severity": "medium"
    }
   ],
@@ -1370,7 +1477,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-rras-router-manager-dll|191",
+    "key": "win-rras-router-manager-dll|193",
     "severity": "medium"
    }
   ],
@@ -1386,7 +1493,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-service-installed-any|93",
+    "key": "win-service-installed-any|95",
     "severity": "info"
    }
   ],
@@ -1394,7 +1501,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-service-installed-suspicious|93",
+    "key": "win-service-installed-suspicious|95",
     "severity": "high"
    }
   ],
@@ -1418,7 +1525,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-sysmon-network-lolbin|88",
+    "key": "win-sysmon-network-lolbin|90",
     "severity": "medium"
    }
   ],
@@ -1426,7 +1533,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-user-account-created|94",
+    "key": "win-user-account-created|96",
     "severity": "medium"
    }
   ],
@@ -1434,7 +1541,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-user-added-privileged-group|95",
+    "key": "win-user-added-privileged-group|97",
     "severity": "high"
    }
   ],
@@ -1442,7 +1549,7 @@
    {
     "count": 1,
     "escalation": null,
-    "key": "win-winscp-or-putty-secrets-read|192",
+    "key": "win-winscp-or-putty-secrets-read|194",
     "severity": "medium"
    }
   ]
@@ -1464,9 +1571,12 @@
   "collection-service-unquoted-path",
   "m365-anonymous-sharing",
   "m365-app-consent",
+  "m365-app-permission-granted",
   "m365-app-registered",
   "m365-audit-disabled",
+  "m365-auth-method-added",
   "m365-conditional-access-change",
+  "m365-device-registered",
   "m365-ediscovery-search",
   "m365-inbox-rule-any",
   "m365-inbox-rule-forwarding",
@@ -1481,6 +1591,9 @@
   "m365-mass-download",
   "m365-mfa-or-password-change",
   "m365-privileged-role-assigned",
+  "m365-risk-detection",
+  "m365-risk-then-inbox-rule",
+  "m365-risky-user",
   "m365-role-assigned-any",
   "m365-signin-bruteforce-account",
   "m365-signin-legacy-auth",
@@ -1489,6 +1602,8 @@
   "m365-signin-risky",
   "m365-signin-two-countries-24h",
   "m365-signin-unexpected-country",
+  "m365-trace-external-relay",
+  "m365-trace-mailbox-rule-message",
   "m365-transport-rule-change",
   "m365-transport-rule-exfil",
   "mail-attachment-disguised",

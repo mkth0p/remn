@@ -1,0 +1,81 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#riskDetections",
+  "value": [
+    {
+      "id": "6f2c8e1a9b4d7c3e5a0f1b2d4c6e8a0b9d1f3e5c7a9b0d2f4e6a8c0b1d3f5e7a",
+      "requestId": "9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+      "correlationId": "e1f2a3b4-c5d6-4e7f-8a9b-0c1d2e3f4a5b",
+      "riskEventType": "unfamiliarFeatures",
+      "riskState": "atRisk",
+      "riskLevel": "medium",
+      "riskDetail": "none",
+      "source": "IdentityProtection",
+      "detectionTimingType": "realtime",
+      "activity": "signin",
+      "tokenIssuerType": "AzureAD",
+      "ipAddress": "198.51.100.23",
+      "location": {
+        "city": "Amsterdam",
+        "state": "Noord-Holland",
+        "countryOrRegion": "NL",
+        "geoCoordinates": null
+      },
+      "activityDateTime": "2026-09-01T09:58:20Z",
+      "detectedDateTime": "2026-09-01T09:58:20Z",
+      "lastUpdatedDateTime": "2026-09-01T10:00:41Z",
+      "userId": "5f1c2a3b-0d4e-4f60-8a71-92b3c4d5e6f7",
+      "userDisplayName": "Alice Example",
+      "userPrincipalName": "alice@contoso.com",
+      "additionalInfo": "[{\"Key\":\"userAgent\",\"Value\":\"Mozilla/5.0 (Windows NT 10.0; Win64; x64)\"}]"
+    },
+    {
+      "id": "0a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9",
+      "requestId": "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f",
+      "correlationId": "4d5e6f7a-8b9c-4d0e-9f1a-2b3c4d5e6f7a",
+      "riskEventType": "anonymizedIPAddress",
+      "riskState": "dismissed",
+      "riskLevel": "low",
+      "riskDetail": "adminDismissedAllRiskForUser",
+      "source": "IdentityProtection",
+      "detectionTimingType": "realtime",
+      "activity": "signin",
+      "tokenIssuerType": "AzureAD",
+      "ipAddress": "192.0.2.44",
+      "location": {
+        "city": null,
+        "state": null,
+        "countryOrRegion": "DE",
+        "geoCoordinates": null
+      },
+      "activityDateTime": "2026-08-30T21:14:05Z",
+      "detectedDateTime": "2026-08-30T21:14:05Z",
+      "lastUpdatedDateTime": "2026-08-31T08:00:00Z",
+      "userId": "4d5e6f7a-8b9c-4d0e-9f1a-2b3c4d5e6f7a",
+      "userDisplayName": "Bob Example",
+      "userPrincipalName": "bob@contoso.com",
+      "additionalInfo": "[]"
+    },
+    {
+      "id": "f0e1d2c3b4a5968778695a4b3c2d1e0ff0e1d2c3b4a5968778695a4b3c2d1e0f",
+      "requestId": null,
+      "correlationId": null,
+      "riskEventType": "suspiciousInboxForwarding",
+      "riskState": "atRisk",
+      "riskLevel": "medium",
+      "riskDetail": "none",
+      "source": "MicrosoftCloudAppSecurity",
+      "detectionTimingType": "offline",
+      "activity": "user",
+      "tokenIssuerType": "AzureAD",
+      "ipAddress": null,
+      "location": null,
+      "activityDateTime": "2026-09-01T10:25:00Z",
+      "detectedDateTime": "2026-09-01T11:40:00Z",
+      "lastUpdatedDateTime": "2026-09-01T11:40:00Z",
+      "userId": "5f1c2a3b-0d4e-4f60-8a71-92b3c4d5e6f7",
+      "userDisplayName": "Alice Example",
+      "userPrincipalName": "alice@contoso.com",
+      "additionalInfo": "[{\"Key\":\"alertUrl\",\"Value\":\"https://security.example/alerts/1\"}]"
+    }
+  ]
+}

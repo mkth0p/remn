@@ -24,7 +24,7 @@ afterEach(async () => {
   mocks.post.mockClear()
 })
 
-async function run(rows: Record<string, unknown>[], done = true) {
+async function run(rows: Record<string, unknown>[], done = true, dates?: IngestRequest['dates']) {
   const db = getDb()
   const id = await db.evidence.add({ caseId: 1, name: 'package.zip', kind: 'package', size: 1, status: 'hashing', integrity: 'pending', count: 0, addedAt: 1 })
   mocks.stream.mockImplementation(async (_url, _form, onRow) => {
@@ -33,7 +33,17 @@ async function run(rows: Record<string, unknown>[], done = true) {
     if (done) await onRow({ type: 'done', sha256: 'a'.repeat(64), stats: { count: rows.length, files: [], unsupported: 1 } })
   })
   await context.onmessage({
-    data: { cmd: 'ingest', jobId: 1, caseId: 1, evidenceId: id, file: new File(['x'], 'package.zip'), kind: 'package', includeRaw: true, settings: { internalDomains: [], brands: [], vipNames: [] } },
+    data: {
+      cmd: 'ingest',
+      jobId: 1,
+      caseId: 1,
+      evidenceId: id,
+      file: new File(['x'], 'package.zip'),
+      kind: 'package',
+      includeRaw: true,
+      settings: { internalDomains: [], brands: [], vipNames: [] },
+      dates,
+    },
   })
   return id
 }
@@ -83,6 +93,14 @@ it('adds a cloud record the case already holds only once, and counts it once', a
   // the skipped record adds nothing to the facets: the address is counted for the rows written
   const ip = (await db.facets.toArray()).find((f) => f.field === 'ipAddress' && f.value === '198.51.100.2')
   expect(ip?.count).toBe(2)
+})
+it('sends the date order and zone set for the evidence with the file, and nothing when none is set', async () => {
+  const first = await run([], true, { order: 'day-first', zone: 'Europe/Paris' })
+  // another file, not the same one again
+  await getDb().evidence.update(first, { sha256Client: 'b'.repeat(64), sha256Server: 'b'.repeat(64) })
+  await run([])
+  const sent = mocks.stream.mock.calls.map(([, form]) => (form as FormData).get('dates'))
+  expect(sent).toEqual(['{"order":"day-first","zone":"Europe/Paris"}', null])
 })
 it('parses an EVTX file in the worker without sending it anywhere', async () => {
   const db = getDb()
