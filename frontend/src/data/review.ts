@@ -1,6 +1,7 @@
 import { getDb, type Finding, type Severity } from '../db/schema'
 import type { Chain, ChainStep } from './chains'
 import { buildIncidents, chainMembership, effectiveSeverity, ORDER, type Incident } from '../rules/incidents'
+import { logoImage, type ReportLanguage } from './reportText'
 
 /**
  * Review decisions and report selection.
@@ -34,6 +35,113 @@ export interface ReportSettings {
   includeFp: boolean
   /** only findings an analyst has looked at (status not new) */
   onlyReviewed: boolean
+  /** what the analyst writes for a client: the engagement, the scope, the conclusion, the recommendations and the handling */
+  client: ClientReport
+  /** the language the report is written in; the interface stays English */
+  language: ReportLanguage
+  /** the firm the report goes out under; REMN's own look when nothing is set */
+  branding: ReportBranding
+}
+
+/** The firm's name, a line for the cover, and its logo as a PNG or JPEG data URL (reportText.ts LOGO_MAX_BYTES at most). */
+export interface ReportBranding {
+  firmName: string
+  coverLine: string
+  logo: string
+}
+
+export const EMPTY_BRANDING: ReportBranding = { firmName: '', coverLine: '', logo: '' }
+
+/** A row of the report's version history. */
+export interface ReportVersion {
+  version: string
+  /** yyyy-mm-dd */
+  date: string
+  author: string
+  note: string
+}
+
+/** A containment or eradication action taken, with its date. */
+export interface ContainmentAction {
+  /** yyyy-mm-dd */
+  date: string
+  action: string
+  by: string
+}
+
+export type Tlp = '' | 'clear' | 'green' | 'amber' | 'amber+strict' | 'red'
+export const TLP_LEVELS: Exclude<Tlp, ''>[] = ['clear', 'green', 'amber', 'amber+strict', 'red']
+export type AnalyticConfidence = '' | 'low' | 'moderate' | 'high'
+
+/**
+ * What makes the report a document an outside responder can hand to a client: who it is for, what
+ * was examined, what the analyst concludes and recommends, and how it is to be handled. The analyst
+ * writes all of it; a part left empty is left out of the report, and the scope falls back to what
+ * the evidence holds, labelled so. Dates are yyyy-mm-dd; lists are one entry a line.
+ */
+export interface ClientReport {
+  client: string
+  engagementRef: string
+  engagementStart: string
+  engagementEnd: string
+  requestedBy: string
+  distribution: string
+  versions: ReportVersion[]
+  objectives: string
+  periodFrom: string
+  periodTo: string
+  systemsIn: string
+  systemsOut: string
+  accountsIn: string
+  accountsOut: string
+  /** how the attacker got in, and why it was possible: the analyst's conclusion */
+  initialAccess: string
+  rootCause: string
+  /**
+   * the text last offered from a story's spine as a starting point: while the initial access still
+   * reads exactly this, it is a draft the analyst has not made their own, and it is not printed
+   */
+  initialAccessDraft: string
+  /** the analyst's own confidence in the conclusion, printed as theirs; empty when they gave none */
+  analyticConfidence: AnalyticConfidence
+  confidenceBasis: string
+  /** what the attacker reached or took and what it did to the business, beyond the accounts and hosts the report lists */
+  impact: string
+  containment: ContainmentAction[]
+  recShort: string
+  recMedium: string
+  recLong: string
+  tlp: Tlp
+  confidentiality: string
+}
+
+export const EMPTY_CLIENT: ClientReport = {
+  client: '',
+  engagementRef: '',
+  engagementStart: '',
+  engagementEnd: '',
+  requestedBy: '',
+  distribution: '',
+  versions: [],
+  objectives: '',
+  periodFrom: '',
+  periodTo: '',
+  systemsIn: '',
+  systemsOut: '',
+  accountsIn: '',
+  accountsOut: '',
+  initialAccess: '',
+  rootCause: '',
+  initialAccessDraft: '',
+  analyticConfidence: '',
+  confidenceBasis: '',
+  impact: '',
+  containment: [],
+  recShort: '',
+  recMedium: '',
+  recLong: '',
+  tlp: '',
+  confidentiality: '',
 }
 
 export const DEFAULT_REPORT: ReportSettings = {
@@ -48,6 +156,34 @@ export const DEFAULT_REPORT: ReportSettings = {
   includeEvidence: true,
   includeFp: false,
   onlyReviewed: false,
+  client: EMPTY_CLIENT,
+  language: 'en',
+  branding: EMPTY_BRANDING,
+}
+
+const str = (v: unknown): string => (typeof v === 'string' ? v : '')
+const rowsOf = <T extends object>(v: unknown, keys: (keyof T)[]): T[] =>
+  Array.isArray(v) ? v.filter((r): r is Record<string, unknown> => !!r && typeof r === 'object').map((r) => Object.fromEntries(keys.map((k) => [k, str(r[k as string])])) as T) : []
+
+/**
+ * The client part of stored settings, every field of the type it should be: a case made before
+ * it existed has none, and a bundle from elsewhere may hold anything.
+ */
+export function clientReport(v: unknown): ClientReport {
+  const r = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>
+  const out = { ...EMPTY_CLIENT }
+  for (const k of Object.keys(EMPTY_CLIENT) as (keyof ClientReport)[]) if (typeof EMPTY_CLIENT[k] === 'string') (out as Record<string, unknown>)[k] = str(r[k])
+  out.versions = rowsOf<ReportVersion>(r.versions, ['version', 'date', 'author', 'note'])
+  out.containment = rowsOf<ContainmentAction>(r.containment, ['date', 'action', 'by'])
+  out.tlp = (TLP_LEVELS as string[]).includes(out.tlp) ? out.tlp : ''
+  out.analyticConfidence = (['low', 'moderate', 'high'] as string[]).includes(out.analyticConfidence) ? out.analyticConfidence : ''
+  return out
+}
+
+/** The branding of stored settings, every field a string, and the logo only when it is an image the report can embed. */
+export function reportBranding(v: unknown): ReportBranding {
+  const r = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>
+  return { firmName: str(r.firmName), coverLine: str(r.coverLine), logo: logoImage(r.logo) ? str(r.logo) : '' }
 }
 
 export interface ChainReview {
@@ -71,7 +207,7 @@ export const verdictStatus = (v: Verdict): Status => (v === 'confirmed' ? 'escal
 
 export async function loadReportSettings(caseId: number): Promise<ReportSettings> {
   const v = (await getDb().kv.get(`report-settings-${caseId}`))?.value as Partial<ReportSettings> | undefined
-  return { ...DEFAULT_REPORT, ...(v ?? {}) }
+  return { ...DEFAULT_REPORT, ...(v ?? {}), client: clientReport(v?.client), language: v?.language === 'fr' ? 'fr' : 'en', branding: reportBranding(v?.branding) }
 }
 export async function saveReportSettings(caseId: number, s: ReportSettings): Promise<void> {
   await getDb().kv.put({ key: `report-settings-${caseId}`, value: s })

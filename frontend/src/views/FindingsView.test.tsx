@@ -259,4 +259,35 @@ describe('FindingsView', () => {
     },
     TEST_TIMEOUT,
   )
+
+  it(
+    'keeps a false positive of another case out of the priority until the analyst chooses that case for this one',
+    async () => {
+      // an earlier, invented engagement in the same browser where the same audit log clearing was dismissed
+      await db.cases.bulkAdd([kase, { ...kase, id: 2, name: 'Earlier engagement' }])
+      await db.findings.add(
+        f({ caseId: 2, ruleId: 'win-log-cleared', severity: 'critical', source: 'events', entities: { computer: 'WS-1', subjectUser: 'bob' }, status: 'false_positive', decidedBy: 'analyst' }),
+      )
+      await act(async () => {
+        render(<FindingsView />)
+      })
+      await waitFor(() => expect(sub()).toContain('4 finding(s)'), WAIT)
+      const sources = await screen.findByRole('button', { name: /past decisions: this case$/ }, WAIT)
+      // the finding's own priority, in its flyout
+      fireEvent.click(screen.getByRole('button', { name: 'rule' }))
+      await waitFor(() => expect(document.querySelectorAll('.group-row').length).toBe(4), WAIT)
+      fireEvent.click(screen.getByText('Security audit log cleared'))
+      await waitFor(() => expect(document.querySelector('.group-row + table tr')).toBeTruthy(), WAIT)
+      fireEvent.click(document.querySelector('.group-row + table tr')!)
+      const priority = () => document.querySelector('[data-priority]')?.textContent ?? ''
+      await waitFor(() => expect(priority()).toContain('Critical severity'), WAIT)
+      expect(priority()).not.toContain('false positive in case Earlier engagement')
+      fireEvent.click(sources)
+      fireEvent.click(await screen.findByRole('checkbox', { name: /Earlier engagement/ }, WAIT))
+      await waitFor(() => expect(priority()).toContain('marked false positive in case Earlier engagement'), WAIT)
+      expect((await db.kv.get('decision-sources'))?.value).toEqual({ '1': [2] })
+      expect(screen.getByRole('button', { name: /past decisions: this case and 1 other$/ })).toBeTruthy()
+    },
+    TEST_TIMEOUT,
+  )
 })

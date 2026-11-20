@@ -343,6 +343,25 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   PrintDemon printer ports, AMSI bypasses, named pipe shells and OpenSSH enabled. They catch 15
   files of EVTX-to-MITRE-Attack the default rules missed and fire on none of the evtx-baseline
   machines, and no other bundled rule changes its findings.
+- The case report can go to a client. The Word export now carries everything the HTML report
+  prints: the questions, the model's part, the story detail, the claim notes, the lead marks, the
+  relationship references, how the report was produced and where it stops. The report gains the
+  engagement, the scope (taken from the evidence when the analyst writes none, and saying so), a
+  TLP marking and confidentiality line on every page, a conclusion with the analyst's own
+  confidence, impact (the hosts and accounts the confirmed items name), containment,
+  recommendations, an indicator appendix, and a table of the ATT&CK techniques of the confirmed
+  findings. The cover's rating is now called completeness. The report can be written in English or
+  French: dates, numbers and sizes follow the language, `<html lang>` and the Word language are
+  set, and printed pages carry a running header and page numbers. It can be issued under a firm's
+  name, cover line and logo (PNG or JPEG, 200 KB at most, the cap shown when refused); with
+  neither set it keeps today's English look. Each Sigma rule's author is printed beside its
+  findings in the HTML and Word reports, as the Detection Rule License asks. An analyst's false
+  positives and escalations no longer weigh on the priority of other cases in the browser: a case
+  reads its own, plus those of the other cases the analyst chooses with "past decisions" on the
+  Findings page. The "How AI was used" section prints the ledger's head in full and says what its
+  unkeyed hash chain shows (an entry changed, an entry removed from among later ones, a gap in the
+  numbering) and what it does not (the newest entries removed, or the chain hashed again by
+  whoever holds the case).
 - The Events page stacks a field (least-frequency analysis): its "stack" button lists every
   value of an image, parent image, process, command line, path, service, scheduled task,
   object, file, user, workstation, address, DNS query or provider and event ID pair among

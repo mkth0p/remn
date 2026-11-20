@@ -8,7 +8,18 @@ import { IconArrowLeft, IconCircle, IconFindings, IconInfo, IconPlay, IconSearch
 import { RescoreButton } from '../components/RescoreButton'
 import { loadRules, type LoadedRule } from '../data/rules'
 import { isLead, measuredOn, readMeasure, ruleTrust, type MeasureReading } from '../data/ruleMeasures'
-import { byPriority, loadPastDecisions, scoreFindings, shortReasons, type PastDecision, type Priority } from '../data/findingPriority'
+import {
+  byPriority,
+  decisionCases,
+  loadDecisionSources,
+  loadPastDecisions,
+  saveDecisionSources,
+  scoreFindings,
+  shortReasons,
+  type DecisionCase,
+  type PastDecision,
+  type Priority,
+} from '../data/findingPriority'
 import { findingsStaleness, runEnabledRules, type Staleness } from '../data/findingsState'
 import { resetFindingSeverityOverrides } from '../data/findingReviews'
 import { getSource } from '../data/source'
@@ -127,8 +138,13 @@ export function FindingsView() {
   const [q, setQ] = useState('')
   const [group, setGroup] = useState<Group>('incident')
   const [sort, setSort] = useState<Sort>('priority')
-  // the analysts' false positives and escalations of every case in this browser, for the priority
+  // the analysts' false positives and escalations of this case, and of the other cases the analyst chose for it, for the priority
   const [memory, setMemory] = useState<PastDecision[]>([])
+  const [otherCases, setOtherCases] = useState<DecisionCase[]>([])
+  // the other cases the analyst chose for this one, once read for it
+  const [chosen, setChosen] = useState<{ caseId: number; ids: number[] } | null>(null)
+  const sources = useMemo(() => (chosen && chosen.caseId === kase?.id ? chosen.ids : null), [chosen, kase?.id])
+  const [pickSources, setPickSources] = useState(false)
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set())
   const [tab, setTab] = useState<'findings' | 'attack'>('findings')
   const [selected, setSelected] = useState<Finding | null>(null)
@@ -175,19 +191,44 @@ export function FindingsView() {
     if (kase) loadRules(kase.id!).then(setRules)
   }, [kase, rulesVersion])
   useEffect(() => {
+    if (!kase?.id) return
     let alive = true
-    loadPastDecisions()
-      .then((m) => alive && setMemory(m))
+    const caseId = kase.id
+    loadDecisionSources(caseId)
+      .then((ids) => alive && setChosen({ caseId, ids }))
+      .catch(() => alive && setChosen({ caseId, ids: [] }))
+    return () => {
+      alive = false
+    }
+  }, [kase?.id])
+  useEffect(() => {
+    // nothing is read until this case's own choice is known, so another case's choice never applies to it
+    if (!kase?.id || !sources) return
+    let alive = true
+    const caseId = kase.id
+    Promise.all([loadPastDecisions(caseId, sources), decisionCases(caseId)])
+      .then(([m, cases]) => {
+        if (!alive) return
+        setMemory(m)
+        setOtherCases(cases)
+      })
       .catch(() => alive && setMemory([]))
     return () => {
       alive = false
     }
-  }, [all])
+  }, [all, sources, kase?.id])
+  const chooseSource = (other: number, on: boolean) => {
+    if (!kase?.id || !sources) return
+    const ids = on ? [...sources, other] : sources.filter((id) => id !== other)
+    setChosen({ caseId: kase.id, ids })
+    saveDecisionSources(kase.id, ids).catch(() => undefined)
+  }
   useEffect(() => {
     setSelected(null)
     setIncident(null)
     setParent(null)
     setPicked(new Set())
+    setPickSources(false)
   }, [kase?.id])
   // a rule run just finished elsewhere (auto-run after ingest): refresh the staleness banner
   useEffect(() => {
@@ -733,6 +774,16 @@ export function FindingsView() {
                   ))}
                 </select>
               </label>
+              {sources && otherCases.length > 0 && (
+                <button
+                  className={classNames('pill', sources.length > 0 && 'active')}
+                  aria-expanded={pickSources}
+                  onClick={() => setPickSources(!pickSources)}
+                  title="the false positives and escalations the priority reads: this case's, and those of other cases only when you choose them"
+                >
+                  past decisions: this case{sources.length ? ` and ${sources.length} other${sources.length === 1 ? '' : 's'}` : ''}
+                </button>
+              )}
               <div className="segmented" title="how the queue is grouped">
                 {(
                   [
@@ -759,6 +810,27 @@ export function FindingsView() {
               <span className="spacer" />
               <span className="mono small dim">{group === 'incident' ? `${fmtNum(incidents.length)} incident(s) · ${fmtNum(shownRows.length)} finding(s)` : `${fmtNum(rows.length)} shown`}</span>
             </div>
+            {pickSources && sources && otherCases.length > 0 && (
+              <div className="row wrap small" style={{ marginTop: 8 }} data-decision-sources>
+                <span className="muted">
+                  The priority reads the false positives and escalations of this case. Add another case only when it is the same client&apos;s: a program one network runs every day can be the
+                  intruder&apos;s on the next.
+                </span>
+                {otherCases.map((c) => (
+                  <label key={c.caseId} className="row" style={{ gap: 4 }}>
+                    <input type="checkbox" checked={sources.includes(c.caseId)} onChange={(e) => chooseSource(c.caseId, e.target.checked)} />
+                    {c.caseName}
+                    <span className="muted">
+                      (
+                      {[c.falsePositives ? `${fmtNum(c.falsePositives)} false positive${c.falsePositives === 1 ? '' : 's'}` : '', c.escalated ? `${fmtNum(c.escalated)} escalated` : '']
+                        .filter(Boolean)
+                        .join(', ')}
+                      )
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
           {picked.size > 0 && (
             <div className="bulkbar">

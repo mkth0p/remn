@@ -202,11 +202,17 @@ model reads the batch at once.
 Every run (question hash, model, transport, budget), tool call (name, arguments, a SHA-256
 of the result, the number of refs), proposal, acceptance, rejection, undo, notice and
 answer is appended to the case's AI ledger (`frontend/src/ai/ledger.ts`, table `aiLedger`),
-each entry hashed with the one before, so an entry changed or removed afterwards breaks the
-chain at that point. The ledger tab lists the entries and verifies the chain; the triage
-pass and the executive summary are recorded too. It travels in the case bundle. The report
-prints a section "How AI was used": runs, models and where they ran, tool calls, what was
-proposed and what became of it by kind, the notices, and the state of the chain.
+each entry hashed with the one before, so an entry changed afterwards, an entry removed from
+among later ones, or a gap in the numbering breaks the chain at that point. The chain has no
+key and is kept in the browser's database: it does not show the newest entries removed, nor
+the chain hashed again from any entry onward by whoever holds the case. The ledger tab lists
+the entries and verifies the chain; the triage pass and the executive summary are recorded
+too. It travels in the case bundle. The report prints a section "How AI was used": runs,
+models and where they ran, tool calls, what was proposed and what became of it by kind, the
+notices, the state of the chain with its head (the last entry's SHA-256, printed whole) and a
+sentence saying what the chain shows and what it does not. A later copy of the case whose
+ledger still holds an entry with that hash has every entry up to it as it was when the report
+was made.
 
 ## Evidence that addresses the model
 

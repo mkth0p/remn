@@ -268,7 +268,10 @@ case (`re_cs`) unless `|i` is given, and the flags `m` and `s` travel as an inli
 keywords, searched in the event's JSON text, are written as that text holds them (a quote as
 `\"`, a backslash as `\\`); IPv6 CIDRs translate when they name one address or
 a prefix within the first group (`::1/128`, `fe80::/10`, `fc00::/7`). The SigmaHQ rules are
-redistributed under the Detection Rule License 1.1, the Sublime rules under MIT.
+redistributed under the Detection Rule License 1.1, the Sublime rules under MIT. That licence
+asks that a match keeps the rule's author: each converted rule keeps it under `sigma.author`, and
+the report prints it beside the rule's findings. The Findings page, the CSV and STIX exports and
+Hayabusa's detections do not carry it yet.
 
 The Rules page lists the packs with a toggle each. `/api/meta` only carries the
 manifests; a pack's rules are fetched once per session from
