@@ -69,12 +69,15 @@ describe('starting the application', () => {
     })
     const db = new RemnDB(name)
     setDb(db)
+    useStore.setState({ currentCase: null })
     render(<App />)
     const status = await screen.findByText(/Another REMN tab/, undefined, { timeout: 5000 })
     expect(status.textContent).toContain('close the other REMN tabs')
     older.close()
     await waitFor(() => expect(screen.queryByText(/Another REMN tab/)).toBeNull(), { timeout: 8000 })
-    db.close()
+    // the start goes on to open a case; its database goes after the test, once that has ended
+    opened = db
+    await waitFor(() => expect(useStore.getState().currentCase).not.toBeNull(), { timeout: 8000 })
   }, 15_000)
 
   it('opens the case and the page the address names, so a reload keeps the place', async () => {
