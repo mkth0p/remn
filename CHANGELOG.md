@@ -237,6 +237,20 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   protection and Defender tampering, EFI boot files, credential stores and known attacker tools.
   They add 46 attack_data detections, which does not count as held out for them, fire on none of
   the clean machines, and add no detection on the two other libraries yet.
+- Hostile text no longer holds the server or the browser in a regular expression. Thirty-five
+  patterns of the backend (HTML attachments, mail headers and display names, URLs, Office, PDF and
+  archive members, EVTX XML, reg query output, M365 dates, rule thresholds) and twelve of the
+  browser code (the EVTX parser's trims, host and file name trims, chain step titles, field values
+  in claim checks, rule durations and thresholds, display names) took a time that grew with the
+  square of a run in the text or faster, so a field or attachment of a few hundred kilobytes held
+  a worker for tens of seconds. Each is now matched from the first character of a run, up to the
+  next opening of the same tag, or up to the last closing bracket, with the same results on
+  well-formed text. Two bundled rules (unquoted service path, renamed PsExec pipe) are rewritten
+  the same way and keep their measures. `tests/backend/test_regex_timing.py` and
+  `frontend/src/test/regexTiming.test.ts` time every pattern the code writes, and the `re`
+  patterns of REMN's own rule packs, on hostile text built from each pattern. Seven bundled rules
+  and some converted community rules can still slow the browser's rules worker on a crafted value,
+  because no rewrite that RE2 also accepts keeps what they match (`docs/security.md`).
 - `win-discovery-burst`: one program starting four or more different discovery commands (whoami,
   net, nltest, ipconfig and others) within ten minutes. Written from ATT&CK before any recording
   was read, so every library is held out for it: it adds two attack_data detections and raises

@@ -280,7 +280,10 @@ def normalize_name(name: str | None) -> str:
 
     s = unicodedata.normalize("NFKD", name)
     s = "".join(c for c in s if not unicodedata.combining(c))
-    s = re.sub(r"<[^>]*>", " ", s)  # drop embedded addresses
+    # drop embedded addresses; a "<" after the last ">" opens none, and leaving that tail out keeps a
+    # name full of "<" from being rescanned to its end once per "<"
+    cut = s.rfind(">") + 1
+    s = re.sub(r"<[^>]*>", " ", s[:cut]) + s[cut:]
     s = re.sub(r"[^a-z0-9 ]+", " ", s.lower())
     tokens = [t for t in s.split() if t]
     # "Dupont Jean" and "Jean Dupont" collapse together

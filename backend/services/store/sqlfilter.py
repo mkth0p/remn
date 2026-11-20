@@ -161,7 +161,8 @@ def _setting(settings: dict[str, Any], name: str) -> list[str]:
     return list(builtin) if builtin else []
 
 
-_THRESHOLD_RE = re.compile(r"^\s*(>=|<=|==|=|!=|>|<)?\s*(\d+)\s*$")
+# the spaces after an optional comparator belong to it, so a value of many spaces is not split every way
+_THRESHOLD_RE = re.compile(r"^\s*(?:(>=|<=|==|=|!=|>|<)\s*)?(\d+)\s*$")
 
 
 def _threshold(v: Any) -> tuple[str, int]:

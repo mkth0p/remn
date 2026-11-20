@@ -193,7 +193,9 @@ def render_prompt(messages: list[dict[str, Any]]) -> str:
     return "\n\n".join(parts).strip() or "User:\n(empty)"
 
 
-_FENCE_RE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.S)
+# the blanks around the fenced text are stripped after the match: three runs that may each take them
+# (\s*, a lazy .*?, \s*) made a reply of blanks cubic
+_FENCE_RE = re.compile(r"^\s*```(?:json)?(.*)```\s*$", re.S)
 _DECODER = json.JSONDecoder()
 
 

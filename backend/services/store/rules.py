@@ -15,8 +15,10 @@ from services.store.casestore import CaseStore, QueryStopped, TimeLimit, q
 from services.store.sqlfilter import Ctx, FilterError, _setting, compile_cond, resolve
 
 SEVERITIES = ["info", "low", "medium", "high", "critical"]
-_DUR = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(ms|s|m|h|d|w)?\s*$", re.I)
-_THR = re.compile(r"^\s*(>=|<=|==|=|>|<|!=)?\s*(\d+)\s*$")
+# the spaces after an optional unit or comparator belong to it: two runs of spaces side by side
+# with nothing between them were split every way before a value that does not match
+_DUR = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(?:(ms|s|m|h|d|w)\s*)?$", re.I)
+_THR = re.compile(r"^\s*(?:(>=|<=|==|=|>|<|!=)\s*)?(\d+)\s*$")
 MAX_FINDINGS = 2000  # findings a rule keeps when it sets no max_findings; mirrors rules/engine.ts MAX_FINDINGS
 MAX_REFS = 5000  # mirrors rules/engine.ts MAX_REFS
 COLLAPSE_AFTER = 200

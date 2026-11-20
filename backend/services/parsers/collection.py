@@ -614,7 +614,10 @@ THREAT_NAME = re.compile(r"(?<![\w/])(?!(?i:lowfi|file|https?|ftp|urn):)([A-Za-z
 # `reg query /s` output: a key on its own line, its values indented beneath it in three columns
 # separated by runs of spaces. Collectors dump the autostart keys this way and call it Autoruns.
 REG_KEY = re.compile(r"^HKEY_[A-Z_]+\\")
-REG_VALUE = re.compile(r"^\s{2,}(?P<name>.+?)\s{2,}(?P<type>REG_[A-Z_]+)(?:\s{2,}(?P<data>.*))?$")
+# A name ends where a run of spaces starts (the shortest name always does), or is one blank when the
+# line holds no name text, as before; the run before the type is taken whole. Ending the name at every
+# blank and taking the runs back one space at a time made a line of spaces cubic.
+REG_VALUE = re.compile(r"^\s{2,}(?P<name>\S.*?(?<!\s)|\s(?=\s\s\S))\s{2,}+(?P<type>REG_[A-Z_]+)(?:\s{2,}(?P<data>.*))?$")
 LAUNCHABLE = re.compile(r"\.(exe|dll|cmd|bat|ps1|vbs|vbe|js|jse|wsf|hta|scr|com|msi|lnk|cpl)\b", re.I)
 
 

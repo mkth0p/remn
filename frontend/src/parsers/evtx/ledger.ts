@@ -244,7 +244,8 @@ class Recent<K, V> {
 }
 
 const lower = (v: unknown) => String(truthy(v) ? v : '').toLowerCase()
-const stripBraces = (s: string) => s.replace(/^[{}]+|[{}]+$/g, '')
+// the trailing run from its first character only, as py.ts strip() does
+const stripBraces = (s: string) => s.replace(/^[{}]+|(?<![{}])[{}]+$/g, '')
 const int0 = (v: unknown) => (truthy(v) ? Math.trunc(Number(v)) : 0)
 
 /**

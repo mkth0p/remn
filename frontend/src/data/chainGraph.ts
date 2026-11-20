@@ -82,7 +82,9 @@ export const MAX_COLUMNS = 14
 const titleKey = (t: string) =>
   t
     .toLowerCase()
-    .replace(/\s*×\d+$/, '')
+    // the count from the first blank before it only (here and below): a title can hold a long run of
+    // blanks from a record, and trying the count from each of them took time that grew with its square
+    .replace(/(?<!\s)\s*×\d+$/, '')
     .replace(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g, '#')
     .replace(/\d+/g, '#')
     .replace(/ (?:from|on|by|via|to) .*$/, '')
@@ -99,7 +101,7 @@ function offset(min: number): string {
 function routineSummary(steps: ChainStep[]): string {
   const heads = new Map<string, number>()
   for (const s of steps) {
-    const head = s.title.replace(/\s*×\d+$/, '').split(/ (?:from|on|by|via|to|->|→) /)[0]
+    const head = s.title.replace(/(?<!\s)\s*×\d+$/, '').split(/ (?:from|on|by|via|to|->|→) /)[0]
     // a head cut in the middle of a word reads as a typo: a long one ends with an ellipsis
     const h = head.length > 36 ? head.slice(0, 35).trimEnd() + '…' : head
     heads.set(h, (heads.get(h) ?? 0) + 1)
@@ -214,7 +216,7 @@ export function buildChainGraph(chain: Chain): Graph {
     const artifacts = Array.from(new Set(g.items.flatMap((x) => x.s.artifacts)))
     const rows = g.items.reduce((t, x) => t + x.s.count, 0)
     const id = n === 1 ? `step:${g.items[0].i}` : allRoutine ? `routine:${g.items[0].i}` : `group:${g.items[0].i}`
-    const titles = Array.from(new Set(g.items.map((x) => x.s.title.replace(/\s*×\d+$/, ''))))
+    const titles = Array.from(new Set(g.items.map((x) => x.s.title.replace(/(?<!\s)\s*×\d+$/, ''))))
     const label = allRoutine && n > 1 ? `${n} routine steps` : n === 1 ? titles[0] : g.key !== '*' ? `${titles[0]} ×${n}` : `${n} steps: ${routineSummary(g.items.map((x) => x.s))}`
     const last = g.items[n - 1].s
     const sub =
@@ -241,7 +243,7 @@ export function buildChainGraph(chain: Chain): Graph {
         n === 1
           ? [...first.artifacts, ...first.findings.map((f) => `${f.severity}: ${f.title}`)]
           : [
-              ...titles.slice(0, 6).map((t) => (n > 1 ? `${g.items.filter((x) => x.s.title.replace(/\s*×\d+$/, '') === t).length}× ${t}` : t)),
+              ...titles.slice(0, 6).map((t) => (n > 1 ? `${g.items.filter((x) => x.s.title.replace(/(?<!\s)\s*×\d+$/, '') === t).length}× ${t}` : t)),
               ...Array.from(new Set(findings.map((f) => `${f.severity}: ${f.title}`))).slice(0, 6),
             ],
     })

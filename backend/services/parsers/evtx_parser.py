@@ -1111,8 +1111,11 @@ _XML_INVALID = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]")
 # what some exporters leave unescaped: an ampersand that starts no reference, and markup inside a
 # value (a PowerShell block comment "<#", a task's own XML in TaskContent)
 _XML_AMP = re.compile(r"&(?!(?:[A-Za-z][A-Za-z0-9]*|#[0-9]+|#x[0-9A-Fa-f]+);)")
-_XML_DATA = re.compile(r"(<Data(?:\s[^>]*)?(?<!/)>)(.*?)(</Data>)", re.S)
-_XML_HEAD = re.compile(r"^(?:\s|<\?xml[^>]*\?>|<!--.*?-->)*<Events?[\s>]", re.S)
+# a Data tag searched from each opening stops at the next opening, so an unclosed one is not rescanned
+_XML_DATA = re.compile(r"(<Data(?:\s(?:(?!<Data)[^>])*)?(?<!/)>)(.*?)(</Data>)", re.S)
+# a comment ends at its first "-->": with .*? one comment could also run on to a later one, and a
+# head of many comments was split every way before failing (exponential)
+_XML_HEAD = re.compile(r"^(?:\s|<\?xml[^>]*\?>|<!--(?:[^-]|-(?!->))*-->)*<Events?[\s>]", re.S)
 
 
 def _xml_encoding(head: bytes) -> str:
@@ -1195,7 +1198,10 @@ def _xml_repaired(text: str) -> str:
     """A record as its exporter should have written it: control characters XML 1.0 does not allow
     replaced, and an ampersand or markup inside a value escaped."""
     text = _XML_AMP.sub("&amp;", _XML_INVALID.sub("\ufffd", text))
-    return _XML_DATA.sub(lambda m: m.group(1) + m.group(2).replace("<", "&lt;").replace(">", "&gt;") + m.group(3), text)
+    # a Data opened after the last closing tag is never closed: leaving that tail out keeps a record of
+    # many unclosed tags from being rescanned to its end once per tag
+    cut = text.rfind("</Data>") + len("</Data>") if "</Data>" in text else 0
+    return _XML_DATA.sub(lambda m: m.group(1) + m.group(2).replace("<", "&lt;").replace(">", "&gt;") + m.group(3), text[:cut]) + text[cut:]
 
 
 def event_from_xml(text: str, stats: Stats | None = None) -> dict[str, Any]:
