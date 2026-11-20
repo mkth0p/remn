@@ -143,6 +143,13 @@ events table:
 
 A `.zip` of a whole acquisition folder is walked.
 
+Not read, each for the reason given further down: Azure Monitor records of the `AuditLogs`,
+`RiskyUsers` and `UserRiskEvents` categories; ID Protection reports downloaded from the admin
+centre whose fields are not the Graph property names; the Exchange admin centre's "Export
+results" of the message trace shown on screen; a UTF-16 file without a byte order mark. A
+Graph page that ends with `@odata.nextLink` is one page of a longer list: REMN reads the
+records it holds and does not say that more pages exist.
+
 Each export may be written in UTF-8, or in UTF-16 or UTF-32 with a byte order mark, as
 Windows PowerShell's `Export-Csv -Encoding Unicode` and `Out-File` write it. The `#TYPE`
 line `Export-Csv` writes above the header without `-NoTypeInformation` is passed over, and a
@@ -155,9 +162,9 @@ the user or the application signed in to. Directory audits, risk detections, ris
 and user lists name a `userPrincipalName` too, but they are not sign-ins: a file of
 directory audits, risk detections or risky users is read as such (below), and a user list is
 listed as a member REMN has no parser for (in the event-log import, as "not a recognised
-Microsoft 365 or Entra export"). A JSON file is of the kind of its first record, and a record of another kind inside
-it is counted as not read: the evidence's statistics (`notRead`) and its member list say how
-many, and the member is marked failed. Field names are read in any case, so the
+Microsoft 365 or Entra export"). A JSON file is of the kind of its first record, and a record
+of another kind inside it is counted as not read: the evidence's statistics (`notRead`) and
+its member list say how many, and the member is marked failed. Field names are read in any case, so the
 PascalCase columns of `Get-MgAuditLogSignIn | Export-Csv` land on the same names as the
 Graph JSON; a column that export wrote as a .NET type name (`Status`, `Location`,
 `DeviceDetail`) is left out. A sign-in whose export gives neither a status nor an error code
