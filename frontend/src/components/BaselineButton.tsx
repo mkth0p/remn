@@ -2,11 +2,14 @@ import { useState } from 'react'
 import { baselineSenders } from '../data/enrich'
 import { toast, useStore } from '../state/store'
 import { Spinner } from './ui'
+import { viewerReason } from '../data/access'
 
 /** Runs the sender-baseline / campaign enrichment for the current case and reports the summary. */
 export function BaselineButton() {
   const kase = useStore((s) => s.currentCase)
   const bump = useStore((s) => s.bumpRules)
+  // the server refuses a viewer every enrichment pass
+  const viewer = viewerReason(useStore((s) => s.health))
   const [busy, setBusy] = useState(false)
   if (!kase) return null
   const run = async () => {
@@ -26,7 +29,12 @@ export function BaselineButton() {
     }
   }
   return (
-    <button className="btn xs" onClick={run} disabled={busy} title="sender prevalence / first contact / solicited / auth regression / campaign clusters - feeds the baseline rules and the AI">
+    <button
+      className="btn xs"
+      onClick={run}
+      disabled={busy || !!viewer}
+      title={viewer ?? 'sender prevalence / first contact / solicited / auth regression / campaign clusters - feeds the baseline rules and the AI'}
+    >
       {busy ? <Spinner /> : null} baseline senders
     </button>
   )

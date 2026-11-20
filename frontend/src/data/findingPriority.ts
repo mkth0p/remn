@@ -7,7 +7,7 @@
  *   severity points x confidence x rule trust x rarity / repetition  + corroboration + escalated before
  *
  * and a finding whose same rule and same entities an analyst marked false positive before (in this
- * case or another one of this browser) keeps a quarter of that. The case also learns from its own
+ * case, or in another case of this browser the analyst chose for it) keeps a quarter of that. The case also learns from its own
  * dismissals: each finding of a rule an analyst marked false positive in this case halves what the
  * rule's other findings on that host weigh, and takes a fifth off its findings on the other hosts,
  * so the queue moves past what is benign on this network as the review goes. Findings already decided (reviewed,
@@ -75,7 +75,7 @@ export interface Priority {
   reasons: PriorityReason[]
 }
 
-/** An analyst's decision on a finding, remembered across the cases of this browser. */
+/** An analyst's decision on a finding, remembered in its case and in the cases the analyst lets read it. */
 export interface PastDecision {
   caseId: number
   caseName: string
@@ -89,7 +89,7 @@ export interface PastDecision {
 export interface PriorityOptions {
   /** each rule's trust (ruleMeasures.ruleTrust of its measure); a rule it does not know is unmeasured */
   trust?: (ruleId: string) => RuleTrust | undefined
-  /** analysts' decisions of this case and the others (loadPastDecisions) */
+  /** analysts' decisions of this case and of the other cases chosen for it (loadPastDecisions) */
   memory?: PastDecision[]
 }
 
@@ -138,11 +138,75 @@ export function pastDecisions(findings: Finding[], caseNames: Map<number, string
   return out
 }
 
-/** Every analyst decision of every case in this browser (nothing leaves it). */
-export async function loadPastDecisions(): Promise<PastDecision[]> {
+/** The analysts' decisions of every case in this browser (nothing leaves it), and the names of the cases. */
+async function allDecisions(): Promise<{ decisions: PastDecision[]; cases: Map<number, string> }> {
   const db = getDb()
   const [decided, cases] = await Promise.all([db.findings.where('status').anyOf(['false_positive', 'escalated']).toArray(), db.cases.toArray()])
-  return pastDecisions(decided, new Map(cases.map((c) => [c.id!, c.name])))
+  const names = new Map(cases.map((c) => [c.id!, c.name]))
+  // a case deleted while its findings were being read has nothing left to say
+  return { decisions: pastDecisions(decided, names).filter((d) => names.has(d.caseId)), cases: names }
+}
+
+/**
+ * The decisions a case's priority reads: its own, and those of the other cases the analyst chose
+ * for it (loadDecisionSources). A program one client's IT runs every day can be the intruder's at
+ * the next client, so a decision stays in its case unless the analyst says the cases belong
+ * together, as two engagements for the same client do.
+ */
+export async function loadPastDecisions(caseId: number, others: readonly number[] = []): Promise<PastDecision[]> {
+  const from = new Set([caseId, ...others])
+  return (await allDecisions()).decisions.filter((d) => from.has(d.caseId))
+}
+
+/** Another case of this browser where an analyst decided findings, for the analyst to choose from. */
+export interface DecisionCase {
+  caseId: number
+  caseName: string
+  falsePositives: number
+  escalated: number
+}
+
+/** The other cases of this browser holding analysts' decisions, by name. */
+export async function decisionCases(caseId: number): Promise<DecisionCase[]> {
+  const { decisions } = await allDecisions()
+  const by = new Map<number, DecisionCase>()
+  for (const d of decisions) {
+    if (d.caseId === caseId) continue
+    const c = by.get(d.caseId) ?? by.set(d.caseId, { caseId: d.caseId, caseName: d.caseName, falsePositives: 0, escalated: 0 }).get(d.caseId)!
+    if (d.status === 'false_positive') c.falsePositives++
+    else c.escalated++
+  }
+  return [...by.values()].sort((a, b) => a.caseName.localeCompare(b.caseName) || a.caseId - b.caseId)
+}
+
+/**
+ * Where the browser keeps, for each case, the other cases whose decisions it reads. Case ids are
+ * this browser's own, so the choice is kept here and not exported with the case.
+ */
+export const DECISION_SOURCES_KEY = 'decision-sources'
+
+async function decisionSources(): Promise<Record<string, number[]>> {
+  const value: unknown = (await getDb().kv.get(DECISION_SOURCES_KEY))?.value
+  const out: Record<string, number[]> = {}
+  if (value && typeof value === 'object' && !Array.isArray(value)) for (const [k, v] of Object.entries(value)) if (Array.isArray(v)) out[k] = v.filter((id): id is number => typeof id === 'number')
+  return out
+}
+
+/** The other cases whose decisions this case reads, of those still in the browser. */
+export async function loadDecisionSources(caseId: number): Promise<number[]> {
+  const chosen = (await decisionSources())[String(caseId)]
+  if (!Array.isArray(chosen)) return []
+  const ids = new Set((await getDb().cases.toCollection().primaryKeys()).map(Number))
+  return chosen.filter((id) => id !== caseId && ids.has(id))
+}
+
+/** Sets the other cases whose decisions this case reads; none puts it back on its own. */
+export async function saveDecisionSources(caseId: number, others: readonly number[]): Promise<void> {
+  const all = await decisionSources()
+  const chosen = [...new Set(others)].filter((id) => id !== caseId)
+  if (chosen.length) all[String(caseId)] = chosen
+  else delete all[String(caseId)]
+  await getDb().kv.put({ key: DECISION_SOURCES_KEY, value: all })
 }
 
 function trustReason(t: RuleTrust): PriorityReason {

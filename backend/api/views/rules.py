@@ -9,6 +9,7 @@ import zipfile
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.views.decorators.http import require_GET, require_POST
 
+from forensic.access import permission
 from services.common import read_zip_member
 from services.rules import mql, packs, sigma
 
@@ -77,11 +78,13 @@ def _convert(request: HttpRequest, converter, what: str):
     )
 
 
+@permission("signed-in")
 @require_POST
 def convert_sigma(request: HttpRequest):
     return _convert(request, sigma.convert_text, "Sigma YAML")
 
 
+@permission("signed-in")
 @require_POST
 def convert_sublime(request: HttpRequest):
     return _convert(request, mql.convert_text, "Sublime rule YAML")
@@ -90,11 +93,13 @@ def convert_sublime(request: HttpRequest):
 # ---------------------------------------------------------------------------
 # community packs (rules/community/<id>/, written by tools/import_community_rules.py)
 # ---------------------------------------------------------------------------
+@permission("signed-in")
 @require_GET
 def list_packs(request: HttpRequest):
     return JsonResponse({"packs": packs.list_packs()})
 
 
+@permission("signed-in")
 @require_GET
 def pack(request: HttpRequest, pack_id: str):
     data = packs.load_pack(pack_id)
@@ -103,6 +108,7 @@ def pack(request: HttpRequest, pack_id: str):
     return JsonResponse(data)
 
 
+@permission("signed-in")
 @require_GET
 def pack_license(request: HttpRequest, pack_id: str):
     text = packs.license_text(pack_id)

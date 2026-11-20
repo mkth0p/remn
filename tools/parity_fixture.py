@@ -52,6 +52,13 @@ STACKS: list[tuple[str, dict[str, Any] | None, str]] = [
     ("providerEventId", None, "rare"),
     ("processName", {"text": "powershell"}, "rare"),
 ]
+M365_EXPORTS = (
+    "entra-risk-detections.graph.json",
+    "entra-risky-users.graph.json",
+    "entra-directory-audits.graph.json",
+    "exo-messagetrace.get-messagetrace.csv",
+    "exo-messagetrace.extended.csv",
+)
 SETTINGS: dict[str, Any] = {
     "internal_domains": ["contoso.com", "interne.fr"],
     "expected_countries": ["FR"],
@@ -72,6 +79,10 @@ def events() -> list[dict[str, Any]]:
         rows.append(m365.ual_row(r))
     for s in make_m365.entra_signins():
         rows.append(m365.entra_row(s))
+    # ID Protection, directory audits and the message trace, as the import reads the test exports
+    for name in M365_EXPORTS:
+        data = (ROOT / "tests" / "fixtures" / "m365" / name).read_bytes()
+        rows.extend(m365.iter_records(None, data, m365.detect_format(name, data) or "", include_raw=False))
     rows.sort(key=lambda r: r.get("ts") or 0)
     return rows
 

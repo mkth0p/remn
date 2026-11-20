@@ -4,6 +4,7 @@ import { ChainGraph } from '../components/ChainGraph'
 import { loadChains, type ChainResult, type ChainStep } from '../data/chains'
 import { useStore } from '../state/store'
 import { fmtNum, fmtTs } from '../util/format'
+import { pressable } from '../components/pressable'
 
 type Mode = 'chain' | 'campaign'
 
@@ -117,7 +118,7 @@ export function GraphView() {
             {step.computer && (
               <>
                 <div className="k">computer</div>
-                <div className="v click" onClick={() => setEntity({ kind: 'host', value: step.computer! })}>
+                <div {...pressable} className="v click" onClick={() => setEntity({ kind: 'host', value: step.computer! })}>
                   {step.computer}
                 </div>
               </>
@@ -125,7 +126,7 @@ export function GraphView() {
             {step.ipAddress && (
               <>
                 <div className="k">ip</div>
-                <div className="v click" onClick={() => setEntity({ kind: 'ip', value: step.ipAddress! })}>
+                <div {...pressable} className="v click" onClick={() => setEntity({ kind: 'ip', value: step.ipAddress! })}>
                   {step.ipAddress}
                 </div>
               </>
@@ -184,7 +185,7 @@ export function GraphView() {
         <div className="split" style={{ gridTemplateColumns: '300px 1fr' }}>
           <div className="left">
             {chains.map((c) => (
-              <div key={c.id} className={'story-row' + (open === c.id ? ' active' : '')} onClick={() => selectChain(c.id)} role="button" aria-label={`Chain ${c.identityLabel}`}>
+              <div {...pressable} key={c.id} className={'story-row' + (open === c.id ? ' active' : '')} onClick={() => selectChain(c.id)} aria-label={`Chain ${c.identityLabel}`}>
                 <Dot sev={c.severity} />
                 <div style={{ minWidth: 0 }}>
                   <div className="ellipsis name">{c.identityLabel}</div>

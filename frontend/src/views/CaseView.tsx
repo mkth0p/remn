@@ -209,14 +209,14 @@ export function CaseView() {
                 </span>
                 <span className="row" style={{ gap: 2 }}>
                   {n.link && (
-                    <button className="btn icon ghost xs" title="open the linked row" onClick={() => openLink(n)}>
+                    <button className="btn icon ghost xs" title="open the linked row" aria-label="open the linked row" onClick={() => openLink(n)}>
                       <IconExternal />
                     </button>
                   )}
-                  <button className="btn icon ghost xs" title="edit" onClick={() => setEditing({ id: n.id!, text: n.text })}>
+                  <button className="btn icon ghost xs" title="edit" aria-label="edit" onClick={() => setEditing({ id: n.id!, text: n.text })}>
                     <IconEdit />
                   </button>
-                  <button className="btn icon ghost xs" title="remove from the timeline" onClick={() => remove(n.id!)}>
+                  <button className="btn icon ghost xs" title="remove from the timeline" aria-label="remove from the timeline" onClick={() => remove(n.id!)}>
                     <IconTrash />
                   </button>
                 </span>
@@ -268,10 +268,10 @@ export function CaseView() {
                       <IconCheck /> done
                     </Badge>
                   ) : null}
-                  <button className="btn icon ghost xs" title="edit" onClick={() => setEditing({ id: n.id!, text: n.text })}>
+                  <button className="btn icon ghost xs" title="edit" aria-label="edit" onClick={() => setEditing({ id: n.id!, text: n.text })}>
                     <IconEdit />
                   </button>
-                  <button className="btn icon ghost xs" title="delete" onClick={() => remove(n.id!)}>
+                  <button className="btn icon ghost xs" title="delete" aria-label="delete" onClick={() => remove(n.id!)}>
                     <IconTrash />
                   </button>
                 </span>
@@ -290,10 +290,10 @@ export function CaseView() {
                     {n.updatedAt !== n.createdAt ? ` · edited ${fmtTs(n.updatedAt)}` : ''}
                   </span>
                   <span className="spacer" />
-                  <button className="btn icon ghost xs" title="edit" onClick={() => setEditing({ id: n.id!, text: n.text })}>
+                  <button className="btn icon ghost xs" title="edit" aria-label="edit" onClick={() => setEditing({ id: n.id!, text: n.text })}>
                     <IconEdit />
                   </button>
-                  <button className="btn icon ghost xs" title="delete" onClick={() => remove(n.id!)}>
+                  <button className="btn icon ghost xs" title="delete" aria-label="delete" onClick={() => remove(n.id!)}>
                     <IconTrash />
                   </button>
                 </div>

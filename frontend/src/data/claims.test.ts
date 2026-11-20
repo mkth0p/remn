@@ -166,6 +166,15 @@ describe('record references', () => {
     const ual = recordRef({ id: 9, evidenceId: 3, recordKey: 'ual:0b1c' }, 'events', { ...ev, name: 'audit.json' })
     expect(ual).toMatchObject({ record: 'audit record 0b1c', duplicateKey: 'ual:0b1c' })
   })
+
+  it('name a directory audit, a risk detection, a risky user and a message trace row as what they are', () => {
+    const named = (recordKey: string) => recordRef({ id: 9, evidenceId: 3, recordKey }, 'events', { ...ev, name: 'export.json' }).record
+    expect(named('entra-audit:directory_7c1d_q2w3e')).toBe('directory audit directory_7c1d_q2w3e')
+    expect(named('entra-risk:6f2c8e1a')).toBe('risk detection 6f2c8e1a')
+    expect(named('entra-riskyuser:5f1c2a3b|2026-09-01T11:40:00.000Z')).toBe('risky user 5f1c2a3b|2026-09-01T11:40:00.000Z')
+    expect(named('exo-trace:1a2b3c4d|payments@attacker.example|delivered')).toBe('message trace 1a2b3c4d|payments@attacker.example|delivered')
+    expect(named('other:1')).toBe('record 1')
+  })
 })
 
 it('finds the summary’s values among the indicators first, and in the rows’ text after', async () => {

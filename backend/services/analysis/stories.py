@@ -177,7 +177,8 @@ def _hid(*parts: Any) -> str:
 
 def _is_cloud(ev: dict[str, Any]) -> bool:
     p = str(ev.get("provider") or "").lower()
-    return "unified audit" in p or "entra" in p or str(ev.get("category") or "").lower().startswith(("m365", "entra"))
+    # the Exchange Online message trace is the tenant's too, though neither audit log nor Entra
+    return "unified audit" in p or "entra" in p or "exchange online" in p or str(ev.get("category") or "").lower().startswith(("m365", "entra"))
 
 
 def _op(ev: dict[str, Any]) -> str:

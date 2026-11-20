@@ -546,22 +546,32 @@ def _sources_of(path) -> tuple[list[dict], dict]:
     return list(source), source.stats()
 
 
-def test_a_directory_audit_export_is_not_read_as_sign_ins(tmp_path):
+def test_a_directory_audit_export_is_read_as_directory_audits_not_sign_ins(tmp_path):
     """A directoryAudits page names a userPrincipalName and an ipAddress, and every record of it
-    became a successful, undated sign-in of nobody. It is not an export REMN reads, and is said so."""
+    became a successful, undated sign-in of nobody. It is read as what it is."""
     page = {"@odata.context": "https://graph.microsoft.com/v1.0/$metadata#auditLogs/directoryAudits", "value": [_directory_audit(i) for i in range(3)]}
     f = tmp_path / "AuditLogs.json"
     f.write_text(json.dumps(page, indent=2), encoding="utf-8")
-    assert m365.detect_format(f.name, f.read_bytes()[:65536]) is None
+    assert m365.detect_format(f.name, f.read_bytes()[:65536]) == "entra-audit-json"
     rows, stats = _sources_of(f)
-    assert rows == [] and stats["files"][0]["status"] == "unsupported"
-    # given to the event-log import, it is not read as an event log either
-    with pytest.raises(ValueError, match="not a recognised Microsoft 365 or Entra export"):
-        list(EvtxSource(f.name, str(f), None, str(tmp_path)))
+    assert stats["files"][0]["status"] == "parsed" and len(rows) == 3
+    assert {(r["provider"], r["operation"], r["subjectUser"], r["targetUser"]) for r in rows} == {
+        (m365.AUDIT_PROVIDER, "Update user.", "admin@contoso.com", "alice@contoso.com")
+    }
+    # given to the event-log import, it is read the same way
+    rows, src = _rows(str(f))
+    assert src.format == "entra-audit-json" and [r["tsIso"] for r in rows] == ["2026-09-01T10:00:00.000Z"] * 3 and src.stats.errors == 0
 
 
 def test_risk_and_user_exports_are_not_read_as_sign_ins():
-    risky_user = {"id": str(uuid.uuid4()), "isDeleted": False, "riskLevel": "high", "riskState": "atRisk", "userPrincipalName": "alice@contoso.com"}
+    risky_user = {
+        "id": str(uuid.uuid4()),
+        "isDeleted": False,
+        "riskLevel": "high",
+        "riskState": "atRisk",
+        "riskLastUpdatedDateTime": "2026-09-01T10:00:00Z",
+        "userPrincipalName": "alice@contoso.com",
+    }
     detection = {
         "id": "a1b2c3",
         "riskEventType": "unfamiliarFeatures",
@@ -573,8 +583,9 @@ def test_risk_and_user_exports_are_not_read_as_sign_ins():
         "tokenIssuerType": "AzureAD",
         "location": {"city": "Lyon", "countryOrRegion": "FR"},
     }
-    for record in (risky_user, detection):
-        assert m365.detect_format("risk.json", json.dumps([record]).encode()) is None
+    # each is read as what it is (test_m365_sources.py)
+    assert m365.detect_format("risk.json", json.dumps([risky_user]).encode()) == "entra-riskyuser-json"
+    assert m365.detect_format("risk.json", json.dumps([detection]).encode()) == "entra-riskdetection-json"
     # a user list as Microsoft-Extractor-Suite and Get-MgUser | Export-Csv write it
     users = b"Id,DisplayName,UserPrincipalName,AccountEnabled,CreatedDateTime,UserType\n1d2c,Alice,alice@contoso.com,True,1/15/2024 10:11:12 AM,Member\n"
     assert m365.detect_format("Users.csv", users) is None

@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { getDb, type Evidence } from '../db/schema'
+import { getDb, type Case, type Evidence } from '../db/schema'
 import { toast, useStore } from '../state/store'
 import { fmtBytes, fmtNum, fmtTs } from '../util/format'
 import { Dropzone } from '../components/Dropzone'
 import { Badge, CopyButton, JsonView, Modal } from '../components/ui'
-import { hashOnly, refreshCounts, requestIngest } from '../data/ingest'
+import { confirmAction } from '../components/confirm'
+import { hashOnly, readAgain, refreshCounts, requestIngest } from '../data/ingest'
+import { dateSetting, datesRead, describeDates, zoneError } from '../data/dateSetting'
 import { getSource } from '../data/source'
 import { Jobs } from '../components/ConsolePanel'
 import { IconTrash } from '../components/Icons'
@@ -12,11 +14,14 @@ import { PackageCoverage } from '../components/PackageCoverage'
 import { coverageMembers } from '../data/packageCoverage'
 import { packageCoverageIssues } from '../data/packageCoverage'
 import { evidenceGaps } from '../data/evidenceGaps'
+import { viewerReason } from '../data/access'
+import { pressableRow } from '../components/pressable'
 
 export function EvidenceView() {
   const kase = useStore((s) => s.currentCase)
   const jobs = useStore((s) => s.jobs)
   const threshold = useStore((s) => s.storeThresholdMb)
+  const health = useStore((s) => s.health)
   const [items, setItems] = useState<Evidence[]>([])
   const [detail, setDetail] = useState<Evidence | null>(null)
   const [verify, setVerify] = useState<{ ev: Evidence; result?: string; progress?: number } | null>(null)
@@ -30,8 +35,10 @@ export function EvidenceView() {
   }, [kase?.id, jobs.length])
   if (!kase || !ds) return null
   const isServer = kase.storage === 'server'
+  // a viewer changes nothing on the server; a case kept in this browser stays its own
+  const viewer = isServer ? viewerReason(health) : null
   const remove = async (e: Evidence) => {
-    if (!confirm(`Remove "${e.name}" and all its rows from ${isServer ? 'the server store' : 'this browser'}?`)) return
+    if (!(await confirmAction(`Remove "${e.name}" and all its rows from ${isServer ? 'the server store' : 'this browser'}?`, { title: 'Remove the evidence', action: 'Remove', danger: true }))) return
     try {
       const cleared = await ds.deleteEvidence(e.id!)
       toast(
@@ -60,7 +67,14 @@ export function EvidenceView() {
         <Badge sev={isServer ? 'accent' : 'info'}>{isServer ? 'server store (GB-scale)' : `browser store (files over ${threshold} MB will ask to switch)`}</Badge>
       </div>
       <div className="view-body col" style={{ gap: 14 }}>
-        <Dropzone onFiles={(files) => requestIngest(files, kase)} allowFolders />
+        {viewer ? (
+          <div className="hint">{viewer} Evidence is added by an analyst who owns the case or is a member of it.</div>
+        ) : (
+          <Dropzone onFiles={(files) => requestIngest(files, kase)} allowFolders />
+        )}
+        {isServer && health?.accounts && (
+          <div className="hint">This list holds the files added from this browser. The rows of every file in the case, whoever added it, are on the Events and Mails pages.</div>
+        )}
         <Jobs />
         <table className="table">
           <thead>
@@ -78,7 +92,7 @@ export function EvidenceView() {
           </thead>
           <tbody>
             {items.map((e) => (
-              <tr key={e.id} onClick={() => setDetail(e)} style={{ cursor: 'pointer' }}>
+              <tr {...pressableRow} key={e.id} onClick={() => setDetail(e)} style={{ cursor: 'pointer' }}>
                 <td className="mono ellipsis" style={{ maxWidth: 260 }} title={e.name}>
                   {e.name}
                 </td>
@@ -117,7 +131,7 @@ export function EvidenceView() {
                   <button className="btn xs" onClick={() => setVerify({ ev: e })} title="re-hash a copy of the file and compare">
                     verify
                   </button>
-                  <button className="btn xs danger" onClick={() => remove(e)} title="remove">
+                  <button className="btn xs danger" onClick={() => remove(e)} disabled={!!viewer} title={viewer ?? 'remove'} aria-label="remove">
                     <IconTrash />
                   </button>
                 </td>
@@ -179,6 +193,7 @@ export function EvidenceView() {
             />
           </label>
           <FileGaps evidence={detail} />
+          <EvidenceDates key={detail.id} evidence={detail} kase={kase} onRead={() => setDetail(null)} />
           {detail.kind === 'package' && detail.stats && <PackageCoverage stats={detail.stats} />}
           {detail.kind !== 'package' && coverageMembers(detail.stats).length > 0 && <PackageCoverage stats={detail.stats!} archive />}
           {detail.stats && (
@@ -225,6 +240,64 @@ function FileGaps({ evidence }: { evidence: Evidence }) {
           <Badge sev={g.severity === 'high' ? 'high' : 'medium'}>{g.kind.replace(/-/g, ' ')}</Badge> {g.text}
         </div>
       ))}
+    </div>
+  )
+}
+
+/**
+ * How the file's dates were read, for a Microsoft 365 or Entra export whose dates or times did not
+ * say all: the order and zone used, what was guessed, and a way to read the file again with an
+ * order and a zone set for this evidence.
+ */
+function EvidenceDates({ evidence, kase, onRead }: { evidence: Evidence; kase: Case; onRead: () => void }) {
+  const [order, setOrder] = useState<string>(evidence.dates?.order ?? '')
+  const [zone, setZone] = useState(evidence.dates?.zone ?? '')
+  const read = datesRead(evidence)
+  if (!read || evidence.kind === 'mail') return null
+  const error = zoneError(zone)
+  const setting = dateSetting(order, zone)
+  const again = async (file: File) => {
+    if (error) return toast('err', error)
+    const question = `Remove evidence #${evidence.id} and import ${file.name} again with ${describeDates(setting)}? Its findings are cleared until the rules run again; your decisions are kept.`
+    if (!(await confirmAction(question, { title: 'Read the file again', action: 'Read again', danger: true }))) return
+    onRead()
+    readAgain(evidence, file, kase, setting).catch((e: Error) => toast('err', `${file.name} not read again: ${e.message}`, 0))
+  }
+  return (
+    <div className="col" style={{ gap: 6 }}>
+      <div className="small dim">dates</div>
+      <div className="small">read with {read.setting}</div>
+      {read.counts.map((c) => (
+        <div key={c} className="small">
+          {c}
+        </div>
+      ))}
+      <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
+        <label className="field">
+          <span>date order</span>
+          <select className="select" value={order} onChange={(e) => setOrder(e.target.value)}>
+            <option value="">as the file shows (month first when it cannot)</option>
+            <option value="day-first">day first (01/09/2026 is 1 September)</option>
+            <option value="month-first">month first (01/09/2026 is 9 January)</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>time zone of times that give none</span>
+          <input className="input" value={zone} onChange={(e) => setZone(e.target.value)} placeholder="UTC, +02:00 or Europe/Paris" />
+        </label>
+      </div>
+      {error && (
+        <div className="small" style={{ color: 'var(--danger)' }}>
+          {error}
+        </div>
+      )}
+      <div className="hint">
+        To read the file with this setting, drop the original file again. Its SHA-256 is checked against the one recorded at import; the evidence is then removed and the file imported again, and its
+        findings are cleared until the rules run again.
+      </div>
+      <Dropzone multiple={false} onFiles={(f) => again(f[0])} compact>
+        <div className="big">drop the file to read it again</div>
+      </Dropzone>
     </div>
   )
 }

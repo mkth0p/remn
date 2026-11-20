@@ -1,4 +1,3 @@
-import DOMPurify from 'dompurify'
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { getDb, type EventRow, type Finding, type MailBody, type MailRow } from '../db/schema'
 import { getSource } from '../data/source'
@@ -10,6 +9,8 @@ import { Badge, CopyButton, Dot, Flag, JsonView, KV, Risk, Sev, Tabs } from './u
 import { AddToTimeline } from './AddToTimeline'
 import { CiteForQuestion } from './CiteForQuestion'
 import { namedMessageIds } from '../data/namedMessages'
+import { sanitizeMailHtml } from './mailHtml'
+import { pressable, pressableRow } from './pressable'
 
 const SEV_ORDER = ['critical', 'high', 'medium', 'low', 'info']
 
@@ -182,28 +183,6 @@ export function EventDetail({ row: initial, onClose }: { row: EventRow; onClose:
   )
 }
 
-function sanitizeMailHtml(html: string): string {
-  const clean = DOMPurify.sanitize(html, {
-    FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'video', 'audio', 'link', 'meta', 'base', 'svg', 'math', 'style'],
-    FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'style', 'srcset', 'background', 'action', 'formaction', 'poster'],
-    ALLOW_UNKNOWN_PROTOCOLS: false,
-  })
-  const doc = new DOMParser().parseFromString(clean, 'text/html')
-  doc.querySelectorAll('img').forEach((img) => {
-    const src = img.getAttribute('src') || ''
-    img.setAttribute('alt', `[image blocked: ${src.slice(0, 80)}]`)
-    img.removeAttribute('src')
-    img.setAttribute('style', 'border:1px dashed #999;padding:4px;font:11px monospace;color:#666')
-  })
-  doc.querySelectorAll('a').forEach((a) => {
-    const href = a.getAttribute('href') || ''
-    a.setAttribute('title', href)
-    a.setAttribute('href', '#')
-    a.setAttribute('style', 'color:#0645ad;text-decoration:underline dotted;cursor:not-allowed')
-  })
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:;"><style>body{font:13px/1.5 Arial,sans-serif;color:#111;background:#fff;padding:12px;margin:0;word-break:break-word}</style></head><body>${doc.body.innerHTML}</body></html>`
-}
-
 function normalizeMail(m: MailRow): MailRow {
   return {
     ...m,
@@ -360,13 +339,13 @@ export function MailDetail({
         <h3>Entities</h3>
         <div className="kv">
           <div className="k">sender</div>
-          <div className="v click" onClick={() => setEntity({ kind: 'address', value: row.fromAddr })} title="open the sender page">
+          <div {...pressable} className="v click" onClick={() => setEntity({ kind: 'address', value: row.fromAddr })} title="open the sender page">
             {row.fromAddr}
           </div>
           {senderDomain && (
             <>
               <div className="k">domain</div>
-              <div className="v click" onClick={() => setEntity({ kind: 'domain', value: senderDomain })} title="open the domain page">
+              <div {...pressable} className="v click" onClick={() => setEntity({ kind: 'domain', value: senderDomain })} title="open the domain page">
                 {senderDomain}
               </div>
             </>
@@ -378,7 +357,7 @@ export function MailDetail({
                 <div className="k" style={{ color: 'var(--warn)' }}>
                   reply-to
                 </div>
-                <div className="v click" onClick={() => setEntity({ kind: 'address', value: r.addr })}>
+                <div {...pressable} className="v click" onClick={() => setEntity({ kind: 'address', value: r.addr })}>
                   {r.addr}
                 </div>
               </Fragment>
@@ -386,7 +365,7 @@ export function MailDetail({
           {row.to.slice(0, 4).map((t, i) => (
             <Fragment key={'to' + i}>
               <div className="k">{i === 0 ? 'recipient' : ''}</div>
-              <div className="v click" onClick={() => setEntity({ kind: 'user', value: t.addr || t.name })} title="open the user page">
+              <div {...pressable} className="v click" onClick={() => setEntity({ kind: 'user', value: t.addr || t.name })} title="open the user page">
                 {t.addr || t.name}
               </div>
             </Fragment>
@@ -400,7 +379,7 @@ export function MailDetail({
           {row.originIp && (
             <>
               <div className="k">origin ip</div>
-              <div className="v click" onClick={() => setEntity({ kind: 'ip', value: String(row.originIp) })} title="open the IP page">
+              <div {...pressable} className="v click" onClick={() => setEntity({ kind: 'ip', value: String(row.originIp) })} title="open the IP page">
                 {row.originIp}
               </div>
             </>
@@ -437,7 +416,7 @@ export function MailDetail({
             {row.campaignId && (
               <>
                 <div className="k">campaign</div>
-                <div className="v click" onClick={() => pivot(row.campaignId!, 'campaignId', 'mails')}>
+                <div {...pressable} className="v click" onClick={() => pivot(row.campaignId!, 'campaignId', 'mails')}>
                   {row.campaignSize ?? '?'} mail(s) · {row.campaignSenders ?? '?'} sender(s)
                 </div>
               </>
@@ -451,7 +430,7 @@ export function MailDetail({
         <h3>Findings {findings.length ? <span className="muted">({findings.length})</span> : null}</h3>
         {!findings.length && <div className="muted small">no rule fired on this mail</div>}
         {findings.slice(0, 8).map((f) => (
-          <div key={f.id} className="row click" style={{ gap: 8, cursor: 'pointer' }} onClick={() => setView('findings')} title={f.description}>
+          <div {...pressable} key={f.id} className="row click" style={{ gap: 8, cursor: 'pointer' }} onClick={() => setView('findings')} title={f.description}>
             <Dot sev={f.severity} />
             <span className="ellipsis" style={{ flex: 1 }}>
               {f.title}
@@ -565,11 +544,16 @@ export function MailDetail({
           <IconAi /> analyse
         </button>
         {onPaneMax && (
-          <button className="btn icon ghost sm" onClick={() => onPaneMax(!paneMax)} title={paneMax ? 'restore the table' : 'expand the message'}>
+          <button
+            className="btn icon ghost sm"
+            onClick={() => onPaneMax(!paneMax)}
+            title={paneMax ? 'restore the table' : 'expand the message'}
+            aria-label={paneMax ? 'restore the table' : 'expand the message'}
+          >
             <IconChevronDown style={{ transform: paneMax ? 'none' : 'rotate(180deg)' }} />
           </button>
         )}
-        <button className="btn icon ghost sm" onClick={onClose} title="close (Esc)">
+        <button className="btn icon ghost sm" onClick={onClose} title="close (Esc)" aria-label="close (Esc)">
           <IconClose />
         </button>
       </div>
@@ -578,7 +562,7 @@ export function MailDetail({
         style={{ color: 'var(--fg-2)' }}
         title={`${row.fromName ? `"${row.fromName}" ` : ''}<${row.fromAddr}> → ${row.to.map((t) => t.addr || t.name).join(', ') || '(undisclosed)'}${row.cc.length ? ` · cc ${row.cc.map((t) => t.addr).join(', ')}` : ''} · ${fmtTs(row.date)}`}
       >
-        <span className="click" onClick={() => setEntity({ kind: 'address', value: row.fromAddr })}>
+        <span {...pressable} className="click" onClick={() => setEntity({ kind: 'address', value: row.fromAddr })}>
           {row.fromName ? `"${row.fromName}" ` : ''}&lt;{row.fromAddr}&gt;
         </span>
         {' → '}
@@ -847,6 +831,7 @@ export function MailDetail({
                 <tbody>
                   {related.events.map((e) => (
                     <tr
+                      {...pressableRow}
                       key={e.id}
                       onClick={() => {
                         setFocus({ source: 'events', id: e.id! })
