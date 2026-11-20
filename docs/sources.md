@@ -269,10 +269,16 @@ record whose date is missing or cannot be read is kept without a time and counte
 way (`undated`), since it is not on the timeline.
 
 The date order and the time zone can be set for an evidence file where its exports cannot
-say (the `dates` field of the import request: `{"order": "day-first" | "month-first",
-"zone": "UTC" | "+02:00" | "Europe/Paris"}`). The order set is used for every numeric date of
-its Entra and message trace exports in place of the order the file shows; a date that cannot be read in it but
-can the other way is counted (`dateOrderContradicted`) and left without a time. The zone set
+say. The detail of such a file on the Evidence page says how its dates were read and what was
+guessed or assumed, and sets an order and a zone for it: the original file is dropped again,
+checked against the SHA-256 recorded when it was imported, and the evidence is removed and
+the file imported again with the setting (its analyst note is kept; its findings are cleared
+until the rules run again). The console says which setting each import used. The import
+request takes it as the `dates` field: `{"order": "day-first" | "month-first", "zone": "UTC"
+| "+02:00" | "Europe/Paris"}`. The order set is used for every numeric date of the file's
+Entra and message trace exports in place of the order the file shows; a date that cannot be
+read in it but can the other way is counted (`dateOrderContradicted`) and left without a
+time. The zone set
 is used for each time a culture wrote without a zone, and never for an ISO 8601 time, a time
 with an offset, or a column whose name says UTC; a zone given by name follows daylight
 saving time. The evidence's statistics keep the setting (`dates`) and count the records it
