@@ -394,7 +394,7 @@ def test_a_server_package_job_sets_its_staging_room_aside_until_it_ends(tmp_path
     monkeypatch.setattr("api.views.store.registry", registry)
     monkeypatch.setattr("api.views.store.get_upload", lambda _: (path, {"name": path.name, "size": len(blob), "sha256": hashlib.sha256(blob).hexdigest()}))
     monkeypatch.setattr("api.views.store.discard_upload", lambda _: None)
-    monkeypatch.setattr("api.views.store.manager.submit", lambda kind, case_key, fn, label: fn(Job(kind, case_key, label)) and Job(kind, case_key, label))
+    monkeypatch.setattr("api.views.store.manager.submit", lambda kind, case_key, fn, label, **_: fn(Job(kind, case_key, label)) and Job(kind, case_key, label))
     seen = []
     start = isolation.start
 
