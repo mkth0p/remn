@@ -30,18 +30,23 @@ two days apart; then they are two stories. A mail received or a failed logon joi
 nearest it, within two days, and never joins two: a spray's daily failures between two
 intrusions three weeks apart leave them two stories, and the failures far from both are listed
 with the flags in no story. A flag that names no person, a service installed or a program run by
-SYSTEM, belongs to the person whose session, process tree or way into the host it is part of.
-When the records tie it to no one, it belongs to the one person who was on the host then: whose
-console, RDP or cached-credential session there was open at its time (a session whose logoff is
-not in the evidence counts as open for two days after its logon), or whose own flagged steps
-there fall within fifteen minutes of it, when that person has a flag of their own within two
-days. Their own flagged steps are what they did: a program run, a service or a task created, a
-script block; not a logon, a share opened, or the connections, lookups, file writes, image loads
-and handle opens every session makes (a domain logon opens IPC$ on a domain controller). The tie
-is medium and says so: "on WS-004 while daniel.roy's session 0x9a01 was open". Such a flag
-supports the story; it does not start one, so it never joins two incidents of its person. When
-two people or more were on the host then, the flag stays the host's and its step says who was on;
-when there is no one, it starts a story of its own host.
+SYSTEM, belongs to the person whose session, process tree or way into the host it is part of (a
+handle opened or a thread created, Sysmon 10 and 8, is part of its source program's tree).
+When the records tie it to no one, it is the host's: being at a host when SYSTEM, a management
+agent or a security product raises a flag there does not make the flag a person's. Its step says
+who was on the host then: whose console, RDP or cached-credential session there was open at its
+time, or whose own flagged steps there fall within fifteen minutes of it. A session whose logoff
+is not in the evidence is open as far as its own records go (its logon, the programs and actions
+of its logon id, its reconnects) and no further, and the step says so: "a finding on ws-004
+while daniel.roy's session 0x9a01 was open (its logoff is not in the evidence: taken as open to
+its last record, 66 min after its logon); its record ties it to no account or session of
+theirs". Their own flagged steps are what they did: a program run, a service or a task created,
+a script block; not a logon, a share opened, or the connections, lookups, file writes, image
+loads and handle opens every session makes (a domain logon opens IPC$ on a domain controller).
+When one person was on the host then and has a flag of their own within two days, the host's
+story links to theirs (medium, `session`), and the two are one incident. When two people or more
+were on it, or the one person raised no flag of their own, the link is weak and makes no
+incident. When no one was on it, the host's flags stand on evidence of their own (below).
 
 A host's own flags make a story only on evidence of their own: a rule that fires on clean
 machines fires on a host's own maintenance too (Windows updating its built-in scheduled tasks,
@@ -132,9 +137,26 @@ accounts from SQL, with their counts, so millions of events are a few thousand r
 reads them over the whole case, not only the records selected around the flags: a bare name
 two accounts write is ambiguous whatever days the stories read, and a script block's SID is
 its account's though the logon that says so was a week before. Past 200,000 combinations it
-reads the most frequent ones and those of the selected records, and the page says so.
+reads the most frequent ones and those of the selected records, and the page says so. A
+browser case posts the records selected around its flags, and the resolver reads only those:
+a bare name joins the only account of that name among them, the join says so ("the only
+account of that name in the rows this build read (not the whole case)"), the build says who is
+who was read from its rows (`identityScope`: `rows`, `case` on a server case), and the page
+and the report list it among where the build stops.
 
 ## Sessions, hops and what ran
+
+A host is keyed by its short name (`ws-004` for WS-004.northstar.example) while the case has one
+host of that name, and by its full name when its records name hosts of that short name in two
+domains or more (DC01.a.example and DC01.b.example): their sessions, processes, hops and stories
+stay apart, and a machine account's ticket is read in the domain of the domain controller that
+issued it. A record that names such a host without its domain (a logon's workstation reading
+DC01) is kept apart from all of them, since nothing says which it is, and an address is never
+given to that bare name. Each host says how it was keyed (`basis`): "keyed by its short name,
+ws-004: the only host of that name in the case (ws-004.northstar.example)", "keyed by its full
+name, dc01.a.example: the case names 2 hosts DC01 (dc01.a.example, dc01.b.example)", or, when
+no record gives its domain, "keyed by its short name, ws-004: no record gives its domain". The
+page shows it on the story's host.
 
 Host lineage reads, for each host:
 
@@ -222,16 +244,25 @@ Every record of a story is a step, or folded into one, and every step says why i
 
 | tie | the record | confidence |
 |---|---|---|
-| flagged | carries a finding, and names the person, or (naming no one) is part of their session, process tree or way in, or happened on a host only they were on then | as sure as the form it names them by, or as lineage ties it: medium for a program WMI or WinRM started, a WinRM shell or an RDP session manager's record placed in the session by time, a service tied to an admin share by time only, or a flag on a host only they were on |
+| flagged | carries a finding, and names the person, or (naming no one) is part of their session, process tree or way in | as sure as the form it names them by, or as lineage ties it: medium for a program WMI or WinRM started, a WinRM shell or an RDP session manager's record placed in the session by time, or a service tied to an admin share by time only |
 | phishing chain | is a step of the person's mail-led chain | strong with a link to the mail, else medium |
 | same session | is the logon of a session in which a flagged record happened, or the other logon of its split token | strong, medium when time alone placed the flagged record in the session |
 | same way in | is part of the same hop (the service after the admin share) | strong, medium when this record or the flagged one is part of the hop by time only |
 | process tree | started a flagged process | strong |
-| same source | came from an address the story's findings name, or is that address trying another account | medium |
+| same source | came from an address the story's findings name and the evidence ties beyond one finding (below), or is that address trying another account; the step says why the address is the attacker's | medium |
 | same person | names the person and is something (a task, a rule, a group change) | as sure as the form |
 
-A weak tie never puts a record in a story. The story's confidence is the weakest tie of its
-flagged steps. A program run with no finding is most of a person's day, so their name alone
+A weak tie never puts a record in a story. The story's confidence says how surely its flagged
+steps are its subject's: high when a record states the tie of every one (it names the person by
+a form a record joined to them, or it is their session's, their process tree's or their way
+in's), medium when a record does for half of them or more, low when for fewer, the others
+resting on naming rules, time and place, or an address. It says so (`confidenceBasis`: "a record
+states the tie of 15 of its 24 flagged steps; 9 rest on naming rules, time and place, or an
+address"), and the story list, the open story and the report show it as "medium confidence"
+with that basis. It is about who and where, not whether the flags are an intrusion: the
+severity and the score say that. A step the analyst confirmed counts as one a record ties. A
+story saved before this scale keeps its old value (strong or medium) until the stories are
+built again. A program run with no finding is most of a person's day, so their name alone
 does not put one in a story: it joins when it ran in one of the story's logon sessions, or is,
 or descends from, one of the story's processes, and its step says which.
 
@@ -355,8 +386,8 @@ by rule id, or from the finding when it carries its rule's measure (`measured`).
 
 ## Campaigns
 
-The attacker's infrastructure in a story's flagged steps is: the addresses its findings name,
-the outside sender domains, link domains and attachment digests of its flagged mails, the
+The attacker's infrastructure in a story's flagged steps is: the outside addresses its findings
+name that the evidence ties beyond one finding (below), the outside sender domains, link domains and attachment digests of its flagged mails, the
 forwarding addresses its inbox rules and mailbox settings name, and the applications its
 people consented to. Stories that share any of these are one campaign. A campaign also lists
 the accounts outside its stories that the same sources reached within two days of one of its
@@ -365,11 +396,28 @@ the accounts its addresses tried. Flagged mails and failed logons in no story an
 are grouped by sender domain and by address. Nothing in a campaign's list of accounts says they
 were compromised.
 
+An outside address a finding names is the attacker's only when the case says more than that one
+finding does: a finding of high severity or more names it, findings of two rules or more name it,
+or no one else in the case uses it (signs in or acts from it; a failed sign-in to someone's
+account is someone trying it, not their use). Only then does it pull the person's other records
+from it, and the failed sign-ins and flagged records of other accounts from it, into the story,
+and each of those steps says which of the three it was: "it came from 203.0.113.69, a source the
+story's findings name (a critical finding names it: Brute force - burst of failed logons from
+one source IP)". An address one medium finding names that others in the case use, an office's
+address flagged by one rule's false positive, ties nothing; the story lists it
+(`untiedAddresses`) and its summary says so. On the lab ([below](#how-well-it-reads-the-lab))
+each planted attack's address is the attacker's by a critical finding, as before the rule, and no
+address is left untied or taken as shared; `tests/backend/test_story_identity.py` holds the cases
+built to mislead it (an office's address flagged once, a shared account signing in from the
+office and from an attacker's address, a tenant of three).
+
 An address most of the organisation's users sign in from, an office's NAT or a VPN's egress, is
-not the attacker's: at least five people of one organisation signed in from it with no finding
-of medium or more on their records from it, and they are more than half of that organisation's
-people the records show signing in from outside. The findings may name it, and the story says
-so (`sharedAddresses`), but it ties no record to the story and joins no stories into a campaign.
+not the attacker's even then: at least two people of one organisation signed in from it with no
+finding of medium or more on their records from it, and they are more than half of that
+organisation's people the records show signing in from outside, so a tenant of three whose
+office is where two of them sign in from has it as its egress. The findings may name it, and the
+story says so (`sharedAddresses`), but it ties no record to the story and joins no stories into
+a campaign.
 
 ## Incidents
 
@@ -384,7 +432,7 @@ reaches, its kind, why (`basis`), how surely and the records it rests on (`refs`
 | explicit credentials | the same, with explicit credentials (4648: its subject is who took the way in), or one person's hop into another story's host or account with another person's account | the hop's own |
 | process tree | a program of one story descends, within six generations, from a program of another story's flags or of its person's session (a `runas`) | strong |
 | one record names both | one record whose two people are two stories' subjects: a password reset of one by the other, an account enabled | the weaker of the two names |
-| on the host then | a host's flag left the host's because two people or more were on it: its story and theirs | weak |
+| on the host then | a host's flag that names no one, and the people who were on the host then (a session open, or their own flagged steps within fifteen minutes): its story and theirs | medium for the one person on it with a flag of their own within two days; weak for each of two people or more, or for one with no flag of their own |
 
 A weak link is shown on the story but joins nothing; a hop from a person who was one of several
 on a host when its flags were raised is weak too, since it makes no one's the more. A link never
@@ -559,7 +607,7 @@ the story, and the confidence of its tie: strong 90, medium 70. The hosts, accou
 addresses a step touches are `attack-asset`s; an account's refers to an `identity` (individual,
 or system for a service account), an address's to `infrastructure` that consists of the address
 (`ipv4-addr` or `ipv6-addr`, with STIX's own id for it). The flow's description is the spine's
-basis and the story's summary. A story built before spines exports its flagged steps, fifteen
+basis and the story's summary, and its confidence the story's: high 90, medium 70, low 50. A story built before spines exports its flagged steps, fifteen
 at most.
 
 A campaign downloads as a STIX 2.1 `grouping` of context `suspicious-activity` ("Download STIX
@@ -668,11 +716,14 @@ as a server case does, and prints each story with the checks below;
 `REMN_APT29=DIR pytest -m heavy tests/backend/test_apt29_stories.py` runs the same checks, day 1 in
 about a minute. On day 1 (196,081 records: pbeesly's payload, UAC bypass, discovery, credential
 access and persistence on SCRANTON, then PsExec to NASHUA; NEWYORK is the domain controller and
-UTICA is left alone) REMN's own rules raise 228 findings and the build reads one story:
-pbeesly's, holding the flags of SCRANTON (her RDP session) and NASHUA (her PsExec sessions) that
-name no one, while the domain controller's and UTICA's own maintenance are leads. No story is
-about a SID or a service account, pbeesly's story holds the 17 flagged script blocks she ran on
-SCRANTON and NASHUA (their header names her SID), and it reaches NASHUA through the explicit
+UTICA is left alone) REMN's own rules raise 228 findings and the build reads one incident of
+three stories: pbeesly's, holding what her sessions and her programs did on SCRANTON and NASHUA
+(the handles her PowerShell opened among them), and the two hosts' own stories, holding the
+flags there that no account or session of hers raised (Windows' firewall and Group Policy
+changes, the event log service stopped, the service manager's PsExec entries), each linked to
+hers by time and place; the domain controller's and UTICA's own maintenance are leads. No story
+is about a SID or a service account, pbeesly's story holds the 17 flagged script blocks she ran
+on SCRANTON and NASHUA (their header names her SID), and it reaches NASHUA through the explicit
 credentials, the PsExec service and WinRM. Without the joins above it read five stories: hers
 and four host stories, all four high. On day 2 it reads two incidents: dschrute's and mscott's
 stories with UTICA's and NEWYORK's, joined by explicit credentials, and kmalone's with the local
@@ -702,16 +753,20 @@ account on SCRANTON she enabled (one record names both).
 - An Entra device is matched to a host by name only: a device renamed, or one whose name two
   hosts of different domains share, is not joined; a device id is not read against the
   machine's own records.
+- A host's domain is read from the records that name it in full (the computer, a workstation, a
+  server's name). Two hosts of one short name whose records never give a domain are one host,
+  and a record that names one of two such hosts by its short name only joins neither.
 - A finding's measure is its rule's by rule id: a rule of your own that replaces a bundled rule
   of the same id is weighed by the bundled rule's measure unless the finding carries its own
   (`measured`), which the page does not send yet. Mail rules and Hayabusa's are not measured and
   weigh as rules never measured.
 - The thresholds at which low findings add up are case settings the build reads, but the page's
   settings do not offer them yet: a case posted by the page uses the defaults.
-- A flag that names no one joins the person on its host by time and place: a job an intruder
-  left running on a host fires in the session of whoever is on it then, and reads as theirs
-  (medium, and the step says so). A session whose logoff is not in the evidence counts as open
-  for two days after its logon.
+- A flag that names no one is its host's, and its host's story is one incident with the one
+  person who was on the host then by time and place only (medium, and the link says so): a job an
+  intruder left running fires beside whoever is on the host then. A session whose logoff is not
+  in the evidence is open only to its last record: a person still at the console after it, doing
+  nothing the logs record, is not taken as on the host.
 - A host's flags stand on their rules' measures (read by rule id, as above). A rule measured
   quiet on the clean machines can still fire on a host's own configuration: with the SigmaHQ packs on, the
   first day of the APT29 evaluation keeps a story of its domain controller (NEWYORK) standing on
@@ -728,9 +783,14 @@ account on SCRANTON she enabled (one record names both).
   them are listed with the flags in no story, saying why. The API holds what a caller asks for
   to at most 1,000 stories and 2,000 steps a story, and a gap between one hour and thirty days.
 - An address is read as the organisation's shared egress from the records a build reads: an
-  attacker who signed in to five accounts or more from one address with no finding on any of
-  those sign-ins, and so outnumbers the people the records show signing in from outside, would
-  be taken for one.
+  attacker who signed in to two accounts or more from one address with no finding on any of
+  those sign-ins, and so outnumbers the people the records show signing in from outside (in a
+  tenant of three, two), would be taken for one. An office's address that fewer than half of
+  the organisation's outside signers use is not its egress: a high finding on it, or findings
+  of two rules, still make it the attacker's.
+- Who else uses an address is read from the records a build reads: an attacker's address that
+  one medium finding names and that another person's records also come from (a hotel's, a
+  carrier's) ties nothing to the story.
 - A decision reads a story again from the steps it leaves (phases, severity, headline), in the
   engine's way, but keeps the engine's score and does not tie steps again: records taken out of
   a story, or the steps split off it, take no other records with them, and a step tied through

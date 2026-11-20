@@ -41,7 +41,7 @@ function view(decisions: StoryDecisions = {}) {
     end: T0 + 20 * 60_000,
     severity: 'high',
     score: 60,
-    confidence: 'strong',
+    confidence: 'high',
     phases: [{ phase: 'initial-access', label: 'Initial access', first: T0, last: T0, steps: 1, records: 1, findings: 1, severity: 'high' }],
     steps: [
       step(1, 0, { phase: 'initial-access', findings: [{ ruleId: 'rdp', title: 'RDP logon from outside', severity: 'high', key: 'rdp|1' }] }),

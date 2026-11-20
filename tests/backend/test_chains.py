@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import uuid
 from datetime import UTC, datetime, timedelta
 
 import make_m365
@@ -12,9 +11,6 @@ from django.test import Client
 
 from services.analysis import chains as C
 from services.parsers import m365
-from services.parsers.mail.common import ParseContext, build_row
-from services.store.casestore import StoreRegistry
-from services.store.writers import EventWriter, MailWriter
 
 HDR = {"HTTP_X_FORENSIC_CLIENT": "1"}
 T0 = datetime(2026, 9, 1, 9, 0, tzinfo=UTC)
@@ -182,71 +178,6 @@ def test_no_chain_without_steps_or_below_score():
     assert len(res2["chains"]) == 1 and res2["chains"][0]["steps"][0]["kind"] == "mail"
 
 
-@pytest.fixture
-def store(tmp_path):
-    reg = StoreRegistry()
-    reg.configure(tmp_path / "cases")
-    st = reg.get(str(uuid.uuid4()))
-    yield st
-    reg.close_all()
-
-
-def test_chains_for_store_selects_identities_via_sql(store):
-    ctx = ParseContext(internal_domains=["contoso.com"])
-    mw = MailWriter(store, 1)
-    seed = build_row(
-        [
-            ("From", f"Billing <{PHISHER}>"),
-            ("To", f"<{VICTIM}>"),
-            ("Subject", "Invoice overdue"),
-            ("Date", "Tue, 1 Sep 2026 09:05:00 +0000"),
-            ("Message-ID", "<p1@evil-login.net>"),
-        ],
-        None,
-        '<html><body><a href="https://evil-login.net/login">pay now</a></body></html>',
-        [],
-        ctx,
-        folder="Inbox",
-        size=None,
-        extra={},
-    )
-    mw.add(seed)
-    mw.add(
-        build_row(
-            [
-                ("From", f"Alice <{VICTIM}>"),
-                ("To", f"<{PHISHER}>"),
-                ("Subject", "RE: Invoice overdue"),
-                ("Date", "Tue, 1 Sep 2026 09:12:00 +0000"),
-                ("Message-ID", "<r1@contoso.com>"),
-                ("In-Reply-To", "<p1@evil-login.net>"),
-            ],
-            "ok, paying",
-            None,
-            [],
-            ctx,
-            folder="Sent Items",
-            size=None,
-            extra={},
-        )
-    )
-    mw.flush()
-    ew = EventWriter(store, 2)
-    _, events, _ = scenario()
-    for e in events:
-        e.pop("id", None)
-        ew.add(e)
-    ew.flush()
-    findings = [{"ruleId": "mail-credential-phishing", "title": "Credential phishing", "severity": "critical", "source": "mails", "refs": [1], "ts": ms(5)}]
-    res = C.chains_for_store(store, {"expected_countries": ["FR"]}, findings, seed_min_risk=45)
-    assert len(res["chains"]) == 1
-    c = res["chains"][0]
-    assert c["identity"] == VICTIM and res["stats"]["events"] > 30
-    assert any(s["kind"] == "mail" and "same thread" in s["artifacts"] for s in c["steps"])
-    assert any("DNS query evil-login.net" in s["title"] and s["artifacts"] for s in c["steps"])
-    assert any("role assigned" in s["title"] for s in c["steps"])
-
-
 def test_build_endpoint_accepts_posted_rows():
     mails, events, findings = scenario()
     c = Client()
@@ -259,8 +190,9 @@ def test_build_endpoint_accepts_posted_rows():
     assert r.status_code == 200, r.content
     body = r.json()
     assert len(body["chains"]) == 1 and body["chains"][0]["identity"] == VICTIM and body["stats"]["chains"] == 1
+    # a server case's chains come with its stories: the endpoint reads no case store
     r2 = c.post("/api/chains/build", json.dumps({"storeKey": "00000000-0000-0000-0000-000000000000"}), content_type="application/json", **HDR)
-    assert r2.status_code == 404
+    assert r2.status_code == 400 and r2.json()["code"] == "storyBuild"
 
 
 def test_routine_activity_and_own_domain_links_do_not_make_a_chain():
@@ -508,18 +440,6 @@ def test_auth_campaign_excludes_other_account_ip_host_and_tenant_success():
     assert C.build_chains([], [{**r, "ts": ms(i * 60)} for i, r in enumerate(failures)])["chains"] == []
 
 
-def test_store_auth_campaign_and_visible_cap(store, monkeypatch):
-    writer = EventWriter(store, 1)
-    for row in auth_events():
-        writer.add(row)
-    writer.flush()
-    assert C.chains_for_store(store, {}, [])["chains"][0]["seed"]["source"] == "events"
-    monkeypatch.setattr(C, "EVENT_CAP", 5)
-    result = C.chains_for_store(store, {}, [])
-    assert result["stats"]["authEventsTruncated"] == 1
-    assert result["chains"] == []
-
-
 def test_foreign_qualified_identity_is_not_bypassed_by_bare_alias():
     identities = C.event_identities({"upn": "alice@other.example", "subjectUser": "alice"})
     assert len(identities) == 1 and identities[0][2] == "other.example"
@@ -586,3 +506,61 @@ def test_a_campaign_of_another_organisation_or_time_stays_its_own_chain():
     for events in (other, later):
         kinds = sorted(c.get("kind") or "mail" for c in C.build_chains(mails, events)["chains"])
         assert kinds == ["authentication", "mail"], kinds
+
+
+def test_a_flagged_event_of_a_kind_the_builder_does_not_model_is_kept_as_a_step():
+    """The process access to LSASS (Sysmon 10) and the RDP connection record (1149) after the phish are
+    no kind the chain builder models; flagged, they are steps that say what they are, not dropped."""
+    mails = [_mail(1, 5, "Invoice overdue", PHISHER, [VICTIM], 85, urls=["evil-login.net"])]
+    sysmon = {"channel": "Microsoft-Windows-Sysmon/Operational", "provider": "Microsoft-Windows-Sysmon"}
+    events = [
+        _ev(22, 8, **sysmon, user="CONTOSO\\alice", subjectUser="alice", query="evil-login.net"),
+        _ev(10, 20, **sysmon, user="CONTOSO\\alice", subjectUser="alice", summary="Process accessed: rundll32.exe opened lsass.exe"),
+        _ev(
+            1149,
+            30,
+            channel="Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational",
+            targetUser="alice",
+            summary="RDP user authentication succeeded",
+        ),
+        # unflagged, it is still no step: the chain is not every record of the person's day
+        _ev(10, 40, **sysmon, user="CONTOSO\\alice", subjectUser="alice", summary="Process accessed: explorer.exe opened svchost.exe"),
+    ]
+    for i, e in enumerate(events, 2):
+        e["id"] = i
+    findings = [
+        {"ruleId": "sysmon-lsass-access", "title": "LSASS memory access", "severity": "high", "source": "events", "refs": [3], "ts": ms(20)},
+        {"ruleId": "rdp-auth-unusual", "title": "RDP authentication", "severity": "medium", "source": "events", "refs": [4], "ts": ms(30)},
+    ]
+    [chain] = C.build_chains(mails, events, findings, {"internal_domains": ["contoso.com"]})["chains"]
+    by_id = {s["id"]: s for s in chain["steps"]}
+    assert by_id[3]["findings"][0]["ruleId"] == "sysmon-lsass-access" and "lsass.exe" in by_id[3]["title"] and "Sysmon 10" in by_id[3]["title"]
+    assert by_id[4]["findings"][0]["ruleId"] == "rdp-auth-unusual" and "1149" in by_id[4]["title"]
+    assert 5 not in by_id
+
+
+def test_events_fold_into_one_step_only_when_they_agree_on_address_account_and_target():
+    mails = [_mail(1, 5, "Invoice overdue", PHISHER, [VICTIM], 85, urls=["evil-login.net"])]
+    sysmon = {"channel": "Microsoft-Windows-Sysmon/Operational", "provider": "Microsoft-Windows-Sysmon"}
+    logon = {"targetUser": "alice", "targetDomain": "CONTOSO", "logonType": 3, "logonTypeName": "Network"}
+    events = [
+        _ev(22, 8, **sysmon, user="CONTOSO\\alice", subjectUser="alice", query="evil-login.net"),
+        # four network logons within minutes: two from one address, one from another, one of another type
+        _ev(4624, 20, **logon, ipAddress="10.0.0.5"),
+        _ev(4624, 21, **logon, ipAddress="10.0.0.5"),
+        _ev(4624, 22, **logon, ipAddress="203.0.113.80"),
+        _ev(4624, 23, **{**logon, "logonType": 10, "logonTypeName": "RemoteInteractive"}, ipAddress="10.0.0.5"),
+        # two runs of one program with different command lines, two lookups of different names
+        _ev(1, 24, **sysmon, user="CONTOSO\\alice", subjectUser="alice", image=r"C:\Windows\System32\cmd.exe", commandLine="cmd /c whoami"),
+        _ev(1, 25, **sysmon, user="CONTOSO\\alice", subjectUser="alice", image=r"C:\Windows\System32\cmd.exe", commandLine="cmd /c net group"),
+        _ev(22, 26, **sysmon, user="CONTOSO\\alice", subjectUser="alice", query="files.example"),
+        _ev(22, 27, **sysmon, user="CONTOSO\\alice", subjectUser="alice", query="cdn.example"),
+    ]
+    for i, e in enumerate(events, 2):
+        e["id"] = i
+    [chain] = C.build_chains(mails, events, [], {"internal_domains": ["contoso.com"]})["chains"]
+    refs = sorted(sorted(s.get("refs") or [s["id"]]) for s in chain["steps"] if s["kind"] == "event")
+    assert [3, 4] in refs and [5] in refs and [6] in refs
+    assert [7] in refs and [8] in refs and [9] in refs and [10] in refs
+    folded = next(s for s in chain["steps"] if s.get("refs") == [3, 4])
+    assert folded["count"] == 2 and "10.0.0.5" in folded["title"]

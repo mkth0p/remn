@@ -1,6 +1,4 @@
-import { apiPost } from '../api/client'
-import { getDb, type Case, type Finding, type Severity } from '../db/schema'
-import { settingsForRules } from './rules'
+import { getDb, type Finding, type Severity } from '../db/schema'
 import { replaceFindings } from './findingReviews'
 
 export interface ChainStep {
@@ -58,68 +56,6 @@ export interface ChainResult {
   stats: Record<string, number>
   builtAt?: number
 }
-export interface ChainOptions {
-  seedMinRisk?: number
-  windowHours?: number
-}
-
-/** events considered per build (the server applies the same cap); the Chains page says when it was hit */
-export const EVENT_CAP = 50_000
-
-const SKIP = new Set(['', '-', 'system', 'anonymous logon', 'local service', 'network service', 'local system'])
-
-/** alice@contoso.com | CONTOSO\alice | alice -> "alice" (mirror of services/analysis/chains.identity_key). */
-export function identityKey(v: unknown): string | null {
-  if (v == null) return null
-  let s = String(v)
-    .trim()
-    .replace(/^["']|["']$/g, '')
-    .toLowerCase()
-  if (!s || s.endsWith('$')) return null
-  if (s.includes('\\')) s = s.slice(s.lastIndexOf('\\') + 1)
-  if (s.includes('@')) s = s.slice(0, s.indexOf('@'))
-  s = s.trim()
-  if (SKIP.has(s) || s.startsWith('dwm-') || s.startsWith('umfd-') || s.startsWith('s-1-') || s.length < 2) return null
-  return s
-}
-
-const EVENT_FIELDS = [
-  'id',
-  'ts',
-  'eventId',
-  'channel',
-  'provider',
-  'category',
-  'operation',
-  'computer',
-  'targetUser',
-  'targetDomain',
-  'subjectDomain',
-  'subjectUser',
-  'user',
-  'upn',
-  'ipAddress',
-  'logonType',
-  'logonTypeName',
-  'image',
-  'processName',
-  'commandLine',
-  'parentImage',
-  'parentProcessName',
-  'query',
-  'destinationHostname',
-  'destinationIp',
-  'destinationPort',
-  'targetFilename',
-  'objectName',
-  'summary',
-  'status',
-  'taskName',
-  'serviceName',
-  'scriptBlockText',
-  'data',
-] as const
-
 /**
  * The keys of an event's `data` that services/analysis/chains.py reads. The rest of EventData
  * stays in the browser: a 4624 carries about a kilobyte of it, and sending all of it for 50,000
@@ -149,102 +85,6 @@ export const CHAIN_DATA_KEYS = [
   'Target',
   'ConsentAction.Permissions',
 ] as const
-/** keys chains.py tests for by prefix only (a user update that touches MFA methods) */
-const CHAIN_DATA_PREFIXES = ['StrongAuthentication']
-
-export function chainData(data: unknown): Record<string, unknown> | undefined {
-  if (!data || typeof data !== 'object') return undefined
-  const src = data as Record<string, unknown>
-  const out: Record<string, unknown> = {}
-  for (const k of CHAIN_DATA_KEYS) if (src[k] !== undefined && src[k] !== null && src[k] !== '') out[k] = src[k]
-  for (const k of Object.keys(src)) if (CHAIN_DATA_PREFIXES.some((p) => k.startsWith(p))) out[k] = true
-  return Object.keys(out).length ? out : undefined
-}
-
-function slimFinding(f: Finding) {
-  return { ruleId: f.ruleId, title: f.title, severity: f.severity, source: f.source, refs: f.refs.slice(0, 2000), ts: f.ts }
-}
-
-/** Build the chains for a case (server store: the API reads DuckDB; browser store: the relevant rows are posted). */
-export async function buildChains(kase: Case, opts: ChainOptions = {}): Promise<ChainResult> {
-  const db = getDb()
-  const caseId = kase.id!
-  const settings = settingsForRules(kase)
-  // findings marked false positive neither seed a chain nor weight its steps
-  const findings = (await db.findings.where('caseId').equals(caseId).toArray()).filter((f) => f.ruleId !== 'chain' && f.status !== 'false_positive').map(slimFinding)
-  const seedMinRisk = opts.seedMinRisk ?? 45
-  const windowHours = opts.windowHours ?? 72
-  let result: ChainResult
-  if (kase.storage === 'server' && kase.serverKey) {
-    result = await apiPost<ChainResult>('/api/chains/build', { storeKey: kase.serverKey, settings, findings, seedMinRisk, windowHours })
-  } else {
-    const refIds = new Set<number>()
-    for (const f of findings) if (f.source === 'mails') for (const r of f.refs) refIds.add(r)
-    const allMails = await db.mails.where('caseId').equals(caseId).toArray()
-    const seeds = allMails.filter((m) => m.date != null && (m.risk >= seedMinRisk || (m.id != null && refIds.has(m.id))))
-    // no seed left (evidence removed, threshold raised): the empty result must still replace the stored snapshot
-    if (!seeds.length && !(await db.events.where('caseId').equals(caseId).count()))
-      return persistChainResult(caseId, { chains: [], stats: { seeds: 0, identities: 0, events: 0, mails: 0, chains: 0 } })
-    const idents = new Set<string>()
-    for (const m of seeds)
-      for (const r of [...m.to, ...m.cc, ...m.bcc]) {
-        const k = identityKey(r.addr)
-        if (k) idents.add(k)
-      }
-    const tMin = seeds.reduce((v, m) => Math.min(v, m.date!), Number.MAX_SAFE_INTEGER) - 5 * 60_000
-    const tMax = seeds.reduce((v, m) => Math.max(v, m.date!), 0) + windowHours * 3_600_000
-    const events: Record<string, unknown>[] = []
-    let eventsTruncated = false
-    let authEventsTruncated = false
-    let authCount = 0
-    let mailCount = 0
-    await db.events
-      .where('[caseId+ts]')
-      .between([caseId, 0], [caseId, Number.MAX_SAFE_INTEGER], true, true)
-      .each((e) => {
-        const row = e as unknown as Record<string, unknown>
-        const data = (row.data ?? {}) as Record<string, unknown>
-        const hit = [row.upn, data.UserId, row.targetUser, row.subjectUser, row.user, data.MailboxOwnerUPN].some((v) => {
-          const k = identityKey(v)
-          return !!k && idents.has(k)
-        })
-        const auth = [4624, 4625].includes(Number(row.eventId)) || ['signin', 'sign-in', 'userloginfailed', 'userloggedin'].includes(String(row.operation ?? '').toLowerCase())
-        const mailHit = hit && e.ts != null && e.ts >= tMin && e.ts <= tMax
-        if (auth && ++authCount > EVENT_CAP) authEventsTruncated = true
-        if (mailHit && ++mailCount > EVENT_CAP) eventsTruncated = true
-        if (!(auth && authCount <= EVENT_CAP) && !(mailHit && mailCount <= EVENT_CAP)) return
-        const slim: Record<string, unknown> = {}
-        for (const k of EVENT_FIELDS) if (row[k] !== undefined) slim[k] = row[k]
-        const kept = chainData(row.data)
-        if (kept) slim.data = kept
-        else delete slim.data
-        events.push(slim)
-      })
-    const replies = allMails.filter((m) => m.date != null && m.date >= tMin && m.date <= tMax && !seeds.includes(m) && idents.has(identityKey(m.fromAddr) ?? ''))
-    const mails = [...seeds, ...replies].map((m) => ({
-      id: m.id,
-      date: m.date,
-      subject: m.subject,
-      fromAddr: m.fromAddr,
-      fromRegistrable: m.fromRegistrable,
-      to: m.to,
-      cc: m.cc,
-      bcc: m.bcc,
-      replyTo: m.replyTo,
-      risk: m.risk,
-      flags: m.flags,
-      urls: (m.urls ?? []).map((u) => ({ url: u.url, host: u.host, domain: u.domain })),
-      attachments: (m.attachments ?? []).map((a) => ({ name: a.name })),
-      messageId: m.messageId,
-      inReplyTo: m.inReplyTo,
-    }))
-    result = await apiPost<ChainResult>('/api/chains/build', { mails, events, findings, settings, seedMinRisk, windowHours })
-    if (eventsTruncated) result.stats.eventsTruncated = 1
-    if (authEventsTruncated) result.stats.authEventsTruncated = 1
-  }
-  return persistChainResult(caseId, result)
-}
-
 /** Store the snapshot the review and the report read and mirror the chains as findings (a story build keeps them too). */
 export async function persistChainResult(caseId: number, result: ChainResult): Promise<ChainResult> {
   const db = getDb()
@@ -281,6 +121,32 @@ export async function persistChainResult(caseId: number, result: ChainResult): P
   return result
 }
 
+const INBOX_RULE_OPS = new Set(['new-inboxrule', 'set-inboxrule', 'updateinboxrules'])
+const SIGN_IN_OPS = new Set(['signin', 'userloggedin', '4624'])
+// what services/analysis/chains.py notes on a sign-in that does not look like the person's own
+const SIGN_IN_RISK = /^(unexpected country|legacy authentication|identity protection risk)/
+
+/**
+ * The ATT&CK techniques a chain's own steps show. A mail-led chain starts from a phishing mail
+ * (T1566); it is email collection (T1114) when a step forwards the mailbox or sets an inbox rule,
+ * or reads the mailbox with a finding on it; valid accounts (T1078) when a sign-in or logon that
+ * worked carries a finding or a sign that it was not the person (an unexpected country, legacy
+ * authentication, an identity protection risk). An authentication chain is brute force (T1110), and
+ * valid accounts when a guessed password worked (its severity high).
+ */
+export function chainAttack(c: Chain): string[] {
+  if (c.kind === 'authentication') return ['T1110', ...(c.severity === 'high' ? ['T1078'] : [])]
+  const out = ['T1566']
+  const op = (s: ChainStep) => String(s.operation ?? '').toLowerCase()
+  const collects = c.steps.some(
+    (s) => INBOX_RULE_OPS.has(op(s)) || s.artifacts.some((a) => a === 'mailbox forwarding' || a === 'forwarding rule') || (op(s) === 'mailitemsaccessed' && s.findings.length > 0),
+  )
+  if (collects) out.push('T1114')
+  const signedIn = c.steps.some((s) => SIGN_IN_OPS.has(op(s)) && !s.title.startsWith('failed') && (s.findings.length > 0 || s.artifacts.some((a) => SIGN_IN_RISK.test(a))))
+  if (signedIn) out.push('T1078')
+  return out
+}
+
 /** Chains are also findings (ruleId "chain") so they show in Findings, the report and the AI summary. */
 async function persistChainFindings(caseId: number, chains: Chain[]): Promise<void> {
   const now = Date.now()
@@ -297,7 +163,7 @@ async function persistChainFindings(caseId: number, chains: Chain[]): Promise<vo
     entities: { user: c.entities.user, ip: c.entities.ips.slice(0, 3).join(', '), host: c.entities.hosts.slice(0, 3).join(', '), attacker: c.entities.attackerAddresses.slice(0, 3).join(', ') },
     count: c.steps.length,
     refs: [c.seed.id],
-    attack: c.kind === 'authentication' ? ['T1110', ...(c.severity === 'high' ? ['T1078'] : [])] : ['T1566', 'T1114', 'T1078'],
+    attack: chainAttack(c),
     tags: ['chain', c.kind === 'authentication' ? 'authentication' : 'mail-led'],
     status: 'new',
     createdAt: now,

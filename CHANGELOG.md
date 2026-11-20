@@ -303,6 +303,25 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   objects, domain policy changed by a user, the Special Groups table changed, sensitive user
   rights assigned and the Guest account enabled. They catch about 20 files of
   EVTX-to-MITRE-Attack the default rules missed and fire on none of the evtx-baseline machines.
+- Stories attribute only what the records tie. Hosts of one short name in two domains
+  (DC01.a.example and DC01.b.example) stay two hosts with their own sessions and stories, a record
+  naming one without its domain joins neither, and each host says how it was keyed. A flag whose
+  record ties it to no account or session, as SYSTEM's, a service's or a management agent's, stays
+  its host's instead of joining the person seated there; the host's story links to that person's
+  as one incident by time and place. A session whose logoff is not in the evidence is open only to
+  its last record, not for two days, and a handle opened or a thread created (Sysmon 10, 8) is
+  tied through the program that did it. An outside address a finding names pulls records into a
+  story only when a high finding names it, findings of two rules do, or no one else in the case
+  uses it, and each pulled step says which; an office's address flagged once ties nothing, and an
+  organisation's shared egress needs two people signing in from it, not five. A story's confidence
+  is high, medium or low by how many of its flagged steps a record ties, with that count shown in
+  the list, the story, the report and the Attack Flow export; a snapshot saved before keeps its
+  "strong" label until the story is built again. A browser case says that who is who was read from
+  the rows it posted. Chain findings carry only the techniques their steps show, a flagged event
+  the chain builder does not model stays as a step, and events fold into one step only when they
+  agree on address, account and target. The unused chain builds (`buildChains`,
+  `chains_for_store`) are gone, `/api/chains/build` refuses a store key, and a relationship edge's
+  assertion class is read from a field.
 - Rules for the logs of server products (`rules/windows/other-products.yaml`): SQL Server audit
   tampering, role membership, new logins, sa enabled, failed logins, options that run code and
   single-user starts; password guessing against OpenSSH; Certificate Services requests with a

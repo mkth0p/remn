@@ -446,7 +446,7 @@ describe('what the report claims about the case', () => {
       end: 120_000,
       severity: 'critical',
       score: 90,
-      confidence: 'strong',
+      confidence: 'high',
       phases: [phase('initial-access', 'Initial access', 'high'), phase('defense-impairment', 'Defense impairment', 'critical'), phase('persistence', 'Persistence', null)],
       steps: [
         step('event:1', 'initial-access', 'RDP logon', [{ title: 'RDP logon from outside', severity: 'high' }]),
@@ -472,7 +472,7 @@ describe('what the report claims about the case', () => {
     const html = buildReportHtml(data({ stories: [{ story, key, note: 'He came in over **RDP** from 10.9.9.9.' }], storiesLeft: 2, claims }))
     const section = html.slice(html.indexOf('<h2>Stories</h2>'), html.indexOf('<h2>Attack chains</h2>'))
     expect(section).toContain('daniel.roy@corp.test: RDP &lt;logon&gt; from outside')
-    expect(section).toContain('strong ties')
+    expect(section).toContain('high confidence')
     // the phases in the story's order, each with its worst finding or, without one, its first step
     expect(section.indexOf('Initial access')).toBeLessThan(section.indexOf('Defense impairment'))
     expect(section).toContain('Audit log cleared')

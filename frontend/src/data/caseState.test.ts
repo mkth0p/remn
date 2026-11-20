@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultSettings, deleteCaseData, deleteEvidenceData, RemnDB, setDb, type Case } from '../db/schema'
 import { clearDerivedState, removeCase } from './caseState'
-import { buildChains, loadChains } from './chains'
+import { loadChains, persistChainResult } from './chains'
 import { pruneOrphanFindings, replaceFindings } from './findingReviews'
 
 vi.mock('../api/client', () => ({ apiPost: vi.fn(), API_HEADERS: {} }))
@@ -58,10 +58,10 @@ describe('derived state follows the evidence', () => {
     expect((await db.findings.toArray())[0]).toMatchObject({ status: 'false_positive', notes: 'reviewed' })
   })
 
-  it('rebuilding chains with no seed left replaces the stored snapshot and its findings', async () => {
+  it('a story build with no chain left replaces the stored snapshot and its findings', async () => {
     await db.kv.put({ key: 'chains-1', value: { chains: [{ id: 'old' }], stats: { seeds: 1, identities: 1, events: 3, mails: 1, chains: 1 } } })
     await replaceFindings(1, ['chain'], [finding('chain|alice|9', 'chain')])
-    const r = await buildChains(kase)
+    const r = await persistChainResult(1, { chains: [], stats: { seeds: 0, identities: 0, events: 0, mails: 0, chains: 0 } })
     expect(r.chains).toEqual([])
     expect((await loadChains(1))?.chains).toEqual([])
     expect(await db.findings.where('[caseId+ruleId]').equals([1, 'chain']).count()).toBe(0)

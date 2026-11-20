@@ -57,20 +57,28 @@ names, Defender detections, persistence and log-clearing events.
 Steps that name the mail's URL domains, attachment names or sender are *artifact links*,
 the strongest tie between the mail and what followed. Links to the organisation's own
 domains (the internal domains of the case settings, and the domains of the mail's own
-recipients, so a case with no internal domain set is read the same) are not artifacts. Bursts collapse into one step, findings of the last rule run
+recipients, so a case with no internal domain set is read the same) are not artifacts. A
+burst collapses into one step only when its events agree on what makes them distinct: the
+operation, the host and program, the account, the address and what was acted on (a command
+line, a query, a destination, a file, a share, a service, a script), so logons from two
+addresses are two steps. A flagged event of a kind the builder does not model (a process
+access, an RDP authentication record, a share file access) is kept as a step that names the
+record and what it says. Findings of the last rule run
 attach to the steps they reference, and one chain is kept per identity per day with the
 other seeds listed as related. Deduplication uses the recipient's full address, so two
 organisations' accounts named Alice retain separate chains. A bare alias on the same event
 cannot bypass a qualified foreign account, and each event contributes only once.
 
-Server-store cases are correlated inside DuckDB; browser-store cases post the relevant
-rows to the local API (`POST /api/chains/build`). A build considers at most 50,000
-events inside the window on either path; when that cap is reached the build says so
-next to its statistics. `services/analysis/chains.py` is pure
-functions over plain rows, tested on the synthetic scenarios. Authentication selection has
-its own 50,000-event budget. Seed, reply, event and output-chain limits are recorded in the
-saved result, shown persistently on the Review page and included in exported reports. A result with
-any limit warning is incomplete; an absent chain is not evidence of absent activity.
+The chains are built from the rows a story build selects ([both stores](stories.md#both-stores)):
+a server case selects them in DuckDB, a browser case selects them in the browser and posts
+them, and the story build hands the same rows to the chain builder. A chain therefore reads
+what the stories read around the flags and the riskiest mails, under the same caps, and an
+authentication campaign no rule flagged, away from every flag, is not read.
+`services/analysis/chains.py` is pure functions over plain rows, tested on the synthetic
+scenarios; `POST /api/chains/build` runs it on posted rows only and refuses a server case's
+store key. Seed and output-chain limits are recorded in the saved result, with the story
+build's own cuts, shown persistently on the Review page and included in exported reports. A
+result with any limit warning is incomplete; an absent chain is not evidence of absent activity.
 
 ## The score
 
@@ -93,7 +101,13 @@ finding-bearing step nor a strong step stays medium at most (capped at 54).
 ## Chains and findings
 
 A chain is also stored as a finding (rule `chain`), so it reaches the findings list and
-the report. Beyond that, a chain and the findings whose rows are its steps are one item:
+the report. The finding carries the ATT&CK techniques the chain's own steps show: a mail-led
+chain is phishing (T1566, its seed); email collection (T1114) when a step forwards the
+mailbox, sets an inbox rule, or reads the mailbox with a finding on the read; valid accounts
+(T1078) when a sign-in or logon that worked carries a finding or a sign it was not the person
+(an unexpected country, legacy authentication, an identity protection risk). An
+authentication campaign is brute force (T1110), and valid accounts when a guessed password
+worked. Beyond that, a chain and the findings whose rows are its steps are one item:
 when the chains are built, every finding whose rows all sit among a chain's steps, or on
 its seed mail, joins that chain's incident. A phishing mail's rule hits and the findings
 on the recipient's later logons are therefore never listed twice, once inside the chain

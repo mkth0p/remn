@@ -19,7 +19,7 @@ import {
   refRow,
   resolveStoryNotes,
   storyAnchor,
-  type Confidence,
+  storyConfidence,
   type Identity,
   type ReportStory,
   type Story,
@@ -343,7 +343,8 @@ function restate(base: Story, steps: StoryStep[], calls: Map<string, StepCall>, 
   const raises = all.every((s) => s.firm) ? threeInThree(all.flatMap((s) => s.firm ?? []).filter((f) => keptIds.has(f.step))) : phases.filter((p) => weight(p.severity) >= 2).length >= 3
   if (raises && weight(severity) < 4) severity = 'high'
   const flags = kept.filter((s) => s.tie.kind === 'flag' || s.tie.kind === 'chain')
-  const confidence: Confidence = flags.every((s) => s.tie.confidence === 'strong' || calls.get(s.id)?.verdict === 'confirmed') ? 'strong' : 'medium'
+  // a step the analyst confirmed is as sure as one a record ties
+  const { confidence, basis: confidenceBasis } = storyConfidence(flags.map((s) => s.tie.confidence === 'strong' || calls.get(s.id)?.verdict === 'confirmed'))
   const hosts = uniq(steps.map((s) => s.host).filter((h): h is string => !!h)).sort()
   const attacker = uniq(all.flatMap((s) => s.attackerAddresses)).sort()
   const shared = uniq(all.flatMap((s) => s.sharedAddresses ?? [])).sort()
@@ -358,6 +359,7 @@ function restate(base: Story, steps: StoryStep[], calls: Map<string, StepCall>, 
     severity,
     score: Math.max(...all.map((s) => s.score)),
     confidence,
+    confidenceBasis,
     phases,
     steps,
     records: steps.reduce((n, s) => n + s.refs.length, 0),
@@ -531,7 +533,7 @@ export function applyStoryDecisions(res: StoryResult | null, decisions: StoryDec
             i ? splitId(s.id) : s.id,
           )
         : mine.size
-          ? { ...s, confidence: restate(s, partSteps, mine, []).confidence }
+          ? (({ confidence, confidenceBasis }) => ({ ...s, confidence, confidenceBasis }))(restate(s, partSteps, mine, []))
           : s
       const view: StoryView = i
         ? { ...common, story, part: 'split', call: split?.call, steps: mine, lostSteps: [], out: [], merged: [] }

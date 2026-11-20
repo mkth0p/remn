@@ -2,6 +2,7 @@
 
 import pytest
 
+from services.analysis import relationships
 from services.analysis.collection_context import prepare
 from services.analysis.relationships import build
 
@@ -84,3 +85,34 @@ def test_reimported_content_is_one_supporting_observation():
 def test_ambiguous_file_digest_is_a_correlation():
     graph = build([{"id": 1, "computer": "ws01", "path": r"C:\a.exe", "targetFilename": r"C:\b.exe", "hashes": "SHA256=" + "a" * 64}], [])
     assert next(e for e in graph["edges"] if e["relation"] == "reported digest")["assertion"] == "correlated"
+
+
+def test_a_snapshot_match_stays_a_correlation_whatever_its_reason_says(monkeypatch):
+    process = {
+        "id": 1,
+        "recordKind": "observation",
+        "artifactType": "process",
+        "computer": "ws01",
+        "processId": 42,
+        "processStart": START,
+        "image": r"C:\Tools\agent.exe",
+        "packageId": "p",
+        "observedAt": AT,
+    }
+    connection = {**process, "id": 2, "artifactType": "connection", "destinationIp": "10.0.0.9", "processStart": None}
+
+    def reworded(events, options=None, process_context=None):
+        # the same match, its reason written another way: the class of the edge must not follow the words
+        rows = prepare(events, options, process_context)
+        for row in rows:
+            if row.get("_processResolution"):
+                row["_processResolution"] = "One process of that host and PID in the collected list"
+        return rows
+
+    monkeypatch.setattr(relationships, "prepare", reworded)
+    edges = build([connection], [], process_context=[process])["edges"]
+    joined = [e for e in edges if e["relation"] in ("observed process", "uses executable", "observed endpoint")]
+    assert {e["relation"] for e in joined} == {"observed process", "uses executable", "observed endpoint"}
+    assert all(e["assertion"] == "correlated" for e in joined)
+    # what the record states itself stays observed
+    assert next(e for e in edges if e["relation"] == "names address")["assertion"] == "observed"
