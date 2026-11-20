@@ -766,7 +766,9 @@ def run_rules(
     long_fields: dict[str, set[str] | None] = {}
     for source in {r.get("source") for r in rules if r.get("enabled") is not False and r.get("source") in RULE_SOURCES}:
         fields = sorted({f for r in rules if r.get("enabled") is not False and r.get("source") == source for f in regex_fields(r)})
-        long_fields[source] = fields_with_long_values(store, source, fields, settings) if fields else set()
+        # held to a rule's limit and stopped by a cancel, as the rules are: a stopped scan cannot tell (None)
+        with TimeLimit(rule_max_s, RULE_STOPPED, cancelled):
+            long_fields[source] = fields_with_long_values(store, source, fields, settings) if fields else set()
     for i, rule in enumerate(rules):
         if cancelled and cancelled():
             break

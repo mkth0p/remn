@@ -199,6 +199,23 @@ def test_a_rule_past_its_time_limit_is_stopped_said_and_the_run_goes_on(server_r
     assert result["byRule"] == {"invented-slow": 0, "invented-quick": 1}
 
 
+def test_the_scan_for_long_values_before_the_rules_is_held_to_their_time_limit(server_registry, settings):
+    # a regex rule first has the run look for values too long to read whole, over the same rows
+    settings.FORENSIC_STORE_RULE_MAX_S = 0.2
+    key = str(uuid.uuid4())
+    st = server_registry.get(key)
+    _endless(st)
+    rules = [{"id": "invented-slow", "title": "an invented command", "severity": "low", "source": "events", "where": {"commandLine|re": "invented$"}}]
+    t0 = time.time()
+    with _Guard(st):
+        r = Client().post(f"/api/store/{key}/rules/run", data=json.dumps({"rules": rules, "settings": {}}), content_type="application/json", **HDR)
+        assert r.status_code == 200, r.content
+        job = _wait_for(key, r.json()["jobId"])
+    assert time.time() - t0 < 10
+    assert job["status"] == "done", job
+    assert [e["ruleId"] for e in job["result"]["errors"]] == ["invented-slow"]
+
+
 def test_cancelling_a_rule_run_stops_the_rule_that_is_running(server_registry, settings):
     settings.FORENSIC_STORE_RULE_MAX_S = 0
     key = str(uuid.uuid4())
