@@ -10,9 +10,9 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.http import require_POST
 
 from api.errors import failure
-from api.views.store import REFUSED, refused
+from api.views.store import REFUSED, _limit, _stopped, refused
 from services.analysis import stories as S
-from services.store.casestore import registry
+from services.store.casestore import QueryStopped, registry
 
 log = logging.getLogger(__name__)
 
@@ -63,7 +63,11 @@ def build(request: HttpRequest):
                 return JsonResponse({"error": "unknown case store"}, status=404)
             except REFUSED as exc:
                 return refused(exc)
-            result = S.stories_for_store(st, settings, findings, **opts)
+            try:
+                with _limit():
+                    result = S.stories_for_store(st, settings, findings, **opts)
+            except QueryStopped as exc:
+                return _stopped(exc)
         else:
             events, mails = body.get("events") or [], body.get("mails") or []
             if not isinstance(events, list) or not isinstance(mails, list):

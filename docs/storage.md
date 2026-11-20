@@ -66,7 +66,8 @@ What one store may take from the server is bounded, and each bound is a setting 
   query opens it again. 0 keeps every store open until the server stops.
 - **Query time.** One query on a store (search, count, aggregate, stack, timeline, facets,
   pivot, a row, the summary, the indicator list, SQL from the SQL view or the analyst's
-  `sql` tool) runs at most `FORENSIC_STORE_QUERY_MAX_S` seconds (60). A query past it is
+  `sql` tool, and the reads of a story, relationship or mail enrichment build, which count
+  together as one) runs at most `FORENSIC_STORE_QUERY_MAX_S` seconds (60). A query past it is
   stopped and answered with 504, the code `queryStopped` and a message that names the limit;
   narrow the filter or the time range, or raise the limit. The export of a whole case reads
   in pages and has no overall limit.

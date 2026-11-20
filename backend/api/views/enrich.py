@@ -11,10 +11,10 @@ from django.views.decorators.http import require_POST
 
 from api.errors import failure
 from api.jobs import manager
-from api.views.store import REFUSED, refused
+from api.views.store import REFUSED, _limit, _stopped, refused
 from services.analysis import baseline
 from services.analysis import rescore as calibration
-from services.store.casestore import registry
+from services.store.casestore import QueryStopped, registry
 
 log = logging.getLogger(__name__)
 
@@ -69,7 +69,12 @@ def mails(request: HttpRequest):
                 return JsonResponse({"error": "unknown case store"}, status=404)
             except REFUSED as exc:
                 return refused(exc)
-            return JsonResponse({"summary": baseline.enrich_store(st, settings)})
+            try:
+                with _limit():
+                    summary = baseline.enrich_store(st, settings)
+            except QueryStopped as exc:
+                return _stopped(exc)
+            return JsonResponse({"summary": summary})
         rows = body.get("mails") or []
         if not isinstance(rows, list):
             return JsonResponse({"error": "mails must be a list"}, status=400)
