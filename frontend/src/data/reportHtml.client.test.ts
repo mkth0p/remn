@@ -2,9 +2,22 @@ import { describe, expect, it } from 'vitest'
 import { defaultSettings, type Case, type Evidence, type Finding } from '../db/schema'
 import { buildIncidents } from '../rules/incidents'
 import { clientReport, DEFAULT_REPORT, EMPTY_BRANDING, EMPTY_CLIENT, reportBranding, type ClientReport, type ReportBranding } from './review'
-import { buildReportHtml, evidenceScope, SCOPE_READ, impactInventory, indicatorAppendix, limitLines, computeConfidence, spineStartingPoint, techniqueTable, type ReportData } from './reportHtml'
+import {
+  buildReportHtml,
+  ruleAuthors,
+  evidenceScope,
+  SCOPE_READ,
+  impactInventory,
+  indicatorAppendix,
+  limitLines,
+  computeConfidence,
+  spineStartingPoint,
+  techniqueTable,
+  type ReportData,
+} from './reportHtml'
 import { reportDocumentXml, buildReportDocx } from './reportDocx'
 import type { ReportLanguage } from './reportText'
+import { validateRule, type Rule } from '../rules/engine'
 import type { DecidedStory } from './storyDecisions'
 import { spinedStory } from '../test/spineStory'
 
@@ -375,5 +388,38 @@ describe('the report in French and under a firm', () => {
     expect(reportBranding(undefined)).toEqual(EMPTY_BRANDING)
     expect(reportBranding({ firmName: 3, coverLine: 'x', logo: 'data:image/png;base64,AAAA' })).toEqual({ firmName: '', coverLine: 'x', logo: '' })
     expect(reportBranding({ logo: PNG_4X2 }).logo).toBe(PNG_4X2)
+  })
+})
+
+describe('the authors of the rules', () => {
+  // rules as the engine reads them from a pack: an invented one with a Sigma header and its author, one of REMN's own without
+  const asRule = (r: unknown): Rule => {
+    const v = validateRule(r)
+    if (!v.ok) throw new Error(v.error)
+    return v.rule
+  }
+  const where = { eventId: 4104 }
+  const sigmaRule = asRule({ id: 'win-encoded-powershell', title: 'Encoded PowerShell', severity: 'high', source: 'events', where, sigma: { id: 'x', author: 'A. Rule-Writer, B. Other' } })
+  const ownRule = asRule({ id: 'win-rdp-logon', title: 'RDP logon', severity: 'medium', source: 'events', where })
+
+  it('reads the author a Sigma rule names, and nothing for a rule that names none', () => {
+    expect(ruleAuthors([sigmaRule, ownRule, asRule({ id: 'odd', title: 'odd', severity: 'low', source: 'events', where, sigma: { author: 7 } })])).toEqual({
+      'win-encoded-powershell': 'A. Rule-Writer, B. Other',
+    })
+  })
+
+  it('names the author beside the findings of the rule, in the HTML and in the Word report, as the Detection Rule License asks', () => {
+    const d = data({}, { ruleAuthors: ruleAuthors([sigmaRule, ownRule]) })
+    const findings = section(buildReportHtml(d), 'findings')
+    expect(findings).toContain('<code>win-encoded-powershell</code> · by A. Rule-Writer, B. Other')
+    expect(findings).not.toContain('<code>win-rdp-logon</code> · by')
+    expect(findings).toContain('Detection Rule License')
+    expect(section(buildReportHtml(d), 'incidents')).toContain('by A. Rule-Writer, B. Other')
+    const doc = reportDocumentXml(d)
+    expect(doc).toContain('win-encoded-powershell · by A. Rule-Writer, B. Other')
+    expect(doc).toContain('Detection Rule License')
+    expect(buildReportHtml({ ...d, settings: { ...d.settings, language: 'fr' } })).toContain('<code>win-encoded-powershell</code> · auteur : A. Rule-Writer, B. Other')
+    // a report whose rules name no author says nothing of the licence
+    expect(section(buildReportHtml(data()), 'findings')).not.toContain('Detection Rule License')
   })
 })

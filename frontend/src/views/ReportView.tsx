@@ -38,6 +38,7 @@ import {
   impactInventory,
   initialAccessIsDraft,
   loadReportFont,
+  ruleAuthors,
   SCOPE_READ,
   spineStartingPoint,
   type AiUsage,
@@ -356,6 +357,7 @@ export function ReportView() {
     storyDecisionsOrphaned: printedStories.decisionsOrphaned,
     questions,
     scope,
+    ruleAuthors: ruleAuthors(ruleMap.values()),
   })
   const html = (generatedAt?: number) => buildReportHtml(reportData(generatedAt))
   /** a change to the client part of the report settings, kept with the case and its bundle */

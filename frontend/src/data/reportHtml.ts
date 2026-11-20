@@ -6,6 +6,7 @@ import { spineBasis, spineSteps } from './storyFlow'
 import type { ChainReview, ClientReport, ReportSettings } from './review'
 import { chainSeverity, effectiveSeverity, stepVisible } from './review'
 import { HOST_FIELDS, USER_FIELDS, type Incident } from '../rules/incidents'
+import type { Rule } from '../rules/engine'
 import type { RelationshipReview } from './relationshipReviews'
 import { packageCoverageIssues } from './packageCoverage'
 import { defang, escapeHtml, isPublicIp, renderMarkdown } from '../util/format'
@@ -118,6 +119,22 @@ export interface ReportData {
   questions?: ReportQuestions
   /** the hosts and accounts the evidence's records name, for the scope when the analyst wrote none */
   scope?: EvidenceScope
+  /** the author each rule names, by rule id (ruleAuthors): the Detection Rule License of the Sigma rules asks that a match keeps it */
+  ruleAuthors?: Record<string, string>
+}
+
+/**
+ * The author each rule names, by rule id. A rule converted from SigmaHQ keeps its Sigma header,
+ * author included; REMN's own rules name none.
+ */
+export function ruleAuthors(rules: Iterable<Rule>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const rule of rules) {
+    const sigma = 'sigma' in rule ? rule.sigma : undefined
+    const author = sigma && typeof sigma === 'object' && 'author' in sigma ? sigma.author : undefined
+    if (typeof author === 'string' && author.trim()) out[rule.id] = author.trim()
+  }
+  return out
 }
 
 /** The model's part in the case, as the report prints it. */
@@ -805,7 +822,7 @@ ${table(
   }),
 )}
 ${left || hidden ? `<div class="cap">${left ? h(t.chain.left(left)) : ''}${left && hidden ? ' · ' : ''}${hidden ? h(t.chain.hidden(hidden, d.settings.chainDetail)) : ''}.</div>` : ''}
-${members.length ? `<div class="cap" style="margin-top:8px">${h(t.chain.members(members.length))}</div>${groupedFindings(t, members, {}, d.measures, d.claims)}` : ''}
+${members.length ? `<div class="cap" style="margin-top:8px">${h(t.chain.members(members.length))}</div>${groupedFindings(t, members, {}, d.measures, d.claims, d.ruleAuthors)}` : ''}
 ${r?.by === 'ai' && r.aiReason ? `<div class="cap ai">${h(t.chain.triage(r.aiReason))}</div>` : ''}
 </div>`
 }
@@ -1122,13 +1139,23 @@ function textNote(t: ReportText, key: string, claims?: ReportClaims): string {
   return c ? `<div class="cap claim ${c.status}">${h(c.text)}</div>` : ''
 }
 
-function groupedFindings(t: ReportText, findings: Finding[], said: Record<string, string>, measures: Record<string, MeasureReading> = {}, claims?: ReportClaims): string {
+/** After a rule's id: who wrote it, when the rule says. */
+const authorMark = (t: ReportText, author: string | undefined) => (author ? ` · ${h(t.finding.by(author))}` : '')
+
+function groupedFindings(
+  t: ReportText,
+  findings: Finding[],
+  said: Record<string, string>,
+  measures: Record<string, MeasureReading> = {},
+  claims?: ReportClaims,
+  authors: Record<string, string> = {},
+): string {
   const groups = groupByRule(findings, said)
   return table(
     t.finding.groupHead,
     groups.map((g) => [
       pill(t, g.severity) + (g.severity !== g.ruleSeverity ? `<span class="sub">${h(t.finding.ruleSeverity(g.ruleSeverity))}</span>` : ''),
-      `${h(g.title)}<span class="sub"><code>${h(g.ruleId)}</code>${measureMark(t, measures[g.ruleId])}${g.escalations.length ? ' · ' + h(g.escalations.slice(0, 2).join(' · ')) : ''}</span>${claimNote(t, g.ids, claims)}`,
+      `${h(g.title)}<span class="sub"><code>${h(g.ruleId)}</code>${authorMark(t, authors[g.ruleId])}${measureMark(t, measures[g.ruleId])}${g.escalations.length ? ' · ' + h(g.escalations.slice(0, 2).join(' · ')) : ''}</span>${claimNote(t, g.ids, claims)}`,
       `<span class="nowrap">${t.num(g.findings)} · ${t.num(g.rows)}</span>`,
       `<span class="nowrap">${span(t, g.first, g.last)}</span>`,
       g.attack
@@ -1145,7 +1172,7 @@ function groupedFindings(t: ReportText, findings: Finding[], said: Record<string
   )
 }
 
-function incidentCard(t: ReportText, i: Incident, measures: Record<string, MeasureReading> = {}, claims?: ReportClaims): string {
+function incidentCard(t: ReportText, i: Incident, measures: Record<string, MeasureReading> = {}, claims?: ReportClaims, authors: Record<string, string> = {}): string {
   const decidedByAi = i.lead.decidedBy === 'ai'
   return `<div class="card inc ${h(i.severity)}">
 <div class="card-head">${pill(t, i.severity)}<h3>${h(i.title)}</h3><span class="stamp st-${h(i.status)}">${h(t.status[i.status] ?? i.status)}</span></div>
@@ -1160,7 +1187,7 @@ function incidentCard(t: ReportText, i: Incident, measures: Record<string, Measu
   }</div>
 ${i.lead.notes ? `<div class="note">${md(i.lead.notes)}</div>${i.lead.notesBy === 'ai' ? `<div class="cap ai">${h(t.incident.noteByAi)}</div>` : ''}` : ''}${textNote(t, `incident:${i.lead.id ?? i.title}`, claims)}
 ${decidedByAi && i.lead.aiReason ? `<div class="cap ai">${h(t.chain.triage(i.lead.aiReason))}</div>` : ''}
-${groupedFindings(t, i.findings, i.entities, measures, claims)}
+${groupedFindings(t, i.findings, i.entities, measures, claims, authors)}
 </div>`
 }
 
@@ -1927,7 +1954,7 @@ export function buildReportHtml(d: ReportData): string {
     id: 'incidents',
     title: t.section.incidents,
     count: d.incidents.length,
-    body: `<p class="intro">${h(t.incident.intro)}</p>${d.incidents.length ? d.incidents.map((i) => incidentCard(t, i, d.measures, d.claims)).join('\n') : `<div class="empty">${h(t.incident.none)}</div>`}`,
+    body: `<p class="intro">${h(t.incident.intro)}</p>${d.incidents.length ? d.incidents.map((i) => incidentCard(t, i, d.measures, d.claims, d.ruleAuthors)).join('\n') : `<div class="empty">${h(t.incident.none)}</div>`}`,
   })
   if (settings.includeEvidence) {
     const packages = d.evidence.filter((e) => e.kind === 'package')
@@ -2030,7 +2057,7 @@ export function buildReportHtml(d: ReportData): string {
           t.finding.ruleHead,
           groups.map((g) => [
             pill(t, g.severity),
-            `${h(g.title)}<span class="sub"><code>${h(g.ruleId)}</code>${measureMark(t, d.measures?.[g.ruleId])}${g.attack.length ? ' · ' + h(g.attack.slice(0, 4).join(' ')) : ''}</span>${claimNote(t, g.ids, d.claims)}`,
+            `${h(g.title)}<span class="sub"><code>${h(g.ruleId)}</code>${authorMark(t, d.ruleAuthors?.[g.ruleId])}${measureMark(t, d.measures?.[g.ruleId])}${g.attack.length ? ' · ' + h(g.attack.slice(0, 4).join(' ')) : ''}</span>${claimNote(t, g.ids, d.claims)}`,
             `<span class="nowrap">${t.num(g.findings)} · ${t.num(g.rows)}</span>`,
             `<span class="nowrap">${span(t, g.first, g.last)}</span>`,
             Object.entries(g.statuses)
@@ -2043,7 +2070,7 @@ export function buildReportHtml(d: ReportData): string {
                   .join('')}${g.values.length > MAX_VALUES ? `<span class="dim"> ${h(t.plusMore(g.values.length - MAX_VALUES))}</span>` : ''}</span>`
               : '<span class="dim">–</span>',
           ]),
-        )}`
+        )}${groups.some((g) => d.ruleAuthors?.[g.ruleId]) ? `<div class="cap">${h(t.finding.authors)}</div>` : ''}`
       : `<div class="empty">${h(t.finding.none)}</div>`,
   })
   if (d.ai && d.ai.runs) sections.push({ id: 'ai', title: t.section.ai, body: aiSection(t, d.ai) })

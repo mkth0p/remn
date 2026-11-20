@@ -297,6 +297,8 @@ const en = {
     ruleHead: ['severity', 'rule', 'findings · rows', 'when (UTC)', 'status', 'what matched'],
     ruleHeadDocx: ['severity', 'rule', 'findings · rows', 'when (UTC)', 'status', 'ATT&CK', 'what matched'],
     ruleSeverity: (sev: string) => `rule: ${sev}`,
+    by: (author: string) => `by ${author}`,
+    authors: 'The Sigma rules are the work of the authors named beside them, shared by SigmaHQ under the Detection Rule License 1.1.',
     intro: 'Every printed finding, one line per rule: how many findings and rows, when, and the values matched. The incidents above carry the same findings in context.',
     none: 'No finding passes the severity floor.',
   },
@@ -826,6 +828,8 @@ const fr: ReportText = {
     ruleHead: ['gravité', 'règle', 'détections · lignes', 'quand (UTC)', 'statut', 'valeurs relevées'],
     ruleHeadDocx: ['gravité', 'règle', 'détections · lignes', 'quand (UTC)', 'statut', 'ATT&CK', 'valeurs relevées'],
     ruleSeverity: (sev: string) => `règle : ${frSev(sev)}`,
+    by: (author: string) => `auteur : ${author}`,
+    authors: "Les règles Sigma sont l'œuvre des auteurs cités à côté d'elles, publiées par SigmaHQ sous la Detection Rule License 1.1.",
     intro:
       'Chaque détection imprimée, une ligne par règle : combien de détections et de lignes, quand, et les valeurs relevées. Les incidents ci-dessus présentent les mêmes détections dans leur contexte.',
     none: 'Aucune détection ne franchit le seuil de gravité.',

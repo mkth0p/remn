@@ -595,6 +595,7 @@ export function reportDocumentXml(d: ReportData): string {
   if (d.findings.length) {
     body.push(para(t.finding.intro))
     body.push(ruleTable(d.findings))
+    if (d.findings.some((f) => d.ruleAuthors?.[f.ruleId])) body.push(caption(t.finding.authors))
   } else body.push(para(t.finding.none))
 
   if (d.ai && d.ai.runs) {
@@ -643,7 +644,7 @@ export function reportDocumentXml(d: ReportData): string {
         const claim = claimLine(g.ids, d.claims, t)
         return [
           g.severity !== g.ruleSeverity ? `${sev(g.severity)}\n${t.finding.ruleSeverity(g.ruleSeverity)}` : sev(g.severity),
-          `${g.title}\n${g.ruleId}${measure ? ` · ${measure.lead ? measure.text.toUpperCase() : measure.text}` : ''}${g.escalations.length ? ` · ${g.escalations.slice(0, 2).join(' · ')}` : ''}${
+          `${g.title}\n${g.ruleId}${d.ruleAuthors?.[g.ruleId] ? ` · ${t.finding.by(d.ruleAuthors[g.ruleId])}` : ''}${measure ? ` · ${measure.lead ? measure.text.toUpperCase() : measure.text}` : ''}${g.escalations.length ? ` · ${g.escalations.slice(0, 2).join(' · ')}` : ''}${
             claim
               ? `\n${claim.word}${claim.where ? ` · ${claim.where}${claim.more ? ` ${t.andMore(claim.more)}` : ''}` : ''}${claim.status !== 'verified' && claim.reasons.length ? `: ${claim.reasons.join(' ')}` : ''}`
               : ''

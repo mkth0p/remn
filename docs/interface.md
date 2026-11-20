@@ -438,7 +438,10 @@ recommendations and techniques join them as described under [For a client](#for-
 Each rule's line in the report is marked "lead" when the rule was never seen to detect what
 it looks for, and notes when it also fires on clean machines; the method says how many of the
 rules behind the printed findings detect recorded attacks, and "Where it stops" counts the
-findings that come from leads.
+findings that come from leads. A rule that names its author, as every Sigma rule does, carries
+that name beside its id ("by ...") wherever the HTML and Word reports print the rule's line, and
+the findings section then adds that the Sigma rules are their authors' work, shared by SigmaHQ
+under the Detection Rule License 1.1, which asks that a match keeps its rule's author.
 
 Stories come first ([Stories](stories.md#in-the-report)): a card per story with its phases in
 order, what marks each, the analyst's note, the analyst's decisions on it and where its evidence
