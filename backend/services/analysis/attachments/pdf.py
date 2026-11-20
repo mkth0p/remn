@@ -38,7 +38,9 @@ KEYWORDS = (
     "/FileAttachment",
 )
 _NAME_ESC = re.compile(rb"#([0-9A-Fa-f]{2})")
-_URI_RE = re.compile(rb"/URI\s*\(\s*([^)]{1,600})\)|/URI\s*<([0-9A-Fa-f]{2,1200})>")
+# the blanks after "(" are skipped once (a value of blanks only keeps its last one, as before): handing
+# them back one at a time to a 600-byte value made a long run of blanks cost 600 steps a byte
+_URI_RE = re.compile(rb"/URI\s*\((?:\s*+(?!\))|\s*(?=\s\)))([^)]{1,600})\)|/URI\s*<([0-9A-Fa-f]{2,1200})>")
 _URL_IN_TEXT = re.compile(rb"(?i)\b(?:https?://|www\.)[^\s\"'<>)]{4,300}")
 
 

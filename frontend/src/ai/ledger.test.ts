@@ -52,4 +52,10 @@ describe('the AI ledger', () => {
     expect(s.byProposalKind).toEqual({ note: { proposed: 1, accepted: 1, rejected: 0 }, decision: { proposed: 1, accepted: 0, rejected: 1 } })
     expect(s.check.intact).toBe(true)
   })
+
+  it('counts as text addressed to a model only the notices that found some, not those of evidence too long to check', async () => {
+    await appendLedger(1, 'notice', 'get_mail: 1 place(s) addressed to a model', { suspects: [{ ref: 'mail:1', field: 'subject', snippet: 's' }] })
+    await appendLedger(1, 'notice', 'get_event: 1 place(s) too long or too deep to check for text addressed to a model', { unread: 1 })
+    expect((await summariseLedger(1)).notices).toBe(1)
+  })
 })

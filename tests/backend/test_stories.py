@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from services.analysis.identity import MEDIUM, STRONG
-from services.analysis.stories import build_stories, finding_phase, record_phase
+from services.analysis.stories import build_stories, finding_phase, record_phase, story_confidence
 
 SEC = {"provider": "Microsoft-Windows-Security-Auditing", "channel": "Security"}
 SCM = {"provider": "Service Control Manager", "channel": "System"}
@@ -94,7 +94,9 @@ def test_an_intrusion_reads_as_one_story_in_phases_with_every_step_tied():
     # the service names no one; the admin share a minute before is its tie to the story, by time only
     service = by_ref["event:24"]
     assert service["phase"] == "persistence" and service["hops"] and service["tie"]["confidence"] == MEDIUM
-    assert story["confidence"] == MEDIUM
+    # most of its flags name NORTHSTAR\\daniel.roy, joined to his address by the organisation's naming rule only
+    assert story["confidence"] == "low"
+    assert story["confidenceBasis"] == "a record states the tie of 3 of its 8 flagged steps; 5 rest on naming rules, time and place, or an address"
     # five mailbox reads are one step
     assert by_ref["event:30"]["count"] == 5 and by_ref["event:30"]["phase"] == "collection"
     assert "event:41" not in by_ref
@@ -432,10 +434,13 @@ def test_an_address_most_of_the_organisation_signs_in_from_ties_nothing_and_make
     for s in res["stories"]:
         assert s["attackerAddresses"] == [] and s["sharedAddresses"] == [nat]
         assert f"Most of the organisation's users sign in from {nat}" in s["summary"]
-    # four others signing in from it is no organisation's egress: the address links the two stories
+    # a small office: four others signing in from it are most of the people who sign in from outside
     few = build_stories(events[:6], [], findings, SETTINGS)
-    [camp] = few["campaigns"]
-    assert camp["label"] == nat and len(camp["stories"]) == 2 and len(camp["targets"]) == 4
+    assert few["campaigns"] == [] and all(s["sharedAddresses"] == [nat] and s["attackerAddresses"] == [] for s in few["stories"])
+    # one other is not most of three: two rules name the address, so it is the attacker's, and links the two stories
+    fewer = build_stories(events[:3], [], findings, SETTINGS)
+    [camp] = fewer["campaigns"]
+    assert camp["label"] == nat and len(camp["stories"]) == 2 and len(camp["targets"]) == 1
 
 
 def test_a_campaign_lists_the_accounts_its_address_reached_around_its_stories_only():
@@ -470,11 +475,19 @@ def test_a_script_block_is_a_step_of_the_person_its_header_names():
     findings = [finding("ps-download-cradle", "high", [2], tags=["execution"]), finding("ps-mimikatz", "high", [3], tags=["credential-access"])]
     res = build_stories(events, [], findings, SETTINGS)
     by_subject = {s["subject"]["id"] if s["kind"] == "host" else s["subject"]["label"]: s for s in res["stories"]}
-    assert set(by_subject) == {"northstar\\daniel.roy"}
+    assert set(by_subject) == {"northstar\\daniel.roy", "ws-004"}
     by_ref = {r: st for st in by_subject["northstar\\daniel.roy"]["steps"] for r in st["refs"]}
     assert by_ref["event:2"]["tie"]["kind"] == "flag" and by_ref["event:2"]["tie"]["basis"] == "the record names them (user)"
-    # SYSTEM's script block names no one: daniel's console session was the only one open on WS-004, so it is his, by time and place
-    assert by_ref["event:3"]["tie"] == {"kind": "flag", "basis": "on ws-004 while northstar\\daniel.roy's session 0x9a01 was open", "confidence": MEDIUM}
+    # SYSTEM's script block is SYSTEM's, not daniel's: it stays the host's, and the host's story is one
+    # intrusion with his, by time and place, since he was the one person on WS-004 then
+    assert "event:3" not in by_ref
+    host = by_subject["ws-004"]
+    assert _by_ref(host)["event:3"]["tie"]["basis"] == (
+        "a finding on ws-004 within 15 minutes of northstar\\daniel.roy's own flagged steps there, and no one else's; its record ties it to no account or session of theirs"
+    )
+    [link] = host["links"]
+    assert (link["kind"], link["confidence"], link["story"]) == ("session", MEDIUM, by_subject["northstar\\daniel.roy"]["id"])
+    assert host["incident"] == by_subject["northstar\\daniel.roy"]["incident"] is not None
 
 
 def test_a_machine_account_or_a_service_is_never_a_storys_subject():
@@ -500,7 +513,7 @@ def test_a_machine_account_or_a_service_is_never_a_storys_subject():
     assert not res["identities"]
 
 
-def test_a_flag_lineage_ties_by_time_only_is_medium_and_so_is_its_story():
+def test_a_flag_lineage_ties_by_time_only_is_medium_and_its_story_low():
     host = "WS-001.northstar.example"
     events = [
         ev(1, 0, eventId=4624, computer=host, targetUser="dave", targetDomain="NORTHSTAR", targetLogonId="0x3001", logonType=3, ipAddress="10.0.0.31", workstation="WS-031"),
@@ -513,7 +526,25 @@ def test_a_flag_lineage_ties_by_time_only_is_medium_and_so_is_its_story():
     assert by_ref["event:2"]["tie"] == {"kind": "flag", "basis": "it is part of their way into ws-001 (wmi)", "confidence": MEDIUM}
     # the logon it is tied to by time comes with it no surer
     assert by_ref["event:1"]["tie"]["kind"] == "hop" and by_ref["event:1"]["tie"]["confidence"] == MEDIUM
-    assert story["confidence"] == MEDIUM
+    assert (story["confidence"], story["confidenceBasis"]) == (
+        "low",
+        "a record states the tie of 0 of its 1 flagged steps; 1 rests on naming rules, time and place, or an address",
+    )
+
+
+def test_a_storys_confidence_follows_how_many_of_its_flagged_steps_a_record_ties():
+    """high when a record states the tie of every flagged step, medium for half or more, low for fewer."""
+    assert story_confidence([True, True, True]) == ("high", "a record states the tie of 3 of its 3 flagged steps")
+    assert story_confidence([True, True, False, False])[0] == "medium"
+    assert story_confidence([True, False, False]) == (
+        "low",
+        "a record states the tie of 1 of its 3 flagged steps; 2 rest on naming rules, time and place, or an address",
+    )
+    assert story_confidence([]) == ("low", "no step of it carries a flag")
+    # a story whose flags all name the person's own account form reads high
+    events = [ev(1, 0, eventId=4698, computer="WS-001", subjectUser="alice.martin", subjectDomain="NORTHSTAR", taskName="\\Updater")]
+    [story] = build_stories(events, [], [finding("win-scheduled-task", "high", [1], tags=["persistence"])], SETTINGS)["stories"]
+    assert story["confidence"] == "high"
 
 
 def test_a_logon_id_reused_after_a_reboot_keeps_the_other_persons_logon_out():
@@ -800,16 +831,20 @@ def _by_ref(story):
     return {r: st for st in story["steps"] for r in st["refs"]}
 
 
-def test_a_flag_that_names_no_one_joins_the_one_person_at_its_host():
+def test_a_flag_that_names_no_one_stays_the_hosts_and_is_one_intrusion_with_the_one_person_on_it():
     """SYSTEM's handle on LSASS while daniel's RDP session is the only one open on WS-004; a registry
     value set by the service manager a minute after daniel installed a service on FS-001; and on the
-    domain controller, where daniel only opened IPC$, a task Windows updated stays the host's."""
+    domain controller, where daniel only opened IPC$, a task Windows updated. None of them is his:
+    their records tie them to no account or session of his. The first two are their hosts' own
+    stories, each one intrusion with his; the third is the domain controller's lone lead."""
     ws, fs, dc = "WS-004.northstar.example", "FS-001.northstar.example", "DC-01.northstar.example"
     me = dict(subjectUser="daniel.roy", subjectDomain="NORTHSTAR")
     events = [
         ev(1, 0, eventId=4624, computer=ws, targetUser="daniel.roy", targetDomain="NORTHSTAR", targetLogonId="0x9a01", logonType=10, ipAddress="10.0.0.40"),
         ev(2, 5, eventId=4698, computer=ws, taskName="\\Updater", subjectLogonId="0x9a01", **me),
         ev(3, 65, base=SYSMON, eventId=10, computer=ws, summary="ProcessAccess C:\\Users\\Public\\x.exe -> C:\\Windows\\System32\\lsass.exe (0x1fffff)"),
+        # a program daniel runs in his session after it: the session's last record
+        ev(8, 66, eventId=4688, computer=ws, processName="C:\\Windows\\System32\\notepad.exe", newProcessId="0x1a2c", subjectLogonId="0x9a01", **me),
         # on the file server daniel installs a service (4697 names him); the service manager's registry write names no one
         ev(4, 20, eventId=4697, computer=fs, serviceName="NSLabUpdater", serviceFile="C:\\Users\\Public\\x.exe", subjectLogonId="0x5501", **me),
         ev(5, 21, base=SYSMON, eventId=13, computer=fs, summary="Registry value set HKLM\\System\\CurrentControlSet\\Services\\NSLabUpdater\\ImagePath"),
@@ -826,18 +861,68 @@ def test_a_flag_that_names_no_one_joins_the_one_person_at_its_host():
         finding("win-scheduled-task-suspicious-content", "high", [7], tags=["persistence"]),
     ]
     res = build_stories(events, [], findings, SETTINGS, measures=MEASURES)
-    [story] = res["stories"]
-    by_ref = _by_ref(story)
-    assert story["subject"]["label"] == "northstar\\daniel.roy" and res["stats"]["folded"] == 2
-    assert by_ref["event:3"]["tie"] == {"kind": "flag", "basis": "on ws-004 while northstar\\daniel.roy's session 0x9a01 was open", "confidence": MEDIUM}
-    assert by_ref["event:5"]["tie"] == {
-        "kind": "flag",
-        "basis": "on fs-001 within 15 minutes of northstar\\daniel.roy's own flagged steps there, and no one else's",
-        "confidence": MEDIUM,
-    }
+    by_subject = {s["subject"]["id"] if s["kind"] == "host" else s["subject"]["label"]: s for s in res["stories"]}
+    assert set(by_subject) == {"northstar\\daniel.roy", "ws-004", "fs-001"}
+    daniel = by_subject["northstar\\daniel.roy"]
+    assert not {"event:3", "event:5"} & set(_by_ref(daniel))
+    lsass, registry = _by_ref(by_subject["ws-004"])["event:3"], _by_ref(by_subject["fs-001"])["event:5"]
+    assert lsass["tie"]["basis"] == (
+        "a finding on ws-004 while northstar\\daniel.roy's session 0x9a01 was open (its logoff is not in the evidence: taken as open to its "
+        "last record, 66 min after its logon); its record ties it to no account or session of theirs"
+    )
+    assert registry["tie"]["basis"] == (
+        "a finding on fs-001 within 15 minutes of northstar\\daniel.roy's own flagged steps there, and no one else's; its record ties it to no account or session of theirs"
+    )
+    # each host's story is one intrusion with daniel's, by time and place
+    for host in ("ws-004", "fs-001"):
+        [link] = by_subject[host]["links"]
+        assert (link["story"], link["kind"], link["confidence"]) == (daniel["id"], "session", MEDIUM)
+        assert by_subject[host]["standing"].startswith("a link to a person's story")
+    [incident] = res["incidents"]
+    assert sorted(incident["stories"]) == sorted(s["id"] for s in by_subject.values())
     # a share opened on the domain controller is no hand on it: the task Windows updated there is the host's, and alone a lead
-    assert "event:7" not in by_ref
     assert {u["ref"]: u["why"] for u in res["unstoried"]}["event:7"] == "a host's lone lead"
+
+
+def test_a_handle_a_persons_program_opened_is_theirs_by_the_program_that_opened_it():
+    """Sysmon names no user on a handle opened (10): the program that opened it, started in daniel's
+    session, makes it his, as surely as the program is."""
+    ws = "WS-004.northstar.example"
+    guid = "{a1000000-0000-0000-0000-000000000001}"
+    events = [
+        ev(1, 0, eventId=4624, computer=ws, targetUser="daniel.roy", targetDomain="NORTHSTAR", targetLogonId="0x9a01", logonType=2),
+        ev(2, 1, base=SYSMON, eventId=1, computer=ws, processGuid=guid, processId="4100", image="C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+           user="NORTHSTAR\\daniel.roy", data={"LogonId": "0x9a01"}),
+        ev(3, 2, base=SYSMON, eventId=10, computer=ws, data={"SourceProcessGUID": guid},
+           summary="ProcessAccess C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -> C:\\Windows\\System32\\lsass.exe (0x1fffff)"),
+    ]  # fmt: skip
+    res = build_stories(events, [], [finding("win-lsass-access", "high", [3], tags=["credential-access"])], SETTINGS)
+    [story] = res["stories"]
+    assert story["subject"]["label"] == "northstar\\daniel.roy"
+    assert _by_ref(story)["event:3"]["tie"] == {
+        "kind": "flag",
+        "basis": "its process descends from powershell.exe in their session on ws-004",
+        "confidence": STRONG,
+    }
+
+
+def test_a_session_whose_logoff_is_not_in_the_evidence_is_open_only_as_far_as_its_records_go():
+    """Daniel's console logon on WS-004 has no logoff; his last record there is a program at 10 min.
+    SYSTEM's handle on LSASS two hours later finds no one on the host: on main it found him, open
+    for two days after his logon."""
+    ws = "WS-004.northstar.example"
+    me = dict(subjectUser="daniel.roy", subjectDomain="NORTHSTAR", subjectLogonId="0x9a01")
+    events = [
+        ev(1, 0, eventId=4624, computer=ws, targetUser="daniel.roy", targetDomain="NORTHSTAR", targetLogonId="0x9a01", logonType=2),
+        ev(2, 5, eventId=4698, computer=ws, taskName="\\Updater", **me),
+        ev(3, 10, eventId=4688, computer=ws, processName="C:\\Windows\\System32\\notepad.exe", newProcessId="0x1a2c", **me),
+        ev(4, 130, base=SYSMON, eventId=10, computer=ws, summary="ProcessAccess C:\\Users\\Public\\x.exe -> C:\\Windows\\System32\\lsass.exe (0x1fffff)"),
+    ]  # fmt: skip
+    findings = [finding("win-scheduled-task", "high", [2], tags=["persistence"]), finding("win-lsass-dump", "critical", [4], tags=["credential-access"])]
+    res = build_stories(events, [], findings, SETTINGS)
+    host = next(s for s in res["stories"] if s["kind"] == "host")
+    assert _by_ref(host)["event:4"]["tie"]["basis"] == "a finding on ws-004" and host["links"] == []
+    assert res["incidents"] == []
 
 
 def test_a_flag_on_a_host_two_people_were_on_stays_the_hosts_and_says_who_was_on():
@@ -848,6 +933,9 @@ def test_a_flag_on_a_host_two_people_were_on_stays_the_hosts_and_says_who_was_on
         ev(3, 2, eventId=4698, computer=ws, taskName="\\A", subjectUser="alice.martin", subjectDomain="NORTHSTAR", subjectLogonId="0x1001"),
         ev(4, 3, eventId=4698, computer="WS-011.northstar.example", taskName="\\B", subjectUser="bob.leroy", subjectDomain="NORTHSTAR", subjectLogonId="0x3003"),
         ev(5, 40, base=SYSMON, eventId=10, computer=ws, summary="ProcessAccess C:\\Users\\Public\\x.exe -> C:\\Windows\\System32\\lsass.exe (0x1fffff)"),
+        # a program each runs in their session after it: neither logoff is in the evidence, and these are their sessions' last records
+        ev(6, 45, eventId=4688, computer=ws, processName="C:\\Windows\\System32\\notepad.exe", newProcessId="0x10", subjectUser="alice.martin", subjectDomain="NORTHSTAR", subjectLogonId="0x1001"),
+        ev(7, 45, eventId=4688, computer=ws, processName="C:\\Windows\\System32\\notepad.exe", newProcessId="0x20", subjectUser="bob.leroy", subjectDomain="NORTHSTAR", subjectLogonId="0x2002"),
     ]  # fmt: skip
     findings = [
         finding("win-scheduled-task", "high", [3], tags=["persistence"]),
@@ -856,7 +944,7 @@ def test_a_flag_on_a_host_two_people_were_on_stays_the_hosts_and_says_who_was_on
     ]
     res = build_stories(events, [], findings, SETTINGS)
     host = next(s for s in res["stories"] if s["kind"] == "host")
-    assert host["subject"]["id"] == "ws-010" and res["stats"]["folded"] == 0
+    assert host["subject"]["id"] == "ws-010"
     assert _by_ref(host)["event:5"]["tie"]["basis"] == (
         "a finding on ws-010 while northstar\\alice.martin and northstar\\bob.leroy were on it (a session open, or their own flagged steps there): no one person's"
     )
@@ -1263,7 +1351,7 @@ def test_a_server_case_reads_who_is_who_on_the_whole_case(registry):
         writer.add({**e, "recordKey": None})
     writer.flush()
     res = stories_for_store(store, SETTINGS, findings)
-    assert res["stats"]["events"] == 3 and res["stats"]["truncated"] == []
+    assert res["stats"]["events"] == 3 and res["stats"]["truncated"] == [] and res["stats"]["identityScope"] == "case"
     by_subject = {s["subject"]["label"]: s for s in res["stories"] if s["kind"] == "person"}
     # the SID is daniel's, though the logon that says so is not among the rows read
     assert "event:2" in {r for st in by_subject["northstar\\daniel.roy"]["steps"] for r in st["refs"]}
@@ -1274,6 +1362,23 @@ def test_a_server_case_reads_who_is_who_on_the_whole_case(registry):
     rows = [e for e in events if e["id"] in (2, 3, 4)]
     alone = {s["subject"]["label"] for s in build_stories(rows, [], findings, SETTINGS)["stories"]}
     assert "ws-004\\admin" in alone and "northstar\\daniel.roy" not in alone
+
+
+def test_a_browser_case_says_who_is_who_was_read_from_the_rows_it_posted():
+    """A browser case posts the rows around its flags, not the case: a bare name joined because it is
+    the only account of that name among them says so, and so does the build, since an account of
+    that name may be elsewhere in the case (the server test above has one a month before)."""
+    events = [
+        ev(3, 10, eventId=4698, computer="WS-004.northstar.example", subjectUser="admin", taskName="\\Updater"),
+        ev(4, 20, eventId=4624, computer="WS-004.northstar.example", targetUser="admin", targetDomain="WS-004", targetLogonId="0x20", logonType=2),
+    ]  # fmt: skip
+    findings = [finding("win-scheduled-task-suspicious-content", "high", [3], tags=["persistence"])]
+    r = _post({"events": events, "mails": [], "findings": findings, "settings": SETTINGS})
+    assert r.status_code == 200, r.content
+    body = r.json()
+    [join] = [j for i in body["identities"] for j in i["joins"] if j["kinds"] == ["name", "netbios"] or j["kinds"] == ["netbios", "name"]]
+    assert join["basis"] == "the only account of that name in the rows this build read (not the whole case)"
+    assert body["stats"]["identityScope"] == "rows"
 
 
 def test_the_browser_sends_every_field_the_story_engine_reads():

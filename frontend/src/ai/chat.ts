@@ -4,7 +4,7 @@ import { useStore } from '../state/store'
 import { sha256Hex } from '../util/export'
 import { composeSystem, fetchAiMeta } from './meta'
 import { conversationBudget, fitToBudget } from './context'
-import { citationsIn, SeenSet, type Suspect } from './evidence'
+import { citationsIn, evidenceBlocks, scanEvidence, SeenSet, type Suspect } from './evidence'
 import { boardMemory, loadBoard } from './hypotheses'
 import { appendLedger } from './ledger'
 import { caseShape, runTool, toolNamesFor, type PlanStep } from './tools'
@@ -26,6 +26,8 @@ export interface ChatMessage {
   refs?: string[]
   /** tool: text in the result addressed to a model */
   suspects?: Suspect[]
+  /** tool: places in the result too long or too deeply nested for that check to read whole */
+  unread?: number
   /** tool: shortened to fit the context */
   compacted?: boolean
   /** tool: milliseconds it took */
@@ -40,8 +42,11 @@ export interface ChatMessage {
   draft?: boolean
   confidence?: string
   openQuestions?: string[]
-  /** assistant: citations in the answer, checked against what the tools returned, and the sentences citing rows read against those rows */
-  cites?: { verified: number; unverified: string[]; sentences?: number; unsupported?: { sentence: string; reason: string }[] }
+  /**
+   * assistant: citations in the answer, checked against what the tools returned, and the sentences citing rows read against
+   * those rows: how many hold the values they name, how many name none (nothing to check), and those that do not hold
+   */
+  cites?: { verified: number; unverified: string[]; sentences?: number; holding?: number; nothingToCheck?: number; unsupported?: { sentence: string; reason: string }[] }
 }
 
 export type AgentMode = 'analyst' | 'explain' | 'rule' | 'report' | 'triage' | 'narrative' | 'json' | 'free'
@@ -54,6 +59,8 @@ export interface AgentRun {
   toolCalls: number
   proposals: string[]
   suspects: number
+  /** places in the evidence it read that the check for text addressed to a model could not read whole */
+  unread: number
   /** prompt tokens of the last turn, as the model counted them (or REMN's estimate) */
   contextTokens?: number
   contextWindow?: number
@@ -134,8 +141,21 @@ export async function runAgent(messages: ChatMessage[], kase: Case, opts: AgentO
   const useTools = opts.tools ?? opts.mode === 'analyst'
   const toolNames = useTools ? toolNamesFor(kase, await caseShape(kase).catch(() => ({ events: 1, mails: 1, chains: 1 })), !!agent) : undefined
   const seen = agent?.seen ?? new SeenSet()
-  const run: AgentRun = { plan: agent?.plan ?? [], step: 0, budget, toolCalls: 0, proposals: [], suspects: 0 }
+  const run: AgentRun = { plan: agent?.plan ?? [], step: 0, budget, toolCalls: 0, proposals: [], suspects: 0, unread: 0 }
+  // What the conversation has read so far: a proposal made after evidence that addresses a model,
+  // or after evidence the check could not read whole, is never accepted in bulk.
   let exposed = messages.some((m) => m.suspects?.length)
+  let unchecked = messages.some((m) => m.unread)
+  for (const m of messages)
+    if (m.role === 'user' && !m.synthetic)
+      // evidence the analyst's own message carries (a story put to the agent) is read like a tool result
+      for (const block of evidenceBlocks(m.content)) {
+        const found = scanEvidence(block)
+        if (found.suspects.length) exposed = true
+        if (found.unread) unchecked = true
+        run.suspects += found.suspects.length
+        run.unread += found.unread
+      }
   const cache = new Map<string, { content: string; step: number }>()
   const base = {
     now: new Date().toISOString(),
@@ -184,7 +204,7 @@ export async function runAgent(messages: ChatMessage[], kase: Case, opts: AgentO
     return {
       verified: cites.filter((c) => c.verified).length,
       unverified: cites.filter((c) => !c.verified).map((c) => c.key),
-      ...(rows ? { sentences: rows.sentences, unsupported: rows.unsupported } : {}),
+      ...(rows ? { sentences: rows.sentences, holding: rows.holding, nothingToCheck: rows.nothingToCheck, unsupported: rows.unsupported } : {}),
     }
   }
   for (let iter = 0; iter < turns; iter++) {
@@ -278,6 +298,7 @@ export async function runAgent(messages: ChatMessage[], kase: Case, opts: AgentO
           cites: assistant.cites.verified,
           unverified: assistant.cites.unverified.slice(0, 20),
           unsupported: assistant.cites.unsupported?.length,
+          nothingToCheck: assistant.cites.nothingToCheck,
         }).catch(() => undefined)
       }
       push(assistant)
@@ -310,11 +331,25 @@ export async function runAgent(messages: ChatMessage[], kase: Case, opts: AgentO
           ms: 0,
         }
       } else {
-        const out = await runTool(c.name, c.arguments ?? {}, { kase, seen, signal: opts.signal, model: model || opts.model, session: agent?.session, exposed: () => exposed })
+        const out = await runTool(c.name, c.arguments ?? {}, {
+          kase,
+          seen,
+          signal: opts.signal,
+          model: model || opts.model,
+          session: agent?.session,
+          exposed: () => exposed,
+          unchecked: () => unchecked,
+        })
         if (out.suspects.length) {
           exposed = true
           run.suspects += out.suspects.length
           if (agent) await appendLedger(caseId, 'notice', `${c.name}: ${out.suspects.length} place(s) addressed to a model`, { suspects: out.suspects.slice(0, 5) }).catch(() => undefined)
+        }
+        if (out.unread) {
+          unchecked = true
+          run.unread += out.unread
+          if (agent)
+            await appendLedger(caseId, 'notice', `${c.name}: ${out.unread} place(s) too long or too deep to check for text addressed to a model`, { unread: out.unread }).catch(() => undefined)
         }
         if (out.plan) run.plan = out.plan
         if (out.proposal) run.proposals.push(out.proposal.id)
@@ -327,6 +362,7 @@ export async function runAgent(messages: ChatMessage[], kase: Case, opts: AgentO
           ms: Date.now() - t0,
           refs: out.refs.length ? out.refs : undefined,
           suspects: out.suspects.length ? out.suspects : undefined,
+          unread: out.unread,
           proposal: out.proposal?.id,
         }
         if (!out.error) cache.set(key, { content: out.content, step: iter + 1 })
@@ -353,6 +389,7 @@ export async function runAgent(messages: ChatMessage[], kase: Case, opts: AgentO
             cites: verified.verified,
             unverified: verified.unverified.slice(0, 20),
             unsupported: verified.unsupported?.length,
+            nothingToCheck: verified.nothingToCheck,
           }).catch(() => undefined)
           push({
             role: 'assistant',

@@ -200,7 +200,7 @@ def claude_chat(request: HttpRequest):
     except ValueError:
         return JsonResponse({"error": "invalid JSON"}, status=400)
     if not claude_code.enabled():
-        return JsonResponse({"error": "the Claude Code connector is switched off on this server"}, status=403)
+        return JsonResponse({"error": "the Claude Code connector is off on this server; an operator turns it on with CLAUDE_CODE_ENABLED=1"}, status=403)
     messages = _clean_messages(body.get("messages"))
     if not messages:
         return JsonResponse({"error": "messages are required"}, status=400)
@@ -234,7 +234,7 @@ def claude_query(request: HttpRequest):
     except ValueError:
         return JsonResponse({"error": "invalid JSON"}, status=400)
     if not claude_code.enabled():
-        return JsonResponse({"error": "the Claude Code connector is switched off on this server"}, status=403)
+        return JsonResponse({"error": "the Claude Code connector is off on this server; an operator turns it on with CLAUDE_CODE_ENABLED=1"}, status=403)
     messages = _query_messages(body)
     if messages is None:
         return JsonResponse({"error": "question is required"}, status=400)

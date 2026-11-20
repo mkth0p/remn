@@ -1,16 +1,57 @@
 id: collection-persistence-user-path
-title: Collected persistence configuration launches from a user-writable location
-description: A service, autorun or task references a temporary or user profile location. Check the binary and authorized deployment; observation does not establish when persistence was created.
+title: Collected persistence configuration launches from a temporary, public or downloads folder
+description: >-
+  A service, autorun or task references a temporary folder (\Temp\, \Tmp\, %TEMP%), the public profile
+  (\Users\Public\, %PUBLIC%) or a downloads folder, or a service references a user's AppData. An autorun or
+  task that starts from AppData is how per-user installs start (OneDrive, Teams, chat and meeting clients),
+  so those are listed at low by collection-persistence-appdata. Check the binary and authorized deployment;
+  observation does not establish when persistence was created.
 source: events
 severity: high
 attack: [T1543.003, T1547.001, T1053.005]
 entities: [computer, serviceName, taskName, name, image, serviceFile, commandLine]
+falsepositives:
+  - installers that register a run-once entry or a task in a temporary folder to finish after a restart
+  - services that vendors install to a user's AppData
+references:
+  - https://learn.microsoft.com/en-us/windows/win32/setupapi/run-and-runonce-registry-keys
 where:
   artifactType|in: [service, autorun, task]
   any_of:
-    - image|contains: ['\temp\', '\appdata\', '\users\public\', '\downloads\']
-    - serviceFile|contains: ['\temp\', '\appdata\', '\users\public\', '\downloads\']
-    - commandLine|contains: ['\temp\', '\appdata\', '\users\public\', '\downloads\']
+    - image|contains: ['\temp\', '\tmp\', '\users\public\', '\downloads\', '%temp%\', '%tmp%\', '%public%\']
+    - serviceFile|contains: ['\temp\', '\tmp\', '\users\public\', '\downloads\', '%temp%\', '%tmp%\', '%public%\']
+    - commandLine|contains: ['\temp\', '\tmp\', '\users\public\', '\downloads\', '%temp%\', '%tmp%\', '%public%\']
+    - artifactType: service
+      any_of:
+        - image|contains: ['\appdata\', '%appdata%\', '%localappdata%\']
+        - serviceFile|contains: ['\appdata\', '%appdata%\', '%localappdata%\']
+        - commandLine|contains: ['\appdata\', '%appdata%\', '%localappdata%\']
+---
+id: collection-persistence-appdata
+title: Collected autorun or task launches from a user's AppData
+description: >-
+  An autorun or scheduled task starts a program in a user's AppData (Roaming or Local, or %APPDATA% and
+  %LOCALAPPDATA%) and in none of the folders collection-persistence-user-path reports. Per-user installs start
+  this way (OneDrive, Teams, chat and meeting clients, updaters), and so does malware that has no administrator
+  rights: compare the program with the software the user is known to run. Observation does not establish when
+  persistence was created.
+source: events
+severity: low
+attack: [T1547.001, T1053.005]
+entities: [computer, taskName, name, image, commandLine]
+falsepositives:
+  - per-user installs of sync, chat, meeting and update clients
+references:
+  - https://learn.microsoft.com/en-us/windows/win32/setupapi/run-and-runonce-registry-keys
+where:
+  artifactType|in: [autorun, task]
+  any_of:
+    - image|contains: ['\appdata\', '%appdata%\', '%localappdata%\']
+    - commandLine|contains: ['\appdata\', '%appdata%\', '%localappdata%\']
+  not:
+    any_of:
+      - image|contains: ['\temp\', '\tmp\', '\users\public\', '\downloads\', '%temp%\', '%tmp%\', '%public%\']
+      - commandLine|contains: ['\temp\', '\tmp\', '\users\public\', '\downloads\', '%temp%\', '%tmp%\', '%public%\']
 ---
 id: collection-encoded-execution
 title: Encoded or download-and-execute command in collected artifacts
@@ -129,7 +170,8 @@ entities: [computer, serviceName, serviceFile]
 where:
   artifactType: service
   serviceFile|not_startswith: '"'
-  serviceFile|re: '(?i)^[a-z]:\\[^"]* [^"]*\.exe'
+  # up to the first space, then the rest: two runs that both take spaces were split every way on a long path
+  serviceFile|re: '(?i)^[a-z]:\\[^" ]* [^"]*\.exe'
 ---
 id: collection-execution-user-path
 title: Executable ran from, or sat in, a temporary or user profile location

@@ -41,6 +41,7 @@ import { TokenGate } from './components/TokenGate'
 import { RemnMark } from './components/RemnMark'
 import { DataNotice } from './components/DataNotice'
 import { EntityPanel } from './components/EntityPanel'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { Modal, Progress, ThemeToggle } from './components/ui'
 import { Dashboard } from './views/Dashboard'
 import { EvidenceView } from './views/EvidenceView'
@@ -82,6 +83,16 @@ const NAV: { id: View; label: string; icon: React.ComponentType; count?: 'events
   { id: 'settings', label: 'Settings', icon: IconSettings },
 ]
 
+/** Why the start failed, from the browser's error, and what usually causes it. */
+function bootFailure(e: unknown): string {
+  const err = e as { name?: string; message?: string; inner?: { name?: string } } | null
+  const names = [err?.name, err?.inner?.name]
+  const said = `REMN could not open its database in this browser: ${err?.message || String(e)}.`
+  if (names.includes('VersionError')) return `${said} It was written by a newer version of REMN than this page; open that version.`
+  if (names.includes('QuotaExceededError')) return `${said} The browser's storage for this site is full: free space and reload.`
+  return `${said} The browser may refuse this site storage (a private window, or site data turned off in its settings), its storage may be full, or another REMN tab may hold the database while it is upgraded: close other REMN tabs, check the site settings and reload.`
+}
+
 export default function App() {
   const view = useStore((s) => s.view)
   const setView = useStore((s) => s.setView)
@@ -121,6 +132,7 @@ export default function App() {
   const [pivotRes, setPivotRes] = useState<PivotResult | null>(null)
   const pivotAbort = useRef<AbortController | null>(null)
   const [ready, setReady] = useState(false)
+  const [bootError, setBootError] = useState<string | null>(null)
   const [pendingKind, setPendingKind] = useState<'evtx' | 'mail' | 'package'>('mail')
   const [migrating, setMigrating] = useState<string | null>(null)
 
@@ -195,7 +207,7 @@ export default function App() {
           if (stopped.length && open) refreshCounts(open)
         })
         .catch((e: Error) => useStore.getState().log('err', `interrupted imports not checked: ${e.message}`))
-    })()
+    })().catch((e) => setBootError(bootFailure(e))) // without it the page said "booting…" for ever
     const load = () => {
       getHealth()
         .then((h) => {
@@ -229,14 +241,16 @@ export default function App() {
           if (!(e instanceof ApiError && e.status === 401)) useStore.getState().log('err', `server unreachable: ${e.message}`)
         })
     }
-    tokenReady.then(() => {
-      load()
-      getMeta()
-        .then(setMeta)
-        .catch((e) => {
-          if (!(e instanceof ApiError && e.status === 401)) toast('err', `could not load reference data: ${e.message}`, 0)
-        })
-    })
+    tokenReady
+      .then(() => {
+        load()
+        getMeta()
+          .then(setMeta)
+          .catch((e) => {
+            if (!(e instanceof ApiError && e.status === 401)) toast('err', `could not load reference data: ${e.message}`, 0)
+          })
+      })
+      .catch(() => undefined) // a database that cannot be read is what the start reports
     const t = setInterval(load, 30000)
     return () => clearInterval(t)
   }, [setCurrentCase, setHealth, setMeta, setThreshold])
@@ -340,6 +354,13 @@ export default function App() {
     setView('evidence')
   }
 
+  if (bootError)
+    return (
+      <div className="empty" role="alert">
+        <div className="big">REMN</div>
+        {bootError}
+      </div>
+    )
   if (!ready || !kase)
     return (
       <div className="empty">
@@ -471,22 +492,25 @@ export default function App() {
         </div>
       </header>
       <main className="main relative">
-        {view === 'dashboard' && <Dashboard />}
-        {view === 'evidence' && <EvidenceView />}
-        {view === 'events' && <EventsView />}
-        {view === 'mails' && <MailsView />}
-        {view === 'timeline' && <TimelineView />}
-        {view === 'findings' && <FindingsView />}
-        {view === 'stories' && <StoriesView key={kase?.id} />}
-        {view === 'graph' && <GraphView key={kase?.id} />}
-        {view === 'rules' && <RulesView />}
-        {view === 'iocs' && <IocsView />}
-        {view === 'ai' && <AiView />}
-        {view === 'review' && <ReviewView />}
-        {view === 'case' && <CaseView />}
-        {view === 'questions' && <QuestionsView key={kase?.id} />}
-        {view === 'report' && <ReportView />}
-        {view === 'settings' && <SettingsView />}
+        {/* one view failing to render leaves the shell and the other views usable; a new view starts afresh */}
+        <ErrorBoundary key={view} what={`The ${NAV.find((n) => n.id === view)?.label ?? view} page`}>
+          {view === 'dashboard' && <Dashboard />}
+          {view === 'evidence' && <EvidenceView />}
+          {view === 'events' && <EventsView />}
+          {view === 'mails' && <MailsView />}
+          {view === 'timeline' && <TimelineView />}
+          {view === 'findings' && <FindingsView />}
+          {view === 'stories' && <StoriesView key={kase?.id} />}
+          {view === 'graph' && <GraphView key={kase?.id} />}
+          {view === 'rules' && <RulesView />}
+          {view === 'iocs' && <IocsView />}
+          {view === 'ai' && <AiView />}
+          {view === 'review' && <ReviewView />}
+          {view === 'case' && <CaseView />}
+          {view === 'questions' && <QuestionsView key={kase?.id} />}
+          {view === 'report' && <ReportView />}
+          {view === 'settings' && <SettingsView />}
+        </ErrorBoundary>
         <EntityPanel />
         {showConsole && (
           <div style={{ position: 'absolute', left: 12, right: 12, bottom: 12, zIndex: 30 }}>

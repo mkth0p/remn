@@ -46,6 +46,10 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   /api/health` without the client header answers `{"ok": true}` only, which is what the image's
   health check now asks; `/api/meta` parses the bundled rules once; and a numeric parameter that
   is not a number is a 400.
+- A Mac connects its Ollama to a REMN served from another host with one line in Terminal,
+  `curl -fsSL https://remn.tech/ollama-mac.sh | bash`: the origin is allowed now and at every
+  login, and Ollama is restarted and checked. Settings
+  and the "cannot reach Ollama" message give the line for the page's own origin ([AI](docs/ai.md)).
 - Each case adapts to its own machines and to the analyst's review. After every run, a rule that
   stands on its own on at least half the case's hosts is folded per host as that network's
   background, whatever the clean machines said, and each finding of a rule the analyst marks false
@@ -119,6 +123,24 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   rows. A cut mail body, attachments past 60 and PST attachments over 60 MiB are flagged
   (`body_truncated`, `attachments_truncated`, `not_read`), and the attachment count is the real
   one. A Sigma `ProcessId` in a process creation rule reads the new process's id.
+- The detection rules do what their descriptions say. Twelve of REMN's own Windows and collection
+  rules were corrected and measured again: the suspicious scheduled task rule reads only the
+  task's command, so it no longer matches the XML namespace every task carries; the Kerberos rules
+  read the exact failure code; a new service is judged by its program's folder rather than an
+  eight-character name; LSASS readers are left out by folder and by the access right that reads
+  memory, never by a name; the Office rule matches parent and child by path end and drops from
+  critical to high; PowerShell's encoded and hidden switches are read in every abbreviation
+  PowerShell accepts (high to medium); the script block rule no longer takes administration
+  cmdlets as keywords; collected autoruns and tasks in AppData are a new low lead apart from the
+  high persistence rule. Four rules whose condition cannot do what their title said (PsExec,
+  pass-the-hash, and two pairs of events in a window) now say what they match and are rated one
+  level lower. The Sigma converter keeps a regex's case (new operator `re_cs`), writes keywords as
+  the event's JSON text holds them, skips a rule with a `timeframe`, converts an IPv4 CIDR whose
+  ranged octet starts at 0, and stores its warnings on each rule; 104 rules of the SigmaHQ packs
+  changed. Both engines refuse a rule that sets `then`, `window`, `distinct` or `any_in_group`
+  without a group, or `then_flags` on events. The browser counts distinct values as the server
+  does, and the parity test compares severity, count and escalation. On the seven clean machines
+  the changed own rules raise 4 high or critical findings where they raised 50.
 - The priority of a finding divides by 1 + ln n when its rule raised n findings on the same host
   or for the same user, so one loud rule no longer fills the top of the queue. The first finding of
   an attack reached the top ten in 38% of EVTX-to-MITRE-Attack recordings and 76% of
@@ -130,30 +152,131 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   hovered. A chain wider than the pane scrolls sideways, by drag or wheel, with the lane names
   pinned at the left, and the selected step is scrolled into view. The report's chain pictures
   use the same layout within the 1,700 pixels they had, with titles on up to three lines.
+- Fewer pages that look right while they are wrong. In the browser store, the mail histogram, the
+  Timeline and the aggregate and timeline tools search mail bodies the same way as the Mails list,
+  so their counts agree with it. Emptying a server-store case keeps every browser record when the
+  server does not confirm that its store is gone, and says so. A running import can be cancelled
+  from the jobs panel: an upload stops, a server job is stopped and waited for, and the rows
+  already written are removed with the evidence entry. A hash beside a failed upload stops at
+  once. A loose file of unknown kind is no longer read as mail: a mailbox file without an
+  extension is recognised by its first lines, and anything else is turned away with its name.
+  Indicators keep the case of a URL's path and still find the lower-case rows of older versions.
+  When collection stops at 50,000 distinct values, the console and the Indicators page say which
+  import it was. An imported case bundle arrives with external lookups switched off. The
+  browser-direct Ollama transport refuses an address off this machine and its local network. A
+  page that throws while it draws shows the error with "try again" in its place, and a database
+  the browser cannot open is explained instead of "booting…" for ever. The Timeline names a part
+  it could not read. The Events and Mails pages query once when they open. With local time on,
+  every time ends in its offset from UTC and every time column names its zone. The Dashboard no
+  longer says no EVTX is loaded when the case holds cloud events, no longer says to run rules that
+  run on their own, and names the connection that did not answer.
 - CSV exports quote any value holding a semicolon or a tab, and put column names through the
   same escaping, so a value from the evidence cannot start a formula in Excel builds that split
   CSV on semicolons. The HTML report carries its own content security policy (no script, no
   remote loads), and the build's source link is only ever an http(s) URL.
+- The documentation says only what the repository can show. The detection figures in the README
+  and `docs/detection.md` are those of the committed rule measure (`rules/measures.json` and
+  `rules/measures-detail.json`), and `tests/backend/test_quoted_measures.py` fails when a page
+  quotes another; figures from runs whose scripts are not in the repository are gone. The quick
+  start works from a clone on Linux, macOS and Windows, the screenshots show the current
+  interface, and `.env.example` lists every variable the backend reads at its default, with a test
+  that fails on one it misses. A code of conduct, an issue-template config and `SECURITY.md` send
+  security reports to GitHub's private vulnerability reporting. `THIRD_PARTY_NOTICES.md` is
+  written from the lock files by `tools/third_party_notices.py`: every shipped Python, npm and
+  Rust package with the licence it declares, the copyleft components (extract-msg, the dissect
+  packages, Hayabusa in the Docker image and others) with how REMN uses each, the licence texts of
+  the browser application, the bundled Tranco list, and the corpora behind the published rates
+  (Phishing Pot is non-commercial). A test fails when a lock gains a package the notices do not
+  list.
 - Public instance limits: a chunk upload over 64 MiB is refused before it is read (by Caddy and by
   the server), unfinished uploads reserve the size they announced in the staging budget, and the
   chains and mail enrichment paths refuse a server case key in browser-only mode, as stories and
   relationships already did. A non-ASCII access token is a 401 rather than a server error.
+- A server case store records its schema version and is never opened half-way by a release that
+  cannot read it. A store written by an older release, or before versions were kept, is upgraded
+  when it is opened, in one transaction: the store keeps a record of the step and the log says it,
+  and a step that fails rolls back and leaves the store as it was. A store written by a newer
+  release is refused before anything in it changes, and the store routes answer 409
+  (`storeVersion`) with a message naming both versions. `tools/store_backup.py` backs up, checks
+  and restores the server stores: it copies each store byte for byte, write-ahead log included,
+  while it holds the store read-only, writes a manifest of digests, schema version and row counts,
+  and opens the copy to check it. A store the server holds open is skipped with the reason, and
+  while the tool holds a store the server answers that case with 503 (`storeBusy`). A restore
+  checks the backup first and never writes over a case; with `--replace` it keeps the case it
+  replaces aside. `docs/setup.md` gives the backup, upgrade and rollback steps. A store query
+  (search, count, aggregate, stack, timeline, facets, pivot, a row, the summary, the indicator
+  list, SQL) past `FORENSIC_STORE_QUERY_MAX_S` (60 s) is stopped and answered with 504
+  (`queryStopped`) and a message naming the limit. A rule past `FORENSIC_STORE_RULE_MAX_S` (300 s)
+  is stopped, listed among the run's errors, and the run goes on; the SQL view's fixed 30 s gives
+  way to the store query limit. `FORENSIC_STORE_MEMORY_MB` and `FORENSIC_STORE_THREADS` set what
+  each open store may use. A store unused for `FORENSIC_STORE_IDLE_S` seconds (600) is closed once
+  no request or job holds it, and opens again on its next use. REMN does not encrypt stores,
+  backups or the browser database, and the security model now says that a server keeping evidence
+  must keep its cases folder, staging area and backups on an encrypted volume.
 - Levels measured rather than inherited: 116 low rules that raise nothing on the evtx-baseline
   clean machines are now medium, and ten rules whose only findings are on those machines are now
   low (SigmaHQ rules through `rules/community/levels.json`, which a re-import keeps; REMN's own
   in their files). Detections go from 235 to 245 of 535 attack_data recordings, 109 to 112 of 279
   EVTX-to-MITRE-Attack files and 260 to 264 of 278 EVTX-ATTACK-SAMPLES files, and medium and
   higher findings on the clean machines from 2,134 to 1,684.
+- The staging area is sized from its disk, and archives expand only as far as it and their own
+  size allow. Outside browser-only mode `FORENSIC_TMP_MAX_GB` now defaults to 0, which lets the
+  staging area use the free space of its disk less a tenth of that disk (at most 10 GiB), so a
+  default install no longer refuses an upload above 4 GiB. A file the staging area can never hold
+  is refused with 413 and a message naming what sets the limit, instead of being told to try again
+  shortly; a file that has to wait gets 507 saying how much is held and when it frees. One package
+  member may take at most half the staging area, and never more than 4 GiB, and everything a parse
+  holds there at once (nested archives, an expanded 7z, a decoded cabinet) stays within what the
+  area had room for when the parse began. An archive expands to at most 200 times its own size,
+  and never less than 64 MiB: zip and 7z members past that are listed as skipped with the reason,
+  a compressed tar stops its walk there and lists the rest as one `(rest of archive)` entry, and a
+  7z is also stopped by what it actually decompresses, not only by the sizes it declares. A tar
+  inside a mail attachment is walked over at most the analysis limit of decompressed data, 10,000
+  headers and 10 seconds, and is flagged as partly analysed when it stops early. The folders of an
+  expanded 7z and of event logs staged for Hayabusa are swept like the upload staging area, and a
+  restart removes what a stopped parse left behind.
 - 39 rules for techniques the default rules missed in attack_data
   (`rules/windows/technique-gaps.yaml`): directory and Kerberos abuse, PowerShell discovery and
   tooling, obfuscated command lines, registry, Python and browser-policy persistence, LSA
   protection and Defender tampering, EFI boot files, credential stores and known attacker tools.
   They add 46 attack_data detections, which does not count as held out for them, fire on none of
   the clean machines, and add no detection on the two other libraries yet.
+- Hostile text no longer holds the server or the browser in a regular expression. Thirty-five
+  patterns of the backend (HTML attachments, mail headers and display names, URLs, Office, PDF and
+  archive members, EVTX XML, reg query output, M365 dates, rule thresholds) and twelve of the
+  browser code (the EVTX parser's trims, host and file name trims, chain step titles, field values
+  in claim checks, rule durations and thresholds, display names) took a time that grew with the
+  square of a run in the text or faster, so a field or attachment of a few hundred kilobytes held
+  a worker for tens of seconds. Each is now matched from the first character of a run, up to the
+  next opening of the same tag, or up to the last closing bracket, with the same results on
+  well-formed text. Two bundled rules (unquoted service path, renamed PsExec pipe) are rewritten
+  the same way and keep their measures. `tests/backend/test_regex_timing.py` and
+  `frontend/src/test/regexTiming.test.ts` time every pattern the code writes, and the `re`
+  patterns of REMN's own rule packs, on hostile text built from each pattern. Seven bundled rules
+  and some converted community rules can still slow the browser's rules worker on a crafted value,
+  because no rewrite that RE2 also accepts keeps what they match (`docs/security.md`).
 - `win-discovery-burst`: one program starting four or more different discovery commands (whoami,
   net, nltest, ipconfig and others) within ten minutes. Written from ATT&CK before any recording
   was read, so every library is held out for it: it adds two attack_data detections and raises
   one finding across the evtx-baseline clean machines.
+- Each parse of uploaded evidence runs in a process of its own. Event logs and their archives,
+  mail of every format including PST, packages and collections, the attachment analysis inside
+  them and a single attachment dropped for analysis were read inside the web server, which holds
+  the access token, the provider keys and every case store, so a memory-safety bug in libpff, the
+  EVTX reader or an attachment analyser gave all of that to whoever wrote the file. The parse
+  process starts without the server's environment or settings and works in a folder of its own in
+  the staging area. Where the system enforces them it has a memory limit (`FORENSIC_PARSE_MAX_MB`,
+  4096 MiB, 1024 in browser-only mode) and a processor-time limit (`FORENSIC_PARSE_MAX_CPU_S`, six
+  hours). On Linux, where an unprivileged network namespace is allowed, it has no network. When
+  the server runs as root and `FORENSIC_PARSE_UID` names an account, it runs as that account. It
+  is stopped at the ingest deadline, which used to be checked only between records, at its memory
+  limit and when its job is cancelled; the rows read before a stop are kept, and the stream or the
+  job says what stopped it and while reading which member. A member that ran the parse out of
+  memory says so on its entry. The native decoders and Hayabusa also start without the server's
+  environment. Starting the process adds about 0.2 s to every file; on a 90,000-event archive the
+  browser-store stream is 7% slower and the server-store ingest 25% shorter.
+  `FORENSIC_PARSE_ISOLATION=0` parses in the server process again, for debugging;
+  `docs/security.md` says what each system enforces and what turning it off gives up.
 - A home page. REMN opens on it until a case holds evidence, and the wordmark leads back to it
   after that. It shows what the tool reads, how the rules are measured and what the measures
   show: the rule totals, recordings and clean-host baseline read live from `rules/measures.json`
@@ -163,6 +286,20 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   review it comes from. New case starts a case (taking over the untouched first one) and can
   import evidence as it is created; Open demo case opens the Northstar lab. The REMN mark, a block
   wearing away into dither, replaces the R in the sidebar.
+- The AI features promise less and hold back more. The Claude Code connector is off until an
+  operator sets `CLAUDE_CODE_ENABLED=1`, and the settings page and `docs/ai.md` say what turning
+  it on means: one sign-in on the server machine, shared by every analyst who picks it, and
+  evidence excerpts leaving the machine. Its status answer says only whether it is signed in and
+  usable, nothing about the account. No model name is built in any more: with none set, the server
+  uses the analyst's pick, else the first model its Ollama lists, and the answer names the model
+  used, so an install whose only model is the old default keeps working. A sentence or text that
+  names no address, account or hash is "nothing to check" instead of verified, and the report and
+  the AI panel count sentences by state. A proposal made after evidence text addressed to a model,
+  or after evidence too long for that check to read whole, is never accepted by "accept all"; in
+  the triage pass this holds for the whole batch, and the inbox says how many proposals wait and
+  why. On an invented set the check finds 11 of 48 payloads (none encoded, 1 of 16 in other
+  languages), and `docs/ai.md` says so. The triage mode that wrote decisions directly, which
+  nothing called, is gone.
 - Eleven rules for directory changes on a domain controller (`rules/windows/directory.yaml`):
   accounts weakened for AS-REP roasting or offline cracking, Kerberos delegation granted
   (including resource-based delegation), passwords set never to expire, permissions changed on
@@ -170,6 +307,25 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   objects, domain policy changed by a user, the Special Groups table changed, sensitive user
   rights assigned and the Guest account enabled. They catch about 20 files of
   EVTX-to-MITRE-Attack the default rules missed and fire on none of the evtx-baseline machines.
+- Stories attribute only what the records tie. Hosts of one short name in two domains
+  (DC01.a.example and DC01.b.example) stay two hosts with their own sessions and stories, a record
+  naming one without its domain joins neither, and each host says how it was keyed. A flag whose
+  record ties it to no account or session, as SYSTEM's, a service's or a management agent's, stays
+  its host's instead of joining the person seated there; the host's story links to that person's
+  as one incident by time and place. A session whose logoff is not in the evidence is open only to
+  its last record, not for two days, and a handle opened or a thread created (Sysmon 10, 8) is
+  tied through the program that did it. An outside address a finding names pulls records into a
+  story only when a high finding names it, findings of two rules do, or no one else in the case
+  uses it, and each pulled step says which; an office's address flagged once ties nothing, and an
+  organisation's shared egress needs two people signing in from it, not five. A story's confidence
+  is high, medium or low by how many of its flagged steps a record ties, with that count shown in
+  the list, the story, the report and the Attack Flow export; a snapshot saved before keeps its
+  "strong" label until the story is built again. A browser case says that who is who was read from
+  the rows it posted. Chain findings carry only the techniques their steps show, a flagged event
+  the chain builder does not model stays as a step, and events fold into one step only when they
+  agree on address, account and target. The unused chain builds (`buildChains`,
+  `chains_for_store`) are gone, `/api/chains/build` refuses a store key, and a relationship edge's
+  assertion class is read from a field.
 - Rules for the logs of server products (`rules/windows/other-products.yaml`): SQL Server audit
   tampering, role membership, new logins, sa enabled, failed logins, options that run code and
   single-user starts; password guessing against OpenSSH; Certificate Services requests with a

@@ -14,8 +14,8 @@ import { timelineRows } from '../data/timelineRows'
 import type { EventRow, RowMark } from '../db/schema'
 import type { Condition, Filter } from '../rules/filter'
 import { toggleFacetValue } from '../data/facetToggle'
-import { toast, useStore } from '../state/store'
-import { fmtTs } from '../util/format'
+import { toast, useImportsFinished, useStore } from '../state/store'
+import { fmtTs, timeColumnWidth, tzLabel } from '../util/format'
 import { downloadBlob, exportCsv, exportJson } from '../util/export'
 import { timelineRecords, toTimelineCsv, toTimesketchJsonl } from '../util/responderExports'
 import { Badge } from '../components/ui'
@@ -92,7 +92,7 @@ export function EventsView() {
   const setFilter = useStore((s) => s.setEventsFilter)
   const focus = useStore((s) => s.focusId)
   const setFocus = useStore((s) => s.setFocus)
-  const jobs = useStore((s) => s.jobs)
+  const importsFinished = useImportsFinished()
   const [rows, setRows] = useState<EventRow[]>([])
   const [truncated, setTruncated] = useState(false)
   const [sampledFrom, setSampledFrom] = useState<number | undefined>(undefined)
@@ -130,8 +130,8 @@ export function EventsView() {
     [ds, filter],
   )
   useEffect(() => {
-    if (jobs.every((j) => j.phase === 'done' || j.phase === 'error')) setVersion((v) => v + 1)
-  }, [jobs])
+    if (importsFinished) setVersion((v) => v + 1)
+  }, [importsFinished])
 
   useEffect(() => {
     if (!ds) return
@@ -183,7 +183,8 @@ export function EventsView() {
   useEffect(() => {
     if (!kase?.id) return
     if (!markedOnly) {
-      setFilter((prev: Filter) => ({ ...prev, conditions: (prev.conditions ?? []).filter((c) => c.field !== 'id') }))
+      // the same filter object when there is no row-id condition to drop, or opening the page queries twice
+      setFilter((prev: Filter) => ((prev.conditions ?? []).some((c) => c.field === 'id') ? { ...prev, conditions: (prev.conditions ?? []).filter((c) => c.field !== 'id') } : prev))
       return
     }
     markedRowIds(kase.id, 'events').then(({ ids }) => {
@@ -230,9 +231,17 @@ export function EventsView() {
     [setFilter],
   )
 
+  // the zone is read on every draw, so the column says the zone its times are in
+  const tz = tzLabel()
+  const tsWidth = timeColumnWidth(160)
   const columns: Column<EventRow>[] = useMemo(
     () => [
-      { key: 'ts', label: 'event time', width: 160, render: (r) => (r.recordKind === 'observation' ? <span title={`Collected: ${fmtTs(r.observedAt)}`}>snapshot (no event time)</span> : fmtTs(r.ts)) },
+      {
+        key: 'ts',
+        label: `event time (${tz})`,
+        width: tsWidth,
+        render: (r) => (r.recordKind === 'observation' ? <span title={`Collected: ${fmtTs(r.observedAt)}`}>snapshot (no event time)</span> : fmtTs(r.ts)),
+      },
       {
         key: 'eventId',
         label: 'id',
@@ -246,7 +255,7 @@ export function EventsView() {
       { key: 'summary', label: 'summary', width: 'minmax(300px, 1fr)' },
       { key: 'channel', label: 'channel', width: 130 },
     ],
-    [toggleFacet],
+    [toggleFacet, tz, tsWidth],
   )
   if (!kase || !ds) return null
   const sort = filter.sort ?? { field: 'ts', dir: 'desc' as const }

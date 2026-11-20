@@ -13,13 +13,15 @@ class ApiConfig(AppConfig):
 
     def ready(self) -> None:
         # Wire the Django-independent services with the settings.
-        from api.views.upload import cleanup_stale, start_sweeper
+        from api.views.upload import cleanup_stale, clear_leftovers, start_sweeper
         from services.analysis.attachments import yara_scan
         from services.reputation.base import registry
         from services.store.casestore import registry as store_registry
 
         yara_scan.configure(settings.YARA_RULES_DIR)
-        store_registry.configure(settings.CASES_DIR)
+        store_registry.configure(
+            settings.CASES_DIR, memory_mb=settings.FORENSIC_STORE_MEMORY_MB, threads=settings.FORENSIC_STORE_THREADS, idle_s=settings.FORENSIC_STORE_IDLE_S
+        )
         try:
             removed_uploads = cleanup_stale()
             if removed_uploads:
@@ -36,19 +38,11 @@ class ApiConfig(AppConfig):
             offline_dir=str(settings.OFFLINE_LISTS_DIR),
             geoip_dir=str(settings.DATA_DIR / "geoip"),
         )
-        # Remove any upload temp file left over by a previous crashed run.
-        tmp = settings.FILE_UPLOAD_TEMP_DIR
+        # remove whatever a previous run stopped mid-parse left in the staging area: files, and the
+        # directories an expanded 7z or the logs staged for an engine run occupy.
         try:
-            tmp.mkdir(parents=True, exist_ok=True)
-            removed = 0
-            for child in tmp.iterdir():
-                if child.is_file() and child.suffix not in (".part", ".json"):
-                    try:
-                        child.unlink()
-                        removed += 1
-                    except OSError:
-                        pass
+            removed = clear_leftovers()
             if removed:
-                log.info("cleaned %d leftover upload temp file(s)", removed)
+                log.info("cleaned %d leftover staging file(s) and folder(s)", removed)
         except OSError as exc:  # pragma: no cover
-            log.warning("could not clean temp dir %s: %s", tmp, exc)
+            log.warning("could not clean temp dir %s: %s", settings.FILE_UPLOAD_TEMP_DIR, exc)

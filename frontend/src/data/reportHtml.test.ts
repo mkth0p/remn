@@ -390,18 +390,24 @@ describe('what the report claims about the case', () => {
       },
       texts: [
         { key: 'summary', what: 'the executive summary', check: { status: 'unsupported' as const, named: ['198.51.100.9'], reasons: ['it names 198.51.100.9, which no row of the evidence holds'] } },
+        { key: 'chain:alice', what: 'the narrative of chain "alice"', check: { status: 'nothing_to_check' as const, named: [], reasons: [] } },
+        { key: 'incident:7', what: 'the notes on "x"', check: { status: 'verified' as const, named: ['203.0.113.7'], reasons: [] } },
       ],
     }
     const html = buildReportHtml({ ...d, claims })
     expect(html).toContain('<span class="sub claim verified" title="">rows checked · box.mbox message 8</span>')
     expect(html).toContain('<span class="sub claim contradicted" title="box.mbox message 9 no longer matches the rule">rows disagree</span>')
     expect(html).toContain('<div class="cap claim unsupported">Checked against its rows: it names 198.51.100.9, which no row of the evidence holds.</div>')
+    // a text that names no value was not checked, and says so rather than passing
+    expect(html).toContain('<div class="cap claim nothing_to_check">It names no address, account or hash: nothing in it was checked against the evidence.</div>')
     expect(html).toContain(
-      'each printed finding was read back against the rows it cites (the first 50 of each): 1 verified, 0 unsupported, 1 contradicted; 1 text (chain narratives, incident and story notes, the summary) checked for the addresses, accounts and hashes it names, 0 holding',
+      'each printed finding was read back against the rows it cites (the first 50 of each): 1 whose rows match the rule, the values and the time, 0 unsupported, 1 contradicted; 3 texts (chain narratives, incident and story notes, the summary) read for the addresses, accounts and hashes they name: 1 whose rows hold every value named, 1 naming none (nothing to check), 1 naming a value no row holds',
     )
+    expect(html).not.toMatch(/\d verified/)
     const limits = html.slice(html.indexOf('<h4>Where it stops</h4>'))
     expect(limits).toContain('<li>The finding &quot;other&quot; (other) is contradicted by its rows: box.mbox message 9 no longer matches the rule.</li>')
     expect(limits).toContain('<li>The executive summary is unsupported: it names 198.51.100.9, which no row of the evidence holds.</li>')
+    expect(limits).not.toContain('narrative of chain')
   })
 
   it("prints each story along its phases with what marks them, the analyst's note and its check, and where it stops", () => {
@@ -440,7 +446,7 @@ describe('what the report claims about the case', () => {
       end: 120_000,
       severity: 'critical',
       score: 90,
-      confidence: 'strong',
+      confidence: 'high',
       phases: [phase('initial-access', 'Initial access', 'high'), phase('defense-impairment', 'Defense impairment', 'critical'), phase('persistence', 'Persistence', null)],
       steps: [
         step('event:1', 'initial-access', 'RDP logon', [{ title: 'RDP logon from outside', severity: 'high' }]),
@@ -466,7 +472,7 @@ describe('what the report claims about the case', () => {
     const html = buildReportHtml(data({ stories: [{ story, key, note: 'He came in over **RDP** from 10.9.9.9.' }], storiesLeft: 2, claims }))
     const section = html.slice(html.indexOf('<h2>Stories</h2>'), html.indexOf('<h2>Attack chains</h2>'))
     expect(section).toContain('daniel.roy@corp.test: RDP &lt;logon&gt; from outside')
-    expect(section).toContain('strong ties')
+    expect(section).toContain('high confidence')
     // the phases in the story's order, each with its worst finding or, without one, its first step
     expect(section.indexOf('Initial access')).toBeLessThan(section.indexOf('Defense impairment'))
     expect(section).toContain('Audit log cleared')

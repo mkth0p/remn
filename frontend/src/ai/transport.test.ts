@@ -41,8 +41,8 @@ describe('pyJson', () => {
 })
 
 // ---------------------------------------------------------------------------
-function metaResponse(version: string): Response {
-  return new Response(JSON.stringify({ prompts: META.prompts, tools: [], querySchema: META.querySchema, schemaDoc: META.schemaDoc, numCtx: 4096, defaultModel: 'd', limits: META.limits, version }), {
+function metaResponse(version: string, defaultModel = 'd'): Response {
+  return new Response(JSON.stringify({ prompts: META.prompts, tools: [], querySchema: META.querySchema, schemaDoc: META.schemaDoc, numCtx: 4096, defaultModel, limits: META.limits, version }), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   })
@@ -145,6 +145,28 @@ describe('BrowserOllamaTransport.chatTurn', () => {
     expect(err.error).toContain('ollama pull testmodel')
   })
 
+  it('with no model chosen anywhere uses the first model this Ollama lists, and the answer names it', async () => {
+    useStore.getState().setAiConfig({ model: '' })
+    fetchMock
+      .mockResolvedValueOnce(metaResponse('v6', ''))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ models: [{ name: 'only-model:latest' }] }), { status: 200 }))
+      .mockResolvedValueOnce(ndjsonResponse([{ message: { content: 'ok' } }, { done: true, model: 'only-model:latest' }]))
+    const chunks: ChatChunk[] = []
+    await getTransport().chatTurn(chatParams(), (c) => chunks.push(c))
+    expect(JSON.parse(String((fetchMock.mock.calls[2] as [string, RequestInit])[1].body)).model).toBe('only-model:latest')
+    expect(chunks.find((c) => c.type === 'done')).toMatchObject({ model: 'only-model:latest' })
+  })
+
+  it('with no model chosen and none installed says to pull one instead of asking for an empty name', async () => {
+    useStore.getState().setAiConfig({ model: '' })
+    fetchMock.mockResolvedValueOnce(metaResponse('v7', '')).mockResolvedValueOnce(new Response(JSON.stringify({ models: [] }), { status: 200 }))
+    const chunks: ChatChunk[] = []
+    await getTransport().chatTurn(chatParams(), (c) => chunks.push(c))
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect((chunks[0] as { error: string }).error).toContain('ollama pull')
+    expect(chunks[1].type).toBe('done')
+  })
+
   it('queryJson salvages JSON wrapped in prose', async () => {
     fetchMock
       .mockResolvedValueOnce(metaResponse('v5'))
@@ -152,6 +174,31 @@ describe('BrowserOllamaTransport.chatTurn', () => {
     const res = await getTransport().queryJson('failed logons', { now: 'T' })
     expect(res.query).toEqual({ source: 'events', filter: {} })
     expect(res.model).toBe('testmodel')
+  })
+})
+
+describe('browser-direct Ollama addresses', () => {
+  it('never send a case to an address off this machine and its local network', async () => {
+    for (const ollamaUrl of ['https://ollama.example.com', 'http://203.0.113.7:11434']) {
+      useStore.getState().setAiConfig({ transport: 'browser', ollamaUrl })
+      const t = getTransport()
+      const chunks: ChatChunk[] = []
+      await t.chatTurn(chatParams(), (c) => chunks.push(c))
+      expect(chunks[0]).toMatchObject({ type: 'error', error: expect.stringContaining(`not to ${ollamaUrl}`) })
+      expect(chunks[1].type).toBe('done')
+      await expect(t.queryJson('failed logons', { now: 'T' })).rejects.toThrow('this machine or your local network')
+      await expect(t.listModels()).rejects.toThrow('this machine or your local network')
+      expect(await t.ping()).toMatchObject({ reachable: false })
+      expect(await t.capabilities('m')).toEqual([])
+    }
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('still reach an Ollama on another machine of the local network', async () => {
+    useStore.getState().setAiConfig({ transport: 'browser', ollamaUrl: 'http://192.168.1.50:11434/' })
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ models: [{ name: 'qwen3:8b' }] }), { status: 200 }))
+    expect(await getTransport().listModels()).toEqual([{ name: 'qwen3:8b', parameterSize: undefined }])
+    expect(fetchMock.mock.calls[0][0]).toBe('http://192.168.1.50:11434/api/tags')
   })
 })
 

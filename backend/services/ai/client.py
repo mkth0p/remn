@@ -11,9 +11,14 @@ log = logging.getLogger(__name__)
 
 
 class OllamaService:
+    """
+    One Ollama. A call uses the model it asks for, else the configured default, else the first model
+    this Ollama lists: the server names no model of its own, and the model used is in every answer.
+    """
+
     def __init__(self, host: str, default_model: str, num_ctx: int = 32768, timeout: float = 600) -> None:
         self.host = host
-        self.default_model = default_model
+        self.default_model = (default_model or "").strip()
         self.num_ctx = num_ctx
         self.timeout = timeout
 
@@ -25,15 +30,27 @@ class OllamaService:
     # Short timeout for metadata calls: a busy CPU-bound Ollama must not freeze /api/health.
     META_TIMEOUT = 8.0
 
+    def resolve_model(self, model: str | None = None, listed: list[dict[str, Any]] | None = None) -> str:
+        """The model a call uses: the one asked for, else the configured one, else the first one listed."""
+        if model:
+            return model
+        if self.default_model:
+            return self.default_model
+        names = [str(m["name"]) for m in (self.list_models() if listed is None else listed) if m.get("name")]
+        if not names:
+            raise RuntimeError(f"no model is chosen and the Ollama at {self.host} has none: pull one there (ollama pull <model>) or pick one in Settings")
+        return names[0]
+
     def ping(self) -> dict[str, Any]:
         try:
             models = self.list_models()
+            default = self.default_model or (str(models[0]["name"]) if models and models[0].get("name") else "")
             return {
                 "reachable": True,
                 "host": self.host,
                 "models": models,
-                "defaultModel": self.default_model,
-                "defaultAvailable": any(m["name"] == self.default_model or m["name"].split(":")[0] == self.default_model.split(":")[0] for m in models),
+                "defaultModel": default,
+                "defaultAvailable": bool(default) and any(m["name"] == default or m["name"].split(":")[0] == default.split(":")[0] for m in models),
             }
         except Exception as exc:  # noqa: BLE001
             return {"reachable": False, "host": self.host, "error": str(exc)[:200], "models": [], "defaultModel": self.default_model}
@@ -57,7 +74,7 @@ class OllamaService:
 
     def capabilities(self, model: str) -> list[str]:
         try:
-            info = self._client(self.META_TIMEOUT).show(model)
+            info = self._client(self.META_TIMEOUT).show(self.resolve_model(model))
             caps = getattr(info, "capabilities", None)
             if caps is None and isinstance(info, dict):
                 caps = info.get("capabilities")
@@ -78,7 +95,7 @@ class OllamaService:
         """
         Yield normalised chunks: {"type": "token"|"thinking"|"tool_calls"|"done"|"error", ...}
         """
-        model = model or self.default_model
+        model = self.resolve_model(model)
         opts = {"num_ctx": self.num_ctx, "temperature": 0.2}
         opts.update(options or {})
         kwargs: dict[str, Any] = {"model": model, "messages": messages, "stream": True, "options": opts}
@@ -142,7 +159,7 @@ class OllamaService:
         options: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Non-streaming structured output. Returns {"data": parsed|None, "raw": text, "model": ...}."""
-        model = model or self.default_model
+        model = self.resolve_model(model)
         opts = {"num_ctx": self.num_ctx, "temperature": 0}
         opts.update(options or {})
         client = self._client()

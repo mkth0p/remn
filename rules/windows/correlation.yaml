@@ -23,12 +23,25 @@ then:
   title: the same client then obtained a TGT with a tool's request
 ---
 id: win-eventlog-crash-after-remote-pipe
-title: Event Log service crashed right after a remote client opened its pipe
-description: A remote client connects to the \eventlog named pipe over SMB (Sysmon 18 with image System, the kernel serving an SMB client) and within a minute WerFault starts under the svchost that hosts the Event Log service (the LocalServiceNetworkRestricted group, or "-s EventLog" on split service hosts). Malformed requests to the EventLog RPC interface crash the service so that nothing is logged until it restarts (the technique published by byt3bl33d3r); the service restarts by itself, so the crash is often the only trace. Benign cause is a genuine crash of that service host while a log collector or an administrator's Event Viewer happens to be reading the logs remotely, which is rare.
-severity: high
+title: Event Log service crash and a remote client on its pipe within a minute
+description: >-
+  A remote client connects to the \eventlog named pipe over SMB (Sysmon 18 with image System, the kernel serving
+  an SMB client) and WerFault starts under the svchost that hosts the Event Log service (the
+  LocalServiceNetworkRestricted group, or "-s EventLog" on split service hosts), the two within a minute of each
+  other on one host. Malformed requests to the EventLog RPC interface crash the service so that nothing is logged
+  until it restarts (the technique published by byt3bl33d3r); the service restarts by itself, so the crash is
+  often the only trace. The rule pairs the two events in either order and cannot tell that the client's requests
+  are what crashed the service, so the pair is a lead to check rather than proof. Benign cause is a genuine crash
+  of that service host while a log collector or an administrator's Event Viewer happens to be reading the logs
+  remotely, which is rare.
+severity: medium
 source: events
 attack: [T1685.001]
 tags: [defense-evasion, eventlog, correlation]
+falsepositives:
+  - a crash of the service host while a log collector or Event Viewer reads the logs over the network
+references:
+  - https://github.com/floesen/EventLogCrasher
 entities: [computer]
 where:
   provider|contains: Sysmon
@@ -146,12 +159,26 @@ distinct: destinationIp
 threshold: ">= 5"
 ---
 id: win-rdp-connect-then-run-dialog
-title: Run-dialog command typed seconds after an inbound RDP connection (SharpRDP-style)
-description: An inbound RDP connection (Sysmon 3 on port 3389) and a new entry in the Run dialog history (RunMRU written by explorer.exe, Sysmon 13) on the same host within ten seconds of each other. SharpRDP and similar tools execute commands by opening an automated RDP session and typing them into the Run dialog, so each connection is followed a few seconds later by a RunMRU write; several findings in a row, each with a new command, mean automation. The commands themselves can look harmless (notepad, cmd, powershell). Benign causes are an administrator who reconnects to an existing session and immediately runs something with Win+R, and busy terminal servers, where one user's connection and another user's Run command can fall in the same ten seconds; the rule cannot tell which user wrote the RunMRU entry, so a single finding is weak and a series of them is what matters.
-severity: medium
+title: Inbound RDP connection and a Run-dialog command within ten seconds (SharpRDP-style)
+description: >-
+  An inbound RDP connection (Sysmon 3 on port 3389) and a new entry in the Run dialog history (RunMRU written by
+  explorer.exe, Sysmon 13) on the same host within ten seconds of each other, in either order. SharpRDP and
+  similar tools execute commands by opening an automated RDP session and typing them into the Run dialog, so
+  each connection is followed a few seconds later by a RunMRU write; several findings in a row, each with a new
+  command, mean automation. The commands themselves can look harmless (notepad, cmd, powershell). The rule does
+  not check which event came first, nor that the connection and the command belong to the same session, so a
+  single finding is weak and a series of them is what matters. Benign causes are an administrator who reconnects
+  to an existing session and immediately runs something with Win+R, and busy terminal servers, where one user's
+  connection and another user's Run command can fall in the same ten seconds.
+severity: low
 source: events
 attack: [T1021.001]
 tags: [lateral-movement, rdp, correlation]
+falsepositives:
+  - an administrator who reconnects to a session and runs a command with Win+R at once
+  - a terminal server where one user's connection and another user's Run command fall in the same ten seconds
+references:
+  - https://github.com/0xthirteen/SharpRDP
 where:
   provider|contains: Sysmon
   any_of:

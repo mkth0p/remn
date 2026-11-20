@@ -7,9 +7,9 @@
  */
 import { createSHA256 } from 'hash-wasm'
 import { refKey, resolveEngineRefs, type EngineFinding } from '../data/engineFindings'
-import { getDb, type AttachmentRow, type EventRow, type Facet, type Ioc, type MailBody, type MailRow, type UrlRow } from '../db/schema'
+import { getDb, type AttachmentRow, type EventRow, type Facet, type Ioc, type IocsCapped, type MailBody, type MailRow, type UrlRow } from '../db/schema'
 import { setApiToken, streamNdjson } from '../api/client'
-import { isPublicIp } from '../util/format'
+import { iocValue, isPublicIp } from '../util/format'
 import { duplicateEvidence } from '../data/duplicateEvidence'
 import { loadEvtxDecoder } from '../parsers/evtx/load'
 import { Stats } from '../parsers/evtx/ledger'
@@ -98,11 +98,14 @@ class FacetCounter {
   }
 }
 
-class IocCounter {
+export class IocCounter {
+  /** distinct values one import collects; past it the import is recorded as capped (a static, so a test can lower it) */
+  static limit = 50_000
   map = new Map<string, Ioc>()
+  capped = false
   add(caseId: number, kind: Ioc['kind'], value: string | null | undefined, source: string, ts: number | null): void {
     if (!value) return
-    const v = value.trim().toLowerCase().slice(0, 2048)
+    const v = iocValue(kind, value)
     if (!v) return
     const key = kind + ':' + v
     const cur = this.map.get(key)
@@ -113,9 +116,9 @@ class IocCounter {
         cur.firstSeen = cur.firstSeen == null ? ts : Math.min(cur.firstSeen, ts)
         cur.lastSeen = cur.lastSeen == null ? ts : Math.max(cur.lastSeen, ts)
       }
-    } else if (this.map.size < 50000) {
+    } else if (this.map.size < IocCounter.limit) {
       this.map.set(key, { caseId, kind, value: v, sources: [source], firstSeen: ts, lastSeen: ts, count: 1 })
-    }
+    } else this.capped = true
   }
 }
 
@@ -160,10 +163,15 @@ async function flushIocs(caseId: number, ic: IocCounter): Promise<void> {
   for (let i = 0; i < items.length; i += 500) {
     const slice = items.slice(i, i + 500)
     const keys = slice.map((x) => [caseId, x.kind, x.value] as [number, string, string])
-    const existing = await db.iocs.where('[caseId+kind+value]').anyOf(keys).toArray()
+    // versions before kept no case in a URL: the same indicator stored by one is found in lower case
+    const folded = slice.filter((x) => x.kind === 'url' && x.value !== x.value.toLowerCase()).map((x) => [caseId, x.kind, x.value.toLowerCase()] as [number, string, string])
+    const existing = await db.iocs
+      .where('[caseId+kind+value]')
+      .anyOf([...keys, ...folded])
+      .toArray()
     const byKey = new Map(existing.map((e) => [e.kind + ':' + e.value, e]))
     const puts: Ioc[] = slice.map((x) => {
-      const ex = byKey.get(x.kind + ':' + x.value)
+      const ex = byKey.get(x.kind + ':' + x.value) ?? (x.kind === 'url' ? byKey.get(x.kind + ':' + x.value.toLowerCase()) : undefined)
       if (!ex) return x
       return {
         ...ex,
@@ -240,7 +248,8 @@ async function rebuild(caseId: number): Promise<void> {
   const old = await db.iocs.where('caseId').equals(caseId).toArray()
   const checked = new Map(old.filter((i) => i.checkedAt).map((i) => [i.kind + ':' + i.value, i]))
   for (const x of ic.map.values()) {
-    const o = checked.get(x.kind + ':' + x.value)
+    // a URL checked by a version that kept no case is found under its lower-case form
+    const o = checked.get(x.kind + ':' + x.value) ?? (x.kind === 'url' ? checked.get(x.kind + ':' + x.value.toLowerCase()) : undefined)
     if (o) Object.assign(x, { reputation: o.reputation, verdict: o.verdict, tags: o.tags, checkedAt: o.checkedAt })
   }
   await db.transaction('rw', [db.facets, db.iocs], async () => {
@@ -250,7 +259,19 @@ async function rebuild(caseId: number): Promise<void> {
   await flushFacets(caseId, 'events', fcEvents)
   await flushFacets(caseId, 'mails', fcMails)
   await flushIocs(caseId, ic)
+  // every indicator of the case was counted again, so what an earlier import left out is resolved or replaced
+  if (ic.capped) await db.kv.put({ key: `iocs-capped-${caseId}`, value: { limit: IocCounter.limit, files: [], rebuilt: true } satisfies IocsCapped })
+  else await db.kv.delete(`iocs-capped-${caseId}`)
   post({ type: 'rebuilt', rows, iocs: ic.map.size })
+}
+
+/** Record that an import stopped collecting indicators, for the Indicators page, and say so in the console. */
+async function noteIocsCapped(caseId: number, file: string): Promise<void> {
+  const db = getDb()
+  const key = `iocs-capped-${caseId}`
+  const prev = (await db.kv.get(key))?.value as IocsCapped | undefined
+  await db.kv.put({ key, value: { ...prev, limit: IocCounter.limit, files: Array.from(new Set([...(prev?.files ?? []), file])) } satisfies IocsCapped })
+  post({ type: 'log', level: 'warn', text: `indicators: collection stopped at ${IocCounter.limit.toLocaleString('en-US')} distinct values; later ones of this file are not in the Indicators list` })
 }
 
 function hashesFromSysmon(h: unknown): string[] {
@@ -480,6 +501,7 @@ async function ingest(req: IngestRequest): Promise<void> {
     await flushFacets(caseId, 'events', fc)
     await flushFacets(caseId, 'mails', mailFc)
     await flushIocs(caseId, ic)
+    if (ic.capped) await noteIocsCapped(caseId, req.sourceName ?? file.name)
     // parsed here: the digest of the bytes the parser read stands where the server's would
     const serverHash = req.parseInBrowser ? '' : (st.done?.sha256 as string) || (st.meta?.sha256 as string) || ''
     const parsedHash = req.parseInBrowser ? String(st.done?.sha256 ?? '') : serverHash
@@ -515,6 +537,7 @@ async function ingest(req: IngestRequest): Promise<void> {
       await flushFacets(caseId, 'events', fc)
       await flushFacets(caseId, 'mails', mailFc)
       await flushIocs(caseId, ic)
+      if (ic.capped) await noteIocsCapped(caseId, req.sourceName ?? file.name)
     } catch {
       /* the original error is the one worth reporting */
     }

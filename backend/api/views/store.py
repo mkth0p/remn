@@ -9,7 +9,6 @@ from __future__ import annotations
 import hmac
 import json
 import logging
-import shutil
 import time
 from collections.abc import Iterator
 from typing import Any
@@ -25,14 +24,16 @@ from api.params import BadParameter, whole_number
 from api.views.upload import discard_upload, get_upload
 from services.analysis import hayabusa
 from services.common import ndjson_line
-from services.ingest.package import PackageSource
-from services.ingest.pipeline import EvtxSource, MailSource, MailStats, detect_mail_format
+from services.ingest import isolation
+from services.ingest.isolation import ParseStopped
+from services.ingest.package import request_budget
+from services.ingest.pipeline import MailStats, detect_mail_format
 from services.parsers import evtx_parser
 from services.parsers.mail import pst as pst_mod
 from services.parsers.mail.common import ParseContext
 from services.store import queries as Q
 from services.store import rules as R
-from services.store.casestore import KEY_RE, registry
+from services.store.casestore import KEY_RE, QueryStopped, StoreBusyError, StoreVersionError, TimeLimit, registry
 from services.store.sqlfilter import FilterError
 from services.store.writers import EventWriter, MailWriter
 
@@ -61,6 +62,28 @@ def _store(key: str, create: bool = True):
         return None, JsonResponse({"error": "invalid case key"}, status=400)
     except FileNotFoundError:
         return None, JsonResponse({"error": "unknown case store"}, status=404)
+    except StoreVersionError as exc:
+        # the message was written for the analyst and the operator: which versions, and what to do
+        return None, JsonResponse({"error": str(exc), "code": "storeVersion"}, status=409)
+    except StoreBusyError as exc:
+        busy = JsonResponse({"error": str(exc), "code": "storeBusy"}, status=503)
+        busy["Retry-After"] = "30"
+        return None, busy
+
+
+QUERY_STOPPED = (
+    "the query was stopped after {seconds} s, the most FORENSIC_STORE_QUERY_MAX_S allows one query on a server store. "
+    "Narrow the filter or the time range, or ask the operator to raise the limit."
+)
+
+
+def _limit() -> TimeLimit:
+    """The time one store query may take before it is stopped."""
+    return TimeLimit(settings.FORENSIC_STORE_QUERY_MAX_S, QUERY_STOPPED)
+
+
+def _stopped(exc: QueryStopped) -> JsonResponse:
+    return JsonResponse({"error": str(exc), "code": "queryStopped"}, status=504)
 
 
 def _ctx_from(settings_obj: dict[str, Any] | None) -> ParseContext:
@@ -101,7 +124,11 @@ def store_root(request: HttpRequest, key: str):
     st, err = _store(key, create=False)
     if err:
         return err
-    return JsonResponse(Q.summary(st))
+    try:
+        with _limit():
+            return JsonResponse(Q.summary(st))
+    except QueryStopped as exc:
+        return _stopped(exc)
 
 
 @require_http_methods(["DELETE"])
@@ -171,72 +198,57 @@ def ingest(request: HttpRequest, key: str):
         t0 = time.time()
         count = 0
         last = 0.0
+        stats: dict[str, Any] | None = None
+        partial = False
+        ew: EventWriter | None = None
+        if kind == "package":
+            parse_options = {
+                "ctx": ctx,
+                "include_raw": include_raw,
+                "package_id": str(meta.get("sha256") or ""),
+                "engines": hayabusa.engines(),
+                "filesystem": read_filesystem,
+                "budget": request_budget(),
+            }
+        elif kind == "evtx":
+            parse_options = {"include_raw": include_raw, "engines": hayabusa.available()}
+        else:
+            parse_options = {"ctx": ctx}
         try:
-            findings: list[dict[str, Any]] = []
-            engine_summaries: list[dict[str, Any]] = []
-            if kind == "package":
-                package = PackageSource(name, str(path), None, tmp_dir, ctx, include_raw, str(meta.get("sha256") or ""))
-                package.engines = hayabusa.engines()
-                package.filesystem = read_filesystem
-                ew = EventWriter(st, evidence_id, include_raw=include_raw)
-                pmw = MailWriter(st, evidence_id, keep_bodies=keep_bodies)
-                try:
-                    for row in package:
-                        (pmw if row["type"] == "mail" else ew).add(row)
-                        count += 1
-                        if time.time() - last > 0.5:
-                            job.update(rows=count, format=package.format, files=len(package.files))
-                            job.check()
-                            last = time.time()
-                finally:
-                    ew.flush()
-                    pmw.flush()
-                stats = package.stats()
+            ew = EventWriter(st, evidence_id, include_raw=include_raw) if kind in ("evtx", "package") else None
+            mw = MailWriter(st, evidence_id, keep_bodies=keep_bodies) if kind in ("mail", "package") else None
+            # the evidence is read in a process of its own; the rows come back here to be written
+            parse = isolation.start(
+                kind, name=name, path=str(path), data=None, tmp_dir=tmp_dir, options=parse_options, check=job.check, notify=lambda: job.update(phase="engines")
+            )
+            try:
+                for row in parse:
+                    (mw if kind == "mail" or row.get("type") == "mail" else ew).add(row)
+                    count += 1
+                    if time.time() - last > 0.5:
+                        job.update(rows=count, format=parse.format, files=parse.entries())
+                        job.check()
+                        last = time.time()
+            except ParseStopped as exc:
+                # what was read before the stop is in the store; the evidence says it is incomplete
+                stats = parse.result(str(exc))["stats"]
+                partial = True
+                raise
+            finally:
+                parse.close()
+                for writer in (ew, mw):
+                    if writer is not None:
+                        writer.flush()
+            result = parse.result()
+            stats = result["stats"]
+            if ew is not None:
                 count -= _already_in_case(stats, ew)
-                fmt = package.format
-                findings = hayabusa.resolve_refs(st, evidence_id, package.findings)
-                engine_summaries = package.engine_summaries
-            elif kind == "evtx":
-                src = EvtxSource(name, str(path), None, tmp_dir, include_raw=include_raw)
-                w = EventWriter(st, evidence_id, include_raw=include_raw)
-                for row in src:
-                    w.add(row)
-                    count += 1
-                    if time.time() - last > 0.5:
-                        job.update(rows=count, format=src.format, files=len(src.files))
-                        job.check()
-                        last = time.time()
-                w.flush()
-                stats = src.stats.to_dict()
-                stats["files"] = src.files
-                count -= _already_in_case(stats, w)
-                fmt = src.format
-                if hayabusa.available():
-                    job.update(phase="engines")
-                    # an archive gives the engine its .evtx members, and a format it cannot read is said, not run
-                    staged, said = hayabusa.stage_upload(name, str(path), None, src.format, tmp_dir)
-                    engine_summaries = [said]
-                    if staged is not None:
-                        try:
-                            found, summary = hayabusa.run(staged, tmp_dir)
-                        finally:
-                            shutil.rmtree(staged, ignore_errors=True)
-                        findings = hayabusa.resolve_refs(st, evidence_id, found)
-                        engine_summaries = [hayabusa.finish(summary, said)]
-            else:
-                src2 = MailSource(name, str(path), None, ctx, tmp_dir)
-                mw = MailWriter(st, evidence_id, keep_bodies=keep_bodies)
-                for row in src2:
-                    mw.add(row)
-                    count += 1
-                    if time.time() - last > 0.5:
-                        job.update(rows=count, format=src2.format)
-                        job.check()
-                        last = time.time()
-                mw.flush()
-                stats = src2.stats.to_dict()
-                fmt = src2.format
+            fmt = parse.format
+            findings = hayabusa.resolve_refs(st, evidence_id, parse.findings)
+            engine_summaries = result.get("engineSummaries") or []
         except Exception:
+            if partial and stats is not None and ew is not None:
+                count -= _already_in_case(stats, ew)
             st.upsert_evidence(
                 {
                     "id": evidence_id,
@@ -246,7 +258,7 @@ def ingest(request: HttpRequest, key: str):
                     "sha256Client": sha_client or None,
                     "sha256Server": meta.get("sha256"),
                     "count": count,
-                    "stats": None,
+                    "stats": stats,
                     "addedAt": evidence.get("addedAt"),
                     "status": "error",
                 }
@@ -431,7 +443,10 @@ def _query(request: HttpRequest, key: str, fn):
         return err
     body = _json(request) if request.method == "POST" else {}
     try:
-        return JsonResponse(fn(st, body), safe=False)
+        with _limit():
+            return JsonResponse(fn(st, body), safe=False)
+    except QueryStopped as exc:
+        return _stopped(exc)
     except (FilterError, BadParameter) as exc:
         return JsonResponse({"error": str(exc)}, status=400)
     except (duckdb.ProgrammingError, duckdb.DataError) as exc:
@@ -508,7 +523,10 @@ def facets(request: HttpRequest, key: str):
         return err
     try:
         limit = whole_number(request.GET.get("limit"), "limit", 50)
-        return JsonResponse(Q.facets(st, request.GET.get("source", "events"), request.GET.get("field", "eventId"), limit), safe=False)
+        with _limit():
+            return JsonResponse(Q.facets(st, request.GET.get("source", "events"), request.GET.get("field", "eventId"), limit), safe=False)
+    except QueryStopped as exc:
+        return _stopped(exc)
     except (FilterError, BadParameter) as exc:
         return JsonResponse({"error": str(exc)}, status=400)
 
@@ -519,7 +537,10 @@ def row(request: HttpRequest, key: str):
     if err:
         return err
     try:
-        r = Q.get_row(st, request.GET.get("source", "events"), int(request.GET.get("id", "0")))
+        with _limit():
+            r = Q.get_row(st, request.GET.get("source", "events"), int(request.GET.get("id", "0")))
+    except QueryStopped as exc:
+        return _stopped(exc)
     except ValueError:
         return JsonResponse({"error": "bad id"}, status=400)
     if r is None:
@@ -543,18 +564,22 @@ def iocs(request: HttpRequest, key: str):
         offset = whole_number(g.get("offset"), "offset", 0, minimum=0)
     except BadParameter as exc:
         return JsonResponse({"error": str(exc)}, status=400)
-    return JsonResponse(
-        Q.list_iocs(
-            st,
-            g.get("kind") or None,
-            g.get("q") or None,
-            g.get("bad") in ("1", "true"),
-            g.get("unchecked") in ("1", "true"),
-            limit,
-            offset,
-            g.get("sort", "verdict"),
-        )
-    )
+    try:
+        with _limit():
+            return JsonResponse(
+                Q.list_iocs(
+                    st,
+                    g.get("kind") or None,
+                    g.get("q") or None,
+                    g.get("bad") in ("1", "true"),
+                    g.get("unchecked") in ("1", "true"),
+                    limit,
+                    offset,
+                    g.get("sort", "verdict"),
+                )
+            )
+    except QueryStopped as exc:
+        return _stopped(exc)
 
 
 @require_POST
@@ -595,7 +620,9 @@ def rules_run(request: HttpRequest, key: str):
 
     def run(job: Job) -> dict[str, Any]:
         job.update(index=0, total=len(rules))
-        return R.run_rules(st, rules, rule_settings, progress=lambda p: job.update(**p), cancelled=lambda: job.cancelled)
+        return R.run_rules(
+            st, rules, rule_settings, progress=lambda p: job.update(**p), cancelled=lambda: job.cancelled, rule_max_s=settings.FORENSIC_STORE_RULE_MAX_S
+        )
 
     job = manager.submit("rules", key, run, label=f"{len(rules)} rules")
     return JsonResponse({"jobId": job.id})

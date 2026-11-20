@@ -223,8 +223,8 @@ function StoryRows({ stories, active, onSelect, views }: { stories: Story[]; act
             <span className="score">{s.score}</span>
             <span>{s.steps.length} steps</span>
             <span>{fmtNum(s.records)} records</span>
-            <span className={s.confidence === 'strong' ? 'bridged' : ''} title="the weakest tie of a flagged step">
-              {s.confidence} ties
+            <span className={s.confidence === 'high' ? 'bridged' : ''} title={s.confidenceBasis ?? 'how many of its flagged steps a record ties to it'}>
+              {s.confidence} confidence
             </span>
             <StoryCallTag view={views?.get(s.id)} />
           </div>
@@ -615,8 +615,12 @@ function StoryNote({
         </button>
         {check && !dirty && (
           <span className="small" role="status">
-            <Dot sev={check.status === 'verified' ? 'ok' : 'high'} />{' '}
-            {check.status === 'verified' ? `every value it names is in the story's records (${check.named.length})` : check.reasons.join('; ')}
+            <Dot sev={check.status === 'verified' ? 'ok' : check.status === 'nothing_to_check' ? 'info' : 'high'} />{' '}
+            {check.status === 'verified'
+              ? `every value it names is in the story's records (${check.named.length})`
+              : check.status === 'nothing_to_check'
+                ? 'it names no address, account or hash: nothing to check against the records'
+                : check.reasons.join('; ')}
           </span>
         )}
       </div>
@@ -1420,7 +1424,7 @@ export function StoriesView() {
                       <span className="muted" style={{ fontWeight: 400 }}>
                         {' '}
                         · <span title={scoreTitle(story)}>score {story.score}</span> · {story.steps.length} steps, {fmtNum(story.records)} records over {spanText(story.end - story.start)} ·{' '}
-                        <span title="the weakest tie of a flagged step: strong when records state it, medium when naming rules or time and place join it">{story.confidence} ties</span>
+                        <span title={story.confidenceBasis ?? 'how many of its flagged steps a record ties to it'}>{story.confidence} confidence</span>
                       </span>
                     </div>
                     <div className="small" style={{ color: 'var(--fg-1)' }}>
@@ -1449,7 +1453,7 @@ export function StoriesView() {
                     </span>
                   ))}
                   {story.hosts.map((h) => (
-                    <span key={h} className="pill" onClick={() => setEntity({ kind: 'host', value: h })} title="a host of the story">
+                    <span key={h} className="pill" onClick={() => setEntity({ kind: 'host', value: h })} title={res?.hosts.find((x) => x.key === h)?.basis ?? 'a host of the story'}>
                       <IconHost /> {h}
                     </span>
                   ))}

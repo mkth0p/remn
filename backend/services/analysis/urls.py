@@ -310,7 +310,9 @@ def unwrap_rewritten(url: str) -> tuple[str, str] | None:
                 decoded = unquote(cand.replace("-", "%").replace("_", "/"))
                 if decoded.startswith(("http://", "https://")):
                     return decoded, host
-    m = re.search(r"/v3/__(.+?)__;", url)  # Proofpoint v3
+    # Proofpoint v3, from the first marker of a line only (atomic group): when no "__;" follows it,
+    # none follows a later one either, and trying each marker again rescanned the rest of the line
+    m = re.search(r"(?m)^(?>.*?/v3/__)(.+?)__;", url)
     if m:
         inner = m.group(1).replace("*", "")
         if inner.startswith(("http://", "https://")):
@@ -525,7 +527,12 @@ def analyze_url(url: str, text: str | None = None, source: str = "text", _depth:
         # login_link so rules can still combine it with sender suspicion.
         risky = {"ip_literal", "punycode", "shortener", "suspicious_tld", "userinfo", "free_hosting", "unusual_port"}
         flags.append("credential_keywords" if risky & set(flags) else "login_link")
-    if re.search(r"[?&#](?:email|user|login|e|u|id)=[^&]*@", pq) or re.search(r"[A-Za-z0-9+/=]{20,}@", pq):
+    # a parameter's value is searched up to the next parameter, which is searched in its turn, and a
+    # run of base64 characters only from its start: retrying from each "?e=" or each character of a
+    # long run rescanned the rest of the URL (an address found either way is found this way)
+    if re.search(r"[?&#](?:email|user|login|e|u|id)=(?:(?![?#](?:email|user|login|e|u|id)=)[^&])*@", pq) or re.search(
+        r"(?<![A-Za-z0-9+/=])[A-Za-z0-9+/=]{20,}@", pq
+    ):
         flags.append("email_in_url")
     if re.search(r"(?:[?&#]|/)(?:[A-Za-z0-9+/]{40,}={0,2})(?:$|[&#/])", u):
         flags.append("base64_in_url")
@@ -619,7 +626,10 @@ def extract_urls(text: str | None, html: str | None) -> tuple[list[dict[str, Any
             u["flags"] = sorted(set(u["flags"]) | {"meta_refresh"})
             add(u)
         # Also scan raw HTML text for URLs not in anchors (obfuscated / plain text)
-        for m in URL_RE.finditer(re.sub(r"<[^>]+>", " ", html)):
+        # a "<" after the last ">" opens no tag: leaving that tail out keeps a page full of "<" from
+        # being rescanned to its end once per "<"
+        cut = html.rfind(">") + 1
+        for m in URL_RE.finditer(re.sub(r"<[^>]+>", " ", html[:cut]) + html[cut:]):
             add(analyze_url(m.group(0), None, source="html"))
     if text:
         for m in URL_RE.finditer(text):

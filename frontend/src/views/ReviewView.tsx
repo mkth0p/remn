@@ -397,7 +397,7 @@ export function ReviewView() {
     if (!kase || !modelReady()) return
     setSuggesting(true)
     try {
-      const run = await runTriage(kase, [it], reviews, { apply: false })
+      const run = await runTriage(kase, [it], reviews)
       if (run.errors.length) toast('err', run.errors.join('; '), 0)
       else if (!run.entries.length) toast('err', `the model gave no usable decision${run.rejected.length ? `: ${run.rejected[0]}` : ''}`, 0)
       reload()
@@ -429,7 +429,6 @@ export function ReviewView() {
       // take a critical incident out of the report with nobody looking. Each proposal waits on its
       // item, with its reason, for the analyst to apply or dismiss.
       const run = await runTriage(kase, items, reviews, {
-        apply: false,
         signal: controller.signal,
         onProgress: setTriage,
       })

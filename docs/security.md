@@ -19,6 +19,19 @@ Upload temporary files are deleted when the parse ends, including when the clien
 part-way through; a resumable chunked upload that is never completed is removed by the sweep
 described below. See [Storage modes](storage.md).
 
+REMN encrypts neither a store nor a backup of one, nor the browser's database. Evidence kept
+on a server therefore needs the disk under it encrypted: the cases folder
+(`FORENSIC_CASES_DIR`), the staging area (`FORENSIC_TMP_DIR`) and wherever store backups are
+written belong on an encrypted volume (LUKS on Linux, BitLocker on Windows, FileVault on
+macOS, or a cloud provider's encrypted disks), with the key kept off that disk. With Docker
+that is the disk that holds Docker's volumes `remn-data` and `remn-tmp` (under
+`/var/lib/docker` by default). This is the minimum for evidence on a server, not an option:
+without it, whoever has the disk, a copy of a backup or an image of the virtual machine reads
+every case. The volume protects a disk that is taken or discarded, not a running server:
+whoever reaches the API with the token, or logs in to the host, reads the cases as before.
+The analyst's own machine, where the browser store lives, is covered the same way by its
+system's disk encryption.
+
 ## What leaves the machine
 
 Nothing, unless the analyst switches it on:
@@ -60,6 +73,18 @@ pack importer download from their sources on request, never during an investigat
 - Parsed content is treated as hostile: React escaping, HTML previews in a sandboxed
   iframe with DOMPurify, images blocked, links disabled and defanged. Attachments are
   analysed statically, never opened or executed.
+- The regular expressions that read evidence take a time that grows with the length of the
+  text, not with its square: a pattern that backtracks would let one crafted field hold a
+  server worker or the browser for minutes. `tests/backend/test_regex_timing.py` and
+  `frontend/src/test/regexTiming.test.ts` find every pattern the code writes, and the `re`
+  patterns of the bundled rules, build hostile text from the parts of each pattern that
+  repeat, and fail on a pattern that runs past its budget at 100,000 characters, naming it
+  and its file. A pattern that reads no evidence, or whose caller limits the text it
+  searches, is listed in the test with the reason. The store runs a rule's `re` pattern
+  with RE2, which does not backtrack. The browser engine does: seven bundled rules and some
+  converted community rules keep a pattern that a crafted value of that length slows down,
+  in the rules worker rather than the page, because no rewrite that RE2 also accepts keeps
+  what they match.
 - The browser application carries a Content Security Policy (no inline script, scripts
   and workers from the app origin only, WebAssembly allowed for hashing, frames only for
   the sandboxed mail and report documents, no object or base tags) as a `<meta>` tag in
@@ -168,25 +193,41 @@ finishes.
   The sweep covers Django's own multipart spool as well as the chunked staging area: a request
   that dies part-way through a single-request upload leaves a file there too. It also covers the
   parsers' own staging, the `.member`, `.decoded` and `.manifest` files a parse writes while it
-  works. A parse releases those itself, and a process killed mid-parse cannot.
-- **A total budget.** `FORENSIC_TMP_MAX_GB` (4 by default) caps what the staging area may hold at
-  once. A new upload that would exceed it triggers a sweep and is then refused with 507, so a
-  stream of abandoned uploads cannot fill the disk however short the lifetime is.
+  works and the folders it expands a 7z into or stages event logs in for Hayabusa. A parse
+  releases those itself, and a process killed mid-parse cannot. A parse still reading an expanded
+  7z touches its folder as it takes each member, so the age is the time since last use. At
+  startup, when nothing is being parsed, all of it is removed whatever its age; chunked uploads
+  stay, since a client can resume them. The total budget below counts those folders too.
+- **A total budget.** `FORENSIC_TMP_MAX_GB` caps what the staging area may hold at once: 4 in
+  browser-only mode, and otherwise 0, which is the free space of the disk under the staging area
+  less a tenth of that disk (at most 10 GiB) kept for the case stores and the system. A configured
+  total is never taken as more than that disk can hold. A file larger than the whole budget is
+  refused with 413 and a message naming what sets the budget, since waiting cannot change it. A
+  new upload that fits the budget but not what other uploads hold now triggers a sweep and is
+  then refused with 507, saying how much is held and how much is free, so a stream of abandoned
+  uploads cannot fill the disk however short the lifetime is. One archive member copied out for
+  parsing may take at most half the budget, and never more than 4 GiB.
 - **Private to the server account.** The staging directory is 0700 and each staged file 0600, so
   evidence in transit is not readable by other accounts on the host.
 - **A ceiling on what one parse holds.** A package parse holds artifacts back to decode them in
   groups, and that hold is capped per request rather than per archive, so nesting cannot multiply
-  it. A client that disconnects mid-parse releases everything the parse was holding rather than
+  it. Everything a package parse holds in the staging area at once, the member being read at each
+  nesting level, an expanded 7z and a decoded cabinet included, stays within what the area had
+  room for when the parse began. An archive expands to at most 200 times its own size, and never
+  less than 64 MiB; that counts what a compressed tar decompresses to pass over a member and what
+  a 7z decompresses to reach one, and the members past it are listed as skipped with the reason.
+  A client that disconnects mid-parse releases everything the parse was holding rather than
   stranding it for the sweeper to find later.
 - **A ceiling on how long one parse runs.** `FORENSIC_INGEST_MAX_S` (30 minutes in
   browser-only mode, off otherwise) ends an ingest stream at the limit with the rows already
-  sent, an error line saying why, and the result marked incomplete. The limit is checked
-  between archive members as well as between rows, so an archive whose members produce no
-  rows cannot walk around it. The rate limiter shapes how
+  sent, an error line saying why, and the result marked incomplete. The parse process is asked
+  to stop at the limit and is killed five seconds later if it has not, so a parser stuck inside
+  one record or one archive member cannot outlast it. The rate limiter shapes how
   fast requests arrive, not how many are in flight, and the server cannot reap a request once it
   is running; this is what stops a few slow parses holding every worker thread indefinitely.
 - **External engines under the same bounds.** Hayabusa, when installed, runs as a separate
-  process watched for memory (`HAYABUSA_MAX_MB`, 1536 by default and 768 in the public
+  process that starts without the server's environment, over the event logs the parse process
+  staged (regular files only, moved out of the parse's folder first), watched for memory (`HAYABUSA_MAX_MB`, 1536 by default and 768 in the public
   compose), output (256 MiB) and time (`HAYABUSA_MAX_S`, 300 s by default, and never past the
   request deadline), and is killed rather than trusted past any of them. Only
   `HAYABUSA_CONCURRENCY` runs share the box at once, one by default, so two uploads cannot add
@@ -200,10 +241,14 @@ finishes.
   browser-only mode, 256 otherwise) is not parsed; it becomes an error row that says why. An
   archive member larger than half the staging budget is not copied out, and bzip2, xz and
   LZMA data inside attachments and archives is expanded only up to the analysis limit, with
-  the attachment flagged as a decompression bomb when it goes past it.
+  the attachment flagged as a decompression bomb when it goes past it. A tar inside an
+  attachment is walked over at most that analysis limit of data, whatever compression it
+  carries, and over at most 10,000 headers and 10 seconds; an attachment whose walk stops early
+  is flagged as partly analysed.
 - **Every member accounted for.** An archive's members are listed in the stream's last line
-  as parsed (with their row count), skipped or failed, with the reason: too large, encrypted,
-  a compression method that is not read, not a mail file, not an event log. Nothing is left
+  as parsed (with their row count), skipped or failed, with the reason: too large, past the
+  archive's expansion allowance, encrypted, a compression method that is not read, not a mail
+  file, not an event log. Nothing is left
   out without a line saying so.
 - **Rules read without expansion.** The Sigma and Sublime converters take YAML from visitors,
   and a safe YAML loader is safe against object construction, not against anchors that each
@@ -274,9 +319,86 @@ empty, the root filesystem refuses writes, the staging area reports as tmpfs, an
 hostname, to a raw address on 443 and to a resolver on 53 all fail, while a 14 MiB EVTX still
 parses to 6000 events with a matching digest.
 
-What remains is that an exploit still gets execution inside that container for the life of one
-request, and can read whatever else is staged at that moment. Isolating each parse into its own
-throwaway sandbox is the next step and is not configuration.
+What remains is that an exploit still gets execution inside that container, which the next
+section bounds further.
+
+### Each parse in a process of its own
+
+Every parse of uploaded evidence runs in a process the server starts for that parse and removes
+after it (`backend/services/ingest/isolation.py`): event logs and their archives, mail of every
+format including PST, packages and collections, the attachment analysis inside them, and a
+single attachment dropped for analysis. The server keeps the stream to the browser, the writes
+to the case store, the statistics and per-file entries, Hayabusa, the deadline and the cancel of
+a job. The parse process sends its rows back in batches, as JSON, one message a line; nothing it
+sends is unpickled or run, and no line it sends is longer than the server is prepared to hold.
+
+That process:
+
+- **Starts without the server's environment.** It gets the path, the locale and time zone and,
+  on Windows, the variables an interpreter needs to start: not the access token, not the provider
+  keys, not anything else the server was started with. It does not load the server's settings
+  either, only the few a parser reads (the staging area, the message and staging limits, the YARA
+  rules folder, logging). The native decoders it starts, and Hayabusa, which the server starts,
+  get the same environment.
+- **Works in a folder of its own** in the staging area, which the server removes when the parse
+  ends, however it ends, and which the staging budget and the sweep count like the other folders
+  a parse uses.
+- **Is stopped at its limits, and says so.** At the deadline, at its memory limit, at its
+  processor-time limit, when the job is cancelled, or when it dies, the parse process is
+  stopped and the processes it started go with it. The rows read before the stop are kept; the
+  stream's error line or the job's error says what stopped it and while reading which member;
+  the result is marked incomplete, and the members it had not finished are errors with the
+  reason. A member that ran the parse out of memory and was given up says so on its entry, and
+  the parse goes on with the next one.
+
+What each system enforces:
+
+| | Linux | macOS | Windows |
+|---|---|---|---|
+| The server's environment and settings | not passed | not passed | not passed |
+| Memory, `FORENSIC_PARSE_MAX_MB` (4096; 1024 in browser-only mode) | the kernel refuses private memory past the limit (`RLIMIT_DATA`) and the parse stops with what it read; the server also watches resident memory, shared memory included, and kills the process past the limit and a margin | the server watches resident memory every 50 ms and kills the process past the limit | the server watches the larger of the working set and the committed private memory every 50 ms and kills the process past the limit |
+| Processor time, `FORENSIC_PARSE_MAX_CPU_S` (six hours) | the kernel (`RLIMIT_CPU`) | the kernel (`RLIMIT_CPU`) | not enforced: that takes a job object, which the standard library does not offer; the deadline, where one is set, is the bound |
+| Deadline, `FORENSIC_INGEST_MAX_S` | asked to stop, killed five seconds later with its process group | as Linux | asked to stop, killed five seconds later with the processes under it the server can see |
+| Network | none, where the system lets an unprivileged process have a network namespace of its own: the process has no interface, loopback included; otherwise not isolated | not isolated | not isolated |
+| Another account, `FORENSIC_PARSE_UID` | when the server runs as root | when the server runs as root | not available |
+| Core dumps | off | off | not applicable |
+
+The server logs what took effect at the first parse, and again if it changes (`parse processes:
+memory kernel, processor time kernel, network none (namespace), account 1000`). Ubuntu 24.04
+restricts unprivileged user namespaces through AppArmor, and Docker's default seccomp profile
+refuses them, so there the network line says it is not isolated and why; in
+`docker-compose.public.yml` the container's internal network is what keeps a parse off the
+network. Nothing in the parse process checks its own sockets: a check inside a process that may
+have been taken over is not a boundary, so where the system offers none, this page says so
+instead.
+
+What a parse process still reaches is what its account can. As the server's own account, that
+is the staging area with any other upload in it, the case stores, and a `.env` file if the
+configuration is kept in one: the access token is then in that file even though it is not in the
+environment. Running the server as root with `FORENSIC_PARSE_UID` set to an unprivileged account
+(a name or a number) closes that on Linux and macOS: the parse runs as that account, in a folder
+it owns (0700), on evidence the server hands it by a link, and the staging area, the case stores
+and the configuration stay the server's. The interpreter, the virtual environment and the code
+must then be readable by that account and the folders above the staging area passable; the
+server lets other accounts pass through the staging folder, not list it. Nothing requires it: a
+container that runs as an unprivileged user, as the public compose does, and gets its token as an
+environment variable already keeps the token out of the parse's reach, since no file in the
+container holds it.
+
+A parse process that has been taken over can still fill the disk under the staging area or
+`/dev/shm`, and can start processes that leave its process group and outlive it. Containing that
+takes something this server does not set up: a container (the public compose), cgroups or a job
+object.
+
+Starting the parse process adds about 0.2 s to every file. On an archive of 90,000 synthetic
+events the browser-store stream was 7% slower and the server-store ingest 25% shorter, because
+the parse and the writes to the store then run side by side on two cores.
+
+`FORENSIC_PARSE_ISOLATION=0` parses inside the server process, as before. It is for debugging a
+parser, and it gives up everything above: the parser then runs with the token, the keys and every
+case store in reach, without a memory or a processor-time limit, without a network namespace or
+another account, and the deadline is checked only between records and archive members, so a
+parser stuck inside one record holds its worker thread until it returns.
 
 The per-address budget reads the **rightmost** X-Forwarded-For entry, the one the trusted proxy
 observed and appended, not the leftmost, which is whatever the client sent. Caddy's default
@@ -311,8 +433,11 @@ change to the case:
   text that addresses a model, an assistant or a reviewer is found before the model reads
   it: the result opens with a notice naming the rows, the chat shows the text, the AI
   ledger records it, and every proposal the run makes afterwards is marked so that
-  "accept all" leaves it for a one-by-one look. The triage pass marks the proposals on items
-  whose own text does the same (`frontend/src/ai/evidence.ts`, `evidence.test.ts`).
+  "accept all" leaves it for a one-by-one look; so is one made after evidence too long for
+  the check to read whole. The triage pass marks every proposal of a batch in which any item
+  does the same (`frontend/src/ai/evidence.ts`, `evidence.test.ts`). The check is a handful
+  of English patterns and finds about one in four of an invented set of payloads; what it
+  misses goes through "accept all" unmarked ([AI analyst](ai.md#evidence-that-addresses-the-model)).
 - Every prompt on those paths says the case text is evidence, never an instruction, and
   that a record asking to be ignored or marked benign is evidence of intent to be named
   in the reason (`backend/services/ai/prompts.py`, `claude_code.py`, the triage

@@ -143,7 +143,7 @@ function corsHint(base: string): string {
     hint +=
       ` REMN is served from ${origin}, so your local Ollama must allow that origin, then be restarted:` +
       ` Windows: setx OLLAMA_ORIGINS "${origin}";` +
-      ` macOS app: launchctl setenv OLLAMA_ORIGINS "${origin}" (the menu-bar app does not read shell exports);` +
+      ` macOS: curl -fsSL ${origin}/ollama-mac.sh | bash -s -- ${origin} (sets it for good and restarts Ollama);` +
       ` Linux service: add Environment="OLLAMA_ORIGINS=${origin}" with systemctl edit ollama.` +
       ` Allow the browser's local-network prompt if it shows one, and turn off shields or ad blockers that block localhost for this site.` +
       ` Only localhost addresses are reachable from this page.` +
@@ -169,10 +169,13 @@ class BrowserOllamaTransport implements AiTransport {
   readonly endpoint: string
   private base: string
   private caps = new Map<string, string[]>()
+  private refused: string | null
 
   constructor(baseUrl: string) {
     this.base = (baseUrl || 'http://localhost:11434').replace(/\/+$/, '')
     this.endpoint = this.base
+    // the prompts carry evidence excerpts: an address typed by mistake must not receive the case
+    this.refused = isLocalModelUrl(this.base) ? null : `REMN only talks to an Ollama on this machine or your local network, not to ${this.base}.`
   }
 
   private cfgNumCtx(meta: AiMeta): number {
@@ -196,6 +199,11 @@ class BrowserOllamaTransport implements AiTransport {
   }
 
   async chatTurn(p: ChatTurnParams, onChunk: (c: ChatChunk) => void, signal?: AbortSignal): Promise<void> {
+    if (this.refused) {
+      onChunk({ type: 'error', error: this.refused })
+      onChunk({ type: 'done', model: p.model || '', stats: {} })
+      return
+    }
     let meta: AiMeta
     try {
       meta = await fetchAiMeta()
@@ -205,7 +213,13 @@ class BrowserOllamaTransport implements AiTransport {
       return
     }
     const cfg = useStore.getState().aiConfig
+    // the analyst's pick, the server's OLLAMA_MODEL, else the first model this Ollama lists; the answer names the one used
     const model = p.model || cfg.model || meta.defaultModel || (await this.firstInstalledModel())
+    if (!model) {
+      onChunk({ type: 'error', error: `no model is chosen and the Ollama at ${this.base} lists none: pull one there (ollama pull <model>) or pick one in Settings` })
+      onChunk({ type: 'done', model: '', stats: {} })
+      return
+    }
     const wire = this.wireMessages(p.messages, meta)
     const system = composeSystem(p.mode, p.context, meta)
     if (system) {
@@ -292,6 +306,7 @@ class BrowserOllamaTransport implements AiTransport {
   }
 
   async queryJson(question: string, context: Record<string, unknown>, model?: string) {
+    if (this.refused) throw new Error(this.refused)
     const meta = await fetchAiMeta()
     const cfg = useStore.getState().aiConfig
     const useModel = model || cfg.model || meta.defaultModel || (await this.firstInstalledModel())
@@ -338,6 +353,7 @@ class BrowserOllamaTransport implements AiTransport {
   }
 
   async listModels(): Promise<ModelInfo[]> {
+    if (this.refused) throw new Error(this.refused)
     const resp = await fetch(`${this.base}/api/tags`, { signal: AbortSignal.timeout(6000) }).catch((e) => {
       throw new Error(corsHint(this.base) + ` (${(e as Error).message})`)
     })
@@ -347,6 +363,7 @@ class BrowserOllamaTransport implements AiTransport {
   }
 
   async capabilities(model: string): Promise<string[]> {
+    if (this.refused) return []
     if (this.caps.has(model)) return this.caps.get(model)!
     try {
       const resp = await fetch(`${this.base}/api/show`, {
@@ -718,13 +735,11 @@ export function pickClaudeModel(requested: string | undefined, configured: strin
   return c && isClaudeName(c) ? c : 'sonnet'
 }
 
+/** Whether the connector can be used; the server says nothing about the account signed in. */
 export interface ClaudeStatus {
   enabled: boolean
   available: boolean
-  version: string | null
   loggedIn: boolean
-  account: string | null
-  method: string | null
   error: string | null
 }
 

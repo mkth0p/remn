@@ -200,6 +200,8 @@ async function restoreRecords(
     ...original,
     id: undefined,
     name: name ?? `${original.name} (imported)`,
+    // external lookups send the case's indicators to third parties: the analyst who imports the case decides
+    settings: { ...original.settings, networkAllowed: false },
     serverKey: original.storage === 'server' ? newServerKey() : undefined,
     restoring: { lock, since: Date.now() },
   }

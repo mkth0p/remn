@@ -13,6 +13,7 @@ import os
 import secrets
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent  # backend/
@@ -144,12 +145,38 @@ FORENSIC_UPLOAD_SWEEP_S = _env_int("FORENSIC_UPLOAD_SWEEP_S", 300)
 # like. Off on a private instance; an instance open to strangers gets thirty minutes.
 FORENSIC_INGEST_MAX_S = _env_int("FORENSIC_INGEST_MAX_S", 1800 if FORENSIC_BROWSER_ONLY else 0)
 # Total bytes the staging area may hold. A new upload is refused above it, after a sweep, so a
-# stream of abandoned uploads cannot fill the disk however short the lifetime is.
-FORENSIC_TMP_MAX_GB = _env_int("FORENSIC_TMP_MAX_GB", 4)
+# stream of abandoned uploads cannot fill the disk however short the lifetime is. 0 is the free
+# space of the disk under FORENSIC_TMP_DIR, less a tenth of that disk (at most 10 GiB) kept for the
+# case stores and the system: a fixed 4 GiB under a 64 GiB chunked-upload limit refused every
+# larger mailbox or collection. An instance open to strangers keeps a fixed total.
+FORENSIC_TMP_MAX_GB = _env_int("FORENSIC_TMP_MAX_GB", 4 if FORENSIC_BROWSER_ONLY else 0)
 # The largest single message (eml, msg, or one message of an mbox) that is parsed. Parsing holds
 # about a dozen copies of a message in memory, so a 128 MiB message inside a 128 KiB zip took the
 # parser past 1.7 GiB. A larger message gets an error row that says why it was not read.
 FORENSIC_MAX_MESSAGE_MB = _env_int("FORENSIC_MAX_MESSAGE_MB", 48 if FORENSIC_BROWSER_ONLY else 256)
+# Each parse of uploaded evidence runs in a process of its own (services/ingest/isolation.py, and
+# docs/security.md for what each system enforces). 0 parses inside the server process, for
+# debugging only: a parser bug in a hostile file then reaches the access token, the provider keys
+# and every case store, and the memory and processor-time limits below no longer apply.
+FORENSIC_PARSE_ISOLATION = _env_bool("FORENSIC_PARSE_ISOLATION", True)
+# The memory one parse process may use, in MiB; past it the parse stops with what it had read.
+# A message is held about a dozen times over while it is parsed, so this sits well above twelve
+# times FORENSIC_MAX_MESSAGE_MB. 0 is no limit.
+FORENSIC_PARSE_MAX_MB = _env_int("FORENSIC_PARSE_MAX_MB", 1024 if FORENSIC_BROWSER_ONLY else 4096)
+# The processor time one parse process may use, in seconds, where the system enforces it (Linux and
+# macOS). It stops a parser caught in a loop on a server without FORENSIC_INGEST_MAX_S. 0 is no limit.
+FORENSIC_PARSE_MAX_CPU_S = _env_int("FORENSIC_PARSE_MAX_CPU_S", 6 * 3600)
+# An account (name or number) the parse processes run as when the server runs as root on Linux or
+# macOS. Empty runs them as the server's own account. A name the system does not know stops the
+# server here rather than every parse later.
+FORENSIC_PARSE_UID = os.environ.get("FORENSIC_PARSE_UID", "").strip()
+if FORENSIC_PARSE_UID and not FORENSIC_PARSE_UID.isdigit() and os.name == "posix":
+    import pwd
+
+    try:
+        pwd.getpwnam(FORENSIC_PARSE_UID)
+    except KeyError:
+        raise ImproperlyConfigured(f"FORENSIC_PARSE_UID: no account named {FORENSIC_PARSE_UID!r} on this system") from None
 # Advisory threshold (MB) above which the UI suggests the server store instead of IndexedDB.
 FORENSIC_STORE_THRESHOLD_MB = _env_int("FORENSIC_STORE_THRESHOLD_MB", 150)
 # Files smaller than this are handled fully in memory by the parsers.
@@ -164,11 +191,10 @@ FRONTEND_DIST = ROOT_DIR / "frontend" / "dist"
 # Ollama
 # ---------------------------------------------------------------------------
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4-hauhaucs:latest")
+# The model used when the analyst picks none. Empty: the first model the Ollama lists, named in the answer.
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "").strip()
 OLLAMA_NUM_CTX = _env_int("OLLAMA_NUM_CTX", 32768)
 OLLAMA_TIMEOUT = _env_int("OLLAMA_TIMEOUT", 600)
-# Claude Code connector: the server runs the local "claude" command line as the analyst model
-# (evidence excerpts leave the machine for Anthropic). Operators can switch it off.
 # Hayabusa, Sigma over EVTX, as an optional detection engine. Found on PATH or at HAYABUSA_PATH,
 # with its rules beside the binary or at HAYABUSA_RULES. Every ingested event log is handed to
 # it when present; HAYABUSA_ENABLED=0 keeps it out of ingest without uninstalling it.
@@ -185,7 +211,10 @@ HAYABUSA_CONCURRENCY = _env_int("HAYABUSA_CONCURRENCY", 1)
 HAYABUSA_WAIT_S = _env_int("HAYABUSA_WAIT_S", 20)
 # Replaces the option set wholesale for a release whose flags moved; see services/analysis/hayabusa.py
 HAYABUSA_ARGS = os.environ.get("HAYABUSA_ARGS", "").strip()
-CLAUDE_CODE_ENABLED = _env_bool("CLAUDE_CODE_ENABLED", True)
+# Claude Code connector: the server runs the local "claude" command line as the analyst model,
+# with the sign-in of the account that runs the server, for every analyst who picks it; evidence
+# excerpts leave the machine for Anthropic. Off unless an operator turns it on.
+CLAUDE_CODE_ENABLED = _env_bool("CLAUDE_CODE_ENABLED", False)
 CLAUDE_CODE_BIN = os.environ.get("CLAUDE_CODE_BIN", "").strip()
 CLAUDE_CODE_TIMEOUT = _env_int("CLAUDE_CODE_TIMEOUT", 600)
 
@@ -210,6 +239,19 @@ OFFLINE_LISTS_DIR = DATA_DIR / "lists"
 YARA_RULES_DIR = DATA_DIR / "yara"
 # Server-side case stores (DuckDB, one folder per case) for gigabyte-scale evidence.
 CASES_DIR = Path(os.environ.get("FORENSIC_CASES_DIR", DATA_DIR / "cases"))
+# Memory (MiB) and worker threads each open case store may use; 0 threads is one fewer than the
+# processors, between 2 and 8. Every open store has its own, so the memory of the stores open at
+# once adds up: keep it under what the machine or container gives REMN.
+FORENSIC_STORE_MEMORY_MB = _env_int("FORENSIC_STORE_MEMORY_MB", 2048)
+FORENSIC_STORE_THREADS = _env_int("FORENSIC_STORE_THREADS", 0)
+# A store nobody has used for this many seconds is closed, and its memory released, as soon as no
+# request or job holds it; its next use opens it again. 0 keeps every store open until the server stops.
+FORENSIC_STORE_IDLE_S = _env_int("FORENSIC_STORE_IDLE_S", 600)
+# How long one query on a server store (search, count, aggregate, stack, timeline, facets, pivot,
+# row, summary, SQL) may run, and one rule of a rule run, before it is stopped and the analyst is
+# told so. 0 is no limit.
+FORENSIC_STORE_QUERY_MAX_S = _env_int("FORENSIC_STORE_QUERY_MAX_S", 60)
+FORENSIC_STORE_RULE_MAX_S = _env_int("FORENSIC_STORE_RULE_MAX_S", 300)
 
 # Bundled detection rules (YAML)
 RULES_DIR = ROOT_DIR / "rules"

@@ -1,15 +1,14 @@
 """
 Evidence ingestion for browser-stored cases. The server never stores anything:
 the upload lives in a request-scoped temp file (or a completed chunked upload),
-is hashed, parsed and streamed back as NDJSON.
+is hashed, parsed in a process of its own (services/ingest/isolation.py) and
+streamed back as NDJSON.
 """
 
 from __future__ import annotations
 
-import io
 import json
 import logging
-import shutil
 import time
 from collections.abc import Iterator
 from typing import Any
@@ -22,9 +21,12 @@ from api.errors import failure
 from api.views.upload import discard_upload, get_upload
 from forensic.build import build_id
 from services.analysis import hayabusa
-from services.analysis.attachments.analyzer import analyze_attachment
 from services.common import ndjson_line, sha256_chunks
-from services.ingest.pipeline import DeadlineExceeded, EvtxSource, MailSource, detect_mail_format, iter_mbox_fileobj
+from services.ingest import isolation
+from services.ingest.isolation import ParseStopped
+from services.ingest.package import request_budget
+from services.ingest.pipeline import DeadlineExceeded, detect_mail_format, iter_mbox_fileobj
+from services.ingest.staging import member_ceiling
 from services.parsers.mail import pst as pst_mod
 from services.parsers.mail.common import ParseContext
 
@@ -115,7 +117,7 @@ def _expired(deadline: float | None) -> bool:
 def _max_member() -> int:
     """The largest archive member copied out for parsing: never more than half the staging budget,
     so one member of a small upload cannot fill the area every other visitor's upload shares."""
-    return min(4 * 1024**3, int(settings.FORENSIC_TMP_MAX_GB) * 1024**3 // 2)
+    return member_ceiling()
 
 
 def _members_line_stats(members: list[dict[str, Any]], limit: int = 2000) -> dict[str, Any]:
@@ -127,21 +129,22 @@ def _members_line_stats(members: list[dict[str, Any]], limit: int = 2000) -> dic
     return {"members": members[:limit], "membersTotal": len(members), "memberCounts": counts}
 
 
-def _engine_lines(src, fmt: str, tmp_dir: str, deadline: float | None) -> Iterator[bytes]:
-    """Hayabusa over the upload's event logs, its detections as finding lines and one summary line."""
-    remaining = max(1.0, deadline - time.monotonic()) if deadline else None
-    # an archive gives the engine its .evtx members, and a format it cannot read is said, not run
-    staged, said = hayabusa.stage_upload(src.name, src.path, src.data, fmt, tmp_dir)
-    if staged is None:
-        yield ndjson_line({"type": "engine", **said})
-        return
-    try:
-        findings, summary = hayabusa.run(staged, tmp_dir, deadline_s=remaining)
-    finally:
-        shutil.rmtree(staged, ignore_errors=True)
-    for finding in findings:
+def _stop_line(exc: Exception, what: str) -> dict[str, Any]:
+    """The error line of a parse that ended early. A limit is said as it is, for the analyst; any
+    other failure is logged under a reference and the client gets its type and the reference."""
+    if isinstance(exc, DeadlineExceeded):
+        return {"error": DEADLINE_REASON}
+    if isinstance(exc, ParseStopped):
+        return {"error": str(exc)}
+    return failure(what, exc, log)
+
+
+def _engine_lines(parse, result: dict[str, Any]) -> Iterator[bytes]:
+    """Hayabusa's detections over the upload's event logs as finding lines, and its summary lines."""
+    for finding in parse.findings:
         yield ndjson_line({"type": "finding", **finding})
-    yield ndjson_line({"type": "engine", **hayabusa.finish(summary, said)})
+    for summary in result.get("engineSummaries") or []:
+        yield ndjson_line({"type": "engine", **summary})
 
 
 def _stream(gen: Iterator[bytes]) -> StreamingHttpResponse:
@@ -186,15 +189,17 @@ def ingest_evtx(request: HttpRequest):
     def gen() -> Iterator[bytes]:
         n = 0
         deadline = _deadline()
+        parse = None
         # The terminal line is yielded after the try, never inside a finally: a client that goes away
         # closes this generator at a yield, and a yield in a finally then aborts the cleanup below it.
         try:
-            evsrc = EvtxSource(src.name, src.path, src.data, tmp_dir, include_raw=include_raw, max_member=_max_member(), deadline=deadline)
             engines = hayabusa.engines() if request.POST.get("engines", "1") != "0" else []
+            options = {"include_raw": include_raw, "max_member": _max_member(), "engines": bool(engines)}
+            parse = isolation.start("evtx", name=src.name, path=src.path, data=src.data, tmp_dir=tmp_dir, options=options, deadline=deadline)
             yield ndjson_line(
                 {
                     "type": "meta",
-                    "format": evsrc.format,
+                    "format": parse.format,
                     "name": src.name,
                     "size": src.size,
                     "sha256": src.sha256,
@@ -203,25 +208,26 @@ def ingest_evtx(request: HttpRequest):
                     "parser": build_id(),
                 }
             )
+            error = None
             try:
-                for row in evsrc:
+                for row in parse:
                     row["type"] = "event"
                     yield ndjson_line(row)
                     n += 1
                     if _expired(deadline):
                         raise DeadlineExceeded()
-                if engines:
-                    yield from _engine_lines(src, evsrc.format, tmp_dir, deadline)
-            except DeadlineExceeded:
-                evsrc.stats.errors += 1
-                yield ndjson_line({"type": "error", "error": DEADLINE_REASON, "emitted": n})
+                yield from _engine_lines(parse, parse.result())
             except Exception as exc:  # noqa: BLE001
-                evsrc.stats.errors += 1
-                yield ndjson_line({"type": "error", **failure("the parse of the event log", exc, log), "emitted": n})
-            stats = evsrc.stats.to_dict()
-            stats["files"] = evsrc.files
-            yield ndjson_line({"type": "done", "format": evsrc.format, "stats": stats, "emitted": n, "sha256": src.sha256, "parser": build_id()})
+                error = _stop_line(exc, "the parse of the event log")
+            # a parse stopped here (the deadline, an error) reports what it had read before it ends
+            parse.stop()
+            if error is not None:
+                yield ndjson_line({"type": "error", **error, "emitted": n})
+            result = parse.result(error["error"] if error else None)
+            yield ndjson_line({"type": "done", "format": parse.format, "stats": result["stats"], "emitted": n, "sha256": src.sha256, "parser": build_id()})
         finally:
+            if parse is not None:
+                parse.close()
             src.cleanup()
 
     return _stream(gen())
@@ -247,9 +253,11 @@ def ingest_mail(request: HttpRequest):
     def gen() -> Iterator[bytes]:
         n = 0
         deadline = _deadline()
+        parse = None
         # as for event logs: the terminal line is never yielded from a finally, so cleanup always runs
         try:
-            msrc = MailSource(src.name, src.path, src.data, ctx, tmp_dir, max_member=_max_member(), deadline=deadline)
+            options = {"ctx": ctx, "max_member": _max_member()}
+            parse = isolation.start("mail", name=src.name, path=src.path, data=src.data, tmp_dir=tmp_dir, options=options, deadline=deadline)
             yield ndjson_line(
                 {
                     "type": "meta",
@@ -261,24 +269,27 @@ def ingest_mail(request: HttpRequest):
                     "parser": build_id(),
                 }
             )
+            error = None
             try:
-                for row in msrc:
+                for row in parse:
                     row["type"] = "mail"
                     yield ndjson_line(row)
                     n += 1
                     if _expired(deadline):
                         raise DeadlineExceeded()
-            except DeadlineExceeded:
-                msrc.stats.errors += 1
-                yield ndjson_line({"type": "error", "error": DEADLINE_REASON, "emitted": n})
             except Exception as exc:  # noqa: BLE001
-                msrc.stats.errors += 1
-                yield ndjson_line({"type": "error", **failure("the parse of the mail", exc, log), "emitted": n})
-            stats = msrc.stats.to_dict()
-            if msrc.members:
-                stats.update(_members_line_stats(msrc.members))
-            yield ndjson_line({"type": "done", "format": msrc.format, "stats": stats, "emitted": n, "sha256": src.sha256, "parser": build_id()})
+                error = _stop_line(exc, "the parse of the mail")
+            parse.stop()
+            if error is not None:
+                yield ndjson_line({"type": "error", **error, "emitted": n})
+            result = parse.result(error["error"] if error else None)
+            stats = result["stats"]
+            if result.get("members"):
+                stats.update(_members_line_stats(result["members"]))
+            yield ndjson_line({"type": "done", "format": parse.format, "stats": stats, "emitted": n, "sha256": src.sha256, "parser": build_id()})
         finally:
+            if parse is not None:
+                parse.close()
             src.cleanup()
 
     return _stream(gen())
@@ -298,56 +309,79 @@ def analyze_single_attachment(request: HttpRequest):
         return JsonResponse({"error": "file too large for single-attachment analysis (200 MB max)"}, status=413)
     f.seek(0)
     data = f.read()
-    result = analyze_attachment(f.name, data, f.content_type)
-    return JsonResponse({"type": "attachment", "result": result})
-
-
-def _unused() -> None:
-    _ = io, Any
+    # the analysers (oletools, pypdf, YARA, the archive readers) read the file in a process of its own
+    parse = isolation.start(
+        "attachment",
+        name=f.name,
+        path=None,
+        data=data,
+        tmp_dir=str(settings.FILE_UPLOAD_TEMP_DIR),
+        options={"content_type": f.content_type},
+        deadline=_deadline(),
+    )
+    try:
+        for _row in parse:
+            pass
+    except DeadlineExceeded:
+        return JsonResponse({"error": DEADLINE_REASON}, status=422)
+    except ParseStopped as exc:
+        return JsonResponse({"error": str(exc)}, status=422)
+    finally:
+        parse.close()
+    return JsonResponse({"type": "attachment", "result": parse.result()["result"]})
 
 
 @require_POST
 def ingest_package(request: HttpRequest):
-    from services.ingest.package import PackageSource
-
     if (err := _too_large(request)) is not None:
         return err
     src = _Source(request)
     if src.error is not None:
         return src.error
     source_name = str(request.POST.get("sourceName") or src.name)[:2048]
-    package = PackageSource(
-        source_name, src.path, src.data, str(settings.FILE_UPLOAD_TEMP_DIR), _ctx_from_request(request), request.POST.get("raw", "1") != "0", src.sha256
-    )
-
-    package.engines = hayabusa.engines() if request.POST.get("engines", "1") != "0" else []
-    package.filesystem = request.POST.get("filesystem") == "1"
+    engines = hayabusa.engines() if request.POST.get("engines", "1") != "0" else []
+    options = {
+        "ctx": _ctx_from_request(request),
+        "include_raw": request.POST.get("raw", "1") != "0",
+        "package_id": src.sha256,
+        "engines": engines,
+        "filesystem": request.POST.get("filesystem") == "1",
+    }
+    tmp_dir = str(settings.FILE_UPLOAD_TEMP_DIR)
 
     def gen() -> Iterator[bytes]:
-        rows = iter(package)
         deadline = _deadline()
+        parse = None
+        stopped = None
         try:
-            yield ndjson_line({"type": "meta", "format": package.format, "name": src.name, "size": src.size, "sha256": src.sha256, "engines": package.engines})
-            for row in rows:
-                yield ndjson_line(row)
-                if _expired(deadline):
-                    # Closing the iterator runs the package's own cleanup, which releases every
-                    # artifact it was holding back for group decoding.
-                    rows.close()
-                    package.inventory_complete = False
-                    yield ndjson_line({"type": "error", "error": DEADLINE_REASON})
-                    break
-            for finding in package.findings:
-                yield ndjson_line({"type": "finding", **finding})
-            for summary in package.engine_summaries:
-                yield ndjson_line({"type": "engine", **summary})
-            yield ndjson_line({"type": "done", "format": package.format, "stats": package.stats(), "sha256": src.sha256})
+            parse = isolation.start(
+                "package", name=source_name, path=src.path, data=src.data, tmp_dir=tmp_dir, options={**options, "budget": request_budget()}, deadline=deadline
+            )
+            yield ndjson_line({"type": "meta", "format": parse.format, "name": src.name, "size": src.size, "sha256": src.sha256, "engines": engines})
+            try:
+                for row in parse:
+                    yield ndjson_line(row)
+                    if _expired(deadline):
+                        raise DeadlineExceeded()
+            except (DeadlineExceeded, ParseStopped) as exc:
+                stopped = _stop_line(exc, "the parse of the package")["error"]
+            if stopped:
+                # stopping the parse runs the package's own clean-up, which releases every artifact
+                # it was holding back for group decoding
+                parse.stop()
+                yield ndjson_line({"type": "error", "error": stopped})
+            result = parse.result(stopped)
+            yield from _engine_lines(parse, result)
+            yield ndjson_line({"type": "done", "format": parse.format, "stats": result["stats"], "sha256": src.sha256})
         except Exception as exc:  # noqa: BLE001
-            yield ndjson_line({"type": "error", **failure("the parse of the package", exc, log)})
-            package.inventory_complete = False
-            yield ndjson_line({"type": "done", "format": package.format, "stats": package.stats(), "sha256": src.sha256})
+            line = failure("the parse of the package", exc, log)
+            yield ndjson_line({"type": "error", **line})
+            if parse is not None:
+                parse.stop()
+                yield ndjson_line({"type": "done", "format": parse.format, "stats": parse.result(stopped or line["error"])["stats"], "sha256": src.sha256})
         finally:
-            rows.close()
+            if parse is not None:
+                parse.close()
             src.cleanup()
 
     return _stream(gen())

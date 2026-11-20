@@ -24,6 +24,7 @@ OPS = {
     "not_endswith",
     "re",
     "not_re",
+    "re_cs",
     "gt",
     "gte",
     "lt",
@@ -81,7 +82,7 @@ def _walk_cond(cond, rule_id: str):
         field, _, op = key.partition("|")
         assert field, f"{rule_id}: empty field in {key!r}"
         assert not op or op in OPS, f"{rule_id}: unknown operator {op!r} in {key!r}"
-        if op in ("re", "not_re"):
+        if op in ("re", "not_re", "re_cs"):
             for pat in value if isinstance(value, list) else [value]:
                 re.compile(str(pat).replace("(?i)", ""))
 
@@ -106,6 +107,13 @@ def test_rules_have_no_duplicate_keys_and_valid_shape():
             assert re.match(r"^\d+(ms|s|m|h|d|w)$", str(d["window"])), f"{rid}: bad window"
         for t in d.get("attack", []):
             assert re.match(r"^T\d{4}(\.\d{3})?$", t), f"{rid}: bad ATT&CK id {t}"
+
+
+def test_no_shipped_rule_asks_for_what_the_engines_would_refuse():
+    from services.store.rules import rule_problem
+
+    refused = {d["id"]: why for _, d in _docs() if (why := rule_problem(d))}
+    assert not refused, refused
 
 
 @pytest.mark.parametrize("path", sorted(RULES.rglob("*.yaml")))

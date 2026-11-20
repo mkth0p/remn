@@ -11,12 +11,14 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from services.store.casestore import CaseStore, q
+from services.store.casestore import CaseStore, QueryStopped, TimeLimit, q
 from services.store.sqlfilter import Ctx, FilterError, _setting, compile_cond, resolve
 
 SEVERITIES = ["info", "low", "medium", "high", "critical"]
-_DUR = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(ms|s|m|h|d|w)?\s*$", re.I)
-_THR = re.compile(r"^\s*(>=|<=|==|=|>|<|!=)?\s*(\d+)\s*$")
+# the spaces after an optional unit or comparator belong to it: two runs of spaces side by side
+# with nothing between them were split every way before a value that does not match
+_DUR = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(?:(ms|s|m|h|d|w)\s*)?$", re.I)
+_THR = re.compile(r"^\s*(?:(>=|<=|==|=|>|<|!=)\s*)?(\d+)\s*$")
 MAX_FINDINGS = 2000  # findings a rule keeps when it sets no max_findings; mirrors rules/engine.ts MAX_FINDINGS
 MAX_REFS = 5000  # mirrors rules/engine.ts MAX_REFS
 COLLAPSE_AFTER = 200
@@ -43,6 +45,8 @@ _GROUPABLE = {
 # The tables a rule may read. The source is written into the SQL text, so anything else is refused
 # before a query is built: a stacked statement there rewrote the evidence rows.
 RULE_SOURCES = ("events", "mails")
+# what a rule stopped at its time limit says, in the run's errors
+RULE_STOPPED = "stopped after {seconds} s, the most FORENSIC_STORE_RULE_MAX_S allows one rule on a server store; it has no findings in this run"
 
 
 def rule_source(rule: dict[str, Any]) -> str:
@@ -155,7 +159,26 @@ def _where_sql(rule: dict[str, Any], settings: dict[str, Any], ctx: Ctx, ts_fiel
     return where
 
 
+def rule_problem(rule: dict[str, Any]) -> str | None:
+    """Why neither engine would run a rule as written, or None. A key the engines would skip
+    without a word is refused instead, so the author learns the rule does less than it says.
+    Mirrors validateRule in frontend/src/rules/engine.ts."""
+    if not rule.get("group_by") and not parse_threshold(rule.get("threshold")):
+        unused = [k for k in ("then", "window", "distinct", "any_in_group") if rule.get(k)]
+        if unused:
+            return f"{', '.join(unused)} need group_by or threshold: without them the rule gives one finding per row"
+    then = rule.get("then")
+    if then is not None and not (isinstance(then, dict) and then.get("where")):
+        return "then needs a where: the follow-up to look for"
+    if rule.get("then_flags") and rule.get("source") != "mails":
+        return "then_flags applies to mail rules only: events carry no flags"
+    return None
+
+
 def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any], notes: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    problem = rule_problem(rule)
+    if problem:
+        raise FilterError(problem)
     source = rule_source(rule)
     ts_field = "date" if source == "mails" else "ts"
     ctx = Ctx(source=source, settings=settings)
@@ -554,9 +577,10 @@ def rule_not_applicable(rule: dict[str, Any], event_ids: set[int], channels: set
 
 def present_selectors(store: CaseStore) -> tuple[set[int], set[str]]:
     """Distinct event ids and channel names of the store (one scan each; lower-cased channels)."""
-    with store.lock:
-        ids = {int(r[0]) for r in store._con.execute('SELECT DISTINCT "eventId" FROM events WHERE "eventId" IS NOT NULL').fetchall()}
-        chans = {str(r[0]).lower() for r in store._con.execute("SELECT DISTINCT channel FROM events WHERE channel IS NOT NULL").fetchall()}
+    # a cursor of its own, so that a time limit can stop the scan
+    cur = store.cursor()
+    ids = {int(r[0]) for r in cur.execute('SELECT DISTINCT "eventId" FROM events WHERE "eventId" IS NOT NULL').fetchall()}
+    chans = {str(r[0]).lower() for r in cur.execute("SELECT DISTINCT channel FROM events WHERE channel IS NOT NULL").fetchall()}
     return ids, chans
 
 
@@ -638,8 +662,10 @@ def run_rules(
     progress: Callable[[dict[str, Any]], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
     diagnose: bool = True,
+    rule_max_s: float = 0,
 ) -> dict[str, Any]:
-    """Every enabled rule on the store. diagnose=False leaves out why a rule found nothing (a second scan per such rule), for a caller that only wants the findings."""
+    """Every enabled rule on the store. diagnose=False leaves out why a rule found nothing (a second scan per such rule), for a caller that only wants the findings.
+    rule_max_s stops a rule that runs longer (0: no limit); the run says so in its errors and goes on with the next rule."""
     all_findings: list[dict[str, Any]] = []
     by_rule: dict[str, int] = {}
     errors: list[dict[str, str]] = []
@@ -647,8 +673,10 @@ def run_rules(
     present: tuple[set[int], set[str]] | None = None
     if any(r.get("source") == "events" for r in rules):
         try:
-            present = present_selectors(store)
+            with TimeLimit(rule_max_s, RULE_STOPPED):
+                present = present_selectors(store)
         except Exception:  # noqa: BLE001
+            # without the list every rule is run, which finds the same and costs more
             present = None
     for i, rule in enumerate(rules):
         if cancelled and cancelled():
@@ -667,7 +695,12 @@ def run_rules(
                 continue
         notes: dict[str, Any] = {}
         try:
-            found = run_rule(store, rule, settings, notes)
+            with TimeLimit(rule_max_s, RULE_STOPPED):
+                found = run_rule(store, rule, settings, notes)
+        except QueryStopped as exc:
+            errors.append({"ruleId": rule.get("id", "?"), "error": str(exc)})
+            found = []
+            failed = True
         except Exception as exc:  # noqa: BLE001
             errors.append({"ruleId": rule.get("id", "?"), "error": str(exc)[:300]})
             found = []
@@ -688,7 +721,8 @@ def run_rules(
             )
         if not found and not failed and diagnose:
             try:
-                diagnostics.append(diagnose_zero(store, rule, settings))
+                with TimeLimit(rule_max_s, RULE_STOPPED):
+                    diagnostics.append(diagnose_zero(store, rule, settings))
             except Exception as exc:  # noqa: BLE001
                 diagnostics.append(
                     {

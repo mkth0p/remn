@@ -223,14 +223,14 @@ export function ReportView() {
     unsupported: printedChecks.filter((c) => c.status === 'unsupported').length,
     contradicted: printedChecks.filter((c) => c.status === 'contradicted').length,
     texts: claims.texts.length,
-    textsUnsupported: claims.texts.filter((t) => t.check.status !== 'verified').length,
+    textsUnsupported: claims.texts.filter((t) => t.check.status === 'unsupported').length,
   }
   const unverified = [
     ...shown.flatMap((f) => {
       const c = f.id != null ? claims?.findings[f.id] : undefined
       return c && c.status !== 'verified' ? [{ what: `${f.title} (${f.ruleId})`, status: c.status, reasons: c.reasons }] : []
     }),
-    ...(claims?.texts ?? []).filter((t) => t.check.status !== 'verified').map((t) => ({ what: t.what, status: t.check.status, reasons: t.check.reasons })),
+    ...(claims?.texts ?? []).filter((t) => t.check.status === 'unsupported').map((t) => ({ what: t.what, status: t.check.status, reasons: t.check.reasons })),
   ]
   const checks = preflightChecks({ evidence, rules: rulesState, undecided, aiDecided: aiDecided(findings), unprintedConfirmed: hiddenConfirmed.length + hiddenStories, claims: claimSummary })
   const status = issueStatus(checks, issue)
@@ -555,7 +555,13 @@ export function ReportView() {
                   multiple={false}
                   onFiles={(f) =>
                     importCaseBundle(f[0], setProgress)
-                      .then((id) => toast('ok', `case imported (#${id}) - switch to it from the case selector`))
+                      .then((id) =>
+                        toast(
+                          'ok',
+                          `case imported (#${id}) - switch to it from the case selector. External lookups are off in the imported case whatever the bundle had; switch them on there if it may use them.`,
+                          9000,
+                        ),
+                      )
                       .catch((e) => toast('err', e.message, 0))
                   }
                 >

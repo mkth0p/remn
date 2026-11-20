@@ -36,7 +36,15 @@ over rather than left empty. Open demo case opens the Northstar lab in the brows
 The sidebar collapses to an icon rail with the button at its foot, remembered per
 browser.
 
-On every list, `j` and `k` move the selection and `/` focuses the search. The Review page
+A page that fails while it is drawn shows what failed in its place, with "try again",
+"reload the page" and the details to copy, and the console says so; the sidebar and the
+other pages stay usable. When the browser does not let the app open its database at start
+(a private window, site data turned off, storage full, a database written by a newer
+version), the page says so and why instead of waiting.
+
+On the Mails and Findings lists, `j` and `k` move the selection and `/` focuses the search;
+the Stories, Graph and Review pages move between their steps or cards with `j` and `k` too.
+The other lists, Events and Indicators among them, are used with the mouse. The Review page
 adds `r`, `e`, `f` and `x` for its decisions.
 
 ## Evidence
@@ -47,7 +55,9 @@ added. "Verify" re-hashes a copy of the file and compares. Removing a file delet
 everything derived from it, as described on the [storage page](storage.md).
 A file that records a gap in itself (records missing from its numbering, a chunk that
 fails its checksum, an audit log export cut at a service limit) carries a "gaps" badge,
-and its detail lists what it cannot show.
+and its detail lists what it cannot show. An import still running has a "cancel" button on
+its line in the jobs list, which stops it and removes what it had written, as described on
+the [storage page](storage.md#uploads-and-jobs).
 
 ## Events and Mails
 
@@ -60,7 +70,9 @@ store keeps apart from the mail row. Values picked in one facet are alternatives
 them); picking one again removes it. A facet lists its 500 most frequent values, and its
 search box reaches every stored value; a field with more distinct values than one import
 counts says so. Times follow the display setting and the column headers say which zone
-they show; the time range is always entered in UTC. An entry added to the case timeline
+they show; a UTC time ends in `Z` and a local time ends in its offset from UTC
+(`2026-03-04 10:15:00+01:00`), so a time copied elsewhere keeps its zone. The time range is
+always entered in UTC. An entry added to the case timeline
 from a row that has no event time (a collection snapshot) says "no event time" rather
 than taking the time of the click.
 
@@ -110,7 +122,8 @@ history), and pivots to the filtered Events or Mails lists or to the analyst.
 
 The Timeline page draws events and mails over time, one chart per source that has data,
 with the curated case-timeline entries (see Case notes below) marked on it. Clicking a
-point narrows the lists to that time.
+point narrows the lists to that time. When the events, the mails, the findings or the case
+timeline cannot be read, a line above the chart says which and why, and the rest is drawn.
 
 ## Findings
 
@@ -144,10 +157,7 @@ for a rule that fires on clean machines), times 1.5 when its rule fired on one h
 case (or for one user, when it names no host) of at least three, or 0.75 when it fired on half
 of them or more. A rule that raised several findings on the same host (or for the same user)
 has each of them divided by 1 + ln n, n being that count: the tenth finding of one rule on a
-host tells less than the first finding of another, which is how stacking works. With it, the
-first finding of an attack came into the top ten of a case built from clean hosts with one
-recording added in 47%, 38% and 76% of the attack_data, EVTX-to-MITRE-Attack and
-EVTX-ATTACK-SAMPLES recordings, against 46%, 31% and 60% without, at detection level 3. A
+host tells less than the first finding of another, which is how stacking works. A
 finding folded below the case's detection level counts as the findings it stands for.
 Other rules on the same host or for the same user within 24 hours add a
 point each and a point more for each other ATT&CK tactic among them, up to 6. The same rule on
@@ -158,12 +168,9 @@ a quarter of its score. The case also learns from its own review: each finding o
 analyst marks false positive in this case halves the score of the rule's other findings on that
 host and takes a fifth off its findings on the other hosts (findings on the same entities are the
 memory's, not counted twice), so the queue moves past what is benign on this network as the
-analyst works down it. On cases built from clean hosts with one recording merged in, an analyst
-dismissing each benign line from the top read 27%, 24% and 12% fewer lines before the first
-finding of the attack on the attack_data, EVTX-to-MITRE-Attack and EVTX-ATTACK-SAMPLES
-recordings, and 30%, 32% and 21% fewer with the host refold of the
-[detection level](detection.md#detection-level); other factors from 0.3 to 0.7 on the same host
-and 0.6 to 1 elsewhere did about as well. The model's decisions do not count, and the memory
+analyst works down it. The weights were chosen on cases built from clean hosts with one
+attack recording merged in; the script and the cases of that comparison are not in the
+repository, so no figure from it is given here. The model's decisions do not count, and the memory
 never leaves the browser. Reviewed and false-positive findings sort below the others. The priority column shows
 the score and the reasons that moved it ("1 of 40 hosts", "+2 rules, 1 tactic", "rule
 dismissed 2x", "false positive before"), its tooltip and the finding flyout say each in a sentence ("marked false
@@ -273,6 +280,12 @@ value as a cyber-observable and makes an indicator only of the values a reputati
 flagged, with identifiers derived from the content (an export imported twice is the same
 objects), an identity for the case and a TLP:AMBER marking. On a browser-only server the
 page offers no lookups, which the server refuses; it says so and offers the exports.
+Values are listed without regard to case, except the path and query of a URL, which keep
+theirs (another case there can be another resource); the search ignores case. In a
+browser-store case one import collects up to 50,000 distinct indicators; when a file
+reaches that, the page names it and says that indicators first seen later in it are not
+listed, and the console says so at the import. The recount after evidence is removed meets
+the same limit over the whole case, and the page says so when it does.
 
 ## AI analyst
 
@@ -379,16 +392,21 @@ server case are checked alike:
   that chain's or incident's own rows;
 - the executive summary: the addresses and hashes it names are somewhere in the evidence.
 
-A claim is verified, unsupported (a row it cites is gone, or a value it names is in none of
-its rows) or contradicted (its rows say otherwise). Each rule's line in the report reads "rows
-checked", "rows missing" or "rows disagree" and names its first row by its place in its own
-file (`frontend/src/data/recordKeys.ts`): an event log's record number with the computer and
-channel, a mailbox's message number, a cloud record's own id, under the file whose SHA-256
-the evidence table prints. REMN's row ids change when evidence is removed and added again or a
-bundle is imported into another browser; these references do not, and a reader can check them
-in any tool. A text that names what its rows do not hold says so under it, every claim that
-does not hold is listed under "Where it stops" and on the Report page, and the preflight keeps
-the report a draft until they all hold or the analyst waives the check with a reason.
+A claim holds (a finding's rows match it as above; a text's rows hold every value it names),
+is unsupported (a row it cites is gone, or a value it names is in none of its rows) or is
+contradicted (its rows say otherwise). A text that names no address, account or hash has
+nothing to check: the report says so under it and counts it apart, and it does not count as
+holding. A text that holds has its values in its rows; the check does not show that what it
+says about them is true. The method section gives the count of each. Each rule's line in the
+report reads "rows checked", "rows missing" or "rows disagree" and names its first row by
+its place in its own file (`frontend/src/data/recordKeys.ts`): an event log's record number
+with the computer and channel, a mailbox's message number, a cloud record's own id, under
+the file whose SHA-256 the evidence table prints. REMN's row ids change when evidence is
+removed and added again or a bundle is imported into another browser; these references do
+not, and a reader can check them in any tool. A text that names what its rows do not hold
+says so under it, every claim that does not hold is listed under "Where it stops" and on the
+Report page, and the preflight keeps the report a draft until they all hold or the analyst
+waives the check with a reason.
 
 The printed report (`frontend/src/data/reportHtml.ts`) is one self-contained HTML file in
 REMN's own look, laid out for A4 and print-to-PDF. Every time in it is UTC, whatever the
@@ -462,9 +480,12 @@ AI transport and model, described on the [AI page](ai.md).
 
 At the bottom are the two destructive actions. "Delete all case data" empties the case
 (every row, finding, note and session, and the server store when it has one) and keeps
-the case with its settings. "Delete this case" removes the case itself, custom rules and
-settings included, and switches to the most recently updated remaining case, or to a
-fresh one when none is left. Both ask for confirmation and neither can be undone.
+the case with its settings; when the server does not confirm that its store is gone (the
+request is refused or the server cannot be reached), nothing is deleted in the browser
+either and the message gives the server's answer. "Delete this case" removes the case
+itself, custom rules and settings included, and switches to the most recently updated
+remaining case, or to a fresh one when none is left; a server store it could not remove
+is named in a message. Both ask for confirmation and neither can be undone.
 
 ## Interface tests
 

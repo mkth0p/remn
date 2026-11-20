@@ -7,6 +7,7 @@ work identically for browser-stored and server-stored cases.
 
 from __future__ import annotations
 
+import atexit
 import importlib.util
 import json
 import logging
@@ -16,7 +17,10 @@ import shutil
 import sys
 import threading
 import time
-from collections.abc import Iterable
+import weakref
+from collections.abc import Callable, Iterable
+from contextvars import ContextVar
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +38,124 @@ from services.parsers.evtx_parser import FIELD_MAP
 log = logging.getLogger(__name__)
 
 KEY_RE = re.compile(r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$")
+
+# The layout of the store this code writes. It goes up by one, with a step in MIGRATIONS, when a
+# store needs changing before this code can read it, or when an older REMN would misread a store
+# this code wrote. A column added for new rows needs neither: an older store gets it when opened,
+# and an older REMN does not read it.
+SCHEMA_VERSION = 1
+
+
+def _to_version_1(con: duckdb.DuckDBPyConnection) -> None:
+    """Version 1 is the layout stores had when the version began to be recorded. A store written
+    before reaches it with what every open does anyway, adding the tables and columns it lacks, so
+    this step has nothing of its own to change."""
+
+
+# MIGRATIONS[n] brings a store at version n - 1 to version n. The steps run in order, in the same
+# transaction as the version they lead to, when the store is opened.
+MIGRATIONS: dict[int, Callable[[duckdb.DuckDBPyConnection], None]] = {1: _to_version_1}
+
+
+class StoreVersionError(RuntimeError):
+    """A case store this version cannot read. It is refused before anything in it is changed."""
+
+
+class StoreBusyError(RuntimeError):
+    """A case store another program holds open (a backup, a restore, a second server on the same folder)."""
+
+
+class QueryStopped(Exception):
+    """A query on a store stopped at its time limit. The message says which limit and what to do."""
+
+
+def schema_version(con: duckdb.DuckDBPyConnection) -> int | None:
+    """The schema version a store records, or None when it records none: a new file, or a store
+    written before the version was recorded."""
+    if not con.execute("SELECT count(*) FROM duckdb_tables() WHERE schema_name = 'main' AND table_name = 'meta'").fetchone()[0]:
+        return None
+    row = con.execute("SELECT value FROM meta WHERE key = 'schema-version'").fetchone()
+    if row is None:
+        return None
+    try:
+        return int(row[0])
+    except (TypeError, ValueError):
+        raise StoreVersionError(
+            f"this case store records a schema version this version of REMN cannot read ({str(row[0])[:40]!r}). It was not opened and nothing in it was changed."
+        ) from None
+
+
+# How DuckDB says another process holds the file: a lock it could not take elsewhere, a
+# sharing violation on Windows, or the same file opened here in another mode.
+_HELD = ("Could not set lock", "File is already open in", "being used by another process", "different configuration")
+
+
+def held_elsewhere(exc: duckdb.Error) -> bool:
+    """Whether opening a store failed because another connection holds the file."""
+    text = str(exc)
+    return any(marker in text for marker in _HELD)
+
+
+_time_limit: ContextVar[TimeLimit | None] = ContextVar("store_time_limit", default=None)
+
+
+class TimeLimit:
+    """Stops the queries a block runs on case stores once `seconds` have passed, and raises
+    QueryStopped with `message` ("{seconds}" in it is filled in). 0 or less is no limit.
+
+    DuckDB has no statement timeout. A watcher interrupts every cursor that CaseStore.cursor() hands
+    out inside the block, and repeats the interrupt until the block ends, since an interrupt that
+    lands between two statements is cleared by the next one. A block inside another is watched by
+    both."""
+
+    def __init__(self, seconds: float, message: str) -> None:
+        self.seconds = float(seconds or 0)
+        self.message = message
+        self.stopped = False
+        self._cursors: list[duckdb.DuckDBPyConnection] = []
+        self._lock = threading.Lock()
+        self._done = threading.Event()
+        self._outer: TimeLimit | None = None
+        self._token: Any = None
+
+    def watch(self, con: duckdb.DuckDBPyConnection) -> duckdb.DuckDBPyConnection:
+        limit: TimeLimit | None = self
+        while limit is not None:
+            with limit._lock:
+                limit._cursors.append(con)
+            limit = limit._outer
+        return con
+
+    def _interrupt(self) -> None:
+        if self._done.wait(self.seconds):
+            return
+        self.stopped = True
+        while True:
+            with self._lock:
+                cursors = list(self._cursors)
+            for con in cursors:
+                try:
+                    con.interrupt()
+                except duckdb.Error:
+                    pass
+            if self._done.wait(0.05):
+                return
+
+    def __enter__(self) -> TimeLimit:
+        if self.seconds > 0:
+            self._outer = _time_limit.get()
+            self._token = _time_limit.set(self)
+            threading.Thread(target=self._interrupt, name="store-time-limit", daemon=True).start()
+        return self
+
+    def __exit__(self, kind: type[BaseException] | None, exc: BaseException | None, tb: Any) -> None:
+        if self._token is None:
+            return
+        self._done.set()
+        _time_limit.reset(self._token)
+        self._token = None
+        if self.stopped and isinstance(exc, duckdb.InterruptException):
+            raise QueryStopped(self.message.replace("{seconds}", f"{self.seconds:g}")) from exc
 
 
 def settle(con: duckdb.DuckDBPyConnection) -> None:
@@ -489,10 +611,22 @@ def _arrow_table(columns: list[tuple[str, tuple[str, Any]]], rows: list[dict[str
     return pa.table(arrays)
 
 
-class CaseStore:
-    """One DuckDB database per case. Writes are serialised with a lock; reads use per-call cursors."""
+def _release(con: duckdb.DuckDBPyConnection, key: str) -> None:
+    """Close a store's connection: its memory goes back and the file is free for another program."""
+    try:
+        con.close()
+    except duckdb.Error as exc:
+        log.debug("case store %s: close: %s", key, exc)
 
-    def __init__(self, root: Path, key: str) -> None:
+
+class CaseStore:
+    """One DuckDB database per case. Writes are serialised with a lock; reads use per-call cursors.
+
+    `memory_mb` and `threads` are what DuckDB may use for this store (threads 0: one fewer than the
+    processors, between 2 and 8). The connection is closed by close(), or when nothing holds the
+    store any more."""
+
+    def __init__(self, root: Path, key: str, memory_mb: int = 2048, threads: int = 0) -> None:
         if not KEY_RE.match(key):
             raise ValueError("invalid case key")
         self.key = key
@@ -500,13 +634,21 @@ class CaseStore:
         self.dir.mkdir(parents=True, exist_ok=True)
         self.path = self.dir / "case.duckdb"
         self.lock = threading.RLock()
-        self._con = duckdb.connect(str(self.path))
         try:
-            threads = max(2, min(8, (os.cpu_count() or 4) - 1))
-            self._con.execute(f"SET threads TO {threads}")
-            self._con.execute("SET memory_limit = '2GB'")
-        except duckdb.Error:
-            pass
+            self._con = duckdb.connect(str(self.path))
+        except duckdb.Error as exc:
+            if held_elsewhere(exc):
+                raise StoreBusyError(
+                    "the case store is open in another program (a backup or restore with tools/store_backup.py, or a second REMN server on the "
+                    "same folder), so it was not opened. Try again when that program has finished."
+                ) from exc
+            raise
+        threads = threads if threads > 0 else max(2, min(8, (os.cpu_count() or 4) - 1))
+        for statement in (f"SET threads TO {int(threads)}", f"SET memory_limit = '{int(memory_mb)}MiB'"):
+            try:
+                self._con.execute(statement)
+            except duckdb.Error as exc:
+                log.warning("case store %s: %s did not apply: %s", key, statement, exc)
         # the store never reads or writes files through SQL: block read_csv / COPY TO / ATTACH / extension
         # loading so the raw SQL endpoint and the analyst's `sql` tool cannot touch the server's filesystem.
         # The settings are read back, and a store whose lockdown did not take effect (a setting renamed
@@ -526,50 +668,92 @@ class CaseStore:
             self._con.close()
             log.error("case store %s not opened: its lockdown did not take effect (%s)", key, applied)
             raise RuntimeError("case store not opened: its lockdown did not take effect")
-        self._init_schema()
-        self._next: dict[str, int] = {}
-        for t in ("events", "mails", "attachments", "urls"):
-            self._next[t] = int(self._con.execute(f"SELECT coalesce(max(id), 0) FROM {t}").fetchone()[0]) + 1
+        # a store this code cannot read, or whose upgrade fails, is closed rather than kept half-open
+        try:
+            self._init_schema()
+            self._next: dict[str, int] = {}
+            for t in ("events", "mails", "attachments", "urls"):
+                self._next[t] = int(self._con.execute(f"SELECT coalesce(max(id), 0) FROM {t}").fetchone()[0]) + 1
+        except BaseException:
+            _release(self._con, key)
+            raise
         self.last_used = time.time()
+        self._closer = weakref.finalize(self, _release, self._con, key)
 
     def _init_schema(self) -> None:
+        """Bring the store to SCHEMA_VERSION: check the version it records before anything is changed,
+        then run the upgrade steps it needs and add the tables and columns it lacks, all in one
+        transaction, and record what was done in the store and in the log."""
+        con = self._con
         with self.lock:
-            for t, cols in TABLES.items():
-                self._con.execute(_ddl(t, cols, pk='kind, value, "evidenceId"' if t == "iocs" else ('"mailId"' if t == "mail_bodies" else None)))
-            self._con.execute(
-                'CREATE TABLE IF NOT EXISTS evidence (id INTEGER PRIMARY KEY, name VARCHAR, kind VARCHAR, format VARCHAR, size BIGINT, "sha256Client" VARCHAR, "sha256Server" VARCHAR, count BIGINT, stats VARCHAR, "addedAt" BIGINT, status VARCHAR)'
-            )
-            self._con.execute(
-                'CREATE TABLE IF NOT EXISTS ioc_reputation (kind VARCHAR, value VARCHAR, verdict VARCHAR, tags VARCHAR[], summary VARCHAR, verdicts VARCHAR, "checkedAt" BIGINT, PRIMARY KEY (kind, value))'
-            )
-            self._con.execute("CREATE TABLE IF NOT EXISTS meta (key VARCHAR PRIMARY KEY, value VARCHAR)")
-            # columns added after a store was created (enrichment passes): add them in place
-            for t, cols in TABLES.items():
-                have = {r[1] for r in self._con.execute(f"PRAGMA table_info('{t}')").fetchall()}
-                for n, typ in cols:
-                    if n not in have:
-                        self._con.execute(f"ALTER TABLE {t} ADD COLUMN {q(n)} {typ[0]}")
-                        if t == "events" and n in PARSER_SOURCES:
-                            # rows written before the column existed: the same value from the EventData
-                            src = ", ".join(f"nullif(trim(json_extract_string(data, '$.\"{k}\"')), '-')" for k in PARSER_SOURCES[n])
-                            self._con.execute(f"UPDATE events SET {q(n)} = coalesce({src}) WHERE data IS NOT NULL")
+            found = schema_version(con)
+            if found is None and con.execute("SELECT count(*) FROM duckdb_tables() WHERE schema_name = 'main'").fetchone()[0]:
+                found = 0  # written before the version was recorded
+            if found is not None and found > SCHEMA_VERSION:
+                raise StoreVersionError(
+                    f"this case store was written by a newer version of REMN (store schema {found}; this version reads up to {SCHEMA_VERSION}). "
+                    "It was not opened and nothing in it was changed. Run the version that wrote it, or restore the backup taken before that "
+                    "version was installed (docs/setup.md, Backup and upgrade)."
+                )
+            added: dict[str, list[str]] = {}
+            con.execute("BEGIN TRANSACTION")
+            try:
+                for step in range((found or 0) + 1, SCHEMA_VERSION + 1) if found is not None else ():
+                    MIGRATIONS[step](con)
+                for t, cols in TABLES.items():
+                    con.execute(_ddl(t, cols, pk='kind, value, "evidenceId"' if t == "iocs" else ('"mailId"' if t == "mail_bodies" else None)))
+                con.execute(
+                    'CREATE TABLE IF NOT EXISTS evidence (id INTEGER PRIMARY KEY, name VARCHAR, kind VARCHAR, format VARCHAR, size BIGINT, "sha256Client" VARCHAR, "sha256Server" VARCHAR, count BIGINT, stats VARCHAR, "addedAt" BIGINT, status VARCHAR)'
+                )
+                con.execute(
+                    'CREATE TABLE IF NOT EXISTS ioc_reputation (kind VARCHAR, value VARCHAR, verdict VARCHAR, tags VARCHAR[], summary VARCHAR, verdicts VARCHAR, "checkedAt" BIGINT, PRIMARY KEY (kind, value))'
+                )
+                con.execute("CREATE TABLE IF NOT EXISTS meta (key VARCHAR PRIMARY KEY, value VARCHAR)")
+                # columns added after a store was created (enrichment passes): add them in place
+                for t, cols in TABLES.items():
+                    have = {r[1] for r in con.execute(f"PRAGMA table_info('{t}')").fetchall()}
+                    for n, typ in cols:
+                        if n not in have:
+                            con.execute(f"ALTER TABLE {t} ADD COLUMN {q(n)} {typ[0]}")
+                            added.setdefault(t, []).append(n)
+                            if t == "events" and n in PARSER_SOURCES:
+                                # rows written before the column existed: the same value from the EventData
+                                src = ", ".join(f"nullif(trim(json_extract_string(data, '$.\"{k}\"')), '-')" for k in PARSER_SOURCES[n])
+                                con.execute(f"UPDATE events SET {q(n)} = coalesce({src}) WHERE data IS NOT NULL")
+                if found != SCHEMA_VERSION:
+                    con.execute("INSERT OR REPLACE INTO meta VALUES ('schema-version', ?)", [str(SCHEMA_VERSION)])
+                if found is not None and (found != SCHEMA_VERSION or added):
+                    row = con.execute("SELECT value FROM meta WHERE key = 'schema-history'").fetchone()
+                    history = json.loads(row[0]) if row else []
+                    history.append({"from": found, "to": SCHEMA_VERSION, "at": datetime.now(UTC).isoformat(timespec="seconds"), "added": added})
+                    con.execute("INSERT OR REPLACE INTO meta VALUES ('schema-history', ?)", [json.dumps(history)])
+                con.execute("COMMIT")
+            except BaseException:
+                try:
+                    con.execute("ROLLBACK")
+                except duckdb.Error as exc:
+                    log.debug("case store %s: rollback: %s", self.key, exc)
+                raise
+            if found is not None and found != SCHEMA_VERSION:
+                log.info("case store %s upgraded from schema %d to %d", self.key, found, SCHEMA_VERSION)
+            if found is not None and added:
+                log.info("case store %s: columns added %s", self.key, added)
             for ddl in INDEXES:
                 try:
-                    self._con.execute(ddl)
+                    con.execute(ddl)
                 except duckdb.Error as exc:  # pragma: no cover
                     log.debug("index: %s", exc)
 
     # -- connections ---------------------------------------------------------
     def cursor(self) -> duckdb.DuckDBPyConnection:
         self.last_used = time.time()
-        return self._con.cursor()
+        con = self._con.cursor()
+        limit = _time_limit.get()
+        return limit.watch(con) if limit is not None else con
 
     def close(self) -> None:
         with self.lock:
-            try:
-                self._con.close()
-            except duckdb.Error:
-                pass
+            self._closer()
 
     # -- ids ----------------------------------------------------------------
     def reserve_ids(self, table: str, n: int) -> int:
@@ -741,14 +925,32 @@ class CaseStore:
 
 
 class StoreRegistry:
+    """The open stores, one per case. A store unused for `idle_s` seconds is let go: it is closed as
+    soon as no request or job holds it any more, and a later get() opens it again. One still held is
+    handed out again rather than opened a second time, so a file never has two stores."""
+
     def __init__(self) -> None:
         self.root: Path | None = None
+        self.memory_mb = 2048
+        self.threads = 0
+        self.idle_s = 600
         self._stores: dict[str, CaseStore] = {}
+        self._let_go: weakref.WeakValueDictionary[str, CaseStore] = weakref.WeakValueDictionary()
         self._lock = threading.Lock()
+        self._sweeper: threading.Thread | None = None
+        self._stop = threading.Event()
+        _registries.add(self)
 
-    def configure(self, root: Path) -> None:
+    def configure(self, root: Path, *, memory_mb: int | None = None, threads: int | None = None, idle_s: float | None = None) -> None:
+        """Where the stores live, and the limits of the stores opened from now on (None keeps the current one)."""
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
+        if memory_mb is not None:
+            self.memory_mb = memory_mb
+        if threads is not None:
+            self.threads = threads
+        if idle_s is not None:
+            self.idle_s = idle_s
 
     def get(self, key: str, create: bool = True) -> CaseStore:
         if self.root is None:
@@ -756,13 +958,59 @@ class StoreRegistry:
         if not KEY_RE.match(key or ""):
             raise ValueError("invalid case key")
         with self._lock:
-            st = self._stores.get(key)
+            st = self._stores.get(key) or self._let_go.get(key)
             if st is None:
                 if not create and not (self.root / key / "case.duckdb").exists():
                     raise FileNotFoundError(key)
-                st = CaseStore(self.root, key)
-                self._stores[key] = st
-            return st
+                st = CaseStore(self.root, key, memory_mb=self.memory_mb, threads=self.threads)
+            self._stores[key] = st
+            self._let_go.pop(key, None)
+            st.last_used = time.time()
+            idle = self._take_idle(time.time())
+            self._start_sweeper()
+        # the stores let go are released here, outside the lock: closing one may write out its log
+        del idle
+        return st
+
+    def _take_idle(self, now: float) -> list[CaseStore]:
+        """Move the stores unused for idle_s out of the held set; the caller drops the list outside the lock."""
+        if self.idle_s <= 0:
+            return []
+        idle = [st for st in self._stores.values() if now - st.last_used >= self.idle_s]
+        for st in idle:
+            del self._stores[st.key]
+            self._let_go[st.key] = st
+        return idle
+
+    def evict_idle(self, now: float | None = None) -> int:
+        """Let go of the stores unused for idle_s; the number let go."""
+        with self._lock:
+            idle = self._take_idle(time.time() if now is None else now)
+        return len(idle)
+
+    def _start_sweeper(self) -> None:
+        """A thread that lets idle stores go without waiting for the next request (called with the
+        lock held). It holds the registry weakly and ends once no store is held, so a registry
+        dropped is not kept alive by it."""
+        if self.idle_s <= 0 or self._sweeper is not None:
+            return
+        ref, every = weakref.ref(self), max(0.5, min(60.0, self.idle_s / 2))
+        stop = self._stop = threading.Event()
+
+        def sweep() -> None:
+            while not stop.wait(every):
+                reg = ref()
+                if reg is None:
+                    return
+                reg.evict_idle()
+                with reg._lock:
+                    if not reg._stores:
+                        reg._sweeper = None
+                        return
+                del reg
+
+        self._sweeper = threading.Thread(target=sweep, name="store-sweeper", daemon=True)
+        self._sweeper.start()
 
     def exists(self, key: str) -> bool:
         return bool(self.root) and KEY_RE.match(key or "") is not None and (self.root / key / "case.duckdb").exists()
@@ -771,7 +1019,7 @@ class StoreRegistry:
         if not KEY_RE.match(key or ""):
             raise ValueError("invalid case key")
         with self._lock:
-            st = self._stores.pop(key, None)
+            st = self._stores.pop(key, None) or self._let_go.pop(key, None)
             if st:
                 st.close()
         target = (self.root or Path(".")) / key
@@ -792,9 +1040,26 @@ class StoreRegistry:
 
     def close_all(self) -> None:
         with self._lock:
-            for st in self._stores.values():
+            for st in [*self._stores.values(), *self._let_go.values()]:
                 st.close()
             self._stores.clear()
+            self._let_go.clear()
+            self._stop.set()
+            self._sweeper = None
+
+
+_registries: weakref.WeakSet[StoreRegistry] = weakref.WeakSet()
+
+
+@atexit.register
+def _stop_sweepers() -> None:
+    """End the sweeper threads before the interpreter ends. A daemon thread still waiting at exit
+    keeps this module, and DuckDB with it, alive past the end, and DuckDB then reports a leak."""
+    for reg in list(_registries):
+        reg._stop.set()
+        sweeper = reg._sweeper
+        if sweeper is not None:
+            sweeper.join(timeout=2)
 
 
 registry = StoreRegistry()

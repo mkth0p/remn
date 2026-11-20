@@ -15,8 +15,10 @@ Identity is the link: a recipient address ``alice@contoso.com``, a Windows ``CON
 ``alice`` and a UAL ``UserId`` all normalise to the key ``alice``. Artifacts of the seed mail
 (URL domains, attachment file names, sender address) give *strong* links when they reappear
 in an event (a DNS query for the phishing domain, a process whose command line names the
-attachment). Steps are ordered in time, bursts of the same operation are collapsed, findings
-of the rule run are attached to the steps they reference, and the chain is scored.
+attachment). Steps are ordered in time, bursts of the same operation from one account and
+address on the same thing are collapsed, a flagged event of a kind no step models is kept as a
+step that says what it is, findings of the rule run are attached to the steps they reference,
+and the chain is scored.
 
 Pure functions over plain dict rows so the same code serves the DuckDB store and rows posted
 from a browser-stored case.
@@ -546,10 +548,43 @@ def _is_m365(ev: dict[str, Any]) -> bool:
 # ---------------------------------------------------------------------------
 # Chain building
 # ---------------------------------------------------------------------------
-def _collapse_key(ev: dict[str, Any]) -> str:
+# what a Windows event acted on, beyond its program: two events that differ in one of these are two steps
+_TARGET_FIELDS = (
+    "logonType",
+    "commandLine",
+    "query",
+    "destinationHostname",
+    "destinationIp",
+    "destinationPort",
+    "targetFilename",
+    "shareName",
+    "relativeTargetName",
+    "serviceName",
+    "taskName",
+    "scriptBlockText",
+    "objectName",
+)
+
+
+def _collapse_key(ev: dict[str, Any], title: str) -> str:
+    """Events fold into one step only when they agree on what makes them distinct: the operation, the
+    host and program, the account, the address and what was acted on (the step's title, and the
+    fields it is made of in full), so a fold never hides a logon from another address or another command."""
+    account = _lower(ev.get("targetUser") or ev.get("subjectUser") or ev.get("user") or ev.get("upn"))
     if _is_m365(ev):
-        return f"m365|{_lower(ev.get('operation'))}|{ev.get('ipAddress') or ''}|{ev.get('status') or ''}"
-    return f"host|{ev.get('eventId')}|{_lower(ev.get('computer'))}|{_lower(ev.get('image') or ev.get('processName'))}"
+        return f"m365|{_lower(ev.get('operation'))}|{account}|{ev.get('ipAddress') or ''}|{ev.get('status') or ''}|{_lower(ev.get('targetUser'))}|{title}"
+    target = "|".join(str(ev.get(k) or "") for k in _TARGET_FIELDS)
+    return f"host|{ev.get('eventId')}|{_lower(ev.get('computer'))}|{_lower(ev.get('image') or ev.get('processName'))}|{account}|{ev.get('ipAddress') or ''}|{target}|{title}"
+
+
+def _record_step(ev: dict[str, Any]) -> tuple[int, str, list[str]]:
+    """(weight, title, notes) for a flagged record of a kind the chain does not model: what it is, where."""
+    eid = ev.get("eventId")
+    chan = str(ev.get("channel") or ev.get("provider") or "")
+    what = f"Sysmon {eid}" if "sysmon" in chan.lower() else f"event {eid} ({chan})" if eid is not None else str(ev.get("operation") or chan or "a record")
+    where = f" on {ev['computer']}" if ev.get("computer") else ""
+    summary = str(ev.get("summary") or ev.get("description") or "").strip()
+    return (1, f"{what}{where}" + (f": {summary}" if summary else ""), [])
 
 
 def build_chains(
@@ -669,16 +704,19 @@ def build_chains(
                 if id(ev) in seen_events:
                     continue
                 seen_events.add(id(ev))
+                fs = f_by_ref.get(("events", int(ev["id"]))) if ev.get("id") is not None else []
                 cls = _m365_step(ev, art_r, settings) if _is_m365(ev) else _host_step(ev, art_r)
+                if cls is None and fs:
+                    # flagged, it is part of what happened next even of a kind the builder does not model
+                    cls = _record_step(ev)
                 if cls is None:
                     continue
                 w, title, notes = cls
-                fs = f_by_ref.get(("events", int(ev["id"]))) if ev.get("id") is not None else []
                 w += max((SEV_WEIGHT.get(str(f.get("severity")), 0) for f in (fs or [])), default=0)
                 w += 2 * len([n for n in notes if n.startswith("mail ")])
                 if w <= 0 and not fs:
                     continue
-                key = _collapse_key(ev)
+                key = _collapse_key(ev, title)
                 # bursts of the same operation from the same client merge into one step (kept at the
                 # first timestamp) even when other steps interleave, so a 30-row MailItemsAccessed run
                 # reads as one line while an inbox rule created in the middle keeps its own place
@@ -1027,78 +1065,5 @@ def _summary(c: dict[str, Any]) -> str:
     return " → ".join(parts)[:900]
 
 
-# ---------------------------------------------------------------------------
-# DuckDB store adapter
-# ---------------------------------------------------------------------------
-# events considered per build; beyond it the window is cut and the stats say so
-EVENT_CAP = 50_000
+# an account name as identity_key reads it, in SQL (the story build selects a server case's rows by it)
 _IDENT_SQL = "lower(regexp_extract(coalesce({col}, ''), '^(?:[^\\\\]*\\\\)?([^@]+)', 1))"
-
-
-def chains_for_store(store: Any, settings: dict[str, Any] | None, findings: list[dict[str, Any]] | None = None, **opts: Any) -> dict[str, Any]:
-    """Select seeds, the identities' events and their replies from a case store, then build."""
-    from services.store import queries as Q
-    from services.store.casestore import rows_to_dicts
-
-    seed_min_risk = int(opts.get("seed_min_risk", 45))
-    window_hours = float(opts.get("window_hours", 72.0))
-    ref_ids = sorted({int(r) for f in (findings or []) if f.get("source") == "mails" for r in (f.get("refs") or []) if str(r).lstrip("-").isdigit()})[:500]
-    seeds = Q.search(
-        store, "mails", {"conditions": [{"field": "risk", "op": "gte", "value": seed_min_risk}]}, limit=300, sort={"field": "risk", "dir": "desc"}, full=True
-    )["rows"]
-    if ref_ids:
-        extra = Q.search(store, "mails", {"conditions": [{"field": "id", "op": "in", "value": ref_ids}]}, limit=500, full=True)["rows"]
-        have = {m["id"] for m in seeds}
-        seeds += [m for m in extra if m["id"] not in have]
-    idents = sorted({k for m in seeds for r in mail_recipients(m) for k in [identity_key(r)] if k})
-    idents = idents or ["__no_mail_recipient__"]
-    t_min = min((int(m["date"]) for m in seeds if m.get("date") is not None), default=0) - 300_000
-    t_max = max((int(m["date"]) for m in seeds if m.get("date") is not None), default=0) + int(window_hours * 3600_000)
-    cur = store.cursor()
-    ph = ", ".join("?" for _ in idents)
-    ident_cond = " OR ".join(_IDENT_SQL.format(col=f'"{c}"') + f" IN ({ph})" for c in ("targetUser", "subjectUser", "user", "upn"))
-    params: list[Any] = [t_min, t_max] + idents * 4
-    cur.execute(f"SELECT * FROM events WHERE ts BETWEEN ? AND ? AND ({ident_cond}) ORDER BY ts LIMIT {EVENT_CAP + 1}", params)
-    events = rows_to_dicts(cur)
-    events_truncated = len(events) > EVENT_CAP
-    events = events[:EVENT_CAP]
-    # Authentication-only cases have no seed mail. Keep their selection independent of
-    # mail windows and of the much larger pool of unrelated host/cloud activity.
-    cur.execute(
-        f"SELECT * FROM events WHERE ts IS NOT NULL AND (\"eventId\" IN (4624,4625) OR lower(operation) IN ('signin','sign-in','userloginfailed','userloggedin')) ORDER BY ts, id LIMIT {EVENT_CAP + 1}"
-    )
-    auth = rows_to_dicts(cur)
-    auth_truncated = len(auth) > EVENT_CAP
-    have_events = {r["id"] for r in events}
-    events.extend(r for r in auth[:EVENT_CAP] if r["id"] not in have_events)
-    for r in events:
-        if isinstance(r.get("data"), str):
-            try:
-                import json
-
-                r["data"] = json.loads(r["data"])
-            except ValueError:
-                pass
-    cur.execute(
-        f"SELECT * FROM mails WHERE date BETWEEN ? AND ? AND {_IDENT_SQL.format(col='"fromAddr"')} IN ({ph}) ORDER BY date, id LIMIT 5001",
-        [t_min, t_max] + idents,
-    )
-    replies = Q._parse_json_cols(rows_to_dicts(cur), "mails") if hasattr(Q, "_parse_json_cols") else rows_to_dicts(cur)
-    replies_truncated = len(replies) > 5000
-    replies = replies[:5000]
-    have = {m["id"] for m in seeds}
-    mails = seeds + [m for m in replies if m["id"] not in have]
-    result = build_chains(
-        mails,
-        events,
-        findings,
-        settings,
-        seed_min_risk=seed_min_risk,
-        window_hours=window_hours,
-        **{k: v for k, v in opts.items() if k in ("before_minutes", "collapse_minutes", "min_score", "max_chains")},
-    )
-    result["stats"]["eventsTruncated"] = events_truncated
-    result["stats"]["authEventsTruncated"] = int(auth_truncated)
-    result["stats"]["repliesTruncated"] = int(replies_truncated)
-    result["stats"]["seedsTruncated"] = int(result["stats"]["seedsTruncated"] or len(seeds) >= 300 or len(ref_ids) >= 500)
-    return result

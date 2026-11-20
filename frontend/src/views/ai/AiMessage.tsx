@@ -9,6 +9,14 @@ const argSummary = (args: Record<string, unknown>) => {
   return s.length > 160 ? s.slice(0, 157) + '…' : s
 }
 
+/** The sentences citing rows, by what reading them against those rows found (older sessions kept only the ones that did not hold). */
+function sentenceCounts(c: NonNullable<ChatMessage['cites']>): string {
+  const bad = c.unsupported?.length ?? 0
+  const notHolding = `${bad} naming what those rows do not hold`
+  if (c.holding === undefined) return notHolding
+  return `${c.holding} whose rows hold the values they name, ${c.nothingToCheck ?? 0} naming no address, account or hash (nothing to check), ${notHolding}`
+}
+
 /** Markdown with its citations turned into chips: verified ones open the row, the others say they were never returned. */
 export function CitedMarkdown({ text, seen }: { text: string; seen: SeenSet | null }) {
   const html = useMemo(() => citationChips(renderMarkdown(text), seen), [text, seen])
@@ -90,9 +98,7 @@ export function AiMessage({ m, seen, showTools }: { m: ChatMessage; seen: SeenSe
                 {m.cites.verified} citation(s) checked against what the tools returned
                 {m.cites.unverified.length ? ` · ${m.cites.unverified.length} unverified: ${m.cites.unverified.slice(0, 6).join(', ')}` : ''}
                 {!m.cites.verified && !m.cites.unverified.length ? ' · the answer cites no rows' : ''}
-                {m.cites.sentences
-                  ? ` · ${m.cites.sentences} sentence(s) read against the rows they cite${m.cites.unsupported?.length ? `, ${m.cites.unsupported.length} naming what those rows do not hold` : ''}`
-                  : ''}
+                {m.cites.sentences ? ` · ${m.cites.sentences} sentence(s) read against the rows they cite: ${sentenceCounts(m.cites)}` : ''}
                 {m.cites.unsupported?.map((u, i) => (
                   <div key={i} className="small">
                     “{u.sentence}”: {u.reason}

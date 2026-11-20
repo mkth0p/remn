@@ -139,6 +139,18 @@ describe('runRule', () => {
     expect(f[0].entities.fromRegistrable).toContain('interne-fr.co')
     expect(f[0].refs).toEqual([1, 2])
   })
+  it('counts the distinct values of a group without a window, as the SQL engine does', () => {
+    const same: Rule = { id: 'same', title: 's', severity: 'high', source: 'mails', where: { 'fromNameNorm|exists': true }, group_by: ['fromNameNorm'], distinct: 'fromRegistrable', threshold: '>= 2' }
+    const rows = [
+      { id: 1, date: T0, fromNameNorm: 'lefevre marie', fromRegistrable: 'interne.fr' },
+      { id: 2, date: T0 + 1000, fromNameNorm: 'lefevre marie', fromRegistrable: 'interne-fr.co' },
+      { id: 3, date: T0 + 2000, fromNameNorm: 'lefevre marie', fromRegistrable: 'interne-fr.co' },
+    ]
+    const f = runRule(same, { rows })
+    // the count is what the threshold tested: two domains, not three mails
+    expect(f[0].count).toBe(2)
+    expect(f[0].refs).toEqual([1, 2, 3])
+  })
   it('escalates severity with then_flags', () => {
     const r: Rule = { id: 'macro', title: 'm', severity: 'high', source: 'mails', where: { 'flags|contains': 'att_office_macro' }, then_flags: [{ att_macro_autoexec: 'critical' }] }
     const f = runRule(r, {
@@ -212,6 +224,30 @@ describe('validateRule', () => {
     expect(validateRule({ id: 'a', title: 't', severity: 'nope', source: 'events' }).ok).toBe(false)
     expect(validateRule({ id: 'a', title: 't', severity: 'low', source: 'events', where: { 'x|re': '(' } }).ok).toBe(false)
     expect(validateRule({ id: 'a', title: 't', severity: 'low', source: 'events', threshold: 'lots' }).ok).toBe(false)
+  })
+  it('refuses a rule asking for something no engine does rather than running it without it', () => {
+    const base = { id: 'a', title: 't', severity: 'low', source: 'events', where: { eventId: 4625 } }
+    const follow = { where: { eventId: 4624 }, join: ['targetUser'], within: '5m', severity: 'high' }
+    const err = (r: object) => {
+      const v = validateRule({ ...base, ...r })
+      return v.ok ? null : v.error
+    }
+    // one finding per row: a follow-up, a window, a distinct count or a group condition has nothing to act on
+    expect(err({ then: follow })).toMatch(/then need group_by or threshold/)
+    expect(err({ window: '5m' })).toMatch(/window need group_by or threshold/)
+    expect(err({ distinct: 'ipAddress' })).toMatch(/distinct need group_by or threshold/)
+    expect(err({ any_in_group: { eventId: 4624 } })).toMatch(/any_in_group need group_by or threshold/)
+    expect(err({ group_by: ['targetUser'], then: { severity: 'high' } })).toMatch(/then needs a where/)
+    // events carry no flags to escalate on
+    expect(err({ then_flags: [{ reply_to_mismatch: 'high' }] })).toMatch(/mail rules only/)
+    expect(err({ group_by: ['targetUser'], then: follow })).toBeNull()
+    expect(err({ threshold: '>= 3', window: '5m', distinct: 'ipAddress' })).toBeNull()
+    expect(err({ source: 'mails', where: { 'risk|gte': 50 }, then_flags: [{ reply_to_mismatch: 'high' }] })).toBeNull()
+  })
+  it('checks the regexes of a follow-up and of a group condition too', () => {
+    const base = { id: 'a', title: 't', severity: 'low', source: 'events', where: { eventId: 4625 }, group_by: ['targetUser'] }
+    expect(validateRule({ ...base, then: { where: { 'commandLine|re': '(' } } }).ok).toBe(false)
+    expect(validateRule({ ...base, any_in_group: { 'commandLine|re_cs': '[' } }).ok).toBe(false)
   })
 })
 

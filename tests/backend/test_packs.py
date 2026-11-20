@@ -52,6 +52,10 @@ def test_manifests_licences_and_counts_agree():
         assert all("yaml" not in r for r in rules)  # the client re-dumps; no duplicated text on the wire
         skipped = json.loads((d / "skipped.json").read_text(encoding="utf-8"))
         assert len(skipped) == p["counts"]["skipped"] and all(s["reason"] for s in skipped)
+        if p["id"].startswith("sigma-"):
+            # every conversion caveat counted is on the rule it concerns
+            carried = sum(len((r["rule"].get("sigma") or {}).get("warnings") or []) for r in rules)
+            assert carried == p["counts"]["warnings"], p["id"]
         assert packs.load_pack(p["id"]) is data  # cached until a file changes
     assert packs.load_pack("nope") is None and packs.load_pack("../windows") is None and packs.license_text("..") is None
 

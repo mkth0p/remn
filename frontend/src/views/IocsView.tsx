@@ -4,9 +4,9 @@ import { Drawer, usePivot } from '../components/Detail'
 import { Badge, JsonView, Progress, Toggle } from '../components/ui'
 import { checkReputation } from '../data/iocs'
 import { getSource } from '../data/source'
-import { getDb, type Ioc } from '../db/schema'
+import { getDb, type Ioc, type IocsCapped } from '../db/schema'
 import { toast, useStore } from '../state/store'
-import { defang, fmtNum, fmtTs } from '../util/format'
+import { defang, fmtNum, fmtTs, timeColumnWidth, tzLabel } from '../util/format'
 import { safeHref } from '../util/safe'
 import { exportCsv, exportJson, iocsToStix } from '../util/export'
 import { IconShield } from '../components/Icons'
@@ -28,11 +28,18 @@ export function IocsView() {
   const [selected, setSelected] = useState<Ioc | null>(null)
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [version, setVersion] = useState(0)
+  const [capped, setCapped] = useState<IocsCapped | null>(null)
   const pivot = usePivot()
   const ds = useMemo(() => (kase ? getSource(kase) : null), [kase])
   useEffect(() => {
     if (!ds) return
     let alive = true
+    // an import in this browser that stopped collecting indicators at its limit, so an absent one is not taken for absent from the evidence
+    if (kase?.id != null)
+      getDb()
+        .kv.get(`iocs-capped-${kase.id}`)
+        .then((k) => alive && setCapped((k?.value as IocsCapped | undefined) ?? null))
+        .catch(() => undefined)
     ds.listIocs({ kind: kind || undefined, q: q.trim() || undefined, onlyBad, limit: PAGE })
       .then((r) => {
         if (!alive) return
@@ -44,7 +51,7 @@ export function IocsView() {
     return () => {
       alive = false
     }
-  }, [ds, kind, q, onlyBad, version, jobs.length])
+  }, [ds, kase?.id, kind, q, onlyBad, version, jobs.length])
   if (!kase || !ds) return null
   const rank = (v: string | null | undefined) => ({ malicious: 3, suspicious: 2, clean: 1 })[v ?? ''] ?? 0
   const check = async (items: Ioc[]) => {
@@ -85,8 +92,8 @@ export function IocsView() {
     },
     { key: 'count', label: 'seen', width: 60, render: (r) => fmtNum(r.count) },
     { key: 'sources', label: 'sources', width: 180, render: (r) => (r.sources ?? []).join(', ') },
-    { key: 'firstSeen', label: 'first', width: 150, render: (r) => fmtTs(r.firstSeen) },
-    { key: 'lastSeen', label: 'last', width: 150, render: (r) => fmtTs(r.lastSeen) },
+    { key: 'firstSeen', label: `first (${tzLabel()})`, width: timeColumnWidth(150), render: (r) => fmtTs(r.firstSeen) },
+    { key: 'lastSeen', label: `last (${tzLabel()})`, width: timeColumnWidth(150), render: (r) => fmtTs(r.lastSeen) },
   ]
   const configured = health?.providers.filter((p) => p.configured) ?? []
   // browser-only: the server refuses lookups (403), so none are offered
@@ -152,6 +159,13 @@ export function IocsView() {
           stix 2.1
         </button>
       </div>
+      {capped && (
+        <div className="row small" style={{ padding: '3px 16px', borderBottom: '1px solid var(--line)', color: 'var(--warn)' }}>
+          {capped.rebuilt
+            ? `Indicator collection stopped at ${fmtNum(capped.limit)} distinct values when the indicators were recounted after evidence was removed: the case holds more than are listed.`
+            : `Indicator collection stopped at ${fmtNum(capped.limit)} distinct values in ${capped.files.join(', ')}: indicators first seen later in ${capped.files.length > 1 ? 'those files' : 'that file'} are not listed.`}
+        </div>
+      )}
       {progress && (
         <div style={{ padding: '6px 16px' }}>
           <Progress value={progress.done / Math.max(1, progress.total)} />

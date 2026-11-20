@@ -467,7 +467,8 @@ export function psPipeline(payload: string): string | null {
   const commands: [string, [string, string][]][] = []
   let inValue = false // inside a parameter value that goes on over several lines
   for (const raw of payload.split('\n')) {
-    const line = raw.replace(/\r+$/, '')
+    // from the first character of the run only: a run inside the line was tried from each of its characters
+    const line = raw.replace(/(?<!\r)\r+$/, '')
     const inv = PS_INVOCATION.exec(line)
     if (inv) {
       commands.push([inv[1], []])

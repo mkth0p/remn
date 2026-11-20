@@ -10,6 +10,7 @@ from collections.abc import Callable
 from typing import Any
 
 from api.errors import failure
+from services.ingest.isolation import ParseStopped
 
 log = logging.getLogger(__name__)
 
@@ -98,6 +99,11 @@ class JobManager:
                     job.status = "cancelled" if job.cancelled else "done"
                 except JobCancelled:
                     job.status = "cancelled"
+                except ParseStopped as exc:
+                    # a parse stopped at a limit is told as it is: what stopped it, and that the rows
+                    # read before it are kept
+                    job.error = str(exc)
+                    job.status = "error"
                 except Exception as exc:  # noqa: BLE001
                     # the reference in the error, not the job's id, ties the log line to what the client is shown
                     job.error = failure(f"the {kind} job", exc, log)["error"]

@@ -2,9 +2,17 @@
 
 ## Reporting
 
-Open a private security advisory on the GitHub repository ("Security" tab, "Report a
-vulnerability"), or an issue without details asking for a contact. Do not put evidence,
-credentials or exploit details in a public issue. Reports are acknowledged within a week.
+Report a vulnerability privately, with GitHub's private vulnerability reporting: on the
+repository, open the "Security" tab, then "Report a vulnerability"
+(https://github.com/mkth0p/remn/security/advisories/new), and fill in the form. The report
+is a draft security advisory that only you and the repository's maintainers can read. The
+discussion, a fix in a temporary private fork and, when the fix is released, the published
+advisory (with a CVE identifier when one is requested) all happen there. Reports are
+acknowledged within a week.
+
+Do not put evidence, credentials or exploit details in a public issue. If the "Report a
+vulnerability" button is missing, open an issue that says only that you have a security
+report and asks for a private channel, with nothing of the report in it.
 
 ## What REMN promises
 
@@ -22,7 +30,10 @@ credentials or exploit details in a public issue. Reports are acknowledged withi
 
 ## What it does not promise
 
-- No encryption at rest for the server store or the browser database.
+- No encryption at rest of its own, for the server store, its backups or the browser
+  database. A server that keeps evidence must keep its cases folder, staging area and
+  backups on an encrypted volume; `docs/security.md` says what that covers and what it
+  does not.
 - No multi-user model: the remote mode uses one shared token.
 - No sandboxed execution: attachments are analysed statically (structure, macros,
   scripts, URLs, YARA), never opened or run.

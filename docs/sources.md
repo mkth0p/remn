@@ -10,6 +10,12 @@ the browser before it leaves, and again on the server, and the Evidence page kee
 chain of custody. This page says what each source is, which formats are accepted, and
 what the rows carry.
 
+A loose file is taken by its name. One whose name is none of the formats below is read by
+its start: a mailbox file without an extension, as mail clients keep them, or a saved message
+goes on as mail; anything else is not imported, and the drop says which files were turned
+away. Inside a dropped folder or an archive, each file is recognised by its content instead
+(see [packages](packages.md)).
+
 ## Windows event logs
 
 Drop `.evtx` files, or a `.zip` or `.tar` archive of them; the archive is walked and
@@ -193,7 +199,7 @@ touched: `data.InternetMessageId` keeps those ids (the first 1,000; beyond that
 `messageId`. An audit record opens the messages it names in the mailbox evidence, and a
 message opens the audit records that name it.
 
-`rules/m365/bec.yaml` ships 28 rules for this data: inbox rules that forward or hide
+`rules/m365/bec.yaml` ships 29 rules for this data: inbox rules that forward or hide
 mail, mailbox and transport-rule forwarding, delegate permissions, MailItemsAccessed
 bursts and delegate syncs, OAuth consent, privileged role assignment, MFA and
 security-info changes, conditional-access and audit tampering, legacy protocols,

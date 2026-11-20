@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { defaultSettings, RemnDB, setDb, type Case, type Finding } from '../db/schema'
 import { listNotes } from '../data/caseNotes'
 import { applySuggestion, loadSuggestions, proposalDecision, reviewItemFor } from '../data/aiReview'
-import { acceptProposals, loadInbox, propose, rejectProposals, undoProposal } from './inbox'
+import { acceptAll, acceptProposals, heldForReview, loadInbox, propose, rejectProposals, undoProposal } from './inbox'
 import { loadLedger } from './ledger'
 
 let db: RemnDB
@@ -94,6 +94,27 @@ describe('the approval inbox', () => {
     expect(Object.keys(await loadSuggestions(1))).toEqual(['finding:1'])
     expect(await db.kv.get('ai-suggestions-1')).toBeUndefined()
     expect((await loadInbox(1))[0]).toMatchObject({ kind: 'decision', status: 'pending', reason: 'old' })
+  })
+
+  it('accepts all but what was proposed after flagged or unread evidence, which waits with its reason', async () => {
+    const note = (title: string, mark: { exposed?: boolean; unchecked?: boolean } = {}) => propose(1, { ...base, kind: 'note', title, note: { kind: 'note', text: title }, ...mark })
+    const clean = await note('clean')
+    const flagged = await note('after a lure', { exposed: true })
+    const unread = await note('after a long body', { unchecked: true })
+    expect(heldForReview(clean)).toBeNull()
+    expect(heldForReview(flagged)).toContain('addressed to a model')
+    expect(heldForReview(unread)).toContain('too long or too deeply nested')
+    expect(await acceptAll(kase)).toEqual({ accepted: 1, failed: [], held: 2 })
+    const after = await loadInbox(1)
+    expect(after.map((p) => [p.title, p.status])).toEqual([
+      ['clean', 'accepted'],
+      ['after a lure', 'pending'],
+      ['after a long body', 'pending'],
+    ])
+    // one by one, the analyst can still accept it
+    expect((await acceptProposals(kase, [unread.id])).accepted).toBe(1)
+    const ledger = await loadLedger(1)
+    expect(JSON.parse(ledger.find((e) => e.kind === 'proposal' && e.text.endsWith('after a long body'))!.data)).toMatchObject({ unchecked: true })
   })
 
   it('says why a decision cannot be applied when its item is gone', async () => {

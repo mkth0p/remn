@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import threading
 import time
 import uuid
@@ -22,6 +23,8 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.http import require_http_methods, require_POST
 
 from api.params import BadParameter, whole_number
+from services.ingest import staging
+from services.ingest.staging import DIRECTORY_SUFFIXES, size_text, staged_bytes
 
 log = logging.getLogger(__name__)
 _ID = re.compile(r"^[a-f0-9]{32}$")
@@ -38,19 +41,6 @@ def upload_dir() -> Path:
     except OSError:
         pass
     return d
-
-
-def staged_bytes() -> int:
-    """Everything the staging area currently holds, including Django's own multipart spool."""
-    total = 0
-    for directory in (upload_dir(), Path(settings.FILE_UPLOAD_TEMP_DIR)):
-        try:
-            for p in directory.iterdir():
-                if p.is_file():
-                    total += p.stat().st_size
-        except OSError:
-            continue
-    return total
 
 
 def pending_bytes() -> int:
@@ -126,19 +116,51 @@ def cleanup_stale(max_age_s: int | None = None) -> int:
     n = 0
     now = time.time()
     # .member, .decoded and .manifest are the parsers own staging. A parse releases them itself,
-    # but a process killed mid-parse cannot, and nothing else reclaims them.
+    # but a process killed mid-parse cannot, and nothing else reclaims them. Django's spool keeps
+    # the uploaded file's extension after ".upload", so every suffix of the name is looked at.
     parser_temp = (".upload", ".member", ".decoded", ".manifest")
     for directory, suffixes in ((upload_dir(), (".part", ".json")), (Path(settings.FILE_UPLOAD_TEMP_DIR), parser_temp)):
         try:
             for p in directory.iterdir():
-                if not p.is_file() or p.suffix not in suffixes:
+                if not p.is_file() or not set(p.suffixes) & set(suffixes):
                     continue
                 if now - p.stat().st_mtime > max_age_s:
                     p.unlink(missing_ok=True)
                     n += 1
         except OSError:
             continue
+    # the directories a parse creates, an expanded 7z and the event logs staged for an engine run,
+    # go on the same age. A parse still reading an expanded archive touches it as it takes each
+    # member, so the age is the time since it was last used.
+    try:
+        for p in Path(settings.FILE_UPLOAD_TEMP_DIR).iterdir():
+            if p.is_dir() and not p.is_symlink() and p.name.endswith(DIRECTORY_SUFFIXES) and now - p.stat().st_mtime > max_age_s:
+                shutil.rmtree(p, ignore_errors=True)
+                n += 1
+    except OSError:
+        pass
     return n
+
+
+def clear_leftovers() -> int:
+    """At startup nothing is being parsed, so whatever a parse staged was left by a process that
+    stopped in the middle of one: remove it whatever its age. Chunked uploads stay, since a client
+    can resume one."""
+    tmp = Path(settings.FILE_UPLOAD_TEMP_DIR)
+    tmp.mkdir(parents=True, exist_ok=True)
+    removed = 0
+    for child in tmp.iterdir():
+        try:
+            if child.is_file() and child.suffix not in (".part", ".json"):
+                child.unlink()
+            elif child.is_dir() and not child.is_symlink() and child.name.endswith(DIRECTORY_SUFFIXES):
+                shutil.rmtree(child)
+            else:
+                continue
+            removed += 1
+        except OSError:
+            pass
+    return removed
 
 
 _sweeper: threading.Thread | None = None
@@ -191,12 +213,33 @@ def init(request: HttpRequest):
     # Refuse rather than accept an upload the disk cannot take. Sweep first, so a burst of
     # abandoned uploads does not lock out a legitimate one for the rest of the retention window.
     # What is announced counts as taken: the room an upload will need is reserved when it starts.
-    budget = settings.FORENSIC_TMP_MAX_GB * 1024**3
     with _reserve:
+        budget, decided_by = staging.capacity()
+        if size > budget:
+            # larger than the staging area could hold even empty: waiting changes nothing, so the
+            # answer says what does.
+            return JsonResponse(
+                {
+                    "error": f"this file is {size_text(size)} and the staging area can hold at most {size_text(budget)} ({decided_by}); it cannot be accepted until that changes",
+                    "code": "staging-too-small",
+                },
+                status=413,
+            )
         if staged_bytes() + pending_bytes() + size > budget:
             cleanup_stale()
-            if staged_bytes() + pending_bytes() + size > budget:
-                return JsonResponse({"error": "the server is staging as much evidence as it can hold; try again shortly", "code": "staging-full"}, status=507)
+            held = staged_bytes() + pending_bytes()
+            if held + size > budget:
+                return JsonResponse(
+                    {
+                        "error": (
+                            f"the staging area holds {size_text(held)} of other uploads and parses in progress and has room for "
+                            f"{size_text(max(0, budget - held))} more; this file needs {size_text(size)}. The room frees as those are parsed, "
+                            f"or after {settings.FORENSIC_UPLOAD_MAX_AGE_S // 60} minutes for an upload that was abandoned"
+                        ),
+                        "code": "staging-full",
+                    },
+                    status=507,
+                )
 
         upload_id = uuid.uuid4().hex
         dp, _ = _paths(upload_id)

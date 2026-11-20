@@ -176,39 +176,87 @@ export interface Suspect {
   snippet: string
 }
 
+/** What the check reads of a value: the first characters of a string, the first items of a list, so deep. */
+const SCAN_CHARS = 20_000
+const SCAN_ITEMS = 200
+const SCAN_DEPTH = 8
+const SCAN_SUSPECTS = 20
+
+export interface EvidenceScan {
+  /** strings that look like instructions to a model */
+  suspects: Suspect[]
+  /**
+   * places the check did not read whole: a string past its first 20,000 characters, a list past its
+   * first 200 items, a value nested deeper than 8. Text there may address a model unseen.
+   */
+  unread: number
+}
+
 function snippetAround(text: string, index: number, length: number): string {
   const from = Math.max(0, index - 40)
   const to = Math.min(text.length, index + length + 60)
   return (from > 0 ? '…' : '') + text.slice(from, to).replace(/\s+/g, ' ') + (to < text.length ? '…' : '')
 }
 
-/** Strings in a value that look like instructions to a model; each with the ref of the row it sits in. */
-export function findInstructions(value: unknown, ref: string | null = null, path = '', out: Suspect[] = [], depth = 0): Suspect[] {
-  if (out.length >= 20 || depth > 8 || value == null) return out
+function scan(value: unknown, ref: string | null, path: string, out: EvidenceScan, depth: number): void {
+  if (out.suspects.length >= SCAN_SUSPECTS || value == null) return
+  if (depth > SCAN_DEPTH) {
+    // a number or a short string cannot carry an instruction; anything else down here is not read
+    if (typeof value === 'object' || (typeof value === 'string' && value.length >= 16)) out.unread++
+    return
+  }
   if (typeof value === 'string') {
-    if (value.length < 16) return out
-    const text = value.length > 20_000 ? value.slice(0, 20_000) : value
+    if (value.length < 16) return
+    if (value.length > SCAN_CHARS) out.unread++
+    const text = value.length > SCAN_CHARS ? value.slice(0, SCAN_CHARS) : value
     for (const re of INSTRUCTION_PATTERNS) {
       const m = re.exec(text)
       if (m) {
-        out.push({ ref, field: path || 'text', snippet: snippetAround(text, m.index, m[0].length).slice(0, 200) })
+        out.suspects.push({ ref, field: path || 'text', snippet: snippetAround(text, m.index, m[0].length).slice(0, 200) })
         break
       }
     }
-    return out
+    return
   }
   if (Array.isArray(value)) {
-    for (const v of value.slice(0, 200)) findInstructions(v, ref, path, out, depth + 1)
-    return out
+    if (value.length > SCAN_ITEMS) out.unread++
+    for (const v of value.slice(0, SCAN_ITEMS)) scan(v, ref, path, out, depth + 1)
+    return
   }
   if (typeof value === 'object') {
     const row = value as Record<string, unknown>
     // a row with its own ref starts its field paths afresh: "mail:2 textPreview"
     const own = typeof row.ref === 'string' ? row.ref : ref
     const base = own !== ref ? '' : path
-    for (const [k, v] of Object.entries(row)) if (k !== 'ref') findInstructions(v, own, base ? `${base}.${k}` : k, out, depth + 1)
+    for (const [k, v] of Object.entries(row)) if (k !== 'ref') scan(v, own, base ? `${base}.${k}` : k, out, depth + 1)
   }
+}
+
+/**
+ * Text in a value addressed to a model, each with the ref of the row it sits in, and how many places
+ * the check could not read whole. The check is a handful of English patterns: it finds the common
+ * phrasings and misses others (another language, an encoding, an instruction split across fields),
+ * so a run that read anything it flags, or anything it could not read whole, is never accepted in bulk.
+ */
+export function scanEvidence(value: unknown, ref: string | null = null): EvidenceScan {
+  const out: EvidenceScan = { suspects: [], unread: 0 }
+  scan(value, ref, '', out, 0)
   return out
+}
+
+/** Strings in a value that look like instructions to a model; each with the ref of the row it sits in. */
+export function findInstructions(value: unknown, ref: string | null = null): Suspect[] {
+  return scanEvidence(value, ref).suspects
+}
+
+/**
+ * The evidence a message carries between markers (a story put to the agent by the analyst). A block
+ * ends before the next opening marker, which wrapEvidence never leaves inside one (it breaks the
+ * evidence's own with a zero-width space), so a text of many unclosed openings is read once rather
+ * than from each of them.
+ */
+export function evidenceBlocks(text: string): string[] {
+  return [...text.matchAll(/<evidence(?=[\s>])[^<>]*>((?:(?!<evidence[\s>])[\s\S])*?)<\/evidence>/gi)].map((m) => m[1])
 }
 
 /**

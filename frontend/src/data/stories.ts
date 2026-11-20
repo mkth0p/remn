@@ -24,6 +24,18 @@ import { settingsForRules } from './rules'
 import type { ReportStoryDecisions } from './storyDecisions'
 
 export type Confidence = 'strong' | 'medium' | 'weak'
+/** How surely a story's flagged steps are its subject's (its ties, not the intrusion). */
+export type StoryConfidence = 'high' | 'medium' | 'low'
+
+/** high when a record states the tie of every flagged step, medium for half of them or more, low for fewer (mirror of stories.story_confidence). */
+export function storyConfidence(strong: boolean[]): { confidence: StoryConfidence; basis: string } {
+  const n = strong.length
+  const k = strong.filter(Boolean).length
+  if (!n) return { confidence: 'low', basis: 'no step of it carries a flag' }
+  const confidence: StoryConfidence = k === n ? 'high' : 2 * k >= n ? 'medium' : 'low'
+  const rest = n - k
+  return { confidence, basis: `a record states the tie of ${k} of its ${n} flagged steps` + (rest ? `; ${rest} rest${rest === 1 ? 's' : ''} on naming rules, time and place, or an address` : '') }
+}
 export type TieKind = 'flag' | 'chain' | 'session' | 'hop' | 'process' | 'address' | 'identity'
 
 /** ATT&CK v19's tactics in the order an intrusion reads (mirror of stories.PHASES). */
@@ -257,6 +269,8 @@ export interface Process {
 export interface HostCoverage {
   key: string
   name: string
+  /** why it is keyed as it is: its short name, or its full name when two hosts of the case share the short one */
+  basis?: string
   ips: string[]
   events: number
   first: number
@@ -303,7 +317,9 @@ export interface Story {
   firm?: { key: string; phase: string; step: string }[]
   /** what started it: a flag, or low findings of several rules within a week that add up */
   startKind?: 'flag' | 'accumulated'
-  confidence: Confidence
+  confidence: StoryConfidence
+  /** why: of its flagged steps, how many a record ties to its subject */
+  confidenceBasis?: string
   phases: StoryPhase[]
   steps: StoryStep[]
   records: number
@@ -313,6 +329,8 @@ export interface Story {
   attackerAddresses: string[]
   /** addresses the findings name that most of the organisation's users sign in from: they tie nothing */
   sharedAddresses?: string[]
+  /** outside addresses its findings name that the evidence ties no further than one finding: they tie nothing */
+  untiedAddresses?: string[]
   chains: string[]
   findings: string[]
   campaigns: string[]
@@ -563,6 +581,8 @@ export const STORY_DATA_KEYS = [
   // the logon GUID explicit credentials name for their target's logon, which the domain controller's ticket carries
   'TargetLogonGuid',
   'ProcessId',
+  // the process that opened a handle or created a thread (Sysmon 10, 8), whose session the flag is of
+  'SourceProcessGUID',
   // lineage: DNS answers, WinRM's session record, WMI's failed calls, DHCP leases, Entra devices
   'QueryName',
   'QueryResults',
@@ -614,11 +634,13 @@ function ipOf(v: unknown): string {
 export function hostKey(v: unknown): string {
   const s = String(v ?? '')
     .trim()
-    .replace(/^\\+|\\+$/g, '')
+    // each trailing run from its first character only: tried from each character of a run inside
+    // the name, it took time that grew with the square of the run
+    .replace(/^\\+|(?<!\\)\\+$/g, '')
     .trim()
     .toLowerCase()
   if (!s || s === '-' || s === 'localhost' || /^[\d.]+$/.test(s) || s.includes(':')) return ''
-  return s.replace(/\$+$/, '').split('.')[0]
+  return s.replace(/(?<!\$)\$+$/, '').split('.')[0]
 }
 
 /**
@@ -1143,6 +1165,8 @@ export function storyCoverageWarnings(stats: StoryResult['stats'] | undefined): 
     accounts: `The case writes its accounts in more than ${num(ACCOUNT_RECORD_CAP)} ways: who is who reads the most frequent ones and those of the records the stories read.`,
   }
   const out = (stats?.truncated ?? []).map((k) => labels[k]).filter(Boolean)
+  if (stats?.identityScope === 'rows')
+    out.push('Who is who was read from the records this build read, not the whole case: a bare account name is joined to the only account of that name among them, though the case may hold another.')
   if (stats?.storiesTruncated) out.push('Only the highest-scoring 200 stories are kept: the flags of the others are listed with those in no story.')
   return out
 }

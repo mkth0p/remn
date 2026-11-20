@@ -7,7 +7,7 @@ import { Badge } from '../../components/ui'
 import { addNote } from '../../data/caseNotes'
 import type { AgentRun } from '../../ai/chat'
 import { refKey } from '../../ai/evidence'
-import { acceptProposals, loadInbox, rejectProposals, undoProposal, useInbox, type Proposal } from '../../ai/inbox'
+import { acceptAll, acceptProposals, heldForReview, loadInbox, rejectProposals, undoProposal, useInbox, type Proposal } from '../../ai/inbox'
 import { loadBoard, recordHypothesis, removeHypothesis, useBoard, type Hypothesis, type HypothesisStatus } from '../../ai/hypotheses'
 import { loadLedger, verifyLedger, type LedgerCheck } from '../../ai/ledger'
 import type { PlanStep } from '../../ai/tools'
@@ -77,7 +77,14 @@ function PlanTab({ run, plan, seenCount, busy }: { run: AgentRun | null; plan: P
             </div>
           )}
           {run.proposals.length > 0 && <div className="small">{run.proposals.length} proposal(s) queued in the inbox this run</div>}
-          {run.suspects > 0 && <div className="small warn-inline">⚠ the evidence it read holds {run.suspects} place(s) addressed to a model: its proposals from then on are marked</div>}
+          {run.suspects > 0 && (
+            <div className="small warn-inline">⚠ the evidence it read holds {run.suspects} place(s) addressed to a model: its proposals from then on wait for a one-by-one look</div>
+          )}
+          {run.unread > 0 && (
+            <div className="small warn-inline">
+              {run.unread} place(s) in the evidence it read were too long or too deeply nested to check whole for text addressed to a model: its proposals from then on wait for a one-by-one look
+            </div>
+          )}
         </div>
       )}
       {plan.length ? (
@@ -123,6 +130,11 @@ function ProposalCard({ kase, p, onDone }: { kase: Case; p: Proposal; onDone: ()
             read text aimed at AI
           </Badge>
         )}
+        {!p.exposed && p.unchecked && (
+          <Badge sev="medium" title="proposed after the agent read evidence too long or too deeply nested to check whole for text addressed to a model: check it before accepting">
+            read text not checked whole
+          </Badge>
+        )}
         <span className="spacer" />
         <span className="dim small">{fmtTs(p.createdAt)}</span>
       </div>
@@ -162,14 +174,16 @@ function InboxTab({ kase }: { kase: Case }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kase.id, version])
   const pending = items.filter((p) => p.status === 'pending').reverse()
-  const clean = pending.filter((p) => !p.exposed)
+  const clean = pending.filter((p) => !heldForReview(p))
+  const flagged = pending.filter((p) => p.exposed).length
+  const unchecked = pending.filter((p) => !p.exposed && p.unchecked).length
   const decided = items.filter((p) => p.status !== 'pending').reverse()
-  const acceptAll = async () => {
-    const r = await acceptProposals(
-      kase,
-      clean.map((p) => p.id),
+  const acceptClean = async () => {
+    const r = await acceptAll(kase)
+    toast(
+      r.failed.length ? 'warn' : 'ok',
+      `${r.accepted} accepted${r.failed.length ? `, ${r.failed.length} not applied (see the cards)` : ''}${r.held ? `, ${r.held} left for a one-by-one look` : ''}`,
     )
-    toast(r.failed.length ? 'warn' : 'ok', `${r.accepted} accepted${r.failed.length ? `, ${r.failed.length} not applied (see the cards)` : ''}`)
   }
   return (
     <div className="col" style={{ gap: 8 }}>
@@ -178,7 +192,7 @@ function InboxTab({ kase }: { kase: Case }) {
       </div>
       {pending.length > 0 && (
         <div className="row" style={{ gap: 6 }}>
-          <button className="btn xs primary" disabled={!clean.length} onClick={acceptAll} title="proposals made after the agent read text aimed at a model are left for one-by-one review">
+          <button className="btn xs primary" disabled={!clean.length} onClick={acceptClean} title="proposals marked below are left for one-by-one review">
             accept all {clean.length}
             {clean.length < pending.length ? ` of ${pending.length}` : ''}
           </button>
@@ -193,6 +207,18 @@ function InboxTab({ kase }: { kase: Case }) {
           >
             reject all
           </button>
+        </div>
+      )}
+      {clean.length < pending.length && (
+        <div className="small warn-inline">
+          {pending.length - clean.length} proposal(s) are not part of accept all and wait for a one-by-one look:{' '}
+          {[
+            flagged ? `${flagged} made after the agent read evidence text addressed to a model` : '',
+            unchecked ? `${unchecked} made after it read evidence too long or too deeply nested to check whole for such text` : '',
+          ]
+            .filter(Boolean)
+            .join('; ')}
+          . That check finds only the phrasings it knows, so read what each one would change before accepting it.
         </div>
       )}
       {!pending.length && <div className="small dim">No proposal waiting.</div>}

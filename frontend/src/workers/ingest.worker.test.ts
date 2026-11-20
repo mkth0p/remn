@@ -13,9 +13,10 @@ vi.mock('../parsers/evtx/load', async () => {
 vi.mock('hash-wasm', () => ({ createSHA256: async () => ({ init: () => {}, update: () => {}, digest: () => 'a'.repeat(64) }) }))
 const context = { postMessage: mocks.post, onmessage: null as unknown as (e: { data: IngestRequest }) => Promise<void> }
 
+let IocCounter: typeof import('./ingest.worker').IocCounter
 beforeAll(async () => {
   vi.stubGlobal('self', context)
-  await import('./ingest.worker')
+  IocCounter = (await import('./ingest.worker')).IocCounter
 })
 afterEach(async () => {
   for (const table of getDb().tables) await table.clear()
@@ -128,4 +129,62 @@ it('says so when a file sent to be parsed here is not an event log', async () =>
     },
   })
   expect(await db.evidence.get(id)).toMatchObject({ status: 'error', error: 'not an EVTX file (no ElfFile header)', count: 0, parsedIn: 'browser' })
+})
+it('keeps the case of the path of a URL indicator, and folds only its scheme and host', async () => {
+  const link = { url: 'Www.Example.TEST/Login/Reset?t=Q1', scheme: '', domain: 'www.example.test' }
+  await run([
+    { type: 'event', ts: 1, eventId: 1, provider: 'Proxy', url: 'HTTPS://Files.Example.TEST/Share/Q3-Invoice.PDF?id=AbC' },
+    { type: 'mail', subject: 's', fromAddr: 'a@example.test', risk: 0, date: 1, attachments: [], urls: [link], bodyText: 'x' },
+  ])
+  const urls = (await getDb().iocs.toArray()).filter((i) => i.kind === 'url')
+  expect(urls.map((i) => i.value).sort()).toEqual(['https://files.example.test/Share/Q3-Invoice.PDF?id=AbC', 'www.example.test/Login/Reset?t=Q1'])
+})
+it('adds to an indicator an older version stored in lower case, rather than list it twice', async () => {
+  const db = getDb()
+  await db.iocs.add({
+    caseId: 1,
+    kind: 'url',
+    value: 'https://files.example.test/share/q3-invoice.pdf',
+    sources: ['mail-url'],
+    firstSeen: 1,
+    lastSeen: 1,
+    count: 2,
+    verdict: 'malicious',
+    checkedAt: 5,
+  })
+  await run([{ type: 'event', ts: 9, eventId: 1, provider: 'Proxy', url: 'https://files.example.test/Share/Q3-Invoice.PDF' }])
+  const urls = (await db.iocs.toArray()).filter((i) => i.kind === 'url')
+  expect(urls).toEqual([expect.objectContaining({ value: 'https://files.example.test/share/q3-invoice.pdf', count: 3, lastSeen: 9, verdict: 'malicious', sources: ['mail-url', 'Proxy'] })])
+})
+it('keeps the reputation found for an indicator stored in lower case when the indicators are rebuilt', async () => {
+  const db = getDb()
+  await db.events.add({ caseId: 1, evidenceId: 1, ts: 1, eventId: 1, provider: 'Proxy', url: 'https://files.example.test/Share/Q3-Invoice.PDF' } as never)
+  await db.iocs.add({ caseId: 1, kind: 'url', value: 'https://files.example.test/share/q3-invoice.pdf', sources: ['Proxy'], firstSeen: 1, lastSeen: 1, count: 1, verdict: 'malicious', checkedAt: 5 })
+  await context.onmessage({ data: { cmd: 'rebuild', caseId: 1 } as unknown as IngestRequest })
+  const urls = (await db.iocs.toArray()).filter((i) => i.kind === 'url')
+  expect(urls).toEqual([expect.objectContaining({ value: 'https://files.example.test/Share/Q3-Invoice.PDF', verdict: 'malicious', checkedAt: 5 })])
+})
+it('says which import stopped collecting indicators at the limit, and a rebuild that did', async () => {
+  IocCounter.limit = 3
+  try {
+    const dns = (ts: number, query: string) => ({ type: 'event', ts, eventId: 22, provider: 'Microsoft-Windows-Sysmon', query })
+    await run([dns(1, 'a.example.test'), dns(2, 'b.example.test'), dns(3, 'c.example.test'), dns(4, 'd.example.test'), dns(5, 'a.example.test')])
+    const db = getDb()
+    expect((await db.iocs.toArray()).map((i) => [i.value, i.count])).toEqual([
+      ['a.example.test', 2],
+      ['b.example.test', 1],
+      ['c.example.test', 1],
+    ])
+    expect((await db.kv.get('iocs-capped-1'))?.value).toEqual({ limit: 3, files: ['package.zip'] })
+    expect(mocks.post).toHaveBeenCalledWith({ type: 'log', level: 'warn', text: 'indicators: collection stopped at 3 distinct values; later ones of this file are not in the Indicators list' })
+    // recomputed after a removal, the indicators of the whole case meet the same limit
+    await context.onmessage({ data: { cmd: 'rebuild', caseId: 1 } as unknown as IngestRequest })
+    expect((await db.kv.get('iocs-capped-1'))?.value).toEqual({ limit: 3, files: [], rebuilt: true })
+    IocCounter.limit = 50_000
+    await context.onmessage({ data: { cmd: 'rebuild', caseId: 1 } as unknown as IngestRequest })
+    expect(await db.kv.get('iocs-capped-1')).toBeUndefined()
+    expect(await db.iocs.count()).toBe(4)
+  } finally {
+    IocCounter.limit = 50_000
+  }
 })

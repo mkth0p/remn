@@ -350,7 +350,8 @@ export async function timelineEvents(caseId: number, filter: Filter, bucket: Buc
  * predicate over the row sees only the 400-character preview. Free text and bodyText conditions are
  * resolved against the bodies first: a bodyText condition becomes the set of mail ids it matches,
  * and free text also matches a mail whose body holds it. Before this, the search box that says
- * "body" searched the preview only, and a bodyText condition never matched.
+ * "body" searched the preview only, and a bodyText condition never matched. The list, the count,
+ * the aggregate and the timeline all go through it, so a body search gives one number everywhere.
  */
 async function mailPredicate(caseId: number, filter: Filter, settings?: SettingsLike) {
   const db = getDb()
@@ -417,7 +418,7 @@ export async function countMails(caseId: number, filter: Filter, settings?: Sett
 
 export async function aggregateMails(caseId: number, filter: Filter, field: string, limit = 25, settings?: SettingsLike): Promise<{ groups: AggGroup[]; total: number; distinct: number }> {
   const db = getDb()
-  const pred = compileFilter(filter, { source: 'mails', settings })
+  const pred = await mailPredicate(caseId, filter, settings)
   const map = new Map<string, AggGroup>()
   let total = 0
   await db.mails
@@ -447,7 +448,7 @@ export async function aggregateMails(caseId: number, filter: Filter, field: stri
 
 export async function timelineMails(caseId: number, filter: Filter, bucket: Bucket, settings?: SettingsLike): Promise<{ t: number; count: number }[]> {
   const db = getDb()
-  const pred = compileFilter(filter, { source: 'mails', settings })
+  const pred = await mailPredicate(caseId, filter, settings)
   const size = bucketMs[bucket]
   const map = new Map<number, number>()
   await db.mails

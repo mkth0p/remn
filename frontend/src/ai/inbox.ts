@@ -6,7 +6,8 @@
  * the rows it cites; the analyst accepts it (one by one or all at once) or rejects it, and only
  * the acceptance writes. An accepted proposal keeps what it replaced, so it can be undone. Nothing
  * in the evidence can accept a proposal: acceptance is a click in this page, and a proposal made
- * after the agent read text addressed to a model is marked so that "accept all" leaves it out.
+ * after the agent read text addressed to a model, or evidence too long for that check to read
+ * whole, is marked and never accepted in bulk: "accept all" leaves it for a one-by-one look.
  *
  * Stored in kv `ai-inbox-<case>` in the shape the case bundle remaps on import (refs as
  * {source, id}, row ids under `refs`, review targets under `target`).
@@ -49,6 +50,8 @@ export interface Proposal {
   session?: number
   /** the run had read evidence text addressed to a model before it proposed this */
   exposed?: boolean
+  /** the run had read evidence too long or too deeply nested for that check to read whole */
+  unchecked?: boolean
   /** what accepting it replaced, for undo */
   applied?: {
     entry?: TriageEntry
@@ -115,6 +118,7 @@ export async function propose(caseId: number, p: Omit<Proposal, 'id' | 'status' 
     by: p.by,
     model: p.model,
     exposed: p.exposed || undefined,
+    unchecked: p.unchecked || undefined,
     cites: p.citations.map(refKey).slice(0, 40),
   })
   return proposal
@@ -198,6 +202,28 @@ export async function acceptProposals(kase: Case, ids: string[], edits: Record<s
     }
   }
   return { accepted, failed }
+}
+
+/**
+ * Why a proposal waits for the analyst to look at it alone, or null when "accept all" may take it.
+ * The check for text addressed to a model finds only what it has patterns for, so it is not what
+ * makes accepting in bulk safe; what it found, and what it could not read, keep a proposal out.
+ */
+export function heldForReview(p: Proposal): string | null {
+  if (p.exposed) return 'the agent proposed it after reading evidence text addressed to a model'
+  if (p.unchecked) return 'the agent proposed it after reading evidence too long or too deeply nested to check whole for such text'
+  return null
+}
+
+/** "Accept all": every pending proposal but those held for review, which stay pending. */
+export async function acceptAll(kase: Case): Promise<{ accepted: number; failed: { id: string; error: string }[]; held: number }> {
+  const pending = (await loadInbox(kase.id!)).filter((p) => p.status === 'pending').reverse()
+  const bulk = pending.filter((p) => !heldForReview(p))
+  const r = await acceptProposals(
+    kase,
+    bulk.map((p) => p.id),
+  )
+  return { ...r, held: pending.length - bulk.length }
 }
 
 export async function rejectProposals(caseId: number, ids: string[], why = ''): Promise<void> {

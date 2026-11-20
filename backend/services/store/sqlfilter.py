@@ -1,7 +1,8 @@
 """
 Filter DSL -> DuckDB SQL. Same semantics as frontend/src/rules/filter.ts:
-case-insensitive string comparison, arrays flatten (attachments.flags matches
-any attachment), settings-backed operators, regex, time and hour ranges.
+case-insensitive string comparison (the _cs operators and re_cs keep case),
+arrays flatten (attachments.flags matches any attachment), settings-backed
+operators, regex, time and hour ranges.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ OPS = {
     "not_endswith",
     "re",
     "not_re",
+    "re_cs",
     "gt",
     "gte",
     "lt",
@@ -159,7 +161,8 @@ def _setting(settings: dict[str, Any], name: str) -> list[str]:
     return list(builtin) if builtin else []
 
 
-_THRESHOLD_RE = re.compile(r"^\s*(>=|<=|==|=|!=|>|<)?\s*(\d+)\s*$")
+# the spaces after an optional comparator belong to it, so a value of many spaces is not split every way
+_THRESHOLD_RE = re.compile(r"^\s*(?:(>=|<=|==|=|!=|>|<)\s*)?(\d+)\s*$")
 
 
 def _threshold(v: Any) -> tuple[str, int]:
@@ -324,8 +327,10 @@ def compile_condition(field_name: str, op: str, value: Any, ctx: Ctx) -> str:
             )
             cond = f"list_bool_or(list_transform({lowlist}, lambda x: ({pat})))"
             return f"NOT coalesce({cond}, FALSE)" if neg else f"coalesce({cond}, FALSE)"
-        if op in ("re", "not_re"):
-            pat = " OR ".join(f"regexp_matches(x, {ctx.p(_regex(v))}, 'i')" for v in vals) or "FALSE"
+        if op in ("re", "not_re", "re_cs"):
+            # re_cs keeps the pattern's case, as a Sigma regex does; an inline (?i) still lifts it
+            flags = "" if op == "re_cs" else ", 'i'"
+            pat = " OR ".join(f"regexp_matches(x, {ctx.p(_regex(v))}{flags})" for v in vals) or "FALSE"
             cond = f"coalesce(list_bool_or(list_transform({sql}, lambda x: ({pat}))), FALSE)"
             return f"NOT {cond}" if op == "not_re" else cond
         if op in ("in_setting", "nin_setting"):
@@ -399,8 +404,9 @@ def compile_condition(field_name: str, op: str, value: Any, ctx: Ctx) -> str:
         else:
             cond = f"regexp_matches({low}, {ctx.p(_alternation(strs, suffix='$'))})"
         return f"NOT coalesce({cond}, FALSE)" if op == "not_endswith" else f"coalesce({cond}, FALSE)"
-    if op in ("re", "not_re"):
-        cond = "(" + " OR ".join(f"regexp_matches(CAST({sql} AS VARCHAR), {ctx.p(_regex(v))}, 'i')" for v in vals) + ")" if vals else "FALSE"
+    if op in ("re", "not_re", "re_cs"):
+        flags = "" if op == "re_cs" else ", 'i'"
+        cond = "(" + " OR ".join(f"regexp_matches(CAST({sql} AS VARCHAR), {ctx.p(_regex(v))}{flags})" for v in vals) + ")" if vals else "FALSE"
         return f"NOT coalesce({cond}, FALSE)" if op == "not_re" else f"coalesce({cond}, FALSE)"
     if op in ("gt", "gte", "lt", "lte"):
         if not vals:

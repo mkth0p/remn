@@ -16,8 +16,11 @@ from services.common import is_public_ip, normalize_ip, parse_timestamp
 
 Header = tuple[str, str]
 
-_IP_RE = re.compile(r"\[?((?:\d{1,3}\.){3}\d{1,3}|[0-9a-fA-F:]{2,}:[0-9a-fA-F:.]+)\]?")
-_FROM_RE = re.compile(r"(?is)\bfrom\s+(?P<from>.+?)(?=\s+\b(?:by|with|id|for|via)\b|;|$)")
+# An IPv6 address is only tried from the start of a run of hexadecimal digits and colons, and the
+# "from" part only checks for the next clause where a run of spaces starts: retrying inside the run
+# rescanned it from each of its characters. A match found inside a run is also found from its start.
+_IP_RE = re.compile(r"\[?((?:\d{1,3}\.){3}\d{1,3}|(?<![0-9a-fA-F:])[0-9a-fA-F:]{2,}:[0-9a-fA-F:.]+)\]?")
+_FROM_RE = re.compile(r"(?is)\bfrom\s+(?P<from>.+?)(?=(?<!\s)\s+\b(?:by|with|id|for|via)\b|;|$)")
 _BY_RE = re.compile(r"(?is)\bby\s+(?P<by>[^\s;()]+)")
 _WITH_RE = re.compile(r"(?is)\bwith\s+(?P<with>[^\s;()]+(?:\s+\([^)]*\))?)")
 _ID_RE = re.compile(r"(?is)\bid\s+(?P<id>[^\s;()]+)")

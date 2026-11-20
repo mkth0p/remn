@@ -226,13 +226,19 @@ def test_the_persistence_rules_fire_on_triage_rows(collection, tmp_path):
             if row["type"] == "event":
                 writer.add(row)
         writer.flush()
-        out = run_rules(store, [rules["collection-persistence-user-path"], rules["collection-defender-detection"]], {})
+        out = run_rules(store, [rules["collection-persistence-user-path"], rules["collection-persistence-appdata"], rules["collection-defender-detection"]], {})
     finally:
         registry.close_all()
 
     assert not out["errors"]
-    persistence = [f for f in out["findings"] if f["ruleId"] == "collection-persistence-user-path"]
-    assert len(persistence) >= 3, "the service, the run key and the task all launch from user-writable paths"
+
+    def named(rule_id):
+        found = [f["entities"] for f in out["findings"] if f["ruleId"] == rule_id]
+        return sorted(e.get("serviceName") or e.get("taskName") or e.get("name") for e in found)
+
+    # the service and the machine run key start from the public profile, the user's run key and task from AppData
+    assert named("collection-persistence-user-path") == ["Dropper", "SyncHelper"]
+    assert named("collection-persistence-appdata") == ["Updater", "\\Updater"]
     assert [f["entities"]["threatName"] for f in out["findings"] if f["ruleId"] == "collection-defender-detection"] == ["Trojan:Win32/Synthetic.A!ml"]
 
 

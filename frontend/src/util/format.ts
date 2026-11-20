@@ -14,17 +14,22 @@ function formatTime(ms: number | null | undefined, local: boolean, opts: { ms?: 
   if (ms == null || !Number.isFinite(ms)) return ''
   const d = new Date(ms)
   if (Number.isNaN(d.getTime())) return ''
-  const y = local ? d.getFullYear() : d.getUTCFullYear()
-  const mo = local ? d.getMonth() + 1 : d.getUTCMonth() + 1
-  const da = local ? d.getDate() : d.getUTCDate()
-  const h = local ? d.getHours() : d.getUTCHours()
-  const mi = local ? d.getMinutes() : d.getUTCMinutes()
-  const s = local ? d.getSeconds() : d.getUTCSeconds()
-  let out = `${y}-${pad(mo)}-${pad(da)}`
+  // a local time is the UTC time moved by the offset of the zone at that moment, and it says that
+  // offset as a UTC time says Z: a time copied into a note or a message keeps its zone
+  const offset = local ? -d.getTimezoneOffset() : 0
+  const w = new Date(ms + offset * 60_000)
+  let out = `${w.getUTCFullYear()}-${pad(w.getUTCMonth() + 1)}-${pad(w.getUTCDate())}`
   if (opts.date) return out
-  out += ` ${pad(h)}:${pad(mi)}:${pad(s)}`
-  if (opts.ms) out += `.${pad(d.getUTCMilliseconds(), 3)}`
-  return out + (local ? '' : 'Z')
+  out += ` ${pad(w.getUTCHours())}:${pad(w.getUTCMinutes())}:${pad(w.getUTCSeconds())}`
+  if (opts.ms) out += `.${pad(w.getUTCMilliseconds(), 3)}`
+  if (!local) return out + 'Z'
+  const abs = Math.abs(offset)
+  return `${out}${offset < 0 ? '-' : '+'}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`
+}
+
+/** The width of a table column of times: a local time is longer by its offset from UTC. */
+export function timeColumnWidth(utc: number): number {
+  return useLocalTime ? utc + 36 : utc
 }
 
 /** The zone the screen shows times in, for column headers: "UTC", or "local" when the analyst chose it. */
@@ -83,6 +88,19 @@ export function riskClass(r: number | null | undefined): string {
 export function severityOfRisk(r: number | null | undefined): Severity {
   const v = r ?? 0
   return v >= 85 ? 'critical' : v >= 65 ? 'high' : v >= 40 ? 'medium' : v >= 20 ? 'low' : 'info'
+}
+
+/**
+ * The stored form of an indicator. Only a URL's scheme and host are case-insensitive: its path and
+ * query name another resource when their case changes, so they keep it. Every other kind folds.
+ */
+export function iocValue(kind: string, value: string): string {
+  const v = value.trim().slice(0, 2048)
+  if (kind !== 'url') return v.toLowerCase()
+  const m = /^((?:[a-z][a-z0-9+.-]*:)?\/\/)?([^/?#]*)(.*)$/is.exec(v)!
+  // credentials before the host keep their case
+  const at = m[2].lastIndexOf('@')
+  return (m[1] ?? '').toLowerCase() + m[2].slice(0, at + 1) + m[2].slice(at + 1).toLowerCase() + m[3]
 }
 
 export function defang(s: string | null | undefined): string {

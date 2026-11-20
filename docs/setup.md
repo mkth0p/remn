@@ -9,8 +9,8 @@ the repository is laid out.
 
 ## Requirements
 
-- Python 3.13. The optional PST and YARA packages have wheels for 3.13 and not yet for
-  3.14, and the continuous integration and the Docker image use 3.13.
+- Python 3.13. The lock files are resolved for 3.13, and the continuous integration and
+  the Docker image use it.
 - Node 22 or later, for building the browser application. Continuous integration and
   the Docker image use 22.
 - Developed and used on Windows 11; the same code runs on Linux in the Docker image and
@@ -67,6 +67,24 @@ that compiles, which is why it needs the compiler and the Python headers.
 Configuration is optional and lives in a `.env` file at the project root: copy
 `.env.example` and set what you need (reputation provider keys, `OLLAMA_MODEL`, the
 remote-access variables below). Every variable is documented in that file.
+
+Evidence passes through a staging area (`FORENSIC_TMP_DIR`, `backend/tmp` of the checkout)
+while it is parsed. By default the staging area may use the free space of its disk less a
+tenth of that disk (at most 10 GiB), so the largest file is set by the chunked-upload limit
+(`FORENSIC_MAX_CHUNKED_GB`, 64) and by that disk; `FORENSIC_TMP_MAX_GB` sets a fixed total
+instead. A file larger than the staging area can hold is refused with a message that says
+which of the two decides it. Put the staging area on a disk with room for the largest
+mailbox or collection you expect, and the case stores (`FORENSIC_CASES_DIR`) on one with
+room for what it becomes.
+
+Each parse runs in a process of its own, started from the same interpreter in isolated mode
+(`python -I`), so the packages must be installed where that interpreter finds them without
+`PYTHONPATH` or a user site folder, as the virtual environment above does. One parse may use
+`FORENSIC_PARSE_MAX_MB` of memory (4096 by default) and `FORENSIC_PARSE_MAX_CPU_S` seconds of
+processor time (six hours; not enforced on Windows), and is stopped past either with what it had
+read and the reason. A server that runs as root on Linux or macOS can run the parses as another
+account with `FORENSIC_PARSE_UID`. What each system enforces, and what
+`FORENSIC_PARSE_ISOLATION=0` gives up, is on the [security page](security.md#each-parse-in-a-process-of-its-own).
 
 ## Run
 
@@ -160,8 +178,14 @@ image keeps no package manager, and a build stage with a compiler takes care of 
 docker build --build-arg EXTRA_PIP="yara-python libpff-python py7zr" -t remn .
 ```
 
-The names are chosen from `backend/requirements-optional.txt` and installed at the
-versions and hashes that file fixes; a name it does not list fails the build.
+or, with compose, `REMN_EXTRA_PIP="yara-python libpff-python" docker compose up --build`
+(`set REMN_EXTRA_PIP=yara-python libpff-python` first in a Windows command prompt). The
+names are chosen from `backend/requirements-optional.txt` and installed at the versions
+and hashes that file fixes; a name it does not list fails the build. The health endpoint,
+`/api/health`, reports what the running server has under `optional` to a request that
+carries the `X-Forensic-Client` header (the token, when one is set). Without the header it
+answers `{"ok": true}` and nothing else; that is what the image's health check
+(`tools/healthcheck.py`) asks, so the check needs no token.
 
 The image differs from a virtual-environment install in one more way: it carries
 [Hayabusa](https://github.com/Yamato-Security/hayabusa) (AGPL-3.0, run as a separate
@@ -169,13 +193,6 @@ program) and runs it over Windows event logs as a third detection engine beside 
 two. A virtual-environment install has that engine only when Hayabusa is installed on the
 machine (on `PATH`, or where `HAYABUSA_PATH` points), so the same evidence can give more
 findings in the container. `--build-arg HAYABUSA=0` builds the image without it.
-
-or, with compose, `REMN_EXTRA_PIP="yara-python libpff-python" docker compose up --build`
-(`set REMN_EXTRA_PIP=yara-python libpff-python` first in a Windows command prompt). The
-health endpoint, `/api/health`, reports what the running server has under `optional` to a
-request that carries the `X-Forensic-Client` header (the token, when one is set). Without the
-header it answers `{"ok": true}` and nothing else; that is what the image's health check
-(`tools/healthcheck.py`) asks, so the check needs no token.
 
 Still not in the image: GeoLite2 and the offline lists, which are data the operator
 downloads under licence (mount your `backend/data` folder at `/app/backend/data`), YARA
@@ -226,7 +243,8 @@ One script does all of it, from a clone of the repository:
 sudo REMN_DOMAIN=remn.example.tech bash deploy/public-server-setup.sh
 ```
 
-It refuses to go on until the name resolves to that machine, installs Docker and the
+It stops when the name does not resolve (and warns, then waits ten seconds, when it
+resolves to an address other than the machine's), installs Docker and the
 firewall, opens 22, 80 and 443 and nothing else, turns on unattended security updates,
 closes SSH password logins only once it has found a key to log in with (never before, so
 it cannot lock you out), starts the stack and waits for the certificate. Running it again
@@ -284,15 +302,20 @@ REMN_DOMAIN=remn.example.tech sudo -E docker compose -f docker-compose.public.ym
 
 ### Upkeep
 
-There is no case data on the machine to back up: browser-only mode keeps nothing, and the
-only volume holds the temporary upload area. What needs attention is the code and the
-base images, since a public address means the vulnerabilities in them are reachable:
+There is no case data on the machine to back up: browser-only mode keeps nothing, staging
+is a RAM-backed tmpfs in a read-only container, and the only volumes hold Caddy's
+certificates and configuration. What needs attention is the code and the base images, since
+a public address means the vulnerabilities in them are reachable:
 
 ```bash
-git pull && REMN_DOMAIN=remn.example.tech sudo -E docker compose -f docker-compose.public.yml up -d --build --pull always
+REMN_DOMAIN=remn.example.tech sudo -E bash deploy/update.sh
 ```
 
-Run that when a release is tagged. Continuous integration scans every image build with
+`deploy/update.sh` pulls the clone, rebuilds the images stamped with the commit (which the
+page shows visitors, with a link to that source; a plain `docker compose up --build` shows
+the build as unknown), checks the new proxy image and Caddyfile before it replaces anything,
+and restarts the stack. `REMN_DOMAIN` can stay out of the command when the `.env` beside the
+compose file holds it, as the setup script leaves it. Run it when a release is tagged. Continuous integration scans every image build with
 Trivy and fails on critical or high findings that have a fix, so a green build is the
 signal that the image is worth deploying. `docker logs` on the two containers shows what
 happened; `sudo docker system prune -f` reclaims the space of the images replaced.
@@ -304,7 +327,8 @@ parses whatever it is given, so treat it as a machine that runs untrusted input 
 the parsers all day: that is why it holds no case data, no keys and no model account, and
 why it lives on a machine of its own rather than next to anything that matters. Visitors
 upload evidence to it; the rows come back to their browser and the temporary copy is
-discarded, but during the parse the file is on that disk, so the instance is a place to
+discarded, but during the parse the file is held on that machine, in its RAM-backed staging
+area, so the instance is a place to
 try REMN and not a place for anyone's real evidence. Say so on the page that links to it.
 
 ## Remote access
@@ -374,6 +398,97 @@ refuses, so these setups have to change:
 
 A container that refuses to start under `restart: unless-stopped` restarts in a loop, with
 the reason in `docker logs`.
+
+## Backup and upgrade
+
+This section is for a server that keeps cases in the server store. A browser-store case lives
+in the analyst's browser and is kept with a case bundle (see
+[Storage modes](storage.md#portable-case-backups)); a public instance keeps no case at all.
+The case bundles are still worth exporting from a server-store case: the findings, notes and
+decisions of every case live in the browser, not in its store.
+
+### Backing up the case stores
+
+`tools/store_backup.py` copies each case store into a backup folder, byte for byte, with a
+`manifest.json` per case that lists each file's size and SHA-256, the store's schema version
+and the row count of every table. It checks each copy by opening it before it reports the
+case as backed up, and it never writes over an earlier backup, so give it a new folder each
+time. `verify` checks a backup folder again later, for instance after it has been copied to
+other media.
+
+```bash
+.venv/bin/python tools/store_backup.py backup /srv/remn-backups/2026-11-19
+.venv/bin/python tools/store_backup.py verify /srv/remn-backups/2026-11-19
+```
+
+On Windows the interpreter is `.venv\Scripts\python.exe` and the folder a Windows path. The
+tool reads the cases folder from the same `.env` as the server; `--cases-dir` names another.
+
+The server holds a store open while it is used, and for `FORENSIC_STORE_IDLE_S` seconds (600)
+after its last use. A backup taken while the server runs copies every case nobody is working
+on, skips the others with a line naming each one and why, and ends with exit code 1; run it
+again later for those, or stop the server first to back up every case in one run. While the
+tool copies a case, the server answers requests for that case with 503 and asks to try again.
+
+With Docker, the stores are in the `remn-data` volume and the tool is in the image. Stop the
+service, run the tool in a one-off container with a host folder for the backups, and start
+the service again. The container runs as uid 1000, which needs to be able to write the folder:
+
+```bash
+mkdir -p remn-backups && sudo chown 1000 remn-backups
+docker compose stop remn
+docker compose run --rm -v "$PWD/remn-backups:/backups" remn python tools/store_backup.py backup /backups/2026-11-19
+docker compose start remn
+```
+
+A backup holds the evidence rows of every case it covers: keep it on an encrypted volume, as
+the stores themselves (see [Security model](security.md#where-evidence-lives)).
+
+### Restoring a case
+
+```bash
+.venv/bin/python tools/store_backup.py restore /srv/remn-backups/2026-11-19            # every case in the backup
+.venv/bin/python tools/store_backup.py restore /srv/remn-backups/2026-11-19 <case key>  # one case
+```
+
+A restore first checks the backup against its manifest (digests, row counts, schema version)
+and changes nothing if they differ. It does not write over a case that is already in the cases
+folder: such a case is skipped, with a line saying so. `--replace` restores over it and keeps
+the case it replaces beside the others as `<key>.before-restore-<time>`, which the server does
+not list; remove that folder once the restored case has been checked. Restore with the server
+stopped, or only cases nobody is using: a case the server holds open is refused. A backup
+written by a newer version of REMN is not restored by an older one.
+
+### Upgrading
+
+1. Note the version that runs now: `git rev-parse HEAD` in the clone (the build is also in
+   `/api/health`).
+2. Stop the server, back up every case into a new folder as above, and check that the last
+   line counts every store as backed up. Keep this backup until the new version has been
+   running for as long as a rollback could still be wanted.
+3. Update the code: `git pull --ff-only` (or check out the release), install the
+   requirements again (`pip install -r backend/requirements.txt`, and the optional file if
+   you use it) and rebuild the browser application (`cd frontend && npm ci && npm run build`).
+   With Docker, `git pull --ff-only` and `docker compose up -d --build`.
+4. Start the server. A store written by an older version is upgraded the first time it is
+   opened, in one transaction, and the server log says so (`case store <key> upgraded from
+   schema 1 to 2`); see [Storage modes](storage.md#server-store). Open the cases you need
+   and check their counts on the Dashboard.
+
+### Rolling back
+
+1. Stop the server and go back to the version noted in step 1 of the upgrade:
+   `git checkout <commit>`, then the requirements and the browser application as in step 3
+   (with Docker, `docker compose up -d --build` after the checkout).
+2. Start it and open the cases. A store the older version reads opens as it is. A store the
+   newer version upgraded to a schema the older one does not read is refused, with nothing in
+   it changed: the case answers 409 (`storeVersion`) with a message that names both versions.
+3. For each refused case, stop the server, restore the case from the backup taken before the
+   upgrade, and start the server again:
+   `tools/store_backup.py restore --replace <backup folder> <case key>` (with Docker, run it
+   as the backup was run). What was added to that case after the upgrade is not in the
+   restored store; it stays in the store kept aside as `<key>.before-restore-<time>` until that
+   folder is removed.
 
 ## Repository layout
 

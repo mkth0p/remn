@@ -48,14 +48,23 @@ _SMUGGLE_API = (
     ("RC4", "rc4"),
     ("xor", "xor"),
 )
-_PASSWORD_INPUT = re.compile(r"(?i)<input[^>]*type\s*=\s*[\"']?password")
-_EMAIL_INPUT = re.compile(r"(?i)<input[^>]*(?:type\s*=\s*[\"']?email|name\s*=\s*[\"']?(?:email|user(?:name)?|login|login_email|identifier))")
-_FORM_ACTION = re.compile(r"(?i)<form[^>]*action\s*=\s*[\"']?([^\"'\s>]+)")
-_META_REFRESH = re.compile(r"(?i)<meta[^>]*http-equiv\s*=\s*[\"']?refresh[^>]*content\s*=\s*[\"']?\s*\d+\s*;\s*url\s*=\s*([^\"'>\s]+)")
-_SCRIPT_RE = re.compile(r"(?is)<script\b[^>]*>(.*?)</script>")
-_SCRIPT_SRC = re.compile(r"(?i)<script[^>]*src\s*=\s*[\"']([^\"']+)")
+# A tag is searched from each of its openings up to the next opening, which is searched in its turn:
+# with [^>]* every opening before the next ">" (or before the end, in a page with none) rescanned
+# the same text, quadratic in the size of the page. A tag that holds its own opening, as in
+# "<input <input type=password>", is found from the inner one. The meta refresh tag takes its first
+# http-equiv=refresh (atomic group): a content=...url after a later one is after the first one too.
+_PASSWORD_INPUT = re.compile(r"(?i)<input(?:(?!<input)[^>])*type\s*=\s*[\"']?password")
+_EMAIL_INPUT = re.compile(r"(?i)<input(?:(?!<input)[^>])*(?:type\s*=\s*[\"']?email|name\s*=\s*[\"']?(?:email|user(?:name)?|login|login_email|identifier))")
+_FORM_ACTION = re.compile(r"(?i)<form(?:(?!<form)[^>])*action\s*=\s*[\"']?([^\"'\s>]+)")
+_META_REFRESH = re.compile(
+    r"(?i)<meta(?>(?:(?!<meta)[^>])*?http-equiv\s*=\s*[\"']?refresh)(?:(?!<meta)[^>])*content\s*=\s*(?:[\"']\s*)?\d+\s*;\s*url\s*=\s*([^\"'>\s]+)"
+)
+_SCRIPT_RE = re.compile(r"(?is)<script\b(?:(?!<script\b)[^>])*>(.*?)</script>")
+# everything up to the last closing script tag: a script opened after it is never closed
+_SCRIPT_END = re.compile(r"(?is).*</script>")
+_SCRIPT_SRC = re.compile(r"(?i)<script(?:(?!<script)[^>])*src\s*=\s*[\"']([^\"']+)")
 _ONLOAD = re.compile(r"(?i)\bon(?:load|error|mouseover|focus|click|pageshow|animationstart)\s*=")
-_HIDDEN_IFRAME = re.compile(r"(?is)<iframe[^>]*(?:width\s*=\s*[\"']?0|height\s*=\s*[\"']?0|display\s*:\s*none|visibility\s*:\s*hidden)")
+_HIDDEN_IFRAME = re.compile(r"(?is)<iframe(?:(?!<iframe)[^>])*(?:width\s*=\s*[\"']?0|height\s*=\s*[\"']?0|display\s*:\s*none|visibility\s*:\s*hidden)")
 _BRAND_TITLE = re.compile(
     r"(?i)(microsoft|office ?365|outlook|onedrive|sharepoint|adobe|docusign|dropbox|google|gmail|paypal|apple|amazon|webmail|owa|sign ?in|log ?in|connexion|identifiez)"
 )
@@ -118,10 +127,14 @@ def analyze_html(data: bytes, ext: str) -> dict[str, Any]:
         "passwordInput": False,
         "size": len(data),
     }
-    m = re.search(r"(?is)<title[^>]*>(.*?)</title>", text)
+    # the first title tag only (atomic group): when no closing tag follows it, none follows a later
+    # one either, and trying each opening again rescanned the rest of the page
+    m = re.search(r"(?is)\A(?>.*?<title(?:(?!<title)[^>])*>)(.*?)</title>", text)
     if m:
         out["title"] = re.sub(r"\s+", " ", m.group(1)).strip()[:200]
-    scripts = _SCRIPT_RE.findall(text)
+    # likewise a script opened after the last closing tag is never closed: the search stops there
+    last_close = _SCRIPT_END.match(text)
+    scripts = _SCRIPT_RE.findall(text, 0, last_close.end() if last_close else 0)
     out["scripts"] = len(scripts) + len(_SCRIPT_SRC.findall(text))
     out["externalScripts"] = _SCRIPT_SRC.findall(text)[:20]
     if out["scripts"]:
@@ -190,7 +203,9 @@ def analyze_html(data: bytes, ext: str) -> dict[str, Any]:
         out["redirect"] = mr.group(1)[:400]
         flags.add("html_meta_refresh")
     elif "location_redirect" in apis:
-        m2 = re.search(r"(?i)(?:window\.)?location(?:\.href|\.replace\(|\s*=)\s*[\"'(]?\s*[\"']([^\"']{6,400})", joined_js)
+        # the spaces after an opening quote or bracket belong to it: two runs of spaces side by side
+        # were split every way
+        m2 = re.search(r"(?i)(?:window\.)?location(?:\.href|\.replace\(|\s*=)\s*(?:[\"'(]\s*)?[\"']([^\"']{6,400})", joined_js)
         if m2:
             out["redirect"] = m2.group(1)
         flags.add("html_js_redirect")

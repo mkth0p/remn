@@ -170,7 +170,9 @@ def build(events: list[dict[str, Any]], mails: list[dict[str, Any]], options: di
             nodes[nid] = {"id": nid, "kind": kind, "value": value, "scope": scope, "label": label or value}
         return nid
 
-    def link(a: str | None, b: str | None, relation: str, reason: str, confidence: str, ref: dict[str, Any]) -> None:
+    def link(a: str | None, b: str | None, relation: str, reason: str, confidence: str, ref: dict[str, Any], assertion: str = "observed") -> None:
+        """An edge; `assertion` says whether a record states it ("observed") or REMN joined it ("correlated"):
+        a field of the call, never read from the reason's wording, which can change."""
         nonlocal limited
         if not a or not b or a == b:
             return
@@ -187,7 +189,7 @@ def build(events: list[dict[str, Any]], mails: list[dict[str, Any]], options: di
                 "confidence": confidence,
                 "refs": [],
                 "count": 0,
-                "assertion": "correlated" if "snapshot match" in reason or "inferred, not stated" in reason else "observed",
+                "assertion": assertion,
                 "rule": "explicit-fields/v2",
                 "assumptions": [reason],
                 "supportTruncated": False,
@@ -196,7 +198,7 @@ def build(events: list[dict[str, Any]], mails: list[dict[str, Any]], options: di
         edge = edges[k]
         if confidence == "contextual":
             edge["confidence"] = confidence
-        if "snapshot match" in reason or "inferred, not stated" in reason:
+        if assertion == "correlated":
             edge["assertion"] = "correlated"
         witness = json.dumps(
             [
@@ -343,13 +345,14 @@ def build(events: list[dict[str, Any]], mails: list[dict[str, Any]], options: di
                 else "PID alone identifies only this observation; it is not merged with other records",
                 "high" if process_key and host and not row.get("_processResolution") else "contextual",
                 ref,
+                "correlated" if process_key and row.get("_processResolution") else "observed",
             )
             if supporting := row.get("_processEvidence"):
                 support_ref = {
                     k: supporting.get(k) for k in ("id", "evidenceId", "sourceFile", "sourceSha256", "sourceIndex", "packageId", "memberIndex", "observedAt")
                 }
                 support_ref.update(source="events", ts=supporting.get("ts"), recordKind="observation", title=clean(supporting.get("summary")))
-                link(record, pn, "observed process", row["_processResolution"], "contextual", support_ref)
+                link(record, pn, "observed process", row["_processResolution"], "contextual", support_ref, "correlated")
             link(
                 pn,
                 fn,
@@ -357,6 +360,7 @@ def build(events: list[dict[str, Any]], mails: list[dict[str, Any]], options: di
                 row.get("_processResolution") or "Process and executable appear in the same source record",
                 "contextual" if row.get("_processResolution") else "high",
                 ref,
+                "correlated" if row.get("_processResolution") else "observed",
             )
             parent_guid = process_guid(row.get("parentProcessGuid"))
             if host and parent_guid:
@@ -442,6 +446,7 @@ def build(events: list[dict[str, Any]], mails: list[dict[str, Any]], options: di
                         "The record names several files and one digest; the subject is inferred, not stated",
                         "contextual",
                         ref,
+                        "correlated",
                     )
             for field in ("destinationIp", "sourceIp", "ipAddress"):
                 endpoint = ip(row.get(field))
@@ -454,6 +459,7 @@ def build(events: list[dict[str, Any]], mails: list[dict[str, Any]], options: di
                         row.get("_processResolution") or "Process and destination appear together in this record",
                         "high" if process_key and not row.get("_processResolution") else "contextual",
                         ref,
+                        "correlated" if row.get("_processResolution") else "observed",
                     )
             for field in ("query", "destinationHostname"):
                 link(record, domain(row.get(field)), "names domain", f"Domain in {field}", "high", ref)

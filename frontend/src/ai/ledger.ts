@@ -111,7 +111,8 @@ export async function summariseLedger(caseId: number): Promise<LedgerSummary & {
       if (d.model) models.add(String(d.model))
       if (d.transport) transports.add(String(d.transport))
     } else if (e.kind === 'tool') s.toolCalls++
-    else if (e.kind === 'notice') s.notices++
+    // a notice that evidence was too long to check is not one that it addressed a model
+    else if (e.kind === 'notice') s.notices += d.unread ? 0 : 1
     else if (e.kind === 'proposal') {
       s.proposals++
       const k = String(d.kind ?? 'other')

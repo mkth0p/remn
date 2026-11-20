@@ -74,6 +74,7 @@ const OPS = new Set<string>([
   'not_endswith',
   're',
   'not_re',
+  're_cs',
   'gt',
   'gte',
   'lt',
@@ -129,7 +130,9 @@ export function compileCond(cond: RuleCond | undefined | null, settings?: Settin
 export function parseDuration(s: string | number | undefined): number | null {
   if (s == null || s === '') return null
   if (typeof s === 'number') return s * 1000
-  const m = /^\s*(\d+(?:\.\d+)?)\s*(ms|s|m|h|d|w)?\s*$/i.exec(String(s))
+  // blanks after the unit only when there is one: two runs of blanks side by side were split every
+  // way when what follows failed, as services/store/rules.py reads it
+  const m = /^\s*(\d+(?:\.\d+)?)\s*(?:(ms|s|m|h|d|w)\s*)?$/i.exec(String(s))
   if (!m) return null
   const n = Number(m[1])
   const unit = (m[2] || 's').toLowerCase()
@@ -140,7 +143,8 @@ export function parseDuration(s: string | number | undefined): number | null {
 export function parseThreshold(t: string | number | undefined): ((n: number) => boolean) | null {
   if (t == null || t === '') return null
   if (typeof t === 'number') return (n) => n >= t
-  const m = /^\s*(>=|<=|==|=|>|<|!=)?\s*(\d+)\s*$/.exec(String(t))
+  // blanks after the operator only when there is one, as in parseDuration
+  const m = /^\s*(?:(>=|<=|==|=|>|<|!=)\s*)?(\d+)\s*$/.exec(String(t))
   if (!m) return null
   const v = Number(m[2])
   switch (m[1] || '>=') {
@@ -225,7 +229,7 @@ export function findingCap(rule: Rule): number {
 /** Whether a rule counting up to its threshold is about its biggest groups (a burst, a spray), as services/store/rules.py decides. */
 function keepsLargest(t: string | number | undefined): boolean {
   if (typeof t === 'number') return Math.trunc(t) > 1
-  const m = /^\s*(>=|<=|==|=|>|<|!=)?\s*(\d+)\s*$/.exec(String(t ?? ''))
+  const m = /^\s*(?:(>=|<=|==|=|>|<|!=)\s*)?(\d+)\s*$/.exec(String(t ?? ''))
   if (!m) return false
   const op = m[1] || '>='
   const v = Number(m[2])
@@ -423,7 +427,8 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
         ts: (first[tsField] as number) ?? null,
         tsEnd: (last[tsField] as number) ?? null,
         entities: ent,
-        count: rows.length,
+        // the number the threshold tested: distinct values when the rule counts them
+        count: n,
       })
       rank.set(findings[findings.length - 1], { rows: rows.length, key: groupKey(first, groupBy), ts: 0 })
       continue
@@ -649,18 +654,29 @@ export function validateRule(r: unknown): { ok: true; rule: Rule } | { ok: false
   }
   if (rule.threshold != null && !parseThreshold(rule.threshold)) return { ok: false, error: `${rule.id}: invalid threshold` }
   if (rule.window && !parseDuration(rule.window)) return { ok: false, error: `${rule.id}: invalid window` }
+  // a key the engines would skip without a word is refused, so the author learns the rule does less than it says
+  // (mirrors rule_problem in backend/services/store/rules.py)
+  if (!rule.group_by?.length && !parseThreshold(rule.threshold)) {
+    const unused = (['then', 'window', 'distinct', 'any_in_group'] as const).filter((k) => rule[k])
+    if (unused.length) return { ok: false, error: `${rule.id}: ${unused.join(', ')} need group_by or threshold: without them the rule gives one finding per row` }
+  }
+  if (rule.then != null && !rule.then.where) return { ok: false, error: `${rule.id}: then needs a where: the follow-up to look for` }
+  if (rule.then_flags?.length && rule.source !== 'mails') return { ok: false, error: `${rule.id}: then_flags applies to mail rules only: events carry no flags` }
   // regex sanity
   const walk = (c: RuleCond | undefined) => {
     if (!c) return
     for (const [k, v] of Object.entries(c)) {
       if (/^(any_of|all_of)(_\d+)?$/.test(k)) for (const alt of Array.isArray(v) ? v : [v]) walk(alt as RuleCond)
       else if (k === 'not') walk(v as RuleCond)
-      else if (k.endsWith('|re') || k.endsWith('|not_re')) for (const p of Array.isArray(v) ? v : [v]) if (!compileRegex(String(p))) throw new Error(`${rule.id}: invalid regex ${p}`)
+      else if (k.endsWith('|re') || k.endsWith('|not_re') || k.endsWith('|re_cs'))
+        for (const p of Array.isArray(v) ? v : [v]) if (!compileRegex(String(p))) throw new Error(`${rule.id}: invalid regex ${p}`)
     }
   }
   try {
     walk(rule.where)
     walk(rule.exclude)
+    walk(rule.then?.where)
+    walk(rule.any_in_group)
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }

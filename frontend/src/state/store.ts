@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import { create } from 'zustand'
 import type { Case, CaseSettings } from '../db/schema'
 import type { Health, Meta } from '../api/client'
@@ -33,6 +34,8 @@ export interface IngestJob {
   bytes: number
   error?: string
   startedAt: number
+  /** the analyst cancelled it; what it wrote is being removed */
+  cancelling?: boolean
 }
 
 interface State {
@@ -168,6 +171,22 @@ export const useStore = create<State>((set) => ({
   authRequired: false,
   setAuthRequired: (authRequired) => set({ authRequired }),
 }))
+
+/**
+ * A count that grows each time the running imports have all finished, for a page that reads its
+ * rows again then. Not at mount, where the page reads them anyway: a check that every job was
+ * done held for an empty list too, so each page queried twice when it opened.
+ */
+export function useImportsFinished(): number {
+  const importing = useStore((s) => s.jobs.some((j) => j.phase !== 'done' && j.phase !== 'error'))
+  const was = useRef(importing)
+  const [finished, setFinished] = useState(0)
+  useEffect(() => {
+    if (was.current && !importing) setFinished((n) => n + 1)
+    was.current = importing
+  }, [importing])
+  return finished
+}
 
 export const log = (level: ConsoleLine['level'], text: string) => useStore.getState().log(level, text)
 export const toast = (kind: Toast['kind'], text: string, ttl?: number) => useStore.getState().toast(kind, text, ttl)

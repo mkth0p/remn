@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useStore } from '../state/store'
 import { fmtBytes, fmtNum } from '../util/format'
+import { cancelImport } from '../data/ingest'
 import { Progress } from './ui'
 
 export function Jobs() {
@@ -18,6 +19,16 @@ export function Jobs() {
             <span className="dim">{j.phase}</span>
             <span className="spacer" />
             <span className="mono dim">{j.phase === 'hashing' ? `${Math.round(j.progress * 100)}%` : `${fmtNum(j.rows)} rows${j.bytes ? ` · ${fmtBytes(j.bytes)}` : ''}`}</span>
+            {j.phase !== 'done' && j.phase !== 'error' && (
+              <button
+                className="btn xs ghost"
+                onClick={() => cancelImport(j.id)}
+                disabled={j.cancelling}
+                title="Stop this import and remove what it has written; the files queued after it in the same drop are not imported"
+              >
+                {j.cancelling ? 'cancelling…' : 'cancel'}
+              </button>
+            )}
           </div>
           {j.phase !== 'done' && j.phase !== 'error' && (
             <div style={{ marginTop: 6 }}>

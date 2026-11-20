@@ -19,6 +19,7 @@ export type Op =
   | 'not_endswith'
   | 're'
   | 'not_re'
+  | 're_cs'
   | 'gt'
   | 'gte'
   | 'lt'
@@ -230,11 +231,11 @@ export function settingList(settings: SettingsLike | undefined, name: string): s
 }
 
 function normalizeNameLike(s: string): string {
-  return s
-    .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/<[^>]*>/g, ' ')
+  const name = s.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase()
+  // no tag ends after the last ">": searching past it for each "<" took time that grew with the
+  // square of the name (the server cuts a display name the same way)
+  const cut = name.lastIndexOf('>') + 1
+  return (name.slice(0, cut).replace(/<[^>]*>/g, ' ') + name.slice(cut))
     .replace(/[^a-z0-9 ]+/g, ' ')
     .split(/\s+/)
     .filter(Boolean)
@@ -353,7 +354,8 @@ export function matchCondition(row: Row, c: Condition, settings?: SettingsLike):
     case 'length': {
       // wanted = threshold string ("< 500", ">= 3") or a number (exact); characters of a text, items of a list
       if (actual == null) return false
-      const m = /^\s*(>=|<=|==|=|!=|>|<)?\s*(\d+)\s*$/.exec(String(wanted))
+      // blanks after the operator only when there is one, as parseThreshold reads it
+      const m = /^\s*(?:(>=|<=|==|=|!=|>|<)\s*)?(\d+)\s*$/.exec(String(wanted))
       if (!m) return false
       const n = Number(m[2])
       const sym = m[1] || '='
@@ -361,13 +363,15 @@ export function matchCondition(row: Row, c: Condition, settings?: SettingsLike):
       return sym === '>' ? len > n : sym === '>=' ? len >= n : sym === '<' ? len < n : sym === '<=' ? len <= n : sym === '!=' ? len !== n : len === n
     }
     case 're':
-    case 'not_re': {
-      const patterns = wantArr.map((w) => compileRegex(String(w), 'i')).filter((r): r is RegExp => !!r)
+    case 'not_re':
+    case 're_cs': {
+      // re_cs keeps the pattern's case, as a Sigma regex does; a leading (?i) still lifts it
+      const patterns = wantArr.map((w) => compileRegex(String(w), op === 're_cs' ? '' : 'i')).filter((r): r is RegExp => !!r)
       const hit = actArr.some((a) => {
         const s = a == null ? '' : typeof a === 'object' ? JSON.stringify(a) : String(a)
         return patterns.some((r) => r.test(s))
       })
-      return op === 're' ? hit : !hit
+      return op === 'not_re' ? !hit : hit
     }
     case 'gt':
     case 'gte':

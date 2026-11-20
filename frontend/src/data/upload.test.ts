@@ -2,8 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { chunkedUpload, forgetUpload } from './upload'
 import { getDb } from '../db/schema'
 
-// hashOnly spins a real web worker: stub it out
-vi.mock('./ingest', () => ({ hashOnly: vi.fn(async () => 'cafe'.repeat(16)) }))
+// hashOnly spins a real web worker: stub it out. The stub is a plain function and not vi.fn,
+// because a spy handles the promise it returns and would hide an unhandled rejection.
+type HashOnly = (file: File, onProgress?: (p: number) => void, signal?: AbortSignal) => Promise<string>
+const hash = vi.hoisted(() => ({ impl: null as HashOnly | null }))
+vi.mock('./ingest', () => ({ hashOnly: ((file, onProgress, signal) => (hash.impl ? hash.impl(file, onProgress, signal) : Promise.resolve('cafe'.repeat(16)))) satisfies HashOnly }))
 
 const fetchMock = vi.fn()
 
@@ -21,6 +24,7 @@ beforeEach(() => {
   fetchMock.mockReset()
 })
 afterEach(async () => {
+  hash.impl = null
   vi.unstubAllGlobals()
   await getDb().kv.clear()
 })
@@ -79,6 +83,45 @@ describe('chunkedUpload resume', () => {
     await expect(chunkedUpload(file, undefined, ctrl.signal)).rejects.toThrow()
     expect(deletes).toEqual(['/api/upload/up2'])
     expect(await getDb().kv.get('upload-big.bin-64-1725000000000')).toBeUndefined()
+  })
+})
+
+describe('the hash beside a failed upload', () => {
+  it('is stopped when the upload fails, rather than read the rest of the file for nothing', async () => {
+    const file = makeFile(64)
+    let hashSignal: AbortSignal | undefined
+    hash.impl = (_file, _onProgress, signal) =>
+      new Promise((_resolve, reject) => {
+        hashSignal = signal
+        signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+      })
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === '/api/upload/init') return json({ uploadId: 'up3', chunkSize: 32 })
+      return new Response('boom', { status: 500 })
+    })
+    await expect(chunkedUpload(file)).rejects.toThrow('chunk upload failed')
+    expect(hashSignal?.aborted).toBe(true)
+  })
+
+  it('does not leave its own failure unhandled when the upload failed first', async () => {
+    const file = makeFile(64)
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown) => unhandled.push(reason)
+    process.on('unhandledRejection', onUnhandled)
+    let failHash: (e: Error) => void = () => undefined
+    hash.impl = () => new Promise<string>((_resolve, reject) => (failHash = reject))
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === '/api/upload/init') return json({ uploadId: 'up4', chunkSize: 32 })
+      return new Response('boom', { status: 500 })
+    })
+    try {
+      await expect(chunkedUpload(file)).rejects.toThrow('chunk upload failed')
+      failHash(new Error('the file could not be read'))
+      await new Promise((r) => setTimeout(r, 20))
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
   })
 })
 

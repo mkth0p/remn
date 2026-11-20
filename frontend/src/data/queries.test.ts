@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { RemnDB, setDb, type EventRow, type MailRow } from '../db/schema'
-import { aggregateEvents, countEvents, getFacets, pivot, searchEvents, searchMails, timelineEvents } from './queries'
+import { aggregateEvents, aggregateMails, countEvents, countMails, getFacets, pivot, searchEvents, searchMails, timelineEvents, timelineMails } from './queries'
 
 const T0 = Date.UTC(2026, 8, 1, 22, 0, 0)
 
@@ -208,6 +208,16 @@ describe('mail search reaches what it says it searches', () => {
     expect((await searchMails(3, { text: 'wire transfer' })).rows.map((r) => r.id)).toEqual([1])
     expect((await searchMails(3, { conditions: [{ field: 'bodyText', op: 'contains', value: 'lunch' }] })).rows.map((r) => r.id)).toEqual([2])
     expect((await searchMails(3, { text: 'ab'.repeat(32) })).rows).toHaveLength(2)
+    // the count, the histogram, the timeline and the aggregate agree with the list on body words
+    expect(await countMails(3, { text: 'wire transfer' })).toBe(1)
+    const byBody = await aggregateMails(3, { text: 'wire transfer' }, 'subject')
+    expect(byBody.total).toBe(1)
+    expect(byBody.groups.map((g) => g.value)).toEqual(['hello'])
+    expect((await aggregateMails(3, { conditions: [{ field: 'bodyText', op: 'contains', value: 'lunch' }] }, 'subject')).total).toBe(1)
+    const tl = await timelineMails(3, { text: 'wire transfer' }, 'day')
+    expect(tl.reduce((s, b) => s + b.count, 0)).toBe(1)
+    const tlCond = await timelineMails(3, { conditions: [{ field: 'bodyText', op: 'contains', value: 'lunch' }] }, 'day')
+    expect(tlCond.reduce((s, b) => s + b.count, 0)).toBe(1)
     await db.delete()
   })
 

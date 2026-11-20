@@ -15,6 +15,37 @@ def ev(n, eid, host, minutes, base=SEC, **fields):
     return {"id": n, "eventId": eid, "computer": host, "ts": T0 + int(minutes * 60_000), **base, **fields}
 
 
+def test_two_hosts_of_one_name_in_two_domains_stay_two_hosts_and_say_why():
+    """Invented forests a.example and b.example each have a DC01: their sessions, processes and hops
+    are each their own, a record that names DC01 without a domain joins neither, and a short name
+    the case has once is still the host its other records name with its domain."""
+    logon = {"targetUser": "admin", "targetLogonId": "0x77", "logonType": 3}
+    events = [
+        ev(1, 4624, "DC01.a.example", 0, **logon, targetDomain="A", ipAddress="10.1.0.20", workstation="WS-01"),
+        ev(2, 4624, "DC01.b.example", 1, **logon, targetDomain="B", ipAddress="10.2.0.20"),
+        ev(3, 4698, "DC01.a.example", 2, subjectUser="admin", subjectLogonId="0x77", taskName="\\Updater"),
+        ev(4, 4698, "DC01.b.example", 3, subjectUser="admin", subjectLogonId="0x77", taskName="\\Updater"),
+        # a logon on a member server from a workstation named DC01: which of the two is not said, but its address is
+        ev(5, 4624, "FS-01.b.example", 4, targetUser="bob", targetDomain="B", targetLogonId="0x88", logonType=3, workstation="DC01", ipAddress="10.2.0.5"),
+        ev(6, 3, "DC01.b.example", 4, base=SYSMON, sourceIp="10.2.0.5", destinationIp="10.2.0.9", initiated="true"),
+        # WS-01 only ever appears without a domain
+        ev(7, 4624, "WS-01", 5, targetUser="carol", targetDomain="A", targetLogonId="0x99", logonType=2),
+    ]
+    lin = build_lineage(events)
+    a, b = lin.session_of("event:3"), lin.session_of("event:4")
+    assert a["host"] == "dc01.a.example" and b["host"] == "dc01.b.example" and a["id"] != b["id"]
+    assert lin.session_of("event:1") is a and lin.session_of("event:2") is b
+    assert lin.hosts["dc01.a.example"]["basis"] == "keyed by its full name, dc01.a.example: the case names 2 hosts DC01 (dc01.a.example, dc01.b.example)"
+    assert "dc01" not in lin.hosts
+    # the bare DC01 joins neither: the address the case gives to b's DC01 names the source
+    assert lin.session_of("event:5")["from"] == "dc01.b.example"
+    assert lin.names.key("DC01") == "dc01" and lin.names.shared("dc01")
+    assert lin.names.basis("dc01").startswith("named DC01 without a domain, which 2 hosts of the case share")
+    # one host of a name keeps its short key, whatever records give its domain
+    assert lin.hosts["fs-01"]["basis"] == "keyed by its short name, fs-01: the only host of that name in the case (fs-01.b.example)"
+    assert lin.hosts["ws-01"]["basis"] == "keyed by its short name, ws-01: no record gives its domain"
+
+
 def test_an_rdp_session_holds_its_activity_and_is_a_hop_from_its_address():
     events = [
         ev(

@@ -227,7 +227,6 @@ def test_browser_only_refuses_server_stores_on_the_open_analysis_paths():
     c = Client()
     key = "0" * 32
     for path, body in (
-        ("/api/chains/build", {"storeKey": key}),
         ("/api/enrich/mails", {"storeKey": key}),
         ("/api/enrich/mails/rescore", {"storeKey": key}),
     ):

@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { deleteCaseData, getDb, type CaseSettings } from '../db/schema'
+import { getDb, type CaseSettings } from '../db/schema'
 import { toast, useStore } from '../state/store'
 import { fmtBytes, getLocalTime, setLocalTime } from '../util/format'
 import { Badge, ListInput, Progress, Toggle } from '../components/ui'
 import { refreshCounts } from '../data/ingest'
-import { removeCase } from '../data/caseState'
+import { removeCase, wipeCase } from '../data/caseState'
 import { migrateCaseToServer } from '../data/migrate'
 import { getSource } from '../data/source'
-import { API_HEADERS } from '../api/client'
 import { CLAUDE_MODELS, fetchClaudeStatus, getTransport, isLocalModelUrl, OPENAI_PRESETS, type ClaudeStatus, type ModelInfo } from '../ai/transport'
 import { suggestTrustedSenders, type TrustedSuggestion } from '../data/trusted'
 import { Modal } from '../components/ui'
@@ -49,7 +48,7 @@ export function SettingsView() {
         if (!dead) setClaudeStatus(st)
       })
       .catch((e) => {
-        if (!dead) setClaudeStatus({ enabled: false, available: false, version: null, loggedIn: false, account: null, method: null, error: (e as Error).message })
+        if (!dead) setClaudeStatus({ enabled: false, available: false, loggedIn: false, error: (e as Error).message })
       })
     return () => {
       dead = true
@@ -82,10 +81,12 @@ export function SettingsView() {
   }
   const wipe = async () => {
     if (!confirm(`Delete ALL data of case "${kase.name}" (${isServer ? 'server store + ' : ''}browser records: evidence rows, findings, sessions)? The case itself is kept.`)) return
-    if (isServer && kase.serverKey) {
-      await fetch(`/api/store/${kase.serverKey}`, { method: 'DELETE', headers: API_HEADERS }).catch(() => undefined)
+    try {
+      await wipeCase(kase)
+    } catch (e) {
+      toast('err', `case data not deleted: ${(e as Error).message}`, 0)
+      return
     }
-    await deleteCaseData(getDb(), kase.id!)
     await refreshCounts(kase)
     toast('ok', 'case data deleted')
   }
@@ -299,8 +300,9 @@ export function SettingsView() {
                       <span>
                         <b>Claude Code</b>{' '}
                         <span className="muted small">
-                          — the REMN server runs the <code>claude</code> command line installed on its machine, signed in with that machine's Claude account. Prompts, tool results (evidence excerpts)
-                          and answers go to Anthropic; the server keeps nothing. Not for evidence that may not leave your organisation.
+                          — off unless the server's operator turns it on. The REMN server then runs the <code>claude</code> command line installed on its machine, with the sign-in of the account that
+                          runs REMN: every analyst who uses this server and picks Claude Code works through that one sign-in. Prompts, tool results (evidence excerpts) and answers leave the server for
+                          Anthropic under that account; the server keeps nothing. Not for evidence that may not leave your organisation.
                         </span>
                       </span>
                     </label>
@@ -323,11 +325,7 @@ export function SettingsView() {
                   <div className="field" style={{ flex: 1 }}>
                     <span>on the server machine</span>
                     <div className="small" style={{ paddingTop: 6 }}>
-                      {!claudeStatus
-                        ? '…'
-                        : claudeStatus.available && claudeStatus.loggedIn
-                          ? `${claudeStatus.version ?? 'installed'} · signed in${claudeStatus.method ? ` (${claudeStatus.method})` : ''}${claudeStatus.account ? ` as ${claudeStatus.account}` : ''}`
-                          : (claudeStatus.error ?? 'not available')}
+                      {!claudeStatus ? '…' : claudeStatus.available && claudeStatus.loggedIn ? 'installed and signed in' : (claudeStatus.error ?? 'not available')}
                     </div>
                   </div>
                 </div>
@@ -345,6 +343,9 @@ export function SettingsView() {
                       placeholder="http://localhost:11434"
                     />
                   </div>
+                  {urlDraft.trim() !== '' && !isLocalModelUrl(urlDraft.trim()) && (
+                    <div className="hint">✗ not a local address: REMN only sends evidence to an Ollama on this machine or your local network.</div>
+                  )}
                 </label>
               )}
               {aiCfg.transport === 'openai' && (
@@ -381,7 +382,7 @@ export function SettingsView() {
               {aiCfg.transport !== 'claude' && (
                 <div className="row">
                   <label className="field" style={{ flex: 1 }}>
-                    <span>default model (blank = server default)</span>
+                    <span>default model (blank: the server's OLLAMA_MODEL, else the first model listed)</span>
                     <input className="input mono" list="ai-models" value={aiCfg.model} onChange={(e) => saveAi({ model: e.target.value })} placeholder={health?.ollama.defaultModel ?? 'qwen3:8b'} />
                     <datalist id="ai-models">
                       {aiModels.map((m) => (
@@ -413,17 +414,21 @@ export function SettingsView() {
               </div>
               {aiCfg.transport === 'claude' && (
                 <div className="hint">
-                  Install Claude Code on the server machine (<code>npm install -g @anthropic-ai/claude-code</code>), run <code>claude</code> there once to sign in, then restart REMN. The server runs
-                  it with its own tools, hooks, plugins and MCP servers off and without saving a session; REMN's tools are still executed in this browser. Operators can switch the connector off with{' '}
-                  <code>CLAUDE_CODE_ENABLED=0</code>.
+                  The connector is off unless an operator turns it on: install Claude Code on the server machine (<code>npm install -g @anthropic-ai/claude-code</code>), run <code>claude</code> there
+                  once to sign in as the account that runs REMN, set <code>CLAUDE_CODE_ENABLED=1</code> and restart REMN. REMN does not check which kind of sign-in that is; whether that account may be
+                  used for this, and on which terms, is for its holder to settle with Anthropic first. The server runs it with its own tools, hooks, plugins and MCP servers off and without saving a
+                  session; REMN's tools are still executed in this browser.
                 </div>
               )}
               {aiCfg.transport === 'browser' && (
                 <div className="hint">
-                  If REMN is NOT served from localhost (e.g. accessed on your home server), your Ollama must allow this origin: run{' '}
-                  <code>setx OLLAMA_ORIGINS "{typeof location !== 'undefined' ? location.origin : ''}"</code> (Windows, then restart Ollama) or{' '}
-                  <code>OLLAMA_ORIGINS={typeof location !== 'undefined' ? location.origin : ''} ollama serve</code>. HTTPS pages may call http://localhost in Chrome, Edge and Firefox; Safari blocks it
-                  — use the server proxy there.
+                  If REMN is NOT served from localhost (e.g. accessed on your home server), your Ollama must allow this origin. On a Mac, paste once in Terminal{' '}
+                  <code>
+                    curl -fsSL {typeof location !== 'undefined' ? location.origin : ''}/ollama-mac.sh | bash -s -- {typeof location !== 'undefined' ? location.origin : ''}
+                  </code>{' '}
+                  (it keeps the setting across restarts and restarts Ollama). Otherwise run <code>setx OLLAMA_ORIGINS "{typeof location !== 'undefined' ? location.origin : ''}"</code> (Windows, then
+                  restart Ollama) or <code>OLLAMA_ORIGINS={typeof location !== 'undefined' ? location.origin : ''} ollama serve</code>. HTTPS pages may call http://localhost in Chrome, Edge and
+                  Firefox; Safari blocks it — use the server proxy there.
                 </div>
               )}
             </div>
