@@ -916,7 +916,10 @@ class CaseStore:
                 FROM ioc_reputation r WHERE r.kind = 'ip' AND r.value = lower(mails."originIp") AND r.verdict IN ('malicious', 'suspicious', 'clean')
             """)
             # Verdicts are ranked as numbers: max() over the labels themselves is alphabetical,
-            # which put 'suspicious' above 'malicious' on a mail that has both.
+            # which put 'suspicious' above 'malicious' on a mail that has both. A link is matched in
+            # the form its indicator is stored in (writers.ioc_value: scheme and host in lower case,
+            # credentials, path and query as they are), or all in lower case as stores written
+            # before that keep it.
             con.execute("""
                 UPDATE mails SET "reputationWorst" = sub.worst FROM (
                     SELECT m.id, CASE max(CASE r.verdict WHEN 'malicious' THEN 3 WHEN 'suspicious' THEN 2 ELSE 1 END)
@@ -925,7 +928,13 @@ class CaseStore:
                     JOIN ioc_reputation r ON (
                         (r.kind = 'ip' AND r.value = lower(m."originIp"))
                         OR (r.kind = 'domain' AND r.value = lower(m."fromRegistrable"))
-                        OR (r.kind = 'url' AND r.value IN (SELECT lower(coalesce(u.normalized, u.url)) FROM urls u WHERE u."mailId" = m.id))
+                        OR (r.kind = 'url' AND r.value IN (
+                            SELECT lower(p.s) || p.a || lower(p.h) || p.r FROM (
+                                SELECT regexp_extract(coalesce(u.normalized, u.url), '^((?:[a-z][a-z0-9+.-]*:)?//)?([^/?#]*@)?([^/?#]*)(.*)$', ['s', 'a', 'h', 'r'], 'is') AS p
+                                FROM urls u WHERE u."mailId" = m.id
+                            )
+                            UNION ALL SELECT lower(coalesce(u.normalized, u.url)) FROM urls u WHERE u."mailId" = m.id
+                        ))
                         OR (r.kind = 'domain' AND r.value IN (SELECT lower(u.domain) FROM urls u WHERE u."mailId" = m.id))
                         OR (r.kind = 'hash' AND r.value IN (SELECT lower(a.sha256) FROM attachments a WHERE a."mailId" = m.id))
                     )

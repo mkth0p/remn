@@ -157,6 +157,29 @@ def test_reputation_worst_ranks_malicious_above_suspicious(store):
     assert Q.get_row(store, "mails", mail["id"])["reputationWorst"] == "malicious"
 
 
+def test_url_indicators_keep_the_case_of_their_path_and_query_and_fold_scheme_and_host(store):
+    # invented addresses on a reserved test domain; the two links differ only in the case of their path
+    links = ["HTTPS://Files.Example.TEST/Share/AbC?Token=XyZ", "https://files.example.test/share/abc?token=xyz", "https://User:PW@Files.Example.TEST/x"]
+    w = MailWriter(store, 1)
+    for i, link in enumerate(links):
+        w.add({"subject": f"invented {i}", "date": 1788300000000 + i, "urls": [{"url": link, "normalized": link, "scheme": "https", "domain": "example.test"}]})
+    w.flush()
+    urls = {r["value"] for r in Q.list_iocs(store)["rows"] if r["kind"] == "url"}
+    assert urls == {"https://files.example.test/Share/AbC?Token=XyZ", "https://files.example.test/share/abc?token=xyz", "https://User:PW@files.example.test/x"}
+    domains = {r["value"] for r in Q.list_iocs(store)["rows"] if r["kind"] == "domain"}
+    assert domains == {"example.test"}
+    # a verdict on the stored form still reaches the mail that carries the link
+    store.set_reputation([{"kind": "url", "value": "https://files.example.test/Share/AbC?Token=XyZ", "verdict": "malicious", "tags": [], "checkedAt": 1}])
+    store.mirror_reputation_to_mails()
+    flagged = Q.search(store, "mails", {"conditions": [{"field": "reputation.worst", "op": "eq", "value": "malicious"}]})["rows"]
+    assert {m["subject"] for m in flagged} == {"invented 0"}
+    # and a verdict on a link stored all in lower case, as stores written before kept it, still reaches its mail
+    store.set_reputation([{"kind": "url", "value": "https://user:pw@files.example.test/x", "verdict": "suspicious", "tags": [], "checkedAt": 1}])
+    store.mirror_reputation_to_mails()
+    flagged = Q.search(store, "mails", {"conditions": [{"field": "reputation.worst", "op": "eq", "value": "suspicious"}]})["rows"]
+    assert {m["subject"] for m in flagged} == {"invented 2"}
+
+
 class _UnappliedSetting:
     """A connection on which one statement of the lockdown fails, or does nothing, as it would after an
     engine upgrade renamed the setting."""
