@@ -4,6 +4,26 @@ import { packageCoverageIssues } from './packageCoverage'
 import {
   AI_TABLE_HEAD,
   aiTexts,
+  assetRow,
+  conclusionParts,
+  CONTAINMENT_HEAD,
+  containmentRows,
+  engagementFacts,
+  IMPACT_HEAD,
+  impactInventory,
+  indicatorAppendix,
+  INDICATOR_HEAD,
+  indicatorRow,
+  INDICATORS_INTRO,
+  markingLine,
+  MAX_INDICATORS,
+  recommendationTerms,
+  scopeRows,
+  TECHNIQUE_HEAD,
+  techniqueRow,
+  techniqueTable,
+  TECHNIQUES_INTRO,
+  VERSION_HEAD,
   bottomLine,
   claimLine,
   computeConfidence,
@@ -34,7 +54,7 @@ import {
 import { groupByIncident, storyOwnGaps } from './stories'
 import { STORY_VERDICT_LABEL } from './storyDecisions'
 import { ANSWER_LABEL } from './questions/answers'
-import { defang, fmtBytes, fmtNum as n, fmtUtc as fmtTs } from '../util/format'
+import { fmtBytes, fmtNum as n, fmtUtc as fmtTs } from '../util/format'
 import { zipStore } from '../util/zip'
 
 /**
@@ -105,6 +125,13 @@ function table(head: string[], rows: string[][]): string {
     .join('')}</w:tbl>${para('')}`
 }
 
+/** A two-column table of labels and values, without a header row. */
+function facts(rows: [string, string][]): string {
+  const cell = (text: string, label: boolean) =>
+    `<w:tc><w:tcPr>${label ? '<w:tcW w:w="1500" w:type="pct"/>' : ''}</w:tcPr><w:p><w:pPr><w:pStyle w:val="TableText"/></w:pPr>${run(text, { bold: label })}</w:p></w:tc>`
+  return `<w:tbl><w:tblPr><w:tblStyle w:val="RemnTable"/><w:tblW w:w="5000" w:type="pct"/></w:tblPr>${rows.map(([k, v]) => `<w:tr><w:trPr><w:cantSplit/></w:trPr>${cell(k, true)}${cell(v, false)}</w:tr>`).join('')}</w:tbl>${para('')}`
+}
+
 /** Markdown as Word paragraphs: headings, bullets and prose; emphasis and links are kept as text. */
 function markdown(text: string): string {
   const inline = (s: string) =>
@@ -164,8 +191,12 @@ export function reportDocumentXml(d: ReportData): string {
   }
 
   // cover
+  const client = settings.client
+  const conclusion = conclusionParts(client)
   body.push(para('REMN forensic analysis report', 'Subtitle'))
   body.push(para(kase.name, 'Title'))
+  const preparedFor = [client.client.trim() ? `Prepared for ${client.client.trim()}` : '', client.engagementRef.trim() ? `engagement ${client.engagementRef.trim()}` : ''].filter(Boolean).join(' · ')
+  if (preparedFor) body.push(para({ text: preparedFor, size: 24 }))
   body.push(
     para([
       `Generated ${generated} · ${kase.analyst ? `analyst ${kase.analyst}` : 'analyst not set'}`,
@@ -187,7 +218,12 @@ export function reportDocumentXml(d: ReportData): string {
   body.push(para([{ text: verdict.label, bold: true, size: 32, color: verdict.severity ? SEV_HEX[verdict.severity] : '1B7F66' }]))
   if (line) body.push(markdown(line))
   body.push(para(verdict.detail))
-  body.push(para([{ text: `Confidence ${confidence.level}: `, bold: true }, confidence.reasons.slice(0, 3).join(' · ')]))
+  body.push(para([{ text: `Completeness ${confidence.level}: `, bold: true }, confidence.reasons.slice(0, 3).join(' · ')]))
+  body.push(caption('How complete the review is, not how sure its conclusion is.'))
+  if (conclusion.confidence) {
+    body.push(para([{ text: `Analyst's confidence ${conclusion.confidence}${conclusion.basis ? ': ' : ''}`, bold: true }, conclusion.basis]))
+    body.push(caption("The analyst's own assessment of the conclusion."))
+  }
   body.push(
     table(
       ['evidence files', 'rows analysed', 'findings', 'incidents · chains', 'confirmed', 'flagged indicators'],
@@ -210,6 +246,20 @@ export function reportDocumentXml(d: ReportData): string {
       caption(`Threat profile: ${[tactics('confirmed') ? `confirmed: ${tactics('confirmed')}` : '', tactics('observed') ? `observed: ${tactics('observed')}` : ''].filter(Boolean).join('. ')}.`),
     )
 
+  const engagement = engagementFacts(client)
+  if (engagement.facts.length || engagement.distribution.length || engagement.versions.length) {
+    body.push(heading('Engagement', 1))
+    if (engagement.facts.length) body.push(facts(engagement.facts))
+    if (engagement.distribution.length) {
+      body.push(heading('Distribution', 3))
+      for (const x of engagement.distribution) body.push(bullet(x))
+    }
+    if (engagement.versions.length) {
+      body.push(heading('Version history', 3))
+      body.push(table(VERSION_HEAD, engagement.versions))
+    }
+  }
+
   if (d.summary) {
     body.push(heading('Executive summary', 1))
     body.push(markdown(d.summary))
@@ -217,6 +267,22 @@ export function reportDocumentXml(d: ReportData): string {
     checkOf('summary')
     if (d.summaryAt && d.findings.some((f) => f.createdAt > d.summaryAt!))
       body.push(caption('Written before the findings last changed: the numbers and ids in it may describe an earlier state of the case.'))
+  }
+
+  body.push(heading('Scope', 1))
+  if (client.objectives.trim()) body.push(markdown(client.objectives))
+  body.push(facts(scopeRows(d).map((r) => [r.label, `${r.items.join('\n')}${r.note ? `\n(${r.note})` : ''}`])))
+
+  if (conclusion.initialAccess || conclusion.rootCause) {
+    body.push(heading('Conclusion', 1))
+    if (conclusion.initialAccess) {
+      body.push(heading('Initial access', 3))
+      body.push(markdown(conclusion.initialAccess))
+    }
+    if (conclusion.rootCause) {
+      body.push(heading('Root cause', 3))
+      body.push(markdown(conclusion.rootCause))
+    }
   }
 
   const happened = moments(d)
@@ -240,6 +306,37 @@ export function reportDocumentXml(d: ReportData): string {
       ),
     )
   } else body.push(para(happened.decided ? 'No dated item to place.' : 'No item has been decided yet: run the review before printing.'))
+
+  const impact = impactInventory(d)
+  if (impact.accounts.length || impact.hosts.length || client.impact.trim()) {
+    body.push(heading('Impact', 1))
+    body.push(
+      para(
+        'The accounts and hosts the confirmed items name, printed or not: the people a confirmed chain or story is about, the hosts it ran on, and the accounts and hosts of the findings confirmed with them. Machine, service and built-in accounts are left out.',
+      ),
+    )
+    if (client.impact.trim()) {
+      body.push(markdown(client.impact))
+      body.push(caption("The analyst's account of the impact."))
+    }
+    if (impact.accounts.length) body.push(table(['account', ...IMPACT_HEAD.slice(1)], impact.accounts.map(assetRow)))
+    if (impact.hosts.length) body.push(table(['host', ...IMPACT_HEAD.slice(1)], impact.hosts.map(assetRow)))
+    if (!impact.accounts.length && !impact.hosts.length) body.push(para('No confirmed item names an account or a host.'))
+  }
+  const actions = containmentRows(client)
+  if (actions.length) {
+    body.push(heading('Containment', 1))
+    body.push(para('The containment and eradication actions taken, as the analyst recorded them.'))
+    body.push(table(CONTAINMENT_HEAD, actions))
+  }
+  const terms = recommendationTerms(client)
+  if (terms.length) {
+    body.push(heading('Recommendations', 1))
+    for (const [t, text] of terms) {
+      body.push(heading(t, 3))
+      body.push(markdown(text))
+    }
+  }
 
   if (d.questions) {
     const q = d.questions
@@ -457,16 +554,19 @@ export function reportDocumentXml(d: ReportData): string {
   }
 
   if (settings.includeIocs) {
+    const ind = indicatorAppendix(d)
     body.push(heading('Indicators of compromise', 1))
-    if (d.iocs.length) {
-      body.push(para('Indicators flagged by the reputation providers; values are defanged.'))
-      body.push(
-        table(
-          ['kind', 'indicator', 'verdict', 'tags', 'seen'],
-          d.iocs.map((i) => [i.kind, defang(i.value), i.verdict ?? '', (i.tags ?? []).join(', '), `${i.count} (${i.sources.join(', ')})`]),
-        ),
-      )
-    } else body.push(para('No indicator flagged: reputation checks were not run, or nothing was found malicious.'))
+    if (ind.rows.length) {
+      body.push(para(INDICATORS_INTRO))
+      body.push(table(INDICATOR_HEAD, ind.rows.map(indicatorRow)))
+      if (ind.left) body.push(caption(`${n(ind.left)} more indicator${ind.left === 1 ? ' is' : 's are'} not listed: the appendix holds ${n(MAX_INDICATORS)}.`))
+    } else body.push(para('No confirmed item names an outside address, domain, sender, URL or hash, and no reputation service flagged one.'))
+  }
+  const techniques = techniqueTable(d)
+  if (techniques.length) {
+    body.push(heading('ATT&CK techniques', 1))
+    body.push(para(TECHNIQUES_INTRO))
+    body.push(table(TECHNIQUE_HEAD, techniques.map(techniqueRow)))
   }
 
   if (settings.includeTimeline && d.timeline.length) {
@@ -520,7 +620,7 @@ export function reportDocumentXml(d: ReportData): string {
   )
 
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body>${body.join('')}<w:sectPr><w:footerReference w:type="default" r:id="rIdFooter"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="567" w:footer="567" w:gutter="0"/></w:sectPr></w:body></w:document>`
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body>${body.join('')}<w:sectPr><w:headerReference w:type="default" r:id="rIdHeader"/><w:footerReference w:type="default" r:id="rIdFooter"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="567" w:footer="567" w:gutter="0"/></w:sectPr></w:body></w:document>`
 
   /** One line per rule: its severity, title and id with what its measure says, whether its rows bear it out, when, and what it matched. */
   function ruleTable(findings: ReportData['findings'], said: Record<string, string> = {}): string {
@@ -566,6 +666,7 @@ const STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:style w:type="paragraph" w:styleId="Caption"><w:name w:val="caption"/><w:basedOn w:val="Normal"/><w:qFormat/><w:rPr><w:color w:val="4F5B69"/><w:sz w:val="17"/><w:szCs w:val="17"/></w:rPr></w:style>
 <w:style w:type="paragraph" w:styleId="ListBullet"><w:name w:val="List Bullet"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:after="60"/><w:ind w:left="360" w:hanging="220"/></w:pPr></w:style>
 <w:style w:type="paragraph" w:styleId="TableText"><w:name w:val="Table Text"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr><w:rPr><w:sz w:val="17"/><w:szCs w:val="17"/></w:rPr></w:style>
+<w:style w:type="paragraph" w:styleId="Header"><w:name w:val="header"/><w:basedOn w:val="Normal"/><w:rPr><w:color w:val="4F5B69"/><w:sz w:val="16"/></w:rPr></w:style>
 <w:style w:type="paragraph" w:styleId="Footer"><w:name w:val="footer"/><w:basedOn w:val="Normal"/><w:rPr><w:color w:val="8A95A3"/><w:sz w:val="16"/></w:rPr></w:style>
 <w:style w:type="table" w:default="1" w:styleId="TableNormal"><w:name w:val="Normal Table"/><w:tblPr><w:tblInd w:w="0" w:type="dxa"/><w:tblCellMar><w:top w:w="0" w:type="dxa"/><w:left w:w="108" w:type="dxa"/><w:bottom w:w="0" w:type="dxa"/><w:right w:w="108" w:type="dxa"/></w:tblCellMar></w:tblPr></w:style>
 <w:style w:type="table" w:styleId="RemnTable"><w:name w:val="REMN Table"/><w:basedOn w:val="TableNormal"/><w:tblPr><w:tblBorders><w:top w:val="single" w:sz="4" w:space="0" w:color="CFD5DC"/><w:left w:val="single" w:sz="4" w:space="0" w:color="CFD5DC"/><w:bottom w:val="single" w:sz="4" w:space="0" w:color="CFD5DC"/><w:right w:val="single" w:sz="4" w:space="0" w:color="CFD5DC"/><w:insideH w:val="single" w:sz="4" w:space="0" w:color="E3E6EA"/><w:insideV w:val="single" w:sz="4" w:space="0" w:color="E3E6EA"/></w:tblBorders><w:tblCellMar><w:top w:w="40" w:type="dxa"/><w:left w:w="80" w:type="dxa"/><w:bottom w:w="40" w:type="dxa"/><w:right w:w="80" w:type="dxa"/></w:tblCellMar></w:tblPr></w:style>
@@ -576,6 +677,9 @@ export function buildReportDocx(d: ReportData): Uint8Array {
   const at = new Date(d.generatedAt ?? Date.now())
   const created = at.toISOString().replace(/\.\d{3}Z$/, 'Z')
   const verdict = computeVerdict(d)
+  // the handling marking at the top of every page, when the analyst set one
+  const header = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:pPr><w:pStyle w:val="Header"/><w:jc w:val="center"/></w:pPr>${run(markingLine(d.settings.client), { bold: true })}</w:p></w:hdr>`
   const footer = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p><w:pPr><w:pStyle w:val="Footer"/></w:pPr>${run(`REMN · ${d.kase.name} · ${verdict.label}${d.issue?.status === 'draft' ? ' · draft' : ''} · page `)}<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>1</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p></w:ftr>`
   return zipStore(
@@ -583,7 +687,7 @@ export function buildReportDocx(d: ReportData): Uint8Array {
       {
         name: '[Content_Types].xml',
         data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>`,
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/><Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>`,
       },
       {
         name: '_rels/.rels',
@@ -603,10 +707,11 @@ export function buildReportDocx(d: ReportData): Uint8Array {
       {
         name: 'word/_rels/document.xml.rels',
         data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rIdFooter" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/></Relationships>`,
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rIdHeader" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/><Relationship Id="rIdFooter" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/></Relationships>`,
       },
       { name: 'word/document.xml', data: reportDocumentXml(d) },
       { name: 'word/styles.xml', data: STYLES },
+      { name: 'word/header1.xml', data: header },
       { name: 'word/footer1.xml', data: footer },
     ],
     at,

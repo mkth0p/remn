@@ -3,13 +3,16 @@ import type { Chain, ChainStep } from './chains'
 import { groupByIncident, storyCoverageWarnings, storyOwnGaps, type ReportStory, type StoryIncident, type StoryResult } from './stories'
 import { STORY_VERDICT_LABEL, type DecidedStory } from './storyDecisions'
 import { spineBasis, spineSteps } from './storyFlow'
-import type { ChainReview, ReportSettings } from './review'
+import type { ChainReview, ClientReport, ReportSettings } from './review'
 import { chainSeverity, effectiveSeverity, stepVisible } from './review'
-import type { Incident } from '../rules/incidents'
+import { HOST_FIELDS, USER_FIELDS, type Incident } from '../rules/incidents'
 import type { RelationshipReview } from './relationshipReviews'
 import { packageCoverageIssues } from './packageCoverage'
 // every time in the report is UTC, whatever the analyst's display setting
-import { defang, escapeHtml, fmtBytes, fmtNum, fmtUtc as fmtTs, renderMarkdown } from '../util/format'
+import { defang, escapeHtml, fmtBytes, fmtNum, fmtUtc as fmtTs, isPublicIp, renderMarkdown } from '../util/format'
+import { userKey } from './findingPriority'
+import { hostKey } from './stories'
+import type { FacetItem } from './source'
 import type { GapStatement } from './evidenceGaps'
 import { isLead, type MeasureReading } from './ruleMeasures'
 import { CHECKED_ROWS, type ClaimCheck, type ReportClaims, type TextStatus } from './claims'
@@ -112,6 +115,8 @@ export interface ReportData {
   storyDecisionsOrphaned?: number
   /** the investigative questions chosen for the case and the analyst's answers (data/questions/answers.ts questionsForReport) */
   questions?: ReportQuestions
+  /** the hosts and accounts the evidence's records name, for the scope when the analyst wrote none */
+  scope?: EvidenceScope
 }
 
 /** The model's part in the case, as the report prints it. */
@@ -345,7 +350,10 @@ export interface Confidence {
   reasons: string[]
 }
 
-/** How far the report can be trusted: decisions made, evidence intact, analysis complete. */
+/**
+ * How complete the review behind the report is: decisions made, evidence intact, analysis complete.
+ * It says nothing of how sure the conclusion is, and the report prints it as completeness.
+ */
 export function computeConfidence(d: ReportData): Confidence {
   const reasons: string[] = []
   const decided = d.chains.filter((c) => d.reviews[c.id]?.verdict).length + d.incidents.filter((i) => i.status !== 'new').length
@@ -435,6 +443,287 @@ export function threatProfile(d: ReportData): BadgeState[] {
     const techniques = [...new Set(mine.flatMap((f) => f.attack.filter((t) => def.tech.some((p) => t.toUpperCase().startsWith(p)))))].sort().slice(0, 6)
     return { def, state: confirmed ? 'confirmed' : mine.length ? 'observed' : 'none', findings: mine.length, techniques }
   })
+}
+
+// ---------------------------------------------------------------------------
+// what a client report adds: the scope, the impact, the indicators, the techniques
+// ---------------------------------------------------------------------------
+
+/** What the case's evidence covers, for the scope: the hosts its records come from and the accounts they name, the most frequent first. */
+export interface EvidenceScope {
+  hosts: string[]
+  /** the evidence names more hosts than were read: the list holds the most frequent ones */
+  hostsCapped: boolean
+  accounts: string[]
+  accountsCapped: boolean
+}
+
+/** how many hosts and accounts the scope reads from the evidence; past it the report says the evidence names more */
+export const SCOPE_READ = 500
+
+/** The hosts the evidence's records come from and the user accounts they name (machine, service and built-in accounts left out), the most frequent first. */
+export function evidenceScope(hosts: FacetItem[], userFields: FacetItem[][]): EvidenceScope {
+  const accounts = new Map<string, { value: string; count: number }>()
+  for (const u of userFields.flat()) {
+    if (!userKey(u.value)) continue
+    const k = u.value.toLowerCase()
+    const a = accounts.get(k)
+    if (a) a.count += u.count
+    else accounts.set(k, { value: u.value, count: u.count })
+  }
+  return {
+    hosts: hosts.map((x) => x.value).filter((x) => x.trim()),
+    hostsCapped: hosts.length >= SCOPE_READ,
+    accounts: [...accounts.values()].sort((a, b) => b.count - a.count).map((a) => a.value),
+    accountsCapped: userFields.some((xs) => xs.length >= SCOPE_READ),
+  }
+}
+
+/** The first and last event or message time the evidence holds, from each file's own range. */
+export function evidencePeriod(evidence: Evidence[]): { from: number | null; to: number | null } {
+  let from: number | null = null
+  let to: number | null = null
+  const take = (r?: { firstTs?: number | null; lastTs?: number | null }) => {
+    if (r?.firstTs != null && Number.isFinite(r.firstTs)) from = from == null ? r.firstTs : Math.min(from, r.firstTs)
+    if (r?.lastTs != null && Number.isFinite(r.lastTs)) to = to == null ? r.lastTs : Math.max(to, r.lastTs)
+  }
+  for (const e of evidence) {
+    const s = e.stats as { firstTs?: number; lastTs?: number; eventRange?: { firstTs?: number; lastTs?: number }; mailRange?: { firstTs?: number; lastTs?: number } } | undefined
+    if (!s) continue
+    if (e.kind === 'package') {
+      take(s.eventRange)
+      take(s.mailRange)
+    } else take(s)
+  }
+  return { from, to }
+}
+
+/** The items the analyst confirmed, printed or not, each with what it names: what the impact and the indicators are drawn from. */
+interface ConfirmedItem {
+  label: string
+  severity: Severity
+  start: number | null
+  end: number | null
+  findings: Finding[]
+  accounts: string[]
+  hosts: string[]
+  addresses: string[]
+}
+
+function confirmedItems(d: ReportData): ConfirmedItem[] {
+  const out: ConfirmedItem[] = []
+  for (const c of d.chains) {
+    if (d.reviews[c.id]?.verdict !== 'confirmed') continue
+    out.push({
+      label: `chain ${c.identityLabel}`,
+      severity: chainSeverity(c, d.reviews[c.id]),
+      start: c.start,
+      end: c.end,
+      findings: d.membersOf.get(c.id) ?? [],
+      accounts: [c.identityLabel],
+      hosts: c.entities.hosts,
+      addresses: [...c.entities.attackerAddresses, ...(c.seed.fromAddr ? [c.seed.fromAddr] : []), ...c.entities.ips, ...c.entities.domains],
+    })
+  }
+  for (const i of d.incidents)
+    if (i.status === 'escalated') out.push({ label: `incident ${i.title}`, severity: i.severity, start: i.ts, end: i.tsEnd, findings: i.findings, accounts: [], hosts: [], addresses: [] })
+  for (const u of d.unprintedConfirmed ?? [])
+    out.push({
+      label: u.findings[0] ? `confirmed item not printed (${u.findings[0].title})` : 'confirmed item not printed',
+      severity: u.severity,
+      start: null,
+      end: null,
+      findings: u.findings,
+      accounts: [],
+      hosts: [],
+      addresses: [],
+    })
+  for (const st of d.decidedStories ?? []) {
+    if (st.verdict !== 'confirmed') continue
+    out.push({
+      label: `story ${st.title}`,
+      severity: st.severity,
+      start: st.start,
+      end: st.end,
+      findings: st.findings,
+      accounts: st.subject?.kind === 'person' ? [st.subject.label] : [],
+      hosts: [...(st.subject?.kind === 'host' ? [st.subject.label] : []), ...st.hosts],
+      addresses: st.attackerAddresses ?? [],
+    })
+  }
+  return out
+}
+
+/** An account or host a confirmed item names: when, how bad at worst, and which items name it. */
+export interface AffectedAsset {
+  name: string
+  /** other ways the evidence writes the same host */
+  aliases: string[]
+  first: number | null
+  last: number | null
+  severity: Severity
+  from: string[]
+}
+
+/**
+ * The accounts and hosts the analyst's confirmed items name, printed or not: the people a confirmed
+ * chain or story is about, the hosts it ran on, and the accounts and hosts of the findings confirmed
+ * with it. Machine, service and well-known accounts are left out; nothing the analyst did not confirm is in it.
+ */
+export function impactInventory(d: ReportData): { accounts: AffectedAsset[]; hosts: AffectedAsset[] } {
+  const accounts = new Map<string, AffectedAsset>()
+  const hosts = new Map<string, AffectedAsset>()
+  const add = (into: Map<string, AffectedAsset>, key: string, name: string, it: ConfirmedItem, first: number | null, last: number | null, severity: Severity) => {
+    if (!key) return
+    const a = into.get(key) ?? into.set(key, { name, aliases: [], first: null, last: null, severity, from: [] }).get(key)!
+    if (name !== a.name && !a.aliases.includes(name) && a.aliases.length < 3) a.aliases.push(name)
+    if (first != null) a.first = a.first == null ? first : Math.min(a.first, first)
+    if (last != null) a.last = a.last == null ? last : Math.max(a.last, last)
+    if (rank(severity) > rank(a.severity)) a.severity = severity
+    if (!a.from.includes(it.label)) a.from.push(it.label)
+  }
+  for (const it of confirmedItems(d)) {
+    for (const acc of it.accounts) add(accounts, acc.trim().toLowerCase(), acc.trim(), it, it.start, it.end, it.severity)
+    for (const host of it.hosts) add(hosts, hostKey(host), host, it, it.start, it.end, it.severity)
+    for (const f of it.findings) {
+      const sev = effectiveSeverity(f)
+      for (const k of USER_FIELDS) {
+        const v = String(f.entities[k] ?? '').trim()
+        if (v && userKey(v)) add(accounts, v.toLowerCase(), v, it, f.ts, f.tsEnd ?? f.ts, sev)
+      }
+      // the host a record was written on; a workstation field names where a logon came from, which may be the attacker's own
+      for (const k of HOST_FIELDS.filter((x) => x !== 'workstation')) {
+        const v = String(f.entities[k] ?? '').trim()
+        add(hosts, hostKey(v), v, it, f.ts, f.tsEnd ?? f.ts, sev)
+      }
+    }
+  }
+  const order = (a: AffectedAsset, b: AffectedAsset) => rank(b.severity) - rank(a.severity) || (a.first ?? Infinity) - (b.first ?? Infinity) || a.name.localeCompare(b.name)
+  return { accounts: [...accounts.values()].sort(order), hosts: [...hosts.values()].sort(order) }
+}
+
+export type IndicatorKind = 'ip' | 'domain' | 'email' | 'url' | 'hash'
+/** An indicator the report lists, with where it comes from: a confirmed item, or a reputation service that flagged it. */
+export interface IndicatorRow {
+  kind: IndicatorKind
+  value: string
+  from: string[]
+  /** a reputation verdict, when a lookup gave one */
+  verdict: string | null
+}
+/** the most indicators the appendix lists; the report says how many more there are */
+export const MAX_INDICATORS = 300
+
+const IPV4 = /^(?:\d{1,3}\.){3}\d{1,3}$/
+const IPV6 = /^[0-9a-f:]+$/i
+const DOMAIN = /^(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i
+const EMAIL = /^[^@\s]+@([^@\s]+\.[a-z]{2,63})$/i
+const URL_RE = /^(?:https?|ftp):\/\/\S+$/i
+const HASHES = /(?:^|[^0-9a-f])([0-9a-f]{64}|[0-9a-f]{40}|[0-9a-f]{32})(?![0-9a-f])/gi
+const HASH_KEY = /hash|sha256|sha1|md5|imphash/i
+const DOMAIN_KEY = /domain$|^query(name)?$|registrable/i
+
+/** What kind of indicator a finding's field holds, if any, read from its value and, for hashes and domains, its name. */
+function indicatorsOf(key: string, raw: unknown): { kind: IndicatorKind; value: string }[] {
+  const values = (Array.isArray(raw) ? raw.map(String) : [String(raw ?? '')]).map((v) => v.trim()).filter(Boolean)
+  const out: { kind: IndicatorKind; value: string }[] = []
+  for (const v of values) {
+    if (HASH_KEY.test(key)) {
+      for (const m of v.matchAll(HASHES)) out.push({ kind: 'hash', value: m[1].toLowerCase() })
+      continue
+    }
+    if (IPV4.test(v) || (v.includes(':') && IPV6.test(v))) out.push({ kind: 'ip', value: v.toLowerCase() })
+    else if (URL_RE.test(v)) out.push({ kind: 'url', value: v })
+    else if (EMAIL.test(v)) out.push({ kind: 'email', value: v.toLowerCase() })
+    else if (DOMAIN_KEY.test(key) && DOMAIN.test(v)) out.push({ kind: 'domain', value: v.toLowerCase().replace(/\.$/, '') })
+  }
+  return out
+}
+
+/**
+ * The indicators of the attack: the addresses, domains, mail senders, URLs and hashes the confirmed
+ * chains, stories and findings name, whether or not a reputation lookup ran, and those a reputation
+ * service flagged. Addresses that are not public and the case's own domains are left out: they are
+ * the victim's, not the attacker's. Each says where it comes from.
+ */
+export function indicatorAppendix(d: ReportData): { rows: IndicatorRow[]; left: number } {
+  const internal = d.kase.settings.internalDomains.map((x) => x.toLowerCase().replace(/^\.+/, '')).filter(Boolean)
+  const isInternal = (domain: string) => internal.some((x) => domain === x || domain.endsWith(`.${x}`))
+  const keep = (kind: IndicatorKind, value: string) => {
+    if (kind === 'ip') return isPublicIp(value)
+    if (kind === 'domain') return !isInternal(value)
+    if (kind === 'email') return !isInternal(value.split('@')[1] ?? '')
+    if (kind === 'url') return !isInternal((/^[a-z]+:\/\/([^/:?#]+)/i.exec(value)?.[1] ?? '').toLowerCase())
+    return true
+  }
+  const rows = new Map<string, IndicatorRow>()
+  const add = (kind: IndicatorKind, value: string, from: string, verdict: string | null = null) => {
+    if (!keep(kind, value)) return
+    const k = `${kind}:${value}`
+    const r = rows.get(k) ?? rows.set(k, { kind, value, from: [], verdict: null }).get(k)!
+    if (!r.from.includes(from)) r.from.push(from)
+    if (verdict) r.verdict = verdict
+  }
+  for (const it of confirmedItems(d)) {
+    for (const a of it.addresses) for (const x of indicatorsOf('address', a)) add(x.kind, x.value, it.label)
+    for (const f of it.findings) for (const [k, v] of Object.entries(f.entities)) for (const x of indicatorsOf(k, v)) add(x.kind, x.value, `confirmed finding ${f.title} (${f.ruleId})`)
+  }
+  for (const i of d.iocs) {
+    const kind: IndicatorKind | null = i.kind === 'ip' || i.kind === 'domain' || i.kind === 'url' || i.kind === 'hash' ? i.kind : i.kind === 'email' ? 'email' : null
+    if (kind) add(kind, i.kind === 'url' ? i.value : i.value.toLowerCase(), `reputation lookup${i.sources.length ? ` (seen in ${i.sources.join(', ')})` : ''}`, i.verdict ?? null)
+  }
+  const order: IndicatorKind[] = ['ip', 'domain', 'email', 'url', 'hash']
+  const all = [...rows.values()].sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind) || a.value.localeCompare(b.value))
+  return { rows: all.slice(0, MAX_INDICATORS), left: Math.max(0, all.length - MAX_INDICATORS) }
+}
+
+/** An ATT&CK technique the printed or confirmed findings carry: its tactics, how many findings, which rules, and whether a confirmed item carries it. */
+export interface TechniqueRow {
+  id: string
+  tactics: string[]
+  findings: number
+  rules: string[]
+  confirmed: boolean
+}
+
+/** Every ATT&CK technique of the printed findings (false positives left out) and of the confirmed ones, in the tactics' order. */
+export function techniqueTable(d: ReportData): TechniqueRow[] {
+  const confirmed = new Set<Finding>(confirmedItems(d).flatMap((it) => it.findings))
+  const confirmedIds = new Set([...confirmed].map((f) => f.id).filter((x) => x != null))
+  const seen = new Map<number | string, Finding>()
+  for (const f of [...d.findings.filter((x) => x.status !== 'false_positive'), ...confirmed]) seen.set(f.id ?? f.key, f)
+  const rows = new Map<string, TechniqueRow & { order: number }>()
+  for (const f of seen.values())
+    for (const raw of f.attack) {
+      const id = raw.trim().toUpperCase()
+      if (!/^T\d{4}(\.\d{3})?$/.test(id)) continue
+      const defs = BADGES.filter((b) => b.tech.some((p) => id.startsWith(p)))
+      const r = rows.get(id) ?? rows.set(id, { id, tactics: defs.map((b) => b.label), findings: 0, rules: [], confirmed: false, order: defs.length ? BADGES.indexOf(defs[0]) : BADGES.length }).get(id)!
+      r.findings++
+      const rule = f.title.replace(/\s+→.*$/, '')
+      if (!r.rules.includes(rule)) r.rules.push(rule)
+      if (confirmed.has(f) || (f.id != null && confirmedIds.has(f.id))) r.confirmed = true
+    }
+  return [...rows.values()].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id)).map(({ order: _order, ...r }) => r)
+}
+
+/**
+ * A starting point for the initial access, drawn from a story's spine: the confirmed story first,
+ * else the first printed. It is offered to the analyst to rewrite, never printed as it is.
+ */
+export function spineStartingPoint(stories: ReportStory[]): string {
+  const pick = stories.find((s) => s.decisions?.call?.verdict === 'confirmed' && storySpineRows(s.story)) ?? stories.find((s) => storySpineRows(s.story))
+  const spine = pick && storySpineRows(pick.story)
+  if (!pick || !spine) return ''
+  const at = (r: SpineRow) => `${r.title}${r.host ? ` on ${r.host}` : ''} at ${fmtTs(r.ts)}`
+  const ways = spine.rows.filter((r) => r.wayIn)
+  const anchor = spine.rows.find((r) => r.anchor)
+  return [
+    `From the story of ${pick.story.title}: ${ways.length ? `the way in reads as ${ways.map(at).join('; then ')}` : `its spine begins with ${at(spine.rows[0])}`}.`,
+    anchor ? `Its worst step: ${at(anchor)}.` : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
 }
 
 const HEX = '<svg viewBox="0 0 100 100" aria-hidden="true"><polygon points="50,3 92,26.5 92,73.5 50,97 8,73.5 8,26.5"/></svg>'
@@ -1174,6 +1463,14 @@ td .sub{display:block;font-size:10px;color:var(--ink-3)}
 .foot{margin-top:40px;border-top:1px solid var(--line);padding-top:6px;font-size:10px;color:var(--ink-3);display:flex;justify-content:space-between}
 .foot .wm{font-family:var(--display);letter-spacing:.2em;color:var(--ink-2)}
 .empty{color:var(--ink-3);font-size:11.5px}
+/* client report */
+.marking{display:flex;gap:10px;align-items:center;justify-content:center;font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2);margin:0 0 10px}
+.foot+.marking{margin:8px 0 0}
+.tlp{background:#000;padding:2px 8px;border-radius:3px;font-weight:700}.tlp.clear{color:#fff}.tlp.green{color:#33ff00}.tlp.amber{color:#ffc000}.tlp.red{color:#ff2b2b}
+.cover .meta.for{font-size:13px;color:var(--ink);margin-bottom:2px}
+.bottom .conf .sub{display:block;font-size:9.5px;color:var(--ink-3);margin-top:2px}
+.conf.analyst b{color:var(--violet);background:rgba(107,79,214,.10)}
+table.kv th{width:26%;text-transform:none;letter-spacing:0;font-size:11px;color:var(--ink-2);background:none;border-bottom:1px solid var(--line);vertical-align:top}
 `
 
 /** The paragraph the cover quotes: the "Bottom line" block of a structured summary, else the first paragraph that reads as prose rather than a heading. */
@@ -1273,6 +1570,7 @@ export function limitLines(d: ReportData, conf: Confidence): string[] {
       ? [`This is a draft. Open before it can be final: ${issue.open.map((c) => `${c.label.toLowerCase()} (${c.detail})`).join('; ') || 'the analyst has not issued it'}.`]
       : []),
     ...(issue?.waived ?? []).map((w) => `Issued with an open check: ${w.label.toLowerCase()}. The analyst's reason: ${w.reason}`),
+    ...clientLimits(d, computeVerdict(d)),
     ...(d.gaps ?? []).map((g) => g.text),
     ...(d.questions?.counts.open
       ? [
@@ -1299,7 +1597,7 @@ export function limitLines(d: ReportData, conf: Confidence): string[] {
     ...(d.rules && d.rules.lastRun == null ? ['The detection rules had not run on this case when the report was made.'] : []),
     ...(d.rules?.evidenceAfter ? [`${d.rules.evidenceAfter} evidence file(s) were added after the last rule run; their findings may be missing.`] : []),
     ...d.evidence.filter((e) => e.kind !== 'package' && evidenceIssue(e)).map((e) => `${e.name}: ${evidenceIssue(e)}.`),
-    ...conf.reasons.filter((r) => !/^every item decided/.test(r)).map((r) => `Confidence: ${r}.`),
+    ...conf.reasons.filter((r) => !/^every item decided/.test(r)).map((r) => `Completeness: ${r}.`),
   ]
 }
 
@@ -1345,6 +1643,147 @@ export function questionsSection(q: ReportQuestions): string {
   )
 }
 
+// ---------------------------------------------------------------------------
+// the client parts, as plain text both reports print
+// ---------------------------------------------------------------------------
+
+const lines = (text: string) =>
+  text
+    .split(/\r?\n/)
+    .map((x) => x.trim())
+    .filter(Boolean)
+
+/** The engagement block: who the report is for and on whose request, when, to whom it goes, and its versions; only what the analyst filled in. */
+export function engagementFacts(c: ClientReport): { facts: [string, string][]; distribution: string[]; versions: string[][] } {
+  const dates =
+    c.engagementStart && c.engagementEnd ? `${c.engagementStart} to ${c.engagementEnd}` : c.engagementStart ? `from ${c.engagementStart}` : c.engagementEnd ? `until ${c.engagementEnd}` : ''
+  const facts: [string, string][] = [
+    ['Client', c.client.trim()],
+    ['Engagement reference', c.engagementRef.trim()],
+    ['Engagement dates', dates],
+    ['Requested by', c.requestedBy.trim()],
+  ]
+  return {
+    facts: facts.filter(([, v]) => v),
+    distribution: lines(c.distribution),
+    versions: c.versions.filter((v) => v.version.trim() || v.note.trim()).map((v) => [v.version.trim(), v.date, v.author.trim(), v.note.trim()]),
+  }
+}
+export const VERSION_HEAD = ['version', 'date', 'author', 'changes']
+
+/** How many entries of a derived list the report prints; the rest is counted. */
+const SCOPE_LIST = 40
+
+/**
+ * The scope: the period examined, the systems and accounts in and out of scope, and the objectives.
+ * What the analyst wrote is printed as written; where they wrote nothing in scope, what the evidence
+ * covers is printed instead, and says so. Nothing is out of scope unless the analyst says it is.
+ */
+export function scopeRows(d: ReportData): { label: string; items: string[]; note: string }[] {
+  const c = d.settings.client
+  const period = evidencePeriod(d.evidence)
+  const derivedList = (xs: string[] | undefined, capped: boolean | undefined, what: string) => {
+    const all = xs ?? []
+    const more = all.length - SCOPE_LIST
+    return {
+      items: [...all.slice(0, SCOPE_LIST), ...(more > 0 ? [`and ${n(more)} more`] : [])],
+      note: all.length ? `from the evidence: ${what}${capped ? ` (the ${n(all.length)} most frequent; it names more)` : ''}` : '',
+    }
+  }
+  const rows: { label: string; items: string[]; note: string }[] = []
+  if (c.periodFrom || c.periodTo) rows.push({ label: 'Period examined', items: [`${c.periodFrom || '…'} to ${c.periodTo || '…'}`], note: '' })
+  else if (period.from != null) rows.push({ label: 'Period examined', items: [`${fmtTs(period.from)} to ${fmtTs(period.to)}`], note: 'from the evidence: the first and last record it holds' })
+  const own = (label: string, text: string) => (lines(text).length ? rows.push({ label, items: lines(text), note: '' }) : 0)
+  if (lines(c.systemsIn).length) own('Systems in scope', c.systemsIn)
+  else {
+    const h = derivedList(d.scope?.hosts, d.scope?.hostsCapped, 'the hosts its records come from')
+    if (h.note) rows.push({ label: 'Systems in scope', ...h })
+  }
+  own('Systems out of scope', c.systemsOut)
+  if (lines(c.accountsIn).length) own('Accounts in scope', c.accountsIn)
+  else {
+    const a = derivedList(d.scope?.accounts, d.scope?.accountsCapped, 'the user accounts its records name')
+    if (a.note) rows.push({ label: 'Accounts in scope', ...a })
+  }
+  own('Accounts out of scope', c.accountsOut)
+  rows.push({ label: 'Evidence', items: [`${n(d.evidence.length)} file${d.evidence.length === 1 ? '' : 's'}, listed with their digests under Evidence and chain of custody`], note: '' })
+  return rows
+}
+
+/** The containment actions the analyst recorded, in date order. */
+export const containmentRows = (c: ClientReport): string[][] =>
+  c.containment
+    .filter((a) => a.action.trim())
+    .sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999'))
+    .map((a) => [a.date || 'no date', a.action.trim(), a.by.trim()])
+export const CONTAINMENT_HEAD = ['date', 'action', 'by']
+
+/** The recommendations the analyst wrote, by term; a term left empty is left out. */
+export const recommendationTerms = (c: ClientReport): [string, string][] =>
+  (
+    [
+      ['Short term', c.recShort],
+      ['Medium term', c.recMedium],
+      ['Long term', c.recLong],
+    ] as [string, string][]
+  ).filter(([, t]) => t.trim())
+
+/** Whether the initial access still reads as the starting point offered from a story's spine: then it is not the analyst's conclusion yet. */
+export const initialAccessIsDraft = (c: ClientReport) => !!c.initialAccessDraft.trim() && c.initialAccess.trim() === c.initialAccessDraft.trim()
+
+/** The analyst's conclusion: the initial access (unless it is still the spine's draft), the root cause, and their confidence in it when they gave one. */
+export function conclusionParts(c: ClientReport): { initialAccess: string; rootCause: string; confidence: string; basis: string } {
+  return {
+    initialAccess: initialAccessIsDraft(c) ? '' : c.initialAccess.trim(),
+    rootCause: c.rootCause.trim(),
+    confidence: c.analyticConfidence,
+    basis: c.confidenceBasis.trim(),
+  }
+}
+
+/** The handling marking: the TLP level and the confidentiality line, as one line, or '' when neither is set. */
+export const markingLine = (c: ClientReport) => [c.tlp ? `TLP:${c.tlp.toUpperCase()}` : '', c.confidentiality.trim()].filter(Boolean).join(' · ')
+
+export const IMPACT_HEAD = ['', 'first seen (UTC)', 'last seen (UTC)', 'worst severity', 'named by']
+/** An affected account or host as a table row: its name and other forms, when, how bad, and which confirmed items name it. */
+export const assetRow = (a: AffectedAsset): string[] => [
+  `${a.name}${a.aliases.length ? ` (also ${a.aliases.join(', ')})` : ''}`,
+  a.first != null ? fmtTs(a.first) : 'no event time',
+  a.last != null ? fmtTs(a.last) : '',
+  a.severity,
+  `${a.from.slice(0, 3).join('; ')}${a.from.length > 3 ? ` and ${n(a.from.length - 3)} more` : ''}`,
+]
+
+export const INDICATOR_HEAD = ['kind', 'indicator', 'where it comes from', 'reputation']
+export const indicatorRow = (r: IndicatorRow): string[] => [
+  r.kind,
+  r.kind === 'hash' ? r.value : defang(r.value),
+  `${r.from.slice(0, 3).join('; ')}${r.from.length > 3 ? ` and ${n(r.from.length - 3)} more` : ''}`,
+  r.verdict ?? 'not looked up',
+]
+export const INDICATORS_INTRO =
+  "The addresses, domains, mail senders, URLs and hashes the confirmed chains, stories and findings name, whether or not a reputation lookup ran, and those a reputation service flagged. Addresses that are not public and the case's own domains are left out. Values are defanged."
+
+export const TECHNIQUE_HEAD = ['technique', 'tactic', 'findings', 'rules', 'confirmed']
+export const techniqueRow = (t: TechniqueRow): string[] => [
+  t.id,
+  t.tactics.join(', ') || 'not mapped to a tactic',
+  n(t.findings),
+  `${t.rules.slice(0, 3).join('; ')}${t.rules.length > 3 ? ` and ${n(t.rules.length - 3)} more` : ''}`,
+  t.confirmed ? 'yes' : 'no',
+]
+export const TECHNIQUES_INTRO =
+  'Each ATT&CK technique the printed findings carry, false positives left out, and those of the confirmed findings left out of the print: its tactic, how many findings, which rules, and whether a confirmed item carries it.'
+
+/** The limits a client report adds under Where it stops: a conclusion not stated, or still the spine's draft. */
+export function clientLimits(d: ReportData, v: Verdict): string[] {
+  const c = d.settings.client
+  const confirmed = v.kind === 'compromise' || v.kind === 'suspicious' || v.kind === 'unwanted'
+  if (initialAccessIsDraft(c)) return ["The initial access offered from a story's spine has not been rewritten by the analyst; the report does not print it as a conclusion."]
+  if (confirmed && !c.initialAccess.trim() && !c.rootCause.trim()) return ['The analyst has stated neither the initial access nor the root cause.']
+  return []
+}
+
 export const REFERENCE_HEAD = ['Source', 'Record', 'Time (UTC)', 'SHA-256']
 
 /** The records a reviewed relationship rests on: the file, the record, its time and the file's SHA-256. */
@@ -1355,6 +1794,115 @@ export function referenceRows(r: RelationshipReview): string[][] {
     `${ref.recordKind === 'observation' ? 'Collected' : 'Event'}: ${fmtTs(ref.recordKind === 'observation' ? ref.observedAt : ref.ts)}`,
     ref.sourceSha256 ?? '',
   ])
+}
+
+const kvTable = (rows: [string, string][]) => `<table class="kv"><tbody>${rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('')}</tbody></table>`
+const listItems = (xs: string[]) => xs.map((x) => h(x)).join('<br>')
+const TLP_CLASS: Record<string, string> = { clear: 'clear', green: 'green', amber: 'amber', 'amber+strict': 'amber', red: 'red' }
+/** The handling marking as the cover and the foot of the report print it. */
+const marking = (c: ClientReport) =>
+  markingLine(c)
+    ? `<div class="marking">${c.tlp ? `<span class="tlp ${TLP_CLASS[c.tlp]}">TLP:${h(c.tlp.toUpperCase())}</span>` : ''}${c.confidentiality.trim() ? `<span>${h(c.confidentiality.trim())}</span>` : ''}</div>`
+    : ''
+
+/** The sections a client report adds, in the order they print; each is left out when it has nothing to say. */
+function clientSections(d: ReportData): { before: Section[]; afterHappened: Section[]; techniques: Section | null } {
+  const c = d.settings.client
+  const before: Section[] = []
+  const e = engagementFacts(c)
+  if (e.facts.length || e.distribution.length || e.versions.length)
+    before.push({
+      id: 'engagement',
+      title: 'Engagement',
+      body:
+        (e.facts.length ? kvTable(e.facts.map(([k, v]) => [h(k), h(v)])) : '') +
+        (e.distribution.length ? `<h4 class="facet">Distribution</h4><div>${listItems(e.distribution)}</div>` : '') +
+        (e.versions.length
+          ? `<h4 class="facet">Version history</h4>${table(
+              VERSION_HEAD,
+              e.versions.map((r) => r.map(h)),
+            )}`
+          : ''),
+    })
+  const scope = scopeRows(d)
+  const objectives = c.objectives.trim()
+  const scopeBody = `${objectives ? `<div class="narr">${md(objectives)}</div>` : ''}${kvTable(scope.map((r) => [h(r.label), `${listItems(r.items)}${r.note ? `<span class="sub">${h(r.note)}</span>` : ''}`]))}`
+  const conclusion = conclusionParts(c)
+  const after: Section[] = []
+  const conclusionBody = [
+    conclusion.initialAccess ? `<h4 class="facet">Initial access</h4><div class="narr">${md(conclusion.initialAccess)}</div>` : '',
+    conclusion.rootCause ? `<h4 class="facet">Root cause</h4><div class="narr">${md(conclusion.rootCause)}</div>` : '',
+    conclusion.confidence
+      ? `<div class="conf analyst"><b>analyst's confidence ${h(conclusion.confidence)}</b>${conclusion.basis ? h(conclusion.basis) : ''}</div><div class="cap">the analyst's own assessment of the conclusion</div>`
+      : '',
+  ].join('')
+  const impact = impactInventory(d)
+  const note = c.impact.trim()
+  if (impact.accounts.length || impact.hosts.length || note)
+    after.push({
+      id: 'impact',
+      title: 'Impact',
+      count: impact.accounts.length + impact.hosts.length,
+      body:
+        `<p class="intro">The accounts and hosts the confirmed items name, printed or not: the people a confirmed chain or story is about, the hosts it ran on, and the accounts and hosts of the findings confirmed with them. Machine, service and built-in accounts are left out.</p>` +
+        (note ? `<div class="narr">${md(note)}</div><div class="cap">the analyst's account of the impact</div>` : '') +
+        (impact.accounts.length
+          ? table(
+              ['account', ...IMPACT_HEAD.slice(1)],
+              impact.accounts.map((a) => assetRow(a).map(h)),
+            )
+          : '') +
+        (impact.hosts.length
+          ? table(
+              ['host', ...IMPACT_HEAD.slice(1)],
+              impact.hosts.map((a) => assetRow(a).map(h)),
+            )
+          : '') +
+        (!impact.accounts.length && !impact.hosts.length ? '<div class="empty">No confirmed item names an account or a host.</div>' : ''),
+    })
+  const actions = containmentRows(c)
+  if (actions.length)
+    after.push({
+      id: 'containment',
+      title: 'Containment',
+      count: actions.length,
+      body: `<p class="intro">The containment and eradication actions taken, as the analyst recorded them.</p>${table(
+        CONTAINMENT_HEAD,
+        actions.map((r) => r.map(h)),
+      )}`,
+    })
+  const terms = recommendationTerms(c)
+  if (terms.length) after.push({ id: 'recommendations', title: 'Recommendations', body: terms.map(([t, text]) => `<h4 class="facet">${h(t)}</h4><div class="narr">${md(text)}</div>`).join('') })
+  return {
+    before: [
+      ...before,
+      // the summary sits between the engagement and the scope; buildReportHtml puts it there
+      { id: 'scope', title: 'Scope', body: scopeBody },
+      ...(conclusionBody ? [{ id: 'conclusion', title: 'Conclusion', body: conclusionBody }] : []),
+    ],
+    afterHappened: after,
+    techniques: (() => {
+      const rows = techniqueTable(d)
+      return rows.length
+        ? {
+            id: 'techniques',
+            title: 'ATT&CK techniques',
+            count: rows.length,
+            body: `<p class="intro">${h(TECHNIQUES_INTRO)}</p>${table(
+              TECHNIQUE_HEAD,
+              rows.map((r) => techniqueRow(r).map(h)),
+            )}`,
+          }
+        : null
+    })(),
+  }
+}
+
+interface Section {
+  id: string
+  title: string
+  count?: number
+  body: string
 }
 
 export function buildReportHtml(d: ReportData): string {
@@ -1372,7 +1920,10 @@ export function buildReportHtml(d: ReportData): string {
     d.summaryBy === 'ai' || d.chains.some((c) => d.reviews[c.id]?.narrativeBy === 'ai' || d.reviews[c.id]?.by === 'ai') || d.incidents.some((i) => i.lead.notesBy === 'ai' || i.lead.decidedBy === 'ai')
   const line = bottomLine(d.summary)
 
-  const sections: { id: string; title: string; count?: number; body: string }[] = []
+  const client = clientSections(d)
+  const sections: Section[] = []
+  const [engagement, ...rest] = client.before[0]?.id === 'engagement' ? client.before : [null, ...client.before]
+  if (engagement) sections.push(engagement)
   if (d.summary)
     sections.push({
       id: 'summary',
@@ -1383,6 +1934,7 @@ export function buildReportHtml(d: ReportData): string {
           : ''
       }`,
     })
+  for (const x of rest) if (x) sections.push(x)
   sections.push({
     id: 'happened',
     title: 'What happened',
@@ -1391,6 +1943,7 @@ export function buildReportHtml(d: ReportData): string {
       ? `<p class="intro">${happened.items.some((m) => m.decision === 'confirmed') ? 'The confirmed items in the order they happened.' : 'Nothing was confirmed; the reviewed items in the order they happened.'} Dates are event times, UTC.${happened.total > happened.items.length ? ` The first ${happened.items.length} of ${happened.total} are listed; the other ${happened.total - happened.items.length}, the latest, are printed in full in the incident and chain sections.` : ''}</p>${momentsList(happened.items)}`
       : `<div class="empty">${happened.decided ? 'No dated item to place.' : 'No item has been decided yet: run the review before printing.'}</div>`,
   })
+  sections.push(...client.afterHappened)
   if (d.questions)
     sections.push({
       id: 'questions',
@@ -1478,18 +2031,24 @@ export function buildReportHtml(d: ReportData): string {
           )
           .join(''),
     })
-  if (settings.includeIocs)
+  if (settings.includeIocs) {
+    const ind = indicatorAppendix(d)
     sections.push({
       id: 'iocs',
       title: 'Indicators of compromise',
-      count: d.iocs.length,
-      body: d.iocs.length
-        ? `<p class="intro">Indicators flagged by the reputation providers; values are defanged.</p>${table(
-            ['kind', 'indicator', 'verdict', 'tags', 'seen'],
-            d.iocs.map((i) => [h(i.kind), `<code>${h(defang(i.value))}</code>`, h(i.verdict ?? ''), (i.tags ?? []).map((t) => chip(t)).join(''), h(`${i.count} (${i.sources.join(', ')})`)]),
-          )}`
-        : '<div class="empty">No indicator flagged: reputation checks were not run, or nothing was found malicious.</div>',
+      count: ind.rows.length + ind.left,
+      body: ind.rows.length
+        ? `<p class="intro">${h(INDICATORS_INTRO)}</p>${table(
+            INDICATOR_HEAD,
+            ind.rows.map((r) => {
+              const [kind, value, from, rep] = indicatorRow(r)
+              return [h(kind), `<code>${h(value)}</code>`, h(from), r.verdict ? h(rep) : `<span class="dim">${h(rep)}</span>`]
+            }),
+          )}${ind.left ? `<div class="cap warn">${n(ind.left)} more indicator${ind.left === 1 ? ' is' : 's are'} not listed: the appendix holds ${n(MAX_INDICATORS)}.</div>` : ''}`
+        : '<div class="empty">No confirmed item names an outside address, domain, sender, URL or hash, and no reputation service flagged one.</div>',
     })
+  }
+  if (client.techniques) sections.push(client.techniques)
   if (settings.includeTimeline && d.timeline.length)
     sections.push({
       id: 'timeline',
@@ -1549,15 +2108,28 @@ export function buildReportHtml(d: ReportData): string {
   const font =
     d.fontData && /^[A-Za-z0-9+/=]+$/.test(d.fontData) ? `@font-face{font-family:'Gulax';src:url(data:font/woff2;base64,${d.fontData}) format('woff2');font-weight:400;font-style:normal}` : ''
   const generated = new Date(d.generatedAt ?? Date.now()).toISOString().replace('T', ' ').slice(0, 19) + 'Z'
+  const conclusion = conclusionParts(settings.client)
+  const preparedFor = [
+    settings.client.client.trim() ? `Prepared for ${settings.client.client.trim()}` : '',
+    settings.client.engagementRef.trim() ? `engagement ${settings.client.engagementRef.trim()}` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
   const seen = profile.filter((b) => b.state !== 'none')
   const confirmedBadges = profile.filter((b) => b.state === 'confirmed')
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'"><meta name="viewport" content="width=device-width"><title>REMN report · ${h(kase.name)}</title><style>${font}${CSS}</style></head><body>
 <div class="cover-page">
 <div class="cover${d.issue?.status === 'draft' ? ' draft' : ''}">
+${marking(settings.client)}
 <div class="brand"><div class="l"><span class="wordmark">REMN</span><span class="tag">forensic analysis report</span></div><div class="r">${generated}<br>${kase.analyst ? `analyst ${h(kase.analyst)}` : 'analyst not set'}${d.issue ? `<br><span class="issue ${d.issue.status}">${d.issue.status === 'final' && d.issue.finalAt ? `final · issued ${h(new Date(d.issue.finalAt).toISOString().replace('T', ' ').slice(0, 19))}Z` : 'draft · not issued'}</span>` : ''}</div></div>
 <h1>${h(kase.name)}</h1>
+${preparedFor ? `<div class="meta for">${h(preparedFor)}</div>` : ''}
 <div class="meta">All times UTC · findings from ${h(settings.minSeverity)} severity up${settings.onlyReviewed ? ', reviewed items only' : ''}${settings.includeFp ? ', false positives included' : ''}</div>
-<div class="hero">${seal(verdict)}<div class="bottom"><div class="k">bottom line</div><div class="line">${line ? md(line) : `<p>${h(verdict.detail)}</p>`}</div>${line ? `<div class="det">${h(verdict.detail)}</div>` : ''}<div class="conf ${confidence.level}"><b>confidence ${confidence.level}</b>${h(confidence.reasons.slice(0, 3).join(' · '))}</div></div></div>
+<div class="hero">${seal(verdict)}<div class="bottom"><div class="k">bottom line</div><div class="line">${line ? md(line) : `<p>${h(verdict.detail)}</p>`}</div>${line ? `<div class="det">${h(verdict.detail)}</div>` : ''}<div class="conf ${confidence.level}"><b>completeness ${confidence.level}</b>${h(confidence.reasons.slice(0, 3).join(' · '))}<span class="sub">how complete the review is, not how sure its conclusion is</span></div>${
+    conclusion.confidence
+      ? `<div class="conf analyst"><b>analyst's confidence ${h(conclusion.confidence)}</b>${h(conclusion.basis)}<span class="sub">the analyst's own assessment of the conclusion</span></div>`
+      : ''
+  }</div></div>
 <div class="scorecard"><div class="kpi"><div class="v">${n(d.evidence.length)}</div><div class="l">evidence files</div></div><div class="kpi"><div class="v">${n(rowsTotal)}</div><div class="l">rows analysed</div></div><div class="kpi"><div class="v">${n(d.findings.length)}</div><div class="l">findings</div></div><div class="kpi"><div class="v">${n(d.incidents.length + d.chains.length)}</div><div class="l">incidents · chains</div></div><div class="kpi${verdict.confirmed ? ' critical' : ''}"><div class="v">${n(verdict.confirmed)}</div><div class="l">confirmed</div></div><div class="kpi accent"><div class="v">${n(d.iocs.length)}</div><div class="l">flagged indicators</div></div></div>
 <div class="sevbar">${ORDER.map((s) => (bySev[s] ? `<span title="${s} ${bySev[s]}" style="width:${((bySev[s] / total) * 100).toFixed(1)}%;background:var(--${s})"></span>` : '')).join('')}</div>
 <div class="legend">${ORDER.map((s) => `<span><i style="background:var(--${s})"></i>${s} ${bySev[s] ?? 0}</span>`).join('')}<span class="dim">· Decisions: <b>${verdict.confirmed}</b> confirmed · <b>${verdict.reviewed}</b> reviewed or unsure · <b>${verdict.falsePositives}</b> false positive${verdict.falsePositives === 1 ? '' : 's'}${d.undecided ? ` · <b>${d.undecided}</b> item${d.undecided === 1 ? '' : 's'} without a decision` : ' · every item decided'}</span></div>
@@ -1568,6 +2140,7 @@ export function buildReportHtml(d: ReportData): string {
 </div>
 ${sections.map((s, i) => `<section class="s" id="${h(s.id)}"><div class="s-head"><span class="num">${num(i)}</span><h2>${h(s.title)}</h2><span class="rule"></span>${s.count != null ? `<span class="count">${n(s.count)}</span>` : ''}</div>${s.body}</section>`).join('\n')}
 <div class="foot"><span class="wm">REMN</span><span>${h(kase.name)} · ${h(verdict.label)} · generated ${generated}</span></div>
+${marking(settings.client)}
 </body></html>`
 }
 

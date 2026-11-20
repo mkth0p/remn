@@ -2,18 +2,46 @@ import { useEffect, useMemo, useState } from 'react'
 import { getSource } from '../data/source'
 import { chainCoverageWarnings, loadChains, type Chain } from '../data/chains'
 import { listNotes } from '../data/caseNotes'
-import { chainSeverity, effectiveSeverity, loadChainReviews, loadReportSettings, selectForReport, unprintedConfirmed, type ChainReview, type ReportSettings } from '../data/review'
+import {
+  chainSeverity,
+  effectiveSeverity,
+  loadChainReviews,
+  loadReportSettings,
+  saveReportSettings,
+  selectForReport,
+  TLP_LEVELS,
+  unprintedConfirmed,
+  type AnalyticConfidence,
+  type ChainReview,
+  type ClientReport,
+  type ContainmentAction,
+  type ReportSettings,
+  type ReportVersion,
+  type Tlp,
+} from '../data/review'
 import { getDb, type CaseNote, type Evidence, type Finding, type Ioc } from '../db/schema'
 import { buildIncidents } from '../rules/incidents'
 import { toast, useStore } from '../state/store'
-import { fmtNum, renderMarkdown } from '../util/format'
+import { fmtNum, fmtUtc, renderMarkdown } from '../util/format'
 import { downloadBlob, exportCaseBundle, importCaseBundle } from '../util/export'
 import { navigatorLayer, timelineRecords, toTimelineCsv, toTimesketchJsonl } from '../util/responderExports'
 import { buildReportDocx, DOCX_MIME } from '../data/reportDocx'
 import { Badge, Spinner } from '../components/ui'
 import { Dropzone } from '../components/Dropzone'
 import { renderGraphPng } from '../components/ChainGraph'
-import { buildReportHtml, loadReportFont, type AiUsage, type ReportData } from '../data/reportHtml'
+import {
+  buildReportHtml,
+  evidencePeriod,
+  evidenceScope,
+  impactInventory,
+  initialAccessIsDraft,
+  loadReportFont,
+  SCOPE_READ,
+  spineStartingPoint,
+  type AiUsage,
+  type EvidenceScope,
+  type ReportData,
+} from '../data/reportHtml'
 import { summariseLedger } from '../ai/ledger'
 import { draftExecutiveSummary } from '../data/reportSummary'
 import { buildCampaignGraph } from '../data/chainGraph'
@@ -33,7 +61,6 @@ import { loadEvidenceProfile, type EvidenceProfile } from '../data/questions/cov
 import type { QuestionAnswer } from '../db/schema'
 
 const ORDER = ['critical', 'high', 'medium', 'low', 'info']
-
 /**
  * Report: built from the Review page's decisions (severity floor, what is in or out, rescored
  * severities, chain verdicts and narratives, chain detail level) plus the case notes. Every cell is
@@ -86,6 +113,8 @@ export function ReportView() {
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState('')
   const [fontData, setFontData] = useState<string | undefined>(undefined)
+  /** what the evidence covers, for the report's scope when the analyst wrote none */
+  const [scope, setScope] = useState<EvidenceScope | undefined>(undefined)
   useEffect(() => {
     loadReportFont().then(setFontData)
   }, [])
@@ -141,6 +170,10 @@ export function ReportView() {
     loadChainReviews(kase.id).then(setReviews)
     reportRelationships(kase.id).then(setRelationships)
     loadReportSettings(kase.id).then(setSettings)
+    const src = getSource(kase)
+    Promise.all([src.facets('events', 'computer', SCOPE_READ), src.facets('events', 'targetUser', SCOPE_READ), src.facets('events', 'subjectUser', SCOPE_READ)])
+      .then(([hosts, targets, subjects]) => setScope(evidenceScope(hosts, [targets, subjects])))
+      .catch(() => setScope(undefined))
   }, [kase, rulesVersion])
   useEffect(() => {
     if (!kase?.id || !questionScenarios.length) return
@@ -316,8 +349,15 @@ export function ReportView() {
     storiesDismissed: printedStories.dismissed,
     storyDecisionsOrphaned: printedStories.decisionsOrphaned,
     questions,
+    scope,
   })
   const html = (generatedAt?: number) => buildReportHtml(reportData(generatedAt))
+  /** a change to the client part of the report settings, kept with the case and its bundle */
+  const patchClient = (patch: Partial<ClientReport>) => {
+    const next = { ...settings, client: { ...settings.client, ...patch } }
+    setSettings(next)
+    void saveReportSettings(kase.id!, next)
+  }
   const fileBase = kase.name.replace(/[^a-z0-9_-]+/gi, '_')
   // what a responder carries into their own tools: every finding but the false positives, and the analyst's timeline
   const responderFindings = findings.filter((f) => f.status !== 'false_positive')
@@ -572,11 +612,232 @@ export function ReportView() {
             </div>
           </div>
         </div>
+        <ClientPanel
+          key={kase.id}
+          client={settings.client}
+          onChange={patchClient}
+          spineDraft={spineStartingPoint(printedStories.stories)}
+          scope={scope}
+          period={evidencePeriod(evidence)}
+          impact={impactInventory(reportData(previewAt))}
+        />
         <div className="panel">
           <div className="panel-h">preview</div>
           <div className="panel-b">
             <iframe title="report preview" sandbox="" srcDoc={html(previewAt)} style={{ width: '100%', height: 560, background: '#fff', border: '1px solid var(--line-2)', borderRadius: 4 }} />
           </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+type TextKey = { [K in keyof ClientReport]: ClientReport[K] extends string ? K : never }[keyof ClientReport]
+const CONFIDENCES: AnalyticConfidence[] = ['', 'low', 'moderate', 'high']
+
+/**
+ * What the analyst writes for a client: the engagement, the handling marking, the scope, the
+ * conclusion, the impact, the containment actions and the recommendations. Each part is printed
+ * only when filled in; the scope falls back to what the evidence covers, and says so.
+ */
+function ClientPanel({
+  client,
+  onChange,
+  spineDraft,
+  scope,
+  period,
+  impact,
+}: {
+  client: ClientReport
+  onChange: (patch: Partial<ClientReport>) => void
+  spineDraft: string
+  scope: EvidenceScope | undefined
+  period: { from: number | null; to: number | null }
+  impact: { accounts: unknown[]; hosts: unknown[] }
+}) {
+  // fields keep what is typed until they lose focus; a value set from outside (the spine's draft) remounts them
+  const [round, setRound] = useState(0)
+  const set = <K extends keyof ClientReport>(k: K, v: ClientReport[K]) => {
+    const patch: Partial<ClientReport> = {}
+    patch[k] = v
+    onChange(patch)
+  }
+  const text = (k: TextKey, label: string, opts: { area?: boolean; placeholder?: string; type?: string; rows?: number } = {}) => (
+    <label className="col small" style={{ gap: 2 }}>
+      <span className="muted">{label}</span>
+      {opts.area ? (
+        <textarea
+          key={`${k}-${round}`}
+          className="textarea"
+          style={{ minHeight: (opts.rows ?? 3) * 18 }}
+          defaultValue={client[k]}
+          placeholder={opts.placeholder}
+          onBlur={(e) => e.target.value !== client[k] && set(k, e.target.value)}
+        />
+      ) : (
+        <input
+          key={`${k}-${round}`}
+          className="input small"
+          type={opts.type ?? 'text'}
+          defaultValue={client[k]}
+          placeholder={opts.placeholder}
+          onBlur={(e) => e.target.value !== client[k] && set(k, e.target.value)}
+        />
+      )}
+    </label>
+  )
+  const list = (xs: string[] | undefined, more: boolean | undefined) =>
+    xs?.length ? `from the evidence: ${xs.slice(0, 6).join(', ')}${xs.length > 6 || more ? ', …' : ''}` : 'one a line; empty: what the evidence covers'
+  const rowsEditor = <T extends ReportVersion | ContainmentAction>(
+    key: 'versions' | 'containment',
+    rows: T[],
+    blank: T,
+    cols: { k: keyof T & string; label: string; type?: string; width?: number }[],
+  ) => (
+    <div className="col" style={{ gap: 4 }}>
+      {rows.map((r, i) => (
+        <div key={`${key}-${i}-${round}`} className="row" style={{ gap: 4 }}>
+          {cols.map((c) => (
+            <input
+              key={c.k}
+              className="input small"
+              type={c.type ?? 'text'}
+              placeholder={c.label}
+              style={{ flex: c.width ? `0 0 ${c.width}px` : 1, minWidth: 0 }}
+              defaultValue={String(r[c.k] ?? '')}
+              onBlur={(e) => {
+                if (e.target.value === String(r[c.k] ?? '')) return
+                const next = rows.map((x, j) => (j === i ? { ...x, [c.k]: e.target.value } : x))
+                onChange({ [key]: next } as Partial<ClientReport>)
+              }}
+            />
+          ))}
+          <button
+            className="btn xs"
+            title="remove this row"
+            onClick={() => {
+              onChange({ [key]: rows.filter((_, j) => j !== i) } as Partial<ClientReport>)
+              setRound((x) => x + 1)
+            }}
+          >
+            remove
+          </button>
+        </div>
+      ))}
+      <div>
+        <button className="btn xs" onClick={() => onChange({ [key]: [...rows, blank] } as Partial<ClientReport>)}>
+          add a row
+        </button>
+      </div>
+    </div>
+  )
+  const draftPending = initialAccessIsDraft(client)
+  return (
+    <div className="panel" data-testid="client-panel">
+      <div className="panel-h">
+        client report <span className="muted">· printed only where filled in; kept with the case and its bundle</span>
+      </div>
+      <div className="panel-b" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 14 }}>
+        <div className="col" style={{ gap: 6 }}>
+          <b className="small">Engagement</b>
+          {text('client', 'client')}
+          {text('engagementRef', 'engagement reference')}
+          <div className="row" style={{ gap: 6 }}>
+            {text('engagementStart', 'engagement start', { type: 'date' })}
+            {text('engagementEnd', 'engagement end', { type: 'date' })}
+          </div>
+          {text('requestedBy', 'requested by')}
+          {text('distribution', 'distribution', { area: true, placeholder: 'one recipient a line' })}
+          <span className="muted small">version history</span>
+          {rowsEditor<ReportVersion>('versions', client.versions, { version: '', date: '', author: '', note: '' }, [
+            { k: 'version', label: 'version', width: 64 },
+            { k: 'date', label: 'date', type: 'date', width: 140 },
+            { k: 'author', label: 'author', width: 110 },
+            { k: 'note', label: 'changes' },
+          ])}
+          <b className="small" style={{ marginTop: 8 }}>
+            Handling
+          </b>
+          <label className="col small" style={{ gap: 2 }}>
+            <span className="muted">TLP</span>
+            <select className="select" value={client.tlp} onChange={(e) => set('tlp', e.target.value as Tlp)}>
+              <option value="">none</option>
+              {TLP_LEVELS.map((t) => (
+                <option key={t} value={t}>
+                  TLP:{t.toUpperCase()}
+                </option>
+              ))}
+            </select>
+          </label>
+          {text('confidentiality', 'confidentiality line', { placeholder: 'printed on the cover and on every page' })}
+        </div>
+        <div className="col" style={{ gap: 6 }}>
+          <b className="small">Scope</b>
+          {text('objectives', 'objectives', { area: true })}
+          <div className="row" style={{ gap: 6 }}>
+            {text('periodFrom', 'period from', { type: 'date' })}
+            {text('periodTo', 'period to', { type: 'date' })}
+          </div>
+          {period.from != null && !client.periodFrom && !client.periodTo && (
+            <span className="hint">
+              empty: the evidence's {fmtUtc(period.from, { date: true })} to {fmtUtc(period.to, { date: true })}
+            </span>
+          )}
+          {text('systemsIn', 'systems in scope', { area: true, placeholder: list(scope?.hosts, scope?.hostsCapped) })}
+          {text('systemsOut', 'systems out of scope', { area: true, placeholder: 'one a line; empty: none named' })}
+          {text('accountsIn', 'accounts in scope', { area: true, placeholder: list(scope?.accounts, scope?.accountsCapped) })}
+          {text('accountsOut', 'accounts out of scope', { area: true, placeholder: 'one a line; empty: none named' })}
+        </div>
+        <div className="col" style={{ gap: 6 }}>
+          <b className="small">Conclusion</b>
+          {text('initialAccess', 'initial access: how the attacker got in', { area: true, rows: 4 })}
+          <div className="row small" style={{ gap: 6 }}>
+            <button
+              className="btn xs"
+              disabled={!spineDraft || !!client.initialAccess.trim()}
+              title={!spineDraft ? 'no printed story has a spine' : client.initialAccess.trim() ? 'the field holds text already' : "put the story's spine in the field as a starting point to rewrite"}
+              onClick={() => {
+                onChange({ initialAccess: spineDraft, initialAccessDraft: spineDraft })
+                setRound((x) => x + 1)
+              }}
+            >
+              start from the story spine
+            </button>
+            {draftPending && <span className="warn">not printed until you rewrite it</span>}
+          </div>
+          {text('rootCause', 'root cause: why it was possible', { area: true, rows: 4 })}
+          <label className="col small" style={{ gap: 2 }}>
+            <span className="muted">your confidence in the conclusion (printed as yours)</span>
+            <select className="select" value={client.analyticConfidence} onChange={(e) => set('analyticConfidence', e.target.value as AnalyticConfidence)}>
+              {CONFIDENCES.map((c) => (
+                <option key={c} value={c}>
+                  {c || 'not given'}
+                </option>
+              ))}
+            </select>
+          </label>
+          {client.analyticConfidence && text('confidenceBasis', 'on what it rests')}
+          <b className="small" style={{ marginTop: 8 }}>
+            Impact
+          </b>
+          <span className="hint">
+            The report lists the {fmtNum(impact.accounts.length)} account(s) and {fmtNum(impact.hosts.length)} host(s) the confirmed items name.
+          </span>
+          {text('impact', 'what was reached or taken, and the effect on the business', { area: true })}
+        </div>
+        <div className="col" style={{ gap: 6 }}>
+          <b className="small">Containment actions taken</b>
+          {rowsEditor<ContainmentAction>('containment', client.containment, { date: '', action: '', by: '' }, [
+            { k: 'date', label: 'date', type: 'date', width: 140 },
+            { k: 'action', label: 'action' },
+            { k: 'by', label: 'by', width: 100 },
+          ])}
+          <b className="small" style={{ marginTop: 8 }}>
+            Recommendations
+          </b>
+          {text('recShort', 'short term', { area: true })}
+          {text('recMedium', 'medium term', { area: true })}
+          {text('recLong', 'long term', { area: true })}
         </div>
       </div>
     </div>

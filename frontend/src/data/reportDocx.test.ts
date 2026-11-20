@@ -81,7 +81,7 @@ function unzip(bytes: Uint8Array): Map<string, string> {
 }
 
 describe('Word report', () => {
-  it('is an Office package with the document, its styles and its footer', () => {
+  it('is an Office package with the document, its styles, its header and its footer', () => {
     const parts = unzip(buildReportDocx(data()))
     expect([...parts.keys()]).toEqual([
       '[Content_Types].xml',
@@ -91,6 +91,7 @@ describe('Word report', () => {
       'word/_rels/document.xml.rels',
       'word/document.xml',
       'word/styles.xml',
+      'word/header1.xml',
       'word/footer1.xml',
     ])
     expect(parts.get('docProps/core.xml')).toContain('REMN report · Case &amp; &lt;co&gt;')

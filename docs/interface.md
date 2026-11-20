@@ -417,10 +417,12 @@ The printed report (`frontend/src/data/reportHtml.ts`) is one self-contained HTM
 REMN's own look, laid out for A4 and print-to-PDF. Every time in it is UTC, whatever the
 display setting. Its verdict is about the case, not about what prints: a confirmed item
 below the severity floor or left out still counts, and the cover says how many are not
-printed. Its confidence is never "high" while a file was not read completely (a parse
+printed. The cover rates how complete the review is ("completeness"), not how sure its
+conclusion is: it is never "high" while an item is undecided, a file was not read completely (a parse
 error, a limit, a skipped archive member, listed in the evidence table's "read" column),
 while the rules have not run or evidence arrived after the last run, and it says
-indicators were checked only when a lookup actually ran on them. "What happened" says
+indicators were checked only when a lookup actually ran on them. A confidence in the
+conclusion is printed only when the analyst gives one, as the analyst's. "What happened" says
 when it lists only the first of more items. The cover carries the wordmark (the
 Gulax face embedded as base64 from the app's own files), an accent rule, the case name,
 five key numbers, a severity bar, the decision counts and a numbered table of contents.
@@ -430,7 +432,8 @@ detail level), the other incidents with their notes and member findings at the e
 severity, the indicators, the case timeline, the tasks, the notes, the findings in time
 order, "How AI was used" when a model took part (runs, models and where they ran, tool
 calls, what it proposed and what became of it, whether the AI ledger's hash chain holds)
-and the case settings.
+and the case settings. The engagement, scope, conclusion, impact, containment,
+recommendations and techniques join them as described under [For a client](#for-a-client).
 
 Each rule's line in the report is marked "lead" when the rule was never seen to detect what
 it looks for, and notes when it also fires on clean machines; the method says how many of the
@@ -453,6 +456,43 @@ the same step (the same title, source, machine and ties in a row) print as one r
 count and a time span, at most 60 rows per chain, and table headers repeat on every page.
 Every string from the case is escaped, markdown fields go through the app's renderer, and
 only PNG data URLs the app drew itself are embedded.
+
+### For a client
+
+The "client report" panel of the Report page holds what an outside responder adds before the
+report goes to a client. It is stored with the report settings of the case, so it travels in
+the case bundle. Each part is printed only when filled in:
+
+- the engagement: client, engagement reference, engagement dates, who requested it, the
+  distribution list and the version history, first in the report, with the client and the
+  reference on the cover;
+- the handling: a TLP level (TLP 2.0: clear, green, amber, amber+strict, red) and a
+  confidentiality line, printed on the cover, at the foot of the HTML report and in the header
+  of every page of the Word report;
+- the scope: objectives, the period examined, the systems and accounts in and out of scope.
+  Where the analyst wrote no period or nothing in scope, the report prints what the evidence
+  covers and says so: the first and last record the files hold, the hosts the records come from
+  and the user accounts they name (the 500 most frequent of each; machine, service and built-in
+  accounts left out). Nothing is printed as out of scope unless the analyst wrote it;
+- the conclusion: the initial access and the root cause, in the analyst's words, and the
+  analyst's confidence in it when they give one. "Start from the story spine" puts the way in
+  of a printed story's spine (the confirmed story first) in the field as a starting point; the
+  report does not print it until the analyst has rewritten it, and says so under "Where it
+  stops". A report with a confirmed item and no stated conclusion says so there too;
+- the impact: the analyst's account of what was reached or taken, above a table of the accounts
+  and hosts the confirmed items name, printed or not (the people a confirmed chain or story is
+  about, the hosts it ran on, the accounts and hosts of the findings confirmed with them), each
+  with when it was seen, its worst severity and the items that name it;
+- the containment actions taken, with their dates, and the recommendations, short, medium and
+  long term.
+
+Two parts are drawn from the decisions alone. The indicators of compromise list the outside
+addresses, domains, mail senders, URLs and hashes the confirmed chains, stories and findings
+name, whether or not a reputation lookup ran, with those a reputation service flagged; each
+says where it comes from, addresses that are not public and the case's own domains are left
+out, and past 300 the report says how many more there are. The ATT&CK techniques table lists
+each technique of the printed findings (false positives left out) and of the confirmed ones,
+with its tactic, its findings, its rules and whether a confirmed item carries it.
 
 ## Case notes
 
