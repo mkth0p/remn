@@ -173,13 +173,28 @@ marked failed with the record number. So does JSON that is broken part-way.
 A time written with a zone or an offset keeps it; one written without is read as UTC, the
 zone the audit log's `CreationTime`, Graph and the portal's `Date (UTC)` use. Dates a
 culture or a spreadsheet wrote are read too (`9/1/2026 10:00 AM`, `01.09.2026 10:00`,
-`2026/09/01 10:00:00`, with or without seconds or an offset). A sign-in CSV that writes its
+`2026/09/01 10:00:00`, with or without seconds or an offset). Such a time without a zone, in
+a column whose name does not say UTC, is counted (`zoneAssumed`): `Export-Csv` writes a time
+in whatever zone it held, so UTC is an assumption there. A sign-in CSV that writes its
 dates as numbers is read in the order its own dates show: one day above 12 anywhere in the
 file settles it for the whole file. When no date shows it, the dates are read month-first,
 the portal's order, and the evidence's statistics (`dateOrderGuessed`) and its member list
 say how many records were dated that way: in a day-first export those dates are wrong. A
 record whose date is missing or cannot be read is kept without a time and counted the same
 way (`undated`), since it is not on the timeline.
+
+The date order and the time zone can be set for an evidence file where its exports cannot
+say (the `dates` field of the import request: `{"order": "day-first" | "month-first",
+"zone": "UTC" | "+02:00" | "Europe/Paris"}`). The order set is used for every numeric date of
+its Entra exports in place of the order the file shows; a date that cannot be read in it but
+can the other way is counted (`dateOrderContradicted`) and left without a time. The zone set
+is used for each time a culture wrote without a zone, and never for an ISO 8601 time, a time
+with an offset, or a column whose name says UTC; a zone given by name follows daylight
+saving time. The evidence's statistics keep the setting (`dates`) and count the records it
+was used for (`dateOrderSet`, `zoneSet`), and each member of an archive or a package says
+the same in its note. The audit log's times are ISO 8601 in UTC, so the setting does not
+change them, and the other tables of a collection package still leave a date that reads
+both ways without a time.
 
 A record is in the case once. Search-UnifiedAuditLog's large-set pages repeat records,
 and exports cut into time slices overlap, so a UAL record whose `AuditData.Id` was already

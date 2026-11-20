@@ -877,6 +877,14 @@ class Stats:
         self.undated = 0
         self.date_order_guessed = 0
         self.repeats_unchecked = 0
+        # cloud exports read with the date order and time zone the analyst set for the evidence
+        # (dates): records dated in that order, records whose date cannot be read in it but can
+        # the other way, and records whose time says no zone, read in the zone set or as UTC
+        self.dates: dict[str, str] = {}
+        self.date_order_set = 0
+        self.date_order_contradicted = 0
+        self.zone_set = 0
+        self.zone_assumed = 0
         # one per EVTX file read: its record numbering and chunk checksums, for the statement of
         # what the evidence cannot show
         self.sequences: list[FileSequence] = []
@@ -924,6 +932,11 @@ class Stats:
             **({"undated": self.undated} if self.undated else {}),
             **({"dateOrderGuessed": self.date_order_guessed} if self.date_order_guessed else {}),
             **({"repeatsUnchecked": self.repeats_unchecked} if self.repeats_unchecked else {}),
+            **({"dates": dict(self.dates)} if self.dates else {}),
+            **({"dateOrderSet": self.date_order_set} if self.date_order_set else {}),
+            **({"dateOrderContradicted": self.date_order_contradicted} if self.date_order_contradicted else {}),
+            **({"zoneSet": self.zone_set} if self.zone_set else {}),
+            **({"zoneAssumed": self.zone_assumed} if self.zone_assumed else {}),
             **self.coverage(),
         }
 

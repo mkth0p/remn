@@ -41,9 +41,11 @@ import logging
 import os
 import re
 from array import array
-from collections.abc import Iterable, Iterator
-from datetime import UTC, datetime, timedelta, timezone
+from collections.abc import Callable, Iterable, Iterator
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta, timezone, tzinfo
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 log = logging.getLogger(__name__)
 
@@ -242,11 +244,11 @@ _CULTURE_RE = re.compile(
 )
 
 
-def _culture_date(s: str, day_first: bool | None) -> datetime | None:
+def _culture_date(s: str, day_first: bool | None, zone: tzinfo | None = None) -> datetime | None:
     m = _CULTURE_RE.match(s)
     if not m:
         return None
-    a, sep, b, c, hour, minute, second, fraction, half, zone = m.groups()
+    a, sep, b, c, hour, minute, second, fraction, half, written = m.groups()
     if len(a) == 4:
         year, month, day = int(a), int(b), int(c)
     elif len(c) != 4:
@@ -260,11 +262,14 @@ def _culture_date(s: str, day_first: bool | None) -> datetime | None:
         if not 1 <= h <= 12:
             return None
         h = h % 12 + (12 if half.lower() == "pm" else 0)
-    tz = UTC
-    if zone and zone != "Z":
-        sign = -1 if zone[0] == "-" else 1
-        digits = zone[1:].replace(":", "")
+    # a zone written with the time is the time's own; the evidence's zone is for a time without one
+    tz = zone or UTC
+    if written and written != "Z":
+        sign = -1 if written[0] == "-" else 1
+        digits = written[1:].replace(":", "")
         tz = timezone(sign * timedelta(hours=int(digits[:2]), minutes=int(digits[2:])))
+    elif written == "Z":
+        tz = UTC
     try:
         return datetime(year, month, day, h, int(minute), int(second or 0), int((fraction or "0")[:6].ljust(6, "0")), tzinfo=tz)
     except ValueError:
@@ -276,12 +281,14 @@ def _culture_date(s: str, day_first: bool | None) -> datetime | None:
 _DOTNET_DATE_RE = re.compile(r"^/Date\((-?\d{1,15})(?:[+-]\d{4})?\)/$")
 
 
-def parse_ts(v: Any, day_first: bool | None = None) -> tuple[int | None, str | None]:
+def parse_ts(v: Any, day_first: bool | None = None, zone: tzinfo | None = None) -> tuple[int | None, str | None]:
     """ISO-8601 (with or without zone / fractional seconds), portal 'M/D/YYYY, h:mm:ss AM', a
-    culture's numeric date, or a .NET "/Date(ms)/" -> (ms, iso). day_first is the order date_order found for the file;
-    None keeps the portal's own month-first order for slashes and dashes. Dotted dates are always
-    day-first. A time written with a zone keeps it; one without is UTC, the zone the audit log,
-    Graph and the portal's "Date (UTC)" write."""
+    culture's numeric date, or a .NET "/Date(ms)/" -> (ms, iso). day_first is the order date_order
+    found for the file, or the order set for the evidence; None keeps the portal's own month-first
+    order for slashes and dashes. Dotted dates are always day-first. A time written with a zone
+    keeps it. A culture-written time without one is in ``zone`` when the evidence sets one, else
+    UTC; an ISO 8601 time without one is UTC, the zone the audit log, Graph and the portal's
+    "Date (UTC)" write."""
     if v is None:
         return None, None
     if isinstance(v, (int, float)):
@@ -299,13 +306,126 @@ def parse_ts(v: Any, day_first: bool | None = None) -> tuple[int | None, str | N
     try:
         dt: datetime | None = datetime.fromisoformat(s.replace("Z", "+00:00"))
     except ValueError:
-        dt = _culture_date(s, day_first)
+        dt = _culture_date(s, day_first, zone)
     if dt is None:
         return None, None
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
+        # "2026-09-01 10:00:00" is how a culture writing the year first writes a time
+        dt = dt.replace(tzinfo=zone if zone is not None and culture_written(s) else UTC)
     dt = dt.astimezone(UTC)
     return int(dt.timestamp() * 1000), dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def culture_written(v: Any) -> bool:
+    """Whether a time is written as a culture or a spreadsheet writes one (9/1/2026 10:00 AM,
+    01.09.2026 10:00) and says nothing of its zone: the form Export-Csv gives a DateTime, whose
+    zone is whatever the value held. An ISO 8601 time is written by Graph or the audit log
+    service, in UTC."""
+    m = _CULTURE_RE.match(str(v or "").strip())
+    return bool(m) and not m.group(10)
+
+
+def utc_column(name: Any) -> bool:
+    """Whether a column's name says its times are UTC ("Date (UTC)", "origin_timestamp_utc"), in
+    which case no setting of the evidence moves them."""
+    return "utc" in re.split(r"[^a-z]+", str(name or "").lower())
+
+
+# ---------------------------------------------------------------------------
+# The date order and time zone an evidence file is read in
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class DateSetting:
+    """What the analyst says of one evidence file's dates where the file cannot say: the order of a
+    numeric date's day and month, and the zone of a culture-written time without one. It is chosen
+    for the evidence, recorded with it, and each file read with it says which of its records it
+    applied to."""
+
+    day_first: bool | None = None
+    zone: tzinfo | None = None
+    zone_name: str = ""
+
+    @property
+    def order(self) -> str:
+        return "" if self.day_first is None else "day-first" if self.day_first else "month-first"
+
+    def to_dict(self) -> dict[str, str]:
+        return {k: v for k, v in (("order", self.order), ("zone", self.zone_name)) if v}
+
+
+_ZONE_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_+\-/]{0,63}$")
+_OFFSET_RE = re.compile(r"^(?:UTC|GMT)?\s*([+-])(\d{1,2})(?::?(\d{2}))?$", re.IGNORECASE)
+
+
+def date_setting(value: Any) -> DateSetting | None:
+    """The date setting a request gives for one evidence file, {"order": "day-first" |
+    "month-first", "zone": "UTC" | "+02:00" | "Europe/Paris"}, as JSON text or an object; None when
+    it sets neither. A value that cannot be used raises ValueError, its message written for the
+    analyst."""
+    if value in (None, "", {}):
+        return None
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            raise ValueError("the date setting is not JSON") from None
+    if not isinstance(value, dict):
+        raise ValueError("the date setting is an object with an order and a zone")
+    order = str(value.get("order") or "").strip().lower()
+    if order not in ("", "day-first", "month-first"):
+        raise ValueError(f"the date order {order[:40]!r} is neither day-first nor month-first")
+    name = str(value.get("zone") or "").strip()
+    zone = time_zone(name) if name else None
+    if not order and zone is None:
+        return None
+    return DateSetting(day_first=None if not order else order == "day-first", zone=zone, zone_name=name if zone is not None else "")
+
+
+def time_zone(name: str) -> tzinfo:
+    """A zone by its name: UTC, an offset (+02:00, -0530, UTC+2) or an IANA name (Europe/Paris), whose
+    offset follows daylight saving time. Raises ValueError for anything else."""
+    if name.upper() in ("UTC", "Z", "GMT"):
+        return UTC
+    if m := _OFFSET_RE.match(name):
+        hours, minutes = int(m.group(2)), int(m.group(3) or 0)
+        if hours > 14 or minutes > 59:
+            raise ValueError(f"the offset {name[:20]!r} is not one a clock uses")
+        return timezone((-1 if m.group(1) == "-" else 1) * timedelta(hours=hours, minutes=minutes))
+    if _ZONE_NAME_RE.match(name):
+        try:
+            return ZoneInfo(name)
+        except (ZoneInfoNotFoundError, ValueError):
+            pass
+    raise ValueError(f"the time zone {name[:64]!r} is not known: give UTC, an offset such as +02:00, or a name such as Europe/Paris")
+
+
+class _Dates:
+    """How the times of one file are read: in the date order its own dates show, unless the evidence
+    sets one, and a culture-written time without a zone in the evidence's zone, or UTC."""
+
+    def __init__(self, setting: DateSetting | None = None, file_order: bool | None = None) -> None:
+        self.set_order = setting is not None and setting.day_first is not None
+        self.day_first = setting.day_first if setting is not None and setting.day_first is not None else file_order
+        self.zone = setting.zone if setting is not None else None
+
+    def read(self, value: Any, utc: bool = False) -> tuple[int | None, str | None, tuple[str, ...]]:
+        """(ms, iso, marks) of one time; utc when the export's column says its times are UTC. The
+        marks name what the record is counted for: dated in an order the file did not show, in the
+        order or the zone the evidence sets, or read as UTC with nothing to say so."""
+        culture = culture_written(value)
+        moved = culture and not utc
+        ms, iso = parse_ts(value, self.day_first, self.zone if moved else None)
+        marks: tuple[str, ...] = ()
+        if guessed_order(value):
+            if self.set_order:
+                marks += ("date_order_set",)
+            elif self.day_first is None:
+                marks += ("date_order_guessed",)
+        if ms is None and self.set_order and parse_ts(value, not self.day_first)[0] is not None:
+            marks += ("date_order_contradicted",)
+        if moved and ms is not None:
+            marks += ("zone_set",) if self.zone is not None else ("zone_assumed",)
+        return ms, iso, marks
 
 
 class _Cut(str):
@@ -1194,16 +1314,25 @@ class RecordKeys:
 
 
 def iter_records(
-    path: str | None, data: bytes | None, fmt: str, stats: Any = None, include_raw: bool = True, seen: RecordKeys | None = None
+    path: str | None,
+    data: bytes | None,
+    fmt: str,
+    stats: Any = None,
+    include_raw: bool = True,
+    seen: RecordKeys | None = None,
+    dates: DateSetting | None = None,
 ) -> Iterator[dict[str, Any]]:
-    """Yield event rows from a UAL / Entra export in the given format (see FORMATS). A record
+    """Yield event rows from a UAL / Entra export in the given format (see FORMATS), its dates read
+    in the order and the zone ``dates`` sets for the evidence where the file cannot say. A record
     whose key (record_key) is already in ``seen`` is the same record exported again: it is
     counted in ``stats.duplicates`` and not yielded: Search-UnifiedAuditLog's ReturnLargeSet
     pages repeat records within one file, and overlapping time slices repeat them across files.
     Pass one RecordKeys for every file of an upload so an archive of slices gives each record
     once. A record read once it is full is counted in ``stats.repeats_unchecked``."""
     seen = RecordKeys() if seen is None else seen
-    for row in _iter_rows(path, data, fmt, stats, include_raw):
+    if stats is not None and dates is not None:
+        stats.dates = dates.to_dict()
+    for row in _iter_rows(path, data, fmt, stats, include_raw, dates):
         marks = row.pop("_marks", ())
         key = row.get("recordKey")
         if key:
@@ -1221,13 +1350,33 @@ def iter_records(
         yield row
 
 
-# what each count on a cloud export's stats says on its member of an archive or a package
+# what each count on a cloud export's stats says on its member of an archive or a package; {order}
+# and {zone} are what the evidence sets
 _NOTES = (
     ("cut", "{:,} record(s) hold a value cut at its length limit, marked by a closing …"),
     ("undated", "{:,} record(s) have no time: their date is missing or could not be read"),
     ("date_order_guessed", "{:,} record(s) were dated month-first: no date in the file has a day above 12 to show its order"),
+    ("date_order_set", "{:,} record(s) were dated {order}, the date order set for the evidence"),
+    ("date_order_contradicted", "{:,} record(s) have a date that cannot be read {order}, the date order set for the evidence, but can be read the other way"),
+    ("zone_set", "{:,} record(s) were read in {zone}, the time zone set for the evidence: their times say none"),
+    ("zone_assumed", "{:,} record(s) were read as UTC: their times say no time zone, and none is set for the evidence"),
     ("repeats_unchecked", "{:,} record(s) were read once the ids held to find repeats were full, and were not compared with one another"),
 )
+
+
+# the counts that say how the dates of the cloud exports were read
+DATE_COUNTS = ("date_order_guessed", "date_order_set", "date_order_contradicted", "zone_set", "zone_assumed")
+
+
+def date_stats(counts: dict[str, int], dates: DateSetting | None) -> dict[str, Any]:
+    """What an evidence's statistics say of its cloud exports' dates: the setting they were read
+    with, and the counts of DATE_COUNTS that are not zero, as Stats.to_dict names them."""
+    out: dict[str, Any] = {"dates": dates.to_dict()} if dates is not None else {}
+    for name in DATE_COUNTS:
+        if counts.get(name):
+            head, *rest = name.split("_")
+            out[head + "".join(w.title() for w in rest)] = counts[name]
+    return out
 
 
 def counts(stats: Any) -> dict[str, int]:
@@ -1235,9 +1384,12 @@ def counts(stats: Any) -> dict[str, int]:
     return {name: int(getattr(stats, name, 0) or 0) for name, _ in _NOTES}
 
 
-def note(counts: dict[str, int]) -> str:
-    """Those counts in words, for one file: "" when there is nothing to say."""
-    return "; ".join(text.format(counts[name]) for name, text in _NOTES if counts.get(name))
+def note(counts: dict[str, int], dates: DateSetting | None = None) -> str:
+    """Those counts in words, for one file read with the evidence's date setting: "" when there is
+    nothing to say."""
+    order = dates.order if dates is not None and dates.order else "in the order set"
+    zone = dates.zone_name if dates is not None and dates.zone_name else "the zone set"
+    return "; ".join(text.format(counts[name], order=order, zone=zone) for name, text in _NOTES if counts.get(name))
 
 
 def _count(row: dict[str, Any], stats: Any) -> None:
@@ -1247,7 +1399,7 @@ def _count(row: dict[str, Any], stats: Any) -> None:
         stats.count += 1
 
 
-def _iter_rows(path: str | None, data: bytes | None, fmt: str, stats: Any, include_raw: bool) -> Iterator[dict[str, Any]]:
+def _iter_rows(path: str | None, data: bytes | None, fmt: str, stats: Any, include_raw: bool, dates: DateSetting | None = None) -> Iterator[dict[str, Any]]:
     # rows are counted by the caller once it knows they are kept; errors are counted here
     fh = _open_text(path, data)
     try:
@@ -1277,12 +1429,11 @@ def _iter_rows(path: str | None, data: bytes | None, fmt: str, stats: Any, inclu
                     continue
                 yield _finish(entra_row(signin), obj, stats, include_raw)
         elif fmt == "entra-signin-csv":
-            day_first = _csv_date_order(path, data)
+            when = _csv_dates(path, data, dates, _date_column)
             for obj in _csv_rows(fh, stats):
-                row = _finish(entra_row(obj, day_first), obj, stats, include_raw)
-                if day_first is None and any(guessed_order(v) for k, v in obj.items() if _date_column(k)):
-                    row["_marks"] = (*row.get("_marks", ()), "date_order_guessed")
-                yield row
+                row = entra_row(obj)
+                row["ts"], row["tsIso"], marks = _csv_when(obj, _date_column, when)
+                yield _finish(row, obj, stats, include_raw, marks)
         else:
             raise ValueError(f"unknown M365 format {fmt}")
     finally:
@@ -1294,16 +1445,32 @@ def _date_column(name: str) -> bool:
     return (_PORTAL_MAP.get(low) or _GRAPH_NAMES.get(low)) == "createdDateTime"
 
 
-def _csv_date_order(path: str | None, data: bytes | None) -> bool | None:
-    """The date order of a sign-in CSV, from a first pass over its date column that stops at the
-    first date settling it (or at the first date not written as numbers, whose order does not
-    matter). Deciding from the first 5,000 rows read a day-first export whose first days were all
-    12 or below month-first, every date of it wrong."""
+def _csv_dates(path: str | None, data: bytes | None, dates: DateSetting | None, is_date: Callable[[str], bool]) -> _Dates:
+    """How a CSV's times are read: in the order the evidence sets, or else the order its own dates
+    show (is_date names its date columns)."""
+    if dates is not None and dates.day_first is not None:
+        return _Dates(dates)
+    return _Dates(dates, _csv_date_order(path, data, is_date))
+
+
+def _csv_when(rec: dict[str, Any], is_date: Callable[[str], bool], when: _Dates) -> tuple[int | None, str | None, tuple[str, ...]]:
+    """The time of a CSV row, from its first date column that holds one, and what it is counted for."""
+    for k, v in rec.items():
+        if v and is_date(k):
+            return when.read(v, utc_column(k))
+    return None, None, ()
+
+
+def _csv_date_order(path: str | None, data: bytes | None, is_date: Callable[[str], bool]) -> bool | None:
+    """The date order of a CSV, from a first pass over its date columns that stops at the first
+    date settling it (or at the first date not written as numbers, whose order does not matter).
+    Deciding from the first 5,000 rows read a day-first export whose first days were all 12 or
+    below month-first, every date of it wrong."""
     fh = _open_text(path, data)
     try:
         for rec in _csv_rows(fh, None):
             for k, v in rec.items():
-                if v and _date_column(k):
+                if v and is_date(k):
                     if not _NUMERIC_DATE_RE.match(str(v)):
                         return None
                     order = date_order([v])
@@ -1314,11 +1481,11 @@ def _csv_date_order(path: str | None, data: bytes | None) -> bool | None:
     return None
 
 
-def _finish(row: dict[str, Any], source: dict[str, Any], stats: Any, include_raw: bool) -> dict[str, Any]:
+def _finish(row: dict[str, Any], source: dict[str, Any], stats: Any, include_raw: bool, marks: tuple[str, ...] = ()) -> dict[str, Any]:
+    """The row with its raw record, and what it is counted for (marks, from reading its time, and
+    whether a value was cut or it has no time), counted by iter_records once it knows the row is kept."""
     if include_raw:
         row["raw"] = _cut(json.dumps(source, ensure_ascii=False, separators=(",", ":")), 200_000)
-    # what the row is counted for, by iter_records once it knows the row is kept
-    marks: tuple[str, ...] = ()
     if isinstance(row.get("raw"), _Cut) or any(isinstance(v, _Cut) for v in row["data"].values()):
         marks += ("cut",)
     if row.get("ts") is None:
