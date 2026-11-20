@@ -152,6 +152,24 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   hovered. A chain wider than the pane scrolls sideways, by drag or wheel, with the lane names
   pinned at the left, and the selected step is scrolled into view. The report's chain pictures
   use the same layout within the 1,700 pixels they had, with titles on up to three lines.
+- The pages work from the keyboard and with a screen reader, and the figures they quote come from
+  the committed measure. Tables take one Tab stop and move with the arrows, Home and End, open
+  with Enter and select with Space; switches, the rows and tiles that open something, and the
+  messages (read out in a live region) are reachable; questions are asked in the app's own dialog
+  instead of the browser's; and the text colours read at 4.5:1 or more on every surface of both
+  themes. The home page reads the rule totals, what the default rules detect in each library and
+  the clean-machine figures from `rules/measures.json`, `rules/measures-detail.json` and the
+  SigmaHQ packs when it is built, and the level picker and the home page give each level's lines
+  as `tools/detection_levels.py` counts them on that measure (`tools/level_figures.py`, checked by
+  `tests/backend/test_level_figures.py`); the ATT&CK Evaluations heading and the head-to-head
+  comparison, which the measure does not hold, are gone. The Dashboard says when the case summary
+  could not be read, a record's JSON is highlighted with every piece escaped, and the message at
+  the end of a rule run counts the findings left out rather than the rules. The AI analyst holds
+  every decision that would lower a severity, leave an item out of the report or dismiss it for a
+  one-by-one look, names in the triage popup, a message and the ledger the items a
+  90,000-character prompt cut, and records in the ledger what the analyst's question carried that
+  was addressed to a model or too deep to check. The Sigma import dialog no longer names base64
+  and utf16 values as skipped, and says how many rules its 300-row list leaves out.
 - Fewer pages that look right while they are wrong. In the browser store, the mail histogram, the
   Timeline and the aggregate and timeline tools search mail bodies the same way as the Mails list,
   so their counts agree with it. Emptying a server-store case keeps every browser record when the
