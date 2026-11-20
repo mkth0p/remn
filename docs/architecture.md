@@ -98,9 +98,10 @@ Mailboxes, packages and cloud exports are always parsed by the server.
 
 For cases of gigabytes, a case can keep its rows on the server instead
 ([Storage modes](storage.md#server-store)). The page uploads each file in chunks
-(`/api/upload/...`) and starts a job (`POST /api/store/<key>/ingest`). The job runs a parse
-process on the staged file and writes the rows it sends into the case's DuckDB file; the page
-follows the job and queries the store through `/api/store/<key>/...`. Rules run on the server as
+(`POST /api/upload/init`, then `PUT /api/upload/<upload_id>/chunk`) and starts a job
+(`POST /api/store/<key>/ingest`). The job runs a parse process on the staged file and writes the
+rows it sends into the case's DuckDB file; the page follows the job and queries the store through
+the routes under `/api/store/<key>` ([API](api.md#server-store)). Rules run on the server as
 a job over the store, and the findings come back to the page. Findings, notes, decisions and AI
 sessions stay in the browser, as for every case: a member of a shared case sees its evidence
 rows, not another member's findings.

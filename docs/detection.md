@@ -29,95 +29,17 @@ Findings come from three places: the rules bundled with REMN (Windows, mail, Mic
 365), the community rule packs converted from SigmaHQ and Sublime Security, and the mail
 risk score computed at ingest. All rules are written in one YAML language and run on two
 engines whose findings continuous integration compares key by key: one in the browser, so
-evidence never has to reach the server, and one in SQL, for gigabyte cases. This page describes the language,
-the rule sets, the scoring, the sender baseline that enriches mails after ingest, and
-the parity between the engines.
+evidence never has to reach the server, and one in SQL, for gigabyte cases. This page describes the rule
+sets, the scoring, the sender baseline that enriches mails after ingest, and the parity between
+the engines; the language itself is in [Writing rules](rules.md).
 
 ## The rule language
 
 A rule is a YAML document with a `where` block over the fields of one source, optional
 grouping over a sliding window, an optional follow-up that escalates the finding, and
-exclusions that read the case settings:
-
-```yaml
-id: win-bruteforce-4625-by-ip
-title: Brute force - burst of failed logons from one source IP
-severity: high                # info | low | medium | high | critical
-source: events                # events | mails
-attack: [T1110.001]
-where:                        # field: value  /  field|op: value  /  any_of / all_of / not
-  eventId: 4625
-  ipAddress|exists: true
-group_by: [ipAddress]         # aggregate per group
-window: 5m                    # sliding window
-threshold: ">= 5"             # count (or distinct count with `distinct: field`)
-then:                         # follow-up that escalates the finding
-  where: { eventId: 4624 }
-  join: [ipAddress]
-  within: 15m
-  severity: critical
-time: { outside_business_hours: true, weekend: true }   # uses case settings
-exclude: { targetUser|in_setting: service_accounts }
-```
-
-A run keeps at most 2,000 findings per rule, or the number the rule sets in `max_findings`,
-and both engines keep the same ones. Past that cap, a rule with a threshold of two or more
-keeps its largest groups (the bursts it counts) and any other grouped rule its rarest (the
-values a hunt is after), equal groups in the order of their values; a rule with a `window`
-keeps its first bursts in the order of the grouped fields, and a rule with one finding per
-row its first rows in time order. The number of findings left out is shown beside the rule
-in the Rules view, above the list in the Findings view and on the findings of that rule, and
-the message at the end of the run says how many rules were cut. A `then` follow-up is
-checked for every finding the rule keeps.
-
-Operators: `eq ne in nin contains not_contains contains_any contains_all startswith
-not_startswith endswith not_endswith re not_re re_cs gt gte lt lte exists empty in_setting
-nin_setting levenshtein length contains_cs startswith_cs endswith_cs`. The `_cs`
-variants match case exactly (`re_cs` is a regex that keeps its case unless the pattern
-starts with `(?i)`); everything else is case-insensitive, `re` included. Dotted paths reach
-nested values (`attachments.flags`, `data.LogonType`). `field|length: "< 500"` counts the
-characters of a text or the items of a list, with the same threshold syntax as
-`threshold`. The derived URL fields `urls.subdomain` (host minus the registrable domain)
-and `urls.fragment` are available in both engines.
-
-`in_setting` and `nin_setting` read the lists in the case settings (internal domains,
-VIP and organisation display names, trusted senders, internal IP ranges, admin and
-service accounts, expected countries) and fall back to a bundled list when the settings
-define none of that name. Today that is `tranco_10k`, the top 10,000 of the
-[Tranco](https://tranco-list.eu) ranking (list id and fetch date in
-`backend/services/reference/tranco.json`; Le Pochat et al., NDSS 2019). A case setting
-named `tranco_10k` overrides it; `tools/import_community_rules.py tranco --download`
-refreshes it. An empty setting has no members, so `nin_setting` is true on every row until
-the setting is filled: a rule whose only guard is `nin_setting` should also carry
-`require_setting`.
-
-Other keys a rule may carry:
-
-- `any_in_group`: a condition that at least one row of a group must meet for the group to
-  become a finding (grouped rules only).
-- `then_flags`: on a mail rule, a list of `flag: severity` pairs; a finding whose mail
-  carries the flag is raised to that severity and names the flag as its escalation.
-- `require_setting`: the name of a case setting; while that setting is empty the rule does
-  not run, and its diagnostic says which setting is missing.
-- `entities`: the fields a finding shows. They default to `group_by`, or to a fixed set per
-  source (host, accounts, address, process and service for events; sender, domain, subject
-  and origin address for mails).
-- `collapse_after`: a rule without `group_by` or `threshold` gives one finding per matching
-  row; past this many rows (200 by default) it gives one finding per combination of its
-  entity fields instead, marked "collapsed" with the number of rows it matched.
-- `confidence`: low, medium or high, shown beside the severity.
-- `max_findings`: see the paragraph on the number of findings a run keeps, above.
-
-`then`, `window`, `distinct` and `any_in_group` act on a group, so a rule without
-`group_by` or `threshold` cannot use them. Both engines refuse such a rule with an error
-rather than run it without them, and they refuse a `then` without a `where` and
-`then_flags` on an events rule (events carry no flags). The language has one follow-up step
-and no ordered sequence of three events or more; a `window` with `distinct: eventId` counts
-different events in any order. It cannot compare one field with another, and it counts
-rows or distinct values but does not sum or average them.
-
-Rules are edited in the Rules page, and a custom rule with the same id as a bundled or
-pack rule overrides it.
+exclusions that read the case settings. Its fields, its operators, how to try a rule, the checks
+a shipped rule passes and how Sigma and Sublime rules are imported are described in
+[Writing rules](rules.md).
 
 ## Bundled rules
 
