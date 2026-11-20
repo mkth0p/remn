@@ -162,9 +162,14 @@ finding folded below the case's detection level counts as the findings it stands
 Other rules on the same host or for the same user within 24 hours add a
 point each and a point more for each other ATT&CK tactic among them, up to 6. The same rule on
 the same entities (what it found, such as the program, command line or service, not the host,
-account or address, unless the rule names nothing else) escalated by an analyst before, in this
-case or another case of this browser, adds 5; marked false positive before, the finding keeps
-a quarter of its score. The case also learns from its own review: each finding of a rule an
+account or address, unless the rule names nothing else) escalated by an analyst before in this
+case adds 5; marked false positive before, the finding keeps a quarter of its score. Decisions
+taken in another case of the browser count only when the analyst chooses that case: the "past
+decisions" control beside the sort lists the other cases holding decisions, with how many of
+each kind, and is shown only when there are some. Choose a case only when it is the same
+client's, since a program one network runs every day can be the intruder's on the next. The
+choice belongs to the case and is kept in the browser, not exported with the case, because case
+numbers are the browser's own. The case also learns from its own review: each finding of a rule an
 analyst marks false positive in this case halves the score of the rule's other findings on that
 host and takes a fifth off its findings on the other hosts (findings on the same entities are the
 memory's, not counted twice), so the queue moves past what is benign on this network as the
