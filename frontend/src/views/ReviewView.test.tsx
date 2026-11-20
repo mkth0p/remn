@@ -59,6 +59,9 @@ beforeEach(async () => {
 })
 afterEach(async () => {
   cleanup()
+  // an action's last reads (the chain reviews, the findings, the proposals) can still be on their way
+  // when a test has seen what it checks; they settle before the database goes
+  await new Promise((r) => setTimeout(r, 100))
   await db.delete()
 })
 
