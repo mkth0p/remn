@@ -116,12 +116,13 @@ For development, run the API with `manage.py runserver` and the frontend with
 Every event rule is measured with `tools/measure_rules.py` on public recordings of attacks
 and on the logs of seven clean Windows lab machines, at pinned versions of each source. The
 committed measure, `rules/measures.json`, was taken on 2026-09-25 (the 116 rules whose logic
-changed on 2026-11-19 were measured again that day): of the 3,009 event rules measured then,
-1,020 fire on a recording of what they look for, and the app marks the
+changed on 2026-11-19 were measured again that day, and the 94 that had no measure or had changed
+on 2026-11-20): of the 3,101 event rules measured then,
+1,038 fire on a recording of what they look for, and the app marks the
 findings of the others as leads. A recording counts as detected when a rule of its ATT&CK
 technique raises a finding of any severity anywhere in the file; whether the finding is on
 the attack's own events is not checked. Counted that way, the rules enabled by default
-detect 241 of the 535 Windows datasets of Splunk attack_data and 115 of the 279 files of
+detect 249 of the 535 Windows datasets of Splunk attack_data and 115 of the 279 files of
 EVTX-to-MITRE-Attack, two libraries no rule had been written against when they were first
 measured, and 271 of the 278 files of EVTX-ATTACK-SAMPLES, which the rules were reviewed
 against. On the clean machines REMN's own rules raised 154 findings at high or critical.

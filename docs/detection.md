@@ -390,34 +390,43 @@ Mail rules are calibrated on mail corpora instead (below).
 
 The committed measure was taken on 2026-09-25; the 116 rules whose logic changed on 2026-11-19
 (12 of REMN's own, and 104 of the SigmaHQ packs, converted again with the case of a regex kept
-and keywords written as events hold them) were measured again that day on the same versions. In
-it, 1,020 of the 3,009 event rules measured fire on a recording of what they look for, 1,988 are
-leads and 1 cannot run without a case setting; 457 of the 457 SigmaHQ rules with a sample fire
-on it; on the clean machines 168 of
-the 2,794 rules whose log sources they have fired at least once. A recording counts as detected
+and keywords written as events hold them) were measured again that day on the same versions, and
+94 rules on 2026-11-20 with `--rules`: the 92 that had no measure (the directory, other-product,
+PowerShell-command and technique-gap rules of 2026-09-26, the discovery burst, and eight
+Microsoft 365 rules) and two whose patterns were bounded that day, which detect what they
+detected before. In
+it, 1,038 of the 3,101 event rules measured fire on a recording of what they look for, 2,060 are
+leads and 3 cannot run without a case setting; 457 of the 457 SigmaHQ rules with a sample fire
+on it; on the clean machines 170 of
+the 2,852 rules whose log sources they have fired at least once. A recording counts as detected
 when a rule of its technique raises a finding of any severity anywhere in the file; whether that
 finding is on the attack's own events is not checked. Counted that way, the rules enabled by
-default (the core rules and the two default SigmaHQ packs) detect 241 of the 535 attack_data
+default (the core rules and the two default SigmaHQ packs) detect 249 of the 535 attack_data
 Windows datasets, 115 of the 279 EVTX-to-MITRE-Attack files and 271 of the 278
 EVTX-ATTACK-SAMPLES files. On the clean machines REMN's own rules raised 154 findings at high or
-critical, at the severities they had when measured. Event rules added since that day (among them
-the directory, other-product, PowerShell-command and technique-gap rules of 2026-09-26) have no
-measure yet and are shown as unmeasured, and a rule changed since as changed;
+critical, at the severities they had when measured. An event rule added since has no measure
+yet and is shown as unmeasured, and a rule changed since as changed;
 `tests/backend/test_rule_measures.py` warns while any rule is in either state.
 Measuring found SigmaHQ rules that could never fire (the AppX deployment channel, comparisons
 with true) and PowerShell rules blind to PowerShell 7's log, since fixed in the converter.
-EVTX-to-MITRE-Attack, added as a source on 2026-09-25, gave 50 leads their first recorded
-attack, five of them REMN's own (AS-REP roasting, Kerberos pre-authentication brute force, audit
-policy and firewall changes, the system time changed); attack_data's Windows datasets, added the
-same day, gave 137, four of them REMN's own (Kerberoasting, password spraying, a suspicious DNS
-query, a member added to a security group).
+EVTX-to-MITRE-Attack, added as a source on 2026-09-25, gave 52 leads their first recorded
+attack, seven of them REMN's own (AS-REP roasting, Kerberos pre-authentication brute force, audit
+policy and firewall changes, the system time changed, a ticket asked for with RC4, WMI command
+output read through the admin share); attack_data's Windows datasets, added the
+same day, gave 145, 12 of them REMN's own (Kerberoasting, password spraying, a suspicious DNS
+query, a member added to a security group, and eight of the rules measured on 2026-11-20:
+directory permissions and server objects, an account's security weakened, a CA backup, SQL
+Server options and single-user mode, a burst of discovery commands).
 
 **Re-measuring** takes the downloads listed in the tool's docstring (about 10 GB unpacked;
 `--datasets DIR --fetch` fetches them at their pinned versions) and one to two hours on four
 cores. `--shard I/N --raw FILE` measures one of N shares of the recordings and clean machines,
 on as many machines as there are shares, and `--merge FILE...` makes the measure of the shares;
 re-run it after changing a rule or re-importing a pack, with `--detail rules/measures-detail.json`,
-and commit both files. A backend test warns while a rule has changed since it was measured, and
+and commit both files. `--rules ID...` (or `@FILE`) measures only the rules named, on every
+recording and clean machine, and replaces their measures in both files, keeping the others and
+the date of the full measure; it refuses when the datasets read are not the ones that measure
+was taken on. A backend test warns while a rule has changed since it was measured, and
 `tests/backend/test_quoted_measures.py` fails until the figures this page and the README quote
 from the two files are updated to match them.
 
