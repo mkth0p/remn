@@ -80,6 +80,20 @@ characters of a text or the items of a list, with the same threshold syntax as
 `threshold`. The derived URL fields `urls.subdomain` (host minus the registrable domain)
 and `urls.fragment` are available in both engines.
 
+A rule's `re`, `not_re` and `re_cs` read the first 65,536 characters of a value (counted as
+characters, not bytes), in both engines: as many as the parsers keep of a command line or a
+script block. The browser's engine backtracks, and a pattern that tries a run again from each
+occurrence of a token takes a time that grows with the square of the value: minutes on a mail
+body of a few hundred thousand characters, seconds at most on 65,536. A match past that point is
+not found, and `not_re` holds there. The rule says so: the Rules view shows "long values read
+in part" beside it, with how many of its rows held a longer value in a field its regular
+expressions read (a value the parser already cut, 65,536 characters and `…`, is one of them),
+and the message at the end of the run says how many rules read one. The rows of a `then`
+follow-up are read the same way and not counted. An analyst's own search and filter read the
+whole value. A rule author keeps the text between two
+tokens bounded (`[^\n]{0,1000}` rather than `[^\n]*`; RE2 repeats up to 1,000):
+`frontend/src/test/regexTiming.test.ts` fails on a bundled rule's pattern that backtracks.
+
 `in_setting` and `nin_setting` read the lists in the case settings (internal domains,
 VIP and organisation display names, trusted senders, internal IP ranges, admin and
 service accounts, expected countries) and fall back to a bundled list when the settings

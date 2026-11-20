@@ -3,7 +3,7 @@ import { getDb, type Case } from '../db/schema'
 import { validateRule, type Rule, type RuleDiag } from '../rules/engine'
 import { log, toast, useStore } from '../state/store'
 import type { DryFinding, RunRequest } from '../workers/rules.worker'
-import type { SettingsLike } from '../rules/filter'
+import { RE_VALUE_MAX, type SettingsLike } from '../rules/filter'
 import { caseLevel, severityFloors } from './detectionLevel'
 import { enabledPackIds, getPackRules } from './packs'
 import type { RuleMeasure } from './ruleMeasures'
@@ -158,10 +158,12 @@ async function saveDiagnostics(caseId: number, res: RuleRunSummary): Promise<voi
   await getDb().kv.put({ key: `ruleDiags-${caseId}`, value: { ts: Date.now(), byRule: res.byRule, diagnostics: res.diagnostics, errors: res.errors } })
   for (const d of res.diagnostics) {
     if (d.reason === 'missing_setting') log('warn', `${d.ruleId}: disarmed — ${d.detail}`)
-    if (d.reason === 'truncated') log('warn', `${d.ruleId}: ${d.detail}`)
+    if (d.reason === 'truncated' || d.reason === 'values_cut') log('warn', `${d.ruleId}: ${d.detail}`)
   }
   const cut = res.diagnostics.filter((d) => d.reason === 'truncated').length
   if (cut) toast('warn', `${cut} rule(s) matched more than a run keeps and were cut short — see the Rules view`, 9000)
+  const long = res.diagnostics.filter((d) => d.reason === 'values_cut').length
+  if (long) toast('warn', `${long} rule(s) read values longer than ${RE_VALUE_MAX.toLocaleString('en-US')} characters only in part, so a match past that point is not found. See the Rules view`, 9000)
   const noData = res.diagnostics.filter((d) => d.reason === 'no_selector_match').length
   const needSettings = res.diagnostics.filter((d) => d.reason === 'missing_setting').length
   const notApplicable = res.diagnostics.filter((d) => d.reason === 'not_applicable').length

@@ -409,6 +409,79 @@ def test_a_rule_keeps_its_own_max_findings_and_the_default_cap_on_the_server(sto
     assert res["byRule"]["bursts-3"] == 3 and "bursts-3" not in cut
 
 
+def test_a_rule_reads_the_first_characters_of_a_long_value_with_its_regex_and_says_how_many_rows_held_one(store):
+    from services.store.sqlfilter import RE_VALUE_MAX
+
+    pad = "a" * RE_VALUE_MAX
+    w = EventWriter(store, 1)
+    w.add(_event(1, eventId=4688, computer="WS01", commandLine="x evil"))
+    w.add(_event(2, eventId=4688, computer="WS02", commandLine=pad + " evil"))
+    w.add(_event(3, eventId=4688, computer="WS03", commandLine="evil " + pad))
+    # as many characters as are read, one of them four bytes long: read whole
+    w.add(_event(4, eventId=4688, computer="WS04", commandLine="a" * (RE_VALUE_MAX - 6) + "\U0001d400 evil"))
+    w.flush()
+    ids = {r["computer"]: r["id"] for r in Q.search(store, "events", None, full=True)["rows"]}
+
+    def run(rule):
+        res = R.run_rules(store, [{"id": "long", "title": "l", "severity": "low", "source": "events", **rule}], {})
+        assert not res["errors"], res["errors"]
+        return sorted(int(f["refs"][0]) for f in res["findings"]), [d for d in res["diagnostics"] if d["reason"] == "values_cut"]
+
+    found, cuts = run({"where": {"eventId": 4688, "commandLine|re": r"\bevil$|^evil\b"}})
+    assert found == [ids["WS01"], ids["WS03"], ids["WS04"]]
+    max_ = f"{RE_VALUE_MAX:,}"
+    assert [(d["longValues"], d["detail"]) for d in cuts] == [
+        (
+            2,
+            f"2 row(s) held a value longer than {max_} characters in a field its regular expressions read: they read its first {max_} characters, and a match past them is not found",
+        )
+    ]
+    # not_re passes the row whose match lies past what it reads
+    assert run({"where": {"eventId": 4688, "commandLine|not_re": "evil"}})[0] == [ids["WS02"]]
+    assert run({"where": {"eventId": 4688, "commandLine|re_cs": "evil$"}})[0] == [ids["WS01"], ids["WS04"]]
+    # a nested condition and an exclusion read the same; a rule without a regular expression says nothing
+    nested = run({"where": {"eventId": 4688, "any_of": [{"commandLine|re": "nothing"}, {"computer": "WS01"}]}, "exclude": {"parentCommandLine|re": "x"}})
+    assert nested[0] == [ids["WS01"]] and [d["longValues"] for d in nested[1]] == [2]
+    assert run({"where": {"eventId": 4688, "commandLine|contains": "evil"}}) == ([ids["WS01"], ids["WS02"], ids["WS03"], ids["WS04"]], [])
+    # collapsed past its row count, the rule reads the same rows and says so once
+    collapsed = run({"where": {"eventId": 4688, "commandLine|re": "evil"}, "entities": ["computer"], "collapse_after": 1})
+    assert len(collapsed[0]) == 3 and [d["longValues"] for d in collapsed[1]] == [2]
+    # an analyst's search reads the whole value
+    assert Q.count(store, "events", {"conditions": [{"field": "commandLine", "op": "re", "value": "a evil$"}]}) == 1
+
+
+def test_a_long_value_under_data_is_counted_as_one_in_a_column(store):
+    from services.store.sqlfilter import RE_VALUE_MAX
+
+    w = EventWriter(store, 1)
+    w.add(_event(1, eventId=4104, data={"ScriptBlockText": "a" * RE_VALUE_MAX + " evil"}))
+    w.add(_event(2, eventId=4104, data={"ScriptBlockText": "evil"}))
+    w.flush()
+    rule = {"id": "long", "title": "l", "severity": "low", "source": "events", "where": {"eventId": 4104, "data.ScriptBlockText|re": "evil$"}}
+    res = R.run_rules(store, [rule], {})
+    assert len(res["findings"]) == 1
+    assert [d["longValues"] for d in res["diagnostics"] if d["reason"] == "values_cut"] == [1]
+
+
+def test_a_rule_counts_a_long_value_in_a_mail_list_or_body_once_per_mail(store):
+    from services.store.sqlfilter import RE_VALUE_MAX
+
+    pad = "a" * RE_VALUE_MAX
+    w = MailWriter(store, 2)
+    w.add({"subject": "one", "date": T0, "to": [{"addr": "a@example.com"}, {"addr": pad + "@example.com"}], "bodyText": pad + " wire transfer"})
+    w.add({"subject": "two", "date": T0, "to": [{"addr": "b@example.com"}], "bodyText": "wire transfer " + pad})
+    w.flush()
+
+    def run(where):
+        res = R.run_rules(store, [{"id": "long", "title": "l", "severity": "low", "source": "mails", "where": where}], {})
+        assert not res["errors"], res["errors"]
+        return len(res["findings"]), [d["longValues"] for d in res["diagnostics"] if d["reason"] == "values_cut"]
+
+    assert run({"toList|re": "example"}) == (2, [1])
+    assert run({"bodyText|re": "wire transfer"}) == (1, [2])
+    assert run({"subject|re": "one|two"}) == (2, [])
+
+
 def test_then_is_checked_for_every_finding(store):
     w = EventWriter(store, 1)
     # 600 accounts each fail once then log on: the follow-up must reach the last of them too

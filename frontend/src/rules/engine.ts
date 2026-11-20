@@ -2,7 +2,21 @@
  * Rule engine for the YAML DSL (see rules/*.yaml). Pure functions: the worker
  * feeds rows, the engine returns findings.
  */
-import { compileRegex, getPath, isOutsideHours, localHourAndDay, matchCondition, settingList, type Condition, type Op, type Row, type SettingsLike } from './filter'
+import {
+  compileRegex,
+  firstChars,
+  getPath,
+  isOutsideHours,
+  localHourAndDay,
+  matchCondition,
+  RE_VALUE_MAX,
+  regexText,
+  settingList,
+  type Condition,
+  type Op,
+  type Row,
+  type SettingsLike,
+} from './filter'
 import type { Finding, Severity } from '../db/schema'
 
 export interface RuleThen {
@@ -92,25 +106,28 @@ const OPS = new Set<string>([
 
 type Pred = (row: Row) => boolean
 
-/** Compile the YAML "where" object: keys `field|op`, `any_of[_N]`, `all_of`, `not`. */
-export function compileCond(cond: RuleCond | undefined | null, settings?: SettingsLike): Pred {
+/**
+ * Compile the YAML "where" object: keys `field|op`, `any_of[_N]`, `all_of`, `not`. Its regular
+ * expressions read the first `reMax` characters of a value (RE_VALUE_MAX, as the SQL engine does).
+ */
+export function compileCond(cond: RuleCond | undefined | null, settings?: SettingsLike, reMax: number = RE_VALUE_MAX): Pred {
   if (!cond || typeof cond !== 'object') return () => true
   const preds: Pred[] = []
   for (const [key, value] of Object.entries(cond)) {
     if (/^any_of(_\d+)?$/.test(key)) {
       const alts = Array.isArray(value) ? value : [value]
-      const sub = alts.map((a) => compileCond(a as RuleCond, settings))
+      const sub = alts.map((a) => compileCond(a as RuleCond, settings, reMax))
       preds.push((row) => sub.some((p) => p(row)))
       continue
     }
     if (/^all_of(_\d+)?$/.test(key)) {
       const alts = Array.isArray(value) ? value : [value]
-      const sub = alts.map((a) => compileCond(a as RuleCond, settings))
+      const sub = alts.map((a) => compileCond(a as RuleCond, settings, reMax))
       preds.push((row) => sub.every((p) => p(row)))
       continue
     }
     if (key === 'not') {
-      const sub = compileCond(value as RuleCond, settings)
+      const sub = compileCond(value as RuleCond, settings, reMax)
       preds.push((row) => !sub(row))
       continue
     }
@@ -121,7 +138,7 @@ export function compileCond(cond: RuleCond | undefined | null, settings?: Settin
     else op = Array.isArray(value) ? 'in' : 'eq'
     const c: Condition = { field, op, value }
     if (op === 'contains' && Array.isArray(value)) c.op = 'contains_any'
-    preds.push((row) => matchCondition(row, c, settings))
+    preds.push((row) => matchCondition(row, c, settings, reMax))
   }
   if (!preds.length) return () => true
   return (row) => preds.every((p) => p(row))
@@ -207,17 +224,59 @@ export function timePred(rule: Rule, settings: SettingsLike | undefined, tsField
 }
 
 /**
- * Why a rule produced zero findings (emitted through RunOptions.onDiag), or that it found more than
- * its cap (`truncated`: how many it left out in `dropped`, which ones it kept in `detail`).
+ * Why a rule produced zero findings (emitted through RunOptions.onDiag), that it found more than
+ * its cap (`truncated`: how many it left out in `dropped`, which ones it kept in `detail`), or that
+ * its regular expressions read some of its rows only in part (`values_cut`: how many in `longValues`).
  */
 export interface RuleDiag {
   ruleId: string
-  reason: 'missing_setting' | 'no_selector_match' | 'all_excluded' | 'outside_time_window' | 'below_threshold' | 'not_applicable' | 'truncated'
+  reason: 'missing_setting' | 'no_selector_match' | 'all_excluded' | 'outside_time_window' | 'below_threshold' | 'not_applicable' | 'truncated' | 'values_cut'
   detail?: string
   matched: number
   afterExclude: number
   afterTime: number
   dropped?: number
+  longValues?: number
+}
+
+/** The fields a rule's regular expressions (re, not_re, re_cs) read in its where, exclude and any_in_group. */
+export function regexFields(rule: Rule): string[] {
+  const out = new Set<string>()
+  const walk = (c: unknown) => {
+    if (Array.isArray(c)) c.forEach(walk)
+    else if (c && typeof c === 'object')
+      for (const [k, v] of Object.entries(c)) {
+        if (/^(any_of|all_of)(_\d+)?$/.test(k) || k === 'not') walk(v)
+        else if (/\|(re|not_re|re_cs)$/.test(k)) out.add(k.split('|')[0])
+      }
+  }
+  for (const c of [rule.where, rule.exclude, rule.any_in_group]) walk(c)
+  return [...out]
+}
+
+/**
+ * Whether a row holds a value longer than RE_VALUE_MAX in a field the rule's regular expressions read,
+ * which they read only the start of; null for a rule without one. services/store/rules.py counts the same rows.
+ */
+export function longRegexValue(rule: Rule): ((row: Row) => boolean) | null {
+  const fields = regexFields(rule)
+  if (!fields.length) return null
+  const long = (a: unknown) => {
+    const s = regexText(a)
+    return s.length > RE_VALUE_MAX && firstChars(s, RE_VALUE_MAX).length < s.length
+  }
+  return (row) =>
+    fields.some((f) => {
+      const v = getPath(row, f)
+      return Array.isArray(v) ? v.some(long) : long(v)
+    })
+}
+
+/** What a rule says when its regular expressions read some of its rows only in part (both engines write it). */
+export function valuesCutDetail(rows: number): string {
+  const n = rows.toLocaleString('en-US')
+  const max = RE_VALUE_MAX.toLocaleString('en-US')
+  return `${n} row(s) held a value longer than ${max} characters in a field its regular expressions read: they read its first ${max} characters, and a match past them is not found`
 }
 
 /** The findings a rule keeps: its max_findings when that is a positive whole number, else MAX_FINDINGS (both engines). */
@@ -288,7 +347,10 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
   const matches: Row[] = []
   let nWhere = 0
   let nExcl = 0
+  const long = longRegexValue(rule)
+  let nLong = 0
   for (const row of opts.rows) {
+    if (long && long(row)) nLong++
     if (!where(row)) continue
     nWhere++
     if (exclude && exclude(row)) continue
@@ -297,6 +359,8 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
     matches.push(row)
   }
   matches.sort((a, b) => (Number(a[tsField]) || 0) - (Number(b[tsField]) || 0))
+  // never silent: the rows whose values its regular expressions read only the start of
+  if (nLong) opts.onDiag?.({ ruleId: rule.id, reason: 'values_cut', detail: valuesCutDetail(nLong), matched: nWhere, afterExclude: nExcl, afterTime: matches.length, longValues: nLong })
   const findings: Omit<Finding, 'caseId' | 'createdAt' | 'status'>[] = []
   const emitZeroDiag = () => {
     if (!opts.onDiag || findings.length) return
@@ -360,7 +424,9 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
       const groupable = GROUPABLE[rule.source] ?? entityFields
       const keyFields = entityFields.filter((f) => groupable.includes(f))
       const grouped: Rule = { ...rule, group_by: keyFields.length ? keyFields : entityFields.slice(0, 2), threshold: '>= 1' }
-      const out = runRule(grouped, opts)
+      // the same rows again: their values cut were said once, above
+      const onDiag = opts.onDiag
+      const out = runRule(grouped, { ...opts, onDiag: onDiag && ((d) => d.reason !== 'values_cut' && onDiag(d)) })
       for (const f of out) f.escalation = f.escalation || `collapsed: ${matches.length.toLocaleString('en-US')} matching rows`
       return out
     }

@@ -82,9 +82,13 @@ pack importer download from their sources on request, never during an investigat
   and its file. A pattern that reads no evidence, or whose caller limits the text it
   searches, is listed in the test with the reason. The store runs a rule's `re` pattern
   with RE2, which does not backtrack. The browser engine does: some converted community
-  rules keep a pattern that a crafted value of that length slows down, in the rules worker
-  rather than the page. A bundled rule bounds the text between two tokens instead
-  (`[^\n]{0,1000}`), which RE2 also reads.
+  rules keep a pattern that a crafted value slows down, in the rules worker rather than the
+  page. Both engines give a rule's regular expression the first 65,536 characters of a
+  value and count the rows read in part (docs/detection.md), which holds such a pattern to
+  seconds; three converted patterns (two SigmaHQ admin-share command lines and a Sublime
+  sender name) take a time that grows with the cube of the value and stay slow within that
+  bound. A bundled rule bounds the text between two tokens instead (`[^\n]{0,1000}`), which
+  RE2 also reads.
 - The browser application carries a Content Security Policy (no inline script, scripts
   and workers from the app origin only, WebAssembly allowed for hashing, frames only for
   the sandboxed mail and report documents, no object or base tags) as a `<meta>` tag in

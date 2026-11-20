@@ -31,6 +31,7 @@ const DIAG_LABEL: Record<RuleDiag['reason'], { label: string; sev: string }> = {
   below_threshold: { label: 'below threshold', sev: 'info' },
   not_applicable: { label: 'not applicable', sev: 'info' },
   truncated: { label: 'cut short', sev: 'medium' },
+  values_cut: { label: 'long values read in part', sev: 'medium' },
 }
 
 const MEASURE_SEV: Record<MeasureVerdict, string> = { detects: 'ok', misses: 'medium', lead: 'info', changed: 'info', settings: 'info', custom: 'accent', unmeasured: 'info' }
@@ -411,17 +412,24 @@ export function RulesView() {
                     if (!lastRun) return <span className="muted small">—</span>
                     const n = lastRun.byRule?.[r.rule.id]
                     const cut = lastRun.diagnostics.find((x) => x.ruleId === r.rule.id && x.reason === 'truncated')
+                    // values its regular expressions read only the start of, said beside whatever else it found
+                    const long = lastRun.diagnostics.find((x) => x.ruleId === r.rule.id && x.reason === 'values_cut')
+                    const also = long ? ` · ${long.detail}` : ''
                     if (n && n > 0)
                       return (
-                        <Badge sev={cut ? DIAG_LABEL.truncated.sev : 'ok'} title={cut ? `${n} finding(s) kept: ${cut.detail}` : `${n} finding(s) in the last run`}>
-                          {cut ? (cut.dropped ? `${fmtNum(n)}, ${fmtNum(cut.dropped)} left out` : `${n}+`) : n}
+                        <Badge sev={cut || long ? DIAG_LABEL.truncated.sev : 'ok'} title={(cut ? `${n} finding(s) kept: ${cut.detail}` : `${n} finding(s) in the last run`) + also}>
+                          {cut ? (cut.dropped ? `${fmtNum(n)}, ${fmtNum(cut.dropped)} left out` : `${n}+`) : long ? `${n}, long values read in part` : n}
                         </Badge>
                       )
-                    const d = lastRun.diagnostics.find((x) => x.ruleId === r.rule.id)
+                    const d = lastRun.diagnostics.find((x) => x.ruleId === r.rule.id && x.reason !== 'values_cut') ?? long
                     if (d)
                       return (
-                        <Badge sev={DIAG_LABEL[d.reason].sev} title={d.detail || `${d.matched} matched · ${d.afterExclude} after exclude · ${d.afterTime} after time filter`}>
+                        <Badge
+                          sev={long ? DIAG_LABEL.values_cut.sev : DIAG_LABEL[d.reason].sev}
+                          title={(d.detail || `${d.matched} matched · ${d.afterExclude} after exclude · ${d.afterTime} after time filter`) + (d === long ? '' : also)}
+                        >
                           {DIAG_LABEL[d.reason].label}
+                          {long && d !== long ? ', long values read in part' : ''}
                         </Badge>
                       )
                     if (n === 0) return <span className="muted small">0</span>

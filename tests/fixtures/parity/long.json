@@ -1,0 +1,200 @@
+{
+ "cuts": {
+  "long-collapsed": {
+   "detail": "2 row(s) held a value longer than 65,536 characters in a field its regular expressions read: they read its first 65,536 characters, and a match past them is not found",
+   "longValues": 2
+  },
+  "long-nested": {
+   "detail": "2 row(s) held a value longer than 65,536 characters in a field its regular expressions read: they read its first 65,536 characters, and a match past them is not found",
+   "longValues": 2
+  },
+  "long-not-re": {
+   "detail": "2 row(s) held a value longer than 65,536 characters in a field its regular expressions read: they read its first 65,536 characters, and a match past them is not found",
+   "longValues": 2
+  },
+  "long-re": {
+   "detail": "2 row(s) held a value longer than 65,536 characters in a field its regular expressions read: they read its first 65,536 characters, and a match past them is not found",
+   "longValues": 2
+  },
+  "long-re-cs": {
+   "detail": "2 row(s) held a value longer than 65,536 characters in a field its regular expressions read: they read its first 65,536 characters, and a match past them is not found",
+   "longValues": 2
+  }
+ },
+ "findings": {
+  "long-collapsed": [
+   "long-collapsed|ws01",
+   "long-collapsed|ws03",
+   "long-collapsed|ws04",
+   "long-collapsed|ws05"
+  ],
+  "long-nested": [
+   "long-nested|1"
+  ],
+  "long-not-re": [
+   "long-not-re|2"
+  ],
+  "long-re": [
+   "long-re|1",
+   "long-re|3",
+   "long-re|4",
+   "long-re|5"
+  ],
+  "long-re-cs": [
+   "long-re-cs|4",
+   "long-re-cs|5"
+  ]
+ },
+ "max": 65536,
+ "rows": [
+  {
+   "commandLine": "cmd /c evil.bat",
+   "computer": "WS01",
+   "eventId": 4688,
+   "id": 1,
+   "ts": 1788300000000
+  },
+  {
+   "commandLine": {
+    "repeat": [
+     [
+      "a",
+      65536
+     ],
+     [
+      " evil",
+      1
+     ]
+    ]
+   },
+   "computer": "WS02",
+   "eventId": 4688,
+   "id": 2,
+   "ts": 1788300001000
+  },
+  {
+   "commandLine": {
+    "repeat": [
+     [
+      "evil ",
+      1
+     ],
+     [
+      "a",
+      65536
+     ]
+    ]
+   },
+   "computer": "WS03",
+   "eventId": 4688,
+   "id": 3,
+   "ts": 1788300002000
+  },
+  {
+   "commandLine": {
+    "repeat": [
+     [
+      "a",
+      65531
+     ],
+     [
+      " evil",
+      1
+     ]
+    ]
+   },
+   "computer": "WS04",
+   "eventId": 4688,
+   "id": 4,
+   "ts": 1788300003000
+  },
+  {
+   "commandLine": {
+    "repeat": [
+     [
+      "a",
+      65530
+     ],
+     [
+      "𝐀",
+      1
+     ],
+     [
+      " evil",
+      1
+     ]
+    ]
+   },
+   "computer": "WS05",
+   "eventId": 4688,
+   "id": 5,
+   "ts": 1788300004000
+  }
+ ],
+ "rules": [
+  {
+   "id": "long-re",
+   "severity": "low",
+   "source": "events",
+   "title": "evil",
+   "where": {
+    "commandLine|re": "\\bevil\\b",
+    "eventId": 4688
+   }
+  },
+  {
+   "id": "long-not-re",
+   "severity": "low",
+   "source": "events",
+   "title": "not evil",
+   "where": {
+    "commandLine|not_re": "evil",
+    "eventId": 4688
+   }
+  },
+  {
+   "id": "long-re-cs",
+   "severity": "low",
+   "source": "events",
+   "title": "ends evil",
+   "where": {
+    "commandLine|re_cs": "evil$",
+    "eventId": 4688
+   }
+  },
+  {
+   "exclude": {
+    "commandLine|re": "a{3}$"
+   },
+   "id": "long-nested",
+   "severity": "low",
+   "source": "events",
+   "title": "evil batch or evil first",
+   "where": {
+    "any_of": [
+     {
+      "commandLine|re": "evil\\.bat"
+     },
+     {
+      "commandLine|re": "^evil"
+     }
+    ],
+    "eventId": 4688
+   }
+  },
+  {
+   "collapse_after": 2,
+   "entities": [
+    "computer"
+   ],
+   "id": "long-collapsed",
+   "severity": "low",
+   "source": "events",
+   "title": "evil anywhere",
+   "where": {
+    "commandLine|re": "evil",
+    "eventId": 4688
+   }
+  }
+ ]
+}

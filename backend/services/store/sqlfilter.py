@@ -119,10 +119,43 @@ class Ctx:
     params: list[Any] = field(default_factory=list)
     table: str = ""
     alias: str = ""
+    # the characters of a value the re operators read; a rule's conditions set RE_VALUE_MAX, a search none
+    re_max: int | None = None
 
     def p(self, value: Any) -> str:
         self.params.append(value)
         return "?"
+
+
+# The characters of a value a rule's regular expression reads, in both engines. The browser's engine
+# backtracks, and a pattern that retries a run from each occurrence of a token takes time that grows
+# with the square of the value there; a rule reads a longer value on its first RE_VALUE_MAX characters
+# (code points, as length() and left() count them), as many as the parsers keep of a command line, and
+# says how many of its rows held one. RE2 has no such cost: the bound is here so that both engines
+# find the same. Mirrors RE_VALUE_MAX in frontend/src/rules/filter.ts.
+RE_VALUE_MAX = 65_536
+
+
+def _re_text(expr: str, ctx: Ctx) -> str:
+    """The text a re operator reads of a value: its first ctx.re_max characters when the context sets them."""
+    if ctx.re_max is None:
+        return expr
+    # strlen counts bytes, never fewer than the characters: a value that short is read whole without counting them
+    return f"(CASE WHEN strlen({expr}) <= {int(ctx.re_max)} THEN {expr} ELSE left({expr}, {int(ctx.re_max)}) END)"
+
+
+def long_value_condition(field_name: str, ctx: Ctx) -> str:
+    """A row holding a value longer than ctx.re_max characters in the field, as the re operators read it."""
+    n = int(ctx.re_max or 0)
+    if ctx.source == "mails" and not ctx.table and (field_name.startswith("attachments.") or field_name.startswith("urls.")):
+        child = "attachments" if field_name.startswith("attachments.") else "urls"
+        sub = Ctx(source="mails", settings=ctx.settings, params=ctx.params, table=child, alias="c", re_max=ctx.re_max)
+        return f'EXISTS (SELECT 1 FROM {child} c WHERE c."mailId" = mails.id AND ({long_value_condition(field_name.split(".", 1)[1], sub)}))'
+    e = resolve(field_name, ctx)
+    if e.kind == "list":
+        return f"coalesce(list_bool_or(list_transform({e.sql}, lambda x: strlen(x) > {n} AND length(x) > {n})), FALSE)"
+    text = f"CAST({e.sql} AS VARCHAR)"
+    return f"coalesce(strlen({text}) > {n} AND length({text}) > {n}, FALSE)"
 
 
 _RE2_META = set("\\.^$|()[]{}*+?")
@@ -271,7 +304,7 @@ def compile_condition(field_name: str, op: str, value: Any, ctx: Ctx) -> str:
     # child tables of mails: any attachment / url matching
     if ctx.source == "mails" and not ctx.table and (field_name.startswith("attachments.") or field_name.startswith("urls.")):
         child = "attachments" if field_name.startswith("attachments.") else "urls"
-        sub = Ctx(source="mails", settings=ctx.settings, params=ctx.params, table=child, alias="c")
+        sub = Ctx(source="mails", settings=ctx.settings, params=ctx.params, table=child, alias="c", re_max=ctx.re_max)
         negative = op in ("ne", "nin", "not_contains", "not_startswith", "not_endswith", "not_re", "nin_setting")
         if negative:
             # "no attachment matches" semantics for negative operators. Only the positive form is
@@ -330,7 +363,7 @@ def compile_condition(field_name: str, op: str, value: Any, ctx: Ctx) -> str:
         if op in ("re", "not_re", "re_cs"):
             # re_cs keeps the pattern's case, as a Sigma regex does; an inline (?i) still lifts it
             flags = "" if op == "re_cs" else ", 'i'"
-            pat = " OR ".join(f"regexp_matches(x, {ctx.p(_regex(v))}{flags})" for v in vals) or "FALSE"
+            pat = " OR ".join(f"regexp_matches({_re_text('x', ctx)}, {ctx.p(_regex(v))}{flags})" for v in vals) or "FALSE"
             cond = f"coalesce(list_bool_or(list_transform({sql}, lambda x: ({pat}))), FALSE)"
             return f"NOT {cond}" if op == "not_re" else cond
         if op in ("in_setting", "nin_setting"):
@@ -406,7 +439,8 @@ def compile_condition(field_name: str, op: str, value: Any, ctx: Ctx) -> str:
         return f"NOT coalesce({cond}, FALSE)" if op == "not_endswith" else f"coalesce({cond}, FALSE)"
     if op in ("re", "not_re", "re_cs"):
         flags = "" if op == "re_cs" else ", 'i'"
-        cond = "(" + " OR ".join(f"regexp_matches(CAST({sql} AS VARCHAR), {ctx.p(_regex(v))}{flags})" for v in vals) + ")" if vals else "FALSE"
+        text = _re_text(f"CAST({sql} AS VARCHAR)", ctx)
+        cond = "(" + " OR ".join(f"regexp_matches({text}, {ctx.p(_regex(v))}{flags})" for v in vals) + ")" if vals else "FALSE"
         return f"NOT coalesce({cond}, FALSE)" if op == "not_re" else f"coalesce({cond}, FALSE)"
     if op in ("gt", "gte", "lt", "lte"):
         if not vals:

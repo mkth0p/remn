@@ -155,6 +155,30 @@ function numeric(v: unknown): number | null {
   return null
 }
 
+/**
+ * The characters of a value a rule's regular expression reads, in both engines. The browser's engine
+ * backtracks: a pattern that retries a run from each occurrence of a token takes time that grows with
+ * the square of the value, minutes on a mail body of a few hundred thousand characters. A rule reads a
+ * longer value on its first RE_VALUE_MAX characters, as many as the parsers keep of a command line or a
+ * script block, and says how many of its rows held one (RuleDiag 'values_cut');
+ * services/store/sqlfilter.py reads the same characters. An analyst's own search reads the whole value.
+ */
+export const RE_VALUE_MAX = 65_536
+
+/** The first `max` characters of a text, counted as the store counts them: by code point, not by UTF-16 unit. */
+export function firstChars(s: string, max: number): string {
+  if (s.length <= max) return s
+  let i = 0
+  for (let n = 0; n < max && i < s.length; n++) {
+    const c = s.charCodeAt(i)
+    i += c >= 0xd800 && c <= 0xdbff && (s.charCodeAt(i + 1) & 0xfc00) === 0xdc00 ? 2 : 1
+  }
+  return s.slice(0, i)
+}
+
+/** A value as the re operators read it: an object as its JSON, anything else as its text. */
+export const regexText = (a: unknown): string => (a == null ? '' : typeof a === 'object' ? JSON.stringify(a) : String(a))
+
 const regexCache = new Map<string, RegExp | null>()
 export function compileRegex(pattern: string, flags = 'i'): RegExp | null {
   const key = flags + '/' + pattern
@@ -263,8 +287,11 @@ function inSetting(value: unknown, settings: SettingsLike | undefined, name: str
   return vals.some((v) => set.has(v))
 }
 
-/** Evaluate one condition against a row. Strings compare case-insensitively. */
-export function matchCondition(row: Row, c: Condition, settings?: SettingsLike): boolean {
+/**
+ * Evaluate one condition against a row. Strings compare case-insensitively. With `reMax`, the re
+ * operators read the first `reMax` characters of a value (a rule's conditions: RE_VALUE_MAX).
+ */
+export function matchCondition(row: Row, c: Condition, settings?: SettingsLike, reMax?: number): boolean {
   const actual = getPath(row, c.field)
   const op = c.op
   let wanted = c.value
@@ -368,7 +395,7 @@ export function matchCondition(row: Row, c: Condition, settings?: SettingsLike):
       // re_cs keeps the pattern's case, as a Sigma regex does; a leading (?i) still lifts it
       const patterns = wantArr.map((w) => compileRegex(String(w), op === 're_cs' ? '' : 'i')).filter((r): r is RegExp => !!r)
       const hit = actArr.some((a) => {
-        const s = a == null ? '' : typeof a === 'object' ? JSON.stringify(a) : String(a)
+        const s = reMax === undefined ? regexText(a) : firstChars(regexText(a), reMax)
         return patterns.some((r) => r.test(s))
       })
       return op === 'not_re' ? !hit : hit
