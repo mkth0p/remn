@@ -33,7 +33,7 @@ from services.parsers.mail import pst as pst_mod
 from services.parsers.mail.common import ParseContext
 from services.store import queries as Q
 from services.store import rules as R
-from services.store.casestore import KEY_RE, QueryStopped, StoreBusyError, StoreVersionError, TimeLimit, registry
+from services.store.casestore import KEY_RE, QueryStopped, StoreBusyError, StoreLockdownError, StoreVersionError, TimeLimit, registry
 from services.store.sqlfilter import FilterError
 from services.store.writers import EventWriter, MailWriter
 
@@ -55,6 +55,22 @@ def _json(request: HttpRequest) -> dict[str, Any]:
         return {}
 
 
+# a store that exists and could not be opened, for a reason its message gives
+REFUSED = (StoreVersionError, StoreBusyError, StoreLockdownError)
+
+
+def refused(exc: Exception) -> JsonResponse:
+    """The answer to a store that could not be opened. Each message was written for the analyst and
+    the operator: what stopped it, and what to do."""
+    if isinstance(exc, StoreVersionError):
+        return JsonResponse({"error": str(exc), "code": "storeVersion"}, status=409)
+    if isinstance(exc, StoreBusyError):
+        busy = JsonResponse({"error": str(exc), "code": "storeBusy"}, status=503)
+        busy["Retry-After"] = "30"
+        return busy
+    return JsonResponse({"error": str(exc), "code": "storeLockdown"}, status=503)
+
+
 def _store(key: str, create: bool = True):
     try:
         return registry.get(key, create=create), None
@@ -62,13 +78,8 @@ def _store(key: str, create: bool = True):
         return None, JsonResponse({"error": "invalid case key"}, status=400)
     except FileNotFoundError:
         return None, JsonResponse({"error": "unknown case store"}, status=404)
-    except StoreVersionError as exc:
-        # the message was written for the analyst and the operator: which versions, and what to do
-        return None, JsonResponse({"error": str(exc), "code": "storeVersion"}, status=409)
-    except StoreBusyError as exc:
-        busy = JsonResponse({"error": str(exc), "code": "storeBusy"}, status=503)
-        busy["Retry-After"] = "30"
-        return None, busy
+    except REFUSED as exc:
+        return None, refused(exc)
 
 
 QUERY_STOPPED = (

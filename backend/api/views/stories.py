@@ -10,6 +10,7 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.http import require_POST
 
 from api.errors import failure
+from api.views.store import REFUSED, refused
 from services.analysis import stories as S
 from services.store.casestore import registry
 
@@ -60,6 +61,8 @@ def build(request: HttpRequest):
                 st = registry.get(str(body["storeKey"]), create=False)
             except (ValueError, FileNotFoundError):
                 return JsonResponse({"error": "unknown case store"}, status=404)
+            except REFUSED as exc:
+                return refused(exc)
             result = S.stories_for_store(st, settings, findings, **opts)
         else:
             events, mails = body.get("events") or [], body.get("mails") or []

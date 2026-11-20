@@ -203,6 +203,36 @@ def test_a_store_opens_only_with_file_access_off_and_its_configuration_locked(tm
                 opened[0].con.execute("SELECT 1")
 
 
+def test_a_store_whose_lockdown_did_not_take_effect_answers_503_saying_so(tmp_path, monkeypatch):
+    from services.store.casestore import registry
+
+    old = registry.root
+    registry.configure(tmp_path / "cases")
+    key = str(uuid.uuid4())
+    CaseStore(tmp_path / "cases", key).close()
+    connect = duckdb.connect
+    monkeypatch.setattr(duckdb, "connect", lambda path: _UnappliedSetting(connect(path), "SET lock_configuration", True))
+    try:
+        c = Client(raise_request_exception=False)
+        answers = [
+            c.get(f"/api/store/{key}", **HDR),
+            c.post(f"/api/store/{key}/count", data=json.dumps({"source": "events"}), content_type="application/json", **HDR),
+            c.post("/api/stories/build", data=json.dumps({"storeKey": key}), content_type="application/json", **HDR),
+            c.post("/api/relationships/build", data=json.dumps({"storeKey": key}), content_type="application/json", **HDR),
+            c.post("/api/enrich/mails", data=json.dumps({"storeKey": key}), content_type="application/json", **HDR),
+            c.post("/api/enrich/mails/rescore", data=json.dumps({"storeKey": key}), content_type="application/json", **HDR),
+        ]
+    finally:
+        registry.close_all()
+        if old:
+            registry.configure(old)
+    for r in answers:
+        assert r.status_code == 503, (r.request["PATH_INFO"], r.content)
+        said = r.json()
+        assert said["code"] == "storeLockdown" and "ref" not in said
+        assert "lockdown did not take effect" in said["error"] and "enable_external_access" in said["error"]
+
+
 def test_server_rules_engine(store):
     w = EventWriter(store, 1)
     # brute force burst from 10.9.9.9 then a success; scattered failures elsewhere; night logon

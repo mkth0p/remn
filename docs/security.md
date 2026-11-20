@@ -110,7 +110,8 @@ pack importer download from their sources on request, never during an investigat
   Every DuckDB connection also runs with external access disabled and the configuration
   locked, so a prompt-injected query cannot read or write files on the server or load
   extensions. The two settings are read back when a case store opens, and a store on
-  which they did not take effect is not opened.
+  which they did not take effect is not opened: the case answers 503 (`storeLockdown`)
+  with a message that says so, and the server log has what the engine applied.
 - Identifiers that reach the filesystem are validated (case keys and upload ids by
   pattern, pack ids without separators, static files resolved inside the build
   directory); rule archives are capped per member and in total; CSV exports neutralise

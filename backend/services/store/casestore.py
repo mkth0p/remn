@@ -65,6 +65,11 @@ class StoreBusyError(RuntimeError):
     """A case store another program holds open (a backup, a restore, a second server on the same folder)."""
 
 
+class StoreLockdownError(RuntimeError):
+    """A case store whose lockdown did not take effect: the engine did not apply the settings that
+    keep its queries away from the server's files. It is closed, not opened without them."""
+
+
 class QueryStopped(Exception):
     """A query on a store stopped at its time limit. The message says which limit and what to do."""
 
@@ -667,7 +672,11 @@ class CaseStore:
         if applied != [(False, True)]:
             self._con.close()
             log.error("case store %s not opened: its lockdown did not take effect (%s)", key, applied)
-            raise RuntimeError("case store not opened: its lockdown did not take effect")
+            raise StoreLockdownError(
+                "the case store was not opened: its lockdown did not take effect (the database engine did not apply enable_external_access = false "
+                "and lock_configuration = true, which keep queries away from the server's files). The server log has what it applied; a DuckDB "
+                "other than the version backend/requirements.txt pins is the likely cause."
+            )
         # a store this code cannot read, or whose upgrade fails, is closed rather than kept half-open
         try:
             self._init_schema()

@@ -11,6 +11,7 @@ from django.views.decorators.http import require_POST
 
 from api.errors import failure
 from api.jobs import manager
+from api.views.store import REFUSED, refused
 from services.analysis import baseline
 from services.analysis import rescore as calibration
 from services.store.casestore import registry
@@ -38,6 +39,8 @@ def rescore(request: HttpRequest):
             return JsonResponse({"error": "invalid case key"}, status=400)
         except FileNotFoundError:
             return JsonResponse({"error": "unknown case store"}, status=404)
+        except REFUSED as exc:
+            return refused(exc)
         if any(j["status"] in ("queued", "running") for j in manager.list(st.key)):
             return JsonResponse({"error": "Wait for this case's current jobs to finish before rescoring."}, status=409)
         job = manager.submit("rescore_mails", st.key, lambda j: calibration.store(st, settings, j), "Rescore mails")
@@ -64,6 +67,8 @@ def mails(request: HttpRequest):
                 st = registry.get(str(body["storeKey"]), create=False)
             except (ValueError, FileNotFoundError):
                 return JsonResponse({"error": "unknown case store"}, status=404)
+            except REFUSED as exc:
+                return refused(exc)
             return JsonResponse({"summary": baseline.enrich_store(st, settings)})
         rows = body.get("mails") or []
         if not isinstance(rows, list):

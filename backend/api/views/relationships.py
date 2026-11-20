@@ -6,6 +6,7 @@ from django.conf import settings
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST
 
+from api.views.store import REFUSED, refused
 from services.analysis.relationships import FIELDS, ROW_CAP, build
 from services.store.casestore import EVENT_COLUMNS, MAIL_COLUMNS, q, registry, rows_to_dicts
 
@@ -44,6 +45,8 @@ def relationships(request):
                 store = registry.get(str(body["storeKey"]), create=False)
             except (ValueError, FileNotFoundError):
                 return JsonResponse({"error": "unknown case store"}, status=404)
+            except REFUSED as exc:
+                return refused(exc)
             cur = store.cursor()
             scope = ' AND "evidenceId" = ?' if evidence_id is not None else ""
             scope_params = [evidence_id] if evidence_id is not None else []
