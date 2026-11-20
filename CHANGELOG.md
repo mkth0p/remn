@@ -241,6 +241,20 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   protection and Defender tampering, EFI boot files, credential stores and known attacker tools.
   They add 46 attack_data detections, which does not count as held out for them, fire on none of
   the clean machines, and add no detection on the two other libraries yet.
+- The address names the case, the page and the finding, story, event or mail open there
+  (`/case/12-lx3k9q2a/findings?finding=314`), so a reload keeps the place, Back and Forward move
+  between pages, and a link opens its place only in the browser that holds that case; a link from
+  another browser or to a deleted case is refused with a message. A page that fails while drawing
+  shows what failed in its place with "go back", "try again" and "reload", and the rest of the app
+  stays usable; a start that cannot open the browser database, or is held back by an older tab,
+  says so instead of waiting. Each page's code is fetched when it is first opened, which brings
+  the first download from 1.9 MB to 0.34 MB; CI now holds the largest chunk under 600,000 bytes
+  and the entry under 420,000. Opening another page moves the keyboard focus to its heading,
+  dialogs keep Tab inside them and give the focus back to the button that opened them, and buttons
+  that show only an icon carry a name for screen readers. Findings, Review, Settings, Stories and
+  Report are now built from parts in their own files, with no change to what they show, and the
+  query bar, rule loading and running, EVTX flattening, the file ledger, record keys and the mail
+  HTML sanitiser have tests of their own.
 - Hostile text no longer holds the server or the browser in a regular expression. Thirty-five
   patterns of the backend (HTML attachments, mail headers and display names, URLs, Office, PDF and
   archive members, EVTX XML, reg query output, M365 dates, rule thresholds) and twelve of the
