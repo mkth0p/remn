@@ -100,7 +100,9 @@ interface State {
   aiStatus: { reachable: boolean | null; error?: string; models?: number; checkedAt: number }
   setAiStatus: (s: State['aiStatus']) => void
   authRequired: boolean
-  setAuthRequired: (v: boolean) => void
+  /** the server asked for a personal token (it has accounts), not the shared one */
+  authAccounts: boolean
+  setAuthRequired: (v: boolean, accounts?: boolean) => void
 }
 
 let seq = 1
@@ -169,7 +171,8 @@ export const useStore = create<State>((set) => ({
   aiStatus: { reachable: null, checkedAt: 0 },
   setAiStatus: (aiStatus) => set({ aiStatus }),
   authRequired: false,
-  setAuthRequired: (authRequired) => set({ authRequired }),
+  authAccounts: false,
+  setAuthRequired: (authRequired, accounts) => set((s) => ({ authRequired, authAccounts: accounts ?? s.authAccounts })),
 }))
 
 /**

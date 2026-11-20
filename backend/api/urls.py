@@ -1,6 +1,6 @@
 from django.urls import path
 
-from api.views import ai, chains, enrich, health, ingest, meta, relationships, reputation, rules, store, stories, upload
+from api.views import access, ai, chains, enrich, health, ingest, meta, relationships, reputation, rules, store, stories, upload
 
 urlpatterns = [
     path("health", health.health),
@@ -50,6 +50,8 @@ urlpatterns = [
     path("store/<str:key>/rules/run", store.rules_run),
     path("store/<str:key>/sql", store.sql),
     path("store/<str:key>/schema", store.schema),
+    # who may open the case, on a server with accounts
+    path("store/<str:key>/access", access.case_access),
     # jobs
     path("jobs", store.jobs_list),
     path("jobs/<str:job_id>", store.job_detail),
@@ -65,4 +67,7 @@ urlpatterns = [
     path("ai/claude/status", ai.claude_status),
     path("ai/claude/chat", ai.claude_chat),
     path("ai/claude/query", ai.claude_query),
+    # the audit log of a server with accounts (admin)
+    path("audit", access.audit_entries),
+    path("audit/verify", access.audit_verify),
 ]

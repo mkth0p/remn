@@ -15,6 +15,7 @@ from django.http import HttpRequest, JsonResponse, StreamingHttpResponse
 from django.views.decorators.http import require_GET, require_POST
 
 from api.services import ollama_service
+from forensic.access import permission
 from services.ai import claude_code, prompts
 from services.ai.tools import QUERY_SCHEMA, TOOLS
 
@@ -67,6 +68,7 @@ def _tools_for(body: dict[str, Any]) -> list[dict[str, Any]]:
     return [t for t in TOOLS if t["function"]["name"] in wanted]
 
 
+@permission("signed-in")
 @require_GET
 def ai_meta(request: HttpRequest):
     """Prompts, tool schemas and defaults for the browser-direct Ollama transport.
@@ -92,6 +94,7 @@ def ai_meta(request: HttpRequest):
     return resp
 
 
+@permission("signed-in")
 @require_GET
 def models(request: HttpRequest):
     svc = ollama_service()
@@ -122,6 +125,8 @@ def _query_messages(body: dict[str, Any]) -> list[dict[str, Any]] | None:
     ]
 
 
+# prompts carry evidence to a model: recorded
+@permission("signed-in", record=True)
 @require_POST
 def query(request: HttpRequest):
     """Natural language -> filter DSL (structured output)."""
@@ -140,6 +145,7 @@ def query(request: HttpRequest):
     return JsonResponse({"query": res["data"], "raw": res["raw"], "model": res["model"]})
 
 
+@permission("signed-in", record=True)
 @require_POST
 def chat(request: HttpRequest):
     """One model turn, streamed as SSE. Body: {messages, mode, tools(bool), toolNames, think(bool), model, options, context}."""
@@ -185,6 +191,7 @@ def chat(request: HttpRequest):
 # Claude Code connector: same contract as the Ollama proxy, the model turn runs
 # through the local "claude" command line (see services/ai/claude_code.py).
 # ---------------------------------------------------------------------------
+@permission("signed-in")
 @require_GET
 def claude_status(request: HttpRequest):
     resp = JsonResponse(claude_code.status(force=request.GET.get("refresh") == "1"))
@@ -192,6 +199,7 @@ def claude_status(request: HttpRequest):
     return resp
 
 
+@permission("signed-in", record=True)
 @require_POST
 def claude_chat(request: HttpRequest):
     """One model turn through Claude Code, streamed as SSE. Body: {messages, mode, tools(bool), toolNames, model, context}."""
@@ -226,6 +234,7 @@ def claude_chat(request: HttpRequest):
     return resp
 
 
+@permission("signed-in", record=True)
 @require_POST
 def claude_query(request: HttpRequest):
     """Natural language -> filter DSL through Claude Code."""
