@@ -203,6 +203,8 @@ const en = {
     ledgerIntact: (entries: number) => `ledger: ${fmtNum(entries)} entries, chain intact, head`,
     ledgerBroken: (entries: number, at: number) => `ledger: ${fmtNum(entries)} entries, chain broken at entry ${fmtNum(at)}`,
     ledgerBrokenWhy: ': an entry was changed or removed after it was written',
+    ledgerScope:
+      "The chain shows an entry changed after it was written, an entry removed from among later ones, and a gap in the numbering. It does not show the newest entries removed, nor the chain written again, from any entry onward, by whoever holds the case: no key protects it, and it is kept in the browser's database and in the exported case. The head is printed whole: a later copy of the case whose ledger still holds an entry with this hash has every entry up to it as it was when this report was made.",
   },
 
   chain: {
@@ -732,6 +734,8 @@ const fr: ReportText = {
     ledgerIntact: (entries: number) => `registre : ${frNum(entries)} ${p(entries, 'entrée', 'entrées')}, chaîne intacte, tête`,
     ledgerBroken: (entries: number, at: number) => `registre : ${frNum(entries)} ${p(entries, 'entrée', 'entrées')}, chaîne rompue à l'entrée ${frNum(at)}`,
     ledgerBrokenWhy: ' : une entrée a été modifiée ou supprimée après son écriture',
+    ledgerScope:
+      "La chaîne révèle une entrée modifiée après son écriture, une entrée supprimée parmi des entrées plus récentes et un trou dans la numérotation. Elle ne révèle ni la suppression des entrées les plus récentes, ni une chaîne réécrite, à partir de n'importe quelle entrée, par quiconque détient le dossier : aucune clé ne la protège, et elle est conservée dans la base de données du navigateur et dans l'export du dossier. La tête est imprimée en entier : une copie ultérieure du dossier dont le registre contient encore une entrée portant cette empreinte a toutes ses entrées jusqu'à celle-ci telles qu'elles étaient à l'établissement de ce rapport.",
   },
 
   chain: {

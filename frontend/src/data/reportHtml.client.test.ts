@@ -423,3 +423,43 @@ describe('the authors of the rules', () => {
     expect(section(buildReportHtml(data()), 'findings')).not.toContain('Detection Rule License')
   })
 })
+
+describe('the AI ledger in the report', () => {
+  // an invented head: 64 hexadecimal characters, the first 16 and the last 48 told apart
+  const head = '0123456789abcdef' + 'f'.repeat(48)
+  const ai = (intact: boolean): ReportData['ai'] => ({
+    runs: 1,
+    toolCalls: 2,
+    proposals: 0,
+    accepted: 0,
+    rejected: 0,
+    undone: 0,
+    notices: 0,
+    models: ['local-model'],
+    transports: ['browser'],
+    first: 1,
+    last: 2,
+    byProposalKind: {},
+    check: intact ? { entries: 4, intact, head } : { entries: 4, intact, brokenAt: 3, head },
+  })
+
+  it('prints the whole head of the chain and says what the chain shows and what it does not, in the HTML and the Word report', () => {
+    const d = data({}, { ai: ai(true) })
+    const html = section(buildReportHtml(d), 'ai')
+    expect(html).toContain(`<code>${head}</code>`)
+    expect(html).toContain('It does not show the newest entries removed')
+    expect(html).toContain('no key protects it')
+    const doc = reportDocumentXml(d)
+    expect(doc).toContain(head)
+    expect(doc).toContain('It does not show the newest entries removed')
+    const fr = section(buildReportHtml({ ...d, settings: { ...d.settings, language: 'fr' } }), 'ai')
+    expect(fr).toContain(`<code>${head}</code>`)
+    expect(fr).toContain('ne révèle ni la suppression des entrées les plus récentes')
+  })
+
+  it('says the same of a broken chain, since what it can show does not change', () => {
+    const html = section(buildReportHtml(data({}, { ai: ai(false) })), 'ai')
+    expect(html).toContain('chain broken at entry 3')
+    expect(html).toContain('It does not show the newest entries removed')
+  })
+})

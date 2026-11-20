@@ -155,9 +155,10 @@ export interface AiUsage {
 }
 
 /** The model's part in the case in plain sentences and rows: the HTML and the Word report print the same. */
-export function aiTexts(a: AiUsage, t: ReportText = EN): { intro: string; facts: string; rows: string[][]; none: string; decisions: string; ledger: string } {
+export function aiTexts(a: AiUsage, t: ReportText = EN): { intro: string; facts: string; rows: string[][]; none: string; decisions: string; ledger: string; ledgerScope: string } {
   const where = a.transports.map((x) => t.transport[x] ?? x)
-  const ledger = a.check.intact ? `${t.ai.ledgerIntact(a.check.entries)} ${(a.check.head ?? '').slice(0, 16)}` : `${t.ai.ledgerBroken(a.check.entries, a.check.brokenAt ?? 0)}${t.ai.ledgerBrokenWhy}`
+  // the whole head: a shortened one could not be matched against the hash of an entry in a later copy
+  const ledger = a.check.intact ? `${t.ai.ledgerIntact(a.check.entries)} ${a.check.head ?? ''}` : `${t.ai.ledgerBroken(a.check.entries, a.check.brokenAt ?? 0)}${t.ai.ledgerBrokenWhy}`
   return {
     intro: t.ai.intro,
     facts: t.ai.facts(a.runs, a.toolCalls, a.first && a.last ? `${t.ts(a.first)} ${t.to} ${t.ts(a.last)}` : '', a.models, where),
@@ -165,6 +166,7 @@ export function aiTexts(a: AiUsage, t: ReportText = EN): { intro: string; facts:
     none: t.ai.none,
     decisions: t.ai.decisions(a.accepted, a.rejected, a.undone, a.notices),
     ledger,
+    ledgerScope: t.ai.ledgerScope,
   }
 }
 
@@ -180,7 +182,8 @@ function aiSection(t: ReportText, a: AiUsage): string {
         )
       : `<div class="empty">${h(x.none)}</div>`) +
     `<div class="settings">${h(x.decisions)}</div>` +
-    `<div class="settings">${a.check.intact ? `${h(t.ai.ledgerIntact(a.check.entries))} <code>${h((a.check.head ?? '').slice(0, 16))}</code>` : `<b>${h(t.ai.ledgerBroken(a.check.entries, a.check.brokenAt ?? 0))}</b>${h(t.ai.ledgerBrokenWhy)}`}</div>`
+    `<div class="settings">${a.check.intact ? `${h(t.ai.ledgerIntact(a.check.entries))} <code>${h(a.check.head ?? '')}</code>` : `<b>${h(t.ai.ledgerBroken(a.check.entries, a.check.brokenAt ?? 0))}</b>${h(t.ai.ledgerBrokenWhy)}`}</div>` +
+    `<div class="cap">${h(x.ledgerScope)}</div>`
   )
 }
 
@@ -1435,6 +1438,7 @@ td .sub{display:block;font-size:10px;color:var(--ink-3)}
 .method ul{margin:0 0 8px;padding-left:16px;font-size:11.5px;color:var(--ink-2)}
 .method li{margin:0 0 2px}
 .settings{font-family:var(--mono);font-size:10.5px;color:var(--ink-2);background:var(--surface-2);padding:8px 12px;border-radius:6px}
+.settings code{overflow-wrap:anywhere}
 .foot{margin-top:40px;border-top:1px solid var(--line);padding-top:6px;font-size:10px;color:var(--ink-3);display:flex;justify-content:space-between}
 .foot .wm{font-family:var(--display);letter-spacing:.2em;color:var(--ink-2)}
 .foot .wm.firm{font-family:var(--sans);letter-spacing:.02em;font-weight:600}

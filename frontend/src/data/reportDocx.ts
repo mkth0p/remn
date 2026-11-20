@@ -606,6 +606,7 @@ export function reportDocumentXml(d: ReportData): string {
     body.push(a.rows.length ? table(t.ai.head, a.rows) : para(a.none))
     body.push(caption(a.decisions))
     body.push(caption(a.ledger))
+    body.push(caption(a.ledgerScope))
   }
 
   body.push(heading(t.section.method, 1))
