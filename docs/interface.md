@@ -48,7 +48,9 @@ that is not of the linked case is not opened.
 
 A page that fails while it is drawn shows what failed in its place, with "go back" (to the
 page shown before it in this tab), "try again", "reload the page" and the details to copy,
-and the console says so; the sidebar and the other pages stay usable. When the browser does not let the app open its database at start
+and the console says so; the sidebar and the other pages stay usable. Each page's code is
+fetched the first time it is opened; when it cannot be, most often because REMN was updated on
+the server after the tab was opened, the page says to reload, and the reload keeps the place. When the browser does not let the app open its database at start
 (a private window, site data turned off, storage full, a database written by a newer
 version), the page says so and why instead of waiting. When another REMN tab of an older
 version keeps the database open while this one needs to upgrade it, the start says so and

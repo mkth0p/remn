@@ -149,10 +149,14 @@ jobs:
       - name: Build
         run: npx vite build
       - name: Bundle size
+        # every page is a script of its own, loaded when it is opened; the largest (the charts of the
+        # Timeline and the chain graph) was 483,040 bytes and the first script 333,292 when this was set
         run: |
-          size=$(stat -c %s dist/assets/index-*.js | sort -n | tail -1)
-          echo "largest bundle: $size bytes"
-          test "$size" -lt 2000000
+          size=$(stat -c %s dist/assets/*.js | sort -n | tail -1)
+          entry=$(stat -c %s "dist/$(grep -o 'assets/index-[^"]*\.js' dist/index.html)")
+          echo "largest script: $size bytes; first script: $entry bytes"
+          test "$size" -lt 600000
+          test "$entry" -lt 420000
 
   evtx-wasm:
     name: EVTX decoder (WebAssembly, reproducible)

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState, type ComponentType } from 'react'
 import { ApiError, getHealth, getMeta, onAuthError, setApiToken } from './api/client'
 import { defaultSettings, getDb, newServerKey, type Case } from './db/schema'
 import { toast, useStore, type View } from './state/store'
@@ -46,26 +46,36 @@ import { DataNotice } from './components/DataNotice'
 import { EntityPanel } from './components/EntityPanel'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { Modal, Progress, ThemeToggle } from './components/ui'
-import { Dashboard } from './views/Dashboard'
-import { EvidenceView } from './views/EvidenceView'
-import { EventsView } from './views/EventsView'
-import { MailsView } from './views/MailsView'
-import { FindingsView } from './views/FindingsView'
-import { StoriesView } from './views/StoriesView'
-import { GraphView } from './views/GraphView'
-import { TimelineView } from './views/TimelineView'
-import { IocsView } from './views/IocsView'
-import { AiView } from './views/AiView'
-import { ReportView } from './views/ReportView'
-import { CaseView } from './views/CaseView'
-import { QuestionsView } from './views/QuestionsView'
-import { ReviewView } from './views/ReviewView'
-import { HomeView } from './views/HomeView'
-import { RulesView } from './views/RulesView'
-import { SettingsView } from './views/SettingsView'
 import type { PivotResult } from './data/queries'
 import { fmtBytes, fmtNum, fmtTs } from './util/format'
 import { safeHref } from './util/safe'
+
+/**
+ * Each page is its own script, fetched when it is first opened: the charts, the rule parser, the
+ * mail sanitiser and the home page's fonts are not part of the first load.
+ */
+function page<K extends string>(load: () => Promise<{ [P in K]: ComponentType }>, name: K) {
+  return lazy(() => load().then((m) => ({ default: m[name] })))
+}
+const Dashboard = page(() => import('./views/Dashboard'), 'Dashboard')
+const EvidenceView = page(() => import('./views/EvidenceView'), 'EvidenceView')
+const EventsView = page(() => import('./views/EventsView'), 'EventsView')
+const MailsView = page(() => import('./views/MailsView'), 'MailsView')
+const FindingsView = page(() => import('./views/FindingsView'), 'FindingsView')
+const StoriesView = page(() => import('./views/StoriesView'), 'StoriesView')
+const GraphView = page(() => import('./views/GraphView'), 'GraphView')
+const TimelineView = page(() => import('./views/TimelineView'), 'TimelineView')
+const IocsView = page(() => import('./views/IocsView'), 'IocsView')
+const AiView = page(() => import('./views/AiView'), 'AiView')
+const ReportView = page(() => import('./views/ReportView'), 'ReportView')
+const CaseView = page(() => import('./views/CaseView'), 'CaseView')
+const QuestionsView = page(() => import('./views/QuestionsView'), 'QuestionsView')
+const ReviewView = page(() => import('./views/ReviewView'), 'ReviewView')
+const HomeView = page(() => import('./views/HomeView'), 'HomeView')
+const RulesView = page(() => import('./views/RulesView'), 'RulesView')
+const SettingsView = page(() => import('./views/SettingsView'), 'SettingsView')
+
+const loadingPage = <div className="empty">loading the page…</div>
 
 const NAV: { id: View; label: string; icon: React.ComponentType; count?: 'events' | 'mails' | 'findings' | 'iocs' | 'evidence'; section?: string }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: IconDashboard },
@@ -406,7 +416,11 @@ export default function App() {
   if (view === 'home')
     return (
       <>
-        <HomeView />
+        <ErrorBoundary what="The home page">
+          <Suspense fallback={loadingPage}>
+            <HomeView />
+          </Suspense>
+        </ErrorBoundary>
         <Toasts />
         {authRequired && <TokenGate />}
       </>
@@ -541,22 +555,24 @@ export default function App() {
       <main className="main relative">
         {/* one view failing to render leaves the shell and the other views usable; a new view starts afresh */}
         <ErrorBoundary key={view} back what={`The ${NAV.find((n) => n.id === view)?.label ?? view} page`}>
-          {view === 'dashboard' && <Dashboard />}
-          {view === 'evidence' && <EvidenceView />}
-          {view === 'events' && <EventsView />}
-          {view === 'mails' && <MailsView />}
-          {view === 'timeline' && <TimelineView />}
-          {view === 'findings' && <FindingsView />}
-          {view === 'stories' && <StoriesView key={kase?.id} />}
-          {view === 'graph' && <GraphView key={kase?.id} />}
-          {view === 'rules' && <RulesView />}
-          {view === 'iocs' && <IocsView />}
-          {view === 'ai' && <AiView />}
-          {view === 'review' && <ReviewView />}
-          {view === 'case' && <CaseView />}
-          {view === 'questions' && <QuestionsView key={kase?.id} />}
-          {view === 'report' && <ReportView />}
-          {view === 'settings' && <SettingsView />}
+          <Suspense fallback={loadingPage}>
+            {view === 'dashboard' && <Dashboard />}
+            {view === 'evidence' && <EvidenceView />}
+            {view === 'events' && <EventsView />}
+            {view === 'mails' && <MailsView />}
+            {view === 'timeline' && <TimelineView />}
+            {view === 'findings' && <FindingsView />}
+            {view === 'stories' && <StoriesView key={kase?.id} />}
+            {view === 'graph' && <GraphView key={kase?.id} />}
+            {view === 'rules' && <RulesView />}
+            {view === 'iocs' && <IocsView />}
+            {view === 'ai' && <AiView />}
+            {view === 'review' && <ReviewView />}
+            {view === 'case' && <CaseView />}
+            {view === 'questions' && <QuestionsView key={kase?.id} />}
+            {view === 'report' && <ReportView />}
+            {view === 'settings' && <SettingsView />}
+          </Suspense>
         </ErrorBoundary>
         <EntityPanel />
         {showConsole && (

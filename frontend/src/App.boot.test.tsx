@@ -82,6 +82,8 @@ describe('starting the application', () => {
     history.replaceState(null, '', `/case/${caseRef(lab)}/case`)
     render(<App />)
     await waitFor(() => expect(title()).toBe('Case notes'), { timeout: 8000 })
+    // the page's own script is fetched when it is first opened
+    expect(await screen.findByText('Tasks', undefined, { timeout: 8000 })).toBeTruthy()
     expect(useStore.getState().currentCase?.id).toBe(1)
     expect((document.querySelector('.topbar select') as HTMLSelectElement).value).toBe('1')
     expect(location.pathname).toBe(`/case/${caseRef(lab)}/case`)

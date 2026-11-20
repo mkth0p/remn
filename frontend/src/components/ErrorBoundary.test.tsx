@@ -68,4 +68,27 @@ describe('a page that throws while it renders', () => {
     expect(back).toHaveBeenCalled()
     history.replaceState(null, '')
   })
+
+  it('says to reload when the code of the page could not be fetched, as after a server update', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    function Unfetched(): never {
+      throw new TypeError('Failed to fetch dynamically imported module: http://remn.localhost/assets/FindingsView-old.js')
+    }
+    render(
+      <ErrorBoundary what="The Findings page">
+        <Unfetched />
+      </ErrorBoundary>,
+    )
+    expect(screen.getByRole('alert').textContent).toContain('REMN was updated there after this tab was opened. Reload the page')
+  })
+
+  it('does not blame an update for an ordinary failure', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    render(
+      <ErrorBoundary what="The Events page">
+        <Fragile />
+      </ErrorBoundary>,
+    )
+    expect(screen.getByRole('alert').textContent).not.toContain('updated')
+  })
 })
