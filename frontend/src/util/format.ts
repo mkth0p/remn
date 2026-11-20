@@ -209,23 +209,33 @@ export function renderMarkdown(md: string): string {
 /**
  * JSON as HTML with its keys, strings, numbers, booleans and nulls in spans. The tokens are found in
  * the JSON itself and each piece is escaped on its own: matched after escaping, a quote is already
- * &quot; and no string or key is ever found, while the digits of an entity such as &#39; are.
+ * &quot; and no string or key is ever found, while the digits of an entity such as &#39; are. A
+ * string is read to its closing quote by hand, once: a pattern for it would read an unclosed one
+ * again from every quote inside it.
  */
 export function highlightJson(value: unknown): string {
   const json = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
-  const token = /"(?:\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(?:true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?/g
+  const token = /"|\b(?:true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?/g
+  const colon = /\s*:/y
   let out = ''
-  let last = 0
-  for (const m of json.matchAll(token)) {
-    const t = m[0]
-    let cls = 'n'
-    if (t.startsWith('"')) cls = m[1] ? 'k' : 's'
-    else if (t === 'true' || t === 'false') cls = 'b'
-    else if (t === 'null') cls = 'z'
-    out += `${escapeHtml(json.slice(last, m.index))}<span class="${cls}">${escapeHtml(t)}</span>`
-    last = m.index + t.length
+  let plain = 0
+  for (let m = token.exec(json); m; m = token.exec(json)) {
+    let end = m.index + m[0].length
+    let cls = m[0] === 'true' || m[0] === 'false' ? 'b' : m[0] === 'null' ? 'z' : 'n'
+    if (m[0] === '"') {
+      // a string ends at the first quote no backslash escapes; one never closed leaves the rest as text
+      while (end < json.length && json[end] !== '"') end += json[end] === '\\' ? 2 : 1
+      if (end >= json.length) break
+      colon.lastIndex = ++end
+      const key = colon.exec(json)
+      cls = key ? 'k' : 's'
+      if (key) end += key[0].length
+      token.lastIndex = end
+    }
+    out += `${escapeHtml(json.slice(plain, m.index))}<span class="${cls}">${escapeHtml(json.slice(m.index, end))}</span>`
+    plain = end
   }
-  return out + escapeHtml(json.slice(last))
+  return out + escapeHtml(json.slice(plain))
 }
 
 export function shortHash(h: string | null | undefined, n = 12): string {

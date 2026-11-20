@@ -44,8 +44,6 @@ const EXEMPT: Record<string, string> = {
   [String.raw`components/graphLayout.ts /([\d.]+)px/`]: "a font the app's own stylesheet names",
   [String.raw`data/claims.ts /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g`]: 'text the model wrote (an answer or a summary), read to check the addresses it names',
   [String.raw`data/reportDocx.ts /\[([^\]]+)\]\(([^)]+)\)/g`]: "the analyst's notes and the model's answers, written into a Word report on request",
-  [String.raw`util/format.ts /("(?:\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g`]:
-    'JSON after HTML escaping, which holds no double quote, so the string branch never starts',
   [String.raw`rules/filter.ts /<[^>]*>/g`]: 'applied up to the last ">" only, which regexRewrites.test.ts times end to end',
 }
 

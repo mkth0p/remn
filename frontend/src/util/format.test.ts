@@ -76,4 +76,15 @@ describe('highlighted JSON', () => {
     expect(pre.textContent).toBe(JSON.stringify({ '<b>k</b>': '<img src=x onerror="alert(1)">', '&amp;': '"quoted"' }, null, 2))
     expect([...pre.querySelectorAll('span')].map((s) => s.className)).toEqual(['k', 's', 'k', 's'])
   })
+  it('reads a string never closed once, and shows the rest as text', () => {
+    // invented text, not JSON: escaped quotes with no closing one, which a pattern would read again from each quote
+    const hostile = '"' + '\\"'.repeat(16_000)
+    const started = performance.now()
+    const html = highlightJson(hostile)
+    expect(performance.now() - started).toBeLessThan(100)
+    const pre = document.createElement('pre')
+    pre.innerHTML = html
+    expect(pre.textContent).toBe(hostile)
+    expect(highlightJson('{"a": 1, "b": "open')).toBe('{<span class="k">&quot;a&quot;:</span> <span class="n">1</span>, <span class="k">&quot;b&quot;:</span> &quot;open')
+  })
 })
