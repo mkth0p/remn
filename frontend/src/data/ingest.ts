@@ -7,10 +7,10 @@ import type { IngestRequest } from '../workers/ingest.worker'
 import { chunkedUpload, type UploadResult } from './upload'
 import { waitForJob } from './jobs'
 import { getSource } from './source'
+import { datesRead, describeDates } from './dateSetting'
 import { duplicateEvidence } from './duplicateEvidence'
 import { whileImporting } from './interruptedImports'
 import { deployment } from './deployment'
-import { datesRead, describeDates } from './dateSetting'
 
 let jobSeq = 1
 
