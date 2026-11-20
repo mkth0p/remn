@@ -237,7 +237,9 @@ dismissed), a story with others merged into it says "+N merged", and the second 
 story is listed on its own.
 
 The selected story opens with its subject (the account, whose forms and joins are one click
-away, or the host), its score, span and the confidence of its ties, a few plain sentences, the
+away, or the host), its score, span and confidence (high, medium or low: how surely its flagged
+steps are its subject's, with the basis of that on hover, as [Stories](stories.md) explains), a
+few plain sentences, the
 sources its findings name, its hosts, its campaign, a link to review its phishing chain, and the
 analyst's note, checked against the story's own records. The **story decision** bar under it
 sets open, reviewed, confirmed incident, benign or false positive, with a reason (required for
