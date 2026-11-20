@@ -185,8 +185,10 @@ targets with five modified properties each and six additional details, which is 
 read of a record from it, and no record id, so a record downloaded twice is in the case twice.
 `Get-MgAuditLogDirectoryAudit | Export-Csv` writes the initiator, the targets and the details
 as .NET type names, so its rows say what was done and when but not by whom; the JSON from
-the same cmdlet holds them. Azure Monitor records of the `AuditLogs` category are not read:
-Microsoft says their schema may differ from Graph's.
+the same cmdlet holds them. The admin centre downloads at most 250,000 audit records a file:
+a CSV or JSON download of exactly that many carries a "gaps" badge on the Evidence page, since
+the records after it in its time window are probably missing. Azure Monitor records of the
+`AuditLogs` category are not read: Microsoft says their schema may differ from Graph's.
 
 A risk detection becomes a row with the provider `Microsoft Entra ID Protection`, the channel
 `Entra RiskDetection`, the category `Entra risk` and the operation `RiskDetection`, at the time
@@ -219,7 +221,10 @@ evidence does not move them, but `Export-Csv` writes them in the session's date 
 of `Get-MessageTrace` is kept once by its `MessageTraceId`, recipient and status;
 `Get-MessageTraceV2`'s output properties are not documented, and its export is read by the
 same column names (`Received`, `SenderAddress`, `RecipientAddress` and the others its
-parameters are named after), any other column kept as it is. The enhanced summary report
+parameters are named after), any other column kept as it is. Both cmdlets return 1,000
+rows unless told otherwise, and `Get-MessageTraceV2` 5,000 at most: an export of exactly
+1,000 or 5,000 rows carries a "gaps" badge, as an audit log export cut at its limit does.
+The enhanced summary report
 gives a row for each `<address>##<status>` of `Recipient_status` (Microsoft does not say what
 separates two recipients; a `;` before another `<address>##` is taken as the separator) and
 its `directionality` as `direction`; the extended report gives a row for each recipient of
