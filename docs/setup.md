@@ -13,10 +13,12 @@ the repository is laid out.
   the Docker image use it.
 - Node 22 or later, for building the browser application. Continuous integration and
   the Docker image use 22.
-- Developed and used on Windows 11; the same code runs on Linux in the Docker image and
-  in continuous integration. The commands below are given for both; on Linux and macOS
-  the virtual environment's interpreter is `.venv/bin/python` instead of
-  `.venv\Scripts\python.exe`, and that is the only difference.
+- git, to clone the repository.
+- Linux, macOS or Windows. Continuous integration runs the backend tests on all three and
+  the browser application's checks and the Docker image on Linux. The commands below are
+  given for Linux and macOS, and for Windows in PowerShell or the Command Prompt; the
+  virtual environment's interpreter is `.venv/bin/python` on the first two and
+  `.venv\Scripts\python.exe` on Windows.
 - Optional, for the AI features: [Ollama](https://ollama.com) with a model that supports
   tools (`gemma4`, `qwen3` and `llama3.1` are known to), or a Claude Code sign-in on the
   server machine. See [AI analyst](ai.md).
@@ -26,23 +28,12 @@ the repository is laid out.
 
 ## Install
 
-Windows:
-
-```bash
-# the API, in a virtual environment on Python 3.13
-py -3.13 -m venv .venv
-.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
-
-# optional: PST, YARA and 7z support
-.venv\Scripts\python.exe -m pip install -r backend\requirements-optional.txt
-
-# the browser application
-cd frontend && npm ci && npm run build && cd ..
-```
-
 Linux and macOS:
 
 ```bash
+git clone https://github.com/mkth0p/remn.git
+cd remn
+
 # the API, in a virtual environment on Python 3.13
 python3.13 -m venv .venv
 .venv/bin/python -m pip install -r backend/requirements.txt
@@ -51,8 +42,31 @@ python3.13 -m venv .venv
 .venv/bin/python -m pip install -r backend/requirements-optional.txt
 
 # the browser application
-cd frontend && npm ci && npm run build && cd ..
+cd frontend
+npm ci
+npm run build
+cd ..
 ```
+
+Windows, in PowerShell or the Command Prompt:
+
+```
+git clone https://github.com/mkth0p/remn.git
+cd remn
+
+py -3.13 -m venv .venv
+.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
+
+.venv\Scripts\python.exe -m pip install -r backend\requirements-optional.txt
+
+cd frontend
+npm ci
+npm run build
+cd ..
+```
+
+The second `pip install` is optional (PST, YARA and 7z support). Each command is on its own line
+because Windows PowerShell 5.1 does not read `&&`.
 
 `backend/requirements.txt` fixes every package at an exact version with its hashes, so two
 installs of one commit are the same install; pip refuses a file whose hash differs.
@@ -91,27 +105,30 @@ account with `FORENSIC_PARSE_UID`. What each system enforces, and what
 One process, one port, the built browser application served by the API:
 
 ```bash
-.venv\Scripts\python.exe backend\run.py --port 8000
-```
-
-```bash
 .venv/bin/python backend/run.py --port 8000        # Linux and macOS
 ```
 
-Then open http://127.0.0.1:8000. `run.py` uses waitress, threaded, with streaming
+```
+.venv\Scripts\python.exe backend\run.py --port 8000
+```
+
+Then open http://127.0.0.1:8000. **Open demo case** on the first page opens a synthetic case
+already read, with nothing uploaded. `run.py` uses waitress, threaded, with streaming
 responses; it prints a warning if `frontend/dist` is missing.
 
 For development, run the API and the browser application separately; the second reloads
 on every save and proxies `/api` to the first:
 
 ```bash
-.venv\Scripts\python.exe backend\manage.py runserver 127.0.0.1:8000
-cd frontend && npm run dev        # http://127.0.0.1:5173
+.venv/bin/python backend/manage.py runserver 127.0.0.1:8000    # Linux and macOS
+.venv\Scripts\python.exe backend\manage.py runserver 127.0.0.1:8000    # Windows
 ```
 
-```bash
-.venv/bin/python backend/manage.py runserver 127.0.0.1:8000    # Linux and macOS
-cd frontend && npm run dev
+and in a second terminal:
+
+```
+cd frontend
+npm run dev        # http://127.0.0.1:5173
 ```
 
 The two setups differ in one way that matters when something works in one and not the
