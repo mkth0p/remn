@@ -443,16 +443,16 @@ and higher finding on its own:
 
 | level | medium budget | findings on their own per clean machine | lines per clean machine |
 |---|---|---|---|
-| 1, compact | 0.1 | 11 | 73 |
-| **2, balanced (a new case)** | 0.5 | **40** | **92** |
-| 3, detailed | 5 | 164 | 186 |
-| 4, broad | 5, and medium and up | 314 | 330 |
-| 5, every finding | none | 587 | 587 |
-| medium and up, nothing else | | 241 | 241 |
+| 1, compact | 0.1 | 11 | 63 |
+| **2, balanced (a new case)** | 0.5 | **38** | **81** |
+| 3, detailed | 5 | 158 | 176 |
+| 4, broad | 5, and medium and up | 307 | 321 |
+| 5, every finding | none | 581 | 581 |
+| medium and up, nothing else | | 234 | 234 |
 
 Since no level drops a finding, every level detects what the enabled rules detect: on the
 committed measure, the counts at any severity given under [Measured rules](#measured-rules). The
-default level has 62% fewer lines on a clean machine than raising every medium and higher finding
+default level has 65% fewer lines on a clean machine than raising every medium and higher finding
 on its own.
 
 The case's own machines are a second measure of noise, read after every run. A rule whose
@@ -473,12 +473,16 @@ none and keeps every finding on its own, as it did.
 
 The budgets are in the code (`frontend/src/data/detectionLevel.ts`) and make the levels nest: a
 finding on its own at one level is on its own at every level above. The two measured columns of
-the table were taken on 2026-09-26 with the findings of the core rules and the two default Sigma
-packs, every severity, at the rule levels of that day, on the clean machines of the rule measure,
-each machine's lines counted under rule noise taken from the six other machines (the app takes it
-from all seven); the last row is not held out that way, since some rule levels were lowered from
-the findings on these machines. The script and the output of that run are not in the repository,
-so these two columns cannot be derived again from `rules/measures-detail.json`.
+the table are computed by `tools/detection_levels.py` from the committed measure
+(`rules/measures-detail.json` holds each rule's findings on each clean machine), for the event
+rules a new case enables (REMN's own and the two default SigmaHQ packs) at their current
+severities, with the budgets read from `detectionLevel.ts`. Each machine's lines are counted with
+rule noise taken from the six other machines (the app takes it from all seven), and a finding is
+counted at its rule's severity, without a follow-up's escalation. The last row reads no noise,
+but some pack rule levels were set from the findings on these same machines, so it is not
+held out. The level picker and the home page show the same figures: `tools/level_figures.py`
+writes them to `frontend/src/data/detectionLevels.gen.json`, and
+`tests/backend/test_level_figures.py` fails when that file differs from what the measure gives.
 
 ## Mail risk scoring
 

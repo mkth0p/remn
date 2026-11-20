@@ -461,8 +461,8 @@ function Levels() {
         ))}
       </div>
       <p className="ld-note">
-        No level drops a finding, so every level detects the same recordings: at any severity, those under Libraries. Lines counted on the {MEASURED_ON.cleanMachines} hosts of evtx-baseline on{' '}
-        {MEASURED_ON.date}, each host under rule noise taken from the other six; the script and the output of that run are not in the repository.
+        No level drops a finding, so every level detects the same recordings: at any severity, those under Libraries. Lines counted on the {MEASURED_ON.cleanMachines} clean hosts of the rule measure
+        of {MEASURED_ON.date}, for the rules a new case enables at their current severities, each host under rule noise taken from the other hosts.
       </p>
     </div>
   )

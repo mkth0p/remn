@@ -13,15 +13,17 @@
  * 365, other products' logs, a rule changed since it was measured) keeps its findings from medium
  * up on their own below the last level; the analyst's own rules are never folded.
  *
- * The levels were chosen and measured on 2026-09-26 with every rule's findings on every recording
- * and clean machine the rule measure uses. The lines of each clean machine were counted with the
- * rules' noise taken from the six other machines, so the figures below are held out for noise; the
- * levels never read the attack libraries, so they are held out for detection too
- * (docs/detection.md#detection-level).
+ * The figures of each level are computed from the committed rule measure by tools/detection_levels.py
+ * (tools/level_figures.py writes them to detectionLevels.gen.json): every finding of the event rules a
+ * new case enables, at their current severities, on the clean machines of rules/measures-detail.json,
+ * each machine's lines counted with the rules' noise taken from the other machines, so the figures are
+ * held out for noise; the levels never read the attack libraries, so they are held out for detection
+ * too (docs/detection.md#detection-level).
  */
 import type { Finding, Severity } from '../db/schema'
 import type { RuleMeasure } from './ruleMeasures'
 import { fmtNum } from '../util/format'
+import FIGURES from './detectionLevels.gen.json'
 
 export type DetectionLevel = 1 | 2 | 3 | 4 | 5
 
@@ -45,13 +47,16 @@ export interface LevelInfo {
   measured: { alone: number; perCleanMachine: number }
 }
 
-/**
- * The run the levels were chosen and measured with, on the clean machines of the rule measure. Its
- * script and output are not in the repository, so its lines cannot be derived again from
- * rules/measures-detail.json (docs/detection.md#detection-level). What every level detects is the
- * committed rule measure's (virtual:rule-measure), since no level drops a finding.
- */
-export const MEASURED_ON = { cleanMachines: 7, date: '2026-09-26' }
+/** The rule measure the level figures were counted on: its date and its clean machines. */
+export const MEASURED_ON = { cleanMachines: FIGURES.machines, date: FIGURES.measured }
+
+/** A level's figures, as the generated file gives them. */
+function measuredAt(level: DetectionLevel): LevelInfo['measured'] {
+  const f = FIGURES.levels.find((l) => l.level === level)
+  // the file is written for every level of this list, and a test fails when it is not
+  if (!f) throw new Error(`detectionLevels.gen.json has no figures for level ${level}: run tools/level_figures.py`)
+  return { alone: f.alone, perCleanMachine: f.lines }
+}
 
 export const DETECTION_LEVELS: LevelInfo[] = [
   {
@@ -59,21 +64,21 @@ export const DETECTION_LEVELS: LevelInfo[] = [
     label: 'compact',
     budget: 0.1,
     text: 'Only rules that stayed silent on the clean machines raise findings on their own; the findings of every other rule are folded into one per host.',
-    measured: { alone: 11, perCleanMachine: 73 },
+    measured: measuredAt(1),
   },
   {
     level: 2,
     label: 'balanced',
     budget: 0.5,
     text: 'Also rules that fired a few times across all the clean machines.',
-    measured: { alone: 40, perCleanMachine: 92 },
+    measured: measuredAt(2),
   },
   {
     level: 3,
     label: 'detailed',
     budget: 5,
     text: 'Also rules that fire up to a few times per clean machine at medium, more at high and critical.',
-    measured: { alone: 164, perCleanMachine: 186 },
+    measured: measuredAt(3),
   },
   {
     level: 4,
@@ -81,19 +86,19 @@ export const DETECTION_LEVELS: LevelInfo[] = [
     budget: 5,
     always: 2,
     text: 'Every medium and higher finding on its own, as before levels, and the low findings of rules quiet on the clean machines.',
-    measured: { alone: 314, perCleanMachine: 330 },
+    measured: measuredAt(4),
   },
   {
     level: 5,
     label: 'every finding',
     budget: Infinity,
     text: 'Every finding of every enabled rule on its own, low and informational included; nothing is folded.',
-    measured: { alone: 587, perCleanMachine: 587 },
+    measured: measuredAt(5),
   },
 ]
 
-/** Raising every medium and higher finding and nothing else, the reference before levels, in the same run. */
-export const BEFORE_LEVELS = { perCleanMachine: 241 }
+/** Raising every medium and higher finding and nothing else, the reference before levels, on the same machines. */
+export const BEFORE_LEVELS = { perCleanMachine: FIGURES.mediumUp }
 
 const RANK: Record<Severity, number> = { info: 0, low: 1, medium: 2, high: 3, critical: 4 }
 /** No severity of the rule stands on its own. */
@@ -166,10 +171,10 @@ export function raised(f: { ruleId?: unknown; severity?: unknown }, floors: Reco
   return floor == null || severityRank(f.severity) >= floor
 }
 
-/** What a level cost when it was measured, in a sentence. */
+/** What a level costs on the clean machines of the rule measure, in a sentence. */
 export function levelMeasured(level: DetectionLevel): string {
   const m = levelInfo(level).measured
-  return `This level gave about ${fmtNum(m.perCleanMachine)} lines per clean machine, ${fmtNum(m.alone)} of them findings on their own (every medium and higher finding on its own: ${fmtNum(BEFORE_LEVELS.perCleanMachine)}), in a run of ${MEASURED_ON.date} on ${MEASURED_ON.cleanMachines} clean machines whose script and output are not in the repository.`
+  return `On the ${MEASURED_ON.cleanMachines} clean machines of the rule measure of ${MEASURED_ON.date}, this level gives about ${fmtNum(m.perCleanMachine)} lines per clean machine, ${fmtNum(m.alone)} of them findings on their own (every medium and higher finding on its own: ${fmtNum(BEFORE_LEVELS.perCleanMachine)}).`
 }
 
 const MAX_FOLDED_REFS = 5000

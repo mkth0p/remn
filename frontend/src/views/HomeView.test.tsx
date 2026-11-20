@@ -6,6 +6,7 @@ import { FIRST_CASE_NAME } from '../data/cases'
 import { useStore } from '../state/store'
 import type { Health } from '../api/client'
 import measure from 'virtual:rule-measure'
+import levels from '../data/detectionLevels.gen.json'
 import { fmtNum } from '../util/format'
 import { HomeView } from './HomeView'
 
@@ -78,6 +79,13 @@ describe('HomeView', () => {
     expect(page).toContain(`${fmtNum(measure.detect)} have fired on a recording of what they look for`)
     expect(page).toContain(`Measured ${measure.measured}`)
     expect(screen.getByRole('cell', { name: fmtNum(measure.clean.own.highCritical) })).toBeTruthy()
+  })
+
+  it('draws the lines of each detection level from the figures the committed measure gives', () => {
+    render(<HomeView />)
+    for (const l of levels.levels) expect(screen.getByTitle(new RegExp(`^${l.level} · .*: ${l.lines} lines per clean host$`))).toBeTruthy()
+    expect(screen.getByTitle(`≥ medium, no levels: ${levels.mediumUp} lines per clean host`)).toBeTruthy()
+    expect(document.body.textContent).toContain(`Lines counted on the ${levels.machines} clean hosts of the rule measure of ${levels.measured}`)
   })
 
   it('names no evaluation REMN did not take part in, and no comparison the committed measure does not hold', () => {

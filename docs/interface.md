@@ -32,8 +32,8 @@ built, counted as the README counts them (`frontend/src/data/measureFigures.ts`)
 measure changes the page with no figure typed; the example rule's record comes from the
 server with the rule. The tactic map and the APT29 hosts come from a separate run of every
 rule (`tools/library_measures.py`, `frontend/src/data/libraryMeasures.json`) and say so;
-the lines per detection level come from a run whose script and output are not in the
-repository, which the page says too; the mail corpora are the dated results of
+the lines per detection level are counted on the same measure's clean machines by
+`tools/detection_levels.py` (`frontend/src/data/detectionLevels.gen.json`); the mail corpora are the dated results of
 [validation](validation.md), on corpora the score's weights were adjusted on. New case names a case, picks its store and can
 take evidence as it is created; the first visit's case, while still untouched, is taken
 over rather than left empty. Open demo case opens the Northstar lab in the browser.
@@ -313,7 +313,7 @@ behind it on hover, and a filter lists the leads, the rules that miss their own 
 or those that fire on clean machines. Above the packs, the case's detection level (1, fewest
 lines, to 5, every finding on its own; see [detection level](detection.md#detection-level)) is a
 slider with what the level keeps on its own, what every level detects in the committed rule
-measure, and how many lines it gave in the run it was measured with; moving it
+measure, and how many lines it gives on the measure's clean machines; moving it
 offers to rerun the rules at the new level, and the "level" column gives the lowest level at which
 each rule's findings stand on their own. Below that level they are folded, one per rule and host,
 and a folded finding's title says how many it stands for; a rule that fires on most of the case's

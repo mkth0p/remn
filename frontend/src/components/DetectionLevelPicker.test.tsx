@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import measure from 'virtual:rule-measure'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { levelInfo } from '../data/detectionLevel'
+import figures from '../data/detectionLevels.gen.json'
 import { fmtNum } from '../util/format'
 import { DetectionLevelPicker } from './DetectionLevelPicker'
 
@@ -19,11 +20,13 @@ describe('the detection level picker', () => {
     expect(text).toContain(`rule measure of ${measure.measured}`)
   })
 
-  it('gives the lines of the chosen level, from a run it names as not in the repository', () => {
+  it('gives the lines of the chosen level as the committed rule measure gives them', () => {
     const { container } = render(<DetectionLevelPicker value={2} onChange={() => {}} />)
     const m = levelInfo(2).measured
-    expect(container.textContent).toContain(`about ${fmtNum(m.perCleanMachine)} lines per clean machine, ${fmtNum(m.alone)} of them findings on their own`)
-    expect(container.textContent).toContain('whose script and output are not in the repository')
+    expect(m).toEqual({ alone: figures.levels[1].alone, perCleanMachine: figures.levels[1].lines })
+    expect(container.textContent).toContain(`On the ${figures.machines} clean machines of the rule measure of ${figures.measured}, this level gives about ${fmtNum(m.perCleanMachine)} lines`)
+    expect(container.textContent).toContain(`${fmtNum(m.alone)} of them findings on their own (every medium and higher finding on its own: ${fmtNum(figures.mediumUp)})`)
+    expect(container.textContent).not.toContain('not in the repository')
   })
 
   it('moves along its five stops and leaves the measure out when compact', () => {
