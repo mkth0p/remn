@@ -315,7 +315,9 @@ and header comparisons, `strings.*` and `regex.*` matchers,
 negated predicates, `profile.by_sender()` through the sender-baseline columns,
 `$tenant_domains`, `$org_display_names` and `$recipient_emails` through the case
 settings, `$tranco_10k` through the bundled list; `$tranco_1m` is approximated with the
-10,000 list, which only makes those rules fire more often, never less).
+10,000 list, which only makes those rules fire more often, never less). The import dialog
+lists the first 300 converted or skipped rules and says how many more there are; adding takes
+every converted rule, listed or not.
 
 ## Measured rules
 
