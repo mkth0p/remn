@@ -5,6 +5,7 @@ import { type StepCall } from '../../data/storyDecisions'
 import { fmtNum, fmtTs } from '../../util/format'
 import { StepCallTag } from '../StoryDecisions'
 import { CONFIDENCE_SEV, day, ORIGIN_CLASS, ORIGIN_ICON, ORIGIN_LABEL, spanText, TIE_LABEL } from './model'
+import { pressable } from '../../components/pressable'
 
 /** A finding on a step, with what its rule's measure says it is worth. */
 function FindingBadge({ f, reading }: { f: StoryStep['findings'][number]; reading?: MeasureReading }) {
@@ -52,6 +53,7 @@ export function Timeline({
           <div key={s.id}>
             {header && <div className="story-day">{d}</div>}
             <div
+              {...pressable}
               className={'step' + (selected === s.id ? ' active' : '') + (s.routine ? ' routine' : '') + (calls?.get(s.id)?.verdict === 'disputed' ? ' disputed' : '')}
               onClick={() => onSelect(s.id)}
             >

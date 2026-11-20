@@ -21,6 +21,7 @@ import { attachStoryNote, deleteStoryNote, saveStoryNote, storyAnchor, type Iden
 import type { Case } from '../../db/schema'
 import { getSource } from '../../data/source'
 import type { Detail } from './model'
+import { confirmAction } from '../../components/confirm'
 import { toast, useStore } from '../../state/store'
 
 /** The analyst's note on the open story: saved, a note whose story is gone attached to it, or deleted after asking. */
@@ -47,7 +48,7 @@ export function storyNoteActions({
     setNotes(await attachStoryNote(kase.id!, o.key, story, identities, noteOf(story.id)?.key))
   }
   const dropNote = async (o: OrphanNote) => {
-    if (!confirm(`Delete the note written on the story of ${o.title}? It cannot be undone.`)) return
+    if (!(await confirmAction(`Delete the note written on the story of ${o.title}? It cannot be undone.`, { title: 'Delete the note', action: 'Delete', danger: true }))) return
     setNotes(await deleteStoryNote(kase.id!, o.key))
   }
   return { saveNote, attachNote, dropNote }

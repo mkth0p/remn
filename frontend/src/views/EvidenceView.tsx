@@ -4,6 +4,7 @@ import { toast, useStore } from '../state/store'
 import { fmtBytes, fmtNum, fmtTs } from '../util/format'
 import { Dropzone } from '../components/Dropzone'
 import { Badge, CopyButton, JsonView, Modal } from '../components/ui'
+import { confirmAction } from '../components/confirm'
 import { hashOnly, refreshCounts, requestIngest } from '../data/ingest'
 import { getSource } from '../data/source'
 import { Jobs } from '../components/ConsolePanel'
@@ -13,6 +14,7 @@ import { coverageMembers } from '../data/packageCoverage'
 import { packageCoverageIssues } from '../data/packageCoverage'
 import { evidenceGaps } from '../data/evidenceGaps'
 import { viewerReason } from '../data/access'
+import { pressableRow } from '../components/pressable'
 
 export function EvidenceView() {
   const kase = useStore((s) => s.currentCase)
@@ -35,7 +37,7 @@ export function EvidenceView() {
   // a viewer changes nothing on the server; a case kept in this browser stays its own
   const viewer = isServer ? viewerReason(health) : null
   const remove = async (e: Evidence) => {
-    if (!confirm(`Remove "${e.name}" and all its rows from ${isServer ? 'the server store' : 'this browser'}?`)) return
+    if (!(await confirmAction(`Remove "${e.name}" and all its rows from ${isServer ? 'the server store' : 'this browser'}?`, { title: 'Remove the evidence', action: 'Remove', danger: true }))) return
     try {
       const cleared = await ds.deleteEvidence(e.id!)
       toast(
@@ -89,7 +91,7 @@ export function EvidenceView() {
           </thead>
           <tbody>
             {items.map((e) => (
-              <tr key={e.id} onClick={() => setDetail(e)} style={{ cursor: 'pointer' }}>
+              <tr {...pressableRow} key={e.id} onClick={() => setDetail(e)} style={{ cursor: 'pointer' }}>
                 <td className="mono ellipsis" style={{ maxWidth: 260 }} title={e.name}>
                   {e.name}
                 </td>

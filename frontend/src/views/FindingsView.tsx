@@ -309,6 +309,7 @@ export function FindingsView() {
           <div className="relative" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             {group === 'incident' && (
               <VirtualTable
+                label="Incidents"
                 rows={incidents}
                 columns={incColumns}
                 rowKey={(r) => r.id}
@@ -322,6 +323,7 @@ export function FindingsView() {
             )}
             {!group && (
               <VirtualTable
+                label="Findings"
                 rows={rows}
                 columns={columns}
                 rowKey={(r) => r.id!}

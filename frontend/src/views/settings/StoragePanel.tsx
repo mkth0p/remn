@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Badge, Progress, Toggle } from '../../components/ui'
+import { confirmAction } from '../../components/confirm'
 import { refreshCounts } from '../../data/ingest'
 import { migrateCaseToServer } from '../../data/migrate'
 import type { DataSource } from '../../data/source'
@@ -43,9 +44,10 @@ export function StoragePanel({
   const migrate = async () => {
     const total = counts.events + counts.mails
     if (
-      !confirm(
+      !(await confirmAction(
         `Move this case to the server store (DuckDB on this machine)? ${total.toLocaleString('en-US')} rows will be transferred and removed from the browser. Findings will be cleared (re-run the rules afterwards).`,
-      )
+        { title: 'Move to the server store', action: 'Move' },
+      ))
     )
       return
     setMigrating('starting…')

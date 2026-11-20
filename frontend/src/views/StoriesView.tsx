@@ -3,6 +3,7 @@ import { EventDetail, MailDetail } from '../components/Detail'
 import { Explorer, ExploreList } from '../components/Explore'
 import { useRelationshipGraph } from '../components/useRelationshipGraph'
 import { Tabs } from '../components/ui'
+import { confirmAction } from '../components/confirm'
 import { applyStoryDecisions, decisionCount, setCall } from '../data/storyDecisions'
 import { resolveStoryNotes, storyCoverageWarnings, storyGaps, storyQuestion, type Story } from '../data/stories'
 import { downloadCampaignGrouping, spineSteps } from '../data/storyFlow'
@@ -52,8 +53,11 @@ export function StoriesView() {
   const onNoteDirty = useCallback((d: boolean) => {
     noteDirty.current = d
   }, [])
-  /** True when the analyst keeps an unsaved note rather than let what they do next throw it away. */
-  const keepNote = () => noteDirty.current && !confirm('The note on this story is not saved. Discard it?')
+  /** Go on with `next` unless it would throw away a note not saved yet and the analyst keeps it. */
+  const unlessNoteKept = (next: () => void) => {
+    if (!noteDirty.current) return next()
+    void confirmAction('The note on this story is not saved. Discard it?', { title: 'Discard the note', action: 'Discard', danger: true }).then((discard) => discard && next())
+  }
 
   const labels = useMemo(() => new Map((res?.identities ?? []).map((i) => [i.id, i.label])), [res])
   // the stories as the page shows them: the build with the analyst's decisions applied
@@ -98,27 +102,27 @@ export function StoriesView() {
   if (!kase) return null
   const { openRow, openRefs } = recordOpeners({ kase, setDetail, setError })
   const selectStory = (id: string) => {
-    if (id !== storyId && keepNote()) return
-    setMode('stories')
-    setStoryId(id)
-    setStepId(null)
-    setPhase(null)
-    setNotice('')
+    const select = () => {
+      setMode('stories')
+      setStoryId(id)
+      setStepId(null)
+      setPhase(null)
+      setNotice('')
+    }
+    if (id === storyId) select()
+    else unlessNoteKept(select)
   }
   // the note is shown in the Stories mode only: leaving it asks first, as a story switch does
   const switchMode = (m: Mode) => {
-    if (m !== mode && mode === 'stories' && keepNote()) return
-    setMode(m)
+    if (m !== mode && mode === 'stories') unlessNoteKept(() => setMode(m))
+    else setMode(m)
   }
-  const explore = (nodeId: string) => {
-    if (keepNote()) return
-    setMode('explore')
-    setExplored(nodeId)
-  }
-  const rebuild = () => {
-    if (keepNote()) return
-    build(story ? { story, identities: res?.identities ?? [], step: stepId ?? undefined } : null)
-  }
+  const explore = (nodeId: string) =>
+    unlessNoteKept(() => {
+      setMode('explore')
+      setExplored(nodeId)
+    })
+  const rebuild = () => unlessNoteKept(() => build(story ? { story, identities: res?.identities ?? [], step: stepId ?? undefined } : null))
   // the request is the analyst's; what the story took from the records reaches the model as evidence
   const ask = (s: Story) => {
     setAiPrompt(storyQuestion(s, res?.stats))
@@ -233,11 +237,12 @@ export function StoriesView() {
                 onAsk={() => ask(story)}
                 onError={setError}
                 onStory={selectStory}
-                onCampaign={(c) => {
-                  if (keepNote()) return
-                  setMode('campaigns')
-                  setCampaignId(c)
-                }}
+                onCampaign={(c) =>
+                  unlessNoteKept(() => {
+                    setMode('campaigns')
+                    setCampaignId(c)
+                  })
+                }
                 onDecide={(verdict, reason) => decide(view.sources[0], (d) => setCall(d, view.part, verdict, reason))}
                 onMerge={(target, reason, orgs) => merge(view, target, reason, orgs)}
               />

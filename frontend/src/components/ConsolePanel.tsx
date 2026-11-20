@@ -74,14 +74,22 @@ export function ConsolePanel() {
   )
 }
 
+/**
+ * The passing messages. Their list is a live region, so a screen reader reads each as it comes
+ * (an error at once, the others when it is free), and each has a button that dismisses it: an
+ * error stays until it is dismissed.
+ */
 export function Toasts() {
   const toasts = useStore((s) => s.toasts)
   const dismiss = useStore((s) => s.dismissToast)
   return (
-    <div className="toasts">
+    <div className="toasts" role="log" aria-live="polite" aria-label="Messages">
       {toasts.map((t) => (
-        <div key={t.id} className={`toast ${t.kind}`} onClick={() => dismiss(t.id)}>
-          {t.text}
+        <div key={t.id} className={`toast ${t.kind}`} role={t.kind === 'err' ? 'alert' : undefined} onClick={() => dismiss(t.id)}>
+          <span>{t.text}</span>
+          <button type="button" className="toast-x" aria-label="dismiss" onClick={() => dismiss(t.id)}>
+            ×
+          </button>
         </div>
       ))}
     </div>

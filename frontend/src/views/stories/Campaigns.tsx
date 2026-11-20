@@ -5,6 +5,7 @@ import { useStore } from '../../state/store'
 import { fmtNum, fmtTs } from '../../util/format'
 import { PhaseStrip } from './StoryList'
 import { spanText } from './model'
+import { pressable, pressableRow } from '../../components/pressable'
 
 export function CampaignList({ campaigns, stories, active, onSelect }: { campaigns: Campaign[]; stories: Map<string, Story>; active: string | null; onSelect: (id: string) => void }) {
   if (!campaigns.length)
@@ -16,7 +17,7 @@ export function CampaignList({ campaigns, stories, active, onSelect }: { campaig
   return (
     <>
       {campaigns.map((c) => (
-        <div key={c.id} className={'story-row' + (active === c.id ? ' active' : '')} onClick={() => onSelect(c.id)} role="button" aria-label={`Campaign ${c.label}`}>
+        <div {...pressable} key={c.id} className={'story-row' + (active === c.id ? ' active' : '')} onClick={() => onSelect(c.id)} aria-label={`Campaign ${c.label}`}>
           <Dot sev={c.severity} />
           <div style={{ minWidth: 0 }}>
             <div className="ellipsis name mono">{c.label}</div>
@@ -78,7 +79,7 @@ export function CampaignDetail({
         <div className="section">
           <h3>Stories</h3>
           {members.map((s) => (
-            <div key={s.id} className="story-row" onClick={() => onStory(s.id)} role="button">
+            <div {...pressable} key={s.id} className="story-row" onClick={() => onStory(s.id)}>
               <Dot sev={s.severity} />
               <div style={{ minWidth: 0 }}>
                 <div className="name ellipsis">{s.title}</div>
@@ -109,6 +110,7 @@ export function CampaignDetail({
               <tr key={a.kind + a.value}>
                 <td>{a.kind.replace('-', ' ')}</td>
                 <td
+                  {...pressableRow}
                   className="mono click"
                   style={{ overflowWrap: 'anywhere' }}
                   onClick={() => (a.kind === 'ip' ? setEntity({ kind: 'ip', value: a.value }) : a.kind.endsWith('domain') ? setEntity({ kind: 'domain', value: a.value }) : undefined)}
@@ -138,7 +140,7 @@ export function CampaignDetail({
             </thead>
             <tbody>
               {campaign.targets.map((t) => (
-                <tr key={t.id} style={{ cursor: 'pointer' }} onClick={() => onOpenRefs(t.refs)} title="open the records">
+                <tr {...pressableRow} key={t.id} style={{ cursor: 'pointer' }} onClick={() => onOpenRefs(t.refs)} title="open the records">
                   <td className="mono">{t.account}</td>
                   <td>{t.how.join(', ')}</td>
                   <td className="mono">{t.via.join(', ')}</td>

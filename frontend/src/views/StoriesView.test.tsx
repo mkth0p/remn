@@ -27,6 +27,7 @@ vi.mock('../data/claims', async (orig) => ({
 }))
 
 import { StoriesView } from './StoriesView'
+import { ConfirmHost } from '../components/ConfirmHost'
 import { apiPost } from '../api/client'
 import { downloadBlob, exportCsv, exportJson } from '../util/export'
 import type { StoryDecisions } from '../data/storyDecisions'
@@ -459,21 +460,30 @@ describe('notes on stories', () => {
       const two = snapshot()
       two.stories.push({ ...two.stories[0], id: 'story-2', title: 'carla.morel@northstar.example', subject: { kind: 'person', id: 'id:carla', label: 'carla.morel@northstar.example', org: null } })
       await db.kv.put({ key: 'stories-1', value: await current(two) })
-      render(<StoriesView />)
+      render(
+        <>
+          <StoriesView />
+          <ConfirmHost />
+        </>,
+      )
       const note = (await screen.findByLabelText('Story note', {}, WAIT)) as HTMLTextAreaElement
       fireEvent.change(note, { target: { value: 'half a thought' } })
-      const ask = vi.fn(() => false)
-      vi.stubGlobal('confirm', ask)
-      fireEvent.click(screen.getByRole('button', { name: 'Story carla.morel@northstar.example' }))
-      expect(ask).toHaveBeenCalledWith('The note on this story is not saved. Discard it?')
+      const carla = screen.getByRole('button', { name: 'Story carla.morel@northstar.example' })
+      carla.focus()
+      fireEvent.click(carla)
+      const dialog = await screen.findByRole('dialog', { name: 'Discard the note' })
+      expect(within(dialog).getByText('The note on this story is not saved. Discard it?')).toBeTruthy()
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull(), WAIT)
       expect((screen.getByLabelText('Story note') as HTMLTextAreaElement).value).toBe('half a thought')
-      ask.mockReturnValue(true)
+      // the focus goes back to the story the analyst pressed
+      expect(document.activeElement).toBe(carla)
       fireEvent.click(screen.getByRole('button', { name: 'Story carla.morel@northstar.example' }))
+      fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Discard' }))
       await waitFor(() => expect((screen.getByLabelText('Story note') as HTMLTextAreaElement).value).toBe(''), WAIT)
       // nothing typed: no question
-      ask.mockClear()
       fireEvent.click(screen.getByRole('button', { name: 'Story daniel.roy@northstar.example' }))
-      expect(ask).not.toHaveBeenCalled()
+      expect(screen.queryByRole('dialog')).toBeNull()
     },
     TEST_TIMEOUT,
   )

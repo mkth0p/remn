@@ -6,6 +6,7 @@ import { effectiveSeverity, sevCounts } from '../../rules/incidents'
 import { fmtNum } from '../../util/format'
 import type { Group } from './model'
 import { LeadBadge, MemberRow } from './parts'
+import { pressable } from '../../components/pressable'
 
 /** The queue grouped by rule, entity or source: one line per group, opened to its first 300 findings. */
 export function GroupedFindings({
@@ -33,7 +34,7 @@ export function GroupedFindings({
     <div style={{ flex: 1, overflow: 'auto', background: 'var(--surface)' }}>
       {groups.map((g) => (
         <div key={g.key}>
-          <div className="group-row" onClick={() => onToggle(g.key)}>
+          <div {...pressable} className="group-row" onClick={() => onToggle(g.key)}>
             <span className="caret">{open.has(g.key) ? '▾' : '▸'}</span>
             <Dot sev={effectiveSeverity(g.items[0])} />
             <span className="name ellipsis" style={{ maxWidth: 520 }}>

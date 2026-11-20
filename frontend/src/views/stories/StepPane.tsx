@@ -10,6 +10,7 @@ import { fmtNum, fmtTs } from '../../util/format'
 import { HopLine, ProcessTrees, SessionLine } from './LineagePanels'
 import { CONFIDENCE_SEV, ORIGIN_LABEL } from './model'
 import { useMemo } from 'react'
+import { pressable } from '../../components/pressable'
 
 export function StepPane({
   story,
@@ -69,7 +70,7 @@ export function StepPane({
             {step.host && (
               <>
                 <div className="k">host</div>
-                <div className="v click" onClick={() => setEntity({ kind: 'host', value: step.host! })}>
+                <div {...pressable} className="v click" onClick={() => setEntity({ kind: 'host', value: step.host! })}>
                   {step.host}
                 </div>
               </>
@@ -77,7 +78,7 @@ export function StepPane({
             {step.ip && (
               <>
                 <div className="k">address</div>
-                <div className="v click" onClick={() => setEntity({ kind: 'ip', value: step.ip! })}>
+                <div {...pressable} className="v click" onClick={() => setEntity({ kind: 'ip', value: step.ip! })}>
                   {step.ip}
                 </div>
               </>

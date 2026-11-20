@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Health, ProviderInfo } from '../api/client'
 import { defaultSettings, RemnDB, setDb, type Case } from '../db/schema'
 import { useStore } from '../state/store'
 import { SettingsView } from './SettingsView'
+import { ConfirmHost } from '../components/ConfirmHost'
 
 // the server answers the access of a shared case and the size of its store
 const api = vi.hoisted(() => ({ get: vi.fn() }))
@@ -17,6 +18,16 @@ vi.mock('../ai/transport', async (importOriginal) => ({
   fetchClaudeStatus: ai.claude,
 }))
 vi.mock('../data/trusted', () => ({ suggestTrustedSenders: ai.suggest }))
+
+/** The page with the app's confirmation dialog, as App mounts it. */
+const page = () => (
+  <>
+    <SettingsView />
+    <ConfirmHost />
+  </>
+)
+/** Answer the confirmation dialog the last action opened. */
+const answer = async (button: 'Cancel' | 'Delete' | 'Remove') => fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: button }))
 
 const kase: Case = { id: 1, name: 'Northwind intrusion', analyst: 'analyst one', notes: '', storage: 'browser', createdAt: 1, updatedAt: 1, settings: defaultSettings() }
 const provider = (name: string, configured: boolean): ProviderInfo => ({ name, kinds: ['ip'], configured, needsKey: configured ? null : 'EXAMPLE', description: name, homepage: '' })
@@ -226,13 +237,14 @@ describe('SettingsView', () => {
 
   it('empties a browser case after confirmation and keeps the case itself', async () => {
     await db.events.add({ caseId: 1, ts: 1000, source: 'security', eventId: 4624, host: 'ws-01' } as never)
-    const ask = vi.spyOn(window, 'confirm').mockReturnValue(false)
-    render(<SettingsView />)
+    render(page())
     fireEvent.click(screen.getByText('delete all case data from this browser'))
-    expect(ask).toHaveBeenCalledTimes(1)
+    expect(within(await screen.findByRole('dialog', { name: 'Delete the case data' })).getByText(/Delete ALL data of case "Northwind intrusion"/)).toBeTruthy()
+    await answer('Cancel')
+    expect(screen.queryByRole('dialog')).toBeNull()
     expect(await db.events.count()).toBe(1)
-    ask.mockReturnValue(true)
     fireEvent.click(screen.getByText('delete all case data from this browser'))
+    await answer('Delete')
     await waitFor(() => expect(toasts()).toContain('case data deleted'))
     expect(await db.events.count()).toBe(0)
     expect(await db.cases.get(1)).toBeTruthy()
@@ -240,9 +252,9 @@ describe('SettingsView', () => {
 
   it('deletes the case and opens the most recently updated one left', async () => {
     await db.cases.add({ ...kase, id: 2, name: 'Second case', updatedAt: 50 })
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
-    render(<SettingsView />)
+    render(page())
     fireEvent.click(screen.getByText('delete this case'))
+    await answer('Delete')
     await waitFor(() => expect(toasts()).toContain('case "Northwind intrusion" deleted'))
     expect(await db.cases.get(1)).toBeUndefined()
     expect(useStore.getState().currentCase?.id).toBe(2)
@@ -257,8 +269,7 @@ describe('SettingsView', () => {
       path.endsWith('/access') ? { key: 'case-key-1', name: 'Northwind intrusion', owner: 'owner-a', members: ['member-b'], may: { read: true, write: true, own: false } } : { sizeBytes: 2048 },
     )
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
-    render(<SettingsView />)
+    render(page())
     await waitFor(() => expect(screen.getByText('remove this case from this browser')).toBeTruthy())
     await waitFor(() => expect(screen.getByText('case-key-1 · 2.00 KB')).toBeTruthy())
     const wipe = screen.getByText('delete all case data (browser + server store)') as HTMLButtonElement
@@ -266,6 +277,7 @@ describe('SettingsView', () => {
     expect(wipe.title).toBe("Only the case's owner or an admin may do this.")
     expect((screen.getByText('delete this case') as HTMLButtonElement).disabled).toBe(true)
     fireEvent.click(screen.getByText('remove this case from this browser'))
+    await answer('Remove')
     await waitFor(() => expect(toasts()).toContain('case "Northwind intrusion" removed from this browser'))
     expect(fetchSpy).not.toHaveBeenCalled()
     expect(await db.cases.get(1)).toBeUndefined()

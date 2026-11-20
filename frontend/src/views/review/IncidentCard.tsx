@@ -10,6 +10,7 @@ import { useStore } from '../../state/store'
 import { classNames, fmtNum, fmtTs } from '../../util/format'
 import { Facts } from './Facts'
 import { DECISIONS, STATUS_LABEL, type Status } from './model'
+import { pressable } from '../../components/pressable'
 
 /** An incident to decide: what was seen, the decision and what it does to the verdict, its severity, whether the report carries it, and its note. */
 export function IncidentCard({
@@ -85,6 +86,7 @@ export function IncidentCard({
             })}
           {inc.kind === 'mail' && (
             <span
+              {...pressable}
               className="pill click"
               onClick={() => {
                 setFocus({ source: 'mails', id: inc.refs[0] })

@@ -5,6 +5,7 @@ import { dismissed, type StoryView } from '../../data/storyDecisions'
 import { fmtNum, fmtTs } from '../../util/format'
 import { StoryCallTag } from '../StoryDecisions'
 import { CONFIDENCE_SEV, spanText } from './model'
+import { pressable } from '../../components/pressable'
 
 /** A tiny strip of the fifteen phases, filled where the story has one: the shape of an intrusion at a glance. */
 export function PhaseStrip({ story }: { story: Story }) {
@@ -89,10 +90,10 @@ function StoryRows({ stories, active, onSelect, views }: { stories: Story[]; act
     <>
       {stories.map((s) => (
         <div
+          {...pressable}
           key={s.id}
           className={'story-row' + (active === s.id ? ' active' : '') + (dismissed(views?.get(s.id)?.call?.verdict) ? ' dismissed' : '')}
           onClick={() => onSelect(s.id)}
-          role="button"
           aria-label={`Story ${s.title}${views?.get(s.id)?.part === 'split' ? ' (second part)' : ''}`}
         >
           <Dot sev={s.severity} />
@@ -139,7 +140,7 @@ export function StoryLinks({ story, stories, onStory }: { story: Story; stories:
               <div key={l.story} role="listitem" style={{ marginTop: 2 }}>
                 <Dot sev={CONFIDENCE_SEV[l.confidence]} title={`${l.confidence} link`} />{' '}
                 {other ? (
-                  <span className="click" style={{ cursor: 'pointer', color: 'var(--fg-1)' }} onClick={() => onStory(other.id)}>
+                  <span {...pressable} className="click" style={{ cursor: 'pointer', color: 'var(--fg-1)' }} onClick={() => onStory(other.id)}>
                     {other.title}
                   </span>
                 ) : (

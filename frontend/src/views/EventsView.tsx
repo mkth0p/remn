@@ -399,6 +399,7 @@ export function EventsView() {
                 />
               )}
               <VirtualTable
+                label="Events"
                 rows={rows}
                 columns={columns}
                 rowKey={(r) => r.id!}

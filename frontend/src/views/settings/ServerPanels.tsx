@@ -1,5 +1,6 @@
 import type { Health } from '../../api/client'
 import { Badge, Toggle } from '../../components/ui'
+import { confirmAction } from '../../components/confirm'
 import { removeCase, wipeCase } from '../../data/caseState'
 import { refreshCounts } from '../../data/ingest'
 import type { Case, CaseSettings } from '../../db/schema'
@@ -74,7 +75,14 @@ export function IngestionPanel({
   const s = kase.settings
   const isServer = kase.storage === 'server'
   const wipe = async () => {
-    if (!confirm(`Delete ALL data of case "${kase.name}" (${isServer ? 'server store + ' : ''}browser records: evidence rows, findings, sessions)? The case itself is kept.`)) return
+    if (
+      !(await confirmAction(`Delete ALL data of case "${kase.name}" (${isServer ? 'server store + ' : ''}browser records: evidence rows, findings, sessions)? The case itself is kept.`, {
+        title: 'Delete the case data',
+        action: 'Delete',
+        danger: true,
+      }))
+    )
+      return
     try {
       await wipeCase(kase)
     } catch (e) {
@@ -86,7 +94,10 @@ export function IngestionPanel({
   }
   const destroy = async () => {
     if (
-      !confirm(`Delete case "${kase.name}" entirely: ${isServer ? 'server store, ' : ''}evidence rows, findings, notes, sessions, custom rules, settings and the case itself? This cannot be undone.`)
+      !(await confirmAction(
+        `Delete case "${kase.name}" entirely: ${isServer ? 'server store, ' : ''}evidence rows, findings, notes, sessions, custom rules, settings and the case itself? This cannot be undone.`,
+        { title: 'Delete the case', action: 'Delete', danger: true },
+      ))
     )
       return
     try {
@@ -101,7 +112,14 @@ export function IngestionPanel({
     }
   }
   const leave = async () => {
-    if (!confirm(`Remove case "${kase.name}" from this browser? Its evidence stays on the server for its owner and members; this browser's findings, notes and sessions of it go.`)) return
+    if (
+      !(await confirmAction(`Remove case "${kase.name}" from this browser? Its evidence stays on the server for its owner and members; this browser's findings, notes and sessions of it go.`, {
+        title: 'Remove from this browser',
+        action: 'Remove',
+        danger: true,
+      }))
+    )
+      return
     try {
       const { next } = await removeCase(kase, { keepServer: true })
       setCurrentCase(next)

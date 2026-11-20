@@ -4,6 +4,7 @@ import type { Condition } from '../rules/filter'
 import { classNames, fmtNum } from '../util/format'
 import { getDb } from '../db/schema'
 import { useStore } from '../state/store'
+import { pressable } from './pressable'
 
 const LOAD = 500
 
@@ -84,7 +85,7 @@ function FacetBlock({
   const max = items[0]?.count ?? 1
   return (
     <div className="facet">
-      <div className="facet-h" onClick={() => setOpen(!open)}>
+      <div {...pressable} className="facet-h" onClick={() => setOpen(!open)}>
         {def.label}
         {items.length > 0 && (
           <span className="muted" title={items.length >= LOAD ? `the ${LOAD} most frequent values; type to search all of them` : undefined}>
@@ -113,6 +114,7 @@ function FacetBlock({
               const key = it.value.toLowerCase()
               return (
                 <div
+                  {...pressable}
                   key={it.value}
                   className={classNames('facet-item', active.has(key) && 'active', negated.has(key) && 'neg')}
                   onClick={(e) => onToggle(def.field, it.value, e.altKey)}

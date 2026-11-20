@@ -10,6 +10,7 @@ import { AddToTimeline } from './AddToTimeline'
 import { CiteForQuestion } from './CiteForQuestion'
 import { namedMessageIds } from '../data/namedMessages'
 import { sanitizeMailHtml } from './mailHtml'
+import { pressable, pressableRow } from './pressable'
 
 const SEV_ORDER = ['critical', 'high', 'medium', 'low', 'info']
 
@@ -338,13 +339,13 @@ export function MailDetail({
         <h3>Entities</h3>
         <div className="kv">
           <div className="k">sender</div>
-          <div className="v click" onClick={() => setEntity({ kind: 'address', value: row.fromAddr })} title="open the sender page">
+          <div {...pressable} className="v click" onClick={() => setEntity({ kind: 'address', value: row.fromAddr })} title="open the sender page">
             {row.fromAddr}
           </div>
           {senderDomain && (
             <>
               <div className="k">domain</div>
-              <div className="v click" onClick={() => setEntity({ kind: 'domain', value: senderDomain })} title="open the domain page">
+              <div {...pressable} className="v click" onClick={() => setEntity({ kind: 'domain', value: senderDomain })} title="open the domain page">
                 {senderDomain}
               </div>
             </>
@@ -356,7 +357,7 @@ export function MailDetail({
                 <div className="k" style={{ color: 'var(--warn)' }}>
                   reply-to
                 </div>
-                <div className="v click" onClick={() => setEntity({ kind: 'address', value: r.addr })}>
+                <div {...pressable} className="v click" onClick={() => setEntity({ kind: 'address', value: r.addr })}>
                   {r.addr}
                 </div>
               </Fragment>
@@ -364,7 +365,7 @@ export function MailDetail({
           {row.to.slice(0, 4).map((t, i) => (
             <Fragment key={'to' + i}>
               <div className="k">{i === 0 ? 'recipient' : ''}</div>
-              <div className="v click" onClick={() => setEntity({ kind: 'user', value: t.addr || t.name })} title="open the user page">
+              <div {...pressable} className="v click" onClick={() => setEntity({ kind: 'user', value: t.addr || t.name })} title="open the user page">
                 {t.addr || t.name}
               </div>
             </Fragment>
@@ -378,7 +379,7 @@ export function MailDetail({
           {row.originIp && (
             <>
               <div className="k">origin ip</div>
-              <div className="v click" onClick={() => setEntity({ kind: 'ip', value: String(row.originIp) })} title="open the IP page">
+              <div {...pressable} className="v click" onClick={() => setEntity({ kind: 'ip', value: String(row.originIp) })} title="open the IP page">
                 {row.originIp}
               </div>
             </>
@@ -415,7 +416,7 @@ export function MailDetail({
             {row.campaignId && (
               <>
                 <div className="k">campaign</div>
-                <div className="v click" onClick={() => pivot(row.campaignId!, 'campaignId', 'mails')}>
+                <div {...pressable} className="v click" onClick={() => pivot(row.campaignId!, 'campaignId', 'mails')}>
                   {row.campaignSize ?? '?'} mail(s) · {row.campaignSenders ?? '?'} sender(s)
                 </div>
               </>
@@ -429,7 +430,7 @@ export function MailDetail({
         <h3>Findings {findings.length ? <span className="muted">({findings.length})</span> : null}</h3>
         {!findings.length && <div className="muted small">no rule fired on this mail</div>}
         {findings.slice(0, 8).map((f) => (
-          <div key={f.id} className="row click" style={{ gap: 8, cursor: 'pointer' }} onClick={() => setView('findings')} title={f.description}>
+          <div {...pressable} key={f.id} className="row click" style={{ gap: 8, cursor: 'pointer' }} onClick={() => setView('findings')} title={f.description}>
             <Dot sev={f.severity} />
             <span className="ellipsis" style={{ flex: 1 }}>
               {f.title}
@@ -561,7 +562,7 @@ export function MailDetail({
         style={{ color: 'var(--fg-2)' }}
         title={`${row.fromName ? `"${row.fromName}" ` : ''}<${row.fromAddr}> → ${row.to.map((t) => t.addr || t.name).join(', ') || '(undisclosed)'}${row.cc.length ? ` · cc ${row.cc.map((t) => t.addr).join(', ')}` : ''} · ${fmtTs(row.date)}`}
       >
-        <span className="click" onClick={() => setEntity({ kind: 'address', value: row.fromAddr })}>
+        <span {...pressable} className="click" onClick={() => setEntity({ kind: 'address', value: row.fromAddr })}>
           {row.fromName ? `"${row.fromName}" ` : ''}&lt;{row.fromAddr}&gt;
         </span>
         {' → '}
@@ -830,6 +831,7 @@ export function MailDetail({
                 <tbody>
                   {related.events.map((e) => (
                     <tr
+                      {...pressableRow}
                       key={e.id}
                       onClick={() => {
                         setFocus({ source: 'events', id: e.id! })

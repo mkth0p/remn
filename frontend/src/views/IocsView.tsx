@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { VirtualTable, type Column } from '../components/VirtualTable'
 import { Drawer, usePivot } from '../components/Detail'
 import { Badge, JsonView, Progress, Toggle } from '../components/ui'
+import { confirmAction } from '../components/confirm'
 import { checkReputation } from '../data/iocs'
 import { getSource } from '../data/source'
 import { getDb, type Ioc, type IocsCapped } from '../db/schema'
@@ -59,7 +60,7 @@ export function IocsView() {
     if (!kase.settings.networkAllowed) return toast('warn', 'Enable external lookups first (toggle above). Each lookup discloses the indicator to the provider.')
     const todo = items.filter((i) => ['ip', 'domain', 'url', 'hash'].includes(i.kind))
     if (!todo.length) return toast('warn', 'nothing to check (ip / domain / url / hash only)')
-    if (todo.length > 300 && !confirm(`Check ${todo.length} indicators? This may take a while and hit rate limits.`)) return
+    if (todo.length > 300 && !(await confirmAction(`Check ${todo.length} indicators? This may take a while and hit rate limits.`, { title: 'Check the indicators', action: 'Check' }))) return
     setProgress({ done: 0, total: todo.length })
     await checkReputation(kase, todo, (done, total) => setProgress({ done, total }))
     setProgress(null)
@@ -199,6 +200,7 @@ export function IocsView() {
       </div>
       <div className="relative" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <VirtualTable
+          label="Indicators"
           rows={rows}
           columns={columns}
           rowKey={(r) => `${r.kind}:${r.value}`}

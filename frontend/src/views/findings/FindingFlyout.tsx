@@ -15,6 +15,7 @@ import { classNames, fmtNum, fmtTs } from '../../util/format'
 import { attackHref } from '../../util/safe'
 import { REFS_OPEN, relatedChains, STATUSES, STATUS_LABEL, type LastRun, type Status } from './model'
 import { FindingSeverity, OverrideLabel, SeverityOverrideNotice, StatusBadge } from './parts'
+import { pressable } from '../../components/pressable'
 
 export type FlyTab = 'overview' | 'table' | 'json'
 
@@ -221,14 +222,14 @@ export function FindingFlyout({
               {Object.entries(selected.entities).map(([k, v]) => (
                 <div className="f" key={k}>
                   <span className="k">{k}</span>
-                  <span className="v" onClick={() => onEntity(k, String(v), selected.source)} title={entityKind(k) ? `open the ${entityKind(k)} page` : `pivot on ${k}`}>
+                  <span {...pressable} className="v" onClick={() => onEntity(k, String(v), selected.source)} title={entityKind(k) ? `open the ${entityKind(k)} page` : `pivot on ${k}`}>
                     {String(v)}
                   </span>
                 </div>
               ))}
               <div className="f">
                 <span className="k">referenced rows</span>
-                <span className="v" onClick={() => onOpenRefs(selected.source, selected.refs)}>
+                <span {...pressable} className="v" onClick={() => onOpenRefs(selected.source, selected.refs)}>
                   {fmtNum(selected.refs.length)}
                   {selected.refs.length > REFS_OPEN ? ` (first ${REFS_OPEN} open)` : ''}
                 </span>
@@ -237,6 +238,7 @@ export function FindingFlyout({
                 <div className="f" key={id}>
                   <span className="k">first row</span>
                   <span
+                    {...pressable}
                     className="v"
                     onClick={() => {
                       setFocus({ source: selected.source, id })
@@ -277,7 +279,7 @@ export function FindingFlyout({
               {inc && inc.findings.length > 1 ? (
                 <>
                   <div className="k">incident</div>
-                  <div className="v click" onClick={() => onOpenIncident(inc)}>
+                  <div {...pressable} className="v click" onClick={() => onOpenIncident(inc)}>
                     {inc.title} · {inc.findings.length} finding(s)
                   </div>
                 </>
@@ -317,7 +319,7 @@ export function FindingFlyout({
           {Object.entries(selected.entities).map(([k, v]) => (
             <div key={'e' + k} style={{ display: 'contents' }}>
               <div className="k">entity.{k}</div>
-              <div className="v click" onClick={() => pivot(String(v), k, selected.source)}>
+              <div {...pressable} className="v click" onClick={() => pivot(String(v), k, selected.source)}>
                 {String(v)}
               </div>
             </div>

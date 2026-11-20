@@ -59,14 +59,25 @@ reloaded.
 
 On the Mails and Findings lists, `j` and `k` move the selection and `/` focuses the search;
 the Stories, Graph and Review pages move between their steps or cards with `j` and `k` too.
-The other lists, Events and Indicators among them, are used with the mouse. The Review page
-adds `r`, `e`, `f` and `x` for its decisions.
+The Review page adds `r`, `e`, `f` and `x` for its decisions. The tables of Events, Mails,
+Findings and Indicators are tables to a screen reader, with their row count, and take the
+keyboard: Tab enters on the row last used, the arrows, Page Up, Page Down, Home and End move
+between rows, Enter opens one and Space selects it where the table selects rows; a sortable
+column header is a button. A switch is a button that Space flips. The items of the other
+lists and the values that open something (stories, steps, chains, evidence, facets, an entity's
+value) are reached with Tab and pressed with Enter or Space, and the focus shows as a ring.
 
 Opening another page moves the keyboard focus to its heading, or to the page itself where it
 has none, so a screen reader names the page and the next Tab starts in it. A dialog takes the
 focus when it opens, keeps Tab and Shift+Tab among its own controls and gives the focus back to
-the button that opened it when it closes. Buttons that show only an icon carry a name a screen
-reader reads out.
+the button that opened it when it closes. The questions asked before something is removed or
+moved (a case or its data, evidence, a custom rule, a note, a story note not saved, a move to
+the server store, a check of many indicators) are asked in such a dialog, not the browser's,
+with the focus on Cancel when the answer removes something. Buttons that show only an icon
+carry a name a screen reader reads out. The messages in the corner are read out as they come,
+an error at once, and each has a button that dismisses it. Every colour text is written in
+reads at 4.5:1 or more on each surface of its theme (WCAG AA), which a test computes from
+`theme.css`.
 
 ## Evidence
 

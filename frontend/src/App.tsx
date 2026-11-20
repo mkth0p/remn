@@ -39,6 +39,7 @@ import {
 } from './components/Icons'
 import { ConsolePanel, Toasts } from './components/ConsolePanel'
 import { TokenGate } from './components/TokenGate'
+import { ConfirmHost } from './components/ConfirmHost'
 import { SharedCases } from './components/CaseAccess'
 import { signOut, viewerReason } from './data/access'
 import { RemnMark } from './components/RemnMark'
@@ -439,6 +440,7 @@ export default function App() {
           </Suspense>
         </ErrorBoundary>
         <Toasts />
+        <ConfirmHost />
         {authRequired && <TokenGate />}
       </>
     )
@@ -599,6 +601,7 @@ export default function App() {
         )}
       </main>
       <Toasts />
+      <ConfirmHost />
       {authRequired && <TokenGate />}
       {newCase && (
         <Modal

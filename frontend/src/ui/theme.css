@@ -168,6 +168,11 @@ textarea {
   font: inherit;
   color: inherit;
 }
+/* where the keyboard focus is, for a keyboard user only: a mouse press draws no ring */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -770,6 +775,7 @@ label.field > span {
   position: relative;
   width: 32px;
   height: 18px;
+  padding: 0;
   background: var(--line-2);
   border-radius: 9px;
   border: 0;
@@ -1185,6 +1191,21 @@ label.field > span {
 .vtable-head .sort {
   color: var(--accent);
 }
+.vtable-sort {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: left;
+  cursor: pointer;
+}
 .vtable-body {
   flex: 1;
   overflow: auto;
@@ -1207,6 +1228,10 @@ label.field > span {
 }
 .vrow.selected {
   background: var(--accent-dim);
+}
+/* inside the scrolling body an outline outside the row would be clipped */
+.vrow:focus-visible {
+  outline-offset: -2px;
 }
 .vrow.sev-critical,
 .vrow.sev-high,
@@ -1526,6 +1551,9 @@ label.field > span {
   z-index: 100;
 }
 .toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-left: 3px solid var(--accent);
@@ -1536,6 +1564,18 @@ label.field > span {
   max-width: 440px;
   font-size: 12px;
   color: var(--fg-1);
+}
+.toast > span {
+  flex: 1;
+}
+.toast-x {
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--fg-2);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
 }
 .toast.err {
   border-left-color: var(--danger);

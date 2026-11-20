@@ -10,6 +10,7 @@ import { classNames, fmtNum, fmtTs } from '../../util/format'
 import { attackHref } from '../../util/safe'
 import { KIND_LABEL, REFS_OPEN, STATUSES, STATUS_LABEL, type Status } from './model'
 import { MemberRow, SeverityOverrideNotice, StatusBadge } from './parts'
+import { pressable } from '../../components/pressable'
 
 /** One incident: its findings in queue order, its status set on all of them, and what to look at next. */
 export function IncidentFlyout({
@@ -128,7 +129,12 @@ export function IncidentFlyout({
             .map(([k, v]) => (
               <div className="f" key={k}>
                 <span className="k">{k}</span>
-                <span className="v" onClick={() => onEntity(k, String(v), incident.source === 'mails' ? 'mails' : 'events')} title={entityKind(k) ? `open the ${entityKind(k)} page` : `pivot on ${k}`}>
+                <span
+                  {...pressable}
+                  className="v"
+                  onClick={() => onEntity(k, String(v), incident.source === 'mails' ? 'mails' : 'events')}
+                  title={entityKind(k) ? `open the ${entityKind(k)} page` : `pivot on ${k}`}
+                >
                   {String(v)}
                 </span>
               </div>
@@ -137,6 +143,7 @@ export function IncidentFlyout({
             <div className="f">
               <span className="k">mail</span>
               <span
+                {...pressable}
                 className="v"
                 onClick={() => {
                   setFocus({ source: 'mails', id: incident.refs[0] })

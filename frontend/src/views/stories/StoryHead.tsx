@@ -11,6 +11,7 @@ import { StoryCallBar, StoryTools } from '../StoryDecisions'
 import { scoreTitle, spanText } from './model'
 import { StoryLinks } from './StoryList'
 import { StoryNote } from './StoryNote'
+import { pressable } from '../../components/pressable'
 
 /**
  * The head of the open story: who or what it is about, its score, span and confidence, its sources,
@@ -71,6 +72,7 @@ export function StoryHead({
         <div className="col" style={{ gap: 3, flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 600, color: 'var(--fg-1)', fontSize: 14 }}>
             <span
+              {...pressable}
               className="click"
               style={{ cursor: 'pointer' }}
               onClick={() => (story.kind === 'host' ? setEntity({ kind: 'host', value: story.subject.id }) : onIdentity())}
@@ -106,25 +108,26 @@ export function StoryHead({
       </div>
       <div className="row wrap small" style={{ gap: 6, marginTop: 8 }}>
         {story.attackerAddresses.map((ip) => (
-          <span key={ip} className="pill" onClick={() => setEntity({ kind: 'ip', value: ip })} title="a source the story's findings name">
+          <span {...pressable} key={ip} className="pill" onClick={() => setEntity({ kind: 'ip', value: ip })} title="a source the story's findings name">
             {ip}
           </span>
         ))}
         {story.hosts.map((h) => (
-          <span key={h} className="pill" onClick={() => setEntity({ kind: 'host', value: h })} title={res?.hosts.find((x) => x.key === h)?.basis ?? 'a host of the story'}>
+          <span {...pressable} key={h} className="pill" onClick={() => setEntity({ kind: 'host', value: h })} title={res?.hosts.find((x) => x.key === h)?.basis ?? 'a host of the story'}>
             <IconHost /> {h}
           </span>
         ))}
         {story.campaigns.map((c) => {
           const camp = res?.campaigns.find((x) => x.id === c)
           return (
-            <span key={c} className="pill" onClick={() => onCampaign(c)} title="the campaign this story is part of">
+            <span {...pressable} key={c} className="pill" onClick={() => onCampaign(c)} title="the campaign this story is part of">
               campaign {camp?.label ?? c}
             </span>
           )
         })}
         {story.chains.length > 0 && (
           <span
+            {...pressable}
             className="pill"
             onClick={() => {
               setFocusChain(story.chains[0])

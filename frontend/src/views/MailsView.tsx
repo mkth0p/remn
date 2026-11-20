@@ -409,6 +409,7 @@ export function MailsView() {
           )}
           {!paneMax && (
             <VirtualTable
+              label="Mails"
               rows={rows}
               columns={columns}
               rowKey={(r) => r.id!}

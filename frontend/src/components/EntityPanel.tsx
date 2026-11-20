@@ -6,6 +6,7 @@ import { useStore, type EntityRef } from '../state/store'
 import { fmtNum, fmtTs, tzLabel } from '../util/format'
 import { Badge, Dot, Flyout, Sev, Tabs } from './ui'
 import { IconAi, IconGlobe, IconHost, IconMail, IconUser } from './Icons'
+import { pressable, pressableRow } from './pressable'
 
 export type EntityKind = EntityRef['kind']
 export type { EntityRef }
@@ -357,7 +358,7 @@ export function EntityPanel() {
           {busy && !items.length && <div className="muted">loading…</div>}
           {!busy && !items.length && <div className="muted">nothing in this case references {entity.value}</div>}
           {items.slice(0, 300).map((it, i) => (
-            <div key={i} className="step" onClick={it.open} style={{ gridTemplateColumns: '150px 14px 1fr' }}>
+            <div {...pressable} key={i} className="step" onClick={it.open} style={{ gridTemplateColumns: '150px 14px 1fr' }}>
               <span className="t">{fmtTs(it.ts)}</span>
               <Dot sev={it.kind === 'event' ? 'info' : it.sev} title={it.kind} />
               <span>
@@ -450,6 +451,7 @@ export function EntityPanel() {
           <tbody>
             {events.slice(0, 200).map((e) => (
               <tr
+                {...pressableRow}
                 key={e.id}
                 onClick={() => {
                   setFocus({ source: 'events', id: e.id! })
@@ -488,6 +490,7 @@ export function EntityPanel() {
           <tbody>
             {mails.slice(0, 200).map((m) => (
               <tr
+                {...pressableRow}
                 key={m.id}
                 onClick={() => {
                   setFocus({ source: 'mails', id: m.id! })

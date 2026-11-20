@@ -6,6 +6,7 @@ import type { Finding } from '../../db/schema'
 import { effectiveSeverity } from '../../rules/incidents'
 import { classNames, fmtNum, fmtTs } from '../../util/format'
 import { STATUS_LABEL, STATUS_SEV, type Status } from './model'
+import { pressableRow } from '../../components/pressable'
 
 export const StatusBadge = ({ s }: { s: string }) => <Badge sev={STATUS_SEV[s as Status] ?? 'info'}>{STATUS_LABEL[s as Status] ?? s}</Badge>
 
@@ -61,7 +62,7 @@ export function LeadBadge({ reading }: { reading?: MeasureReading }) {
 /** One finding as a row of a group or of an incident's list; a click opens it. */
 export function MemberRow({ f, priority, reading, onOpen }: { f: Finding; priority?: Priority; reading?: MeasureReading; onOpen: () => void }) {
   return (
-    <tr onClick={onOpen} style={{ cursor: 'pointer' }}>
+    <tr {...pressableRow} onClick={onOpen} style={{ cursor: 'pointer' }}>
       <td style={{ width: 60 }} className="mono" title={priority?.reasons.map((r) => r.text).join('\n')}>
         {priority?.score}
       </td>

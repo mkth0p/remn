@@ -3,6 +3,7 @@ import { suggestionsFor, type Suggestion } from '../../data/aiReview'
 import type { ChainReview, ReviewItem } from '../../data/review'
 import { classNames } from '../../util/format'
 import { chainDecision, factsLine, STATUS_LABEL, STATUS_SEV, type Status } from './model'
+import { pressable } from '../../components/pressable'
 
 export interface RailGroup {
   id: string
@@ -49,7 +50,7 @@ export function ReviewRail({
             {g.items.map((it, j) => {
               const i = start + j
               return (
-                <div key={it.id} className={classNames('item', i === idx && 'active', it.done && 'done')} onClick={() => setIdx(i)}>
+                <div {...pressable} key={it.id} className={classNames('item', i === idx && 'active', it.done && 'done')} onClick={() => setIdx(i)}>
                   <Dot sev={it.severity} />
                   <div style={{ minWidth: 0 }}>
                     <div className="title ellipsis">{it.title}</div>
