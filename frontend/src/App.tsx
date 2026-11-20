@@ -95,6 +95,8 @@ function bootFailure(e: unknown): string {
   return `${said} The browser may refuse this site storage (a private window, or site data turned off in its settings), its storage may be full, or another REMN tab may hold the database while it is upgraded: close other REMN tabs, check the site settings and reload.`
 }
 
+const BOOT_BLOCKED = 'Another REMN tab holds the database of this browser open in an older version, so this page cannot upgrade it yet: close the other REMN tabs or reload them, and this page starts.'
+
 export default function App() {
   const view = useStore((s) => s.view)
   const setView = useStore((s) => s.setView)
@@ -135,11 +137,15 @@ export default function App() {
   const pivotAbort = useRef<AbortController | null>(null)
   const [ready, setReady] = useState(false)
   const [bootError, setBootError] = useState<string | null>(null)
+  const [bootWait, setBootWait] = useState<string | null>(null)
   const [pendingKind, setPendingKind] = useState<'evtx' | 'mail' | 'package'>('mail')
   const [migrating, setMigrating] = useState<string | null>(null)
 
   useEffect(() => {
     const db = getDb()
+    // an older REMN tab that keeps the database open holds this one's upgrade back; the start waits, and says for what
+    const blocked = () => setBootWait(BOOT_BLOCKED)
+    db.on('blocked', blocked)
     onAuthError((accounts) => useStore.getState().setAuthRequired(true, accounts))
     const tokenReady = db.kv.get('apiToken').then((tok) => {
       if (typeof tok?.value === 'string' && tok.value) setApiToken(tok.value)
@@ -254,7 +260,10 @@ export default function App() {
       })
       .catch(() => undefined) // a database that cannot be read is what the start reports
     const t = setInterval(load, 30000)
-    return () => clearInterval(t)
+    return () => {
+      clearInterval(t)
+      db.on('blocked').unsubscribe(blocked)
+    }
   }, [setCurrentCase, setHealth, setMeta, setThreshold])
 
   // leaving while an import runs stops it; the browser asks first
@@ -365,8 +374,9 @@ export default function App() {
     )
   if (!ready || !kase)
     return (
-      <div className="empty">
-        <div className="big">REMN</div>booting…
+      <div className="empty" role="status">
+        <div className="big">REMN</div>
+        {bootWait ?? 'booting…'}
       </div>
     )
   if (view === 'home')

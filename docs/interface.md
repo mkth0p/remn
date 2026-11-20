@@ -40,7 +40,9 @@ A page that fails while it is drawn shows what failed in its place, with "try ag
 "reload the page" and the details to copy, and the console says so; the sidebar and the
 other pages stay usable. When the browser does not let the app open its database at start
 (a private window, site data turned off, storage full, a database written by a newer
-version), the page says so and why instead of waiting.
+version), the page says so and why instead of waiting. When another REMN tab of an older
+version keeps the database open while this one needs to upgrade it, the start says so and
+waits for that tab to be closed or reloaded.
 
 On the Mails and Findings lists, `j` and `k` move the selection and `/` focuses the search;
 the Stories, Graph and Review pages move between their steps or cards with `j` and `k` too.
