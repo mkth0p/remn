@@ -356,7 +356,12 @@ The Report page assembles the report from the Review page's decisions and says h
 items still have no decision. It holds the executive summary (drafted by the model or
 written by hand), the case bundle export and import, and a preview. "Download HTML"
 saves the report, "print / PDF" opens the browser's print dialog on it, and "open in a
-tab" shows it as its own page for the browser's print-to-PDF. Printing runs from a frame
+tab" shows it as its own page for the browser's print-to-PDF. "Word" saves the same report
+as a .docx to edit before it goes out (`frontend/src/data/reportDocx.ts`): the same sections
+in the same order, built from the same data and the same sentences, including the questions,
+the stories with their spine, phases and the analyst's decisions, the chain steps, each rule's
+lead mark and claim note, the records a reviewed relationship rests on, how a model was used
+and the whole of "Where it stops"; only the graphs stay in the HTML report. Printing runs from a frame
 that runs no script but keeps the app's origin, which the browser requires before the
 page may call print on it.
 

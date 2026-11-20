@@ -138,22 +138,38 @@ const TRANSPORT_WORDS: Record<string, string> = {
   claude: 'Claude Code (Anthropic)',
 }
 
-function aiSection(a: AiUsage): string {
-  const kinds = Object.entries(a.byProposalKind)
+/** The model's part in the case in plain sentences and rows: the HTML and the Word report print the same. */
+export function aiTexts(a: AiUsage): { intro: string; facts: string; rows: string[][]; none: string; decisions: string; ledger: string } {
   const where = a.transports.map((t) => TRANSPORT_WORDS[t] ?? t)
+  return {
+    intro:
+      "A language model assisted this investigation: it read the case through read-only tools and proposed; every change it proposed took effect only when the analyst accepted it. Each run, tool call, proposal and decision is recorded in the case's AI ledger, chained by hash.",
+    facts:
+      `${n(a.runs)} run${a.runs === 1 ? '' : 's'} · ${n(a.toolCalls)} tool call${a.toolCalls === 1 ? '' : 's'} · ${a.first && a.last ? `${fmtTs(a.first)} to ${fmtTs(a.last)}` : ''}` +
+      `${a.models.length ? ` · model${a.models.length === 1 ? '' : 's'}: ${a.models.join(', ')}` : ''}${where.length ? ` · through ${where.join(', ')}` : ''}`,
+    rows: Object.entries(a.byProposalKind).map(([k, v]) => [k.replace('_', ' '), n(v.proposed), n(v.accepted), n(v.rejected)]),
+    none: 'The model proposed no change to the case.',
+    decisions:
+      `${n(a.accepted)} accepted, ${n(a.rejected)} rejected${a.undone ? `, ${n(a.undone)} undone after acceptance` : ''}` +
+      `${a.notices ? ` · ${n(a.notices)} time${a.notices === 1 ? '' : 's'} the evidence held text addressed to a model (flagged to the analyst)` : ''}`,
+    ledger: `ledger: ${n(a.check.entries)} entries, ${a.check.intact ? `chain intact, head ${(a.check.head ?? '').slice(0, 16)}` : `chain broken at entry ${n(a.check.brokenAt ?? 0)}: an entry was changed or removed after it was written`}`,
+  }
+}
+
+export const AI_TABLE_HEAD = ['proposed', 'count', 'accepted', 'rejected']
+
+function aiSection(a: AiUsage): string {
+  const t = aiTexts(a)
   return (
-    `<p class="intro">A language model assisted this investigation: it read the case through read-only tools and proposed; every change it proposed took effect only when the analyst accepted it. ` +
-    `Each run, tool call, proposal and decision is recorded in the case's AI ledger, chained by hash.</p>` +
-    `<div class="settings">${n(a.runs)} run${a.runs === 1 ? '' : 's'} · ${n(a.toolCalls)} tool call${a.toolCalls === 1 ? '' : 's'} · ${a.first && a.last ? `${fmtTs(a.first)} to ${fmtTs(a.last)}` : ''}` +
-    `${a.models.length ? ` · model${a.models.length === 1 ? '' : 's'}: ${h(a.models.join(', '))}` : ''}${where.length ? ` · through ${h(where.join(', '))}` : ''}</div>` +
-    (kinds.length
+    `<p class="intro">${h(t.intro)}</p>` +
+    `<div class="settings">${h(t.facts)}</div>` +
+    (t.rows.length
       ? table(
-          ['proposed', 'count', 'accepted', 'rejected'],
-          kinds.map(([k, v]) => [h(k.replace('_', ' ')), n(v.proposed), n(v.accepted), n(v.rejected)]),
+          AI_TABLE_HEAD,
+          t.rows.map((r) => r.map(h)),
         )
-      : '<div class="empty">The model proposed no change to the case.</div>') +
-    `<div class="settings">${n(a.accepted)} accepted, ${n(a.rejected)} rejected${a.undone ? `, ${n(a.undone)} undone after acceptance` : ''}` +
-    `${a.notices ? ` · ${n(a.notices)} time${a.notices === 1 ? '' : 's'} the evidence held text addressed to a model (flagged to the analyst)` : ''}</div>` +
+      : `<div class="empty">${h(t.none)}</div>`) +
+    `<div class="settings">${h(t.decisions)}</div>` +
     `<div class="settings">ledger: ${n(a.check.entries)} entries, ${a.check.intact ? `chain intact, head <code>${h((a.check.head ?? '').slice(0, 16))}</code>` : `<b>chain broken at entry ${n(a.check.brokenAt ?? 0)}</b>: an entry was changed or removed after it was written`}</div>`
   )
 }
@@ -546,19 +562,25 @@ const PHASE_WORDS: Record<string, string> = {
   impact: 'Impact',
 }
 
-/** The analyst's decisions on a story, one line each: the decision and its reason, what was merged, split, taken out and disputed. */
-function storyDecisionLines(dec: ReportStory['decisions']): string {
-  if (!dec) return ''
-  const lines = [
-    dec.call ? `The analyst decided it ${h(STORY_VERDICT_LABEL[dec.call.verdict])}${dec.call.reason ? `: ${h(dec.call.reason)}` : '.'}` : '',
-    ...dec.merged.map((m) => `Merged into it by the analyst: the story of ${h(m.title)}${m.orgs ? ` (another organisation, ${h(m.orgs.join(' and '))})` : ''}: ${h(m.reason)}`),
-    dec.split ? `${dec.part === 'second' ? 'The second part of a story the analyst split' : 'Split by the analyst'} at “${h(dec.split.title)}” (${fmtTs(dec.split.ts)}): ${h(dec.split.reason)}` : '',
-    ...dec.out.map((o) => `Taken out by the analyst: “${h(o.title)}” (${n(o.count)} record${o.count === 1 ? '' : 's'}): ${h(o.reason)}`),
-    ...dec.disputed.map((x) => `Disputed by the analyst and left out of its phases and severity: “${h(x.title)}” (${fmtTs(x.ts)})${x.reason ? `: ${h(x.reason)}` : ''}`),
+/**
+ * The analyst's decisions on a story, one plain sentence each: the decision and its reason, what was
+ * merged, split, taken out and disputed. The HTML and the Word report print the same sentences.
+ */
+export function storyDecisionTexts(dec: ReportStory['decisions']): string[] {
+  if (!dec) return []
+  return [
+    dec.call ? `The analyst decided it ${STORY_VERDICT_LABEL[dec.call.verdict]}${dec.call.reason ? `: ${dec.call.reason}` : '.'}` : '',
+    ...dec.merged.map((m) => `Merged into it by the analyst: the story of ${m.title}${m.orgs ? ` (another organisation, ${m.orgs.join(' and ')})` : ''}: ${m.reason}`),
+    dec.split ? `${dec.part === 'second' ? 'The second part of a story the analyst split' : 'Split by the analyst'} at “${dec.split.title}” (${fmtTs(dec.split.ts)}): ${dec.split.reason}` : '',
+    ...dec.out.map((o) => `Taken out by the analyst: “${o.title}” (${n(o.count)} record${o.count === 1 ? '' : 's'}): ${o.reason}`),
+    ...dec.disputed.map((x) => `Disputed by the analyst and left out of its phases and severity: “${x.title}” (${fmtTs(x.ts)})${x.reason ? `: ${x.reason}` : ''}`),
     dec.confirmedSteps ? `${n(dec.confirmedSteps)} step${dec.confirmedSteps === 1 ? '' : 's'} confirmed by the analyst.` : '',
   ].filter(Boolean)
-  return lines.map((l) => `<div class="cap">${l}</div>`).join('')
 }
+const storyDecisionLines = (dec: ReportStory['decisions']): string =>
+  storyDecisionTexts(dec)
+    .map((l) => `<div class="cap">${h(l)}</div>`)
+    .join('')
 
 const STORY_PILL: Record<string, string> = { confirmed: 'confirmed', reviewed: 'unsure' }
 
@@ -567,55 +589,115 @@ const STORY_PILL: Record<string, string> = { confirmed: 'confirmed', reviewed: '
  * it, in time order, each with the tie that put it in the story, and how the spine was drawn. Nothing
  * for a story built before spines.
  */
-function storySpine(s: ReportStory['story']): string {
+/** A row of a story's spine, in plain values: the HTML and the Word report lay it out each their way. */
+export interface SpineRow {
+  ts: number
+  tsEnd: number
+  /** the severity of the step's worst finding */
+  severity: Severity | null
+  phase: string
+  title: string
+  host: string | null
+  wayIn: boolean
+  anchor: boolean
+  /** the title of the step's worst finding, and how many more it has */
+  finding: string | null
+  more: number
+  why: string
+}
+
+/** A story's spine as rows, with how many of its steps it holds and how it was drawn; null for a story built before spines. */
+export function storySpineRows(s: ReportStory['story']): { rows: SpineRow[]; of: number; basis: string | null } | null {
   const steps = spineSteps(s)
-  if (!steps?.length) return ''
+  if (!steps?.length) return null
   const basis = spineBasis(s)
   const ways = new Set(basis?.wayIn ?? [])
-  const marks = (id: string) => (ways.has(id) ? ' ' + chip('way in') : '') + (id === basis?.anchor ? ' ' + chip('anchor') : '')
-  const worst = (st: (typeof steps)[number]) => [...st.findings].sort((a, b) => rank(b.severity) - rank(a.severity))[0]
-  return `<div class="story-part">Spine: ${n(steps.length)} of ${n(s.steps.length)} steps</div>
+  const rows = steps.map((st) => {
+    const f = [...st.findings].sort((a, b) => rank(b.severity) - rank(a.severity))[0]
+    return {
+      ts: st.ts,
+      tsEnd: st.tsEnd,
+      severity: f?.severity ?? null,
+      phase: st.phase ? (PHASE_WORDS[st.phase] ?? st.phase) : 'context',
+      title: st.title,
+      host: st.host,
+      wayIn: ways.has(st.id),
+      anchor: st.id === basis?.anchor,
+      finding: f?.title ?? null,
+      more: Math.max(0, st.findings.length - 1),
+      why: `${st.tie.confidence}: ${st.tie.basis}`,
+    }
+  })
+  return { rows, of: s.steps.length, basis: basis?.text ?? null }
+}
+
+function storySpine(s: ReportStory['story']): string {
+  const spine = storySpineRows(s)
+  if (!spine) return ''
+  return `<div class="story-part">Spine: ${n(spine.rows.length)} of ${n(spine.of)} steps</div>
 ${table(
   ['when (UTC)', 'phase', 'step', 'why it is in the story'],
-  steps.map((st) => {
-    const f = worst(st)
-    return [
-      `<span class="nowrap">${span(st.ts, st.tsEnd)}</span>`,
-      `${f ? pill(f.severity) + ' ' : ''}${h(st.phase ? (PHASE_WORDS[st.phase] ?? st.phase) : 'context')}`,
-      `${h(st.title)}${st.host ? ` <span class="dim">on</span> <code>${h(st.host)}</code>` : ''}${marks(st.id)}${f ? `<span class="sub">${h(f.title)}${st.findings.length > 1 ? ` +${n(st.findings.length - 1)}` : ''}</span>` : ''}`,
-      `${h(st.tie.confidence)}: ${h(st.tie.basis)}`,
-    ]
-  }),
+  spine.rows.map((r) => [
+    `<span class="nowrap">${span(r.ts, r.tsEnd)}</span>`,
+    `${r.severity ? pill(r.severity) + ' ' : ''}${h(r.phase)}`,
+    `${h(r.title)}${r.host ? ` <span class="dim">on</span> <code>${h(r.host)}</code>` : ''}${r.wayIn ? ' ' + chip('way in') : ''}${r.anchor ? ' ' + chip('anchor') : ''}${r.finding ? `<span class="sub">${h(r.finding)}${r.more ? ` +${n(r.more)}` : ''}</span>` : ''}`,
+    h(r.why),
+  ]),
 )}
-${basis ? `<div class="cap">${h(basis.text)}</div>` : ''}
+${spine.basis ? `<div class="cap">${h(spine.basis)}</div>` : ''}
 <div class="story-part">Phases</div>`
 }
 
 /** A story: its spine, its phases in the order they happened, what marks each (its worst findings, else its first step), the analyst's decisions on it, and where its evidence stops. */
+/**
+ * A story's phases in the order they happened, each with what marks it: its worst findings, else its
+ * first step (`step` set). A step the analyst disputed marks no phase.
+ */
+export function storyPhaseRows(
+  s: ReportStory['story'],
+  dec: ReportStory['decisions'],
+): { severity: Severity | null; label: string; first: number; last: number; steps: number; marks: string; step: boolean }[] {
+  const disputed = new Set((dec?.disputed ?? []).map((x) => x.id))
+  return s.phases.map((p) => {
+    const steps = s.steps.filter((st) => st.phase === p.phase && !disputed.has(st.id))
+    const found = steps.flatMap((st) => st.findings).sort((a, b) => rank(b.severity) - rank(a.severity))
+    const titles = [...new Set(found.map((f) => f.title))]
+    const marks = titles.length ? titles.slice(0, 2).join('; ') + (titles.length > 2 ? ' …' : '') : (steps[0]?.title ?? '')
+    return { severity: p.severity, label: PHASE_WORDS[p.phase] ?? p.label, first: p.first, last: p.last, steps: p.steps, marks, step: !titles.length }
+  })
+}
+
+/** Who a story is about, when, and where: hosts and the outside addresses it came from, the first six of each. */
+export function storyWhere(s: ReportStory['story']): { who: string; hosts: string; hostsMore: number; from: string } {
+  return {
+    who: `${s.kind === 'host' ? 'Host' : 'Person'} ${s.subject.label}`,
+    hosts: s.hosts.slice(0, 6).join(', '),
+    hostsMore: Math.max(0, s.hosts.length - 6),
+    from: s.attackerAddresses.slice(0, 6).join(', '),
+  }
+}
+
+/** The part of a split story a card prints, after its title. */
+export const storyPart = (dec: ReportStory['decisions']): string => (dec?.part === 'second' ? ' (second part)' : dec?.part === 'first' ? ' (first part)' : '')
+
 function storyCard({ story: s, key, note, decisions: dec }: ReportStory, d: ReportData): string {
   // the build's own limits are printed once, above the stories
   const gaps = storyOwnGaps(s)
-  // a step the analyst disputed marks no phase
-  const disputed = new Set((dec?.disputed ?? []).map((x) => x.id))
-  const marks = (phase: string) => {
-    const steps = s.steps.filter((st) => st.phase === phase && !disputed.has(st.id))
-    const found = steps.flatMap((st) => st.findings).sort((a, b) => rank(b.severity) - rank(a.severity))
-    const titles = [...new Set(found.map((f) => f.title))].slice(0, 2)
-    return titles.length ? h(titles.join('; ')) + (new Set(found.map((f) => f.title)).size > 2 ? ' …' : '') : `<span class="dim">${h(steps[0]?.title ?? '')}</span>`
-  }
-  const who = s.kind === 'host' ? 'Host' : 'Person'
-  const where = [
-    s.hosts.length ? `hosts <code>${h(s.hosts.slice(0, 6).join(', '))}</code>${s.hosts.length > 6 ? ` +${s.hosts.length - 6}` : ''}` : '',
-    s.attackerAddresses.length ? `from <code>${h(s.attackerAddresses.slice(0, 6).join(', '))}</code>` : '',
-  ].filter(Boolean)
+  const w = storyWhere(s)
+  const where = [w.hosts ? `hosts <code>${h(w.hosts)}</code>${w.hostsMore ? ` +${w.hostsMore}` : ''}` : '', w.from ? `from <code>${h(w.from)}</code>` : ''].filter(Boolean)
   return `<div class="card chain ${h(s.severity)}">
-<div class="card-head">${pill(s.severity)}<h3>${h(s.title)}${dec?.part === 'second' ? ' (second part)' : dec?.part === 'first' ? ' (first part)' : ''}</h3>${dec?.call ? `<span class="pill verdict-${STORY_PILL[dec.call.verdict] ?? 'benign'}">${h(STORY_VERDICT_LABEL[dec.call.verdict])}</span>` : ''}${chip(`${s.confidence} confidence`)}</div>
-<div class="card-meta">${who} ${h(s.subject.label)} · ${span(s.start, s.end)} · ${n(s.records)} record(s) in ${n(s.steps.length)} step(s)${where.length ? ' · ' + where.join(' · ') : ''}</div>
+<div class="card-head">${pill(s.severity)}<h3>${h(s.title)}${storyPart(dec)}</h3>${dec?.call ? `<span class="pill verdict-${STORY_PILL[dec.call.verdict] ?? 'benign'}">${h(STORY_VERDICT_LABEL[dec.call.verdict])}</span>` : ''}${chip(`${s.confidence} confidence`)}</div>
+<div class="card-meta">${h(w.who)} · ${span(s.start, s.end)} · ${n(s.records)} record(s) in ${n(s.steps.length)} step(s)${where.length ? ' · ' + where.join(' · ') : ''}</div>
 ${note ? `<div class="narr">${md(note)}</div><div class="cap">the analyst's reading of the story</div>${textNote(`story:${key}`, d.claims)}` : `<div class="narr"><p>${h(s.summary || s.headline)}</p></div>`}
 ${storySpine(s)}
 ${table(
   ['phase', 'when (UTC)', 'steps', 'what marks it'],
-  s.phases.map((p) => [`${p.severity ? pill(p.severity) + ' ' : ''}${h(PHASE_WORDS[p.phase] ?? p.label)}`, `<span class="nowrap">${span(p.first, p.last)}</span>`, n(p.steps), marks(p.phase)]),
+  storyPhaseRows(s, dec).map((p) => [
+    `${p.severity ? pill(p.severity) + ' ' : ''}${h(p.label)}`,
+    `<span class="nowrap">${span(p.first, p.last)}</span>`,
+    n(p.steps),
+    p.step ? `<span class="dim">${h(p.marks)}</span>` : h(p.marks),
+  ]),
 )}
 ${storyDecisionLines(dec)}
 ${gaps.length ? `<div class="cap">Where it stops: ${gaps.map((g) => h(g)).join(' ')}</div>` : ''}
@@ -631,11 +713,7 @@ function storyCards(d: ReportData): string {
     .map(({ incident: i, items }) => {
       const cards = items.map((st) => storyCard(st, d)).join('\n')
       if (!i) return cards
-      const inside = new Set(items.map((r) => r.story.id))
-      const why = new Map<string, string>()
-      for (const { story } of items)
-        for (const l of story.links ?? []) if (l.confidence !== 'weak' && inside.has(l.story)) why.set([story.id, l.story].sort().join('|'), `${l.basis} (${l.confidence})`)
-      const bases = [...why.values()]
+      const bases = incidentBases(items)
       const unprinted = i.stories.length - items.length
       return `<div class="story-inc">
 <div class="card-head">${pill(i.severity)}<h3>One intrusion: ${h(i.label)}</h3>${chip(`${n(i.stories.length)} stories`)}</div>
@@ -658,23 +736,45 @@ ${cards}
     .join('\n')
 }
 
+/** Why the printed stories of one incident read as one intrusion: the strong and medium links between them. */
+export function incidentBases(items: ReportStory[]): string[] {
+  const inside = new Set(items.map((r) => r.story.id))
+  const why = new Map<string, string>()
+  for (const { story } of items) for (const l of story.links ?? []) if (l.confidence !== 'weak' && inside.has(l.story)) why.set([story.id, l.story].sort().join('|'), `${l.basis} (${l.confidence})`)
+  return [...why.values()]
+}
+
+/** The intro of the Stories section, in both reports. */
+export const STORIES_INTRO =
+  "A story is what happened to one person, or on one host, in one incident: the records around what raised a flag, read along the tactics of ATT&CK in the order they happened, each record tied to the story by its account, its logon session, the way into the host or the process that started it. A story the analyst decided says so: a confirmed story counts in the verdict as a confirmed incident does, a story decided benign or false positive is not printed, and a step the analyst disputed is left out of its story's phases and severity and listed under it. Each says where its evidence stops."
+
 /** What the reader of the Stories section must know before any story: that they are out of date, and where the build stopped. */
-function storiesCaveats(d: ReportData): string {
+export function storiesCaveatTexts(d: ReportData): { warn: boolean; text: string }[] {
   const stale = d.storiesStale ?? []
   const cut = storyCoverageWarnings(d.storyStats)
   const orphaned = d.storyNotesOrphaned ?? 0
   const lostDecisions = d.storyDecisionsOrphaned ?? 0
   return [
-    stale.length ? `<div class="cap warn">Out of date: ${h(stale.join('; '))}. These stories read the case as it was then: build them again on the Stories page before relying on them.</div>` : '',
-    cut.length ? `<div class="cap warn">Incomplete: ${cut.map((w) => h(w)).join(' ')} An absent step or story is not a negative result.</div>` : '',
+    stale.length ? { warn: true, text: `Out of date: ${stale.join('; ')}. These stories read the case as it was then: build them again on the Stories page before relying on them.` } : null,
+    cut.length ? { warn: true, text: `Incomplete: ${cut.join(' ')} An absent step or story is not a negative result.` } : null,
     orphaned
-      ? `<div class="cap">${n(orphaned)} analyst note${orphaned === 1 ? ' is' : 's are'} on a story this build no longer holds: the Stories page lists ${orphaned === 1 ? 'it' : 'them'} to attach again.</div>`
-      : '',
+      ? {
+          warn: false,
+          text: `${n(orphaned)} analyst note${orphaned === 1 ? ' is' : 's are'} on a story this build no longer holds: the Stories page lists ${orphaned === 1 ? 'it' : 'them'} to attach again.`,
+        }
+      : null,
     lostDecisions
-      ? `<div class="cap warn">${n(lostDecisions)} analyst decision${lostDecisions === 1 ? ' is' : 's are'} on a story this build no longer holds: the Stories page lists ${lostDecisions === 1 ? 'it' : 'them'} to attach again, and the report does not count ${lostDecisions === 1 ? 'it' : 'them'}.</div>`
-      : '',
-  ].join('')
+      ? {
+          warn: true,
+          text: `${n(lostDecisions)} analyst decision${lostDecisions === 1 ? ' is' : 's are'} on a story this build no longer holds: the Stories page lists ${lostDecisions === 1 ? 'it' : 'them'} to attach again, and the report does not count ${lostDecisions === 1 ? 'it' : 'them'}.`,
+        }
+      : null,
+  ].filter((x): x is { warn: boolean; text: string } => !!x)
 }
+const storiesCaveats = (d: ReportData): string =>
+  storiesCaveatTexts(d)
+    .map((c) => `<div class="cap${c.warn ? ' warn' : ''}">${h(c.text)}</div>`)
+    .join('')
 
 // ---------------------------------------------------------------------------
 // findings, grouped by rule
@@ -745,33 +845,51 @@ export function groupByRule(findings: Finding[], said: Record<string, string> = 
 const MAX_VALUES = 6
 
 /** After a rule's id: whether it was ever seen to detect what it looks for, and whether benign activity matches it. */
+/** What a rule's measure says about its findings, in words: a lead, a rule that also fires on clean machines, or nothing. */
+export function measureWords(m: MeasureReading | undefined): { lead: boolean; text: string } | null {
+  if (!m) return null
+  if (isLead(m)) return { lead: true, text: 'lead' }
+  if (m.noisy) return { lead: false, text: 'also fires on clean machines' }
+  return null
+}
+
 function measureMark(m: MeasureReading | undefined): string {
-  if (!m) return ''
-  if (isLead(m)) return ' · <b class="lead">lead</b>'
-  if (m.noisy) return ' · <span class="dim">also fires on clean machines</span>'
-  return ''
+  const w = measureWords(m)
+  if (!w) return ''
+  return w.lead ? ` · <b class="lead">${h(w.text)}</b>` : ` · <span class="dim">${h(w.text)}</span>`
 }
 
 const CLAIM_WORD: Record<ClaimCheck['status'], string> = { verified: 'rows checked', unsupported: 'rows missing', contradicted: 'rows disagree' }
 
-/** Whether a rule's findings hold against the rows they cite, and where the first of those rows is in its file. */
-function claimNote(ids: number[], claims?: ReportClaims): string {
-  if (!claims) return ''
+/** Whether a rule's findings hold against the rows they cite, and where the first of those rows is in its file; null when none was checked. */
+export function claimLine(ids: number[], claims?: ReportClaims): { status: ClaimCheck['status']; word: string; where: string; more: number; reasons: string[] } | null {
+  if (!claims) return null
   const cs = ids.map((id) => claims.findings[id]).filter((c): c is ClaimCheck => !!c)
-  if (!cs.length) return ''
+  if (!cs.length) return null
   const worst = cs.find((c) => c.status === 'contradicted') ?? cs.find((c) => c.status === 'unsupported') ?? cs[0]
   const rec = cs.find((c) => c.records.length)?.records[0]
   const cited = cs.reduce((t, c) => t + c.cited, 0)
-  const where = rec ? ` · ${h(rec.file)} ${h(rec.record)}${cited > 1 ? ` <span class="dim">and ${n(cited - 1)} more</span>` : ''}` : ''
-  return `<span class="sub claim ${worst.status}" title="${h(worst.reasons.join(' '))}">${CLAIM_WORD[worst.status]}${where}</span>`
+  return { status: worst.status, word: CLAIM_WORD[worst.status], where: rec ? `${rec.file} ${rec.record}` : '', more: rec && cited > 1 ? cited - 1 : 0, reasons: worst.reasons }
 }
 
-/** A text's check, under the text, when it names something its rows do not hold, or names nothing that could be checked. */
-function textNote(key: string, claims?: ReportClaims): string {
+function claimNote(ids: number[], claims?: ReportClaims): string {
+  const c = claimLine(ids, claims)
+  if (!c) return ''
+  const where = c.where ? ` · ${h(c.where)}${c.more ? ` <span class="dim">and ${n(c.more)} more</span>` : ''}` : ''
+  return `<span class="sub claim ${c.status}" title="${h(c.reasons.join(' '))}">${c.word}${where}</span>`
+}
+
+/** A text's check, to print under the text, when it names something its rows do not hold, or names nothing that could be checked; null otherwise. */
+export function textCheck(key: string, claims?: ReportClaims): { status: Exclude<TextStatus, 'verified'>; text: string } | null {
   const t = claims?.texts.find((x) => x.key === key)
-  if (!t || t.check.status === 'verified') return ''
-  if (t.check.status === 'nothing_to_check') return '<div class="cap claim nothing_to_check">It names no address, account or hash: nothing in it was checked against the evidence.</div>'
-  return `<div class="cap claim ${t.check.status}">Checked against its rows: ${h(t.check.reasons.join(' '))}.</div>`
+  if (!t || t.check.status === 'verified') return null
+  if (t.check.status === 'nothing_to_check') return { status: 'nothing_to_check', text: 'It names no address, account or hash: nothing in it was checked against the evidence.' }
+  return { status: t.check.status, text: `Checked against its rows: ${t.check.reasons.join(' ')}.` }
+}
+
+function textNote(key: string, claims?: ReportClaims): string {
+  const c = textCheck(key, claims)
+  return c ? `<div class="cap claim ${c.status}">${h(c.text)}</div>` : ''
 }
 
 function groupedFindings(findings: Finding[], said: Record<string, string>, measures: Record<string, MeasureReading> = {}, claims?: ReportClaims): string {
@@ -1082,7 +1200,8 @@ export function bottomLine(summary: string): string {
     .slice(0, 600)
 }
 
-function method(d: ReportData, v: Verdict, conf: Confidence): string {
+/** How the report was produced, one plain sentence each: what was read, what fired, what was checked, what a model wrote. */
+export function producedLines(d: ReportData, v: Verdict): string[] {
   const rowsTotal = d.evidence.reduce((t, e) => t + (e.count ?? 0), 0)
   const kinds = [...new Set(d.evidence.map((e) => e.format || e.kind))]
   const rulesFired = new Set(d.findings.map((f) => f.ruleId)).size
@@ -1091,33 +1210,17 @@ function method(d: ReportData, v: Verdict, conf: Confidence): string {
     d.chains.filter((c) => d.reviews[c.id]?.narrativeBy === 'ai' || d.reviews[c.id]?.by === 'ai').length +
     d.incidents.filter((i) => i.lead.notesBy === 'ai' || i.lead.decidedBy === 'ai').length +
     (d.summaryBy === 'ai' ? 1 : 0)
-  const issues = d.evidence.filter((e) => e.kind === 'package').flatMap((e) => packageCoverageIssues(e))
   const printedRules = [...new Set(d.findings.map((f) => f.ruleId))]
   const readings = printedRules.map((r) => d.measures?.[r]).filter((m): m is MeasureReading => !!m?.label)
   const detects = readings.filter((m) => m.verdict === 'detects').length
   const leads = readings.filter(isLead).length
-  const leadFindings = d.findings.filter((f) => {
-    const m = d.measures?.[f.ruleId]
-    return !!m && isLead(m)
-  }).length
   // the printed findings and texts, read back against the rows they cite
   const checked = d.findings.map((f) => (f.id != null ? d.claims?.findings[f.id] : undefined)).filter((c): c is ClaimCheck => !!c)
   const claimCount = (s: ClaimCheck['status']) => checked.filter((c) => c.status === s).length
   const texts = d.claims?.texts ?? []
   const textCount = (s: TextStatus) => texts.filter((t) => t.check.status === s).length
-  const byId = new Map(d.findings.filter((f) => f.id != null).map((f) => [f.id!, f]))
-  const claimLimits = [
-    ...Object.entries(d.claims?.findings ?? {})
-      .filter(([id, c]) => c.status !== 'verified' && byId.has(Number(id)))
-      .sort((a, b) => (a[1].status === 'contradicted' ? 0 : 1) - (b[1].status === 'contradicted' ? 0 : 1))
-      .map(([id, c]) => {
-        const f = byId.get(Number(id))!
-        return `The finding "${f.title}" (${f.ruleId}) is ${c.status === 'contradicted' ? 'contradicted by its rows' : 'unsupported'}: ${c.reasons.join('; ')}.`
-      }),
-    ...texts.filter((t) => t.check.status === 'unsupported').map((t) => `${t.what[0].toUpperCase()}${t.what.slice(1)} is unsupported: ${t.check.reasons.join('; ')}.`),
-  ]
-  const sources = [
-    `${n(d.evidence.length)} evidence file${d.evidence.length === 1 ? '' : 's'} (${h(kinds.join(', ') || 'none')}), ${n(rowsTotal)} rows parsed`,
+  return [
+    `${n(d.evidence.length)} evidence file${d.evidence.length === 1 ? '' : 's'} (${kinds.join(', ') || 'none'}), ${n(rowsTotal)} rows parsed`,
     `${n(rulesFired)} rule${rulesFired === 1 ? '' : 's'} produced the printed findings${engine ? `; ${n(engine)} finding${engine === 1 ? '' : 's'} came from an external detection engine` : ''}`,
     ...(checked.length
       ? [
@@ -1130,17 +1233,42 @@ function method(d: ReportData, v: Verdict, conf: Confidence): string {
       : []),
     ...(readings.length
       ? [
-          `of those rules, ${n(detects)} fire${detects === 1 ? 's' : ''} on recorded attacks of what ${detects === 1 ? 'it looks' : 'they look'} for and ${n(leads)} ${leads === 1 ? 'was' : 'were'} never seen to (their findings are marked lead)${d.measuredOn ? `. ${h(d.measuredOn)}` : ''}`,
+          `of those rules, ${n(detects)} fire${detects === 1 ? 's' : ''} on recorded attacks of what ${detects === 1 ? 'it looks' : 'they look'} for and ${n(leads)} ${leads === 1 ? 'was' : 'were'} never seen to (their findings are marked lead)${d.measuredOn ? `. ${d.measuredOn}` : ''}`,
         ]
       : []),
-    `findings below ${h(d.settings.minSeverity)} severity are not printed${d.settings.onlyReviewed ? '; only reviewed items are printed' : ''}${d.settings.includeFp ? '; false positives are printed' : '; false positives are not printed'}${d.storiesDismissed ? `; ${n(d.storiesDismissed)} ${d.storiesDismissed === 1 ? 'story' : 'stories'} decided benign or false positive ${d.storiesDismissed === 1 ? 'is' : 'are'} not printed` : ''}`,
+    `findings below ${d.settings.minSeverity} severity are not printed${d.settings.onlyReviewed ? '; only reviewed items are printed' : ''}${d.settings.includeFp ? '; false positives are printed' : '; false positives are not printed'}${d.storiesDismissed ? `; ${n(d.storiesDismissed)} ${d.storiesDismissed === 1 ? 'story' : 'stories'} decided benign or false positive ${d.storiesDismissed === 1 ? 'is' : 'are'} not printed` : ''}`,
     `${v.confirmed} confirmed, ${v.reviewed} reviewed or unsure, ${v.falsePositives} false positive${v.falsePositives === 1 ? '' : 's'}, ${d.undecided} undecided`,
     aiTexts
       ? `${aiTexts} text${aiTexts === 1 ? '' : 's'} in this report ${aiTexts === 1 ? 'was' : 'were'} drafted by the analyst model and are labelled as such; decisions are the analyst's`
       : 'no text in this report was drafted by a model',
   ]
+}
+
+/**
+ * Where the analysis stops, one plain sentence each: what is open before the report is final, what
+ * the evidence cannot show, what does not hold against its rows, the leads, the cuts and the files
+ * not read completely. The HTML and the Word report print the same list.
+ */
+export function limitLines(d: ReportData, conf: Confidence): string[] {
+  const issues = d.evidence.filter((e) => e.kind === 'package').flatMap((e) => packageCoverageIssues(e))
+  const leadFindings = d.findings.filter((f) => {
+    const m = d.measures?.[f.ruleId]
+    return !!m && isLead(m)
+  }).length
+  const texts = d.claims?.texts ?? []
+  const byId = new Map(d.findings.filter((f) => f.id != null).map((f) => [f.id!, f]))
+  const claimLimits = [
+    ...Object.entries(d.claims?.findings ?? {})
+      .filter(([id, c]) => c.status !== 'verified' && byId.has(Number(id)))
+      .sort((a, b) => (a[1].status === 'contradicted' ? 0 : 1) - (b[1].status === 'contradicted' ? 0 : 1))
+      .map(([id, c]) => {
+        const f = byId.get(Number(id))!
+        return `The finding "${f.title}" (${f.ruleId}) is ${c.status === 'contradicted' ? 'contradicted by its rows' : 'unsupported'}: ${c.reasons.join('; ')}.`
+      }),
+    ...texts.filter((t) => t.check.status === 'unsupported').map((t) => `${t.what[0].toUpperCase()}${t.what.slice(1)} is unsupported: ${t.check.reasons.join('; ')}.`),
+  ]
   const issue = d.issue
-  const limits = [
+  return [
     ...(issue?.status === 'draft'
       ? [`This is a draft. Open before it can be final: ${issue.open.map((c) => `${c.label.toLowerCase()} (${c.detail})`).join('; ') || 'the analyst has not issued it'}.`]
       : []),
@@ -1173,7 +1301,11 @@ function method(d: ReportData, v: Verdict, conf: Confidence): string {
     ...d.evidence.filter((e) => e.kind !== 'package' && evidenceIssue(e)).map((e) => `${e.name}: ${evidenceIssue(e)}.`),
     ...conf.reasons.filter((r) => !/^every item decided/.test(r)).map((r) => `Confidence: ${r}.`),
   ]
-  return `<div class="method"><div><h4>How this was produced</h4><ul>${sources.map((s) => `<li>${s}</li>`).join('')}</ul></div><div><h4>Where it stops</h4><ul>${limits.map((s) => `<li>${h(s)}</li>`).join('')}</ul></div></div>`
+}
+
+function method(d: ReportData, v: Verdict, conf: Confidence): string {
+  const list = (xs: string[]) => xs.map((s) => `<li>${h(s)}</li>`).join('')
+  return `<div class="method"><div><h4>How this was produced</h4><ul>${list(producedLines(d, v))}</ul></div><div><h4>Where it stops</h4><ul>${list(limitLines(d, conf))}</ul></div></div>`
 }
 
 // ---------------------------------------------------------------------------
@@ -1192,12 +1324,16 @@ function questionRow(q: ReportQuestion): string {
   return `<div class="q ${h(q.status)}"><div class="q-head"><code>${h(q.id)}</code><span class="q-name">${h(q.name)}</span><span class="pill ${QUESTION_PILL[q.status] ?? 'info'}">${h(ANSWER_LABEL[q.status] ?? q.status)}</span></div>${text}${cites}${cov}</div>`
 }
 
+/** What the Questions section says first: where the questions come from, and how many are answered, cannot be, and are open. */
+export function questionsIntro(q: ReportQuestions): string {
+  const { answered, cannot, open } = q.counts
+  return `The questions the investigation set out to answer, from the scenarios chosen for the case (DFIQ, dfiq.org, and REMN's own, whose ids start with 0). Each carries the analyst's answer and the records or findings it rests on. ${n(answered)} answered, ${n(cannot)} cannot be answered from this evidence, ${n(open)} still open${q.uncovered ? `, ${n(q.uncovered)} of them with no evidence in the case that could answer ${q.uncovered === 1 ? 'it' : 'them'}` : ''}.`
+}
+
 /** The chosen scenarios, each facet's questions with the analyst's answer, what it cites, and the ones left open flagged. */
 export function questionsSection(q: ReportQuestions): string {
-  const { answered, cannot, open } = q.counts
-  const intro = `<p class="intro">The questions the investigation set out to answer, from the scenarios chosen for the case (DFIQ, dfiq.org, and REMN's own, whose ids start with 0). Each carries the analyst's answer and the records or findings it rests on. ${n(answered)} answered, ${n(cannot)} cannot be answered from this evidence, ${n(open)} still open${q.uncovered ? `, ${n(q.uncovered)} of them with no evidence in the case that could answer ${q.uncovered === 1 ? 'it' : 'them'}` : ''}.</p>`
   return (
-    intro +
+    `<p class="intro">${h(questionsIntro(q))}</p>` +
     q.scenarios
       .map(
         (s) =>
@@ -1207,6 +1343,18 @@ export function questionsSection(q: ReportQuestions): string {
       )
       .join('')
   )
+}
+
+export const REFERENCE_HEAD = ['Source', 'Record', 'Time (UTC)', 'SHA-256']
+
+/** The records a reviewed relationship rests on: the file, the record, its time and the file's SHA-256. */
+export function referenceRows(r: RelationshipReview): string[][] {
+  return r.references.map((ref) => [
+    ref.sourceFile ?? '',
+    `${ref.source} #${ref.id} · evidence #${ref.evidenceId} · source row ${(ref.sourceIndex ?? -1) + 1}`,
+    `${ref.recordKind === 'observation' ? 'Collected' : 'Event'}: ${fmtTs(ref.recordKind === 'observation' ? ref.observedAt : ref.ts)}`,
+    ref.sourceSha256 ?? '',
+  ])
 }
 
 export function buildReportHtml(d: ReportData): string {
@@ -1324,13 +1472,8 @@ export function buildReportHtml(d: ReportData): string {
           .map(
             (r) =>
               `<div class="card"><h3>${h(r.sourceLabel)} → ${h(r.relation)} → ${h(r.targetLabel)}</h3><p>${h(r.reason)} (${h(r.confidence)})</p><div class="narr">${md(r.notes)}</div>${Object.keys(r.aliases ?? {}).length ? `<p>Explicit aliases: ${h(JSON.stringify(r.aliases))}</p>` : ''}${table(
-                ['Source', 'Record', 'Time (UTC)', 'SHA-256'],
-                r.references.map((ref) => [
-                  h(ref.sourceFile ?? ''),
-                  h(`${ref.source} #${ref.id} · evidence #${ref.evidenceId} · source row ${(ref.sourceIndex ?? -1) + 1}`),
-                  h(`${ref.recordKind === 'observation' ? 'Collected' : 'Event'}: ${fmtTs(ref.recordKind === 'observation' ? ref.observedAt : ref.ts)}`),
-                  h(ref.sourceSha256 ?? ''),
-                ]),
+                REFERENCE_HEAD,
+                referenceRows(r).map((row) => row.map(h)),
               )}</div>`,
           )
           .join(''),

@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import type { Case, Finding } from '../db/schema'
+import type { Case, Finding, QuestionAnswer } from '../db/schema'
 import { buildIncidents } from '../rules/incidents'
 import { DEFAULT_REPORT } from './review'
 import { buildReportDocx, reportDocumentXml } from './reportDocx'
-import type { ReportData } from './reportHtml'
+import { computeConfidence, limitLines, producedLines, computeVerdict, type ReportData } from './reportHtml'
+import { questionsForReport } from './questions/answers'
+import { evidenceProfile } from './questions/coverage'
+import { readMeasure } from './ruleMeasures'
+import { spinedStory } from '../test/spineStory'
 
 const finding = (p: Partial<Finding>): Finding => ({
   id: 1,
@@ -105,5 +109,131 @@ describe('Word report', () => {
     // a well-formed document: every paragraph and table closes
     expect(xml.match(/<w:p>|<w:p /g)?.length).toBe(xml.match(/<\/w:p>/g)?.length)
     expect(xml.match(/<w:tbl>/g)?.length).toBe(xml.match(/<\/w:tbl>/g)?.length)
+  })
+})
+
+/** Text as the Word document holds it, escaped for XML. */
+const xml = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
+describe('Word report against the HTML report', () => {
+  const answers = new Map<string, QuestionAnswer>([
+    [
+      'Q1074',
+      {
+        caseId: 1,
+        questionId: 'Q1074',
+        status: 'answered',
+        text: 'The Security log was cleared.',
+        citations: [{ source: 'events', rowId: 80, label: 'Security.evtx record 4,200', ts: 0, addedAt: 0 }],
+        createdAt: 0,
+        updatedAt: 0,
+      },
+    ],
+  ])
+  const full = (): ReportData => {
+    const d = data()
+    const id = d.findings[0].id!
+    return {
+      ...d,
+      questions: questionsForReport(['S1001'], answers, evidenceProfile([{ value: 'Security', count: 10 }], [], 0))!,
+      ai: {
+        runs: 2,
+        toolCalls: 5,
+        proposals: 1,
+        accepted: 1,
+        rejected: 0,
+        undone: 0,
+        notices: 1,
+        models: ['local-model'],
+        transports: ['browser'],
+        first: 1,
+        last: 2,
+        byProposalKind: { decision: { proposed: 1, accepted: 1, rejected: 0 } },
+        check: { entries: 9, intact: true, head: 'ab'.repeat(32) },
+      },
+      stories: [
+        {
+          story: spinedStory(),
+          key: 'person|x|2026-09-04',
+          note: 'Came in by mail.',
+          decisions: { call: { verdict: 'confirmed', reason: 'the reset mail', decidedAt: 1 }, merged: [], out: [], disputed: [], confirmedSteps: 2 },
+        },
+      ],
+      storiesDismissed: 1,
+      measures: { 'ps-enc': readMeasure({ of: 3, fires: 1, clean: { findings: 4, events: 4, machines: 1, scope: 10_000, of: 7 } }, 'bundled') },
+      claims: {
+        findings: { [id]: { status: 'contradicted', cited: 3, checked: 3, reasons: ['record 9 no longer matches the rule'], records: [{ file: 'Security.evtx', record: 'record 9', key: 'k' }] } },
+        texts: [{ key: 'summary', what: 'the executive summary', check: { status: 'unsupported', named: ['198.51.100.9'], reasons: ['it names 198.51.100.9, which no row of the evidence holds'] } }],
+      },
+      relationships: [
+        {
+          key: 'r',
+          status: 'accepted',
+          includeInReport: true,
+          notes: 'reviewed',
+          sourceLabel: 'WS1',
+          targetLabel: 'DC1',
+          relation: 'logged on to',
+          reason: 'same record',
+          confidence: 'high',
+          references: [
+            {
+              id: 1,
+              evidenceId: 1,
+              source: 'events',
+              sourceFile: 'processes.csv',
+              sourceSha256: 'cd'.repeat(32),
+              sourceIndex: 0,
+              recordKind: 'observation',
+              ts: null,
+              observedAt: 1,
+              title: 'process',
+            },
+          ],
+          aliases: {},
+          updatedAt: 1,
+        },
+      ],
+      gaps: [{ kind: 'record-holes', severity: 'high', text: 'Security on DC01: 3 records missing from its numbering.', evidenceId: 1 }],
+    }
+  }
+
+  it('carries every line of how it was produced and where it stops that the HTML prints', () => {
+    const d = full()
+    const doc = reportDocumentXml(d)
+    for (const l of producedLines(d, computeVerdict(d))) expect(doc).toContain(xml(l))
+    for (const l of limitLines(d, computeConfidence(d))) expect(doc).toContain(xml(l))
+    expect(doc).toContain('3 records missing from its numbering')
+    expect(doc).toContain('investigative question')
+  })
+
+  it('carries the questions, the model’s part, the story detail, the claim notes, the lead marks and the relationship references', () => {
+    const doc = reportDocumentXml(full())
+    expect(doc).toContain('>Questions<')
+    expect(doc).toContain('The Security log was cleared.')
+    expect(doc).toContain('Security.evtx record 4,200')
+    expect(doc).toContain('>How AI was used<')
+    expect(doc).toContain('2 runs · 5 tool calls')
+    expect(doc).toContain('ledger: 9 entries, chain intact')
+    // the story: its spine, its phases, the analyst's decisions, how many were dismissed
+    expect(doc).toContain('Spine: 6 of 8 steps')
+    expect(doc).toContain('[way in]')
+    expect(doc).toContain('The analyst decided it confirmed incident: the reset mail')
+    expect(doc).toContain('2 steps confirmed by the analyst.')
+    expect(doc).toContain('1 story decided benign or false positive by the analyst is not printed.')
+    // the rule line: a lead, rows that disagree and where they are
+    expect(doc).toContain('LEAD')
+    expect(doc).toContain('rows disagree · Security.evtx record 9 and 2 more: record 9 no longer matches the rule')
+    expect(doc).toContain('Checked against its rows: it names 198.51.100.9')
+    // the records a relationship rests on
+    expect(doc).toContain('processes.csv')
+    expect(doc).toContain('Collected: 1970-01-01 00:00:00Z')
+    expect(doc).toContain('cd'.repeat(32))
+  })
+
+  it('says what a story is without contradicting how the verdict counts a confirmed story', () => {
+    const doc = reportDocumentXml(full())
+    expect(doc).not.toContain('not a decision')
+    expect(doc).toContain('a confirmed story counts in the verdict as a confirmed incident does')
   })
 })
