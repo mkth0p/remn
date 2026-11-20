@@ -68,6 +68,15 @@ Configuration is optional and lives in a `.env` file at the project root: copy
 `.env.example` and set what you need (reputation provider keys, `OLLAMA_MODEL`, the
 remote-access variables below). Every variable is documented in that file.
 
+Evidence passes through a staging area (`FORENSIC_TMP_DIR`, `backend/tmp` of the checkout)
+while it is parsed. By default the staging area may use the free space of its disk less a
+tenth of that disk (at most 10 GiB), so the largest file is set by the chunked-upload limit
+(`FORENSIC_MAX_CHUNKED_GB`, 64) and by that disk; `FORENSIC_TMP_MAX_GB` sets a fixed total
+instead. A file larger than the staging area can hold is refused with a message that says
+which of the two decides it. Put the staging area on a disk with room for the largest
+mailbox or collection you expect, and the case stores (`FORENSIC_CASES_DIR`) on one with
+room for what it becomes.
+
 ## Run
 
 One process, one port, the built browser application served by the API:

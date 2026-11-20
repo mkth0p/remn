@@ -8,7 +8,6 @@ import itertools
 import json
 import os
 import shutil
-import tarfile
 import tempfile
 import time
 import zipfile
@@ -18,8 +17,21 @@ from typing import Any
 
 from forensic.build import VERSION
 from services.analysis import hayabusa
-from services.ingest.pipeline import SNIFF_BYTES, EvtxSource, MailSource, Member, detect_archive, looks_like_mail
+from services.ingest import staging
+from services.ingest.pipeline import (
+    REST_OF_ARCHIVE,
+    SNIFF_BYTES,
+    EvtxSource,
+    Expansion,
+    ExpansionLimit,
+    MailSource,
+    Member,
+    detect_archive,
+    looks_like_mail,
+    open_tar,
+)
 from services.ingest.reconcile import reconcile
+from services.ingest.staging import size_text
 from services.parsers import collection, evtx_parser, m365, native, triage
 from services.parsers.mail.common import ParseContext
 
@@ -53,6 +65,11 @@ ENCODING_LABEL = {
     "cp1252": "Windows-1252",
 }
 BUDGET_SPENT = f"native decoding budget for this package is spent ({MAX_NATIVE_DECODES} artifacts or {MAX_NATIVE_SECONDS:g}s); inventoried and hashed only"
+# the largest member, and the most a package may read out of its archives in all. What one member
+# may take is also at most half what the staging area may hold, and what a package holds there at
+# once (the member being read at each nesting level, an expanded 7z, a decoded cabinet, the
+# artifacts held back for group decoding) at most what the area had free when the parse began:
+# the fixed figures alone let one upload expand past a staging area of 4 GiB, or 1 GiB of RAM.
 MAX_MEMBER = 4 * 1024**3
 MAX_TOTAL = 16 * 1024**3
 MAX_STRUCTURED = 64 * 1024**2
@@ -95,6 +112,10 @@ class PackageSource:
         self.budget = budget if budget is not None else {"bytes": 0, "files": 0, "decodes": 0, "decodeSeconds": 0.0}
         self.budget.setdefault("decodes", 0)
         self.budget.setdefault("decodeSeconds", 0.0)
+        if "memberCap" not in self.budget:
+            # set once per request and shared by every nesting level, like the other allowances
+            capacity, _ = staging.capacity()
+            self.budget.update(memberCap=min(MAX_MEMBER, capacity // 2), heldCap=max(0, capacity - staging.staged_bytes()), held=0)
         self.depth = depth
         self.inherited_context = inherited_context or {}
         self.expectations = []
@@ -112,8 +133,11 @@ class PackageSource:
         # on a real volume they are millions of records, and the pass shares its time allowance
         # with the external engines that run after it, which would otherwise be the ones skipped.
         self.filesystem = False
-        # a 7z archive (DFIR-ORC) has no streaming member access, so it is extracted once
+        # a 7z archive (DFIR-ORC) has no streaming member access, so it is extracted once: the
+        # directory, the bytes it holds, the members listed but not extracted with the reason,
+        # and why the extraction failed if it did
         self._extracted: str | None = None
+        self._expanded_7z: tuple[int, list[tuple[str, int, str]], str | None] | None = None
         # External detection engines to run over the event logs this package carries. The event
         # log members are held back for that, within the same hold allowance as prefetch, and the
         # findings are collected rather than streamed, so consumers that only want rows are not
@@ -148,7 +172,12 @@ class PackageSource:
         held = self.deferred.pop(tmp_path, None)
         if held is not None:
             self.budget["deferredBytes"] = max(0, self.budget["deferredBytes"] - int(held[0].get("size") or 0))
+            self._unstage(int(held[0].get("size") or 0))
         _unlink(tmp_path)
+
+    def _unstage(self, size: int) -> None:
+        """Give back the staging room of bytes this request no longer holds."""
+        self.budget["held"] = max(0, self.budget["held"] - size)
 
     def _emit(self, entry: dict[str, Any], member_name: str, index: int, rows) -> Iterator[dict[str, Any]]:
         """Stamp provenance onto a member's rows and account for them against the package."""
@@ -245,44 +274,116 @@ class PackageSource:
                 finally:
                     self.budget["decodeSeconds"] += time.monotonic() - started
 
+    def _refusal(self, size: int, besides: int = 0) -> str | None:
+        """Why a member of this size is not copied out, or None. besides is what this package is
+        about to hold in the staging area along with it."""
+        cap = self.budget["memberCap"]
+        if size > cap:
+            if cap >= MAX_MEMBER:
+                return f"member exceeds {size_text(MAX_MEMBER)} limit"
+            return f"member exceeds {size_text(cap)}, half the staging area, which is the most one member may take"
+        if self.budget["bytes"] + size > MAX_TOTAL:
+            return f"package exceeds {size_text(MAX_TOTAL)} expanded-byte limit"
+        room = self.budget["heldCap"] - self.budget["held"] - besides
+        if size > room:
+            return f"the staging area has room for {size_text(max(0, room))} more while this package is read, and the member is {size_text(size)}"
+        return None
+
+    def _expand_7z(self, py7zr, src) -> None:
+        """Expand, once, the members of a 7z that fit, and note why each of the others does not."""
+        refused: list[tuple[str, int, str]] = []
+        targets: list[tuple[str, int]] = []
+        chosen = largest = staged = 0
+        expansion = Expansion(os.path.getsize(self.path) if self.path else len(self.data or b""))
+        error = None
+        try:
+            # py7zr stops once it has decompressed more than max_extract_size in all, which counts
+            # the members it passes over in a solid block to reach the ones wanted
+            with py7zr.SevenZipFile(src, mode="r", max_extract_size=expansion.limit) as archive:
+                files = [info for info in archive.list() if not info.is_directory]
+                for position, info in enumerate(files):
+                    name, size = info.filename, int(info.uncompressed or 0)
+                    parts = PurePosixPath(name.replace("\\", "/")).parts
+                    reason = None
+                    if position >= MAX_FILES:
+                        reason = f"past the {MAX_FILES:,}-member inventory limit; not expanded"
+                    elif getattr(info, "is_symlink", False):
+                        reason = "symbolic link"
+                    elif ".." in parts or name.startswith(("/", "\\")) or (parts and ":" in parts[0]):
+                        reason = "unsafe member path"
+                    elif not expansion.fits(size):
+                        reason = f"{expansion.reason}; not expanded"
+                    elif self.budget["bytes"] + chosen + size > MAX_TOTAL:
+                        reason = f"package exceeds {size_text(MAX_TOTAL)} expanded-byte limit"
+                    else:
+                        # the expanded members stay on disk while each is copied out to be read,
+                        # so room is kept for the largest copy as well
+                        reason = self._refusal(size, chosen + max(largest, size))
+                    if reason:
+                        refused.append((name, size, reason))
+                        continue
+                    expansion.charge(size)
+                    targets.append((name, size))
+                    chosen += size
+                    largest = max(largest, size)
+                if targets:
+                    self._extracted = tempfile.mkdtemp(dir=self.tmp_dir, suffix=".7z")
+                    self.budget["held"] += chosen
+                    staged = chosen
+                    archive.extract(path=self._extracted, targets=[name for name, _size in targets])
+        except Exception as exc:  # noqa: BLE001
+            error = f"7z: {type(exc).__name__}: {exc}"[:300]
+            refused += [(name, size, "not read: the archive could not be expanded") for name, size in targets]
+            if self._extracted:
+                shutil.rmtree(self._extracted, ignore_errors=True)
+                self._extracted = None
+            self._unstage(staged)
+            staged = 0
+            self.inventory_complete = False
+        self._expanded_7z = (staged, refused, error)
+
     def _members_7z(self, src, every: bool = False) -> Iterator[tuple[Member, str | None]]:
-        """DFIR-ORC ships 7z. py7zr offers no streaming member access, so the archive is expanded
-        once into the staging area, within the package byte budget, and read from there."""
+        """DFIR-ORC ships 7z. py7zr offers no streaming member access, so the members that fit are
+        expanded once into the staging area and read from there."""
         try:
             import py7zr
         except ImportError:
             yield Member(self.name, 0, lambda: io.BytesIO(b"")), "7z archives need py7zr (backend/requirements-optional.txt)"
             return
-        if self._extracted is None:
-            try:
-                with py7zr.SevenZipFile(src, mode="r") as archive:
-                    # summed from the member list: archiveinfo() insists on a file name, and an
-                    # in-memory package has none
-                    expanded = sum(int(getattr(member, "uncompressed", 0) or 0) for member in archive.list())
-                    if self.budget["bytes"] + expanded > MAX_TOTAL:
-                        yield Member(self.name, expanded, lambda: io.BytesIO(b"")), "package exceeds 16 GiB expanded-byte limit"
-                        return
-                    self._extracted = tempfile.mkdtemp(dir=self.tmp_dir, suffix=".7z")
-                    archive.extractall(path=self._extracted)
-                    self.budget["bytes"] += expanded
-            except Exception as exc:  # noqa: BLE001
-                yield Member(self.name, 0, lambda: io.BytesIO(b"")), f"7z: {type(exc).__name__}: {exc}"[:300]
-                return
-        root = os.path.realpath(self._extracted)
-        found = sorted(os.path.join(dirpath, filename) for dirpath, _dirs, files in os.walk(root) for filename in files)
-        for i, path in enumerate(found):
+        if self._expanded_7z is None:
+            self._expand_7z(py7zr, src)
+        assert self._expanded_7z is not None
+        _held, refused, error = self._expanded_7z
+        if error:
+            yield Member(self.name, 0, lambda: io.BytesIO(b"")), error
+        listed: dict[str, tuple[int, str | None, str | None]] = {name: (size, reason, None) for name, size, reason in refused}
+        root = os.path.realpath(self._extracted) if self._extracted else None
+        if root:
+            for dirpath, _dirs, files in os.walk(root):
+                for filename in files:
+                    real = os.path.realpath(os.path.join(dirpath, filename))
+                    if not real.startswith(root + os.sep):
+                        continue  # a member that escaped the extraction directory is not evidence
+                    listed[os.path.relpath(real, root).replace(os.sep, "/")] = (os.path.getsize(real), None, real)
+        for i, (name, (size, reason, real)) in enumerate(sorted(listed.items())):
             if i >= MAX_FILES and not every:
                 self.inventory_complete = False
                 break
-            real = os.path.realpath(path)
-            if not real.startswith(root + os.sep):
-                continue  # a member that escaped the extraction directory is not evidence
-            name = os.path.relpath(real, root).replace(os.sep, "/")
-            yield Member(name, os.path.getsize(real), lambda p=real: open(p, "rb")), None
+            if real is None:
+                yield Member(name, size, lambda: io.BytesIO(b"")), reason
+                continue
+            # the staging sweep goes by age; touched as each member is taken, the expansion of a
+            # parse that runs for hours is not taken from under it.
+            try:
+                os.utime(root)
+            except OSError:
+                pass
+            yield Member(name, size, lambda p=real: open(p, "rb")), None
 
     def _release_evtx(self) -> None:
         for tmp_path, (entry, _name) in list(self.evtx_held.items()):
             self.budget["deferredBytes"] = max(0, self.budget["deferredBytes"] - int(entry.get("size") or 0))
+            self._unstage(int(entry.get("size") or 0))
             _unlink(tmp_path)
         self.evtx_held = {}
 
@@ -417,6 +518,9 @@ class PackageSource:
         fmt = detect_archive(self.name, head)
         src = self.path or io.BytesIO(self.data or b"")
         if fmt == "zip":
+            # zipfile writes no more of a member than it declares, so the declared sizes of the
+            # members read bound what the archive expands to
+            expansion = Expansion(os.path.getsize(self.path) if self.path else len(self.data or b""))
             with zipfile.ZipFile(src) as zf:
                 for i, info in enumerate(zf.infolist()):
                     if i >= MAX_FILES and not every:
@@ -427,26 +531,39 @@ class PackageSource:
                     reason = "encrypted member" if info.flag_bits & 1 else None
                     if (info.external_attr >> 16) & 0o170000 == 0o120000:
                         reason = "symbolic link"
+                    if not reason and info.file_size <= self.budget["memberCap"]:
+                        if expansion.fits(info.file_size):
+                            expansion.charge(info.file_size)
+                        else:
+                            reason = f"{expansion.reason}; not read"
                     yield Member(info.filename, info.file_size, lambda info=info: zf.open(info)), reason
         elif fmt == "7z":
             yield from self._members_7z(src, every)
         elif fmt == "tar":
-            with tarfile.open(name=self.path, fileobj=None if self.path else src, mode="r:*") as tf:
-                for i in itertools.count():
-                    info = tf.next()
-                    if info is None:
-                        break
-                    if i >= MAX_FILES:
-                        if not every:
-                            self.inventory_complete = False
+            with open_tar(self.path, self.data) as (tf, walk):
+                try:
+                    for i in itertools.count():
+                        info = tf.next()
+                        if info is None:
                             break
-                        # tarfile keeps every header it has read; past the cap only the name is
-                        # wanted, so the list does not grow with the archive
-                        tf.members.clear()
-                    if info.isdir():
-                        continue
-                    reason = None if info.isfile() else "non-regular member"
-                    yield Member(info.name, info.size, lambda info=info: tf.extractfile(info)), reason
+                        if i >= MAX_FILES:
+                            if not every:
+                                self.inventory_complete = False
+                                break
+                            # tarfile keeps every header it has read; past the cap only the name is
+                            # wanted, so the list does not grow with the archive
+                            tf.members.clear()
+                        if info.isdir():
+                            continue
+                        reason = None if info.isfile() else "non-regular member"
+                        if not reason and not walk.fits(info.size):
+                            reason = f"{walk.reason}; not read"
+                        yield Member(info.name, info.size, lambda info=info: tf.extractfile(info)), reason
+                except ExpansionLimit as exc:
+                    # passing over a member decompresses all of it, so a walk past the allowance
+                    # cannot even list the members after it
+                    self.inventory_complete = False
+                    yield Member(REST_OF_ARCHIVE, 0, lambda: io.BytesIO(b"")), f"{exc}; the members after this point were not listed"
         else:
             yield (
                 Member(
@@ -470,6 +587,9 @@ class PackageSource:
             if self._extracted:
                 shutil.rmtree(self._extracted, ignore_errors=True)
                 self._extracted = None
+            if self._expanded_7z:
+                self._unstage(self._expanded_7z[0])
+                self._expanded_7z = None
 
     def _iterate(self) -> Iterator[dict[str, Any]]:
         # A small explicit manifest supplies collection context regardless of archive order.
@@ -506,10 +626,7 @@ class PackageSource:
             parts = PurePosixPath(member.name.replace("\\", "/")).parts
             if ".." in parts or member.name.startswith(("/", "\\")) or (parts and ":" in parts[0]):
                 reason = "unsafe member path"
-            if member.size > MAX_MEMBER:
-                reason = "member exceeds 4 GiB limit"
-            if self.budget["bytes"] + member.size > MAX_TOTAL:
-                reason = "package exceeds 16 GiB expanded-byte limit"
+            reason = self._refusal(member.size) or reason
             if reason:
                 entry.update(status="skipped", reason=reason)
                 continue
@@ -517,17 +634,18 @@ class PackageSource:
             rows = source = None
             decode_started = None
             notes: dict[str, Any] = {}
+            size = decoded_size = 0
             try:
                 digest = hashlib.sha256()
                 with tempfile.NamedTemporaryFile(dir=self.tmp_dir, suffix=".member", delete=False) as out:
                     tmp_path = out.name
-                    size = 0
                     with member.open() as fh:
                         while chunk := fh.read(1024**2):
                             size += len(chunk)
                             self.bytes_read += len(chunk)
                             self.budget["bytes"] += len(chunk)
-                            if size > MAX_MEMBER or self.budget["bytes"] > MAX_TOTAL:
+                            self.budget["held"] += len(chunk)
+                            if size > self.budget["memberCap"] or self.budget["bytes"] > MAX_TOTAL or self.budget["held"] > self.budget["heldCap"]:
                                 raise ValueError("expanded-byte limit reached")
                             digest.update(chunk)
                             out.write(chunk)
@@ -554,10 +672,17 @@ class PackageSource:
                                 decoded = native.decode("cab", tmp_path, self.tmp_dir)
                             finally:
                                 self.budget["decodeSeconds"] += time.monotonic() - cab_started
-                            # What it expanded to counts against the package, like any other bytes.
-                            self.budget["bytes"] += os.path.getsize(decoded)
+                            # What it expanded to counts against the package, like any other bytes,
+                            # and is held in the staging area while its members are read.
+                            decoded_size = os.path.getsize(decoded)
+                            self.budget["bytes"] += decoded_size
+                            self.budget["held"] += decoded_size
                             if self.budget["bytes"] > MAX_TOTAL:
-                                raise ValueError("package exceeds 16 GiB expanded-byte limit")
+                                raise ValueError(f"package exceeds {size_text(MAX_TOTAL)} expanded-byte limit")
+                            if self.budget["held"] > self.budget["heldCap"]:
+                                raise ValueError(
+                                    f"the cabinet expands to {size_text(decoded_size)}, more than the staging area has room for while this package is read"
+                                )
                         inherited = {**self.context, "artifactDefault": collection.category(member.name) or self.context.get("artifactDefault")}
                         nested = PackageSource(
                             "nested.zip" if decoded else member.name,
@@ -604,6 +729,7 @@ class PackageSource:
                     finally:
                         if decoded:
                             os.unlink(decoded)
+                            self._unstage(decoded_size)
                     continue
                 if PurePosixPath(low.replace("\\", "/")).name == "collection-manifest.json":
                     if member.name != "collection-manifest.json":
@@ -783,6 +909,8 @@ class PackageSource:
                             closer()
                         except Exception:  # noqa: BLE001
                             pass
+                if tmp_path:
+                    self._unstage(size)
                 _unlink(tmp_path)
 
         yield from self._drain_native()

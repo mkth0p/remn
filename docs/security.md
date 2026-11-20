@@ -181,15 +181,30 @@ finishes.
   The sweep covers Django's own multipart spool as well as the chunked staging area: a request
   that dies part-way through a single-request upload leaves a file there too. It also covers the
   parsers' own staging, the `.member`, `.decoded` and `.manifest` files a parse writes while it
-  works. A parse releases those itself, and a process killed mid-parse cannot.
-- **A total budget.** `FORENSIC_TMP_MAX_GB` (4 by default) caps what the staging area may hold at
-  once. A new upload that would exceed it triggers a sweep and is then refused with 507, so a
-  stream of abandoned uploads cannot fill the disk however short the lifetime is.
+  works and the folders it expands a 7z into or stages event logs in for Hayabusa. A parse
+  releases those itself, and a process killed mid-parse cannot. A parse still reading an expanded
+  7z touches its folder as it takes each member, so the age is the time since last use. At
+  startup, when nothing is being parsed, all of it is removed whatever its age; chunked uploads
+  stay, since a client can resume them. The total budget below counts those folders too.
+- **A total budget.** `FORENSIC_TMP_MAX_GB` caps what the staging area may hold at once: 4 in
+  browser-only mode, and otherwise 0, which is the free space of the disk under the staging area
+  less a tenth of that disk (at most 10 GiB) kept for the case stores and the system. A configured
+  total is never taken as more than that disk can hold. A file larger than the whole budget is
+  refused with 413 and a message naming what sets the budget, since waiting cannot change it. A
+  new upload that fits the budget but not what other uploads hold now triggers a sweep and is
+  then refused with 507, saying how much is held and how much is free, so a stream of abandoned
+  uploads cannot fill the disk however short the lifetime is. One archive member copied out for
+  parsing may take at most half the budget, and never more than 4 GiB.
 - **Private to the server account.** The staging directory is 0700 and each staged file 0600, so
   evidence in transit is not readable by other accounts on the host.
 - **A ceiling on what one parse holds.** A package parse holds artifacts back to decode them in
   groups, and that hold is capped per request rather than per archive, so nesting cannot multiply
-  it. A client that disconnects mid-parse releases everything the parse was holding rather than
+  it. Everything a package parse holds in the staging area at once, the member being read at each
+  nesting level, an expanded 7z and a decoded cabinet included, stays within what the area had
+  room for when the parse began. An archive expands to at most 200 times its own size, and never
+  less than 64 MiB; that counts what a compressed tar decompresses to pass over a member and what
+  a 7z decompresses to reach one, and the members past it are listed as skipped with the reason.
+  A client that disconnects mid-parse releases everything the parse was holding rather than
   stranding it for the sweeper to find later.
 - **A ceiling on how long one parse runs.** `FORENSIC_INGEST_MAX_S` (30 minutes in
   browser-only mode, off otherwise) ends an ingest stream at the limit with the rows already
@@ -213,10 +228,14 @@ finishes.
   browser-only mode, 256 otherwise) is not parsed; it becomes an error row that says why. An
   archive member larger than half the staging budget is not copied out, and bzip2, xz and
   LZMA data inside attachments and archives is expanded only up to the analysis limit, with
-  the attachment flagged as a decompression bomb when it goes past it.
+  the attachment flagged as a decompression bomb when it goes past it. A tar inside an
+  attachment is walked over at most that analysis limit of data, whatever compression it
+  carries, and over at most 10,000 headers and 10 seconds; an attachment whose walk stops early
+  is flagged as partly analysed.
 - **Every member accounted for.** An archive's members are listed in the stream's last line
-  as parsed (with their row count), skipped or failed, with the reason: too large, encrypted,
-  a compression method that is not read, not a mail file, not an event log. Nothing is left
+  as parsed (with their row count), skipped or failed, with the reason: too large, past the
+  archive's expansion allowance, encrypted, a compression method that is not read, not a mail
+  file, not an event log. Nothing is left
   out without a line saying so.
 - **Rules read without expansion.** The Sigma and Sublime converters take YAML from visitors,
   and a safe YAML loader is safe against object construction, not against anchors that each

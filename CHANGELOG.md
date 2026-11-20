@@ -215,6 +215,22 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   in their files). Detections go from 235 to 245 of 535 attack_data recordings, 109 to 112 of 279
   EVTX-to-MITRE-Attack files and 260 to 264 of 278 EVTX-ATTACK-SAMPLES files, and medium and
   higher findings on the clean machines from 2,134 to 1,684.
+- The staging area is sized from its disk, and archives expand only as far as it and their own
+  size allow. Outside browser-only mode `FORENSIC_TMP_MAX_GB` now defaults to 0, which lets the
+  staging area use the free space of its disk less a tenth of that disk (at most 10 GiB), so a
+  default install no longer refuses an upload above 4 GiB. A file the staging area can never hold
+  is refused with 413 and a message naming what sets the limit, instead of being told to try again
+  shortly; a file that has to wait gets 507 saying how much is held and when it frees. One package
+  member may take at most half the staging area, and never more than 4 GiB, and everything a parse
+  holds there at once (nested archives, an expanded 7z, a decoded cabinet) stays within what the
+  area had room for when the parse began. An archive expands to at most 200 times its own size,
+  and never less than 64 MiB: zip and 7z members past that are listed as skipped with the reason,
+  a compressed tar stops its walk there and lists the rest as one `(rest of archive)` entry, and a
+  7z is also stopped by what it actually decompresses, not only by the sizes it declares. A tar
+  inside a mail attachment is walked over at most the analysis limit of decompressed data, 10,000
+  headers and 10 seconds, and is flagged as partly analysed when it stops early. The folders of an
+  expanded 7z and of event logs staged for Hayabusa are swept like the upload staging area, and a
+  restart removes what a stopped parse left behind.
 - 39 rules for techniques the default rules missed in attack_data
   (`rules/windows/technique-gaps.yaml`): directory and Kerberos abuse, PowerShell discovery and
   tooling, obfuscated command lines, registry, Python and browser-policy persistence, LSA

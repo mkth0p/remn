@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import os
 import zipfile
 
 import make_samples
@@ -140,6 +141,85 @@ def test_xz_bomb_is_bounded():
 
     out, truncated = bounded_decompress("xz", lzma.compress(b"\0" * (64 * 2**20)), MAX_NESTED_BYTES)
     assert truncated and len(out) == MAX_NESTED_BYTES
+
+
+def _bz2_tar_with_a_long_member(member_mib: int) -> bytes:
+    """A bz2 tar whose first member is member_mib MiB of zeros and whose second is a small script,
+    so a walk has to decompress all of the first to reach the second. Made of concatenated bz2
+    streams, which decompress as one, so the fixture costs nothing to build."""
+    import bz2
+    import tarfile
+
+    filler = tarfile.TarInfo("filler.bin")
+    filler.size = member_mib * 2**20
+    script = b"Write-Output 'invented fixture'\n"
+    payload = tarfile.TarInfo("payload.ps1")
+    payload.size = len(script)
+    tail = payload.tobuf(format=tarfile.USTAR_FORMAT) + script + bytes(512 - len(script)) + bytes(1024)
+    return bz2.compress(filler.tobuf(format=tarfile.USTAR_FORMAT)) + bz2.compress(bytes(2**20)) * member_mib + bz2.compress(tail)
+
+
+def test_a_tgz_whose_payload_is_a_bz2_tar_is_walked_within_the_nested_limit():
+    """The gzip layer of a .tgz is read to the nested limit, but the tar reader then accepted a bz2
+    stream behind it and walked it without any bound: a few hundred kilobytes described terabytes,
+    all decompressed to find the next header."""
+    import gzip
+    import time
+
+    from services.analysis.attachments import archive
+
+    inner = _bz2_tar_with_a_long_member(4096)  # 4 GiB of tar in under 200 KB of bz2
+    assert len(inner) < archive.MAX_NESTED_BYTES
+    started = time.monotonic()
+    result = archive.analyze_archive(gzip.compress(inner), "tgz", "gz")
+    elapsed = time.monotonic() - started
+
+    # the whole walk decompresses at most the nested limit; unbounded it ran for over ten seconds
+    assert elapsed < 3, f"{elapsed:.1f}s"
+    assert {"archive_partially_analyzed", "zip_bomb"} <= set(result["flags"]), result
+    assert result["truncatedAt"] == archive.MAX_NESTED_BYTES
+    assert [e["name"] for e in result["entries"]] == ["filler.bin"]
+
+
+def test_a_tar_walk_stops_at_its_member_and_time_limits(monkeypatch):
+    import tarfile
+
+    from services.analysis.attachments import archive
+
+    out = io.BytesIO()
+    with tarfile.open(fileobj=out, mode="w") as tar:
+        for i in range(30):
+            info = tarfile.TarInfo(f"m{i:02d}.txt")
+            info.size = 1
+            tar.addfile(info, io.BytesIO(b"x"))
+    monkeypatch.setattr(archive, "MAX_TAR_MEMBERS", 20)
+    result = archive.analyze_archive(out.getvalue(), "tar", "tar")
+    assert result["entryCount"] == 20 and "archive_partially_analyzed" in result["flags"]
+
+    monkeypatch.setattr(archive, "MAX_TAR_MEMBERS", 10_000)
+    monkeypatch.setattr(archive, "MAX_TAR_SECONDS", 0.0)
+    result = archive.analyze_archive(out.getvalue(), "tar", "tar")
+    assert result["entryCount"] < 30 and "archive_partially_analyzed" in result["flags"]
+
+
+def test_a_tgz_larger_than_the_nested_limit_is_partly_analyzed_not_corrupt():
+    """A genuine .tgz past the nested limit used to be cut mid-member and reported corrupt."""
+    import gzip
+    import tarfile
+
+    from services.analysis.attachments import archive
+
+    out = io.BytesIO()
+    with tarfile.open(fileobj=out, mode="w") as tar:
+        for name in ("readme.txt", "setup.exe"):
+            info = tarfile.TarInfo(name)
+            body = os.urandom(10 * 2**20)  # incompressible, so the gzip layer itself stays large
+            info.size = len(body)
+            tar.addfile(info, io.BytesIO(body))
+    result = archive.analyze_archive(gzip.compress(out.getvalue(), compresslevel=1), "tgz", "gz")
+    assert "archive_corrupt" not in result["flags"], result
+    assert "archive_partially_analyzed" in result["flags"]
+    assert [e["name"] for e in result["entries"]] == ["readme.txt", "setup.exe"]
 
 
 def test_bounded_decompress_keeps_one_shot_semantics():
