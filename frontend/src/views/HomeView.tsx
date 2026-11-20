@@ -13,6 +13,7 @@ import { requestIngest } from '../data/ingest'
 import { startCase } from '../data/cases'
 import { DEFAULT_DETECTION_LEVEL, type DetectionLevel } from '../data/detectionLevel'
 import { DetectionLevelPicker } from '../components/DetectionLevelPicker'
+import { useDialogFocus } from '../components/dialogFocus'
 import { DETECTION_LEVELS, BEFORE_LEVELS, MEASURED_ON } from '../data/detectionLevel'
 import { EXAMPLE_RULE, HEAD_TO_HEAD, HELD_OUT, heldOut, LIBRARY_MEASURES, liveFigures, MAIL_CORPORA, type Cut, type LiveFigures } from '../data/landingFigures'
 import { fmtNum } from '../util/format'
@@ -873,6 +874,8 @@ function NewCaseDialog({ browserOnly, onClose }: { browserOnly: boolean; onClose
   const [files, setFiles] = useState<File[]>([])
   const [busy, setBusy] = useState(false)
   const [over, setOver] = useState(false)
+  const dialog = useRef<HTMLDivElement>(null)
+  useDialogFocus(dialog)
   useEffect(() => {
     const esc = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
     window.addEventListener('keydown', esc)
@@ -894,7 +897,7 @@ function NewCaseDialog({ browserOnly, onClose }: { browserOnly: boolean; onClose
   }
   return (
     <div className="ld-scrim" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="ld-modal" role="dialog" aria-modal="true" aria-labelledby="ld-new-title">
+      <div className="ld-modal" ref={dialog} role="dialog" aria-modal="true" aria-labelledby="ld-new-title" tabIndex={-1}>
         <div className="ld-mh">
           <div className="ld-mh-t">
             <RemnMark size={38} />

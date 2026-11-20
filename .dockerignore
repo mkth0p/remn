@@ -9,6 +9,9 @@ frontend/dist
 frontend/.vite
 backend/tmp
 backend/data/cases
+backend/data/accounts.json*
+backend/data/.accounts.json.*
+backend/data/audit.*
 backend/data/claude-cwd
 backend/data/lists/*.csv
 backend/data/lists/*.txt

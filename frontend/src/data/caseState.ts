@@ -40,7 +40,8 @@ export async function wipeCase(kase: Case): Promise<void> {
   if (kase.storage === 'server' && kase.serverKey) {
     let r: Response
     try {
-      r = await fetch(`/api/store/${kase.serverKey}`, { method: 'DELETE', headers: API_HEADERS })
+      // on a server with accounts, the emptied case keeps its owner and members
+      r = await fetch(`/api/store/${kase.serverKey}?keepAccess=1`, { method: 'DELETE', headers: API_HEADERS })
     } catch (e) {
       throw new Error(`the server store could not be reached (${(e as Error).message}); nothing was deleted`, { cause: e })
     }
@@ -55,11 +56,14 @@ export async function wipeCase(kase: Case): Promise<void> {
  * ones, or a fresh browser case when none is left. serverCleared is false when the server store
  * could not be removed (server down); the browser side is deleted regardless, and the caller
  * tells the analyst where the store is left.
+ *
+ * keepServer removes the case from this browser only and leaves its server store: a member of a
+ * shared case on a server with accounts, who may not delete it, does this.
  */
-export async function removeCase(kase: Case): Promise<{ next: Case; serverCleared: boolean }> {
+export async function removeCase(kase: Case, { keepServer = false }: { keepServer?: boolean } = {}): Promise<{ next: Case; serverCleared: boolean }> {
   const db = getDb()
   let serverCleared = true
-  if (kase.storage === 'server' && kase.serverKey) {
+  if (kase.storage === 'server' && kase.serverKey && !keepServer) {
     serverCleared = await fetch(`/api/store/${kase.serverKey}`, { method: 'DELETE', headers: API_HEADERS })
       .then((r) => r.ok || r.status === 404)
       .catch(() => false)

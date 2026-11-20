@@ -2083,6 +2083,14 @@ label.field > span {
   display: flex;
   flex-direction: column;
 }
+/* a dialog, a page and its heading take the focus from a script so a screen reader says where the
+   person is (components/dialogFocus.ts, viewFocus.ts); they are not controls and get no focus ring */
+.modal:focus,
+.ld-modal:focus,
+.main:focus,
+h1[tabindex='-1']:focus {
+  outline: none;
+}
 .modal-h {
   padding: 12px 16px;
   border-bottom: 1px solid var(--line);

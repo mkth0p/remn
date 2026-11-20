@@ -1,9 +1,11 @@
 /**
  * The AI ledger of a case: an append-only record of what the model was asked, which tools it ran,
  * what it proposed and what the analyst decided. A tool result is kept as a SHA-256 of its text,
- * not the text. Each entry's hash covers the previous entry's hash, so an entry edited or removed
- * afterwards breaks the chain at that point, which verifyLedger() reports and the report prints.
- * It travels in the case bundle with the rest of the case.
+ * not the text. Each entry's hash covers the previous entry's hash, so an entry edited afterwards,
+ * or removed from among later ones, breaks the chain at that point, which verifyLedger() reports
+ * and the report prints. No key protects it: the newest entries removed, or the chain hashed again
+ * from any entry onward by whoever holds the case, still verify. It travels in the case bundle
+ * with the rest of the case.
  */
 import { getDb, type AiLedgerEntry } from '../db/schema'
 import { sha256Hex } from '../util/export'

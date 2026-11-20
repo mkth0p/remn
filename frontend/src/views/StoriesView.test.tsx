@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RelationshipResult } from '../data/relationships'
 import { storyInputs, type Story, type StoryNotes, type StoryResult, type StoryStep } from '../data/stories'
+import { spineSteps } from '../data/storyFlow'
 import { defaultSettings, RemnDB, setDb, type Case } from '../db/schema'
 import { useStore } from '../state/store'
 
@@ -716,6 +717,110 @@ describe('decisions on stories', () => {
       const [mdName, blob] = vi.mocked(downloadBlob).mock.calls[0]
       expect(mdName).toBe('story-daniel.roy_northstar.example-timeline.md')
       expect(await (blob as Blob).text()).toContain('| Time (UTC) | Host | Account |')
+    },
+    TEST_TIMEOUT,
+  )
+})
+
+describe('the parts of the Stories page', () => {
+  it(
+    'filters the list by search and kind, and moves between the steps of the open story with j and k',
+    async () => {
+      await db.kv.put({ key: 'stories-1', value: await current() })
+      render(<StoriesView />)
+      await screen.findByRole('button', { name: 'Story daniel.roy@northstar.example' }, WAIT)
+      fireEvent.change(screen.getByLabelText('Search stories'), { target: { value: 'nobody' } })
+      expect(screen.queryByRole('button', { name: 'Story daniel.roy@northstar.example' })).toBeNull()
+      fireEvent.change(screen.getByLabelText('Search stories'), { target: { value: '203.0.113.69' } })
+      expect(screen.getByRole('button', { name: 'Story daniel.roy@northstar.example' })).toBeTruthy()
+      fireEvent.change(screen.getByLabelText('Story kind'), { target: { value: 'host' } })
+      expect(screen.queryByRole('button', { name: 'Story daniel.roy@northstar.example' })).toBeNull()
+      fireEvent.change(screen.getByLabelText('Story kind'), { target: { value: 'person' } })
+      expect(screen.getByRole('button', { name: 'Story daniel.roy@northstar.example' })).toBeTruthy()
+      // j opens the first step of the spine, k stays on it, and a key typed in a field moves nothing
+      // a story with no spine moves along its whole timeline
+      const opened = snapshot().stories[0]
+      const spine = spineSteps(opened)?.length ? spineSteps(opened)! : opened.steps
+      fireEvent.keyDown(screen.getByLabelText('Search stories'), { key: 'j' })
+      expect(screen.queryByText('Why it is in the story')).toBeNull()
+      fireEvent.keyDown(window, { key: 'j' })
+      expect(await screen.findByText('Why it is in the story')).toBeTruthy()
+      expect(screen.getAllByText(spine[0].title).length).toBeGreaterThan(1)
+      fireEvent.keyDown(window, { key: 'j' })
+      fireEvent.keyDown(window, { key: 'k' })
+      fireEvent.keyDown(window, { key: 'k' })
+      expect(screen.getAllByText(spine[0].title).length).toBeGreaterThan(1)
+      fireEvent.click(screen.getByText('close'))
+      expect(screen.queryByText('Why it is in the story')).toBeNull()
+    },
+    TEST_TIMEOUT,
+  )
+
+  it(
+    'opens the lineage, the decisions and the JSON of a story, and the record of a step',
+    async () => {
+      await db.kv.put({ key: 'stories-1', value: await current() })
+      render(<StoriesView />)
+      await screen.findByRole('button', { name: 'Story daniel.roy@northstar.example' }, WAIT)
+      const tabs = () => within(document.querySelector('.tabs') as HTMLElement)
+      fireEvent.click(tabs().getByText('Lineage (2)'))
+      expect(screen.getAllByText(/remote interactive \(RDP\)/).length).toBeGreaterThan(0)
+      fireEvent.click(tabs().getByText('Decisions (0)'))
+      expect(screen.getByRole('region', { name: 'Decisions on the story' })).toBeTruthy()
+      fireEvent.click(tabs().getByText('JSON'))
+      expect(document.querySelector('pre.codeblock')?.textContent).toContain('"id": "story-1"')
+      fireEvent.click(tabs().getByText('Story'))
+      fireEvent.click(screen.getByText('The audit log was cleared by NORTHSTAR\\daniel.roy'))
+      fireEvent.click(await screen.findByText('open the record'))
+      expect(await screen.findByText('event 2', { exact: false }, WAIT)).toBeTruthy()
+    },
+    TEST_TIMEOUT,
+  )
+
+  it(
+    'goes from a story to its campaign, its hosts and its addresses',
+    async () => {
+      await db.kv.put({ key: 'stories-1', value: await current() })
+      useStore.setState({ entity: null })
+      render(<StoriesView />)
+      await screen.findByRole('button', { name: 'Story daniel.roy@northstar.example' }, WAIT)
+      const pills = () => Array.from(document.querySelectorAll('.story-head .pill'))
+      fireEvent.click(pills().find((p) => p.textContent === '203.0.113.69')!)
+      expect(useStore.getState().entity).toEqual({ kind: 'ip', value: '203.0.113.69' })
+      fireEvent.click(pills().find((p) => p.textContent?.trim() === 'ws-004')!)
+      expect(useStore.getState().entity).toEqual({ kind: 'host', value: 'ws-004' })
+      fireEvent.click(pills().find((p) => p.textContent === 'campaign 203.0.113.69')!)
+      expect(await screen.findByText('northstar\\employee019')).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'Campaign 203.0.113.69' })).toBeTruthy()
+    },
+    TEST_TIMEOUT,
+  )
+
+  it(
+    'says what a case with no stories shows, built or not',
+    async () => {
+      render(<StoriesView />)
+      expect(await screen.findByText('not built yet: run the rules first, the stories start from their findings', {}, WAIT)).toBeTruthy()
+      expect(screen.getByText(/A story is what happened to one person/)).toBeTruthy()
+      cleanup()
+      await db.kv.put({ key: 'stories-1', value: await current({ ...snapshot(), stories: [], campaigns: [] }) })
+      render(<StoriesView />)
+      expect(await screen.findByText(/No story: no finding of medium severity or more names a person or a host/, {}, WAIT)).toBeTruthy()
+      expect(screen.getByText('0 stories · none · 0 campaign(s)', { exact: false })).toBeTruthy()
+    },
+    TEST_TIMEOUT,
+  )
+
+  it(
+    'says when the build read only part of the case, and puts a notice away',
+    async () => {
+      await db.kv.put({ key: 'stories-1', value: await current({ ...snapshot(), stats: { events: 5, mails: 0, truncated: ['flagged'], cut: { flagged: 12 } } }) })
+      useStore.setState({ focusChain: 'story-0ld' })
+      render(<StoriesView />)
+      expect(await screen.findByText(/Incomplete: More than .* records carry findings: the stories read the first .* and left 12 out/, {}, WAIT)).toBeTruthy()
+      const notice = screen.getByText(/The story this link points to is not among the stories/)
+      fireEvent.click(within(notice.parentElement!).getByText('dismiss'))
+      expect(screen.queryByText(/The story this link points to is not among the stories/)).toBeNull()
     },
     TEST_TIMEOUT,
   )

@@ -11,6 +11,7 @@ from django.views.decorators.http import require_POST
 
 from api.errors import failure
 from api.jobs import manager
+from forensic.access import permission
 from services.analysis import baseline
 from services.analysis import rescore as calibration
 from services.store.casestore import registry
@@ -18,6 +19,7 @@ from services.store.casestore import registry
 log = logging.getLogger(__name__)
 
 
+@permission("write", case="body")
 @require_POST
 def rescore(request: HttpRequest):
     # Only the messages composed here are returned. An exception raised while the mails are scored
@@ -40,7 +42,8 @@ def rescore(request: HttpRequest):
             return JsonResponse({"error": "unknown case store"}, status=404)
         if any(j["status"] in ("queued", "running") for j in manager.list(st.key)):
             return JsonResponse({"error": "Wait for this case's current jobs to finish before rescoring."}, status=409)
-        job = manager.submit("rescore_mails", st.key, lambda j: calibration.store(st, settings, j), "Rescore mails")
+        account = getattr(request, "account", None)
+        job = manager.submit("rescore_mails", st.key, lambda j: calibration.store(st, settings, j), "Rescore mails", account=account.name if account else None)
         return JsonResponse({"jobId": job.id}, status=202)
     rows = body.get("mails")
     if not isinstance(rows, list) or len(rows) > 200 or any(not isinstance(r, dict) or not isinstance(r.get("id"), int) for r in rows):
@@ -48,6 +51,7 @@ def rescore(request: HttpRequest):
     return JsonResponse(calibration.batch(rows, settings))
 
 
+@permission("write", case="body")
 @require_POST
 def mails(request: HttpRequest):
     """Body: {storeKey, settings} -> summary; or {mails: [...], settings} -> {rows: [{id, senderPrevalence, ...}], summary}."""

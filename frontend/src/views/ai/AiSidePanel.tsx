@@ -289,7 +289,7 @@ function BoardTab({ kase }: { kase: Case }) {
             <button className="btn xs ghost" onClick={() => toNote(h)} title="add to the case notes">
               → note
             </button>
-            <button className="btn xs ghost" onClick={() => removeHypothesis(kase.id!, h.id)}>
+            <button className="btn xs ghost" onClick={() => removeHypothesis(kase.id!, h.id)} aria-label="remove the hypothesis">
               ×
             </button>
           </div>

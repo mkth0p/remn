@@ -22,13 +22,15 @@ from api.errors import failure
 from api.jobs import Job, manager
 from api.params import BadParameter, whole_number
 from api.views.upload import discard_upload, get_upload
+from forensic.access import may, permission
+from forensic.accounts import accounts_on, store
 from services.analysis import hayabusa
 from services.common import ndjson_line
 from services.ingest import isolation
 from services.ingest.isolation import ParseStopped
 from services.ingest.package import request_budget
 from services.ingest.pipeline import MailStats, detect_mail_format
-from services.parsers import evtx_parser
+from services.parsers import evtx_parser, m365
 from services.parsers.mail import pst as pst_mod
 from services.parsers.mail.common import ParseContext
 from services.store import queries as Q
@@ -101,18 +103,61 @@ def _ctx_from(settings_obj: dict[str, Any] | None) -> ParseContext:
     )
 
 
+def _account_name(request: HttpRequest) -> str | None:
+    account = getattr(request, "account", None)
+    return account.name if account is not None else None
+
+
+def _visible_cases(account) -> dict[str, Any]:
+    """The cases an account may read, with their stores' sizes. An admin also sees the stores no
+    case record covers: those written before accounts were turned on, which only an admin opens."""
+    records = store().cases()
+    stores = {s["key"]: s for s in registry.list()}
+    keys = set(records) | (set(stores) if account.role == "admin" else set())
+    out = []
+    for key in sorted(keys):
+        rec = records.get(key)
+        if not may(account, "read", rec):
+            continue
+        st = stores.get(key) or {"key": key, "sizeBytes": 0, "modified": None}
+        rec = rec or {}
+        out.append(
+            {
+                **st,
+                "name": rec.get("name") or "",
+                "owner": rec.get("owner"),
+                "members": list(rec.get("members") or []),
+                "stored": key in stores,
+                "may": {"read": True, "write": may(account, "write", rec or None), "own": may(account, "own", rec or None)},
+            }
+        )
+    body: dict[str, Any] = {"stores": out, "thresholdMb": settings.FORENSIC_STORE_THRESHOLD_MB}
+    if account.role == "admin":
+        body["root"] = str(settings.CASES_DIR)
+    return body
+
+
 # ---------------------------------------------------------------------------
 # listing / lifecycle
 # ---------------------------------------------------------------------------
+@permission("signed-in")
 @require_GET
 def list_stores(request: HttpRequest):
     """Store keys are capabilities: a case reaches its store by the key it holds. Listing every key
-    is an operator action, so it is only answered on a server with an access token configured."""
+    is an operator action, so it is only answered on a server with an access token configured.
+
+    On a server with accounts, each account is listed the cases it may read, with their names, owner
+    and members: an admin every case, a store without an owner included, anyone else the cases it
+    owns or is a member of."""
+    account = getattr(request, "account", None)
+    if account is not None:
+        return JsonResponse(_visible_cases(account))
     if not settings.FORENSIC_AUTH_TOKEN:
         return JsonResponse({"error": "the store listing needs an access token on this server (FORENSIC_AUTH_TOKEN)", "code": "listing"}, status=403)
     return JsonResponse({"stores": registry.list(), "root": str(settings.CASES_DIR), "thresholdMb": settings.FORENSIC_STORE_THRESHOLD_MB})
 
 
+@permission({"GET": "read", "DELETE": "own"}, case="url")
 @require_http_methods(["GET", "DELETE"])
 def store_root(request: HttpRequest, key: str):
     if request.method == "DELETE":
@@ -120,6 +165,10 @@ def store_root(request: HttpRequest, key: str):
             ok = registry.delete(key)
         except ValueError:
             return JsonResponse({"error": "invalid case key"}, status=400)
+        # a case deleted goes from the accounts file too; a case emptied to be filled again
+        # (?keepAccess=1) keeps its owner and members
+        if accounts_on() and request.GET.get("keepAccess") != "1":
+            store().forget_case(key)
         return JsonResponse({"deleted": ok})
     st, err = _store(key, create=False)
     if err:
@@ -131,6 +180,7 @@ def store_root(request: HttpRequest, key: str):
         return _stopped(exc)
 
 
+@permission("write", case="url")
 @require_http_methods(["DELETE"])
 def delete_evidence(request: HttpRequest, key: str, evidence_id: int):
     st, err = _store(key, create=False)
@@ -142,6 +192,7 @@ def delete_evidence(request: HttpRequest, key: str, evidence_id: int):
 # ---------------------------------------------------------------------------
 # ingestion job (chunked upload -> parse -> DuckDB)
 # ---------------------------------------------------------------------------
+@permission("write", case="url", create=True)
 @require_POST
 def ingest(request: HttpRequest, key: str):
     st, err = _store(key)
@@ -154,6 +205,12 @@ def ingest(request: HttpRequest, key: str):
     options = body.get("options") or {}
     if kind not in ("evtx", "mail", "package"):
         return JsonResponse({"error": "kind must be evtx, mail or package"}, status=400)
+    # the date order and time zone the analyst set for the evidence, for the cloud exports in it
+    try:
+        date_setting = m365.date_setting(options.get("dates"))
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    dates = date_setting.to_dict() if date_setting is not None else None
     try:
         path, meta = get_upload(upload_id)
     except (FileNotFoundError, ValueError):
@@ -172,6 +229,19 @@ def ingest(request: HttpRequest, key: str):
             discard_upload(upload_id)
             return JsonResponse({"error": "PST/OST support requires libpff-python (see backend/requirements-optional.txt)"}, status=501)
     sha_client = str(evidence.get("sha256Client") or "")
+    # Each browser numbers the evidence it adds. Two members adding files to one case from two
+    # browsers can give two files one number, and the second would take over the first's entry and
+    # mix its rows with them; it is refused instead.
+    held = st.cursor().execute('SELECT name, "sha256Client" FROM evidence WHERE id = ?', [evidence_id]).fetchone()
+    if held is not None and (held[1] or "") != sha_client:
+        discard_upload(upload_id)
+        return JsonResponse(
+            {
+                "error": f"evidence #{evidence_id} of this case is already another file ({held[0]}), added from another browser; add the file again",
+                "code": "evidenceId",
+            },
+            status=409,
+        )
     ctx = _ctx_from(options.get("settings"))
     include_raw = bool(options.get("includeRaw", True))
     keep_bodies = bool(options.get("keepBodies", True))
@@ -209,9 +279,10 @@ def ingest(request: HttpRequest, key: str):
                 "engines": hayabusa.engines(),
                 "filesystem": read_filesystem,
                 "budget": request_budget(),
+                "dates": dates,
             }
         elif kind == "evtx":
-            parse_options = {"include_raw": include_raw, "engines": hayabusa.available()}
+            parse_options = {"include_raw": include_raw, "engines": hayabusa.available(), "dates": dates}
         else:
             parse_options = {"ctx": ctx}
         try:
@@ -295,7 +366,7 @@ def ingest(request: HttpRequest, key: str):
             "seconds": round(time.time() - t0, 1),
         }
 
-    job = manager.submit("ingest", key, run, label=name)
+    job = manager.submit("ingest", key, run, label=name, account=_account_name(request))
     return JsonResponse({"jobId": job.id})
 
 
@@ -325,6 +396,8 @@ def _nest_mail(r: dict[str, Any]) -> dict[str, Any]:
     return r
 
 
+# evidence leaving the server: recorded, although it changes nothing
+@permission("read", case="url", record=True)
 @require_GET
 def export_rows(request: HttpRequest, key: str):
     """Stream every stored row as NDJSON in the exact format /import accepts:
@@ -390,6 +463,7 @@ def export_rows(request: HttpRequest, key: str):
     return resp
 
 
+@permission("write", case="url", create=True)
 @require_POST
 def import_rows(request: HttpRequest, key: str):
     """Bulk import of already-parsed rows (NDJSON body: {"type":"event"|"mail", ...}). Used to migrate a browser case to the server store."""
@@ -459,6 +533,7 @@ def _query(request: HttpRequest, key: str, fn):
         return JsonResponse(failure("the store query", exc, log), status=500)
 
 
+@permission("read", case="url")
 @require_POST
 def search(request: HttpRequest, key: str):
     return _query(
@@ -477,11 +552,13 @@ def search(request: HttpRequest, key: str):
     )
 
 
+@permission("read", case="url")
 @require_POST
 def count(request: HttpRequest, key: str):
     return _query(request, key, lambda st, b: {"count": Q.count(st, str(b.get("source") or "events"), b.get("filter"), b.get("settings"))})
 
 
+@permission("read", case="url")
 @require_POST
 def aggregate(request: HttpRequest, key: str):
     return _query(
@@ -498,6 +575,7 @@ def aggregate(request: HttpRequest, key: str):
     )
 
 
+@permission("read", case="url")
 @require_POST
 def stack(request: HttpRequest, key: str):
     return _query(
@@ -509,6 +587,7 @@ def stack(request: HttpRequest, key: str):
     )
 
 
+@permission("read", case="url")
 @require_POST
 def timeline(request: HttpRequest, key: str):
     return _query(
@@ -516,6 +595,7 @@ def timeline(request: HttpRequest, key: str):
     )
 
 
+@permission("read", case="url")
 @require_GET
 def facets(request: HttpRequest, key: str):
     st, err = _store(key, create=False)
@@ -531,6 +611,7 @@ def facets(request: HttpRequest, key: str):
         return JsonResponse({"error": str(exc)}, status=400)
 
 
+@permission("read", case="url")
 @require_GET
 def row(request: HttpRequest, key: str):
     st, err = _store(key, create=False)
@@ -548,11 +629,13 @@ def row(request: HttpRequest, key: str):
     return JsonResponse(r)
 
 
+@permission("read", case="url")
 @require_POST
 def pivot(request: HttpRequest, key: str):
     return _query(request, key, lambda st, b: Q.pivot(st, str(b.get("value") or "")))
 
 
+@permission("read", case="url")
 @require_GET
 def iocs(request: HttpRequest, key: str):
     st, err = _store(key, create=False)
@@ -582,6 +665,7 @@ def iocs(request: HttpRequest, key: str):
         return _stopped(exc)
 
 
+@permission("write", case="url")
 @require_POST
 def reputation(request: HttpRequest, key: str):
     st, err = _store(key, create=False)
@@ -594,11 +678,13 @@ def reputation(request: HttpRequest, key: str):
     return JsonResponse({"stored": n, "mailsFlagged": mirrored})
 
 
+@permission("read", case="url")
 @require_POST
 def sql(request: HttpRequest, key: str):
     return _query(request, key, lambda st, b: Q.run_sql(st, str(b.get("sql") or ""), whole_number(b.get("limit"), "limit", 200)))
 
 
+@permission("read", case="url")
 @require_GET
 def schema(request: HttpRequest, key: str):
     return JsonResponse({"schema": Q.SCHEMA_DOC})
@@ -607,6 +693,8 @@ def schema(request: HttpRequest, key: str):
 # ---------------------------------------------------------------------------
 # rules
 # ---------------------------------------------------------------------------
+# a rule run reads the case and hands its findings to the page; it writes nothing to the store
+@permission("read", case="url")
 @require_POST
 def rules_run(request: HttpRequest, key: str):
     st, err = _store(key, create=False)
@@ -624,13 +712,14 @@ def rules_run(request: HttpRequest, key: str):
             st, rules, rule_settings, progress=lambda p: job.update(**p), cancelled=lambda: job.cancelled, rule_max_s=settings.FORENSIC_STORE_RULE_MAX_S
         )
 
-    job = manager.submit("rules", key, run, label=f"{len(rules)} rules")
+    job = manager.submit("rules", key, run, label=f"{len(rules)} rules", account=_account_name(request))
     return JsonResponse({"jobId": job.id})
 
 
 # ---------------------------------------------------------------------------
 # jobs
 # ---------------------------------------------------------------------------
+@permission("read", case="query")
 @require_GET
 def jobs_list(request: HttpRequest):
     """The jobs of the case whose key the request presents. Without a key there is nothing to list:
@@ -653,17 +742,24 @@ def _job(request: HttpRequest, job_id: str) -> Job | None:
     return job
 
 
+# who may cancel is decided in the view: the account that started the job, or one that may write to its case
+@permission("read", case="query", record=("DELETE",))
 @require_http_methods(["GET", "DELETE"])
 def job_detail(request: HttpRequest, job_id: str):
     job = _job(request, job_id)
     if not job:
         return JsonResponse({"error": "unknown job"}, status=404)
     if request.method == "DELETE":
+        account = getattr(request, "account", None)
+        # a viewer may stop the rule run it started, not a job someone else started on the case
+        if account is not None and job.account != account.name and not may(account, "write", store().case(job.case_key or "")):
+            return JsonResponse({"error": "only the account that started this job, or one that may change its case, may cancel it", "code": "role"}, status=403)
         manager.cancel(job_id)
         return JsonResponse({"cancelled": True})
     return JsonResponse(job.to_dict(with_result=job.status in ("done", "error", "cancelled")))
 
 
+@permission("read", case="query")
 @require_GET
 def job_events(request: HttpRequest, job_id: str):
     """SSE stream of job progress (polling fallback: GET /api/jobs/<id>?case=<key>)."""

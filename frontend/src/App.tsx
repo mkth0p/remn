@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState, type ComponentType } from 'react'
 import { ApiError, getHealth, getMeta, onAuthError, setApiToken } from './api/client'
 import { defaultSettings, getDb, newServerKey, type Case } from './db/schema'
 import { toast, useStore, type View } from './state/store'
+import { findCase, focusRouteItem, NOT_HELD, parseRoute, startHistorySync } from './state/route'
 import { detectKind, ingestFiles, refreshCounts, requestIngest } from './data/ingest'
 import { migrateCaseToServer } from './data/migrate'
 import { getSource } from './data/source'
@@ -38,31 +39,44 @@ import {
 } from './components/Icons'
 import { ConsolePanel, Toasts } from './components/ConsolePanel'
 import { TokenGate } from './components/TokenGate'
+import { SharedCases } from './components/CaseAccess'
+import { signOut, viewerReason } from './data/access'
 import { RemnMark } from './components/RemnMark'
 import { DataNotice } from './components/DataNotice'
 import { EntityPanel } from './components/EntityPanel'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { focusPageHeading } from './components/viewFocus'
 import { Modal, Progress, ThemeToggle } from './components/ui'
-import { Dashboard } from './views/Dashboard'
-import { EvidenceView } from './views/EvidenceView'
-import { EventsView } from './views/EventsView'
-import { MailsView } from './views/MailsView'
-import { FindingsView } from './views/FindingsView'
-import { StoriesView } from './views/StoriesView'
-import { GraphView } from './views/GraphView'
-import { TimelineView } from './views/TimelineView'
-import { IocsView } from './views/IocsView'
-import { AiView } from './views/AiView'
-import { ReportView } from './views/ReportView'
-import { CaseView } from './views/CaseView'
-import { QuestionsView } from './views/QuestionsView'
-import { ReviewView } from './views/ReviewView'
-import { HomeView } from './views/HomeView'
-import { RulesView } from './views/RulesView'
-import { SettingsView } from './views/SettingsView'
 import type { PivotResult } from './data/queries'
 import { fmtBytes, fmtNum, fmtTs } from './util/format'
 import { safeHref } from './util/safe'
+
+/**
+ * Each page is its own script, fetched when it is first opened: the charts, the rule parser, the
+ * mail sanitiser and the home page's fonts are not part of the first load.
+ */
+function page<K extends string>(load: () => Promise<{ [P in K]: ComponentType }>, name: K) {
+  return lazy(() => load().then((m) => ({ default: m[name] })))
+}
+const Dashboard = page(() => import('./views/Dashboard'), 'Dashboard')
+const EvidenceView = page(() => import('./views/EvidenceView'), 'EvidenceView')
+const EventsView = page(() => import('./views/EventsView'), 'EventsView')
+const MailsView = page(() => import('./views/MailsView'), 'MailsView')
+const FindingsView = page(() => import('./views/FindingsView'), 'FindingsView')
+const StoriesView = page(() => import('./views/StoriesView'), 'StoriesView')
+const GraphView = page(() => import('./views/GraphView'), 'GraphView')
+const TimelineView = page(() => import('./views/TimelineView'), 'TimelineView')
+const IocsView = page(() => import('./views/IocsView'), 'IocsView')
+const AiView = page(() => import('./views/AiView'), 'AiView')
+const ReportView = page(() => import('./views/ReportView'), 'ReportView')
+const CaseView = page(() => import('./views/CaseView'), 'CaseView')
+const QuestionsView = page(() => import('./views/QuestionsView'), 'QuestionsView')
+const ReviewView = page(() => import('./views/ReviewView'), 'ReviewView')
+const HomeView = page(() => import('./views/HomeView'), 'HomeView')
+const RulesView = page(() => import('./views/RulesView'), 'RulesView')
+const SettingsView = page(() => import('./views/SettingsView'), 'SettingsView')
+
+const loadingPage = <div className="empty">loading the page…</div>
 
 const NAV: { id: View; label: string; icon: React.ComponentType; count?: 'events' | 'mails' | 'findings' | 'iocs' | 'evidence'; section?: string }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: IconDashboard },
@@ -92,6 +106,11 @@ function bootFailure(e: unknown): string {
   if (names.includes('QuotaExceededError')) return `${said} The browser's storage for this site is full: free space and reload.`
   return `${said} The browser may refuse this site storage (a private window, or site data turned off in its settings), its storage may be full, or another REMN tab may hold the database while it is upgraded: close other REMN tabs, check the site settings and reload.`
 }
+
+// the page's own title (index.html), for the home page
+const HOME_TITLE = typeof document === 'undefined' ? 'REMN' : document.title
+
+const BOOT_BLOCKED = 'Another REMN tab holds the database of this browser open in an older version, so this page cannot upgrade it yet: close the other REMN tabs or reload them, and this page starts.'
 
 export default function App() {
   const view = useStore((s) => s.view)
@@ -133,12 +152,19 @@ export default function App() {
   const pivotAbort = useRef<AbortController | null>(null)
   const [ready, setReady] = useState(false)
   const [bootError, setBootError] = useState<string | null>(null)
+  const [bootWait, setBootWait] = useState<string | null>(null)
   const [pendingKind, setPendingKind] = useState<'evtx' | 'mail' | 'package'>('mail')
   const [migrating, setMigrating] = useState<string | null>(null)
 
   useEffect(() => {
     const db = getDb()
-    onAuthError(() => useStore.getState().setAuthRequired(true))
+    // an older REMN tab that keeps the database open holds this one's upgrade back; the start waits, and says for what
+    const blocked = () => setBootWait(BOOT_BLOCKED)
+    db.on('blocked', blocked)
+    // React runs this twice in development: only the start still mounted keeps the address in step
+    let alive = true
+    let stopHistory: (() => void) | undefined
+    onAuthError((accounts) => useStore.getState().setAuthRequired(true, accounts))
     const tokenReady = db.kv.get('apiToken').then((tok) => {
       if (typeof tok?.value === 'string' && tok.value) setApiToken(tok.value)
     })
@@ -191,11 +217,20 @@ export default function App() {
         return db.cases.toArray()
       })
       setCases(all)
+      // the place the address names (a reload, a link, a bookmark), when it is a case this browser holds
+      const route = parseRoute(location.pathname, location.search)
+      const linked = route.caseRef ? findCase(all, route.caseRef) : undefined
+      if (route.caseRef && !linked) toast('warn', NOT_HELD, 0)
       const last = (await db.kv.get('lastCase'))?.value as number | undefined
-      const current = all.find((c) => c.id === last) ?? all[0]
-      setCurrentCase({ ...current, settings: { ...defaultSettings(), ...current.settings } })
-      // the home page first, until some case holds evidence
-      useStore.getState().setView((await casesWithEvidence()).size ? 'dashboard' : 'home')
+      const current = linked ?? all.find((c) => c.id === last) ?? all[0]
+      const open = { ...current, settings: { ...defaultSettings(), ...current.settings } }
+      setCurrentCase(open)
+      const item = linked && route.item && (await focusRouteItem(open, route.item)) ? route.item : null
+      if (linked && route.item && !item) useStore.getState().log('warn', `the ${route.item.kind} the address names is not in case "${open.name}", so it was not opened`)
+      // otherwise the home page first, until some case holds evidence
+      useStore.getState().setView(linked ? (route.view ?? 'dashboard') : route.view === 'home' ? 'home' : (await casesWithEvidence()).size ? 'dashboard' : 'home')
+      if (!alive) return
+      stopHistory = startHistorySync(item)
       setReady(true)
       // an import a closed or crashed tab left half-done: its rows go, and the evidence says it stopped
       repairInterruptedImports((st) => {
@@ -252,7 +287,12 @@ export default function App() {
       })
       .catch(() => undefined) // a database that cannot be read is what the start reports
     const t = setInterval(load, 30000)
-    return () => clearInterval(t)
+    return () => {
+      alive = false
+      stopHistory?.()
+      clearInterval(t)
+      db.on('blocked').unsubscribe(blocked)
+    }
   }, [setCurrentCase, setHealth, setMeta, setThreshold])
 
   // leaving while an import runs stops it; the browser asks first
@@ -266,6 +306,28 @@ export default function App() {
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
   }, [importing])
+
+  // the tab says which page it shows; the case's name stays out of it, and so out of the browser's history
+  useEffect(() => {
+    const label = NAV.find((n) => n.id === view)?.label
+    document.title = label ? `${label} · REMN` : HOME_TITLE
+  }, [view])
+
+  // a page opened from the navigation, a link, or back and forward: the focus goes to its heading,
+  // so a screen reader says where the person is; not on the first page the start opens
+  const mainRef = useRef<HTMLElement>(null)
+  const shownView = useRef<string | null>(null)
+  const shell = ready && !!kase && !bootError
+  useEffect(() => {
+    if (!shell) {
+      shownView.current = null
+      return
+    }
+    const before = shownView.current
+    shownView.current = view
+    if (before === null || before === view) return
+    return focusPageHeading(mainRef.current ?? document.body)
+  }, [view, shell])
 
   // incidents group one person's accounts by the case's internal domains (rules/identity.ts)
   useEffect(() => setCaseInternalDomains(kase?.settings.internalDomains), [kase?.settings.internalDomains])
@@ -363,14 +425,19 @@ export default function App() {
     )
   if (!ready || !kase)
     return (
-      <div className="empty">
-        <div className="big">REMN</div>booting…
+      <div className="empty" role="status">
+        <div className="big">REMN</div>
+        {bootWait ?? 'booting…'}
       </div>
     )
   if (view === 'home')
     return (
       <>
-        <HomeView />
+        <ErrorBoundary what="The home page">
+          <Suspense fallback={loadingPage}>
+            <HomeView />
+          </Suspense>
+        </ErrorBoundary>
         <Toasts />
         {authRequired && <TokenGate />}
       </>
@@ -379,6 +446,8 @@ export default function App() {
   const isServer = kase.storage === 'server'
   const browserOnly = health?.mode === 'browser-only'
   const canConvert = !isServer && !browserOnly
+  // on a server with accounts, a viewer changes nothing; the server refuses it too
+  const viewer = viewerReason(health)
   const dep = deployment(health)
   const acknowledgeNotice = async () => {
     if (!pending) return
@@ -449,6 +518,15 @@ export default function App() {
             <span className={`status-dot ${isServer ? 'ok' : ''}`} />
             store {isServer ? 'server' : 'browser'}
           </div>
+          {health?.account && (
+            <div title={`signed in with a personal token as ${health.account.name}, role ${health.account.role}${viewer ? `. ${viewer}` : ''}`}>
+              <span className="status-dot ok" />
+              <span className="mono">{health.account.name}</span> · {health.account.role}{' '}
+              <button className="btn ghost xs" onClick={() => void signOut()} title="forget this browser's token and ask for one again">
+                sign out
+              </button>
+            </div>
+          )}
           <button className="btn ghost xs" style={{ justifyContent: 'flex-start' }} onClick={() => setShowConsole(!showConsole)} title="console">
             <IconTerminal />
             <span className="label"> console {busy ? '●' : ''}</span>
@@ -491,25 +569,27 @@ export default function App() {
           />
         </div>
       </header>
-      <main className="main relative">
+      <main className="main relative" ref={mainRef}>
         {/* one view failing to render leaves the shell and the other views usable; a new view starts afresh */}
-        <ErrorBoundary key={view} what={`The ${NAV.find((n) => n.id === view)?.label ?? view} page`}>
-          {view === 'dashboard' && <Dashboard />}
-          {view === 'evidence' && <EvidenceView />}
-          {view === 'events' && <EventsView />}
-          {view === 'mails' && <MailsView />}
-          {view === 'timeline' && <TimelineView />}
-          {view === 'findings' && <FindingsView />}
-          {view === 'stories' && <StoriesView key={kase?.id} />}
-          {view === 'graph' && <GraphView key={kase?.id} />}
-          {view === 'rules' && <RulesView />}
-          {view === 'iocs' && <IocsView />}
-          {view === 'ai' && <AiView />}
-          {view === 'review' && <ReviewView />}
-          {view === 'case' && <CaseView />}
-          {view === 'questions' && <QuestionsView key={kase?.id} />}
-          {view === 'report' && <ReportView />}
-          {view === 'settings' && <SettingsView />}
+        <ErrorBoundary key={view} back what={`The ${NAV.find((n) => n.id === view)?.label ?? view} page`}>
+          <Suspense fallback={loadingPage}>
+            {view === 'dashboard' && <Dashboard />}
+            {view === 'evidence' && <EvidenceView />}
+            {view === 'events' && <EventsView />}
+            {view === 'mails' && <MailsView />}
+            {view === 'timeline' && <TimelineView />}
+            {view === 'findings' && <FindingsView />}
+            {view === 'stories' && <StoriesView key={kase?.id} />}
+            {view === 'graph' && <GraphView key={kase?.id} />}
+            {view === 'rules' && <RulesView />}
+            {view === 'iocs' && <IocsView />}
+            {view === 'ai' && <AiView />}
+            {view === 'review' && <ReviewView />}
+            {view === 'case' && <CaseView />}
+            {view === 'questions' && <QuestionsView key={kase?.id} />}
+            {view === 'report' && <ReportView />}
+            {view === 'settings' && <SettingsView />}
+          </Suspense>
         </ErrorBoundary>
         <EntityPanel />
         {showConsole && (
@@ -550,17 +630,29 @@ export default function App() {
               </span>
             </label>
             {!browserOnly && (
-              <label className="checkbox">
-                <input type="radio" name="storage" checked={newCase.storage === 'server'} onChange={() => setNewCase({ ...newCase, storage: 'server' })} />{' '}
+              <label className="checkbox" title={viewer ?? undefined}>
+                <input type="radio" name="storage" disabled={!!viewer} checked={newCase.storage === 'server'} onChange={() => setNewCase({ ...newCase, storage: 'server' })} />{' '}
                 <span>
                   <b>Server store</b>{' '}
                   <span className="muted small">
                     — rows go to a DuckDB file on this machine ({health?.store?.casesDir ?? 'backend/data/cases'}); the browser keeps findings and notes. For gigabytes of EVTX / mailboxes.
+                    {health?.accounts ? ' You own the case; add members in Settings.' : ''}
                   </span>
                 </span>
               </label>
             )}
           </div>
+          {viewer && <div className="hint">{viewer}</div>}
+          {health?.accounts && (
+            <SharedCases
+              onOpen={async (id) => {
+                setCases(await getDb().cases.toArray())
+                await switchCase(id)
+                setNewCase(null)
+                setView('evidence')
+              }}
+            />
+          )}
           <div className="col" style={{ gap: 4 }}>
             <b className="small">Detection level</b>
             <DetectionLevelPicker value={newCase.level} onChange={(level) => setNewCase({ ...newCase, level })} />
