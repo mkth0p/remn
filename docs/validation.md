@@ -11,10 +11,16 @@ describes them and lists the public datasets that can be dropped into the tool a
 
 ## Test suites
 
-```bash
-.venv\Scripts\python.exe -m pytest      # parsers, analysers, API, rule catalogue, connectors (from the project root)
-cd frontend && npm test                 # filter language, rule engine, queries, incidents, review, report, pages
+From the project root, with the development packages installed
+(`backend/requirements-dev.txt`, see [CONTRIBUTING](../CONTRIBUTING.md)):
+
 ```
+.venv/bin/python -m pytest      # parsers, analysers, API, rule catalogue, connectors
+cd frontend
+npm test                        # filter language, rule engine, queries, incidents, review, report, pages
+```
+
+On Windows the interpreter is `.venv\Scripts\python.exe`.
 
 The heavy tests, multi-gigabyte ingests and long runs, are opt-in: `pytest -m heavy -s`.
 Continuous integration runs both suites, the linters and formatters, the production
@@ -94,7 +100,8 @@ commit, converts it to the rows an `.evtx` gives and reads it through the server
 365 detection was checked for parsing only: the Invictus IR Unified Audit Log set,
 9,608 records of real business email compromise, loads, and its inbox-rule and
 mailbox-permission rules fire. Re-run with
-`.venv/Scripts/python.exe tools/validate_public.py --phishpot` after any scoring change.
+`.venv/bin/python tools/validate_public.py --phishpot` (`.venv\Scripts\python.exe` on Windows)
+after any scoring change.
 
 ## The golden corpus
 
@@ -147,8 +154,8 @@ timings), `ai_repro.py` (replay of a model turn).
 | set | what | drop in as | source |
 |---|---|---|---|
 | EVTX-ATTACK-SAMPLES | 278 small .evtx files at the commit measured, one attack technique each, GPL-3.0 | the zip, or any .evtx | github.com/sbousseaden/EVTX-ATTACK-SAMPLES |
-| EVTX-to-MITRE-Attack | 270+ samples, Security, Sysmon, PowerShell | the repository zip | github.com/mdecrevoisier/EVTX-to-MITRE-Attack |
-| Splunk attack_data, Windows | about 750 attack-range recordings (Sysmon, Security, PowerShell), labelled with ATT&CK techniques, as XmlWinEventLog; Git LFS files | the `.log` files (event records as XML) | github.com/splunk/attack_data |
+| EVTX-to-MITRE-Attack | 279 .evtx files at the commit measured (`4748560`), Security, Sysmon, PowerShell | the repository zip | github.com/mdecrevoisier/EVTX-to-MITRE-Attack |
+| Splunk attack_data, Windows | attack-range recordings (Sysmon, Security, PowerShell) as XmlWinEventLog, labelled with ATT&CK techniques, Git LFS files; the rule measure reads 535 of them at the commit measured (`7a5e9d5`), leaving out 36 larger than 20 MB and 14 whose files are not at that commit | the `.log` files (event records as XML) | github.com/splunk/attack_data |
 | hayabusa-sample-evtx | the two sets above plus DeepBlueCLI samples | the repository zip | github.com/Yamato-Security/hayabusa-sample-evtx |
 | omerbenamram/evtx samples | security_big_sample.evtx, sysmon.evtx | the files | github.com/omerbenamram/evtx |
 | Invictus IR O365 dataset | 9,608 Unified Audit Log records from real BEC cases, CC BY 4.0 | `auditrecords.csv` after extracting the 7z | github.com/invictus-ir/o365_dataset |
