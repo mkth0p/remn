@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { defaultSettings, RemnDB, setDb, type Case } from './db/schema'
 import { caseRef } from './state/route'
@@ -108,4 +108,26 @@ describe('starting the application', () => {
     ).toContain('does not hold')
     expect(location.pathname).toBe(`/case/${caseRef(second)}/dashboard`)
   }, 15_000)
+})
+
+describe('moving between pages', () => {
+  const navButton = (label: string) => [...document.querySelectorAll<HTMLButtonElement>('.nav .nav-item')].find((b) => b.textContent?.startsWith(label))!
+
+  it("moves the focus to the opened page's heading, or to the page when it has none, but not on the first load", async () => {
+    await twoCases()
+    history.replaceState(null, '', `/case/${caseRef(lab)}/case`)
+    render(<App />)
+    expect(await screen.findByText('Tasks', undefined, { timeout: 8000 })).toBeTruthy()
+    expect(document.activeElement).toBe(document.body)
+    navButton('Indicators').focus()
+    fireEvent.click(navButton('Indicators'))
+    await waitFor(() => expect(document.activeElement?.tagName).toBe('H1'), { timeout: 8000 })
+    expect(document.activeElement?.textContent).toBe('Indicators')
+    expect(document.querySelector('main')?.contains(document.activeElement)).toBe(true)
+    navButton('Events').focus()
+    fireEvent.click(navButton('Events'))
+    await waitFor(() => expect(document.activeElement).toBe(document.querySelector('main')), { timeout: 8000 })
+    // the page's first search ends before its database goes
+    expect(await screen.findByText(/^\d+ match/, undefined, { timeout: 8000 })).toBeTruthy()
+  }, 20_000)
 })

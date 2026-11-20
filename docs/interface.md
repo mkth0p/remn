@@ -50,16 +50,23 @@ A page that fails while it is drawn shows what failed in its place, with "go bac
 page shown before it in this tab), "try again", "reload the page" and the details to copy,
 and the console says so; the sidebar and the other pages stay usable. Each page's code is
 fetched the first time it is opened; when it cannot be, most often because REMN was updated on
-the server after the tab was opened, the page says to reload, and the reload keeps the place. When the browser does not let the app open its database at start
-(a private window, site data turned off, storage full, a database written by a newer
-version), the page says so and why instead of waiting. When another REMN tab of an older
-version keeps the database open while this one needs to upgrade it, the start says so and
-waits for that tab to be closed or reloaded.
+the server after the tab was opened, the page says to reload, and the reload keeps the place.
+When the browser does not let the app open its database at start (a private window, site data
+turned off, storage full, a database written by a newer version), the page says so and why
+instead of waiting. When another REMN tab of an older version keeps the database open while
+this one needs to upgrade it, the start says so and waits for that tab to be closed or
+reloaded.
 
 On the Mails and Findings lists, `j` and `k` move the selection and `/` focuses the search;
 the Stories, Graph and Review pages move between their steps or cards with `j` and `k` too.
 The other lists, Events and Indicators among them, are used with the mouse. The Review page
 adds `r`, `e`, `f` and `x` for its decisions.
+
+Opening another page moves the keyboard focus to its heading, or to the page itself where it
+has none, so a screen reader names the page and the next Tab starts in it. A dialog takes the
+focus when it opens, keeps Tab and Shift+Tab among its own controls and gives the focus back to
+the button that opened it when it closes. Buttons that show only an icon carry a name a screen
+reader reads out.
 
 ## Evidence
 

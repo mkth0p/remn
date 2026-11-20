@@ -290,7 +290,7 @@ export function EventsView() {
                 <button className={markedOnly ? 'btn xs primary' : 'btn xs ghost'} title="Show only the rows you marked" onClick={() => setMarkedOnly((on) => !on)}>
                   marked
                 </button>
-                <button className="btn icon ghost sm" title="export" onClick={() => setMenu(!menu)}>
+                <button className="btn icon ghost sm" title="export" aria-label="export" onClick={() => setMenu(!menu)}>
                   <IconMore />
                 </button>
                 {menu && (

@@ -167,6 +167,7 @@ export function AiView() {
               </div>
               <button
                 className="btn ghost xs"
+                aria-label="delete the chat"
                 onClick={(e) => {
                   e.stopPropagation()
                   getDb()

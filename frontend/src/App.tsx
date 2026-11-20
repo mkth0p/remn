@@ -45,6 +45,7 @@ import { RemnMark } from './components/RemnMark'
 import { DataNotice } from './components/DataNotice'
 import { EntityPanel } from './components/EntityPanel'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { focusPageHeading } from './components/viewFocus'
 import { Modal, Progress, ThemeToggle } from './components/ui'
 import type { PivotResult } from './data/queries'
 import { fmtBytes, fmtNum, fmtTs } from './util/format'
@@ -312,6 +313,22 @@ export default function App() {
     document.title = label ? `${label} · REMN` : HOME_TITLE
   }, [view])
 
+  // a page opened from the navigation, a link, or back and forward: the focus goes to its heading,
+  // so a screen reader says where the person is; not on the first page the start opens
+  const mainRef = useRef<HTMLElement>(null)
+  const shownView = useRef<string | null>(null)
+  const shell = ready && !!kase && !bootError
+  useEffect(() => {
+    if (!shell) {
+      shownView.current = null
+      return
+    }
+    const before = shownView.current
+    shownView.current = view
+    if (before === null || before === view) return
+    return focusPageHeading(mainRef.current ?? document.body)
+  }, [view, shell])
+
   // incidents group one person's accounts by the case's internal domains (rules/identity.ts)
   useEffect(() => setCaseInternalDomains(kase?.settings.internalDomains), [kase?.settings.internalDomains])
 
@@ -552,7 +569,7 @@ export default function App() {
           />
         </div>
       </header>
-      <main className="main relative">
+      <main className="main relative" ref={mainRef}>
         {/* one view failing to render leaves the shell and the other views usable; a new view starts afresh */}
         <ErrorBoundary key={view} back what={`The ${NAV.find((n) => n.id === view)?.label ?? view} page`}>
           <Suspense fallback={loadingPage}>

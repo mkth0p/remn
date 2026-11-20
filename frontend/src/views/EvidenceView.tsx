@@ -128,7 +128,7 @@ export function EvidenceView() {
                   <button className="btn xs" onClick={() => setVerify({ ev: e })} title="re-hash a copy of the file and compare">
                     verify
                   </button>
-                  <button className="btn xs danger" onClick={() => remove(e)} disabled={!!viewer} title={viewer ?? 'remove'}>
+                  <button className="btn xs danger" onClick={() => remove(e)} disabled={!!viewer} title={viewer ?? 'remove'} aria-label="remove">
                     <IconTrash />
                   </button>
                 </td>

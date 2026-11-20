@@ -565,11 +565,16 @@ export function MailDetail({
           <IconAi /> analyse
         </button>
         {onPaneMax && (
-          <button className="btn icon ghost sm" onClick={() => onPaneMax(!paneMax)} title={paneMax ? 'restore the table' : 'expand the message'}>
+          <button
+            className="btn icon ghost sm"
+            onClick={() => onPaneMax(!paneMax)}
+            title={paneMax ? 'restore the table' : 'expand the message'}
+            aria-label={paneMax ? 'restore the table' : 'expand the message'}
+          >
             <IconChevronDown style={{ transform: paneMax ? 'none' : 'rotate(180deg)' }} />
           </button>
         )}
-        <button className="btn icon ghost sm" onClick={onClose} title="close (Esc)">
+        <button className="btn icon ghost sm" onClick={onClose} title="close (Esc)" aria-label="close (Esc)">
           <IconClose />
         </button>
       </div>

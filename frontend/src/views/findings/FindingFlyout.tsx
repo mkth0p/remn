@@ -100,7 +100,7 @@ export function FindingFlyout({
       title={
         <span className="row" style={{ gap: 8 }}>
           {parent && (
-            <button className="btn icon ghost sm" title="back to the incident" onClick={onBack}>
+            <button className="btn icon ghost sm" title="back to the incident" aria-label="back to the incident" onClick={onBack}>
               <IconArrowLeft />
             </button>
           )}

@@ -1,6 +1,7 @@
-import { Fragment, useEffect, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import type { Severity } from '../db/schema'
 import { classNames, highlightJson, riskClass } from '../util/format'
+import { useDialogFocus } from './dialogFocus'
 import { IconClose, IconCopy, IconMoon, IconSun } from './Icons'
 import { useStore } from '../state/store'
 import { currentTheme, setTheme, type Theme } from '../ui/theme'
@@ -68,11 +69,16 @@ export function Modal({ title, onClose, children, footer, wide }: { title: React
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
   }, [onClose])
+  const ref = useRef<HTMLDivElement>(null)
+  const titleId = useId()
+  useDialogFocus(ref)
   return (
     <div className="modal-bg" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" style={wide ? { width: 'min(1000px, 94vw)' } : undefined}>
+      <div className="modal" ref={ref} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} style={wide ? { width: 'min(1000px, 94vw)' } : undefined}>
         <div className="modal-h">
-          <h2 style={{ flex: 1 }}>{title}</h2>
+          <h2 id={titleId} style={{ flex: 1 }}>
+            {title}
+          </h2>
           <button className="btn ghost sm" onClick={onClose} aria-label="close">
             <IconClose />
           </button>

@@ -364,7 +364,7 @@ export function MailsView() {
               <span className="row relative" style={{ gap: 4 }}>
                 <BaselineButton />
                 <RescoreButton key={kase?.id} />
-                <button className="btn icon ghost sm" title="export" onClick={() => setMenu(!menu)}>
+                <button className="btn icon ghost sm" title="export" aria-label="export" onClick={() => setMenu(!menu)}>
                   <IconMore />
                 </button>
                 {menu && (

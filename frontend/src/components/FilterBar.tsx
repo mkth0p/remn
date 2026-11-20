@@ -151,6 +151,7 @@ export function FilterBar({ source, filter, onChange, fields, total, loading, fa
             <button
               className="btn icon ghost xs"
               title="clear search"
+              aria-label="clear search"
               onClick={() => {
                 setText('')
                 onChange({ ...filter, text: undefined })
@@ -206,7 +207,7 @@ export function FilterBar({ source, filter, onChange, fields, total, loading, fa
         )}
         {hasAny ? (
           <>
-            <button className="btn icon ghost sm" onClick={() => setSaveName('')} title="save this search">
+            <button className="btn icon ghost sm" onClick={() => setSaveName('')} title="save this search" aria-label="save this search">
               <IconSave />
             </button>
             <button className="btn ghost sm" onClick={() => onChange({ sort: filter.sort })} title="clear every filter">
