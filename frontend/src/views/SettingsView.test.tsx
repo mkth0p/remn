@@ -64,7 +64,7 @@ afterEach(async () => {
 const toasts = () => useStore.getState().toasts.map((t) => t.text)
 const saved = async () => (await db.cases.get(1))!
 const panel = (title: string) => Array.from(document.querySelectorAll('.panel')).find((p) => p.querySelector('.panel-h')?.textContent === title) as HTMLElement
-const listInput = (placeholder: string) => screen.getByPlaceholderText((_, el) => el.getAttribute('placeholder') === placeholder) as HTMLTextAreaElement
+const listInput = (placeholder: string) => screen.getByPlaceholderText((_, el) => el?.getAttribute('placeholder') === placeholder) as HTMLTextAreaElement
 const setList = (placeholder: string, text: string) => {
   const el = listInput(placeholder)
   fireEvent.change(el, { target: { value: text } })
