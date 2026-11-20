@@ -30,7 +30,7 @@ describe('focusPageHeading', () => {
     const { main } = shell('<div class="empty">loading the page…</div>')
     focusPageHeading(main, 1000)
     await settle()
-    main.innerHTML = '<div><h1>Review</h1></div>'
+    main.innerHTML = '<div><h1>Timeline</h1></div>'
     await settle()
     expect(document.activeElement).toBe(main.querySelector('h1'))
   })

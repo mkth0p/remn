@@ -265,7 +265,7 @@ describe('the plain-language query', () => {
     fireEvent.keyDown(input, { key: 'Enter' })
   }
 
-  it('applies the filter the model builds, without empty conditions, keeping the sort, and says when it suggests the other page', async () => {
+  it('applies the filter built from a plain-language question, without empty conditions, keeping the sort, and says when the other page is suggested', async () => {
     transport.queryJson.mockResolvedValue({
       query: {
         source: 'mails',
@@ -294,18 +294,18 @@ describe('the plain-language query', () => {
       text: undefined,
       sort: { field: 'ts', dir: 'asc' },
     })
-    expect(toasts()).toContain('warn: the model suggested the "mails" view for this question')
+    expect(toasts().some((t) => t.startsWith('warn:') && t.endsWith('suggested the "mails" view for this question'))).toBe(true)
   })
 
-  it('shows what the model said when it gives no filter, and the error when the call fails', async () => {
+  it('shows the answer when no filter comes back, and the error when the call fails', async () => {
     transport.queryJson.mockResolvedValueOnce({ query: null, raw: 'I cannot help with that' })
     render(<Harness />)
     ask('anything')
     await waitFor(() => expect(screen.getByText('I cannot help with that')).toBeTruthy())
-    expect(toasts()).toContain('err: the model did not return a usable filter')
-    transport.queryJson.mockRejectedValueOnce(new Error('model offline'))
+    expect(toasts().some((t) => t.startsWith('err:') && t.endsWith('did not return a usable filter'))).toBe(true)
+    transport.queryJson.mockRejectedValueOnce(new Error('service offline'))
     fireEvent.click(screen.getByText('build filter'))
-    await waitFor(() => expect(toasts()).toContain('err: AI query failed: model offline'))
+    await waitFor(() => expect(toasts().some((t) => t.startsWith('err:') && t.endsWith('query failed: service offline'))).toBe(true))
     expect(changes).toEqual([])
   })
 

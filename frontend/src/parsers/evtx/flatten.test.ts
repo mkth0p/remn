@@ -169,8 +169,8 @@ group('summarize', () => {
 
   it('writes Sysmon events by their kind, and an unknown one by its number', () => {
     const sysmon = 'Microsoft-Windows-Sysmon'
-    expect(summarize({ eventId: 3, provider: sysmon, image: 'C:\\Tools\\agent.exe', destinationIp: '192.0.2.9', destinationPort: 443 })).toBe(
-      'Network connection C:\\Tools\\agent.exe -> 192.0.2.9:443',
+    expect(summarize({ eventId: 3, provider: sysmon, image: 'C:\\Tools\\collector.exe', destinationIp: '192.0.2.9', destinationPort: 443 })).toBe(
+      'Network connection C:\\Tools\\collector.exe -> 192.0.2.9:443',
     )
     expect(summarize({ eventId: 10, provider: sysmon, sourceImage: 'a.exe', targetImage: 'lsass.exe', grantedAccess: '0x1010' })).toBe(
       'ProcessAccess (process handle opened) a.exe -> lsass.exe (0x1010)',

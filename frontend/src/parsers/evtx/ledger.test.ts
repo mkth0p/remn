@@ -254,8 +254,8 @@ describe('Lineage', () => {
     eventId: 7,
     provider: SYSMON,
     processGuid: guid,
-    image: 'C:\\Tools\\agent.exe',
-    imageLoaded: 'C:\\Tools\\Agent.exe',
+    image: 'C:\\Tools\\collector.exe',
+    imageLoaded: 'C:\\Tools\\Collector.exe',
     signed,
     signatureStatus: 'Valid',
     signature: ' Example Software Ltd ',
@@ -298,8 +298,8 @@ describe('Lineage', () => {
     lineage.apply({
       eventId: 7,
       provider: SYSMON,
-      imageLoaded: 'c:\\tools\\agent.exe',
-      data: { ProcessGuid: '{ABC}', Signed: 'true', Image: 'C:\\Tools\\agent.exe', SignatureStatus: 'Valid', Signature: 'Example Software Ltd' },
+      imageLoaded: 'c:\\tools\\collector.exe',
+      data: { ProcessGuid: '{ABC}', Signed: 'true', Image: 'C:\\Tools\\collector.exe', SignatureStatus: 'Valid', Signature: 'Example Software Ltd' },
     })
     const row = { eventId: 8, provider: SYSMON, data: { SourceProcessGuid: '{abc}' } } as Record<string, unknown>
     lineage.apply(row)

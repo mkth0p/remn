@@ -7,8 +7,8 @@ import type { DataSource } from './source'
 
 const packs = vi.hoisted(() => ({ enabledPackIds: vi.fn(), getPackRules: vi.fn() }))
 vi.mock('./packs', () => packs)
-const reviews = vi.hoisted(() => ({ replaceFindings: vi.fn(), refoldWidespread: vi.fn() }))
-vi.mock('./findingReviews', () => reviews)
+const stored = vi.hoisted(() => ({ replaceFindings: vi.fn(), refoldWidespread: vi.fn() }))
+vi.mock('./findingReviews', () => stored)
 const source = vi.hoisted(() => ({ getSource: vi.fn() }))
 vi.mock('./source', () => source)
 
@@ -39,8 +39,8 @@ beforeEach(() => {
   useStore.setState({ meta: null, toasts: [], console: [] })
   packs.enabledPackIds.mockResolvedValue(new Set())
   packs.getPackRules.mockReset()
-  reviews.replaceFindings.mockReset()
-  reviews.refoldWidespread.mockReset().mockResolvedValue(0)
+  stored.replaceFindings.mockReset()
+  stored.refoldWidespread.mockReset().mockResolvedValue(0)
   source.getSource.mockReset()
 })
 afterEach(async () => {
@@ -242,7 +242,7 @@ describe('runRulesFor', () => {
   })
 
   it('runs a browser case in the worker, refolds widespread rules and keeps the diagnostics with warnings', async () => {
-    reviews.refoldWidespread.mockResolvedValue(2)
+    stored.refoldWidespread.mockResolvedValue(2)
     const run = runRulesFor(browserCase, [rule('a')], undefined, { a: 1 })
     lastWorker().say({
       type: 'done',
@@ -256,7 +256,7 @@ describe('runRulesFor', () => {
     })
     const res = await run
     expect(res.total).toBe(1)
-    expect(reviews.refoldWidespread).toHaveBeenCalledWith(1, { a: 1 })
+    expect(stored.refoldWidespread).toHaveBeenCalledWith(1, { a: 1 })
     const saved = (await db.kv.get('ruleDiags-1'))?.value as { byRule: Record<string, number>; diagnostics: unknown[] }
     expect(saved.byRule).toEqual({ a: 1 })
     expect(saved.diagnostics).toHaveLength(3)
@@ -279,10 +279,10 @@ describe('runRulesFor', () => {
       errors: ['b: timed out'],
     })
     source.getSource.mockReturnValue({ runRules: runOnServer, searchEvents: vi.fn(), searchMails: vi.fn() })
-    reviews.replaceFindings.mockResolvedValue(1)
+    stored.replaceFindings.mockResolvedValue(1)
     const res = await runRulesFor(serverCase, [rule('a'), rule('b')])
     expect(FakeWorker.all).toHaveLength(0)
-    expect(reviews.replaceFindings).toHaveBeenCalledWith(2, ['a'], [{ ruleId: 'a', key: 'k1' }], expect.any(Function), undefined)
+    expect(stored.replaceFindings).toHaveBeenCalledWith(2, ['a'], [{ ruleId: 'a', key: 'k1' }], expect.any(Function), undefined)
     expect(res).toEqual({ total: 1, byRule: { a: 1, b: 1 }, errors: ['b: timed out'], diagnostics: [] })
     expect(useStore.getState().toasts.map((t) => t.text)).toContain('1 finding(s) from 2 rule(s)')
   })
