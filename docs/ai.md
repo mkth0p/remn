@@ -22,9 +22,13 @@ can be changed in Settings to an Ollama elsewhere on the local network; as for t
 OpenAI-compatible servers below, only loopback, private-range addresses and local names are
 accepted, and any other address is refused before a prompt is sent. When REMN
 is served from another host, Ollama must allow that origin once, then be restarted:
-`setx OLLAMA_ORIGINS "https://remn.example.com"` on Windows, `launchctl setenv
-OLLAMA_ORIGINS "https://remn.example.com"` for the macOS app (it does not read shell
-exports), an `Environment=` line through `systemctl edit ollama` on Linux. Safari blocks an
+`setx OLLAMA_ORIGINS "https://remn.example.com"` on Windows, an `Environment=` line through
+`systemctl edit ollama` on Linux. On a Mac, one line in Terminal does it for good:
+`curl -fsSL https://remn.example.com/ollama-mac.sh | bash -s -- https://remn.example.com`
+(`frontend/public/ollama-mac.sh`). The menu-bar app does not read shell exports, and
+`launchctl setenv` is lost at reboot, so the script sets the variable, installs a
+LaunchAgent that sets it again at every login, restarts Ollama, checks that it answers the
+origin. It installs nothing and pulls no model. The file lists how to undo it. Safari blocks an
 HTTPS page from calling localhost, so a Safari user takes the server proxy, or on a
 browser-only instance, where there is none, another browser or a local REMN. A page served
 from another host checks the model when the analyst opens the AI analyst, not on every page
