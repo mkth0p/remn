@@ -47,8 +47,8 @@ Everything becomes rows of two tables, events and mails. See [Data sources](sour
 
 ## What does REMN not do?
 
-- It does not collect evidence: there is no agent and no remote acquisition. It reads exports
-  and collections made with other tools.
+- It does not collect evidence: it installs nothing on the machines under investigation and
+  acquires nothing remotely. It reads exports and collections made with other tools.
 - It does not read disk images, memory images, network captures, or Linux and macOS logs. The
   Sigma converter skips rules for products other than Windows.
 - It does not open or run attachments. They are analysed statically (structure, macros, PDF
