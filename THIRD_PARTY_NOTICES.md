@@ -94,6 +94,15 @@ own questions in the same file (ids starting with 0) are REMN's.
 | --- | --- | --- | --- |
 | Tranco list V367N, the top 10,000 domains, fetched 2026-09-05 | `backend/services/reference/tranco_top10k.txt` (with `tranco.json`) on the server, and `frontend/src/reference/tranco10k.ts`, which is part of the browser application | https://tranco-list.eu; Le Pochat et al., "Tranco: A Research-Oriented Top Sites Ranking Hardened Against Manipulation", NDSS 2019 | The Tranco site states no licence for the list. The list is built from other providers' rankings, among them Cloudflare Radar (CC BY-NC 4.0, non-commercial) and the Chrome UX Report (CC BY-SA 4.0); whether their terms carry over to the list is not settled. |
 
+## Samples written by real tools, in the test fixtures (`tests/fixtures/real/`)
+
+Each folder's README names every file's source at a pinned commit, its SHA-256 and what was
+trimmed. The files are unchanged unless that README says otherwise.
+
+| Samples | Where | Source | Licence |
+| --- | --- | --- | --- |
+| Windows prefetch files, versions 17 to 31 | `tests/fixtures/real/prefetch/` | plaso test data, https://github.com/log2timeline/plaso | Apache-2.0 |
+
 ## Fonts
 
 | Font | Source | Licence |
@@ -113,8 +122,9 @@ own questions in the same file (ids starting with 0) are REMN's.
 
 ## Test corpora and attack recordings (downloaded for the tools, never committed)
 
-The detection measures and the mail rates REMN publishes are taken on these. The repository
-holds none of their files: only file names, counts and REMN's own results.
+The detection measures and the mail rates REMN publishes are taken on these, and the parser
+tests marked heavy download theirs by URL and SHA-256 (`tests/backend/real_samples.py`). The
+repository holds none of their files: only file names, hashes, counts and REMN's own results.
 
 | Corpus | Used by | Source | Licence |
 | --- | --- | --- | --- |
@@ -129,6 +139,7 @@ holds none of their files: only file names, counts and REMN's own results.
 | SpamAssassin public corpus | `tools/validate_public.py` | https://spamassassin.apache.org/old/publiccorpus/ | Not verified |
 | Apache Tika test PST | `tools/validate_public.py` | https://github.com/apache/tika | Apache-2.0 (the repository's licence) |
 | Invictus IR Microsoft 365 audit log dataset | `tools/validate_public.py` | https://github.com/invictus-ir/o365_dataset | CC BY 4.0 |
+| Velociraptor test data and golden outputs | `tests/backend/test_real_*.py`, heavy tests | https://github.com/Velocidex/velociraptor | AGPL-3.0 (the repository's licence) |
 
 ## Base images of the Docker builds
 

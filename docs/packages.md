@@ -189,10 +189,15 @@ is accepted only when a single grouped cell was split and that split alone accou
 for the whole shortfall; reaching the header width by combining several splits is a
 coincidence rather than a repair.
 
-Native decoders use Dissect for Prefetch v23/30/31 (including MAM compression) and
+Native decoders use Dissect for Prefetch v23/26/30/31 (including MAM compression) and
 REGF registry hives. Prefetch emits each recorded execution time, run count and
 referenced filenames; these filenames are not automatically resolved to host drive
-letters. Prefetch v17/26 is unsupported. Registry last-write times remain metadata;
+letters. Version 23 (Windows 7) records one run time, versions 26 and later up to
+eight. The layout of Windows 10 1903 and later keeps its run count and the executable's
+full path in other places than the earlier version 30 files, and both are read from
+there. Prefetch v17 (Windows XP and Server 2003) is not read: such a file is counted
+as an error with that reason. These versions are checked on prefetch files Windows
+wrote (`tests/fixtures/real/prefetch/`). Registry last-write times remain metadata;
 no transaction-log replay or deleted-key recovery is performed. In-transaction hives
 are identified in the original fields. Services and Run/RunOnce values become
 configuration observations. Memory/disk images and arbitrary collector schemas

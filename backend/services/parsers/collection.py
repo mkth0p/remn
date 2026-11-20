@@ -678,7 +678,11 @@ def _prefetch_image(name: str | None, referenced) -> str | None:
         return None
     want = str(name).upper()
     for entry in referenced or ():
-        if isinstance(entry, str) and entry.upper().rsplit("\\", 1)[-1] == want:
+        if not isinstance(entry, str):
+            continue
+        leaf = entry.upper().rsplit("\\", 1)[-1]
+        # the header keeps 29 characters of a longer name, so a cut name matches the start of one
+        if leaf == want or (len(want) == 29 and leaf.startswith(want)):
             return entry
     return None
 
@@ -1508,7 +1512,7 @@ def native_rows(kind: str, raw_records, name: str, context: dict):
         row["parserVersion"] = f"dissect-{kind}/1"
         if kind == "prefetch":
             row["processName"] = raw.get("Name")
-            executable = _prefetch_image(raw.get("Name"), raw.get("ReferencedFiles"))
+            executable = _prefetch_image(raw.get("Name"), raw.get("ReferencedFiles")) or raw.get("ExecutablePath")
             if executable:
                 row["image"] = executable
                 row["path"] = executable
