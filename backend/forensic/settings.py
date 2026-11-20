@@ -1,10 +1,11 @@
 """
 Django settings for the forensic backend.
 
-The server is deliberately stateless: no database, no sessions, no auth.
-It parses uploaded evidence in memory / temp files, streams results to the
-browser (which stores everything in IndexedDB) and proxies Ollama and the
-optional reputation providers.
+The server keeps no database and no sessions. It parses uploaded evidence in
+memory / temp files, streams results to the browser (which stores everything in
+IndexedDB, or in a DuckDB file per case on the server) and proxies Ollama and the
+optional reputation providers. With accounts (forensic/accounts.py) it also keeps
+one accounts file and an audit log under the data directory.
 """
 
 from __future__ import annotations
@@ -43,7 +44,8 @@ ALLOWED_HOSTS = ["127.0.0.1", "localhost"] + [h.strip() for h in os.environ.get(
 
 # Shared access token for remote deployments. When set, every /api request must
 # send it as the X-Forensic-Client header value; when unset (local use), the
-# header only needs to be present (cookie-less CSRF protection).
+# header only needs to be present (cookie-less CSRF protection). Once accounts exist
+# (FORENSIC_ACCOUNTS_FILE), every request sends a personal token and this one is not accepted.
 FORENSIC_AUTH_TOKEN = os.environ.get("FORENSIC_AUTH_TOKEN", "").strip()
 # backend/run.py does not start on an address other machines can reach unless a token is set. This
 # says that running there without one is intended: a proxy, a VPN or a firewall in front decides
@@ -90,10 +92,13 @@ INSTALLED_APPS = ["api"]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # outside the token check, so that it sees the requests the check refuses
+    "forensic.middleware.AuditMiddleware",
     "forensic.middleware.ApiClientHeaderMiddleware",
     "forensic.middleware.ModeGuardMiddleware",
     "forensic.middleware.RateLimitMiddleware",
     "forensic.middleware.ConcurrencyGuardMiddleware",
+    "forensic.middleware.AccessMiddleware",
     "forensic.middleware.JsonErrorsMiddleware",
     "forensic.middleware.SecurityHeadersMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
@@ -239,6 +244,15 @@ OFFLINE_LISTS_DIR = DATA_DIR / "lists"
 YARA_RULES_DIR = DATA_DIR / "yara"
 # Server-side case stores (DuckDB, one folder per case) for gigabyte-scale evidence.
 CASES_DIR = Path(os.environ.get("FORENSIC_CASES_DIR", DATA_DIR / "cases"))
+# Accounts and the cases each may open (forensic/accounts.py): while this file holds no account the
+# server has none, and FORENSIC_AUTH_TOKEN, when set, is the one shared token. `manage.py accounts`
+# writes it. The audit log of a server with accounts sits beside it (forensic/audit.py).
+FORENSIC_ACCOUNTS_FILE = DATA_DIR / "accounts.json"
+FORENSIC_AUDIT_LOG = DATA_DIR / "audit.log"
+# The key that chains the audit log's entries. Empty: a random key written beside the log at first
+# use. Set here, it stays out of the data directory, so a copy of that directory alone cannot be
+# rewritten to pass a check; whoever runs the server can still read it.
+FORENSIC_AUDIT_KEY = os.environ.get("FORENSIC_AUDIT_KEY", "").strip()
 # Memory (MiB) and worker threads each open case store may use; 0 threads is one fewer than the
 # processors, between 2 and 8. Every open store has its own, so the memory of the stores open at
 # once adds up: keep it under what the machine or container gives REMN.

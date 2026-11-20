@@ -452,11 +452,12 @@ export function RulesView() {
                     className="btn xs"
                     onClick={() => setEdit({ id: r.origin === 'custom' ? Number(r.file.split(':')[1]) : undefined, yaml: yamlOf(r) })}
                     title={r.origin === 'custom' ? 'edit' : 'copy as custom rule'}
+                    aria-label={r.origin === 'custom' ? 'edit' : 'copy as custom rule'}
                   >
                     <IconEdit />
                   </button>
                   {r.origin === 'custom' && (
-                    <button className="btn xs danger" onClick={() => remove(r)}>
+                    <button className="btn xs danger" onClick={() => remove(r)} aria-label="delete the custom rule">
                       <IconTrash />
                     </button>
                   )}

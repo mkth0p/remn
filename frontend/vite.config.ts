@@ -72,7 +72,8 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     sourcemap: false,
-    chunkSizeWarningLimit: 1500,
+    // each page is its own script (App.tsx); a chunk past this is a page that pulled in too much
+    chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: { entryFileNames: `assets/[name]-[hash].${BUILD_ID}.js`, chunkFileNames: `assets/[name]-[hash].${BUILD_ID}.js`, assetFileNames: `assets/[name]-[hash].${BUILD_ID}[extname]` },
     },

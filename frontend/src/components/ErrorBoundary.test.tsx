@@ -46,4 +46,49 @@ describe('a page that throws while it renders', () => {
     fireEvent.click(screen.getByRole('button', { name: 'try again' }))
     expect(screen.getByText('the view')).toBeTruthy()
   })
+
+  it('offers to go back to the page shown before it, when this tab has one', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const back = vi.spyOn(history, 'back').mockImplementation(() => undefined)
+    history.replaceState({ remn: 0 }, '')
+    const first = render(
+      <ErrorBoundary what="The Events page" back>
+        <Fragile />
+      </ErrorBoundary>,
+    )
+    expect(screen.queryByRole('button', { name: 'go back' })).toBeNull()
+    first.unmount()
+    history.replaceState({ remn: 1 }, '')
+    render(
+      <ErrorBoundary what="The Events page" back>
+        <Fragile />
+      </ErrorBoundary>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'go back' }))
+    expect(back).toHaveBeenCalled()
+    history.replaceState(null, '')
+  })
+
+  it('says to reload when the code of the page could not be fetched, as after a server update', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    function Unfetched(): never {
+      throw new TypeError('Failed to fetch dynamically imported module: http://remn.localhost/assets/FindingsView-old.js')
+    }
+    render(
+      <ErrorBoundary what="The Findings page">
+        <Unfetched />
+      </ErrorBoundary>,
+    )
+    expect(screen.getByRole('alert').textContent).toContain('REMN was updated there after this tab was opened. Reload the page')
+  })
+
+  it('does not blame an update for an ordinary failure', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    render(
+      <ErrorBoundary what="The Events page">
+        <Fragile />
+      </ErrorBoundary>,
+    )
+    expect(screen.getByRole('alert').textContent).not.toContain('updated')
+  })
 })

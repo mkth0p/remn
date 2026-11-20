@@ -32,6 +32,25 @@ describe('HomeView', () => {
     expect(await db.cases.count()).toBe(1)
   })
 
+  it('keeps the focus in the new case dialog and gives it back to the button that opened it', () => {
+    render(<HomeView />)
+    const opener = screen.getAllByRole('button', { name: 'New case' })[0]
+    opener.focus()
+    fireEvent.click(opener)
+    const dialog = screen.getByRole('dialog', { name: 'New case' })
+    expect(document.activeElement).toBe(screen.getByLabelText('Case name'))
+    const close = screen.getByRole('button', { name: 'Close' })
+    close.focus()
+    fireEvent.keyDown(close, { key: 'Tab', shiftKey: true })
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Create case' }))
+    fireEvent.keyDown(document.activeElement!, { key: 'Tab' })
+    expect(document.activeElement).toBe(close)
+    expect(dialog.contains(document.activeElement)).toBe(true)
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(document.activeElement).toBe(opener)
+  })
+
   it('opens the current case', () => {
     render(<HomeView />)
     fireEvent.click(screen.getByRole('button', { name: /^Open case/ }))

@@ -12,11 +12,13 @@ import { PackageCoverage } from '../components/PackageCoverage'
 import { coverageMembers } from '../data/packageCoverage'
 import { packageCoverageIssues } from '../data/packageCoverage'
 import { evidenceGaps } from '../data/evidenceGaps'
+import { viewerReason } from '../data/access'
 
 export function EvidenceView() {
   const kase = useStore((s) => s.currentCase)
   const jobs = useStore((s) => s.jobs)
   const threshold = useStore((s) => s.storeThresholdMb)
+  const health = useStore((s) => s.health)
   const [items, setItems] = useState<Evidence[]>([])
   const [detail, setDetail] = useState<Evidence | null>(null)
   const [verify, setVerify] = useState<{ ev: Evidence; result?: string; progress?: number } | null>(null)
@@ -30,6 +32,8 @@ export function EvidenceView() {
   }, [kase?.id, jobs.length])
   if (!kase || !ds) return null
   const isServer = kase.storage === 'server'
+  // a viewer changes nothing on the server; a case kept in this browser stays its own
+  const viewer = isServer ? viewerReason(health) : null
   const remove = async (e: Evidence) => {
     if (!confirm(`Remove "${e.name}" and all its rows from ${isServer ? 'the server store' : 'this browser'}?`)) return
     try {
@@ -60,7 +64,14 @@ export function EvidenceView() {
         <Badge sev={isServer ? 'accent' : 'info'}>{isServer ? 'server store (GB-scale)' : `browser store (files over ${threshold} MB will ask to switch)`}</Badge>
       </div>
       <div className="view-body col" style={{ gap: 14 }}>
-        <Dropzone onFiles={(files) => requestIngest(files, kase)} allowFolders />
+        {viewer ? (
+          <div className="hint">{viewer} Evidence is added by an analyst who owns the case or is a member of it.</div>
+        ) : (
+          <Dropzone onFiles={(files) => requestIngest(files, kase)} allowFolders />
+        )}
+        {isServer && health?.accounts && (
+          <div className="hint">This list holds the files added from this browser. The rows of every file in the case, whoever added it, are on the Events and Mails pages.</div>
+        )}
         <Jobs />
         <table className="table">
           <thead>
@@ -117,7 +128,7 @@ export function EvidenceView() {
                   <button className="btn xs" onClick={() => setVerify({ ev: e })} title="re-hash a copy of the file and compare">
                     verify
                   </button>
-                  <button className="btn xs danger" onClick={() => remove(e)} title="remove">
+                  <button className="btn xs danger" onClick={() => remove(e)} disabled={!!viewer} title={viewer ?? 'remove'} aria-label="remove">
                     <IconTrash />
                   </button>
                 </td>

@@ -10,6 +10,7 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.http import require_POST
 
 from api.errors import failure
+from forensic.access import permission
 from services.analysis import stories as S
 from services.store.casestore import registry
 
@@ -38,6 +39,7 @@ def _opts(body: dict) -> dict:
     return out
 
 
+@permission("read", case="body")
 @require_POST
 def build(request: HttpRequest):
     """Body: {storeKey, settings, findings, ...opts} for a server case, or {events, mails, findings, settings, ...opts}."""

@@ -40,7 +40,7 @@ const TAILS = ['', '\0']
 const EXEMPT: Record<string, string> = {
   [String.raw`ai/evidence.ts /^([a-z]+)\s*[:#\s]\s*(\S+)$/i`]: 'a row reference the model writes in a tool call',
   [String.raw`ai/transport.ts /\/+$/`]: 'the endpoint address the analyst types in the settings',
-  [String.raw`views/SettingsView.tsx /\/+$/`]: 'the endpoint address the analyst types in the settings',
+  [String.raw`views/settings/AiPanel.tsx /\/+$/`]: 'the endpoint address the analyst types in the settings',
   [String.raw`components/graphLayout.ts /([\d.]+)px/`]: "a font the app's own stylesheet names",
   [String.raw`data/claims.ts /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g`]: 'text the model wrote (an answer or a summary), read to check the addresses it names',
   [String.raw`data/reportDocx.ts /\[([^\]]+)\]\(([^)]+)\)/g`]: "the analyst's notes and the model's answers, written into a Word report on request",

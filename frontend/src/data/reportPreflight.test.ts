@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { issueStatus, preflightChecks } from './reportPreflight'
 import type { Evidence } from '../db/schema'
+import { reportText } from './reportText'
 
 const good = { id: 1, caseId: 1, name: 'dc.evtx', kind: 'evtx', status: 'done', integrity: 'verified', stats: { errors: 0 } } as unknown as Evidence
 const claims = { checked: 12, unsupported: 0, contradicted: 0, texts: 2, textsUnsupported: 0 }
@@ -43,5 +44,19 @@ describe('report preflight', () => {
     const checks = preflightChecks({ ...input, evidence: [good, stopped] })
     expect(checks.find((c) => c.id === 'read')).toMatchObject({ ok: false, detail: 'mail.pst' })
     expect(checks.find((c) => c.id === 'integrity')?.ok).toBe(false)
+  })
+
+  it("words the checks in the report's language, with the same ids and the same results", () => {
+    const open = { ...input, undecided: 3, rules: { lastRun: null, evidenceAfter: 0, errors: 0 } }
+    const en = preflightChecks(open)
+    const fr = preflightChecks(open, reportText('fr'))
+    expect(fr.map((c) => [c.id, c.ok])).toEqual(en.map((c) => [c.id, c.ok]))
+    expect(fr.find((c) => c.id === 'decided')).toMatchObject({ label: 'Chaque élément a une décision', detail: '3 éléments sans décision' })
+    expect(fr.find((c) => c.id === 'rules')?.detail).toBe("les règles de détection n'ont pas été exécutées sur ce dossier")
+    // a waiver given against the English check holds for the French one: it is kept by id
+    expect(issueStatus(fr, { waivers: { rules: 'run by the SOC', decided: 'left for later' }, finalAt: 5 }).waived.map((w) => w.label)).toEqual([
+      'Les règles de détection ont porté sur toutes les preuves',
+      'Chaque élément a une décision',
+    ])
   })
 })

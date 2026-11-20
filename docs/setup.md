@@ -142,7 +142,8 @@ If the container starts but the page does not load, check these in order:
   on another computer gets a refused connection. Publishing on the network takes three
   variables: `REMN_BIND=0.0.0.0`, `REMN_HOSTS` with the name or address browsers will use
   (Django answers 400 to any other), and `REMN_TOKEN`, which every analyst pastes once
-  when the page asks for it. Without a token, a server published on anything but a
+  when the page asks for it. Without a token or accounts (see
+  [Accounts for a team](#accounts-for-a-team)), a server published on anything but a
   loopback address does not start, and its log says why. For example, on a machine
   reached as 192.0.2.10:
 
@@ -342,8 +343,8 @@ FORENSIC_ALLOWED_HOSTS=remn.example.com      # extra Host header values (comma l
 ```
 
 `backend/run.py` does not start on an address other machines can reach (`--host 0.0.0.0`,
-or a container published beyond loopback) without `FORENSIC_AUTH_TOKEN`: it exits with
-code 2 and a message naming the choices. `FORENSIC_ALLOW_NO_TOKEN=1` overrides that, for a
+or a container published beyond loopback) without `FORENSIC_AUTH_TOKEN` or accounts: it exits
+with code 2 and a message naming the choices. `FORENSIC_ALLOW_NO_TOKEN=1` overrides that, for a
 server whose own proxy, VPN or firewall decides who gets in, and for a browser-only
 instance that is open by design.
 
@@ -371,12 +372,74 @@ each analyst allows it once on their machine: `setx OLLAMA_ORIGINS "https://remn
 then restart Ollama. Chrome, Edge and Firefox let an HTTPS page call `http://localhost`;
 Safari does not, so that analyst switches to the server-proxy transport in Settings → AI.
 
-**Accepted trade-offs of this first version** (one shared token, keep the deployment
-private): no per-user accounts or audit log, no request budget unless
-`FORENSIC_RATE_LIMIT_PER_MIN` is set (wrong tokens are limited, as above), DuckDB case stores are not
-encrypted at rest, and anyone with the token can read or delete every case store.
+**Accepted trade-offs.** The shared token is the single-user mode: whoever holds it can read
+or delete every case store, and nothing records who did what; keep such a deployment private,
+or use accounts. In either mode there is no request budget unless `FORENSIC_RATE_LIMIT_PER_MIN`
+is set (wrong tokens are limited, as above) and DuckDB case stores are not encrypted at rest.
 Confidential rows only reach the server when a case uses the server store; browser-store
 cases keep evidence in the analyst's browser. See [Storage modes](storage.md).
+
+### Accounts for a team
+
+A team that shares one server gives each person an account. The first account turns accounts
+on: from the next request every API call needs a personal token, the shared
+`FORENSIC_AUTH_TOKEN` is no longer accepted (leave it empty), the server starts beyond loopback
+without it, and requests are recorded in an audit log. What each role may do, and what the
+audit log records and proves, is on the [security page](security.md#accounts-roles-and-the-audit-log).
+
+```bash
+.venv/bin/python backend/manage.py accounts create lead --role admin         # prints the token once
+.venv/bin/python backend/manage.py accounts create analyst-a --role analyst
+.venv/bin/python backend/manage.py accounts create reviewer --role viewer
+```
+
+With Docker, run it in the running container, which runs as the server's account:
+`docker compose exec remn python backend/manage.py accounts create lead --role admin`. Outside
+Docker, run it as the account the server runs as; run with sudo, the files it writes are given
+to the owner of the data directory. Each token is printed once and kept on the server only as a
+digest: hand it to its owner over a channel you trust. They paste it once when the page asks
+for it. The sidebar then shows the account and its role, with **sign out** to forget the token in
+that browser; on a viewer's page the controls that would change something are disabled, and
+their tooltip says why.
+
+| Command | Does |
+|---|---|
+| `accounts list` | the accounts, their roles, and the ids of their tokens |
+| `accounts rotate <name>` | revokes every token of the account and prints a new one |
+| `accounts revoke <name> [--token <id>]` | revokes one token, or all of them |
+| `accounts disable <name>`, `accounts enable <name>` | refuses the account's tokens, or accepts them again |
+| `accounts role <name> admin\|analyst\|viewer` | gives the account another role |
+| `accounts cases` | the case records, and the stores no record covers |
+| `accounts case <key> --owner <name> --members <a,b>` | gives a case an owner, or sets its members |
+
+A change takes effect at the next request, without a restart. The accounts are in
+`accounts.json` in the data directory (`FORENSIC_DATA_DIR`, the `remn-data` volume with Docker).
+
+The analyst who creates a server-store case, by its first upload or import, owns it. The owner
+adds and removes members by account name in **Settings**, under **case access**
+(`POST /api/store/<key>/access` with `{"members": [...]}`). A member opens the case in their own
+browser from **+ case**, under **Cases shared with you**. A store created before accounts were
+turned on has no owner and only an admin opens it: list such stores with `accounts cases` and
+give each one an owner with `accounts case <key> --owner <name>`.
+
+What the members share is the case's evidence rows on the server. Findings, notes, decisions
+and AI sessions stay in each browser, as they do for every case: a member runs the rules in their
+own browser, and the **Evidence** page lists the files added from that browser only (the rows of
+every file are on the Events and Mails pages). Only the owner, or an admin, empties or deletes a
+shared case; a member removes it from their own browser and leaves the store in place.
+
+The audit log is `audit.log` beside the accounts file. An admin reads it with
+`manage.py audit show [--case <key>] [--account <name>]` or `GET /api/audit`, and checks it with
+`manage.py audit verify` or `GET /api/audit/verify`. `verify` ends with the code of the newest
+entry: note it somewhere the server cannot write, and give it back next time with
+`--head <code>`, which is what finds entries cut off the end. The key that chains the log is
+`FORENSIC_AUDIT_KEY`, or a random key written to `audit.key` beside the log when that is empty;
+set the variable to keep the key out of the data directory and its backups. Changing the key
+makes the entries written under the old one fail verification.
+
+Removing `accounts.json` turns accounts off at the next request: every case is then open to
+whoever reaches the server, as in the single-user mode, until the server is restarted, when the
+rule above about a token beyond loopback applies again.
 
 **Upgrading from a version that only warned.** Before this change the server printed a
 warning and listened when it was reachable beyond loopback without a token. It now
@@ -442,7 +505,10 @@ docker compose start remn
 ```
 
 A backup holds the evidence rows of every case it covers: keep it on an encrypted volume, as
-the stores themselves (see [Security model](security.md#where-evidence-lives)).
+the stores themselves (see [Security model](security.md#where-evidence-lives)). The tool copies
+the case stores only. On a server with accounts, copy `accounts.json`, `audit.log` and
+`audit.key` from the data directory with them (or keep `FORENSIC_AUDIT_KEY`): without the
+accounts file a restored case has no owner, and without the key the log cannot be verified.
 
 ### Restoring a case
 
