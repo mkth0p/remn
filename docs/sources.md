@@ -97,6 +97,11 @@ and a message with more is flagged `attachments_truncated` while its attachment 
 the real one. An attachment over 60 MiB in a PST or OST is not read: it is listed with the
 size the mailbox declares, no hash, and the flag `not_read`.
 
+A `.msg` saved in 8-bit strings rather than Unicode is read in the code page it names. Outlook
+does not always write the message code page; when only the internet code page is there (a
+message in Chinese saved as Big5, for example), that one is used, rather than the Western
+European default that turned such a subject and sender into unreadable characters.
+
 ### Deleted and orphaned mail (PST and OST)
 
 Messages inside Deleted Items and the Exchange Recoverable Items dumpster (Purges,

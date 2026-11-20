@@ -102,6 +102,7 @@ trimmed. The files are unchanged unless that README says otherwise.
 | Samples | Where | Source | Licence |
 | --- | --- | --- | --- |
 | Windows prefetch files, versions 17 to 31 | `tests/fixtures/real/prefetch/` | plaso test data, https://github.com/log2timeline/plaso | Apache-2.0 |
+| Mail written by Outlook, Lotus Notes and GroupWise, and two mbox files | `tests/fixtures/real/mail/` | Apache Tika test data, https://github.com/apache/tika | Apache-2.0 |
 
 ## Fonts
 
@@ -137,7 +138,7 @@ repository holds none of their files: only file names, hashes, counts and REMN's
 | Nazario phishing corpus | `tools/validate_public.py` | https://monkey.org/~jose/phishing/ | CC BY 4.0, as `docs/validation.md` records it; not verified again for this file |
 | Phishing Pot | `tools/validate_public.py` | https://github.com/rf-peixoto/phishing_pot | CC BY-NC 4.0: non-commercial use only. The phishing rates in `docs/validation.md` are measured partly on it |
 | SpamAssassin public corpus | `tools/validate_public.py` | https://spamassassin.apache.org/old/publiccorpus/ | Not verified |
-| Apache Tika test PST | `tools/validate_public.py` | https://github.com/apache/tika | Apache-2.0 (the repository's licence) |
+| Apache Tika test PST and test mail | `tools/validate_public.py`, `tests/backend/test_real_mail.py` (heavy tests) | https://github.com/apache/tika | Apache-2.0 (the repository's licence) |
 | Invictus IR Microsoft 365 audit log dataset | `tools/validate_public.py` | https://github.com/invictus-ir/o365_dataset | CC BY 4.0 |
 | Velociraptor test data and golden outputs | `tests/backend/test_real_*.py`, heavy tests | https://github.com/Velocidex/velociraptor | AGPL-3.0 (the repository's licence) |
 
