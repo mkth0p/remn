@@ -48,7 +48,8 @@ describe('emptying a case', () => {
     const fetchMock = vi.fn(async () => new Response('{"detail":"unauthorised"}', { status: 401 }))
     vi.stubGlobal('fetch', fetchMock)
     await expect(wipeCase(server)).rejects.toThrow(/HTTP 401.*nothing was deleted/)
-    expect(fetchMock).toHaveBeenCalledWith('/api/store/k3', expect.objectContaining({ method: 'DELETE' }))
+    // an emptied case keeps its owner and members on a server with accounts; a server without them ignores this
+    expect(fetchMock).toHaveBeenCalledWith('/api/store/k3?keepAccess=1', expect.objectContaining({ method: 'DELETE' }))
     expect(await db.evidence.where('caseId').equals(3).count()).toBe(1)
     expect(await db.findings.where('caseId').equals(3).count()).toBe(1)
   })

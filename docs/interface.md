@@ -554,6 +554,12 @@ itself, custom rules and settings included, and switches to the most recently up
 remaining case, or to a fresh one when none is left; a server store it could not remove
 is named in a message. Both ask for confirmation and neither can be undone.
 
+On a server with accounts ([Setup](setup.md#accounts-for-a-team)), a server case's Settings also
+show its owner and members under "case access", where the owner or an admin adds and removes
+members. The two destructive actions are its owner's: a member gets "remove this case from this
+browser" instead, which leaves the store on the server. A viewer's controls that would change
+something on the server are disabled across the pages, each with the reason in its tooltip.
+
 ## Interface tests
 
 Component tests run under jsdom with `fake-indexeddb` (`*.test.tsx` next to the views:

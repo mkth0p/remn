@@ -7,6 +7,11 @@ from django.conf import settings
 
 log = logging.getLogger(__name__)
 
+# Whether this process serves requests. backend/manage.py sets it to False for every command but
+# runserver: `manage.py accounts` and `manage.py audit` run beside a live server, and the start-up
+# cleaning below, which assumes nothing is being parsed, would remove the files of a parse in progress.
+SERVING = True
+
 
 class ApiConfig(AppConfig):
     name = "api"
@@ -22,6 +27,15 @@ class ApiConfig(AppConfig):
         store_registry.configure(
             settings.CASES_DIR, memory_mb=settings.FORENSIC_STORE_MEMORY_MB, threads=settings.FORENSIC_STORE_THREADS, idle_s=settings.FORENSIC_STORE_IDLE_S
         )
+        registry.configure(
+            keys=settings.REPUTATION_KEYS,
+            timeout=settings.REPUTATION_TIMEOUT,
+            cache_ttl=settings.REPUTATION_CACHE_TTL,
+            offline_dir=str(settings.OFFLINE_LISTS_DIR),
+            geoip_dir=str(settings.DATA_DIR / "geoip"),
+        )
+        if not SERVING:
+            return
         try:
             removed_uploads = cleanup_stale()
             if removed_uploads:
@@ -31,13 +45,6 @@ class ApiConfig(AppConfig):
                 log.info("staged evidence swept every %ds, removed after %ds", settings.FORENSIC_UPLOAD_SWEEP_S, settings.FORENSIC_UPLOAD_MAX_AGE_S)
         except Exception as exc:  # noqa: BLE001
             log.warning("upload cleanup failed: %s", exc)
-        registry.configure(
-            keys=settings.REPUTATION_KEYS,
-            timeout=settings.REPUTATION_TIMEOUT,
-            cache_ttl=settings.REPUTATION_CACHE_TTL,
-            offline_dir=str(settings.OFFLINE_LISTS_DIR),
-            geoip_dir=str(settings.DATA_DIR / "geoip"),
-        )
         # remove whatever a previous run stopped mid-parse left in the staging area: files, and the
         # directories an expanded 7z or the logs staged for an engine run occupy.
         try:

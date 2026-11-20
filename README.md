@@ -132,8 +132,8 @@ a rule stops detecting a recording or a high one gets noisier.
 The mail risk score was run on public phishing and legitimate mail corpora, with the rates in
 [docs/validation.md](docs/validation.md); its weights were adjusted on those same corpora, so
 the rates are not a held-out measure. Not yet exercised on real multi-gigabyte acquisitions. Attachments are analysed statically;
-nothing is opened or run. The remote mode uses one shared token and no encryption at
-rest. See [SECURITY.md](SECURITY.md).
+nothing is opened or run. A shared server uses one token, or accounts with roles and an
+audit log, and no encryption at rest. See [SECURITY.md](SECURITY.md).
 
 ## Contributing and licence
 

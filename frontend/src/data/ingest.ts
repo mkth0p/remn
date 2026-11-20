@@ -10,6 +10,7 @@ import { getSource } from './source'
 import { duplicateEvidence } from './duplicateEvidence'
 import { whileImporting } from './interruptedImports'
 import { deployment } from './deployment'
+import { viewerReason } from './access'
 
 let jobSeq = 1
 
@@ -107,6 +108,15 @@ export function requestIngest(files: File[], kase: Case, kindOverride?: 'evtx' |
   const health = useStore.getState().health
   // browser-only mode caps chunked uploads at the single-request limit; a full server stages up to maxChunkedGb
   const limitMb = health?.mode === 'browser-only' ? health.limits?.maxUploadMb : health?.limits?.maxChunkedGb ? health.limits.maxChunkedGb * 1024 : undefined
+  // on a server with accounts a viewer adds no evidence: the server neither parses nor stores it.
+  // Only an .evtx file this browser parses itself, into a case kept here, goes on.
+  const viewer = viewerReason(health)
+  if (viewer) {
+    const kept = kase.storage === 'server' ? [] : files.filter((f) => parsedInBrowser(f, kase, kindOverride ?? detectKind(f)))
+    if (kept.length < files.length) toast('warn', `${files.length - kept.length} file(s) not added. ${viewer}`, 0)
+    files = kept
+    if (!files.length) return
+  }
   if (kase.storage !== 'server' && limitMb) {
     // a file parsed here is never uploaded, so the server's limit does not apply to it
     const over = files.filter((f) => f.size > limitMb * 1024 * 1024 && !parsedInBrowser(f, kase, kindOverride ?? detectKind(f)))

@@ -11,6 +11,7 @@ from django.conf import settings
 from django.http import JsonResponse
 from django.views.decorators.http import require_GET
 
+from forensic.access import permission
 from services.analysis.attachments.magic import DANGEROUS_EXT
 from services.parsers.mail.common import MAIL_WEIGHTS, STRONG_FLAGS
 from services.reference import eventids, flags
@@ -89,6 +90,7 @@ def bundled_rules(rules_dir: Path) -> list[dict]:
     return rules
 
 
+@permission("signed-in")
 @require_GET
 def meta(request):
     events = [{"provider": prov, "eventId": eid, "description": desc, "category": cat} for (prov, eid), (desc, cat) in eventids._EVENTS.items()]
