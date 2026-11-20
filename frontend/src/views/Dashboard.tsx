@@ -11,6 +11,7 @@ import { Jobs } from '../components/ConsolePanel'
 import { deployment } from '../data/deployment'
 import { openDemoCase } from '../data/demoCase'
 import { transportLabel } from '../ai/transport'
+import { viewerReason } from '../data/access'
 
 interface Summary {
   counts?: { events?: number; mails?: number; iocs?: number }
@@ -103,7 +104,7 @@ export function Dashboard() {
           <div className="panel">
             <div className="panel-h">add evidence</div>
             <div className="panel-b col">
-              <Dropzone onFiles={(files) => requestIngest(files, kase)} />
+              {isServer && viewerReason(health) ? <div className="hint">{viewerReason(health)}</div> : <Dropzone onFiles={(files) => requestIngest(files, kase)} />}
               {!counts.events && !counts.mails && <DemoCaseButton />}
               <Jobs />
               <div className="hint">

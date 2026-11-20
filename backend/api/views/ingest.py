@@ -19,6 +19,7 @@ from django.views.decorators.http import require_POST
 
 from api.errors import failure
 from api.views.upload import discard_upload, get_upload
+from forensic.access import permission
 from forensic.build import build_id
 from services.analysis import hayabusa
 from services.common import ndjson_line, sha256_chunks
@@ -176,6 +177,7 @@ def _ctx_from_request(request: HttpRequest) -> ParseContext:
 # ---------------------------------------------------------------------------
 # EVTX (single file or zip/tar of EVTX files)
 # ---------------------------------------------------------------------------
+@permission("work")
 @require_POST
 def ingest_evtx(request: HttpRequest):
     if (err := _too_large(request)) is not None:
@@ -236,6 +238,7 @@ def ingest_evtx(request: HttpRequest):
 # ---------------------------------------------------------------------------
 # Mail (eml, msg, mbox, pst, zip/tar corpora)
 # ---------------------------------------------------------------------------
+@permission("work")
 @require_POST
 def ingest_mail(request: HttpRequest):
     if (err := _too_large(request)) is not None:
@@ -298,6 +301,7 @@ def ingest_mail(request: HttpRequest):
 # ---------------------------------------------------------------------------
 # Single attachment analysis (drag & drop a file to analyse it alone)
 # ---------------------------------------------------------------------------
+@permission("work")
 @require_POST
 def analyze_single_attachment(request: HttpRequest):
     if (err := _too_large(request)) is not None:
@@ -331,6 +335,7 @@ def analyze_single_attachment(request: HttpRequest):
     return JsonResponse({"type": "attachment", "result": parse.result()["result"]})
 
 
+@permission("work")
 @require_POST
 def ingest_package(request: HttpRequest):
     if (err := _too_large(request)) is not None:

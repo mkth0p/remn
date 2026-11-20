@@ -5,6 +5,10 @@ __pycache__/
 .pytest_cache/
 backend/tmp/
 backend/data/cases/
+# accounts, the audit log and its key (forensic/accounts.py, forensic/audit.py)
+backend/data/accounts.json*
+backend/data/.accounts.json.*
+backend/data/audit.*
 backend/data/lists/*.csv
 backend/data/lists/*.txt
 backend/data/geoip/*.mmdb

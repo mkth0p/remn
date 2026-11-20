@@ -130,8 +130,9 @@ background job parses it; the Evidence page shows the job's progress and its err
 and `GET /api/jobs?case=<key>` lists the jobs of that case. A job is read, followed and
 cancelled only with its case's key (`/api/jobs/<id>?case=<key>`); without it, or with
 another key, the answer is the 404 of an unknown job, and no answer about a job carries
-the key. An interrupted upload resumes from the last received offset when the same file
-is dropped again.
+the key. On a server with accounts the key is not enough: the account must also be allowed
+to open the case ([Security model](security.md#accounts-roles-and-the-audit-log)). An
+interrupted upload resumes from the last received offset when the same file is dropped again.
 
 A running import can be cancelled from its line in the jobs list, in either store. The file
 stops being read and sent; a server job is asked to stop and, once it has, what the import
