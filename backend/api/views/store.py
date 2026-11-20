@@ -230,7 +230,10 @@ def ingest(request: HttpRequest, key: str):
     if held is not None and (held[1] or "") != sha_client:
         discard_upload(upload_id)
         return JsonResponse(
-            {"error": f"evidence #{evidence_id} of this case is already another file ({held[0]}), added from another browser; add the file again", "code": "evidenceId"},
+            {
+                "error": f"evidence #{evidence_id} of this case is already another file ({held[0]}), added from another browser; add the file again",
+                "code": "evidenceId",
+            },
             status=409,
         )
     ctx = _ctx_from(options.get("settings"))

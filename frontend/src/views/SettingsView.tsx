@@ -10,6 +10,8 @@ import { getSource } from '../data/source'
 import { CLAUDE_MODELS, fetchClaudeStatus, getTransport, isLocalModelUrl, OPENAI_PRESETS, type ClaudeStatus, type ModelInfo } from '../ai/transport'
 import { suggestTrustedSenders, type TrustedSuggestion } from '../data/trusted'
 import { Modal } from '../components/ui'
+import { CaseAccessPanel } from '../components/CaseAccess'
+import { OWNER_REASON, useCaseAccess, viewerReason } from '../data/access'
 
 export function SettingsView() {
   const kase = useStore((s) => s.currentCase)
@@ -38,6 +40,7 @@ export function SettingsView() {
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [storeSize, setStoreSize] = useState<number | null>(null)
   const ds = useMemo(() => (kase ? getSource(kase) : null), [kase])
+  const [access, setAccess, accessError] = useCaseAccess(kase)
   useEffect(() => setUrlDraft(aiCfg.ollamaUrl), [aiCfg.ollamaUrl])
   const [claudeStatus, setClaudeStatus] = useState<ClaudeStatus | null>(null)
   useEffect(() => {
@@ -70,6 +73,12 @@ export function SettingsView() {
   const s = kase.settings
   const isServer = kase.storage === 'server'
   const browserOnly = health?.mode === 'browser-only'
+  // on a server with accounts, emptying or deleting a server case is its owner's (or an admin's)
+  const viewer = viewerReason(health)
+  const shared = isServer && health?.accounts === true
+  const mayOwn = !shared || access?.may.own === true
+  const ownReason = mayOwn ? undefined : (viewer ?? (access ? OWNER_REASON : accessError ? `who may change this case is not known: ${accessError}` : 'checking who may change this case…'))
+  const settled = access != null || accessError != null
   const patch = async (p: Partial<CaseSettings>) => {
     updateSettings(p)
     await getDb().cases.update(kase.id!, { settings: { ...s, ...p }, updatedAt: Date.now() })
@@ -104,6 +113,18 @@ export function SettingsView() {
       if (!serverCleared) toast('warn', 'the server store could not be removed (server unreachable); delete its folder under backend/data/cases', 0)
     } catch (e) {
       toast('err', `delete failed: ${(e as Error).message}`, 0)
+    }
+  }
+  const leave = async () => {
+    if (!confirm(`Remove case "${kase.name}" from this browser? Its evidence stays on the server for its owner and members; this browser's findings, notes and sessions of it go.`)) return
+    try {
+      const { next } = await removeCase(kase, { keepServer: true })
+      setCurrentCase(next)
+      useStore.getState().bumpCases()
+      useStore.getState().setView('dashboard')
+      toast('ok', `case "${kase.name}" removed from this browser`)
+    } catch (e) {
+      toast('err', `not removed: ${(e as Error).message}`, 0)
     }
   }
   const migrate = async () => {
@@ -226,7 +247,7 @@ export function SettingsView() {
               </div>
               {!isServer && !browserOnly && (
                 <div className="col">
-                  <button className="btn primary sm" onClick={migrate} disabled={!!migrating}>
+                  <button className="btn primary sm" onClick={migrate} disabled={!!migrating || !!viewer} title={viewer ?? undefined}>
                     convert this case to the server store
                   </button>
                   {migrating && (
@@ -263,6 +284,7 @@ export function SettingsView() {
               )}
             </div>
           </div>
+          {shared && <CaseAccessPanel kase={kase} access={access} onChange={setAccess} />}
           <div className="panel">
             <div className="panel-h">AI · analyst model</div>
             <div className="panel-b col">
@@ -635,14 +657,22 @@ export function SettingsView() {
               </div>
               <div className="divider" />
               <div className="row">
-                <button className="btn danger sm" onClick={wipe}>
+                <button className="btn danger sm" onClick={wipe} disabled={!mayOwn} title={ownReason}>
                   delete all case data{isServer ? ' (browser + server store)' : ' from this browser'}
                 </button>
-                <button className="btn danger sm" onClick={destroy}>
+                <button className="btn danger sm" onClick={destroy} disabled={!mayOwn} title={ownReason}>
                   delete this case
                 </button>
+                {shared && !mayOwn && settled && (
+                  <button className="btn sm" onClick={leave}>
+                    remove this case from this browser
+                  </button>
+                )}
               </div>
-              <div className="hint">The first empties the case and keeps it; the second removes the case itself and switches to another one.</div>
+              <div className="hint">
+                The first empties the case and keeps it; the second removes the case itself and switches to another one.
+                {ownReason && settled ? ` ${ownReason}` : ''}
+              </div>
             </div>
           </div>
         </div>

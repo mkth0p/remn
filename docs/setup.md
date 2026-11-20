@@ -398,7 +398,9 @@ With Docker, run it in the running container, which runs as the server's account
 Docker, run it as the account the server runs as; run with sudo, the files it writes are given
 to the owner of the data directory. Each token is printed once and kept on the server only as a
 digest: hand it to its owner over a channel you trust. They paste it once when the page asks
-for it.
+for it. The sidebar then shows the account and its role, with **sign out** to forget the token in
+that browser; on a viewer's page the controls that would change something are disabled, and
+their tooltip says why.
 
 | Command | Does |
 |---|---|
@@ -414,9 +416,17 @@ A change takes effect at the next request, without a restart. The accounts are i
 `accounts.json` in the data directory (`FORENSIC_DATA_DIR`, the `remn-data` volume with Docker).
 
 The analyst who creates a server-store case, by its first upload or import, owns it. The owner
-sets its members by account name (`POST /api/store/<key>/access` with `{"members": [...]}`). A
-store created before accounts were turned on has no owner and only an admin opens it: list such
-stores with `accounts cases` and give each one an owner with `accounts case <key> --owner <name>`.
+adds and removes members by account name in **Settings**, under **case access**
+(`POST /api/store/<key>/access` with `{"members": [...]}`). A member opens the case in their own
+browser from **+ case**, under **Cases shared with you**. A store created before accounts were
+turned on has no owner and only an admin opens it: list such stores with `accounts cases` and
+give each one an owner with `accounts case <key> --owner <name>`.
+
+What the members share is the case's evidence rows on the server. Findings, notes, decisions
+and AI sessions stay in each browser, as they do for every case: a member runs the rules in their
+own browser, and the **Evidence** page lists the files added from that browser only (the rows of
+every file are on the Events and Mails pages). Only the owner, or an admin, empties or deletes a
+shared case; a member removes it from their own browser and leaves the store in place.
 
 The audit log is `audit.log` beside the accounts file. An admin reads it with
 `manage.py audit show [--case <key>] [--account <name>]` or `GET /api/audit`, and checks it with

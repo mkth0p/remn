@@ -160,6 +160,12 @@ the one shared `FORENSIC_AUTH_TOKEN`. Once it holds one:
   says why. The case listing (`GET /api/store`) and the job routes show each account only the
   cases it may read. A store written before accounts were turned on has no record: only an admin
   opens it until an owner is given (`manage.py accounts case <key> --owner <name>`).
+- **The page follows the server.** When the server asks for a personal token the page says so;
+  once signed in, the sidebar shows the account and its role, with **sign out**. A viewer's
+  controls that would change something (adding or removing evidence, lookups, enrichment,
+  emptying or deleting a server case, changing its members) are disabled, with the reason in
+  their tooltip. Settings shows a server case's owner and members under **case access**, where
+  its owner changes them. The server refuses these requests whatever the page does.
 - **Every route declares what it needs** (`backend/forensic/access.py`), and with accounts on a
   route that declares nothing is refused. `tests/backend/test_route_permissions.py` enumerates
   the URL patterns and fails on a route without a declaration.

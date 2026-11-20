@@ -64,6 +64,32 @@ describe('requestIngest', () => {
     expect(useStore.getState().toasts.map((t) => t.text)).toEqual([expect.stringMatching(/^1 file\(s\) not imported: their kind is unknown \(holiday\.docx\)/)])
   })
 
+  it('adds nothing to a server case for a viewer, and says why', async () => {
+    const { requestIngest } = await import('./ingest')
+    useStore.setState({ health: { mode: 'full', accounts: true, account: { name: 'vic', role: 'viewer' } }, dataNotice: 'acknowledged' } as never)
+    requestIngest([file('a.evtx', 1), file('b.eml', 1)], { ...kase, storage: 'server', serverKey: 'k1' } as Case)
+    expect(useStore.getState().pendingIngest).toBeNull()
+    expect(useStore.getState().toasts.map((t) => t.text)).toEqual([expect.stringMatching(/^2 file\(s\) not added\. Your account is a viewer/)])
+  })
+
+  it("keeps only the .evtx files a viewer's browser parses itself, into a case kept in this browser", async () => {
+    const { requestIngest } = await import('./ingest')
+    useStore.setState({ health: { mode: 'full', accounts: true, account: { name: 'vic', role: 'viewer' } }, dataNotice: 'required' } as never)
+    const here = { ...kase, settings: { parseEvtxInBrowser: true } } as unknown as Case
+    requestIngest([file('a.evtx', 1), file('b.eml', 1)], here)
+    expect(useStore.getState().toasts.map((t) => t.text)).toEqual([expect.stringMatching(/^1 file\(s\) not added\. Your account is a viewer/)])
+    // the file parsed here is not uploaded, so the notice before an upload is not shown either
+    expect(useStore.getState().pendingIngest).toBeNull()
+  })
+
+  it('lets an analyst on a server with accounts add evidence as before', async () => {
+    const { requestIngest } = await import('./ingest')
+    useStore.setState({ health: { mode: 'full', accounts: true, account: { name: 'ana', role: 'analyst' } }, dataNotice: 'required' } as never)
+    requestIngest([file('a.evtx', 1)], kase)
+    expect(useStore.getState().pendingIngest?.reason).toBe('notice')
+    expect(useStore.getState().toasts).toEqual([])
+  })
+
   it('asks first while the server has not answered, unless the page is on this machine', async () => {
     const { requestIngest } = await import('./ingest')
     useStore.setState({ health: null } as never)

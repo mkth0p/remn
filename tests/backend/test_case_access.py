@@ -191,7 +191,9 @@ def test_a_file_added_from_another_browser_under_a_number_the_case_already_uses_
         uid = team.post("ben", "/api/upload/init", {"name": "invented-ben.evtx", "size": len(data)}).json()["uploadId"]
         Client().generic("PUT", f"/api/upload/{uid}/chunk?offset=0", data, content_type="application/octet-stream", **team.headers("ben"))
         Client().post(f"/api/upload/{uid}/complete", **team.headers("ben"))
-        return team.post("ben", f"/api/store/{key}/ingest", {"uploadId": uid, "kind": "evtx", "evidence": {"id": 1, "name": "invented-ben.evtx", "sha256Client": sha}})
+        return team.post(
+            "ben", f"/api/store/{key}/ingest", {"uploadId": uid, "kind": "evtx", "evidence": {"id": 1, "name": "invented-ben.evtx", "sha256Client": sha}}
+        )
 
     r = ingest("b" * 64)
     assert r.status_code == 409 and r.json()["code"] == "evidenceId" and "invented-ana.evtx" in r.json()["error"]
