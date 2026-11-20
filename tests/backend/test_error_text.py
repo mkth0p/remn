@@ -73,6 +73,17 @@ def test_a_failure_names_what_failed_its_type_and_a_reference_and_logs_the_same_
     assert SECRET not in record.getMessage() and record.getMessage().startswith("the thing failed [ref") and "ValueError at" in record.getMessage()
 
 
+def test_the_place_of_a_logged_error_is_its_file_name_whatever_the_path_separator():
+    # a server on Windows gives tracebacks backslash paths, which named the whole checkout
+    code = compile(f"raise ValueError({SECRET!r})", r"C:\srv\remn\backend\services\parsers\invented.py", "exec")
+    try:
+        exec(code, {})
+    except ValueError as exc:
+        record = logging.LogRecord("services.test", logging.ERROR, __file__, 1, "parse failed", None, (ValueError, exc, exc.__traceback__))
+    RedactEvidence().filter(record)
+    assert record.getMessage() == "parse failed [ValueError at invented.py:1]"
+
+
 def test_text_written_for_the_analyst_is_passed_through_and_any_other_text_is_not(caplog):
     log = logging.getLogger("api.test")
     said = failure("the thing", AnalystMessage("the file is not a recognised export; nothing was read"), log)
