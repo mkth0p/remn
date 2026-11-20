@@ -300,11 +300,34 @@ touched: `data.InternetMessageId` keeps those ids (the first 1,000; beyond that
 `messageId`. An audit record opens the messages it names in the mailbox evidence, and a
 message opens the audit records that name it.
 
-`rules/m365/bec.yaml` ships 29 rules for this data: inbox rules that forward or hide
+`rules/m365/bec.yaml` ships 37 rules for this data: inbox rules that forward or hide
 mail, mailbox and transport-rule forwarding, delegate permissions, MailItemsAccessed
 bursts and delegate syncs, OAuth consent, privileged role assignment, MFA and
 security-info changes, conditional-access and audit tampering, legacy protocols,
 eDiscovery, mass download and anonymous sharing, risky sign-ins, legacy-auth sign-ins,
 sign-ins outside the expected countries (a case setting), two countries within 24 hours,
-password spray, brute force followed by success, MFA fatigue.
+password spray, brute force followed by success, MFA fatigue. The rules that read a
+directory activity (consent, roles, security info, applications) find it in a directory
+audit export as in the audit log, since both name it the same way.
+
+Eight rules read the directory audits, ID Protection and message trace exports:
+
+- `m365-risk-detection` and `m365-risky-user`: a risk detection, or a user in the risky
+  users list, at medium or high risk or confirmed compromised;
+- `m365-risk-then-inbox-rule`: a sign-in or risk detection at medium or high risk, raised
+  to critical when the same account creates or changes an inbox rule within 24 hours;
+- `m365-auth-method-added`: a passkey, a passwordless phone sign-in or a Windows Hello for
+  Business credential added, or security info updated by the user;
+- `m365-device-registered`: a device registered in the directory;
+- `m365-app-permission-granted`: an application permission given to a service principal;
+- `m365-trace-external-relay`: a message from outside the internal domains sent on to an
+  address outside them (an inbox rule's redirect, mailbox forwarding, a transport rule);
+- `m365-trace-mailbox-rule-message`: a message the extended report marks as made by an
+  inbox rule (source `MAILBOXRULE`), sent outside the internal domains.
+
+The two message trace rules do not run until the internal domains are set. A forward made
+by an inbox rule's ForwardTo is a new message from the mailbox and shows in the message
+trace as that user's own mail; only the extended report marks it. These eight rules have
+not been measured: `rules/measures.json` has no entry for them, and the Rules view shows
+them as unmeasured.
 `samples/synthetic/make_m365.py` writes a complete scenario in all four formats.

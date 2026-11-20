@@ -42,7 +42,7 @@
    "filter": null,
    "order": "rare",
    "stack": {
-    "blank": 203,
+    "blank": 223,
     "distinct": 26,
     "events": 49,
     "field": "image",
@@ -315,7 +315,7 @@
    "filter": null,
    "order": "rare",
    "stack": {
-    "blank": 219,
+    "blank": 239,
     "distinct": 33,
     "events": 33,
     "field": "commandLine",
@@ -659,7 +659,7 @@
    "filter": null,
    "order": "common",
    "stack": {
-    "blank": 221,
+    "blank": 241,
     "distinct": 31,
     "events": 31,
     "field": "serviceName",
@@ -979,13 +979,21 @@
    "filter": null,
    "order": "rare",
    "stack": {
-    "blank": 127,
-    "distinct": 31,
-    "events": 125,
+    "blank": 131,
+    "distinct": 33,
+    "events": 141,
     "field": "targetUser",
     "hosts": 4,
     "order": "rare",
     "rows": [
+     {
+      "count": 1,
+      "first": 1788258662000,
+      "hostList": [],
+      "hosts": 0,
+      "last": 1788258662000,
+      "value": "payments@attacker.example"
+     },
      {
       "count": 1,
       "first": 1788253800000,
@@ -1059,19 +1067,27 @@
       "value": "user8@contoso.com"
      },
      {
-      "count": 6,
-      "first": 1788244800000,
+      "count": 3,
+      "first": 1788259204880,
+      "hostList": [],
+      "hosts": 0,
+      "last": 1788259205310,
+      "value": "collect@attacker.example"
+     },
+     {
+      "count": 10,
+      "first": 1788124445000,
       "hostList": [],
       "hosts": 0,
       "last": 1788339600000,
       "value": "bob@contoso.com"
      },
      {
-      "count": 48,
+      "count": 56,
       "first": 1788244200000,
       "hostList": [],
       "hosts": 0,
-      "last": 1788256800000,
+      "last": 1788262800000,
       "value": "alice@contoso.com"
      },
      {
@@ -1341,7 +1357,7 @@
    "filter": null,
    "order": "rare",
    "stack": {
-    "blank": 91,
+    "blank": 111,
     "distinct": 43,
     "events": 161,
     "field": "providerEventId",

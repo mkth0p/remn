@@ -418,3 +418,125 @@ then:
   severity: critical
   title: Successful sign-in after repeated MFA failures
 entities: [targetUser, ipAddress]
+---
+id: m365-risk-detection
+title: Entra ID Protection risk detection at medium or high risk
+description: A risk detection (unfamiliar sign-in properties, an anonymous or malicious address, leaked credentials, suspicious inbox forwarding ...) that ID Protection rated medium or high, or confirmed as compromised. A detection an administrator dismissed keeps its level; its state is the finding's status.
+severity: high
+source: events
+attack: [T1078.004]
+tags: [m365, entra, risk]
+where:
+  channel: Entra RiskDetection
+  any_of:
+    - data.riskLevel|in: [medium, high]
+    - status: confirmedCompromised
+entities: [targetUser, ipAddress, description, status]
+---
+id: m365-risky-user
+title: User at medium or high risk in Entra ID Protection
+description: The risky users list names the user as at risk with a medium or high level, or as confirmed compromised. The row is the user's state when the list was taken, at the time its risk last changed.
+severity: high
+source: events
+attack: [T1078.004]
+tags: [m365, entra, risk]
+where:
+  channel: Entra RiskyUser
+  status|in: [atRisk, confirmedCompromised]
+  any_of:
+    - data.riskLevel|in: [medium, high]
+    - status: confirmedCompromised
+entities: [targetUser, status]
+---
+id: m365-risk-then-inbox-rule
+title: Risky sign-in or risk detection for an account
+description: A sign-in or a risk detection rated medium or high for an account. Escalated to critical when the same account creates or changes an inbox rule within 24 hours of it, the usual order of a mailbox takeover. The finding stays low when no inbox rule follows; m365-signin-risky and m365-risk-detection report the risk itself.
+severity: low
+source: events
+attack: [T1078.004, T1564.008]
+tags: [m365, entra, risk, inbox-rule]
+where:
+  any_of:
+    - channel: Entra RiskDetection
+      data.riskLevel|in: [medium, high]
+    - category: Entra sign-in
+      any_of:
+        - data.riskLevelDuringSignIn|in: [medium, high]
+        - data.riskLevelAggregated|in: [medium, high]
+        - data.riskState|in: [atRisk, confirmedCompromised]
+  targetUser|exists: true
+group_by: [targetUser]
+threshold: ">= 1"
+then:
+  where:
+    operation|in: [New-InboxRule, Set-InboxRule, UpdateInboxRules]
+  join: [targetUser=subjectUser]
+  within: 24h
+  severity: critical
+  title: Inbox rule by the same account within a day
+entities: [targetUser]
+---
+id: m365-auth-method-added
+title: Passkey, passwordless or Windows Hello credential added, or security info updated by the user
+description: The Authentication Methods activities m365-mfa-or-password-change does not list. An attacker who adds a sign-in method of their own can sign in again after the password is reset.
+severity: high
+source: events
+attack: [T1098.005, T1556.006]
+tags: [m365, entra, mfa, persistence]
+where:
+  operation|in: ["Add Passkey (device-bound).", "Add passwordless phone sign-in credential.", "Add Windows Hello for Business credential.", "User updated security info."]
+entities: [subjectUser, targetUser, ipAddress]
+---
+id: m365-device-registered
+title: Device registered in the directory
+description: Register device. or Add registered owner to device. An attacker with a user's password and second factor registers a device of their own to get a primary refresh token and pass device-based conditional access.
+severity: medium
+source: events
+attack: [T1098.005]
+tags: [m365, entra, device, persistence]
+where:
+  operation|in: ["Register device.", "Add registered owner to device."]
+entities: [subjectUser, targetUser, ipAddress, objectName]
+---
+id: m365-app-permission-granted
+title: Application permission granted to a service principal
+description: Add app role assignment to service principal. gives an application a permission of an API (Mail.Read, Files.Read.All ...) that it uses on its own, without a signed-in user. An administrator's consent writes one beside Consent to application.; on its own it is a grant made without the consent prompt.
+severity: high
+source: events
+attack: [T1098.003]
+tags: [m365, entra, oauth, consent]
+where:
+  operation: "Add app role assignment to service principal."
+entities: [subjectUser, ipAddress, objectName]
+---
+id: m365-trace-external-relay
+title: Message from outside the organisation sent on to an outside address
+description: In the Exchange Online message trace, a message whose sender and recipient are both outside the internal domains passed through the tenant - an inbox rule that redirects, mailbox forwarding or a transport rule sent it on. A forward by an inbox rule's ForwardTo is sent from the mailbox itself and does not show here; the extended report marks it (m365-trace-mailbox-rule-message). Set the internal domains in Settings.
+severity: high
+source: events
+attack: [T1114.003]
+tags: [m365, exchange, message-trace, exfiltration]
+require_setting: internal_domains
+where:
+  category: Exchange message trace
+  data.SenderDomain|exists: true
+  data.RecipientDomain|exists: true
+  data.SenderDomain|nin_setting: internal_domains
+  data.RecipientDomain|nin_setting: internal_domains
+  status|not_re: "(?i)fail|drop|spam|quarantin"
+entities: [subjectUser, targetUser, objectName]
+---
+id: m365-trace-mailbox-rule-message
+title: Message an inbox rule sent outside the organisation
+description: In the extended message trace report, the source MAILBOXRULE marks a message an inbox rule created, a forward or a redirect. To an address outside the internal domains, it is the mail the rule takes out, whoever sent it. Set the internal domains in Settings.
+severity: high
+source: events
+attack: [T1114.003]
+tags: [m365, exchange, message-trace, inbox-rule, exfiltration]
+require_setting: internal_domains
+where:
+  category: Exchange message trace
+  data.source: MAILBOXRULE
+  data.RecipientDomain|exists: true
+  data.RecipientDomain|nin_setting: internal_domains
+entities: [subjectUser, targetUser, objectName]
