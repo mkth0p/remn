@@ -219,6 +219,18 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   in their files). Detections go from 235 to 245 of 535 attack_data recordings, 109 to 112 of 279
   EVTX-to-MITRE-Attack files and 260 to 264 of 278 EVTX-ATTACK-SAMPLES files, and medium and
   higher findings on the clean machines from 2,134 to 1,684.
+- The parsers are tested on files the real tools wrote, and the defects those files showed are
+  fixed. Prefetch from Windows 8.1 (version 26) is read instead of failing; a Windows 7 file no
+  longer gains a run in 1601; the Windows 10 1903 and Windows 11 layouts give their real run count
+  and the executable's full path. An Outlook `.msg` whose 8-bit strings only its internet code
+  page names (Big5, for example) is no longer mojibake. A UTF-16 log with Windows line ends is no
+  longer a failed member. Velociraptor's `Windows.NTFS.MFT` rows give every time of the entry
+  under its path, and the EventData columns of its `Windows.EventLogs.Kerberoasting` rows reach
+  the fields the Kerberoasting rule reads. Samples from plaso and Apache Tika are committed under
+  `tests/fixtures/real/`; samples that are too large, under the AGPL or that name people
+  (Velociraptor, Splunk attack_data, some of Tika's) are downloaded by pinned URL and SHA-256 by
+  tests marked heavy, which run nightly in CI. Expected values come from those projects' own tests
+  and golden outputs, or from an independent second reading.
 - The staging area is sized from its disk, and archives expand only as far as it and their own
   size allow. Outside browser-only mode `FORENSIC_TMP_MAX_GB` now defaults to 0, which lets the
   staging area use the free space of its disk less a tenth of that disk (at most 10 GiB), so a
@@ -364,6 +376,23 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   ("marked false positive in case Acme on 2026-08-14"). Reviewed and false-positive findings
   sort below the rest; severity and newest remain as sorts. A decision made on the Findings page
   is now recorded as the analyst's, with its date.
+- A Microsoft 365 compromise can be investigated from the exports a responder is usually given.
+  Entra ID directory audits (Graph JSON, and the admin centre's JSON and CSV downloads, including
+  a CSV whose first columns are in the portal's language), ID Protection risk detections and risky
+  users (Graph JSON, or their properties as CSV) and the Exchange Online message trace
+  (Get-MessageTrace and Get-MessageTraceV2 written with Export-Csv, and the admin centre's
+  enhanced summary and extended reports) are read into the events table, each recognised by its
+  content; a record of another kind in such a file is counted as not read, and its member says so.
+  Every Microsoft 365 export may be written in UTF-16 or UTF-32 with a byte order mark. An
+  evidence file can be read again from its detail on the Evidence page with a date order and a
+  time zone set for it; the import records the setting, counts the records it applied to, and
+  counts the dates it guessed and the times it read as UTC. A directory activity carries the audit
+  log's name for it, so the existing rules, stories and chains find it in either export. Eight new
+  rules, not yet measured, report risk detections and risky users at medium or high risk, a risk
+  followed within a day by an inbox rule of the same account, passkeys and other sign-in methods
+  added, devices registered, application permissions granted to a service principal, and mail the
+  message trace shows leaving the organisation. A message trace export of exactly 1,000 or 5,000
+  rows, and a directory audit download of 250,000 records, carries a gaps badge.
 - Disk artifacts sit on the case timeline with what each of their times means, next to the
   event logs. An MFTECmd `$MFT` entry becomes a row per distinct `$STANDARD_INFORMATION` time and
   per `$FILE_NAME` time that differs from it, each saying which it is (`SI created, modified`,

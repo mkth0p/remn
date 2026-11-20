@@ -87,9 +87,28 @@ export interface GapInput {
 
 type Located = FileSequenceStats & { evidenceId: number }
 
-const UAL_FORMATS = ['m365-ual-csv', 'm365-ual-json']
-/** what one Search-UnifiedAuditLog call returns at most, and a ReturnLargeSet search */
-const EXPORT_CAPS = [5000, 50000]
+/**
+ * Exports that stop at a number of records: one Search-UnifiedAuditLog call (5,000) and a
+ * ReturnLargeSet search (50,000); Get-MessageTrace and Get-MessageTraceV2 (1,000 unless told
+ * otherwise, Get-MessageTraceV2 5,000 at most); the Entra admin centre's audit log download
+ * (250,000 records a file). The admin centre's message trace reports are not counted: they are
+ * cut elsewhere, or not at all.
+ */
+const EXPORT_CAPS: { formats: string[]; records: string; limits: Record<number, string>; missing: string }[] = [
+  {
+    formats: ['m365-ual-csv', 'm365-ual-json'],
+    records: 'Unified Audit Log records',
+    limits: { 5000: 'the most one Search-UnifiedAuditLog call returns', 50000: 'the most a large-set search returns' },
+    missing: 'Records',
+  },
+  {
+    formats: ['exo-messagetrace-csv'],
+    records: 'message trace rows',
+    limits: { 1000: 'as many as Get-MessageTrace and Get-MessageTraceV2 return unless told otherwise', 5000: 'the most Get-MessageTraceV2 returns' },
+    missing: 'Messages',
+  },
+  { formats: ['entra-audit-csv', 'entra-audit-json'], records: 'directory audit records', limits: { 250000: 'the most the Entra admin centre downloads in one file' }, missing: 'Records' },
+]
 const ENTRA_CHANNEL = 'Entra SignIn'
 /** a log that starts within this of the first finding is not said to start after it */
 const LATE_MS = 3_600_000
@@ -356,17 +375,17 @@ function startsLate(seqs: Located[], incidentStart: number): GapStatement[] {
   return out
 }
 
-/** Unified Audit Log exports that hold exactly as many records as a service limit returns. */
+/** Cloud exports that hold exactly as many records as their source returns at most. */
 function exportCaps(evidence: Evidence[]): GapStatement[] {
   const out: GapStatement[] = []
   const check = (e: Evidence, file: string, format: unknown, count: unknown, duplicates: unknown) => {
-    if (!UAL_FORMATS.includes(String(format))) return
+    const cap = EXPORT_CAPS.find((c) => c.formats.includes(String(format)))
     const n = Number(count ?? 0) + Number(duplicates ?? 0)
-    if (!EXPORT_CAPS.includes(n)) return
+    if (!cap?.limits[n]) return
     out.push({
       kind: 'export-cap',
       severity: 'high',
-      text: `${file}: exactly ${fmtNum(n)} Unified Audit Log records, the most ${n === 5000 ? 'one Search-UnifiedAuditLog call' : 'a large-set search'} returns. Records after that point in its time window are probably missing.`,
+      text: `${file}: exactly ${fmtNum(n)} ${cap.records}, ${cap.limits[n]}. ${cap.missing} after that point in its time window are probably missing.`,
       evidenceId: e.id,
     })
   }

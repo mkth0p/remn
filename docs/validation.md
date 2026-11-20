@@ -24,6 +24,36 @@ fixture (`tests/fixtures/parity/`, see the [detection page](detection.md)) and t
 fixture (`tests/fixtures/ai_system_compose.json`), which fails when a prompt changes
 without the fixture being regenerated.
 
+### Parsers on files the real tools wrote
+
+Most parser fixtures are invented. The parsers are also tested on files the real tool or
+service wrote, taken from other projects' public test data, and the expected values come from
+those projects' own tests or golden outputs, or from a second reading made independently of
+REMN, never from REMN's output:
+
+| Source family | Samples | Where |
+| --- | --- | --- |
+| Windows prefetch, versions 17 to 31 | plaso test data (Apache 2.0); Velociraptor's sample with its golden output | committed (`tests/fixtures/real/prefetch/`); Velociraptor's downloaded |
+| Outlook `.msg`, `.eml`, mbox, PST | Apache Tika test data (Apache 2.0) | five committed (`tests/fixtures/real/mail/`); those naming people downloaded |
+| Unified Audit Log, Entra sign-ins | plaso test data; Splunk attack_data (Apache 2.0) | three records committed (`tests/fixtures/real/m365/`); Splunk's downloaded |
+| Defender support log, Velociraptor results (`Windows.NTFS.MFT`, `Windows.EventLogs.Kerberoasting`) | Velociraptor test data and golden outputs (AGPL 3.0) | downloaded |
+
+The downloaded samples are not in the repository, because of their size, their licence or
+the names they hold. The tests that read them are marked heavy, fetch each file by a URL
+pinned to a commit and check its SHA-256 (`tests/backend/real_samples.py`), and keep it in the
+directory `REMN_REAL_SAMPLES` names (by default `.cache/remn/real-samples` in the home
+directory). They run every night in the CI job that installs the optional parsers, which the
+PST test needs:
+
+```bash
+.venv\Scripts\python.exe -m pytest -m heavy tests/backend/test_real_prefetch.py tests/backend/test_real_mail.py tests/backend/test_real_m365.py tests/backend/test_real_collections.py
+```
+
+No public sample written by the real tool was found for the Graph directory audits, risk
+detections and risky users exports, the Entra portal downloads, the message trace exports,
+EvtxECmd, MFTECmd and the other Zimmerman parsers, DFIR-ORC and DHCP server logs; their tests
+use the invented fixtures.
+
 ## Public corpora and measured rates
 
 `tools/validate_public.py` downloads redistributable corpora into `samples/public/`

@@ -97,6 +97,11 @@ and a message with more is flagged `attachments_truncated` while its attachment 
 the real one. An attachment over 60 MiB in a PST or OST is not read: it is listed with the
 size the mailbox declares, no hash, and the flag `not_read`.
 
+A `.msg` saved in 8-bit strings rather than Unicode is read in the code page it names. Outlook
+does not always write the message code page; when only the internet code page is there (a
+message in Chinese saved as Big5, for example), that one is used, rather than the Western
+European default that turned such a subject and sender into unreadable characters.
+
 ### Deleted and orphaned mail (PST and OST)
 
 Messages inside Deleted Items and the Exchange Recoverable Items dumpster (Purges,
@@ -113,7 +118,7 @@ synchronised OST, becomes a row of its own in its folder, with the subject "(unr
 message)", "(unreadable folder)", "(unreadable folder contents)" or "(unreadable orphan item)",
 the flag `parse_error` and libpff's error, and the import counts it among its errors.
 
-## Microsoft 365 audit and Entra sign-in exports
+## Microsoft 365 and Entra exports
 
 Business email compromise investigations rest on the tenant's own logs. Drop the exports
 the acquisition tools produce next to the mailbox export and they become rows of the
@@ -129,20 +134,118 @@ events table:
   an Event Hub or a storage account (the sign-in under `properties`, categories
   `SignInLogs`, `NonInteractiveUserSignInLogs`, `ServicePrincipalSignInLogs` and
   `ManagedIdentitySignInLogs`; a record of another category, such as `AuditLogs`, is
-  counted as not read); a `.zip` of a whole acquisition folder is walked.
+  counted as not read);
+- Entra ID directory audits as Graph JSON (`auditLogs/directoryAudits`,
+  `Get-MgAuditLogDirectoryAudit`, a page or an array of records), or the Entra admin
+  centre's audit log download as JSON or CSV;
+- Entra ID Protection risk detections and risky users as Graph JSON
+  (`identityProtection/riskDetections`, `identityProtection/riskyUsers`), or their properties
+  as CSV columns (`Get-MgRiskDetection | Export-Csv`, `Get-MgRiskyUser | Export-Csv`,
+  Microsoft-Extractor-Suite's `Get-RiskyDetections` and `Get-RiskyUsers`);
+- the Exchange Online message trace as `Get-MessageTrace` or `Get-MessageTraceV2` output
+  written with `Export-Csv` (Microsoft-Extractor-Suite's `Get-MessageTraceLog`), or the
+  Exchange admin centre's downloadable enhanced summary and extended reports.
+
+A `.zip` of a whole acquisition folder is walked.
+
+Not read, each for the reason given further down: Azure Monitor records of the `AuditLogs`,
+`RiskyUsers` and `UserRiskEvents` categories; ID Protection reports downloaded from the admin
+centre whose fields are not the Graph property names; the Exchange admin centre's "Export
+results" of the message trace shown on screen; a UTF-16 file without a byte order mark. A
+Graph page that ends with `@odata.nextLink` is one page of a longer list: REMN reads the
+records it holds and does not say that more pages exist.
+
+Each export may be written in UTF-8, or in UTF-16 or UTF-32 with a byte order mark, as
+Windows PowerShell's `Export-Csv -Encoding Unicode` and `Out-File` write it. The `#TYPE`
+line `Export-Csv` writes above the header without `-NoTypeInformation` is passed over, and a
+date `ConvertTo-Json` wrote as `\/Date(milliseconds)\/` is read. A UTF-16 file without a
+byte order mark is not recognised.
 
 Outside the Azure Monitor records, whose category says what they are, a record is read as a
 sign-in only when it carries a time (`createdDateTime`), a client address (`ipAddress`) and
-the user or the application signed in to. Entra directory audit
-records, risk detections, risky users and user lists name a `userPrincipalName` too, but
-they are not sign-ins: a file of them is listed as a member REMN has no parser for (in the
-event-log import, as "not a recognised Microsoft 365 or Entra export"), and such a record
-inside a sign-in file is counted as not read. Field names are read in any case, so the
+the user or the application signed in to. Directory audits, risk detections, risky users
+and user lists name a `userPrincipalName` too, but they are not sign-ins: a file of
+directory audits, risk detections or risky users is read as such (below), and a user list is
+listed as a member REMN has no parser for (in the event-log import, as "not a recognised
+Microsoft 365 or Entra export"). A JSON file is of the kind of its first record, and a record
+of another kind inside it is counted as not read: the evidence's statistics (`notRead`) and
+its member list say how many, and the member is marked failed. Field names are read in any case, so the
 PascalCase columns of `Get-MgAuditLogSignIn | Export-Csv` land on the same names as the
 Graph JSON; a column that export wrote as a .NET type name (`Status`, `Location`,
 `DeviceDetail`) is left out. A sign-in whose export gives neither a status nor an error code
 has no `status`, and its summary says the outcome is not in the export: it is not counted as
 a successful sign-in.
+
+A directory audit becomes a row with the provider `Microsoft Entra ID Audit`, the channel
+`Entra Audit` and the category `Entra audit`. Its `operation` is the activity as the Unified
+Audit Log names it, with a closing period (`Consent to application.`, `Add member to
+role.`), so the rules, stories and chains that know an audit log record know the same
+activity in a directory audit; `description` and `data.activityDisplayName` keep Entra's own
+spelling, and Privileged Identity Management activities keep theirs. The initiator, a user
+or an application, is `subjectUser`, and its address `ipAddress`; the first target with a
+user principal name is `targetUser`, and the first named target that is not a user
+`objectName`. Each modified property is `data.<name>` with its new value and
+`data.<name>.old` with its old one (`data.Role.DisplayName`, `data.ConsentAction.Permissions`),
+each additional detail `data.<key>` (`data.User-Agent`), and the initiator and the targets
+`data.initiatedBy.*` and `data.Target.*`. A field REMN does not know is kept under its own
+name in `data`. A record whose id holds a GUID is kept once, as an audit log record is.
+
+The admin centre's CSV download writes the date, service, category, activity and result
+columns in the language of the portal, so those five are read by their place, first and third
+to sixth; the other columns are named in English in every language. It holds at most three
+targets with five modified properties each and six additional details, which is all REMN can
+read of a record from it, and no record id, so a record downloaded twice is in the case twice.
+`Get-MgAuditLogDirectoryAudit | Export-Csv` writes the initiator, the targets and the details
+as .NET type names, so its rows say what was done and when but not by whom; the JSON from
+the same cmdlet holds them. The admin centre downloads at most 250,000 audit records a file:
+a CSV or JSON download of exactly that many carries a "gaps" badge on the Evidence page, since
+the records after it in its time window are probably missing. Azure Monitor records of the
+`AuditLogs` category are not read: Microsoft says their schema may differ from Graph's.
+
+A risk detection becomes a row with the provider `Microsoft Entra ID Protection`, the channel
+`Entra RiskDetection`, the category `Entra risk` and the operation `RiskDetection`, at the time
+of the activity it rates (`activityDateTime`; `detectedDateTime` when it has none, and an
+offline detection is often hours later). Its `description` is the `riskEventType`, its
+`status` the `riskState` and `statusText` the `riskDetail`; the user is `subjectUser` and
+`targetUser`, the address `ipAddress`, and the place `data.country`, `data.city` and
+`data.state`, as on a sign-in. `data.correlationId` and `data.requestId` are those of the
+sign-in it rates, and each key of `additionalInfo` is `data.additionalInfo.<key>` (the
+`userAgent` is also `workstation`). A risky user becomes a row of the channel `Entra
+RiskyUser` and the operation `RiskyUser` at `riskLastUpdatedDateTime`: the state of that
+user's risk when the list was taken, so the same user listed again after the risk changed is
+a second row. Both are a warning when the risk is medium or high or the compromise was
+confirmed. A risk detection is kept once by its id. The ID Protection reports in the admin
+centre can be downloaded as CSV or JSON, but Microsoft does not document what those files
+hold: a download whose fields are the Graph property names is read, any other is not
+recognised. Azure Monitor records of the `RiskyUsers` and `UserRiskEvents` categories are not
+read.
+
+A message trace becomes rows with the provider `Exchange Online Message Trace`, the channel
+`Exchange MessageTrace`, the category `Exchange message trace` and the operation
+`MessageTrace`, one for each recipient of a message: the sender is `subjectUser`, the
+recipient `targetUser`, the subject `objectName`, the delivery status `status` (a message
+that failed, was quarantined or filtered as spam is a warning), the address that sent it to
+the service `ipAddress` and the one the service sent it to `destinationIp`. Every column is
+kept under its own name in `data`, with `data.SenderDomain`, `data.RecipientDomain` and
+`data.InternetMessageId`, which opens the mailbox message and the audit records that name the
+same message. The cmdlets write their times in UTC, Microsoft says, so a zone set for the
+evidence does not move them, but `Export-Csv` writes them in the session's date order. A row
+of `Get-MessageTrace` is kept once by its `MessageTraceId`, recipient and status;
+`Get-MessageTraceV2`'s output properties are not documented, and its export is read by the
+same column names (`Received`, `SenderAddress`, `RecipientAddress` and the others its
+parameters are named after), any other column kept as it is. Both cmdlets return 1,000
+rows unless told otherwise, and `Get-MessageTraceV2` 5,000 at most: an export of exactly
+1,000 or 5,000 rows carries a "gaps" badge, as an audit log export cut at its limit does.
+The enhanced summary report
+gives a row for each `<address>##<status>` of `Recipient_status` (Microsoft does not say what
+separates two recipients; a `;` before another `<address>##` is taken as the separator) and
+its `directionality` as `direction`; the extended report gives a row for each recipient of
+each event, its `event_id` as the status and its `source` (`MAILBOXRULE` for a message an
+inbox rule sent) in `data.source`. A report writes its times in the zone of the admin who
+asked for it, so a time without a zone, in a column whose name does not say UTC, is counted
+(`zoneAssumed`) and read in the zone set for the evidence. A report has no id for its rows,
+so a report downloaded twice is in the case twice. The admin centre's "Export results" of the
+summary shown on screen is not recognised: Microsoft does not document its columns.
 
 Rows carry `provider`, `channel` (the workload), `category` (`M365 Exchange`,
 `M365 Entra`, `Entra sign-in`, …), `operation`, `subjectUser` and `targetUser`,
@@ -167,13 +270,34 @@ marked failed with the record number. So does JSON that is broken part-way.
 A time written with a zone or an offset keeps it; one written without is read as UTC, the
 zone the audit log's `CreationTime`, Graph and the portal's `Date (UTC)` use. Dates a
 culture or a spreadsheet wrote are read too (`9/1/2026 10:00 AM`, `01.09.2026 10:00`,
-`2026/09/01 10:00:00`, with or without seconds or an offset). A sign-in CSV that writes its
+`2026/09/01 10:00:00`, with or without seconds or an offset). Such a time without a zone, in
+a column whose name does not say UTC, is counted (`zoneAssumed`): `Export-Csv` writes a time
+in whatever zone it held, so UTC is an assumption there. A sign-in CSV that writes its
 dates as numbers is read in the order its own dates show: one day above 12 anywhere in the
 file settles it for the whole file. When no date shows it, the dates are read month-first,
 the portal's order, and the evidence's statistics (`dateOrderGuessed`) and its member list
 say how many records were dated that way: in a day-first export those dates are wrong. A
 record whose date is missing or cannot be read is kept without a time and counted the same
 way (`undated`), since it is not on the timeline.
+
+The date order and the time zone can be set for an evidence file where its exports cannot
+say. The detail of such a file on the Evidence page says how its dates were read and what was
+guessed or assumed, and sets an order and a zone for it: the original file is dropped again,
+checked against the SHA-256 recorded when it was imported, and the evidence is removed and
+the file imported again with the setting (its analyst note is kept; its findings are cleared
+until the rules run again). The console says which setting each import used. The import
+request takes it as the `dates` field: `{"order": "day-first" | "month-first", "zone": "UTC"
+| "+02:00" | "Europe/Paris"}`. The order set is used for every numeric date of the file's
+Entra and message trace exports in place of the order the file shows; a date that cannot be
+read in it but can the other way is counted (`dateOrderContradicted`) and left without a
+time. The zone set
+is used for each time a culture wrote without a zone, and never for an ISO 8601 time, a time
+with an offset, or a column whose name says UTC; a zone given by name follows daylight
+saving time. The evidence's statistics keep the setting (`dates`) and count the records it
+was used for (`dateOrderSet`, `zoneSet`), and each member of an archive or a package says
+the same in its note. The audit log's times are ISO 8601 in UTC, so the setting does not
+change them, and the other tables of a collection package still leave a date that reads
+both ways without a time.
 
 A record is in the case once. Search-UnifiedAuditLog's large-set pages repeat records,
 and exports cut into time slices overlap, so a UAL record whose `AuditData.Id` was already
@@ -199,11 +323,34 @@ touched: `data.InternetMessageId` keeps those ids (the first 1,000; beyond that
 `messageId`. An audit record opens the messages it names in the mailbox evidence, and a
 message opens the audit records that name it.
 
-`rules/m365/bec.yaml` ships 29 rules for this data: inbox rules that forward or hide
+`rules/m365/bec.yaml` ships 37 rules for this data: inbox rules that forward or hide
 mail, mailbox and transport-rule forwarding, delegate permissions, MailItemsAccessed
 bursts and delegate syncs, OAuth consent, privileged role assignment, MFA and
 security-info changes, conditional-access and audit tampering, legacy protocols,
 eDiscovery, mass download and anonymous sharing, risky sign-ins, legacy-auth sign-ins,
 sign-ins outside the expected countries (a case setting), two countries within 24 hours,
-password spray, brute force followed by success, MFA fatigue.
+password spray, brute force followed by success, MFA fatigue. The rules that read a
+directory activity (consent, roles, security info, applications) find it in a directory
+audit export as in the audit log, since both name it the same way.
+
+Eight rules read the directory audits, ID Protection and message trace exports:
+
+- `m365-risk-detection` and `m365-risky-user`: a risk detection, or a user in the risky
+  users list, at medium or high risk or confirmed compromised;
+- `m365-risk-then-inbox-rule`: a sign-in or risk detection at medium or high risk, raised
+  to critical when the same account creates or changes an inbox rule within 24 hours;
+- `m365-auth-method-added`: a passkey, a passwordless phone sign-in or a Windows Hello for
+  Business credential added, or security info updated by the user;
+- `m365-device-registered`: a device registered in the directory;
+- `m365-app-permission-granted`: an application permission given to a service principal;
+- `m365-trace-external-relay`: a message from outside the internal domains sent on to an
+  address outside them (an inbox rule's redirect, mailbox forwarding, a transport rule);
+- `m365-trace-mailbox-rule-message`: a message the extended report marks as made by an
+  inbox rule (source `MAILBOXRULE`), sent outside the internal domains.
+
+The two message trace rules do not run until the internal domains are set. A forward made
+by an inbox rule's ForwardTo is a new message from the mailbox and shows in the message
+trace as that user's own mail; only the extended report marks it. These eight rules have
+not been measured: `rules/measures.json` has no entry for them, and the Rules view shows
+them as unmeasured.
 `samples/synthetic/make_m365.py` writes a complete scenario in all four formats.

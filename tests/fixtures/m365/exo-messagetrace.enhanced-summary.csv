@@ -1,0 +1,3 @@
+"origin_timestamp","sender_address","Recipient_status","message_subject","total_bytes","message_id","network_message_id","original_client_ip","directionality","connector_id","delivery_priority"
+"2026-09-01T10:31:02.417","alice@contoso.com","payments@attacker.example##Receive, Send","RE: Invoice 4471 - updated bank details","48211","<AM9PR01MB0001.example@AM9PR01MB0001.eurprd01.prod.outlook.com>","6f7a8b9c-0d1e-4f2a-8b3c-4d5e6f7a8b9c","198.51.100.23","Outbound","","Normal"
+"2026-09-01T10:40:00.120","supplier@fabrikam.example","alice@contoso.com##Receive, Deliver;collect@attacker.example##Receive, Send","Invoice 4472","102400","<20260901104000.1234@mail.fabrikam.example>","7a8b9c0d-1e2f-4a3b-8c4d-5e6f7a8b9c0d","192.0.2.25","Inbound","","Normal"

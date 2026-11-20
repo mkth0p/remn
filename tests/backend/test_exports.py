@@ -205,6 +205,83 @@ def test_velociraptor_results_are_named_after_their_artifact():
     assert category("Collection-WS01-2026/results/Windows.Sysinternals.Autoruns.json") == "autorun"
 
 
+def velociraptor_result(tmp_path, artifact: str, records: list[dict]) -> list[dict]:
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as z:
+        z.writestr(f"results/{artifact}.json", "".join(json.dumps(r) + "\n" for r in records))
+    return list(PackageSource("Collection-WS01.zip", None, out.getvalue(), str(tmp_path), ParseContext(analyze_attachments=False)))
+
+
+def test_velociraptor_s_mft_artifact_gives_every_distinct_time_of_an_entry_and_its_full_path(tmp_path):
+    """Windows.NTFS.MFT writes the columns MFTECmd does for the eight times, and the entry's path
+    as OSPath, as Velociraptor's golden output shows. Read as a plain file listing, an entry gave
+    one row, at its $SI creation time, under its bare file name. The values are invented."""
+    rows = velociraptor_result(
+        tmp_path,
+        "Windows.NTFS.MFT",
+        [
+            {
+                "EntryNumber": 41,
+                "InUse": True,
+                "ParentEntryNumber": 5,
+                "OSPath": "\\\\.\\C:\\Users\\Public\\notes.txt",
+                "FileName": "notes.txt",
+                "FileSize": 12,
+                "Created0x10": "2026-03-18T04:15:18.5166156Z",
+                "Created0x30": "2026-03-18T04:15:18.5166156Z",
+                "LastModified0x10": "2026-01-06T14:13:46.9839391Z",
+                "LastModified0x30": "2026-03-18T04:15:18.5166156Z",
+                "LastRecordChange0x10": "2026-02-23T03:41:48.391796Z",
+                "LastRecordChange0x30": "2026-03-18T04:15:18.5166156Z",
+                "LastAccess0x10": "2026-03-18T04:17:08.7362551Z",
+                "LastAccess0x30": "2026-03-18T04:15:18.5166156Z",
+                "SI_Lt_FN": False,
+                "USecZeros": False,
+            }
+        ],
+    )
+    assert {r["artifactType"] for r in rows} == {"mft"}
+    assert {r["path"] for r in rows} == {"\\\\.\\C:\\Users\\Public\\notes.txt"}
+    # $SI's four times, and $FN's, which share one row since they are one time
+    assert sorted(r["ts"] for r in rows) == sorted(
+        timestamp_utc(t)
+        for t in ("2026-01-06T14:13:46.983Z", "2026-02-23T03:41:48.391Z", "2026-03-18T04:15:18.516Z", "2026-03-18T04:15:18.516Z", "2026-03-18T04:17:08.736Z")
+    )
+
+
+def test_a_velociraptor_event_log_artifact_with_flat_columns_reaches_the_fields_rules_read(tmp_path):
+    """Windows.EventLogs.Kerberoasting writes each 4769 event's EventData as columns of its own
+    row, with no EventData object, as Velociraptor's golden output shows. The service, the ticket
+    encryption and the address stayed out of the fields the Kerberoasting rule reads. The values
+    are invented."""
+    rows = velociraptor_result(
+        tmp_path,
+        "Windows.EventLogs.Kerberoasting",
+        [
+            {
+                "EventTime": "2026-09-30T01:58:40Z",
+                "EventID": 4769,
+                "Computer": "DC01.example.test",
+                "ServiceName": "SVC-APP01",
+                "ServiceSid": "S-1-5-21-1-2-3-1110",
+                "TargetUserName": "jdoe@EXAMPLE.TEST",
+                "Status": "0x0",
+                "TargetDomainName": "EXAMPLE.TEST",
+                "TicketEncryptionType": "0x17",
+                "TicketOptions": "0x40810010",
+                "TransmittedServices": "-",
+                "IpAddress": "::ffff:192.0.2.10",
+                "IpPort": "52562",
+            }
+        ],
+    )
+    assert len(rows) == 1
+    row = rows[0]
+    assert (row["eventId"], row["computer"], row["targetUser"]) == (4769, "DC01.example.test", "jdoe@EXAMPLE.TEST")
+    assert (row["serviceName"], row["ticketEncryption"]) == ("SVC-APP01", "0x17")
+    assert row["ipAddress"] in ("::ffff:192.0.2.10", "192.0.2.10")
+
+
 def test_a_velociraptor_collector_zip_yields_results_and_triage_rows(tmp_path):
     from triage_fixture import write_triage
 

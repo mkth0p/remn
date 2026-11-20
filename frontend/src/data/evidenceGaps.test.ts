@@ -242,6 +242,35 @@ describe('what the evidence cannot show', () => {
     expect(gaps[1].text).toContain('audit.csv: exactly 50,000 Unified Audit Log records, the most a large-set search returns')
   })
 
+  it('names a message trace or a directory audit download cut where its source stops', () => {
+    const pkg = ev(
+      3,
+      'exchange.zip',
+      {
+        files: [
+          { name: 'trace-0901.csv', status: 'parsed', format: 'exo-messagetrace-csv', count: 1000 },
+          { name: 'trace-0902.csv', status: 'parsed', format: 'exo-messagetrace-csv', count: 4990, duplicates: 10 },
+          { name: 'trace-0903.csv', status: 'parsed', format: 'exo-messagetrace-csv', count: 1200 },
+          // the admin centre's reports are not cut at these numbers
+          { name: 'extended.csv', status: 'parsed', format: 'exo-messagetrace-report-csv', count: 1000 },
+        ],
+      },
+      'zip',
+    )
+    const audits = ev(4, 'AuditLogs_2026-09-02.csv', { count: 250000 }, 'entra-audit-csv')
+    const gaps = evidenceGaps({ evidence: [pkg, audits] })
+    expect(gaps.map((g) => [g.kind, g.evidenceId])).toEqual([
+      ['export-cap', 3],
+      ['export-cap', 3],
+      ['export-cap', 4],
+    ])
+    expect(gaps[0].text).toBe(
+      'trace-0901.csv: exactly 1,000 message trace rows, as many as Get-MessageTrace and Get-MessageTraceV2 return unless told otherwise. Messages after that point in its time window are probably missing.',
+    )
+    expect(gaps[1].text).toContain('trace-0902.csv: exactly 5,000 message trace rows, the most Get-MessageTraceV2 returns.')
+    expect(gaps[2].text).toContain('AuditLogs_2026-09-02.csv: exactly 250,000 directory audit records, the most the Entra admin centre downloads in one file.')
+  })
+
   it('says which package members were read only in part, and how far', () => {
     const pkg = ev(
       5,

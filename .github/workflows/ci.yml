@@ -95,6 +95,15 @@ jobs:
         run: python -c "import pypff, yara, py7zr"
       - name: Tests
         run: pytest -q
+      # the parsers on samples written by the real tools that are too large, licensed otherwise
+      # or too personal to commit, downloaded by URL and SHA-256 (tests/backend/real_samples.py);
+      # nightly only, so a pull request does not wait on the hosts they come from. This job has
+      # the PST reader the Outlook data file test needs.
+      - name: Parsers on downloaded real samples
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          REMN_REAL_SAMPLES: ${{ runner.temp }}/real-samples
+        run: pytest -q -m heavy tests/backend/test_real_prefetch.py tests/backend/test_real_mail.py tests/backend/test_real_m365.py tests/backend/test_real_collections.py
 
   # The documentation is written for Windows first and the lock is resolved for every platform:
   # the same install and the same tests where the readers are.
