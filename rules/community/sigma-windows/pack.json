@@ -1,7 +1,7 @@
 {
   "id": "sigma-windows",
   "name": "Sigma - Windows (stable + test)",
-  "description": "The main SigmaHQ Windows rule set (process creation, registry, image load, PowerShell, network, file, DNS, built-in Security/System channels). Converted to the REMN DSL one to one; rules that would need to be weakened are listed in skipped.json.",
+  "description": "The main SigmaHQ Windows rule set (process creation, registry, image load, PowerShell, network, file, DNS, built-in Security/System channels). Converted to the REMN DSL; rules that would need to be weakened are listed in skipped.json, and a rule converted with a caveat carries it under sigma.warnings.",
   "source": "events",
   "defaultEnabled": true,
   "license": {
@@ -18,7 +18,7 @@
     "paths": [
       "rules"
     ],
-    "fetched": "2026-09-24"
+    "fetched": "2026-11-19"
   },
   "counts": {
     "upstream": 2410,

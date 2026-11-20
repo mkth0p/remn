@@ -71,9 +71,10 @@ the message at the end of the run says how many rules were cut. A `then` follow-
 checked for every finding the rule keeps.
 
 Operators: `eq ne in nin contains not_contains contains_any contains_all startswith
-not_startswith endswith not_endswith re not_re gt gte lt lte exists empty in_setting
+not_startswith endswith not_endswith re not_re re_cs gt gte lt lte exists empty in_setting
 nin_setting levenshtein length contains_cs startswith_cs endswith_cs`. The `_cs`
-variants match case exactly; everything else is case-insensitive. Dotted paths reach
+variants match case exactly (`re_cs` is a regex that keeps its case unless the pattern
+starts with `(?i)`); everything else is case-insensitive, `re` included. Dotted paths reach
 nested values (`attachments.flags`, `data.LogonType`). `field|length: "< 500"` counts the
 characters of a text or the items of a list, with the same threshold syntax as
 `threshold`. The derived URL fields `urls.subdomain` (host minus the registrable domain)
@@ -86,7 +87,34 @@ define none of that name. Today that is `tranco_10k`, the top 10,000 of the
 [Tranco](https://tranco-list.eu) ranking (list id and fetch date in
 `backend/services/reference/tranco.json`; Le Pochat et al., NDSS 2019). A case setting
 named `tranco_10k` overrides it; `tools/import_community_rules.py tranco --download`
-refreshes it.
+refreshes it. An empty setting has no members, so `nin_setting` is true on every row until
+the setting is filled: a rule whose only guard is `nin_setting` should also carry
+`require_setting`.
+
+Other keys a rule may carry:
+
+- `any_in_group`: a condition that at least one row of a group must meet for the group to
+  become a finding (grouped rules only).
+- `then_flags`: on a mail rule, a list of `flag: severity` pairs; a finding whose mail
+  carries the flag is raised to that severity and names the flag as its escalation.
+- `require_setting`: the name of a case setting; while that setting is empty the rule does
+  not run, and its diagnostic says which setting is missing.
+- `entities`: the fields a finding shows. They default to `group_by`, or to a fixed set per
+  source (host, accounts, address, process and service for events; sender, domain, subject
+  and origin address for mails).
+- `collapse_after`: a rule without `group_by` or `threshold` gives one finding per matching
+  row; past this many rows (200 by default) it gives one finding per combination of its
+  entity fields instead, marked "collapsed" with the number of rows it matched.
+- `confidence`: low, medium or high, shown beside the severity.
+- `max_findings`: see the paragraph on the number of findings a run keeps, above.
+
+`then`, `window`, `distinct` and `any_in_group` act on a group, so a rule without
+`group_by` or `threshold` cannot use them. Both engines refuse such a rule with an error
+rather than run it without them, and they refuse a `then` without a `where` and
+`then_flags` on an events rule (events carry no flags). The language has one follow-up step
+and no ordered sequence of three events or more; a `window` with `distinct: eventId` counts
+different events in any order. It cannot compare one field with another, and it counts
+rows or distinct values but does not sum or average them.
 
 Rules are edited in the Rules page, and a custom rule with the same id as a bundled or
 pack rule overrides it.
@@ -225,17 +253,20 @@ Each pack directory holds the rules grouped by log source (`process_creation.yam
 `registry_set.yaml`, …) or by Sublime rule family, a `pack.json` manifest with the
 upstream repository, the exact commit, the licence and the counts, the upstream
 `LICENSE` verbatim, and `skipped.json` naming every upstream rule that was not converted
-and why. A rule is skipped rather than weakened: `fieldref`, `expand` and the time-part
-modifiers, any modifier outside the Sigma 2.1 list, `file_access` sources, Sublime ML
-classifiers, `file.explode`, link analysis, and so on. Two translations are looser than
-the original and are not reported on the rule: a Sigma `|re` regex matches without regard
-to case, and a Sublime `any()` with several conditions on one collection (attachments,
-links) matches when each condition holds for some member rather than all of them for the
-same one; both make a rule match more, never less. What translates exactly is
+and why. A SigmaHQ rule converted with a caveat (an unknown service matched by channel name,
+`cased` on an equality) carries it in its YAML under `sigma.warnings`, and `pack.json` counts
+them. A rule is skipped rather than weakened: `fieldref`, `expand` and the time-part
+modifiers, a `timeframe`, any modifier outside the Sigma 2.1 list, `file_access` sources, Sublime ML
+classifiers, `file.explode`, link analysis, and so on. One translation is looser than the
+original and is not reported on the rule: a Sublime `any()` with several conditions on one
+collection (attachments, links) matches when each condition holds for some member rather than
+all of them for the same one; it makes a rule match more, never less. What translates exactly is
 translated: `base64`, `base64offset` and `utf16`/`wide` values become the literal strings
 the encoded value can appear as (all three alignments), matched case-sensitively; `neq`
-becomes a negated equality; `cased` selects the case-sensitive operators; the regex flags
-`m` and `s` travel as an inline group; IPv6 CIDRs translate when they name one address or
+becomes a negated equality; `cased` selects the case-sensitive operators; a regex keeps its
+case (`re_cs`) unless `|i` is given, and the flags `m` and `s` travel as an inline group;
+keywords, searched in the event's JSON text, are written as that text holds them (a quote as
+`\"`, a backslash as `\\`); IPv6 CIDRs translate when they name one address or
 a prefix within the first group (`::1/128`, `fe80::/10`, `fc00::/7`). The SigmaHQ rules are
 redistributed under the Detection Rule License 1.1, the Sublime rules under MIT.
 
@@ -342,22 +373,25 @@ machines a quarter less, half when it fired on every one of them
 
 Mail rules are calibrated on mail corpora instead (below).
 
-The committed measure was taken on 2026-09-25. In it, 1,023 of the 3,008 event rules measured
-fire on a recording of what they look for, 1,984 are leads and 1 cannot run without a case
-setting; 457 of the 457 SigmaHQ rules with a sample fire on it; on the clean machines 170 of
+The committed measure was taken on 2026-09-25; the 116 rules whose logic changed on 2026-11-19
+(12 of REMN's own, and 104 of the SigmaHQ packs, converted again with the case of a regex kept
+and keywords written as events hold them) were measured again that day on the same versions. In
+it, 1,020 of the 3,009 event rules measured fire on a recording of what they look for, 1,988 are
+leads and 1 cannot run without a case setting; 457 of the 457 SigmaHQ rules with a sample fire
+on it; on the clean machines 168 of
 the 2,794 rules whose log sources they have fired at least once. A recording counts as detected
 when a rule of its technique raises a finding of any severity anywhere in the file; whether that
 finding is on the attack's own events is not checked. Counted that way, the rules enabled by
 default (the core rules and the two default SigmaHQ packs) detect 241 of the 535 attack_data
 Windows datasets, 115 of the 279 EVTX-to-MITRE-Attack files and 271 of the 278
-EVTX-ATTACK-SAMPLES files. On the clean machines REMN's own rules raised 200 findings at high or
+EVTX-ATTACK-SAMPLES files. On the clean machines REMN's own rules raised 154 findings at high or
 critical, at the severities they had when measured. Event rules added since that day (among them
 the directory, other-product, PowerShell-command and technique-gap rules of 2026-09-26) have no
 measure yet and are shown as unmeasured, and a rule changed since as changed;
 `tests/backend/test_rule_measures.py` warns while any rule is in either state.
 Measuring found SigmaHQ rules that could never fire (the AppX deployment channel, comparisons
 with true) and PowerShell rules blind to PowerShell 7's log, since fixed in the converter.
-EVTX-to-MITRE-Attack, added as a source on 2026-09-25, gave 53 leads their first recorded
+EVTX-to-MITRE-Attack, added as a source on 2026-09-25, gave 50 leads their first recorded
 attack, five of them REMN's own (AS-REP roasting, Kerberos pre-authentication brute force, audit
 policy and firewall changes, the system time changed); attack_data's Windows datasets, added the
 same day, gave 137, four of them REMN's own (Kerberoasting, password spraying, a suspicious DNS
@@ -572,9 +606,10 @@ identity evidence still applies.
 The browser engine lets confidential evidence be analysed without a row ever reaching
 the server; the SQL engine handles gigabyte cases. They are held to the same output by a
 fixture: `tools/parity_fixture.py` builds a mixed scenario (Windows events, Microsoft 365
-rows, mails), runs every bundled rule on the SQL engine and records the rows and finding
-keys under `tests/fixtures/parity/`; `frontend/src/rules/parity.test.ts` runs the
-browser engine on the same rows and fails on any difference. Regenerate the fixture after
+rows, mails), runs every bundled rule on the SQL engine and records the rows and each
+finding's key, severity, count and escalation under `tests/fixtures/parity/`;
+`frontend/src/rules/parity.test.ts` runs the browser engine on the same rows and fails on
+any difference. Regenerate the fixture after
 changing an engine or a rule, and review the diff. The same script records the Events
 page's stacks of a few fields in `stacks.json`, and `frontend/src/data/stack.parity.test.ts`
 stacks the rows in the browser store and compares.

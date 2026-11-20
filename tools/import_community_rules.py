@@ -11,6 +11,7 @@ Each source is converted with the same code the "import Sigma" / "import Sublime
 multi-document REMN YAML plus:
 
     pack.json      manifest (upstream repo, commit, licence, counts, default enabled state)
+    (each rule)    what its conversion could not keep exactly, under sigma.warnings or sublime.warnings
     LICENSE        the upstream licence, verbatim
     skipped.json   every upstream rule that was not converted and why
 
@@ -67,7 +68,7 @@ SOURCES: dict[str, dict[str, Any]] = {
                 "roots": ["rules"],
                 "name": "Sigma - Windows (stable + test)",
                 "default": True,
-                "description": "The main SigmaHQ Windows rule set (process creation, registry, image load, PowerShell, network, file, DNS, built-in Security/System channels). Converted to the REMN DSL one to one; rules that would need to be weakened are listed in skipped.json.",
+                "description": "The main SigmaHQ Windows rule set (process creation, registry, image load, PowerShell, network, file, DNS, built-in Security/System channels). Converted to the REMN DSL; rules that would need to be weakened are listed in skipped.json, and a rule converted with a caveat carries it under sigma.warnings.",
             },
             {
                 "id": "sigma-emerging-threats",
@@ -230,6 +231,10 @@ def build_pack(src: dict[str, Any], pack: dict[str, Any], zf: zipfile.ZipFile, p
             # the SQL engine must compile AND bind the rule before it is shipped (a compiled
             # condition can still fail in DuckDB's binder, e.g. an empty JSON key)
             _bind(scratch, rule, src["source"])
+            if r.get("warnings"):
+                # counted and thrown away, a caveat could not be traced to its rule: it ships with it
+                meta = rule.setdefault("sigma" if src is SOURCES["sigma"] else "sublime", {})
+                meta.setdefault("warnings", list(r["warnings"]))
             warnings += len(r.get("warnings") or [])
             group = _sigma_group(rule) if src is SOURCES["sigma"] else _sublime_group(rel)
             groups[group].append(rule)

@@ -19,6 +19,7 @@ export type Op =
   | 'not_endswith'
   | 're'
   | 'not_re'
+  | 're_cs'
   | 'gt'
   | 'gte'
   | 'lt'
@@ -361,13 +362,15 @@ export function matchCondition(row: Row, c: Condition, settings?: SettingsLike):
       return sym === '>' ? len > n : sym === '>=' ? len >= n : sym === '<' ? len < n : sym === '<=' ? len <= n : sym === '!=' ? len !== n : len === n
     }
     case 're':
-    case 'not_re': {
-      const patterns = wantArr.map((w) => compileRegex(String(w), 'i')).filter((r): r is RegExp => !!r)
+    case 'not_re':
+    case 're_cs': {
+      // re_cs keeps the pattern's case, as a Sigma regex does; a leading (?i) still lifts it
+      const patterns = wantArr.map((w) => compileRegex(String(w), op === 're_cs' ? '' : 'i')).filter((r): r is RegExp => !!r)
       const hit = actArr.some((a) => {
         const s = a == null ? '' : typeof a === 'object' ? JSON.stringify(a) : String(a)
         return patterns.some((r) => r.test(s))
       })
-      return op === 're' ? hit : !hit
+      return op === 'not_re' ? !hit : hit
     }
     case 'gt':
     case 'gte':

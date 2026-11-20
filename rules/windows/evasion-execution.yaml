@@ -76,23 +76,63 @@ where:
 ---
 id: win-powershell-suspicious-scriptblock
 title: Suspicious PowerShell script block (4104)
-description: Script block logging contains download cradles, encoded commands, AMSI bypass, credential dumping or offensive tooling keywords. "hidden" alone and "char[]" are not keywords (the window style is "-w hidden" or "-windowstyle hidden"), and the module code PowerShell generates for CDXML cmdlets (__cmdletization) is left out; on the clean machines those were 72 of its 76 findings, and no recorded attack needed them.
+description: >-
+  Script block logging (4104) holds a download cradle (Net.WebClient, DownloadString) or IEX, an encoded
+  command or a hidden window, an AMSI bypass, credential theft (Mimikatz, LSASS dumps, saved registry hives,
+  shadow copies), an offensive framework or tool (PowerSploit, PowerView, Rubeus, BloodHound, Empire...),
+  shellcode and in-memory loading (VirtualAlloc, GetProcAddress, GetDelegateForFunctionPointer, a dynamic
+  assembly), a keylogger or screen capture API, Defender switched off, given exclusions or told to allow what
+  it finds, or an obfuscation idiom of Invoke-Obfuscation (a reversed string joined back, IEX spelled with
+  characters of $PSHome or $ShellId, a format string that puts quoted pieces back in order). Language features
+  and administration cmdlets are not keywords on their own (-join, [char], Replace(, Add-Type,
+  Get-CimInstance, Invoke-Command, -Credential, Invoke-WebRequest, Set-MpPreference, -ExecutionPolicy Bypass,
+  net user...): administration scripts use them every day. "hidden" alone and "char[]" are not keywords
+  either, and the module code PowerShell generates for CDXML cmdlets (__cmdletization) is left out.
 severity: high
 source: events
 attack: [T1059.001, T1027, T1685]
 tags: [execution, powershell]
+falsepositives:
+  - security assessment and red team scripts run on purpose
+  - administration scripts that download with Net.WebClient, decode base64 or start a hidden window
+references:
+  - https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_logging_windows
+  - https://github.com/danielbohannon/Invoke-Obfuscation
 where:
   eventId: 4104
-  scriptBlockText|contains: [-encodedcommand, "-enc ", "-e ", frombase64string, downloadstring, downloadfile, "net.webclient", "invoke-webrequest", "iwr ", "iex ", "invoke-expression", "start-bitstransfer", "bitsadmin", "invoke-mimikatz", "mimikatz", "invoke-shellcode", "invoke-dllinjection", "invoke-reflectivepeinjection", "invoke-wmimethod", "invoke-command", "amsiutils", "amsiinitfailed", "amsi.dll", "system.management.automation.amsi", "bypass", "-nop ", "-noprofile", "-w hidden", "-windowstyle hidden", "sekurlsa", "lsadump", "kerberos::", "get-keystrokes", "powersploit", "powerview", "get-netuser", "get-netgroup", "get-domainuser", "invoke-kerberoast", "rubeus", "sharphound", "bloodhound", "nishang", "empire", "covenant", "sliver", "cobalt", "beacon", "shellcode", "virtualalloc", "createthread", "memcpy", "kernel32", "reflection.assembly", "add-type", "dllimport", "compress-archive", "rundll32", "certutil", "vssadmin", "wbadmin", "bcdedit", "cipher /w", "reg save", "ntdsutil", "comsvcs", "minidump", "procdump", "lsass", "schtasks /create", "new-service", "sc create", "net user", "net localgroup", "net group", "wmic", "psexec", "sysinternals", "set-mppreference", "add-mppreference", "disablerealtimemonitoring", "exclusionpath", "-xor", "[char]", "-join", "replace(", ".invoke(", "gzipstream", "deflatestream", "memorystream", "securestring", "convertto-securestring", "get-credential", "-credential", "clipboard", "get-wmiobject win32_", "get-ciminstance", "shadowcopy", "invoke-obfuscation"]
+  any_of:
+    - scriptBlockText|contains: [-encodedcommand, "-enc ", frombase64string, downloadstring, downloadfile, "net.webclient", "invoke-expression", "invoke-mimikatz", "mimikatz", "invoke-shellcode", "invoke-dllinjection", "invoke-reflectivepeinjection", "amsiutils", "amsiinitfailed", "amsi.dll", "system.management.automation.amsi", "-w hidden", "-windowstyle hidden", "sekurlsa", "lsadump", "kerberos::", "get-keystrokes", "powersploit", "powerview", "get-netuser", "get-netgroup", "get-domainuser", "invoke-kerberoast", "rubeus", "sharphound", "bloodhound", "nishang", "empire", "covenant", "sliver", "cobalt", "beacon", "shellcode", "virtualalloc", "virtualprotect", "createthread", "memcpy", "getprocaddress", "getdelegateforfunctionpointer", "unsafenativemethods", "definedynamicassembly", "getasynckeystate", "setwindowshookex", "copyfromscreen", "cipher /w", "reg save", "ntdsutil", "comsvcs", "minidump", "procdump", "lsass", "psexec", "shadowcopy", "-xor", "invoke-obfuscation", "disablerealtimemonitoring", "disablebehaviormonitoring", "disableioavprotection", "disablescriptscanning", "disableblockatfirstseen", "disableintrusionpreventionsystem", "exclusionpath", "exclusionprocess", "exclusionextension"]
+    # iex however it is followed: iex(...), iex $x, iex 'x'
+    - scriptBlockText|re: '\biex\b'
+    # a reversed string joined back: ('gnirtS46esaBmorF'[-1..-16] -join ''); the index stops at the next
+    # bracket of either kind, so a value of many "[-1..-" is read once, not from each of them
+    - scriptBlockText|re: '\[\s*-1\s*\.\.\s*-[^\[\]]*\]\s*-join'
+    # iex spelled with characters of automatic variables: $PSHome[4]+$PSHome[34]+'X'
+    - scriptBlockText|contains: ["$pshome[", "$shellid[", "$env:comspec[", "$env:public[", "verbosepreference.tostring()["]
+    # a format string whose first placeholder is not {0}, filled with quoted pieces: ("{1}{0}" -f 'ject','New-Ob')
+    - scriptBlockText|re: '["'']\{[1-9]\d*\}(\{\d+\})+["'']\s*-f\s*["'']'
+    # defender told to allow (6) or ignore (9) what it finds
+    - scriptBlockText|re: 'threatdefaultaction\s+["'']?(6|9|allow|noaction)\b'
   scriptBlockText|not_contains: ["Microsoft.PowerShell.Utility", "PSReadLine", "Set-StrictMode -Version", "# Copyright (c) Microsoft Corporation", "$PSScriptRoot\\", "chocolatey", "winget", "Windows Defender Advanced Threat Protection", "__cmdletization"]
 ---
 id: win-powershell-encoded-command
-title: PowerShell launched with an encoded / hidden command line
-description: 4688 or Sysmon 1 process creation of powershell/pwsh with -EncodedCommand, -w hidden, -nop, download cradle or IEX.
-severity: high
+title: PowerShell launched with an encoded or hidden command, or a download cradle
+description: >-
+  4688 or Sysmon 1 process creation of powershell or pwsh whose command line passes an encoded command
+  (-EncodedCommand, or any abbreviation PowerShell accepts, followed by base64), asks for a hidden window
+  (-WindowStyle Hidden or 1, abbreviated or not), or runs a download cradle, FromBase64String or IEX /
+  Invoke-Expression. -NoProfile, -NonInteractive, -ExecutionPolicy Bypass and a URL are not enough on their own:
+  installers, updaters and management agents pass them on every run. Parameters are read as PowerShell reads
+  them, so -Encoding (an argument of Out-File) is not -EncodedCommand.
+severity: medium
 source: events
 attack: [T1059.001, T1027]
 tags: [execution, powershell]
+falsepositives:
+  - management agents that send their commands encoded (Ansible over WinRM, some RMM tools)
+  - installers that run a hidden PowerShell window (the Office Click-to-Run setup on the clean machines)
+references:
+  - https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_powershell_exe
 where:
   any_of:
     - { eventId: 4688 }
@@ -101,7 +141,13 @@ where:
   any_of_2:
     - { processName|contains: [powershell.exe, pwsh.exe, powershell_ise.exe] }
     - { image|contains: [powershell.exe, pwsh.exe, powershell_ise.exe] }
-  commandLine|contains: [-enc, "-e ", "-ec ", "-encodedcommand", "-w hidden", "-windowstyle hidden", "-nop", "-noprofile", "-noni", "-noninteractive", "-ep bypass", "-exec bypass", "-executionpolicy bypass", "iex", "invoke-expression", "downloadstring", "downloadfile", "net.webclient", "invoke-webrequest", "frombase64string", "bitstransfer", "http://", "https://"]
+  any_of_3:
+    # -EncodedCommand and its abbreviations, then the base64
+    - commandLine|re: '\s[-/](e|ec|en|enc|enco|encod|encode|encoded|encodedc|encodedco|encodedcom|encodedcomm|encodedcomma|encodedcomman|encodedcommand)\s+["'']?[a-z0-9+/]{16}'
+    # -WindowStyle Hidden (or 1) and their abbreviations
+    - commandLine|re: '\s[-/]w(i|in|ind|indo|indow|indows|indowst|indowsty|indowstyl|indowstyle)?\s+["'']?(h|hi|hid|hidd|hidde|hidden|1)(["'']|\s|$)'
+    - commandLine|contains: ["downloadstring", "downloadfile", "net.webclient", "invoke-webrequest", "frombase64string", "bitstransfer", "invoke-expression"]
+    - commandLine|re: '\biex\b'
 ---
 id: win-lolbin-suspicious-commandline
 title: Living-off-the-land binary with suspicious arguments
@@ -181,22 +227,33 @@ threshold: ">= 1"
 ---
 id: win-office-spawns-shell
 title: Office / PDF reader spawned a shell or script host
-description: 4688 / Sysmon 1 where the parent is Word, Excel, PowerPoint, Outlook, Acrobat, OneNote or a browser and the child is cmd, powershell, wscript, mshta, rundll32, regsvr32, certutil, msiexec, bitsadmin, curl...
-severity: critical
+description: >-
+  4688 / Sysmon 1 where the parent is Word, Excel, PowerPoint, Outlook, OneNote, Access, Publisher, Visio, the
+  Equation Editor, WordPad, Thunderbird or a PDF reader (Acrobat, Foxit, SumatraPDF), and the child is cmd,
+  PowerShell, a script host, mshta, rundll32, regsvr32, certutil, msiexec, bitsadmin, curl, wmic, schtasks or
+  another LOLBin: a macro, an embedded object or an exploit running commands. Both programs are matched by the
+  end of their path, so an updater or an editor whose name merely contains a reader's name (Foxit's update
+  service, Notepad++) does not count; Explorer, the console host and language runtimes (Python, Node, Java) are
+  not counted as children, since readers open folders with Explorer and add-ins start runtimes.
+severity: high
 source: events
 attack: [T1204.002, T1566.001]
 tags: [execution, phishing, initial-access]
+falsepositives:
+  - macros and add-ins that run a command or a script as part of a business workflow
+references:
+  - https://github.com/SigmaHQ/sigma/blob/272daf82bf77fb0bb97f1f0c4d82bc61154772e1/rules/windows/process_creation/proc_creation_win_office_susp_child_processes.yml
 where:
   any_of:
     - { eventId: 4688 }
     - { eventId: 1, provider|contains: Sysmon }
   any_of_2:
-    - parentProcessName|contains: [winword.exe, excel.exe, powerpnt.exe, outlook.exe, onenote.exe, msaccess.exe, mspub.exe, visio.exe, acrord32.exe, acrobat.exe, foxit, sumatrapdf.exe, wordpad.exe, notepad.exe, teams.exe, thunderbird.exe, eqnedt32.exe, fltldr.exe]
-    - parentImage|contains: [winword.exe, excel.exe, powerpnt.exe, outlook.exe, onenote.exe, msaccess.exe, mspub.exe, visio.exe, acrord32.exe, acrobat.exe, foxit, sumatrapdf.exe, wordpad.exe, teams.exe, thunderbird.exe, eqnedt32.exe, fltldr.exe]
+    - parentProcessName|endswith: ["\\winword.exe", "\\excel.exe", "\\powerpnt.exe", "\\outlook.exe", "\\onenote.exe", "\\msaccess.exe", "\\mspub.exe", "\\visio.exe", "\\acrord32.exe", "\\acrobat.exe", "\\foxitpdfreader.exe", "\\foxitreader.exe", "\\sumatrapdf.exe", "\\wordpad.exe", "\\thunderbird.exe", "\\eqnedt32.exe", "\\fltldr.exe"]
+    - parentImage|endswith: ["\\winword.exe", "\\excel.exe", "\\powerpnt.exe", "\\outlook.exe", "\\onenote.exe", "\\msaccess.exe", "\\mspub.exe", "\\visio.exe", "\\acrord32.exe", "\\acrobat.exe", "\\foxitpdfreader.exe", "\\foxitreader.exe", "\\sumatrapdf.exe", "\\wordpad.exe", "\\thunderbird.exe", "\\eqnedt32.exe", "\\fltldr.exe"]
   # the child: processName on 4688, image on Sysmon 1
   any_of_3:
-    - { processName|contains: [cmd.exe, powershell.exe, pwsh.exe, wscript.exe, cscript.exe, mshta.exe, rundll32.exe, regsvr32.exe, certutil.exe, msiexec.exe, bitsadmin.exe, curl.exe, wmic.exe, schtasks.exe, control.exe, explorer.exe, conhost.exe, forfiles.exe, msbuild.exe, installutil.exe, regasm.exe, odbcconf.exe, hh.exe, bash.exe, wsl.exe, python, node.exe, java.exe, javaw.exe] }
-    - { image|contains: [cmd.exe, powershell.exe, pwsh.exe, wscript.exe, cscript.exe, mshta.exe, rundll32.exe, regsvr32.exe, certutil.exe, msiexec.exe, bitsadmin.exe, curl.exe, wmic.exe, schtasks.exe, control.exe, explorer.exe, conhost.exe, forfiles.exe, msbuild.exe, installutil.exe, regasm.exe, odbcconf.exe, hh.exe, bash.exe, wsl.exe, python, node.exe, java.exe, javaw.exe] }
+    - { processName|endswith: ["\\cmd.exe", "\\powershell.exe", "\\pwsh.exe", "\\wscript.exe", "\\cscript.exe", "\\mshta.exe", "\\rundll32.exe", "\\regsvr32.exe", "\\certutil.exe", "\\msiexec.exe", "\\bitsadmin.exe", "\\curl.exe", "\\wmic.exe", "\\schtasks.exe", "\\control.exe", "\\forfiles.exe", "\\msbuild.exe", "\\installutil.exe", "\\regasm.exe", "\\odbcconf.exe", "\\hh.exe", "\\bash.exe", "\\wsl.exe"] }
+    - { image|endswith: ["\\cmd.exe", "\\powershell.exe", "\\pwsh.exe", "\\wscript.exe", "\\cscript.exe", "\\mshta.exe", "\\rundll32.exe", "\\regsvr32.exe", "\\certutil.exe", "\\msiexec.exe", "\\bitsadmin.exe", "\\curl.exe", "\\wmic.exe", "\\schtasks.exe", "\\control.exe", "\\forfiles.exe", "\\msbuild.exe", "\\installutil.exe", "\\regasm.exe", "\\odbcconf.exe", "\\hh.exe", "\\bash.exe", "\\wsl.exe"] }
 ---
 id: win-process-from-suspicious-path
 title: Process executed from a temp / download / public folder
@@ -236,12 +293,16 @@ id: win-lsass-memory-access
 title: A program outside Windows read LSASS memory (Sysmon 10)
 description: >-
   Sysmon 10: a program outside the Windows and Program Files folders, or a script host or LOLBin inside them,
-  opened lsass.exe with the right to read its memory (PROCESS_VM_READ, or full access), which is how mimikatz,
-  procdump, nanodump and their kin read the credentials it holds (T1003.001). Opening it only to query it
-  (0x1000, 0x1400) cannot read credentials and is left out, as are Defender, the Windows system folders
-  (System32, SysWOW64) and THOR or Aurora duplicating a handle (0x40). One finding per program per machine.
-  Benign causes: an antivirus or security product's installer or updater run from a temporary folder, which
-  opens LSASS the way a dumper does: check the program's signature and origin. A program whose own executable
+  opened lsass.exe with the right to read its memory (PROCESS_VM_READ in the access mask, which full access
+  includes), which is how mimikatz, procdump, nanodump and their kin read the credentials it holds (T1003.001).
+  Opening it only to query it (0x1000, 0x1400) cannot read credentials and is left out, as are the Windows
+  system folders (System32, SysWOW64), Program Files, Defender's platform folder, Sysmon in the Windows folder and
+  THOR or Aurora duplicating a handle (0x40). Each folder is read from the start of the path and no program is
+  left out for its name, so a dumper named procexp64.exe or MsMpEng.exe, or put in a folder called Program Files
+  under a profile, is reported. One finding per program per machine. Benign causes: an antivirus or security
+  product's installer or updater run from a temporary folder, which opens LSASS the way a dumper does, and
+  Process Explorer run from a download folder, which opens every process with full access while it runs (and can
+  write a dump of LSASS): check the program's signature and origin. A program whose own executable
   Sysmon saw validly signed by a vendor other than Microsoft (sourceSigner), and which loaded no unsigned DLL
   before, is the medium rule win-lsass-memory-access-signed: security products' installers and updaters are
   signed, and so are the dump tools some vendors ship (Avast's AvDump), which is why it stays a finding.
@@ -250,14 +311,25 @@ severity: high
 source: events
 attack: [T1003.001]
 tags: [credential-access]
+falsepositives:
+  - an antivirus or security product's installer or updater run from a temporary folder
+  - Process Explorer run from outside Program Files
+references:
+  - https://learn.microsoft.com/en-us/windows/win32/procthread/process-security-and-access-rights
+  - https://learn.microsoft.com/en-us/sysinternals/downloads/sysmon
 entities: [computer, sourceImage, grantedAccess, sourceSigner]
 where:
   eventId: 10
   provider|contains: Sysmon
   targetImage|endswith: lsass.exe
-  grantedAccess|in: ["0x1010", "0x1410", "0x1438", "0x143a", "0x1fffff", "0x1f0fff", "0x1f1fff", "0x1f2fff", "0x1f3fff", "0x40"]
-  sourceImage|not_contains: ["\\program files\\", "\\program files (x86)\\", "msmpeng", "csrss", "wininit", "wmiprvse", "taskmgr", "procexp", "vmtoolsd", "sysmon"]
-  not: { sourceImage|contains: ["\\windows\\system32\\", "\\windows\\syswow64\\"], sourceImage|not_endswith: ["\\powershell.exe", "\\pwsh.exe", "\\rundll32.exe", "\\regsvr32.exe", "\\mshta.exe", "\\wscript.exe", "\\cscript.exe", "\\cmd.exe", "\\msbuild.exe"] }
+  # PROCESS_VM_READ (0x10) is in the mask when its second hex digit from the right is odd; 0x40 duplicates a handle
+  any_of_2:
+    - grantedAccess|re: "^0x[0-9a-f]*[13579bdf][0-9a-f]$"
+    - grantedAccess: "0x40"
+  # folders only the system or an administrator can write, read from the drive: a folder of the same name
+  # further down a path, or a program merely named like a system tool, is not one of them
+  sourceImage|not_re: '^[a-z]:\\(program files( \(x86\))?\\|programdata\\microsoft\\windows defender\\platform\\|windows\\sysmon(64)?\.exe$)'
+  not: { sourceImage|re: '^[a-z]:\\windows\\(system32|syswow64)\\', sourceImage|not_endswith: ["\\powershell.exe", "\\pwsh.exe", "\\rundll32.exe", "\\regsvr32.exe", "\\mshta.exe", "\\wscript.exe", "\\cscript.exe", "\\cmd.exe", "\\msbuild.exe"] }
   # a vendor's valid signature on the program (and no unsigned DLL in it) is the medium rule
   any_of:
     - sourceSigner|exists: false
@@ -272,22 +344,32 @@ id: win-lsass-memory-access-signed
 title: A program signed by a vendor other than Microsoft read LSASS memory (Sysmon 10)
 description: >-
   Sysmon 10: a program outside the Windows and Program Files folders opened lsass.exe with the right to read its
-  memory, and Sysmon saw its own executable validly signed by a vendor other than Microsoft, with no unsigned DLL
-  loaded before. Security products' installers and updaters do this (Avira, Avast, AVG and Malwarebytes on the
-  clean machines), and so do the dump tools some vendors ship and attackers borrow (Avast's AvDump): check which
-  program it is. One finding per program per machine.
+  memory (PROCESS_VM_READ in the access mask), and Sysmon saw its own executable validly signed by a vendor other
+  than Microsoft, with no unsigned DLL loaded before. Security products' installers and updaters do this (Avira,
+  Avast, AVG and Malwarebytes on the clean machines), and so do the dump tools some vendors ship and attackers
+  borrow (Avast's AvDump): check which program it is. The folders are read as in win-lsass-memory-access, from the
+  start of the path. One finding per program per machine.
 severity: medium
 source: events
 attack: [T1003.001]
 tags: [credential-access]
+falsepositives:
+  - security products' installers and updaters (Avira, Avast, AVG, Malwarebytes, Dropbox's updater on the clean machines)
+references:
+  - https://learn.microsoft.com/en-us/windows/win32/procthread/process-security-and-access-rights
 entities: [computer, sourceImage, grantedAccess, sourceSigner]
 where:
   eventId: 10
   provider|contains: Sysmon
   targetImage|endswith: lsass.exe
-  grantedAccess|in: ["0x1010", "0x1410", "0x1438", "0x143a", "0x1fffff", "0x1f0fff", "0x1f1fff", "0x1f2fff", "0x1f3fff", "0x40"]
-  sourceImage|not_contains: ["\\program files\\", "\\program files (x86)\\", "msmpeng", "csrss", "wininit", "wmiprvse", "taskmgr", "procexp", "vmtoolsd", "sysmon"]
-  not: { sourceImage|contains: ["\\windows\\system32\\", "\\windows\\syswow64\\"], sourceImage|not_endswith: ["\\powershell.exe", "\\pwsh.exe", "\\rundll32.exe", "\\regsvr32.exe", "\\mshta.exe", "\\wscript.exe", "\\cscript.exe", "\\cmd.exe", "\\msbuild.exe"] }
+  # PROCESS_VM_READ (0x10) is in the mask when its second hex digit from the right is odd; 0x40 duplicates a handle
+  any_of_2:
+    - grantedAccess|re: "^0x[0-9a-f]*[13579bdf][0-9a-f]$"
+    - grantedAccess: "0x40"
+  # folders only the system or an administrator can write, read from the drive: a folder of the same name
+  # further down a path, or a program merely named like a system tool, is not one of them
+  sourceImage|not_re: '^[a-z]:\\(program files( \(x86\))?\\|programdata\\microsoft\\windows defender\\platform\\|windows\\sysmon(64)?\.exe$)'
+  not: { sourceImage|re: '^[a-z]:\\windows\\(system32|syswow64)\\', sourceImage|not_endswith: ["\\powershell.exe", "\\pwsh.exe", "\\rundll32.exe", "\\regsvr32.exe", "\\mshta.exe", "\\wscript.exe", "\\cscript.exe", "\\cmd.exe", "\\msbuild.exe"] }
   sourceSigner|exists: true
   sourceSigner|not_startswith: "Microsoft "
 exclude:

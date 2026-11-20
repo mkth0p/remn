@@ -42,13 +42,29 @@
    "filter": null,
    "order": "rare",
    "stack": {
-    "blank": 202,
-    "distinct": 24,
-    "events": 47,
+    "blank": 203,
+    "distinct": 26,
+    "events": 49,
     "field": "image",
     "hosts": 3,
     "order": "rare",
     "rows": [
+     {
+      "count": 1,
+      "first": null,
+      "hostList": [],
+      "hosts": 0,
+      "last": null,
+      "value": "C:\\Users\\demo\\AppData\\Local\\Sync\\sync.exe"
+     },
+     {
+      "count": 1,
+      "first": null,
+      "hostList": [],
+      "hosts": 0,
+      "last": null,
+      "value": "C:\\Users\\demo\\AppData\\Local\\Temp\\stage.exe"
+     },
      {
       "count": 1,
       "first": null,
@@ -299,7 +315,7 @@
    "filter": null,
    "order": "rare",
    "stack": {
-    "blank": 216,
+    "blank": 219,
     "distinct": 33,
     "events": 33,
     "field": "commandLine",
@@ -643,9 +659,9 @@
    "filter": null,
    "order": "common",
    "stack": {
-    "blank": 219,
-    "distinct": 30,
-    "events": 30,
+    "blank": 221,
+    "distinct": 31,
+    "events": 31,
     "field": "serviceName",
     "hosts": 2,
     "order": "common",
@@ -945,6 +961,14 @@
       "hosts": 0,
       "last": null,
       "value": "PSEXESVC"
+     },
+     {
+      "count": 1,
+      "first": null,
+      "hostList": [],
+      "hosts": 0,
+      "last": null,
+      "value": "SyncSvc"
      }
     ],
     "truncated": false
@@ -955,7 +979,7 @@
    "filter": null,
    "order": "rare",
    "stack": {
-    "blank": 124,
+    "blank": 127,
     "distinct": 31,
     "events": 125,
     "field": "targetUser",
@@ -1317,7 +1341,7 @@
    "filter": null,
    "order": "rare",
    "stack": {
-    "blank": 88,
+    "blank": 91,
     "distinct": 43,
     "events": 161,
     "field": "providerEventId",

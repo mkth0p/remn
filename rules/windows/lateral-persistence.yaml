@@ -1,23 +1,34 @@
 id: win-service-installed-suspicious
 title: Suspicious service installed (7045 / 4697)
-description: New service whose binary path points to a temp folder, a user profile (a service runs as SYSTEM from a folder any user can write), a script host, cmd/powershell, a UNC path or a well-known remote-execution service (PsExec, PAExec, WinRM...).
+description: >-
+  New service whose program sits in a temp folder, a user profile, ProgramData or another folder users can write
+  (a service runs as SYSTEM from it), whose command line runs a script host, cmd or PowerShell, an encoded command
+  or a UNC path, or which is a well-known remote-execution service (PsExec, PAExec, RemCom, smbexec...). The folder
+  is the program's own, not one named in its arguments (Zoom's sharing service passes a profile folder), and a
+  name of eight letters and digits is no longer a reason on its own: drivers and Sysmon64 have such names.
 severity: high
 source: events
 attack: [T1543.003, T1569.002]
 tags: [persistence, lateral-movement]
+falsepositives:
+  - a security product's installer that runs its installer service from the temp folder (Malwarebytes on the clean machines)
+references:
+  - https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4697
 entities: [computer, serviceName, serviceFile]
 where:
   eventId|in: [7045, 4697]
   any_of:
-    - serviceFile|contains: ["\\temp\\", "\\tmp\\", "\\appdata\\", "\\users\\", "\\programdata\\", "\\downloads\\", "\\perflogs\\", "\\recycle", "\\windows\\tasks\\", "\\windows\\debug\\"]
+    # the folder of the program itself (up to the closing quote, or the first space when it is not quoted),
+    # not a folder named in its arguments
+    - serviceFile|re: '^("[^"]*|[^" ]*)\\(temp|tmp|appdata|users|programdata|downloads|perflogs|\$recycle\.bin|recycler|windows\\tasks|windows\\debug)\\'
     - serviceFile|contains: [cmd.exe, cmd /c, powershell, pwsh, mshta, rundll32, regsvr32, wscript, cscript, certutil, bitsadmin, msiexec /q, "%comspec%", "\\\\", "-enc", "-e ", "iex", "downloadstring", "base64", "ADMIN$", "C$"]
     - serviceName|contains: [PSEXESVC, PAExec, csexecsvc, winexesvc, RemComSvc, BTOBTO, smbexec, mssecsvc, wmiexec, atexec, sysmon64bak, "\\\\"]
     - serviceFile|re: "(?i)^[a-z]:\\\\[a-z0-9]{6,}\\.exe$"
-    - serviceName|re: "^[A-Za-z0-9]{8}$"
-# Firmware and hardware tools install drivers from their own folders under vendor names; that is
-# the only exclusion, so a driver dropped under System32\drivers with a random name still counts.
+# Firmware and hardware tools install drivers from their own folders under vendor names, and Defender
+# loads its own driver from its folder under ProgramData, which only the system can write; those are
+# the only exclusions, so a driver dropped under System32\drivers with a random name still counts.
 exclude:
-  serviceFile|contains: ["\\swtools\\", "\\program files\\lenovo\\", "\\program files (x86)\\lenovo\\", "\\program files\\intel\\", "\\program files (x86)\\intel\\", "\\program files\\dell\\", "\\program files (x86)\\dell\\", "\\program files\\hp\\", "\\program files (x86)\\hp\\", "\\program files\\nvidia", "\\program files\\amd\\"]
+  serviceFile|contains: ["\\programdata\\microsoft\\windows defender\\", "\\swtools\\", "\\program files\\lenovo\\", "\\program files (x86)\\lenovo\\", "\\program files\\intel\\", "\\program files (x86)\\intel\\", "\\program files\\dell\\", "\\program files (x86)\\dell\\", "\\program files\\hp\\", "\\program files (x86)\\hp\\", "\\program files\\nvidia", "\\program files\\amd\\"]
 ---
 id: win-service-installed-any
 title: New service installed (inventory)
@@ -30,12 +41,23 @@ where:
   eventId|in: [7045, 4697]
 ---
 id: win-psexec-pattern
-title: PsExec-style remote execution (PSEXESVC on ADMIN$)
-description: Service named PSEXESVC (or similar) or a file written to ADMIN$ share followed by service creation from the same host.
-severity: high
+title: PsExec-style remote execution (PSEXESVC service, or a program on ADMIN$)
+description: >-
+  A service named like the ones PsExec, PAExec, RemCom or CSExec install (7045, 4697, 7036), or a program or
+  script (.exe, .dll, .bat, .ps1) opened over the network on the ADMIN$ share (5145), which is how these tools copy
+  their service binary to the target before starting it. Either one is a finding on its own: the rule does not
+  check that a service follows the copy, and 5145 records a program read from ADMIN$ as well as one written
+  there. One finding per host.
+severity: medium
 source: events
 attack: [T1569.002, T1021.002]
 tags: [lateral-movement]
+falsepositives:
+  - administrators who use PsExec or PAExec
+  - software deployment that copies an installer to ADMIN$ and starts it as a service (for example a configuration manager's client push)
+references:
+  - https://learn.microsoft.com/en-us/sysinternals/downloads/psexec
+  - https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-5145
 where:
   any_of:
     - { eventId|in: [7045, 4697, 7036], serviceName|contains: [PSEXESVC, PAExec, RemCom, csexec] }
@@ -61,11 +83,20 @@ threshold: ">= 1"
 ---
 id: win-scheduled-task-created
 title: Scheduled task created or updated
-description: 4698/4702 (Security) or 106/140 (TaskScheduler) - persistence or remote execution (at, schtasks /s). One finding per task name and host; the task name and the account are on the finding.
+description: >-
+  4698/4702 (Security) or 106/140 (TaskScheduler) - persistence or remote execution (at, schtasks /s). Tasks
+  whose name starts with the folder or name Windows, Office and common updaters give their own tasks
+  (\Microsoft\Windows\, \GoogleUpdateTask, \Intel...) are left out. The creator chooses the name, so a task
+  named like one of them is left out too; win-scheduled-task-suspicious-content still reads its command. One
+  finding per task name and host; the task name and the account are on the finding.
 severity: medium
 source: events
 attack: [T1053.005]
 tags: [persistence]
+falsepositives:
+  - software installers and updaters that register their own tasks
+references:
+  - https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4698
 entities: [computer, subjectUser, taskName]
 group_by: [computer, taskName]
 threshold: ">= 1"
@@ -73,22 +104,32 @@ where:
   any_of:
     - { eventId|in: [4698, 4702] }
     - { eventId|in: [106, 140], provider|contains: TaskScheduler }
-  taskName|not_contains: ["\\Microsoft\\Windows\\", "\\Microsoft\\Office\\", "\\SoftLanding\\", "OneDrive", "GoogleUpdate", "MicrosoftEdgeUpdate", "Adobe", "Mozilla", "Firefox", "Brave", "Opera", "Dropbox", "npcap", "Intel", "NVIDIA", "Lenovo", "Dell", "HP"]
+  # anchored at the start of the name: a vendor's name anywhere inside it is not the vendor's task
+  taskName|not_startswith: ["\\Microsoft\\Windows\\", "\\Microsoft\\Office\\", "\\OneDrive ", "\\GoogleUpdateTask", "\\MicrosoftEdgeUpdateTask", "\\Adobe", "\\Mozilla\\", "\\BraveSoftwareUpdateTask", "\\Opera ", "\\DropboxUpdateTask", "\\npcapwatchdog", "\\Intel", "\\NVIDIA", "\\Lenovo", "\\Dell", "\\HP"]
 ---
 id: win-scheduled-task-suspicious-content
 title: Scheduled task with suspicious command
-description: Task XML (4698/4702) references cmd, powershell, mshta, script hosts, temp folders or encoded commands. One finding per task name and host; the task name and the account are on the finding, the command is in the rows.
+description: >-
+  The command or the arguments of a task's action (4698/4702) run cmd, PowerShell, mshta, a script host or a
+  LOLBin, a script file, a URL, a program in a temp or user-writable folder, or an encoded or hidden command. Only
+  the action is read: every task's XML carries the address of its schema (http://schemas.microsoft.com/...) and
+  <Hidden>, and its description is free text. One finding per task name and host; the task name and the account
+  are on the finding, the command is in the rows.
 severity: high
 source: events
 attack: [T1053.005]
 tags: [persistence, execution]
+falsepositives:
+  - maintenance tasks that run a script with cmd or PowerShell, and tasks of Windows itself that run rundll32, when Windows updates them (4702)
+references:
+  - https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/event-4698
 entities: [computer, subjectUser, taskName]
 group_by: [computer, taskName]
 threshold: ">= 1"
 where:
   eventId|in: [4698, 4702]
-  # not a bare "hidden": every task's XML carries <Hidden>true</Hidden>
-  taskContent|contains: [powershell, pwsh, cmd.exe, cmd /c, mshta, wscript, cscript, rundll32, regsvr32, certutil, bitsadmin, "\\temp\\", "\\appdata\\", "\\users\\public\\", "\\programdata\\", "-enc", "-w hidden", "-windowstyle hidden", "windowstyle hidden", downloadstring, iex, "http", ".vbs", ".js", ".hta", ".ps1", ".bat"]
+  # the text of an Exec action's Command or Arguments element; within it the XML escapes "<"
+  taskContent|re: '<(command|arguments)>[^<]*(powershell|pwsh|cmd\.exe|cmd /c|mshta|wscript|cscript|rundll32|regsvr32|certutil|bitsadmin|\\temp\\|\\appdata\\|\\users\\public\\|\\programdata\\|-enc|-w hidden|windowstyle hidden|downloadstring|\biex\b|https?://|\.(vbs|js|hta|ps1|bat|cmd)\b)'
 ---
 id: win-user-account-created
 title: User account created

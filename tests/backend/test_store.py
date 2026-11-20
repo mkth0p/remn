@@ -429,6 +429,34 @@ def test_then_is_checked_for_every_finding(store):
     assert len(f) == 600 and all(x["severity"] == "high" for x in f)
 
 
+def test_a_rule_asking_for_what_no_engine_does_is_refused_rather_than_run_without_it(store):
+    w = EventWriter(store, 1)
+    w.add(_event(0, eventId=4625, targetUser="bob"))
+    w.add(_event(1, eventId=4624, targetUser="bob"))
+    w.flush()
+    base = {"title": "t", "severity": "low", "source": "events", "where": {"eventId": 4625}}
+    follow = {"where": {"eventId": 4624}, "join": ["targetUser"], "within": "5m", "severity": "high"}
+    rules = [
+        # one finding per row: a follow-up, a window, a distinct count or a group condition has nothing to act on
+        {**base, "id": "row-then", "then": follow},
+        {**base, "id": "row-window", "window": "5m"},
+        {**base, "id": "row-distinct", "distinct": "ipAddress"},
+        {**base, "id": "row-any-in-group", "any_in_group": {"eventId": 4624}},
+        {**base, "id": "then-no-where", "group_by": ["targetUser"], "then": {"severity": "high"}},
+        # events carry no flags to escalate on
+        {**base, "id": "events-flags", "then_flags": [{"reply_to_mismatch": "high"}]},
+        {**base, "id": "fine", "group_by": ["targetUser"], "then": follow},
+    ]
+    res = R.run_rules(store, rules, {"internal_ips": [], "service_accounts": []})
+    refused = {e["ruleId"]: e["error"] for e in res["errors"]}
+    assert set(refused) == {"row-then", "row-window", "row-distinct", "row-any-in-group", "then-no-where", "events-flags"}
+    assert "group_by or threshold" in refused["row-then"] and "then" in refused["row-then"]
+    assert "where" in refused["then-no-where"]
+    assert "mail" in refused["events-flags"]
+    assert {f["ruleId"] for f in res["findings"]} == {"fine"}
+    assert R.rule_problem(rules[-1]) is None
+
+
 def _sql_store(store):
     w = EventWriter(store, 1)
     for i, (line, service) in enumerate(
