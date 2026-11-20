@@ -131,6 +131,25 @@ def test_an_event_log_crash_and_a_client_on_its_pipe_are_paired_in_either_order_
     assert "right after" not in found[0]["title"] and "either order" in found[0]["description"]
 
 
+def test_an_auto_elevated_binary_and_a_seclogon_logon_are_paired_in_either_order_and_the_title_says_so(store):
+    logon = event(
+        4624,
+        {"TargetUserName": "j.doe", "TargetDomainName": "CORP", "LogonType": 9, "LogonProcessName": "seclogo", "AuthenticationPackageName": "Negotiate"},
+        second=0,
+        computer="WS01",
+    )
+    elevated = event(
+        4688,
+        {"SubjectUserName": "j.doe", "NewProcessName": r"C:\Windows\System32\taskmgr.exe", "TokenElevationType": "%%1937"},
+        second=3,
+        computer="WS01",
+    )
+    # the logon comes first here: the rule cannot tell, so it cannot claim the binary led to it
+    found = fired(store, "win-uac-bypass-token-duplication", [logon, elevated])
+    assert len(found) == 1
+    assert " then " not in found[0]["title"] and "either order" in found[0]["description"]
+
+
 def test_an_ntlm_network_logon_without_a_session_key_is_reported_as_a_low_hint(store):
     # a client that negotiates no NTLM session key looks like this too, and the log cannot say
     # whether the source is a workstation, so the finding is a hint and says what it matched
