@@ -8,9 +8,11 @@ out agree on what fits.
 
 from __future__ import annotations
 
+import itertools
 import os
 import shutil
 import stat
+import threading
 from pathlib import Path
 
 from django.conf import settings
@@ -94,6 +96,41 @@ def capacity() -> tuple[int, str]:
         f"the disk under the staging area has {size_text(disk.free)} free and keeps {size_text(kept)} of it for the case stores "
         "and the system; FORENSIC_TMP_MAX_GB sets the total instead"
     )
+
+
+# The room set aside for the package parses running now, by claim. staged_bytes() sees only what a
+# parse has written so far, so without this two parses that begin together were each given the
+# same free room. What a parse has written counts both here and on disk, which errs towards
+# refusing a member rather than towards filling the area.
+_claims: dict[int, int] = {}
+_claims_lock = threading.Lock()
+_claim_ids = itertools.count(1)
+
+
+def claimed_bytes() -> int:
+    with _claims_lock:
+        return sum(_claims.values())
+
+
+def parse_room(claim: bool = False) -> tuple[int, int | None]:
+    """The room one package parse may hold in the staging area, and the claim that sets it aside
+    (None without `claim`): what the area has free and no running parse has set aside. A claim is
+    at most half the area, so that a parse that begins while it runs still finds room; the server
+    claims for each parse, and gives the claim back with release() when the parse ends."""
+    with _claims_lock:
+        total = capacity()[0]
+        room = max(0, total - staged_bytes() - sum(_claims.values()))
+        if not claim:
+            return room, None
+        room = min(room, total // 2)
+        token = next(_claim_ids)
+        _claims[token] = room
+        return room, token
+
+
+def release(token: int | None) -> None:
+    with _claims_lock:
+        _claims.pop(token, None)
 
 
 def member_ceiling() -> int:

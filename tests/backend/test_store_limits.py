@@ -121,6 +121,38 @@ def test_a_store_query_past_its_time_limit_is_stopped_and_says_why(server_regist
     assert Client().post(f"/api/store/{key}/count", data=json.dumps({"source": "mails"}), content_type="application/json", **HDR).json() == {"count": 0}
 
 
+def _endless_mails(st: CaseStore) -> None:
+    """Turn the store's mails into a view that scans ten billion rows to find one invented mail."""
+    con = st.cursor()
+    con.execute(f"INSERT INTO mails (id, \"evidenceId\", subject, date) VALUES (1, 2, 'invented subject', {T0})")
+    con.execute("ALTER TABLE mails RENAME TO mails_seed")
+    con.execute("CREATE VIEW mails AS SELECT * REPLACE (m.id + r.range AS id) FROM mails_seed m, range(10000000000) r WHERE r.range = 9999999999")
+
+
+BUILDS = [
+    ("stories/build", {"findings": [{"ruleId": "invented", "source": "events", "refs": [5]}], "settings": {}}),
+    ("relationships/build", {}),
+    ("enrich/mails", {"settings": {}}),
+]
+
+
+@pytest.mark.parametrize(("route", "body"), BUILDS, ids=[b[0].split("/")[0] for b in BUILDS])
+def test_a_build_that_reads_a_store_past_the_query_time_limit_is_stopped_and_says_why(server_registry, settings, route, body):
+    settings.FORENSIC_STORE_QUERY_MAX_S = 0.2
+    key = str(uuid.uuid4())
+    st = server_registry.get(key)
+    _endless(st)
+    _endless_mails(st)
+    t0 = time.time()
+    with _Guard(st):
+        r = Client().post(f"/api/{route}", data=json.dumps({**body, "storeKey": key}), content_type="application/json", **HDR)
+    assert time.time() - t0 < 10
+    assert r.status_code == 504, r.content
+    answer = r.json()
+    assert answer["code"] == "queryStopped"
+    assert "stopped after 0.2 s" in answer["error"] and "FORENSIC_STORE_QUERY_MAX_S" in answer["error"]
+
+
 def test_a_query_inside_its_limit_is_answered_as_before(server_registry, settings):
     settings.FORENSIC_STORE_QUERY_MAX_S = 30
     key = str(uuid.uuid4())
@@ -165,6 +197,33 @@ def test_a_rule_past_its_time_limit_is_stopped_said_and_the_run_goes_on(server_r
     said = result["errors"][0]["error"]
     assert "stopped after 0.2 s" in said and "FORENSIC_STORE_RULE_MAX_S" in said
     assert result["byRule"] == {"invented-slow": 0, "invented-quick": 1}
+
+
+def test_cancelling_a_rule_run_stops_the_rule_that_is_running(server_registry, settings):
+    settings.FORENSIC_STORE_RULE_MAX_S = 0
+    key = str(uuid.uuid4())
+    st = server_registry.get(key)
+    _endless_mails(st)
+    rules = [
+        {"id": "invented-slow", "title": "an invented subject", "severity": "low", "source": "mails", "where": {"subject|contains": "invented"}},
+        {"id": "invented-next", "title": "another invented subject", "severity": "low", "source": "mails", "where": {"subject|contains": "other"}},
+    ]
+    with _Guard(st) as guard:
+        r = Client().post(f"/api/store/{key}/rules/run", data=json.dumps({"rules": rules, "settings": {}}), content_type="application/json", **HDR)
+        assert r.status_code == 200, r.content
+        job_id = r.json()["jobId"]
+        # the cancel is sent once the first rule's query has started
+        deadline = time.time() + 10
+        while len(guard.cursors) < 2 and time.time() < deadline:
+            time.sleep(0.05)
+        time.sleep(0.3)
+        t0 = time.time()
+        assert Client().delete(f"/api/jobs/{job_id}?case={key}", **HDR).json() == {"cancelled": True}
+        job = _wait_for(key, job_id)
+    assert time.time() - t0 < 5
+    assert job["status"] == "cancelled", job
+    # the rule that was stopped is neither counted nor reported as failed, and the next one did not run
+    assert job["result"]["byRule"] == {} and job["result"]["errors"] == []
 
 
 def test_a_rule_run_has_no_time_limit_unless_one_is_given(tmp_path):

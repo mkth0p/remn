@@ -115,7 +115,8 @@ pack importer download from their sources on request, never during an investigat
   Every DuckDB connection also runs with external access disabled and the configuration
   locked, so a prompt-injected query cannot read or write files on the server or load
   extensions. The two settings are read back when a case store opens, and a store on
-  which they did not take effect is not opened.
+  which they did not take effect is not opened: the case answers 503 (`storeLockdown`)
+  with a message that says so, and the server log has what the engine applied.
 - Identifiers that reach the filesystem are validated (case keys and upload ids by
   pattern, pack ids without separators, static files resolved inside the build
   directory); rule archives are capped per member and in total; CSV exports neutralise
@@ -351,7 +352,8 @@ The log is the one thing on a browser-only server that outlives a parse. It hold
 lines: requests refused, sweeps, the engine's state. A failure in the parsing code, in a request
 or in the web server is logged by exception type and place (`UnicodeDecodeError at common.py:104`),
 never with the exception's text, which is often a piece of the input or a path on the server. This
-holds in every mode; `FORENSIC_DEBUG=1` keeps the text and the traceback for a developer on their
+holds in every mode, and for an error nothing caught in the parse process, which writes to the
+server's own stderr; `FORENSIC_DEBUG=1` keeps the text and the traceback for a developer on their
 own machine, and has no such effect in browser-only mode. In browser-only mode the log also never
 names a file, member or attachment. `docker-compose.public.yml` rotates the log (three files of
 10 MB) rather than keeping it for the life of the container.
@@ -360,11 +362,14 @@ A client is told no more than the log holds. A request, a parse or a job that fa
 answers with what failed, the exception's type and a reference (`the store query failed on the
 server (OSError); the server log has the cause under reference 3f9a01c2`), and the log line of
 that failure carries the same reference, so the operator can find the cause for the analyst who
-reports it. Two kinds of text are still passed on as they are: a statement or filter the database
+reports it. Three kinds of text are still passed on as they are: a statement or filter the database
 cannot run gets DuckDB's diagnostic as a 400, because the analyst, and the model's `sql` tool,
-correct the query from it; and the per-file entries of a package or mailbox ingest (a member that
+correct the query from it; the per-file entries of a package or mailbox ingest (a member that
 could not be read, an unparseable message) keep the parser's message for that file, which can
-quote the file.
+quote the file; and a message the code wrote for the analyst, which names no path and quotes
+nothing from the evidence, is told as it is wherever it stops a parse or a job (a table given to
+the event log import that is none of the Microsoft 365 or Entra exports REMN reads is answered
+`not a recognised Microsoft 365 or Entra export`, not with a reference).
 
 This is what lets a public instance take real evidence: the exposure of a file is bounded to one
 parse, and nothing of it is kept. Before the first upload to a parser on another machine, the app
@@ -473,7 +478,8 @@ A parse process that has been taken over can still fill the disk under the stagi
 takes something this server does not set up: a container (the public compose), cgroups or a job
 object.
 
-Starting the parse process adds about 0.2 s to every file. On an archive of 90,000 synthetic
+Starting the parse process adds about 0.1 s to every file, about 0.2 s for a mailbox or a
+package, whose parsers take longer to load. On an archive of 90,000 synthetic
 events the browser-store stream was 7% slower and the server-store ingest 25% shorter, because
 the parse and the writes to the store then run side by side on two cores.
 

@@ -757,7 +757,7 @@ def run_rules(
     present: tuple[set[int], set[str]] | None = None
     if any(r.get("source") == "events" for r in rules):
         try:
-            with TimeLimit(rule_max_s, RULE_STOPPED):
+            with TimeLimit(rule_max_s, RULE_STOPPED, cancelled):
                 present = present_selectors(store)
         except Exception:  # noqa: BLE001
             # without the list every rule is run, which finds the same and costs more
@@ -784,9 +784,12 @@ def run_rules(
                 continue
         notes: dict[str, Any] = {}
         try:
-            with TimeLimit(rule_max_s, RULE_STOPPED):
+            with TimeLimit(rule_max_s, RULE_STOPPED, cancelled):
                 found = run_rule(store, rule, settings, notes, long_fields=long_fields.get(rule.get("source")))
         except QueryStopped as exc:
+            if cancelled and cancelled():
+                # stopped by the cancel, not by the limit: the rule did not finish and is not counted
+                break
             errors.append({"ruleId": rule.get("id", "?"), "error": str(exc)})
             found = []
             failed = True
@@ -822,9 +825,11 @@ def run_rules(
             )
         if not found and not failed and diagnose:
             try:
-                with TimeLimit(rule_max_s, RULE_STOPPED):
+                with TimeLimit(rule_max_s, RULE_STOPPED, cancelled):
                     diagnostics.append(diagnose_zero(store, rule, settings))
             except Exception as exc:  # noqa: BLE001
+                if cancelled and cancelled():
+                    break
                 diagnostics.append(
                     {
                         "ruleId": rule.get("id", "?"),

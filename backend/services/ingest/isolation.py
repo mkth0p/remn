@@ -41,7 +41,7 @@ import psutil
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 
-from services.common import json_default
+from services.common import AnalystMessage, json_default
 from services.ingest.pipeline import DeadlineExceeded
 
 log = logging.getLogger(__name__)
@@ -98,7 +98,8 @@ class ParseStopped(Exception):
 
 class ParseFailed(Exception):
     """A parse that raised in its process. The parent raises it under the type name the child
-    reported, so a client is told the same kind of failure as before."""
+    reported, so a client is told the same kind of failure as before, and as an AnalystMessage
+    when the child raised one."""
 
 
 class CpuLimit(BaseException):
@@ -794,7 +795,10 @@ class IsolatedParse:
         if what == "cpu":
             raise self._stopped(f"the parse reached its {cpu_limit():,} s processor-time limit (FORENSIC_PARSE_MAX_CPU_S)")
         type_name = str(stop.get("type") or "")
-        cls = type(type_name if _IDENTIFIER.match(type_name) else "Exception", (ParseFailed,), {"__module__": __name__})
+        # text the parser wrote for the analyst stays theirs to read. A child taken over could mark
+        # any text so, which puts no more in front of the analyst than the rows it sends already do.
+        bases = (AnalystMessage, ParseFailed) if stop.get("forAnalyst") is True else (ParseFailed,)
+        cls = type(type_name if _IDENTIFIER.match(type_name) else "Exception", bases, {"__module__": __name__})
         raise cls(str(stop.get("message") or "")[:500])
 
     def _ended_early(self) -> ParseStopped:
@@ -1096,8 +1100,25 @@ def _cpu_limit(signum: int, frame: Any) -> None:
     raise CpuLimit()
 
 
+def _uncaught(kind: type[BaseException], exc: BaseException | None, tb: Any) -> None:
+    """An exception nothing in the child caught. The child shares the server's stderr, so it is
+    logged as the child's other errors are: through the server's log filter, which keeps its type
+    and place and drops its text, since that text can quote the evidence."""
+    if not issubclass(kind, SystemExit):
+        log.critical("the parse process stopped on an error nothing in it caught", exc_info=(kind, exc, tb))
+
+
 def child_main(kinds: dict[str, type[_Work]] | None = None) -> None:
     """The child: read the job, lock down, parse, report, exit."""
+    # Until the server's logging configuration replaces it, a handler with the same filter is the
+    # one that writes to stderr; an uncaught error in a thread is logged the same way.
+    from forensic.logfilter import RedactEvidence
+
+    early = logging.StreamHandler()
+    early.addFilter(RedactEvidence())
+    logging.getLogger().addHandler(early)
+    sys.excepthook = _uncaught
+    threading.excepthook = lambda args: _uncaught(args.exc_type, args.exc_value, args.exc_traceback)
     # the protocol gets the real stdout; anything a library prints goes to stderr instead
     out = os.fdopen(os.dup(1), "wb")
     os.dup2(2, 1)
@@ -1158,7 +1179,7 @@ def child_main(kinds: dict[str, type[_Work]] | None = None) -> None:
     except CpuLimit:
         stop = {"kind": "cpu"}
     except Exception as exc:  # noqa: BLE001
-        stop = {"kind": "error", "type": type(exc).__name__, "message": str(exc)[:500]}
+        stop = {"kind": "error", "type": type(exc).__name__, "message": str(exc)[:500], "forAnalyst": isinstance(exc, AnalystMessage)}
     state = None
     if work is not None:
         try:

@@ -113,7 +113,14 @@ def test_a_detection_becomes_a_finding_that_names_its_row():
     assert finding["ruleId"] == "engine:hayabusa:proc-creation-win-susp-downloads-exec"
     assert finding["title"] == "Suspicious Process Creation In Downloads" and finding["severity"] == "high"
     assert finding["ts"] == int(datetime.fromisoformat(STAMP).timestamp() * 1000)
-    assert finding["entities"] == {"computer": "WS01", "channel": "Security", "eventId": "4688", "provider": "Microsoft-Windows-Security-Auditing"}
+    # the account Hayabusa's details name as User: an incident is filed under it, as under REMN's own finding on the event
+    assert finding["entities"] == {
+        "computer": "WS01",
+        "channel": "Security",
+        "eventId": "4688",
+        "provider": "Microsoft-Windows-Security-Auditing",
+        "user": "jdoe",
+    }
     assert finding["attack"] == ["T1204.002"]
     assert "engine:hayabusa" in finding["tags"] and "tactic:Execution" in finding["tags"]
     assert finding["refKeys"] == ["WS01|Security|1"] and finding["refs"] == []
@@ -370,6 +377,82 @@ def test_refs_resolve_against_a_server_store(tmp_path):
         registry.close_all()
 
     assert len(resolved[0]["refs"]) == 1 and "refKeys" not in resolved[0]
+
+
+# An invented network logon as Hayabusa reports it: the fields its details show under its own
+# abbreviations, the others under the event's names.
+LOGON = {
+    **DETECTION,
+    "EventID": 4624,
+    "RecordID": 2,
+    "RuleTitle": "Invented Logon Rule",
+    "Details": {"Type": "3 - NETWORK", "TgtUser": "jdoe", "SrcComp": "LAPTOP7", "SrcIP": "::ffff:203.0.113.7", "LID": "0x3e7"},
+    "ExtraFieldInfo": {"SubjectUserName": "WS01$", "SubjectDomainName": "INVENTED", "TargetDomainName": "INVENTED", "ProcessName": "-"},
+}
+LOGON_DATA = {
+    "SubjectUserName": "WS01$",
+    "SubjectDomainName": "INVENTED",
+    "TargetUserName": "jdoe",
+    "TargetDomainName": "INVENTED",
+    "LogonType": "3",
+    "WorkstationName": "LAPTOP7",
+    "IpAddress": "::ffff:203.0.113.7",
+    "TargetLogonId": "0x3e7",
+    "ProcessName": "-",
+}
+
+
+def _logon_row() -> dict:
+    """The row REMN's own parser makes of the event LOGON reports."""
+    from services.parsers.evtx_parser import flatten
+
+    system = {"Provider": {"Name": LOGON["Provider"]}, "EventID": 4624, "Channel": "Security", "Computer": "WS01", "EventRecordID": 2}
+    return flatten({"System": system, "EventData": LOGON_DATA}, include_raw=False)
+
+
+def _remn_entities(store) -> dict:
+    """The entities REMN's own rule engine gives a finding on the logon row of the store."""
+    from services.store import rules as R
+
+    found = R.run_rule(store, {"id": "invented", "title": "invented", "severity": "low", "source": "events", "where": {"eventId": 4624}}, {}, {})
+    assert len(found) == 1
+    return found[0]["entities"]
+
+
+def test_a_detection_names_the_user_host_and_address_remn_names_on_the_same_event(tmp_path):
+    """Hayabusa's findings named only the host, channel, event id and provider, and REMN's findings
+    on the same event the user: an incident is filed under its user first, so where both engines
+    agreed one incident became two."""
+    import uuid
+
+    from services.store.casestore import StoreRegistry
+    from services.store.writers import EventWriter
+
+    registry = StoreRegistry()
+    registry.configure(tmp_path / "cases")
+    try:
+        store = registry.get(str(uuid.uuid4()))
+        writer = EventWriter(store, 7)
+        writer.add(_logon_row())
+        writer.flush()
+        remn = _remn_entities(store)
+        # as the browser store takes it, from what Hayabusa reports of the event
+        streamed = hayabusa.to_finding(LOGON)["entities"]
+        # as a server case takes it, resolved against the row the store holds
+        resolved = hayabusa.resolve_refs(store, 7, [hayabusa.to_finding(LOGON)])[0]["entities"]
+    finally:
+        registry.close_all()
+
+    assert remn["targetUser"] == "jdoe" and remn["ipAddress"] == "203.0.113.7" and remn["computer"] == "WS01"
+    for entities in (streamed, resolved):
+        assert {k: entities.get(k) for k in remn} == remn, entities
+        assert entities["channel"] == "Security" and entities["eventId"] == "4624"
+
+
+def test_a_detection_takes_the_entity_fields_remn_rules_take():
+    from services.store import rules as R
+
+    assert list(hayabusa.ENTITY_FIELDS[: len(R._default_entities({"source": "events"}))]) == R._default_entities({"source": "events"})
 
 
 def test_only_one_engine_run_at_a_time_and_the_other_ingest_carries_on(engine, tmp_path, monkeypatch):

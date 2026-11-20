@@ -23,7 +23,7 @@ from forensic.access import permission
 from forensic.build import build_id
 from services.analysis import hayabusa
 from services.common import ndjson_line, sha256_chunks
-from services.ingest import isolation
+from services.ingest import isolation, staging
 from services.ingest.isolation import ParseStopped
 from services.ingest.package import request_budget
 from services.ingest.pipeline import DeadlineExceeded, detect_mail_format, iter_mbox_fileobj
@@ -376,9 +376,11 @@ def ingest_package(request: HttpRequest):
         deadline = _deadline()
         parse = None
         stopped = None
+        budget = None
         try:
+            budget = request_budget(claim=True)
             parse = isolation.start(
-                "package", name=source_name, path=src.path, data=src.data, tmp_dir=tmp_dir, options={**options, "budget": request_budget()}, deadline=deadline
+                "package", name=source_name, path=src.path, data=src.data, tmp_dir=tmp_dir, options={**options, "budget": budget}, deadline=deadline
             )
             yield ndjson_line({"type": "meta", "format": parse.format, "name": src.name, "size": src.size, "sha256": src.sha256, "engines": engines})
             try:
@@ -405,6 +407,8 @@ def ingest_package(request: HttpRequest):
         finally:
             if parse is not None:
                 parse.close()
+            if budget is not None:
+                staging.release(budget["claim"])
             src.cleanup()
 
     return _stream(gen())

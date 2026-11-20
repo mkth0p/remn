@@ -76,19 +76,22 @@ MAX_TOTAL = 16 * 1024**3
 MAX_STRUCTURED = 64 * 1024**2
 
 
-def request_budget() -> dict[str, Any]:
+def request_budget(claim: bool = False) -> dict[str, Any]:
     """The allowances one package request shares across its nesting levels, sized from the staging
     area when the request begins. Computed by the server, which sees the whole staging area, and
-    handed to the parse wherever it runs."""
+    handed to the parse wherever it runs. With `claim` the room it may hold is set aside for it
+    (staging.parse_room) until staging.release(budget["claim"]), which the server's entry points do."""
     capacity, _ = staging.capacity()
+    room, token = staging.parse_room(claim)
     return {
         "bytes": 0,
         "files": 0,
         "decodes": 0,
         "decodeSeconds": 0.0,
         "memberCap": min(MAX_MEMBER, capacity // 2),
-        "heldCap": max(0, capacity - staging.staged_bytes()),
+        "heldCap": room,
         "held": 0,
+        "claim": token,
     }
 
 

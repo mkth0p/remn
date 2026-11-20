@@ -27,6 +27,8 @@ from typing import Any
 import psutil
 from django.conf import settings
 
+from services.parsers.evtx_parser import flatten
+
 ENGINE = "hayabusa"
 RULE_PREFIX = f"engine:{ENGINE}:"
 SEVERITY = {
@@ -44,6 +46,13 @@ SEVERITY = {
 # "2026-08-19 01:34:26.123 +00:00" by default; ISO with a Z or T when asked for UTC
 STAMP = re.compile(r"^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2}(?:\.\d+)?)\s*([+-]\d{2}:?\d{2}|Z)?$")
 TECHNIQUE = re.compile(r"\bT\d{4}(?:\.\d{3})?\b", re.I)
+# What a finding on one event names, as REMN's own rules name it (services/store/rules.py
+# _default_entities), so that the two engines' findings on one event are filed under the same user,
+# host or address; and `user`, where the parser keeps the account Hayabusa calls "User".
+ENTITY_FIELDS = ("computer", "targetUser", "subjectUser", "ipAddress", "processName", "serviceName", "user")
+# Hayabusa's abbreviations, in the details of a detection, of the event fields that name a user or
+# an address. The other fields keep their own names (in ExtraFieldInfo, or in details a rule writes).
+ABBREVIATIONS = {"TgtUser": "TargetUserName", "SrcUser": "SubjectUserName", "SrcIP": "IpAddress"}
 
 # The bounds. An engine over a few hundred megabytes of logs wants more memory than a decoder
 # over one artifact, and the container's memory limit is the ceiling above this one, so the
@@ -140,6 +149,26 @@ def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:120] or "rule"
 
 
+def _entities(row: dict[str, Any]) -> dict[str, str]:
+    return {k: str(row[k])[:200] for k in ENTITY_FIELDS if row.get(k) not in (None, "", "[]")}
+
+
+def _event_entities(obj: dict[str, Any]) -> dict[str, str]:
+    """The entities of the event a detection is on, read by REMN's own parser from what Hayabusa
+    reports of the event, so that its names and normal forms are those of REMN's rows."""
+    data: dict[str, Any] = {}
+    for part in (obj.get("ExtraFieldInfo"), obj.get("Details")):
+        if isinstance(part, dict):
+            for k, v in part.items():
+                data.setdefault(ABBREVIATIONS.get(str(k), str(k)), v)
+    system = {"Provider": {"Name": obj.get("Provider")}, "EventID": obj.get("EventID"), "Channel": obj.get("Channel"), "Computer": obj.get("Computer")}
+    try:
+        return _entities(flatten({"System": system, "EventData": data}, include_raw=False))
+    except Exception:  # noqa: BLE001
+        # what the engine reports is not REMN's to vouch for; the finding keeps the entities below
+        return {}
+
+
 def to_finding(obj: dict[str, Any]) -> dict[str, Any] | None:
     """One Hayabusa detection as a REMN finding. refKeys name the event rows it belongs to, for
     whichever store holds them to resolve into refs."""
@@ -171,6 +200,7 @@ def to_finding(obj: dict[str, Any]) -> dict[str, Any] | None:
         for k, v in (("computer", computer), ("channel", channel), ("eventId", obj.get("EventID")), ("provider", obj.get("Provider")))
         if v not in (None, "")
     }
+    entities.update(_event_entities(obj))
     ref_key = f"{computer}|{channel}|{record}"
     return {
         "ruleId": rule_id,
@@ -399,11 +429,25 @@ def finish(summary: dict[str, Any], said: dict[str, Any]) -> dict[str, Any]:
 
 def resolve_refs(store, evidence_id, findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Link findings to the event rows a server store holds for this evidence, by the identity
-    both sides carry: computer, channel, record id."""
+    both sides carry: computer, channel, record id. A finding then names the entities of its row,
+    as REMN's own rules read them there."""
     cur = store.cursor()
     cur.execute('SELECT id, "computer", "channel", "recordId" FROM events WHERE "evidenceId" = ? AND "recordId" IS NOT NULL', [evidence_id])
     index = {f"{computer}|{channel}|{record}": row_id for row_id, computer, channel, record in cur.fetchall()}
     for finding in findings:
         keys = finding.pop("refKeys", []) or []
         finding["refs"] = [index[k] for k in keys if k in index]
+    ids = sorted({f["refs"][0] for f in findings if f["refs"]})
+    rows: dict[int, dict[str, str]] = {}
+    columns = ", ".join(f'"{k}"' for k in ENTITY_FIELDS)
+    for i in range(0, len(ids), 5_000):
+        chunk = ids[i : i + 5_000]
+        cur.execute(f"SELECT id, {columns} FROM events WHERE id IN ({', '.join('?' for _ in chunk)})", chunk)
+        for row_id, *values in cur.fetchall():
+            rows[row_id] = _entities(dict(zip(ENTITY_FIELDS, values, strict=True)))
+    for finding in findings:
+        if finding["refs"] and finding["refs"][0] in rows:
+            # the row's own values replace what was read from the engine's report
+            entities = {k: v for k, v in (finding.get("entities") or {}).items() if k not in ENTITY_FIELDS}
+            finding["entities"] = {**entities, **rows[finding["refs"][0]]}
     return findings

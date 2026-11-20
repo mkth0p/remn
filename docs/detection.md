@@ -8,7 +8,12 @@ on PATH or `HAYABUSA_PATH`, rules beside it or at `HAYABUSA_RULES`; the containe
 it pinned by version and by the SHA-256 of the release archive) every ingested event log is
 also handed to it, and its detections come back as findings with rule ids under
 `engine:hayabusa:`, the level mapped to a severity, the MITRE techniques it tags, and refs to
-the rows REMN parsed from the same records, linked by computer, channel and record id. An
+the rows REMN parsed from the same records, linked by computer, channel and record id. A
+detection names the user, host and address of its event as REMN's own rules name them (the
+row's values in a server case, the engine's report read by REMN's parser in the browser
+store), so an incident holds the findings of both engines on that event. Where a converted
+Sigma pack is enabled, the same rule on the same record still gives one finding from each
+engine. An
 archive of event logs gives it its `.evtx` members, up to half the staging area (4 GiB at
 most); records exported as XML and cloud exports are not its input, and its summary says they
 were not scanned. In a package the logs are held for it in at most 256 MiB of staging; a log

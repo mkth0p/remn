@@ -23,6 +23,7 @@ from api.errors import failure
 from api.jobs import manager
 from api.views import ingest
 from forensic.logfilter import RedactEvidence
+from services.common import AnalystMessage
 from services.reputation.base import Provider, Registry, Verdict
 from services.store.casestore import registry
 
@@ -70,6 +71,59 @@ def test_a_failure_names_what_failed_its_type_and_a_reference_and_logs_the_same_
     # the exception reaches the log only as exc_info, which the log filter reduces to type and place
     RedactEvidence().filter(record)
     assert SECRET not in record.getMessage() and record.getMessage().startswith("the thing failed [ref") and "ValueError at" in record.getMessage()
+
+
+def test_the_place_of_a_logged_error_is_its_file_name_whatever_the_path_separator():
+    # a server on Windows gives tracebacks backslash paths, which named the whole checkout
+    code = compile(f"raise ValueError({SECRET!r})", r"C:\srv\remn\backend\services\parsers\invented.py", "exec")
+    try:
+        exec(code, {})
+    except ValueError as exc:
+        record = logging.LogRecord("services.test", logging.ERROR, __file__, 1, "parse failed", None, (ValueError, exc, exc.__traceback__))
+    RedactEvidence().filter(record)
+    assert record.getMessage() == "parse failed [ValueError at invented.py:1]"
+
+
+def test_text_written_for_the_analyst_is_passed_through_and_any_other_text_is_not(caplog):
+    log = logging.getLogger("api.test")
+    said = failure("the thing", AnalystMessage("the file is not a recognised export; nothing was read"), log)
+    assert said == {"error": "the file is not a recognised export; nothing was read"}
+    # a ValueError that was not written for the analyst still says only its type and a reference
+    hidden = failure("the thing", ValueError(SECRET), log)
+    _assert_reference(hidden["error"], hidden["ref"], "the thing")
+
+
+# an invented user list: a table, but none of the Microsoft 365 or Entra exports REMN reads
+USERS_CSV = (
+    b"Id,DisplayName,UserPrincipalName,AccountEnabled,CreatedDateTime,UserType\n1d2c,Invented User,invented@example.org,True,1/15/2024 10:11:12 AM,Member\n"
+)
+
+
+def test_an_export_the_event_log_import_cannot_read_is_named_to_the_analyst(tmp_path):
+    from services.parsers import m365
+
+    with override_settings(FILE_UPLOAD_TEMP_DIR=tmp_path):
+        r = Client().post("/api/ingest/evtx", {"file": SimpleUploadedFile("Users.csv", USERS_CSV), "engines": "0"}, **HDR)
+        (error,) = [line for line in _lines(r) if line["type"] == "error"]
+    assert error["error"] == m365.UNRECOGNISED and "ref" not in error
+
+
+def test_an_export_a_server_case_cannot_read_is_named_in_the_job(store_key, tmp_path):
+    from services.parsers import m365
+
+    with override_settings(FILE_UPLOAD_TEMP_DIR=tmp_path):
+        c = Client()
+        uid = c.post("/api/upload/init", json.dumps({"name": "Users.csv", "size": len(USERS_CSV)}), content_type="application/json", **HDR).json()["uploadId"]
+        assert c.generic("PUT", f"/api/upload/{uid}/chunk?offset=0", USERS_CSV, content_type="application/octet-stream", **HDR).status_code == 200
+        assert c.post(f"/api/upload/{uid}/complete", **HDR).status_code == 200
+        body = {"uploadId": uid, "kind": "evtx", "evidence": {"id": 1, "name": "Users.csv"}}
+        job_id = c.post(f"/api/store/{store_key}/ingest", json.dumps(body), content_type="application/json", **HDR).json()["jobId"]
+        job = manager.get(job_id)
+        for _ in range(500):
+            if job.finished:
+                break
+            time.sleep(0.02)
+    assert job.status == "error" and job.error == m365.UNRECOGNISED
 
 
 def test_a_view_that_raises_answers_a_json_500_with_a_reference(monkeypatch):

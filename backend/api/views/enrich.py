@@ -11,10 +11,11 @@ from django.views.decorators.http import require_POST
 
 from api.errors import failure
 from api.jobs import manager
+from api.views.store import REFUSED, _limit, _stopped, refused
 from forensic.access import permission
 from services.analysis import baseline
 from services.analysis import rescore as calibration
-from services.store.casestore import registry
+from services.store.casestore import QueryStopped, registry
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +41,8 @@ def rescore(request: HttpRequest):
             return JsonResponse({"error": "invalid case key"}, status=400)
         except FileNotFoundError:
             return JsonResponse({"error": "unknown case store"}, status=404)
+        except REFUSED as exc:
+            return refused(exc)
         if any(j["status"] in ("queued", "running") for j in manager.list(st.key)):
             return JsonResponse({"error": "Wait for this case's current jobs to finish before rescoring."}, status=409)
         account = getattr(request, "account", None)
@@ -68,7 +71,14 @@ def mails(request: HttpRequest):
                 st = registry.get(str(body["storeKey"]), create=False)
             except (ValueError, FileNotFoundError):
                 return JsonResponse({"error": "unknown case store"}, status=404)
-            return JsonResponse({"summary": baseline.enrich_store(st, settings)})
+            except REFUSED as exc:
+                return refused(exc)
+            try:
+                with _limit():
+                    summary = baseline.enrich_store(st, settings)
+            except QueryStopped as exc:
+                return _stopped(exc)
+            return JsonResponse({"summary": summary})
         rows = body.get("mails") or []
         if not isinstance(rows, list):
             return JsonResponse({"error": "mails must be a list"}, status=400)
