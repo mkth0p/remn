@@ -46,13 +46,21 @@ REMN's two scenarios:
   or the tenant (inbox rules, forwarding, consented applications, delegated access), what they
   read or took (MailItemsAccessed, content searches, SharePoint and OneDrive downloads), and
   whether they sent mail from the account, asked for payment changes, or reached other people
-  with the same campaign.
+  with the same campaign. Besides the Unified Audit Log, Entra sign-ins and mailboxes, its
+  questions are answered from Entra directory audits (authentication methods, devices,
+  consents and application permissions), from ID Protection's risk detections and risky users
+  (the sign-ins), and from the Exchange Online message trace (mail forwarded out, mail sent
+  from the account, the other recipients of a campaign); the [data
+  sources](sources.md#microsoft-365-and-entra-exports) page says which of their exports are
+  read. The message trace shows what was sent, not what a message said or which rule sent it; only its
+  extended report marks a message an inbox rule sent.
 
 ## What each question shows
 
 - **Evidence in this case.** Each question lists the kinds of evidence that can answer it (the
-  Security log, Sysmon, the Task Scheduler log, the Unified Audit Log, Entra sign-ins, mailboxes,
-  browser history, the collected autoruns...). The page reads what the case holds from the
+  Security log, Sysmon, the Task Scheduler log, the Unified Audit Log, Entra sign-ins and
+  directory audits, ID Protection, the message trace, mailboxes, browser history, the collected
+  autoruns...). The page reads what the case holds from the
   channel and category counts that ingestion keeps (no scan of the rows) and from the mail
   count, and says "covered by the Security log (1,204 rows)" or "not covered: no browser history
   in this case". A question the case cannot cover is marked "no evidence" in the list. The check

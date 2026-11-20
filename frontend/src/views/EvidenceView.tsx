@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { getDb, type Evidence } from '../db/schema'
+import { getDb, type Case, type Evidence } from '../db/schema'
 import { toast, useStore } from '../state/store'
 import { fmtBytes, fmtNum, fmtTs } from '../util/format'
 import { Dropzone } from '../components/Dropzone'
 import { Badge, CopyButton, JsonView, Modal } from '../components/ui'
 import { confirmAction } from '../components/confirm'
-import { hashOnly, refreshCounts, requestIngest } from '../data/ingest'
+import { hashOnly, readAgain, refreshCounts, requestIngest } from '../data/ingest'
+import { dateSetting, datesRead, describeDates, zoneError } from '../data/dateSetting'
 import { getSource } from '../data/source'
 import { Jobs } from '../components/ConsolePanel'
 import { IconTrash } from '../components/Icons'
@@ -192,6 +193,7 @@ export function EvidenceView() {
             />
           </label>
           <FileGaps evidence={detail} />
+          <EvidenceDates key={detail.id} evidence={detail} kase={kase} onRead={() => setDetail(null)} />
           {detail.kind === 'package' && detail.stats && <PackageCoverage stats={detail.stats} />}
           {detail.kind !== 'package' && coverageMembers(detail.stats).length > 0 && <PackageCoverage stats={detail.stats!} archive />}
           {detail.stats && (
@@ -238,6 +240,64 @@ function FileGaps({ evidence }: { evidence: Evidence }) {
           <Badge sev={g.severity === 'high' ? 'high' : 'medium'}>{g.kind.replace(/-/g, ' ')}</Badge> {g.text}
         </div>
       ))}
+    </div>
+  )
+}
+
+/**
+ * How the file's dates were read, for a Microsoft 365 or Entra export whose dates or times did not
+ * say all: the order and zone used, what was guessed, and a way to read the file again with an
+ * order and a zone set for this evidence.
+ */
+function EvidenceDates({ evidence, kase, onRead }: { evidence: Evidence; kase: Case; onRead: () => void }) {
+  const [order, setOrder] = useState<string>(evidence.dates?.order ?? '')
+  const [zone, setZone] = useState(evidence.dates?.zone ?? '')
+  const read = datesRead(evidence)
+  if (!read || evidence.kind === 'mail') return null
+  const error = zoneError(zone)
+  const setting = dateSetting(order, zone)
+  const again = async (file: File) => {
+    if (error) return toast('err', error)
+    const question = `Remove evidence #${evidence.id} and import ${file.name} again with ${describeDates(setting)}? Its findings are cleared until the rules run again; your decisions are kept.`
+    if (!(await confirmAction(question, { title: 'Read the file again', action: 'Read again', danger: true }))) return
+    onRead()
+    readAgain(evidence, file, kase, setting).catch((e: Error) => toast('err', `${file.name} not read again: ${e.message}`, 0))
+  }
+  return (
+    <div className="col" style={{ gap: 6 }}>
+      <div className="small dim">dates</div>
+      <div className="small">read with {read.setting}</div>
+      {read.counts.map((c) => (
+        <div key={c} className="small">
+          {c}
+        </div>
+      ))}
+      <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
+        <label className="field">
+          <span>date order</span>
+          <select className="select" value={order} onChange={(e) => setOrder(e.target.value)}>
+            <option value="">as the file shows (month first when it cannot)</option>
+            <option value="day-first">day first (01/09/2026 is 1 September)</option>
+            <option value="month-first">month first (01/09/2026 is 9 January)</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>time zone of times that give none</span>
+          <input className="input" value={zone} onChange={(e) => setZone(e.target.value)} placeholder="UTC, +02:00 or Europe/Paris" />
+        </label>
+      </div>
+      {error && (
+        <div className="small" style={{ color: 'var(--danger)' }}>
+          {error}
+        </div>
+      )}
+      <div className="hint">
+        To read the file with this setting, drop the original file again. Its SHA-256 is checked against the one recorded at import; the evidence is then removed and the file imported again, and its
+        findings are cleared until the rules run again.
+      </div>
+      <Dropzone multiple={false} onFiles={(f) => again(f[0])} compact>
+        <div className="big">drop the file to read it again</div>
+      </Dropzone>
     </div>
   )
 }

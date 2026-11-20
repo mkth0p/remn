@@ -268,5 +268,6 @@ set, not how often a real attacker would get through.
   faster models are enough for the filter builder and for "explain". The Settings page
   tests the connection and lists the models.
 - To see exactly what a model does with a tool call:
-  `.venv\Scripts\python.exe samples\synthetic\ai_repro.py <model> [true|false]` replays
-  a second agent turn against Ollama and prints the raw chunks.
+  `.venv/bin/python samples/synthetic/ai_repro.py <model> [true|false]` (on Windows,
+  `.venv\Scripts\python.exe samples\synthetic\ai_repro.py`) replays a second agent turn
+  against Ollama and prints the raw chunks.
