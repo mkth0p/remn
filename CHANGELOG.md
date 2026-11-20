@@ -291,6 +291,19 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   browser-store stream is 7% slower and the server-store ingest 25% shorter.
   `FORENSIC_PARSE_ISOLATION=0` parses in the server process again, for debugging;
   `docs/security.md` says what each system enforces and what turning it off gives up.
+- Documentation: an architecture page (the parts, the two modes, where evidence goes in a diagram,
+  the web and parse processes and job slots, accounts and roles, the files on disk), an API
+  reference listing every route under /api/ with its method, the role it needs, whether a
+  browser-only instance answers it and its main fields, a guide to writing rules (format, fields,
+  operators, trying a rule, the checks and measures a shipped rule passes, importing Sigma and
+  Sublime rules, the regular expression shapes that backtrack in the browser engine), and a page
+  of frequently asked questions. The install starts with the clone line and gives commands that
+  work on Linux, macOS and Windows PowerShell. The screenshots are new captures of the current app
+  on the demo case. `tools/detection_levels.py` computes the detection-level table from the
+  committed measures, and the page shows its output. Two backend tests hold the pages to the code:
+  one compares the API reference with the URL configuration, the other checks the figures the
+  pages quote against the measures, the packs, the rule files, the level script and the regular
+  expression timing test.
 - A home page. REMN opens on it until a case holds evidence, and the wordmark leads back to it
   after that. It shows what the tool reads, how the rules are measured and what the measures
   show: the rule totals, recordings and clean-host baseline read live from `rules/measures.json`
