@@ -1,8 +1,9 @@
 """The figures the pages quote from what the repository holds, beyond the sentences test_quoted_measures.py
 reads in README.md and docs/detection.md: the measure's figures wherever another page quotes them, the size
-of each community pack and of its level changes, the number of rules a file ships, and the detection level
-table of docs/detection.md, which tools/detection_levels.py computes from the committed measure. A pack
-refreshed, a rule added or a measure taken without the pages fails here; so does a figure edited by hand.
+of each community pack and of its level changes, the number of rules a file ships, the detection level
+table of docs/detection.md, which tools/detection_levels.py computes from the committed measure, and the
+rules and limits of the browser's regex timing test that docs/rules.md names. A pack refreshed, a rule
+added or a measure taken without the pages fails here; so does a figure edited by hand.
 """
 
 from __future__ import annotations
@@ -211,3 +212,38 @@ def test_the_level_budgets_are_read_from_the_app():
     assert budgets == sorted(budgets) and budgets[-1] == math.inf
     assert lv["default"] in {level["level"] for level in lv["levels"]}
     assert any(level["always"] is not None for level in lv["levels"])
+
+
+TIMING_TEST = ROOT / "frontend" / "src" / "test" / "regexTiming.test.ts"
+
+
+def timing_mismatches(page: str, timing: str) -> list[str]:
+    """docs/rules.md against the browser's timing test: the rules it leaves as they are, the length of
+    the value it tries and the time it allows."""
+    out = []
+    block = timing[timing.index("const RULE_EXEMPT") :]
+    exempt = set(re.findall(r"^\s+'([a-z0-9-]+)': RETRIED", block[: block.index("\n}\n")], re.M))
+    m = re.search(r"so (\w+) own rules keep it and are listed with that reason in the timing test: (.*?)\. ", page)
+    if not m:
+        return ["docs/rules.md no longer names the own rules the timing test leaves as they are"]
+    named = set(re.findall(r"`([a-z0-9-]+)`", m.group(2)))
+    if named != exempt or quoted._value(m.group(1)) != len(exempt):
+        out.append(f"docs/rules.md: names {m.group(1)} rules {sorted(named)}, the timing test leaves {sorted(exempt)}")
+    length = int(re.search(r"const LENGTH = ([\d_]+)", timing).group(1).replace("_", ""))
+    budget = int(re.search(r"const BUDGET_MS = ([\d_]+)", timing).group(1).replace("_", ""))
+    if f"a hostile value of {length:,} characters within {budget} ms" not in page:
+        out.append(f"docs/rules.md: the timing test tries {length:,} characters within {budget} ms")
+    return out
+
+
+def test_the_rules_page_names_what_the_timing_test_leaves_and_allows():
+    assert timing_mismatches(_page("docs/rules.md"), TIMING_TEST.read_text(encoding="utf-8")) == []
+
+
+def test_a_rule_left_out_of_the_timing_test_is_caught():
+    timing = TIMING_TEST.read_text(encoding="utf-8")
+    added = timing.replace("const RULE_EXEMPT: Record<string, string> = {", "const RULE_EXEMPT: Record<string, string> = {\n  'win-a-new-rule': RETRIED,")
+    assert any("win-a-new-rule" in line for line in timing_mismatches(_page("docs/rules.md"), added))
+    assert any(
+        "characters within" in line for line in timing_mismatches(_page("docs/rules.md"), re.sub(r"const BUDGET_MS = \d+", "const BUDGET_MS = 1", timing))
+    )
