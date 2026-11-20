@@ -290,4 +290,129 @@ describe('FindingsView', () => {
     },
     TEST_TIMEOUT,
   )
+
+  it(
+    'lists the techniques on the ATT&CK tab and shows the findings of one from there',
+    async () => {
+      await db.findings.clear()
+      await db.findings.bulkAdd([
+        f({ ruleId: 'win-log-cleared', severity: 'high', title: 'Security audit log cleared', source: 'events', attack: ['T1070.001'], entities: { computer: 'WS-1' } }),
+        f({ ruleId: 'win-log-cleared-2', severity: 'critical', title: 'System log cleared', source: 'events', attack: ['T1070.001', 'T1562'], entities: { computer: 'WS-2' } }),
+      ])
+      await act(async () => {
+        render(<FindingsView />)
+      })
+      await waitFor(() => expect(sub()).toContain('2 finding(s)'), WAIT)
+      fireEvent.click(screen.getByText(/ATT&CK/))
+      const row = () => Array.from(document.querySelectorAll('.panel table tbody tr')).map((r) => r.textContent)
+      await waitFor(() => expect(row()).toHaveLength(2), WAIT)
+      expect(screen.getByText(/2 technique\(s\) across 2 finding\(s\)/)).toBeTruthy()
+      // the most found technique first, with its worst severity, its findings and the rules that fired
+      expect(row()[0]).toContain('T1070.001')
+      expect(row()[0]).toContain('critical')
+      expect(row()[0]).toMatch(/critical22/)
+      fireEvent.click(screen.getAllByRole('button', { name: 'show findings' })[1])
+      await waitFor(() => expect((document.querySelector('[data-findings-search]') as HTMLInputElement).value).toBe('T1562'), WAIT)
+      expect(screen.getByText('1 incident(s) · 1 finding(s)')).toBeTruthy()
+    },
+    TEST_TIMEOUT,
+  )
+
+  it(
+    'moves through the flat list with the keyboard, and shows a finding as its overview, a table and JSON',
+    async () => {
+      await db.findings.clear()
+      await db.findings.add(
+        f({ ruleId: 'win-log-cleared', severity: 'critical', title: 'Security audit log cleared', source: 'events', refs: [42, 43], attack: ['T1070.001'], entities: { computer: 'WS-1' } }),
+      )
+      await act(async () => {
+        render(<FindingsView />)
+      })
+      await waitFor(() => expect(sub()).toContain('1 finding(s)'), WAIT)
+      fireEvent.click(screen.getByRole('button', { name: 'flat' }))
+      fireEvent.keyDown(window, { key: 'j' })
+      await waitFor(() => expect(document.querySelector('.flyout-h')?.textContent).toContain('Security audit log cleared'), WAIT)
+      // the insights count the entity in the case (the source here answers 3)
+      await waitFor(() => expect(screen.getByText('3 event(s) with WS-1')).toBeTruthy(), WAIT)
+      expect(screen.getByText(/1 finding\(s\) · 0 marked false positive/)).toBeTruthy()
+      expect(screen.getByText('2', { selector: '.highlight .v' })).toBeTruthy()
+      fireEvent.click(screen.getByText('Table'))
+      expect(screen.getByText('entity.computer')).toBeTruthy()
+      expect(screen.getByText('win-log-cleared', { selector: '.kv .v' })).toBeTruthy()
+      fireEvent.click(screen.getByText('JSON'))
+      expect(document.querySelector('.flyout')?.textContent).toContain('"ruleId"')
+      fireEvent.click(screen.getByText('Overview'))
+      // the analyst's note is kept when the field is left
+      const notes = screen.getByPlaceholderText('analyst notes…')
+      fireEvent.change(notes, { target: { value: 'cleared by the backup job' } })
+      fireEvent.blur(notes)
+      await waitFor(async () => expect((await db.findings.toArray())[0].notes).toBe('cleared by the backup job'), WAIT)
+    },
+    TEST_TIMEOUT,
+  )
+
+  it(
+    'asks the analyst about a finding, and opens its rows on the page of its source',
+    async () => {
+      await db.findings.clear()
+      await db.findings.add(f({ ruleId: 'win-log-cleared', severity: 'critical', title: 'Security audit log cleared', source: 'events', refs: [42, 43], entities: { computer: 'WS-1' } }))
+      useStore.setState({ aiPrompt: null, eventsFilter: {} })
+      await act(async () => {
+        render(<FindingsView />)
+      })
+      await waitFor(() => expect(sub()).toContain('1 finding(s)'), WAIT)
+      fireEvent.click(screen.getByRole('button', { name: 'flat' }))
+      fireEvent.keyDown(window, { key: 'j' })
+      await waitFor(() => expect(document.querySelector('.flyout')).toBeTruthy(), WAIT)
+      fireEvent.click(screen.getByRole('button', { name: 'ask the analyst' }))
+      expect(useStore.getState().view).toBe('ai')
+      expect(useStore.getState().aiPrompt).toContain('Rule win-log-cleared (critical): Security audit log cleared.')
+      expect(useStore.getState().aiPrompt).toContain('ids 42, 43')
+      useStore.setState({ view: 'findings' })
+      fireEvent.click(screen.getByRole('button', { name: 'open 2 row(s)' }))
+      expect(useStore.getState().view).toBe('events')
+      expect(useStore.getState().eventsFilter).toEqual({ conditions: [{ field: 'id', op: 'in', value: [42, 43] }], sort: { field: 'ts', dir: 'asc' } })
+    },
+    TEST_TIMEOUT,
+  )
+
+  it(
+    'sets a status on every finding of the incidents picked in the bulk bar',
+    async () => {
+      await act(async () => {
+        render(<FindingsView />)
+      })
+      await waitFor(() => expect(sub()).toContain('2 incident(s) · 4 finding(s)'), WAIT)
+      // the bar of the picked rows, beside the banner that the findings are behind the evidence
+      const bulk = () => Array.from(document.querySelectorAll('.bulkbar')).find((b) => b.textContent?.includes('selected'))
+      fireEvent.click(screen.getByTitle('select all shown'))
+      await waitFor(() => expect(bulk()?.querySelector('b')?.textContent).toBe('2 selected · 4 finding(s)'), WAIT)
+      const reviewed = Array.from(bulk()!.querySelectorAll('button')).find((b) => b.textContent === 'reviewed')!
+      fireEvent.click(reviewed)
+      await waitFor(async () => expect((await db.findings.toArray()).map((x) => x.status)).toEqual(['reviewed', 'reviewed', 'reviewed', 'reviewed']), WAIT)
+      expect((await db.findings.toArray()).every((x) => x.decidedBy === 'analyst')).toBe(true)
+      await waitFor(() => expect(bulk()).toBeUndefined(), WAIT)
+    },
+    TEST_TIMEOUT,
+  )
+
+  it(
+    'opens the mail of a mail incident from its investigation section',
+    async () => {
+      useStore.setState({ focusId: null })
+      await act(async () => {
+        render(<FindingsView />)
+      })
+      await waitFor(() => expect(sub()).toContain('2 incident(s)'), WAIT)
+      const source = Array.from(document.querySelectorAll('select')).find((s) => Array.from(s.options).some((o) => o.value === 'mails' && o.textContent === 'mails'))!
+      fireEvent.change(source, { target: { value: 'mails' } })
+      fireEvent.keyDown(window, { key: 'j' })
+      await waitFor(() => expect(document.querySelector('.flyout')?.textContent).toContain('3 finding(s) from 3 rule(s)'), WAIT)
+      expect(screen.getByText('x@evil.test', { selector: '.highlight .v' })).toBeTruthy()
+      fireEvent.click(screen.getByText('open #7'))
+      expect(useStore.getState().focusId).toEqual({ source: 'mails', id: 7 })
+      expect(useStore.getState().view).toBe('mails')
+    },
+    TEST_TIMEOUT,
+  )
 })
