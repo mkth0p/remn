@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import io
 import os
-import threading
 import time
 import zipfile
 
@@ -159,21 +158,23 @@ def test_the_hold_allowance_is_per_request_not_per_nesting_level(tmp_path, monke
             z.writestr(f"nested{level}.zip", inner)
     blob = out.getvalue()
 
+    # What is staged only grows between two deletions, so measuring the folder just before each one,
+    # in the parse's own thread, sees every peak. A thread that sampled it every few milliseconds
+    # could miss one, and raced with the deletions it measured.
     peak = {"bytes": 0}
-    stop = threading.Event()
+    unlink = os.unlink
 
-    def watch():
-        while not stop.is_set():
-            peak["bytes"] = max(peak["bytes"], staged_bytes(tmp_path))
-            time.sleep(0.005)
+    def measured_unlink(path, *args, **kwargs):
+        peak["bytes"] = max(peak["bytes"], staged_bytes(tmp_path))
+        return unlink(path, *args, **kwargs)
 
-    watcher = threading.Thread(target=watch, daemon=True)
-    watcher.start()
-    source = PackageSource("pkg.zip", None, blob, str(tmp_path), ParseContext(analyze_attachments=False))
-    list(source)
-    stop.set()
-    watcher.join()
+    with monkeypatch.context() as m:
+        m.setattr(os, "unlink", measured_unlink)
+        m.setattr(os, "remove", measured_unlink)
+        source = PackageSource("pkg.zip", None, blob, str(tmp_path), ParseContext(analyze_attachments=False))
+        list(source)
 
+    assert peak["bytes"] > 0, "the parse must stage and delete something for the measure to mean anything"
     # one member is staged at a time on top of the held-back set, so allow a member of headroom
     assert peak["bytes"] <= P.MAX_DEFERRED_BYTES + 256 * 1024, f"peak {peak['bytes']} exceeded the per-request ceiling"
     assert staged_bytes(tmp_path) == 0
