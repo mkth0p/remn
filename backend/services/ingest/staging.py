@@ -17,8 +17,9 @@ from django.conf import settings
 
 GIB = 1024**3
 # the directories a parse creates in the staging area, named by tempfile.mkdtemp with these
-# suffixes: a 7z archive expanded to be read, and the event logs staged for one engine run.
-DIRECTORY_SUFFIXES = (".7z", ".evtx")
+# suffixes: a 7z archive expanded to be read, the event logs staged for one engine run, and the
+# folder a parse process works in.
+DIRECTORY_SUFFIXES = (".7z", ".evtx", ".parse")
 # the largest archive member copied out for parsing, however much the staging area may hold.
 MEMBER_MAX = 4 * GIB
 # without a configured total the staging area may use the free space of its disk, less a reserve

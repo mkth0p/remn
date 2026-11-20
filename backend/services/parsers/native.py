@@ -33,6 +33,16 @@ MAX_BATCH_SECONDS = 60.0
 MAX_BATCH_OUTPUT = 16 * 1024**2
 
 
+def _worker_environment(tmp_dir: str) -> dict[str, str]:
+    """The worker reads hostile files: it gets none of the server's variables. Inside a parse
+    process there are none to give it anyway; with FORENSIC_PARSE_ISOLATION off there are. Its
+    home and temporary folder are its own staging folder: dissect asks for the home folder when it
+    opens a target, and on Windows an interpreter with no USERPROFILE has none to give."""
+    from services.ingest.isolation import child_env
+
+    return child_env(home=tmp_dir)
+
+
 def _keep_partial(output: str, reason: str, at_most: int) -> None:
     """Close a stopped worker's output at its last whole record within at_most bytes and mark it
     partial, as the worker marks a failure it catches itself, so the records decoded before the
@@ -62,7 +72,12 @@ def decode(kind: str, path: str, tmp_dir: str) -> str:
     process = None
     try:
         process = subprocess.Popen(
-            command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=_worker_environment(tmp_dir),
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         monitor = psutil.Process(process.pid)
         started = time.monotonic()
@@ -154,7 +169,12 @@ def batch_records(kind: str, paths: list[str], tmp_dir: str) -> list[tuple[int, 
     process = None
     try:
         process = subprocess.Popen(
-            command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=_worker_environment(tmp_dir),
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         monitor = psutil.Process(process.pid)
         started = time.monotonic()
@@ -208,7 +228,12 @@ def triage_records(path: str, tmp_dir: str, functions: list[tuple[str, int]], *,
     process = None
     try:
         process = subprocess.Popen(
-            command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=_worker_environment(tmp_dir),
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         monitor = psutil.Process(process.pid)
         started = time.monotonic()

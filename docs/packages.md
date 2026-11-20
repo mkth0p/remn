@@ -329,8 +329,12 @@ temporary files; archive paths are never used as extraction destinations. Links,
 encrypted members and traversal paths are skipped. Temporary files are cleaned up.
 An inventory cut short is marked incomplete.
 
-Native decoders run in subprocesses, monitored at 50 ms intervals with 30-second,
-512 MiB RSS and 64 MiB output limits; CAB output is allowed 512 MiB because it
+A package is parsed in a process of its own ([security](security.md#each-parse-in-a-process-of-its-own)),
+under a memory and a processor-time limit and the request deadline; a parse stopped at one keeps
+the rows it read, the inventory is marked incomplete, and the members it was still reading or
+holding back are errors with the reason. Native decoders run in subprocesses of that process, so
+they start without the server's environment and inherit its limits, and each is also monitored
+at 50 ms intervals with 30-second, 512 MiB RSS and 64 MiB output limits; CAB output is allowed 512 MiB because it
 is an archive rather than records. A prefetch file or a CAB may be 64 MiB; a registry hive is
 read where its cells are rather than loaded, so it may be as large as the member ceiling. A
 registry or prefetch decode stopped at one of these limits keeps the records it decoded before

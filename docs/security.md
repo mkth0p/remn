@@ -220,13 +220,14 @@ finishes.
   stranding it for the sweeper to find later.
 - **A ceiling on how long one parse runs.** `FORENSIC_INGEST_MAX_S` (30 minutes in
   browser-only mode, off otherwise) ends an ingest stream at the limit with the rows already
-  sent, an error line saying why, and the result marked incomplete. The limit is checked
-  between archive members as well as between rows, so an archive whose members produce no
-  rows cannot walk around it. The rate limiter shapes how
+  sent, an error line saying why, and the result marked incomplete. The parse process is asked
+  to stop at the limit and is killed five seconds later if it has not, so a parser stuck inside
+  one record or one archive member cannot outlast it. The rate limiter shapes how
   fast requests arrive, not how many are in flight, and the server cannot reap a request once it
   is running; this is what stops a few slow parses holding every worker thread indefinitely.
 - **External engines under the same bounds.** Hayabusa, when installed, runs as a separate
-  process watched for memory (`HAYABUSA_MAX_MB`, 1536 by default and 768 in the public
+  process that starts without the server's environment, over the event logs the parse process
+  staged (regular files only, moved out of the parse's folder first), watched for memory (`HAYABUSA_MAX_MB`, 1536 by default and 768 in the public
   compose), output (256 MiB) and time (`HAYABUSA_MAX_S`, 300 s by default, and never past the
   request deadline), and is killed rather than trusted past any of them. Only
   `HAYABUSA_CONCURRENCY` runs share the box at once, one by default, so two uploads cannot add
@@ -318,9 +319,86 @@ empty, the root filesystem refuses writes, the staging area reports as tmpfs, an
 hostname, to a raw address on 443 and to a resolver on 53 all fail, while a 14 MiB EVTX still
 parses to 6000 events with a matching digest.
 
-What remains is that an exploit still gets execution inside that container for the life of one
-request, and can read whatever else is staged at that moment. Isolating each parse into its own
-throwaway sandbox is the next step and is not configuration.
+What remains is that an exploit still gets execution inside that container, which the next
+section bounds further.
+
+### Each parse in a process of its own
+
+Every parse of uploaded evidence runs in a process the server starts for that parse and removes
+after it (`backend/services/ingest/isolation.py`): event logs and their archives, mail of every
+format including PST, packages and collections, the attachment analysis inside them, and a
+single attachment dropped for analysis. The server keeps the stream to the browser, the writes
+to the case store, the statistics and per-file entries, Hayabusa, the deadline and the cancel of
+a job. The parse process sends its rows back in batches, as JSON, one message a line; nothing it
+sends is unpickled or run, and no line it sends is longer than the server is prepared to hold.
+
+That process:
+
+- **Starts without the server's environment.** It gets the path, the locale and time zone and,
+  on Windows, the variables an interpreter needs to start: not the access token, not the provider
+  keys, not anything else the server was started with. It does not load the server's settings
+  either, only the few a parser reads (the staging area, the message and staging limits, the YARA
+  rules folder, logging). The native decoders it starts, and Hayabusa, which the server starts,
+  get the same environment.
+- **Works in a folder of its own** in the staging area, which the server removes when the parse
+  ends, however it ends, and which the staging budget and the sweep count like the other folders
+  a parse uses.
+- **Is stopped at its limits, and says so.** At the deadline, at its memory limit, at its
+  processor-time limit, when the job is cancelled, or when it dies, the parse process is
+  stopped and the processes it started go with it. The rows read before the stop are kept; the
+  stream's error line or the job's error says what stopped it and while reading which member;
+  the result is marked incomplete, and the members it had not finished are errors with the
+  reason. A member that ran the parse out of memory and was given up says so on its entry, and
+  the parse goes on with the next one.
+
+What each system enforces:
+
+| | Linux | macOS | Windows |
+|---|---|---|---|
+| The server's environment and settings | not passed | not passed | not passed |
+| Memory, `FORENSIC_PARSE_MAX_MB` (4096; 1024 in browser-only mode) | the kernel refuses private memory past the limit (`RLIMIT_DATA`) and the parse stops with what it read; the server also watches resident memory, shared memory included, and kills the process past the limit and a margin | the server watches resident memory every 50 ms and kills the process past the limit | the server watches the larger of the working set and the committed private memory every 50 ms and kills the process past the limit |
+| Processor time, `FORENSIC_PARSE_MAX_CPU_S` (six hours) | the kernel (`RLIMIT_CPU`) | the kernel (`RLIMIT_CPU`) | not enforced: that takes a job object, which the standard library does not offer; the deadline, where one is set, is the bound |
+| Deadline, `FORENSIC_INGEST_MAX_S` | asked to stop, killed five seconds later with its process group | as Linux | asked to stop, killed five seconds later with the processes under it the server can see |
+| Network | none, where the system lets an unprivileged process have a network namespace of its own: the process has no interface, loopback included; otherwise not isolated | not isolated | not isolated |
+| Another account, `FORENSIC_PARSE_UID` | when the server runs as root | when the server runs as root | not available |
+| Core dumps | off | off | not applicable |
+
+The server logs what took effect at the first parse, and again if it changes (`parse processes:
+memory kernel, processor time kernel, network none (namespace), account 1000`). Ubuntu 24.04
+restricts unprivileged user namespaces through AppArmor, and Docker's default seccomp profile
+refuses them, so there the network line says it is not isolated and why; in
+`docker-compose.public.yml` the container's internal network is what keeps a parse off the
+network. Nothing in the parse process checks its own sockets: a check inside a process that may
+have been taken over is not a boundary, so where the system offers none, this page says so
+instead.
+
+What a parse process still reaches is what its account can. As the server's own account, that
+is the staging area with any other upload in it, the case stores, and a `.env` file if the
+configuration is kept in one: the access token is then in that file even though it is not in the
+environment. Running the server as root with `FORENSIC_PARSE_UID` set to an unprivileged account
+(a name or a number) closes that on Linux and macOS: the parse runs as that account, in a folder
+it owns (0700), on evidence the server hands it by a link, and the staging area, the case stores
+and the configuration stay the server's. The interpreter, the virtual environment and the code
+must then be readable by that account and the folders above the staging area passable; the
+server lets other accounts pass through the staging folder, not list it. Nothing requires it: a
+container that runs as an unprivileged user, as the public compose does, and gets its token as an
+environment variable already keeps the token out of the parse's reach, since no file in the
+container holds it.
+
+A parse process that has been taken over can still fill the disk under the staging area or
+`/dev/shm`, and can start processes that leave its process group and outlive it. Containing that
+takes something this server does not set up: a container (the public compose), cgroups or a job
+object.
+
+Starting the parse process adds about 0.2 s to every file. On an archive of 90,000 synthetic
+events the browser-store stream was 7% slower and the server-store ingest 25% shorter, because
+the parse and the writes to the store then run side by side on two cores.
+
+`FORENSIC_PARSE_ISOLATION=0` parses inside the server process, as before. It is for debugging a
+parser, and it gives up everything above: the parser then runs with the token, the keys and every
+case store in reach, without a memory or a processor-time limit, without a network namespace or
+another account, and the deadline is checked only between records and archive members, so a
+parser stuck inside one record holds its worker thread until it returns.
 
 The per-address budget reads the **rightmost** X-Forwarded-For entry, the one the trusted proxy
 observed and appended, not the leftmost, which is whatever the client sent. Caddy's default

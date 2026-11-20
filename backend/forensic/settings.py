@@ -13,6 +13,7 @@ import os
 import secrets
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent  # backend/
@@ -153,6 +154,29 @@ FORENSIC_TMP_MAX_GB = _env_int("FORENSIC_TMP_MAX_GB", 4 if FORENSIC_BROWSER_ONLY
 # about a dozen copies of a message in memory, so a 128 MiB message inside a 128 KiB zip took the
 # parser past 1.7 GiB. A larger message gets an error row that says why it was not read.
 FORENSIC_MAX_MESSAGE_MB = _env_int("FORENSIC_MAX_MESSAGE_MB", 48 if FORENSIC_BROWSER_ONLY else 256)
+# Each parse of uploaded evidence runs in a process of its own (services/ingest/isolation.py, and
+# docs/security.md for what each system enforces). 0 parses inside the server process, for
+# debugging only: a parser bug in a hostile file then reaches the access token, the provider keys
+# and every case store, and the memory and processor-time limits below no longer apply.
+FORENSIC_PARSE_ISOLATION = _env_bool("FORENSIC_PARSE_ISOLATION", True)
+# The memory one parse process may use, in MiB; past it the parse stops with what it had read.
+# A message is held about a dozen times over while it is parsed, so this sits well above twelve
+# times FORENSIC_MAX_MESSAGE_MB. 0 is no limit.
+FORENSIC_PARSE_MAX_MB = _env_int("FORENSIC_PARSE_MAX_MB", 1024 if FORENSIC_BROWSER_ONLY else 4096)
+# The processor time one parse process may use, in seconds, where the system enforces it (Linux and
+# macOS). It stops a parser caught in a loop on a server without FORENSIC_INGEST_MAX_S. 0 is no limit.
+FORENSIC_PARSE_MAX_CPU_S = _env_int("FORENSIC_PARSE_MAX_CPU_S", 6 * 3600)
+# An account (name or number) the parse processes run as when the server runs as root on Linux or
+# macOS. Empty runs them as the server's own account. A name the system does not know stops the
+# server here rather than every parse later.
+FORENSIC_PARSE_UID = os.environ.get("FORENSIC_PARSE_UID", "").strip()
+if FORENSIC_PARSE_UID and not FORENSIC_PARSE_UID.isdigit() and os.name == "posix":
+    import pwd
+
+    try:
+        pwd.getpwnam(FORENSIC_PARSE_UID)
+    except KeyError:
+        raise ImproperlyConfigured(f"FORENSIC_PARSE_UID: no account named {FORENSIC_PARSE_UID!r} on this system") from None
 # Advisory threshold (MB) above which the UI suggests the server store instead of IndexedDB.
 FORENSIC_STORE_THRESHOLD_MB = _env_int("FORENSIC_STORE_THRESHOLD_MB", 150)
 # Files smaller than this are handled fully in memory by the parsers.

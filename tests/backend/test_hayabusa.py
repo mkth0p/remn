@@ -48,8 +48,10 @@ DETECTION = {
 }
 
 FAKE_ENGINE = r"""
-import os, shutil, sys, time
-args = sys.argv[1:]
+import json, os, shutil, sys, time
+# the engine starts without the server's environment, so its test settings come as the first argument
+os.environ.update(json.loads(sys.argv[1]))
+args = sys.argv[2:]
 output = args[args.index("-o") + 1]
 target = args[args.index("-f") + 1] if "-f" in args else args[args.index("-d") + 1]
 assert os.path.exists(target), target
@@ -77,9 +79,12 @@ def engine(tmp_path, monkeypatch):
     monkeypatch.setenv("FAKE_HAYABUSA_OUTPUT", str(fixture))
     monkeypatch.setattr(hayabusa, "binary", lambda: sys.executable)
     monkeypatch.setattr(hayabusa, "rules_dir", lambda: str(tmp_path))
-    monkeypatch.setattr(
-        hayabusa, "command", lambda target, output: [sys.executable, str(script), "-o", output, "-f" if os.path.isfile(target) else "-d", target]
-    )
+
+    def command(target, output):
+        settings = json.dumps({k: v for k, v in os.environ.items() if k.startswith("FAKE_HAYABUSA_")})
+        return [sys.executable, str(script), settings, "-o", output, "-f" if os.path.isfile(target) else "-d", target]
+
+    monkeypatch.setattr(hayabusa, "command", command)
     return fixture
 
 

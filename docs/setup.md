@@ -77,6 +77,15 @@ which of the two decides it. Put the staging area on a disk with room for the la
 mailbox or collection you expect, and the case stores (`FORENSIC_CASES_DIR`) on one with
 room for what it becomes.
 
+Each parse runs in a process of its own, started from the same interpreter in isolated mode
+(`python -I`), so the packages must be installed where that interpreter finds them without
+`PYTHONPATH` or a user site folder, as the virtual environment above does. One parse may use
+`FORENSIC_PARSE_MAX_MB` of memory (4096 by default) and `FORENSIC_PARSE_MAX_CPU_S` seconds of
+processor time (six hours; not enforced on Windows), and is stopped past either with what it had
+read and the reason. A server that runs as root on Linux or macOS can run the parses as another
+account with `FORENSIC_PARSE_UID`. What each system enforces, and what
+`FORENSIC_PARSE_ISOLATION=0` gives up, is on the [security page](security.md#each-parse-in-a-process-of-its-own).
+
 ## Run
 
 One process, one port, the built browser application served by the API:

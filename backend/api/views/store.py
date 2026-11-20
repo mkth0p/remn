@@ -9,7 +9,6 @@ from __future__ import annotations
 import hmac
 import json
 import logging
-import shutil
 import time
 from collections.abc import Iterator
 from typing import Any
@@ -25,8 +24,10 @@ from api.params import BadParameter, whole_number
 from api.views.upload import discard_upload, get_upload
 from services.analysis import hayabusa
 from services.common import ndjson_line
-from services.ingest.package import PackageSource
-from services.ingest.pipeline import EvtxSource, MailSource, MailStats, detect_mail_format
+from services.ingest import isolation
+from services.ingest.isolation import ParseStopped
+from services.ingest.package import request_budget
+from services.ingest.pipeline import MailStats, detect_mail_format
 from services.parsers import evtx_parser
 from services.parsers.mail import pst as pst_mod
 from services.parsers.mail.common import ParseContext
@@ -197,72 +198,57 @@ def ingest(request: HttpRequest, key: str):
         t0 = time.time()
         count = 0
         last = 0.0
+        stats: dict[str, Any] | None = None
+        partial = False
+        ew: EventWriter | None = None
+        if kind == "package":
+            parse_options = {
+                "ctx": ctx,
+                "include_raw": include_raw,
+                "package_id": str(meta.get("sha256") or ""),
+                "engines": hayabusa.engines(),
+                "filesystem": read_filesystem,
+                "budget": request_budget(),
+            }
+        elif kind == "evtx":
+            parse_options = {"include_raw": include_raw, "engines": hayabusa.available()}
+        else:
+            parse_options = {"ctx": ctx}
         try:
-            findings: list[dict[str, Any]] = []
-            engine_summaries: list[dict[str, Any]] = []
-            if kind == "package":
-                package = PackageSource(name, str(path), None, tmp_dir, ctx, include_raw, str(meta.get("sha256") or ""))
-                package.engines = hayabusa.engines()
-                package.filesystem = read_filesystem
-                ew = EventWriter(st, evidence_id, include_raw=include_raw)
-                pmw = MailWriter(st, evidence_id, keep_bodies=keep_bodies)
-                try:
-                    for row in package:
-                        (pmw if row["type"] == "mail" else ew).add(row)
-                        count += 1
-                        if time.time() - last > 0.5:
-                            job.update(rows=count, format=package.format, files=len(package.files))
-                            job.check()
-                            last = time.time()
-                finally:
-                    ew.flush()
-                    pmw.flush()
-                stats = package.stats()
+            ew = EventWriter(st, evidence_id, include_raw=include_raw) if kind in ("evtx", "package") else None
+            mw = MailWriter(st, evidence_id, keep_bodies=keep_bodies) if kind in ("mail", "package") else None
+            # the evidence is read in a process of its own; the rows come back here to be written
+            parse = isolation.start(
+                kind, name=name, path=str(path), data=None, tmp_dir=tmp_dir, options=parse_options, check=job.check, notify=lambda: job.update(phase="engines")
+            )
+            try:
+                for row in parse:
+                    (mw if kind == "mail" or row.get("type") == "mail" else ew).add(row)
+                    count += 1
+                    if time.time() - last > 0.5:
+                        job.update(rows=count, format=parse.format, files=parse.entries())
+                        job.check()
+                        last = time.time()
+            except ParseStopped as exc:
+                # what was read before the stop is in the store; the evidence says it is incomplete
+                stats = parse.result(str(exc))["stats"]
+                partial = True
+                raise
+            finally:
+                parse.close()
+                for writer in (ew, mw):
+                    if writer is not None:
+                        writer.flush()
+            result = parse.result()
+            stats = result["stats"]
+            if ew is not None:
                 count -= _already_in_case(stats, ew)
-                fmt = package.format
-                findings = hayabusa.resolve_refs(st, evidence_id, package.findings)
-                engine_summaries = package.engine_summaries
-            elif kind == "evtx":
-                src = EvtxSource(name, str(path), None, tmp_dir, include_raw=include_raw)
-                w = EventWriter(st, evidence_id, include_raw=include_raw)
-                for row in src:
-                    w.add(row)
-                    count += 1
-                    if time.time() - last > 0.5:
-                        job.update(rows=count, format=src.format, files=len(src.files))
-                        job.check()
-                        last = time.time()
-                w.flush()
-                stats = src.stats.to_dict()
-                stats["files"] = src.files
-                count -= _already_in_case(stats, w)
-                fmt = src.format
-                if hayabusa.available():
-                    job.update(phase="engines")
-                    # an archive gives the engine its .evtx members, and a format it cannot read is said, not run
-                    staged, said = hayabusa.stage_upload(name, str(path), None, src.format, tmp_dir)
-                    engine_summaries = [said]
-                    if staged is not None:
-                        try:
-                            found, summary = hayabusa.run(staged, tmp_dir)
-                        finally:
-                            shutil.rmtree(staged, ignore_errors=True)
-                        findings = hayabusa.resolve_refs(st, evidence_id, found)
-                        engine_summaries = [hayabusa.finish(summary, said)]
-            else:
-                src2 = MailSource(name, str(path), None, ctx, tmp_dir)
-                mw = MailWriter(st, evidence_id, keep_bodies=keep_bodies)
-                for row in src2:
-                    mw.add(row)
-                    count += 1
-                    if time.time() - last > 0.5:
-                        job.update(rows=count, format=src2.format)
-                        job.check()
-                        last = time.time()
-                mw.flush()
-                stats = src2.stats.to_dict()
-                fmt = src2.format
+            fmt = parse.format
+            findings = hayabusa.resolve_refs(st, evidence_id, parse.findings)
+            engine_summaries = result.get("engineSummaries") or []
         except Exception:
+            if partial and stats is not None and ew is not None:
+                count -= _already_in_case(stats, ew)
             st.upsert_evidence(
                 {
                     "id": evidence_id,
@@ -272,7 +258,7 @@ def ingest(request: HttpRequest, key: str):
                     "sha256Client": sha_client or None,
                     "sha256Server": meta.get("sha256"),
                     "count": count,
-                    "stats": None,
+                    "stats": stats,
                     "addedAt": evidence.get("addedAt"),
                     "status": "error",
                 }
