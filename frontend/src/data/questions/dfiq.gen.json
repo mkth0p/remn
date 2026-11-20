@@ -109,13 +109,26 @@
   "m365-directory": {
    "label": "Entra directory audit records",
    "categories": [
-    "M365 Entra"
+    "M365 Entra",
+    "Entra audit"
    ]
   },
   "entra-signin": {
    "label": "Entra sign-in logs",
    "channels": [
     "Entra SignIn"
+   ]
+  },
+  "entra-risk": {
+   "label": "Entra ID Protection risk detections and risky users",
+   "categories": [
+    "Entra risk"
+   ]
+  },
+  "message-trace": {
+   "label": "Exchange Online message trace",
+   "categories": [
+    "Exchange message trace"
    ]
   },
   "mail": {
@@ -2354,7 +2367,8 @@
     "autoruns",
     "services",
     "tasks",
-    "m365-audit"
+    "m365-audit",
+    "m365-directory"
    ],
    "attack": [
     "T1543.003",
@@ -2420,14 +2434,16 @@
    "tags": [],
    "evidence": [
     "entra-signin",
-    "m365-audit"
+    "m365-audit",
+    "entra-risk"
    ],
    "attack": [
     "T1078.004"
    ],
    "ruleTags": [
     "sign-in",
-    "geo"
+    "geo",
+    "risk"
    ],
    "searches": [
     {
@@ -2449,6 +2465,23 @@
         "value": "Entra SignIn"
        }
       ]
+     }
+    },
+    {
+     "source": "events",
+     "label": "risk detections and risky users",
+     "filter": {
+      "conditions": [
+       {
+        "field": "category",
+        "op": "eq",
+        "value": "Entra risk"
+       }
+      ],
+      "sort": {
+       "field": "ts",
+       "dir": "asc"
+      }
      }
     }
    ],
@@ -2475,7 +2508,7 @@
    "searches": [
     {
      "source": "events",
-     "label": "authentication methods changed",
+     "label": "authentication methods and devices added or changed",
      "filter": {
       "conditions": [
        {
@@ -2485,7 +2518,11 @@
          "security info",
          "StrongAuthentication",
          "Update user.",
-         "authentication method"
+         "authentication method",
+         "Passkey",
+         "passwordless",
+         "Windows Hello",
+         "Register device."
         ]
        }
       ]
@@ -2503,7 +2540,8 @@
    "evidence": [
     "entra-signin",
     "m365-audit",
-    "security"
+    "security",
+    "entra-risk"
    ],
    "attack": [
     "T1110.001",
@@ -2548,7 +2586,8 @@
    "description": "",
    "tags": [],
    "evidence": [
-    "m365-exchange"
+    "m365-exchange",
+    "message-trace"
    ],
    "attack": [
     "T1564.008"
@@ -2575,8 +2614,26 @@
        }
       ]
      }
+    },
+    {
+     "source": "events",
+     "label": "messages an inbox rule sent (extended message trace)",
+     "filter": {
+      "conditions": [
+       {
+        "field": "data.source",
+        "op": "eq",
+        "value": "MAILBOXRULE"
+       }
+      ],
+      "sort": {
+       "field": "ts",
+       "dir": "asc"
+      }
+     }
     }
    ],
+   "note": "The message trace shows what a rule did, not the rule; only the extended report marks a message an inbox rule sent (source MAILBOXRULE).",
    "approaches": []
   },
   {
@@ -2586,14 +2643,16 @@
    "description": "",
    "tags": [],
    "evidence": [
-    "m365-exchange"
+    "m365-exchange",
+    "message-trace"
    ],
    "attack": [
     "T1114.003"
    ],
    "ruleTags": [
     "forwarding",
-    "transport-rule"
+    "transport-rule",
+    "message-trace"
    ],
    "searches": [
     {
@@ -2612,8 +2671,26 @@
        }
       ]
      }
+    },
+    {
+     "source": "events",
+     "label": "message trace",
+     "filter": {
+      "conditions": [
+       {
+        "field": "category",
+        "op": "eq",
+        "value": "Exchange message trace"
+       }
+      ],
+      "sort": {
+       "field": "ts",
+       "dir": "asc"
+      }
+     }
     }
    ],
+   "note": "The audit log shows the forwarding set up; the message trace shows the mail that left. The message trace rules need the internal domains in Settings.",
    "approaches": []
   },
   {
@@ -2648,6 +2725,9 @@
         "op": "in",
         "value": [
          "Consent to application.",
+         "Add delegated permission grant.",
+         "Add OAuth2PermissionGrant.",
+         "Add app role assignment to service principal.",
          "Add service principal credentials.",
          "Add application.",
          "Add-MailboxPermission",
@@ -2780,7 +2860,8 @@
    "tags": [],
    "evidence": [
     "m365-exchange",
-    "mail"
+    "mail",
+    "message-trace"
    ],
    "attack": [
     "T1534"
@@ -2815,6 +2896,23 @@
         "value": "sent"
        }
       ]
+     }
+    },
+    {
+     "source": "events",
+     "label": "message trace",
+     "filter": {
+      "conditions": [
+       {
+        "field": "category",
+        "op": "eq",
+        "value": "Exchange message trace"
+       }
+      ],
+      "sort": {
+       "field": "ts",
+       "dir": "asc"
+      }
      }
     }
    ],
@@ -2854,7 +2952,8 @@
    "description": "",
    "tags": [],
    "evidence": [
-    "mail"
+    "mail",
+    "message-trace"
    ],
    "attack": [
     "T1566"
@@ -2880,8 +2979,26 @@
        "dir": "asc"
       }
      }
+    },
+    {
+     "source": "events",
+     "label": "message trace, by subject",
+     "filter": {
+      "conditions": [
+       {
+        "field": "category",
+        "op": "eq",
+        "value": "Exchange message trace"
+       }
+      ],
+      "sort": {
+       "field": "objectName",
+       "dir": "asc"
+      }
+     }
     }
    ],
+   "note": "The message trace lists every recipient of a message, delivered or not, without its content; the mails page groups the messages it holds into campaigns.",
    "approaches": []
   }
  ],

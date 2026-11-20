@@ -1,0 +1,255 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#auditLogs/directoryAudits",
+  "value": [
+    {
+      "id": "Directory_8c1d4f2e-3b5a-4c6d-9e7f-0a1b2c3d4e5f_KX2RG_10234561",
+      "category": "ApplicationManagement",
+      "correlationId": "8c1d4f2e-3b5a-4c6d-9e7f-0a1b2c3d4e5f",
+      "result": "success",
+      "resultReason": "",
+      "activityDisplayName": "Consent to application",
+      "activityDateTime": "2026-09-01T10:05:12.4810000Z",
+      "loggedByService": "Core Directory",
+      "operationType": "Assign",
+      "initiatedBy": {
+        "user": {
+          "id": "5f1c2a3b-0d4e-4f60-8a71-92b3c4d5e6f7",
+          "displayName": "Alice Example",
+          "userPrincipalName": "alice@contoso.com",
+          "ipAddress": "198.51.100.23"
+        },
+        "app": null
+      },
+      "targetResources": [
+        {
+          "id": "7e8f9a0b-1c2d-4e3f-8a4b-5c6d7e8f9a0b",
+          "displayName": "Mail Sync Helper",
+          "type": "ServicePrincipal",
+          "userPrincipalName": null,
+          "groupType": null,
+          "modifiedProperties": [
+            {
+              "displayName": "ConsentContext.IsAdminConsent",
+              "oldValue": null,
+              "newValue": "\"False\""
+            },
+            {
+              "displayName": "ConsentContext.OnBehalfOfAll",
+              "oldValue": null,
+              "newValue": "\"False\""
+            },
+            {
+              "displayName": "ConsentAction.Permissions",
+              "oldValue": null,
+              "newValue": "\"[] => [[Id: 1, ClientId: 7e8f9a0b, PrincipalId: 5f1c2a3b, ResourceId: 2b3c4d5e, ConsentType: Principal, Scope: Mail.Read Mail.Send offline_access]]; \""
+            },
+            {
+              "displayName": "TargetId.ServicePrincipalNames",
+              "oldValue": null,
+              "newValue": "\"c3d4e5f6-a7b8-4c9d-8e0f-1a2b3c4d5e6f\""
+            }
+          ]
+        }
+      ],
+      "additionalDetails": [
+        {
+          "key": "User-Agent",
+          "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        },
+        {
+          "key": "AppId",
+          "value": "c3d4e5f6-a7b8-4c9d-8e0f-1a2b3c4d5e6f"
+        }
+      ]
+    },
+    {
+      "id": "UserManagement_2d3e4f5a-6b7c-4d8e-9f0a-1b2c3d4e5f6a_RG7XZ_20934871",
+      "category": "UserManagement",
+      "correlationId": "2d3e4f5a-6b7c-4d8e-9f0a-1b2c3d4e5f6a",
+      "result": "success",
+      "resultReason": "User registered Authenticator App with Notification and Code",
+      "activityDisplayName": "User registered security info",
+      "activityDateTime": "2026-09-01T10:09:40.1000000Z",
+      "loggedByService": "Authentication Methods",
+      "operationType": "Add",
+      "initiatedBy": {
+        "user": {
+          "id": "5f1c2a3b-0d4e-4f60-8a71-92b3c4d5e6f7",
+          "displayName": "Alice Example",
+          "userPrincipalName": "alice@contoso.com",
+          "ipAddress": "198.51.100.23"
+        },
+        "app": null
+      },
+      "targetResources": [
+        {
+          "id": "5f1c2a3b-0d4e-4f60-8a71-92b3c4d5e6f7",
+          "displayName": "Alice Example",
+          "type": "User",
+          "userPrincipalName": "alice@contoso.com",
+          "groupType": null,
+          "modifiedProperties": []
+        }
+      ],
+      "additionalDetails": []
+    },
+    {
+      "id": "Directory_4f5a6b7c-8d9e-4f0a-8b1c-2d3e4f5a6b7c_PL3QW_30982312",
+      "category": "Device",
+      "correlationId": "4f5a6b7c-8d9e-4f0a-8b1c-2d3e4f5a6b7c",
+      "result": "success",
+      "resultReason": "",
+      "activityDisplayName": "Register device",
+      "activityDateTime": "2026-09-01T10:14:02.7700000Z",
+      "loggedByService": "Device Registration Service",
+      "operationType": "Add",
+      "initiatedBy": {
+        "user": {
+          "id": "5f1c2a3b-0d4e-4f60-8a71-92b3c4d5e6f7",
+          "displayName": "Alice Example",
+          "userPrincipalName": "alice@contoso.com",
+          "ipAddress": null
+        },
+        "app": null
+      },
+      "targetResources": [
+        {
+          "id": "6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d",
+          "displayName": "DESKTOP-EXAMPLE1",
+          "type": "Device",
+          "userPrincipalName": null,
+          "groupType": null,
+          "modifiedProperties": []
+        }
+      ],
+      "additionalDetails": [
+        {
+          "key": "Device OS",
+          "value": "Windows"
+        },
+        {
+          "key": "Device Trust Type",
+          "value": "Workplace"
+        }
+      ]
+    },
+    {
+      "id": "Directory_9a0b1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d_ZX81K_40128844",
+      "category": "ApplicationManagement",
+      "correlationId": "9a0b1c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d",
+      "result": "failure",
+      "resultReason": "Microsoft.Online.Workflows.InsufficientPrivilegesException",
+      "activityDisplayName": "Add service principal credentials",
+      "activityDateTime": "2026-09-01T10:16:30.0000000Z",
+      "loggedByService": "Core Directory",
+      "operationType": "Update",
+      "initiatedBy": {
+        "user": {
+          "id": "5f1c2a3b-0d4e-4f60-8a71-92b3c4d5e6f7",
+          "displayName": "Alice Example",
+          "userPrincipalName": "alice@contoso.com",
+          "ipAddress": "198.51.100.23"
+        },
+        "app": null
+      },
+      "targetResources": [
+        {
+          "id": "7e8f9a0b-1c2d-4e3f-8a4b-5c6d7e8f9a0b",
+          "displayName": "Mail Sync Helper",
+          "type": "ServicePrincipal",
+          "userPrincipalName": null,
+          "groupType": null,
+          "modifiedProperties": []
+        }
+      ],
+      "additionalDetails": []
+    },
+    {
+      "id": "Directory_1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e_MN4BV_50213477",
+      "category": "ApplicationManagement",
+      "correlationId": "1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e",
+      "result": "success",
+      "resultReason": "",
+      "activityDisplayName": "Add app role assignment to service principal",
+      "activityDateTime": "2026-09-01T10:18:00.0000000Z",
+      "loggedByService": "Core Directory",
+      "operationType": "Assign",
+      "initiatedBy": {
+        "user": null,
+        "app": {
+          "appId": "c3d4e5f6-a7b8-4c9d-8e0f-1a2b3c4d5e6f",
+          "displayName": "Mail Sync Helper",
+          "servicePrincipalId": "7e8f9a0b-1c2d-4e3f-8a4b-5c6d7e8f9a0b",
+          "servicePrincipalName": null
+        }
+      },
+      "targetResources": [
+        {
+          "id": "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e",
+          "displayName": "Microsoft Graph",
+          "type": "ServicePrincipal",
+          "userPrincipalName": null,
+          "groupType": null,
+          "modifiedProperties": [
+            {
+              "displayName": "AppRole.Value",
+              "oldValue": null,
+              "newValue": "\"Mail.ReadWrite\""
+            }
+          ]
+        }
+      ],
+      "additionalDetails": []
+    },
+    {
+      "id": "Directory_3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f_QA6TY_60345522",
+      "category": "RoleManagement",
+      "correlationId": "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f",
+      "result": "success",
+      "resultReason": "",
+      "activityDisplayName": "Add member to role",
+      "activityDateTime": "2026-09-02T08:00:00.0000000Z",
+      "loggedByService": "Core Directory",
+      "operationType": "Assign",
+      "initiatedBy": {
+        "user": {
+          "id": "0a9b8c7d-6e5f-4a3b-9c2d-1e0f9a8b7c6d",
+          "displayName": "Tenant Admin",
+          "userPrincipalName": "admin@contoso.com",
+          "ipAddress": "203.0.113.10"
+        },
+        "app": null
+      },
+      "targetResources": [
+        {
+          "id": "4d5e6f7a-8b9c-4d0e-9f1a-2b3c4d5e6f7a",
+          "displayName": null,
+          "type": "User",
+          "userPrincipalName": "bob@contoso.com",
+          "groupType": null,
+          "modifiedProperties": [
+            {
+              "displayName": "Role.ObjectID",
+              "oldValue": null,
+              "newValue": "\"62e90394-69f5-4237-9190-012177145e10\""
+            },
+            {
+              "displayName": "Role.DisplayName",
+              "oldValue": null,
+              "newValue": "\"Global Administrator\""
+            }
+          ]
+        },
+        {
+          "id": "62e90394-69f5-4237-9190-012177145e10",
+          "displayName": "Global Administrator",
+          "type": "Role",
+          "userPrincipalName": null,
+          "groupType": null,
+          "modifiedProperties": []
+        }
+      ],
+      "additionalDetails": []
+    }
+  ]
+}
