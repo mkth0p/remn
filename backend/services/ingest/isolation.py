@@ -1096,8 +1096,25 @@ def _cpu_limit(signum: int, frame: Any) -> None:
     raise CpuLimit()
 
 
+def _uncaught(kind: type[BaseException], exc: BaseException | None, tb: Any) -> None:
+    """An exception nothing in the child caught. The child shares the server's stderr, so it is
+    logged as the child's other errors are: through the server's log filter, which keeps its type
+    and place and drops its text, since that text can quote the evidence."""
+    if not issubclass(kind, SystemExit):
+        log.critical("the parse process stopped on an error nothing in it caught", exc_info=(kind, exc, tb))
+
+
 def child_main(kinds: dict[str, type[_Work]] | None = None) -> None:
     """The child: read the job, lock down, parse, report, exit."""
+    # Until the server's logging configuration replaces it, a handler with the same filter is the
+    # one that writes to stderr; an uncaught error in a thread is logged the same way.
+    from forensic.logfilter import RedactEvidence
+
+    early = logging.StreamHandler()
+    early.addFilter(RedactEvidence())
+    logging.getLogger().addHandler(early)
+    sys.excepthook = _uncaught
+    threading.excepthook = lambda args: _uncaught(args.exc_type, args.exc_value, args.exc_traceback)
     # the protocol gets the real stdout; anything a library prints goes to stderr instead
     out = os.fdopen(os.dup(1), "wb")
     os.dup2(2, 1)

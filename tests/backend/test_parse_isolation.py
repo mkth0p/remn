@@ -281,6 +281,19 @@ def test_a_parse_process_that_crashes_is_reported_with_what_it_had_sent(tmp_path
     assert ("SIGSEGV" in error) if os.name != "nt" else ("0xc0000005" in error)
 
 
+def test_an_error_in_the_parse_process_start_reaches_the_server_log_without_its_text(tmp_path, hostile, capfd):
+    """The parse process shares the server's stderr, and an exception nothing in it caught was
+    printed there in full, with a text that can quote the evidence."""
+    hostile("start_fails")
+    parse = start(tmp_dir=str(tmp_path))
+    with pytest.raises(ParseStopped, match="the parse process ended"):
+        list(parse)
+    parse.close()
+    said = capfd.readouterr().err
+    assert "invented evidence text" not in said and "Fabrikam" not in said, said
+    assert "ValueError at hostile_parsers.py" in said, said
+
+
 def test_a_cancelled_job_stops_its_parse_process(tmp_path, hostile):
     hostile("silent")
 

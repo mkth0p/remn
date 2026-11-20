@@ -19,15 +19,17 @@ import tempfile
 import time
 import zipfile
 from collections.abc import Callable, Iterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from services.common import AnalystMessage, sha256_file
 from services.ingest.staging import member_ceiling
 from services.parsers import evtx_parser, m365
-from services.parsers.mail import mbox as mbox_mod
-from services.parsers.mail import pst as pst_mod
-from services.parsers.mail.common import ParseContext, parse_message_bytes
-from services.parsers.mail.msg import parse_msg_bytes
+
+# The mail parsers are imported where mail is read. They bring the attachment analyser, the URL
+# and look-alike checks, tldextract and requests, about half the start of a parse process, which
+# a parse of event logs does not need.
+if TYPE_CHECKING:
+    from services.parsers.mail.common import ParseContext
 
 log = logging.getLogger(__name__)
 
@@ -77,6 +79,8 @@ def detect_mail_format(name: str, head: bytes) -> str:
         return "pst"
     if head.startswith(_OLE):
         return "msg"
+    from services.parsers.mail import mbox as mbox_mod
+
     if mbox_mod.looks_like_mbox(head) or n.endswith((".mbox", ".mbx")):
         return "mbox"
     if n.endswith((".pst", ".ost")):
@@ -567,6 +571,8 @@ def _error_row(folder: str, exc: Exception, fmt: str) -> dict[str, Any]:
 
 def iter_mbox_fileobj(fileobj: Any, ctx: ParseContext, folder: str) -> Iterator[dict[str, Any]]:
     """Split an mbox stream on 'From ' separator lines without needing a path."""
+    from services.parsers.mail.common import parse_message_bytes
+
     from_line = re.compile(rb"^From .*\r?\n$")
     buf: list[bytes] = []
     buffered = 0  # bytes of the current message, counted past the limit without keeping them
@@ -638,6 +644,10 @@ class MailSource:
         self.format = detect_mail_format(name, head)
 
     def __iter__(self) -> Iterator[dict[str, Any]]:
+        from services.parsers.mail import pst as pst_mod
+        from services.parsers.mail.common import parse_message_bytes
+        from services.parsers.mail.msg import parse_msg_bytes
+
         fmt = self.format
         if fmt == "pst" and not pst_mod.available():
             raise AnalystMessage("PST/OST support requires libpff-python (see backend/requirements-optional.txt)")
@@ -684,6 +694,11 @@ class MailSource:
         return row
 
     def _iter_archive(self) -> Iterator[dict[str, Any]]:
+        from services.parsers.mail import mbox as mbox_mod
+        from services.parsers.mail import pst as pst_mod
+        from services.parsers.mail.common import parse_message_bytes
+        from services.parsers.mail.msg import parse_msg_bytes
+
         index = 0
         for member in iter_archive(self.path, self.data, self.format, self.members, self.max_member, self.deadline):
             low = member.name.lower()

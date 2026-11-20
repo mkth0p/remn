@@ -270,7 +270,8 @@ The log is the one thing on a browser-only server that outlives a parse. It hold
 lines: requests refused, sweeps, the engine's state. A failure in the parsing code, in a request
 or in the web server is logged by exception type and place (`UnicodeDecodeError at common.py:104`),
 never with the exception's text, which is often a piece of the input or a path on the server. This
-holds in every mode; `FORENSIC_DEBUG=1` keeps the text and the traceback for a developer on their
+holds in every mode, and for an error nothing caught in the parse process, which writes to the
+server's own stderr; `FORENSIC_DEBUG=1` keeps the text and the traceback for a developer on their
 own machine, and has no such effect in browser-only mode. In browser-only mode the log also never
 names a file, member or attachment. `docker-compose.public.yml` rotates the log (three files of
 10 MB) rather than keeping it for the life of the container.
@@ -394,7 +395,8 @@ A parse process that has been taken over can still fill the disk under the stagi
 takes something this server does not set up: a container (the public compose), cgroups or a job
 object.
 
-Starting the parse process adds about 0.2 s to every file. On an archive of 90,000 synthetic
+Starting the parse process adds about 0.1 s to every file, about 0.2 s for a mailbox or a
+package, whose parsers take longer to load. On an archive of 90,000 synthetic
 events the browser-store stream was 7% slower and the server-store ingest 25% shorter, because
 the parse and the writes to the store then run side by side on two cores.
 
