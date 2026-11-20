@@ -32,7 +32,7 @@ from services.parsers.mail import pst as pst_mod
 from services.parsers.mail.common import ParseContext
 from services.store import queries as Q
 from services.store import rules as R
-from services.store.casestore import KEY_RE, registry
+from services.store.casestore import KEY_RE, QueryStopped, StoreBusyError, StoreVersionError, TimeLimit, registry
 from services.store.sqlfilter import FilterError
 from services.store.writers import EventWriter, MailWriter
 
@@ -61,6 +61,28 @@ def _store(key: str, create: bool = True):
         return None, JsonResponse({"error": "invalid case key"}, status=400)
     except FileNotFoundError:
         return None, JsonResponse({"error": "unknown case store"}, status=404)
+    except StoreVersionError as exc:
+        # the message was written for the analyst and the operator: which versions, and what to do
+        return None, JsonResponse({"error": str(exc), "code": "storeVersion"}, status=409)
+    except StoreBusyError as exc:
+        busy = JsonResponse({"error": str(exc), "code": "storeBusy"}, status=503)
+        busy["Retry-After"] = "30"
+        return None, busy
+
+
+QUERY_STOPPED = (
+    "the query was stopped after {seconds} s, the most FORENSIC_STORE_QUERY_MAX_S allows one query on a server store. "
+    "Narrow the filter or the time range, or ask the operator to raise the limit."
+)
+
+
+def _limit() -> TimeLimit:
+    """The time one store query may take before it is stopped."""
+    return TimeLimit(settings.FORENSIC_STORE_QUERY_MAX_S, QUERY_STOPPED)
+
+
+def _stopped(exc: QueryStopped) -> JsonResponse:
+    return JsonResponse({"error": str(exc), "code": "queryStopped"}, status=504)
 
 
 def _ctx_from(settings_obj: dict[str, Any] | None) -> ParseContext:
@@ -101,7 +123,11 @@ def store_root(request: HttpRequest, key: str):
     st, err = _store(key, create=False)
     if err:
         return err
-    return JsonResponse(Q.summary(st))
+    try:
+        with _limit():
+            return JsonResponse(Q.summary(st))
+    except QueryStopped as exc:
+        return _stopped(exc)
 
 
 @require_http_methods(["DELETE"])
@@ -431,7 +457,10 @@ def _query(request: HttpRequest, key: str, fn):
         return err
     body = _json(request) if request.method == "POST" else {}
     try:
-        return JsonResponse(fn(st, body), safe=False)
+        with _limit():
+            return JsonResponse(fn(st, body), safe=False)
+    except QueryStopped as exc:
+        return _stopped(exc)
     except (FilterError, BadParameter) as exc:
         return JsonResponse({"error": str(exc)}, status=400)
     except (duckdb.ProgrammingError, duckdb.DataError) as exc:
@@ -508,7 +537,10 @@ def facets(request: HttpRequest, key: str):
         return err
     try:
         limit = whole_number(request.GET.get("limit"), "limit", 50)
-        return JsonResponse(Q.facets(st, request.GET.get("source", "events"), request.GET.get("field", "eventId"), limit), safe=False)
+        with _limit():
+            return JsonResponse(Q.facets(st, request.GET.get("source", "events"), request.GET.get("field", "eventId"), limit), safe=False)
+    except QueryStopped as exc:
+        return _stopped(exc)
     except (FilterError, BadParameter) as exc:
         return JsonResponse({"error": str(exc)}, status=400)
 
@@ -519,7 +551,10 @@ def row(request: HttpRequest, key: str):
     if err:
         return err
     try:
-        r = Q.get_row(st, request.GET.get("source", "events"), int(request.GET.get("id", "0")))
+        with _limit():
+            r = Q.get_row(st, request.GET.get("source", "events"), int(request.GET.get("id", "0")))
+    except QueryStopped as exc:
+        return _stopped(exc)
     except ValueError:
         return JsonResponse({"error": "bad id"}, status=400)
     if r is None:
@@ -543,18 +578,22 @@ def iocs(request: HttpRequest, key: str):
         offset = whole_number(g.get("offset"), "offset", 0, minimum=0)
     except BadParameter as exc:
         return JsonResponse({"error": str(exc)}, status=400)
-    return JsonResponse(
-        Q.list_iocs(
-            st,
-            g.get("kind") or None,
-            g.get("q") or None,
-            g.get("bad") in ("1", "true"),
-            g.get("unchecked") in ("1", "true"),
-            limit,
-            offset,
-            g.get("sort", "verdict"),
-        )
-    )
+    try:
+        with _limit():
+            return JsonResponse(
+                Q.list_iocs(
+                    st,
+                    g.get("kind") or None,
+                    g.get("q") or None,
+                    g.get("bad") in ("1", "true"),
+                    g.get("unchecked") in ("1", "true"),
+                    limit,
+                    offset,
+                    g.get("sort", "verdict"),
+                )
+            )
+    except QueryStopped as exc:
+        return _stopped(exc)
 
 
 @require_POST
@@ -595,7 +634,9 @@ def rules_run(request: HttpRequest, key: str):
 
     def run(job: Job) -> dict[str, Any]:
         job.update(index=0, total=len(rules))
-        return R.run_rules(st, rules, rule_settings, progress=lambda p: job.update(**p), cancelled=lambda: job.cancelled)
+        return R.run_rules(
+            st, rules, rule_settings, progress=lambda p: job.update(**p), cancelled=lambda: job.cancelled, rule_max_s=settings.FORENSIC_STORE_RULE_MAX_S
+        )
 
     job = manager.submit("rules", key, run, label=f"{len(rules)} rules")
     return JsonResponse({"jobId": job.id})

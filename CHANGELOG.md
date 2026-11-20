@@ -188,6 +188,27 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   the server), unfinished uploads reserve the size they announced in the staging budget, and the
   chains and mail enrichment paths refuse a server case key in browser-only mode, as stories and
   relationships already did. A non-ASCII access token is a 401 rather than a server error.
+- A server case store records its schema version and is never opened half-way by a release that
+  cannot read it. A store written by an older release, or before versions were kept, is upgraded
+  when it is opened, in one transaction: the store keeps a record of the step and the log says it,
+  and a step that fails rolls back and leaves the store as it was. A store written by a newer
+  release is refused before anything in it changes, and the store routes answer 409
+  (`storeVersion`) with a message naming both versions. `tools/store_backup.py` backs up, checks
+  and restores the server stores: it copies each store byte for byte, write-ahead log included,
+  while it holds the store read-only, writes a manifest of digests, schema version and row counts,
+  and opens the copy to check it. A store the server holds open is skipped with the reason, and
+  while the tool holds a store the server answers that case with 503 (`storeBusy`). A restore
+  checks the backup first and never writes over a case; with `--replace` it keeps the case it
+  replaces aside. `docs/setup.md` gives the backup, upgrade and rollback steps. A store query
+  (search, count, aggregate, stack, timeline, facets, pivot, a row, the summary, the indicator
+  list, SQL) past `FORENSIC_STORE_QUERY_MAX_S` (60 s) is stopped and answered with 504
+  (`queryStopped`) and a message naming the limit. A rule past `FORENSIC_STORE_RULE_MAX_S` (300 s)
+  is stopped, listed among the run's errors, and the run goes on; the SQL view's fixed 30 s gives
+  way to the store query limit. `FORENSIC_STORE_MEMORY_MB` and `FORENSIC_STORE_THREADS` set what
+  each open store may use. A store unused for `FORENSIC_STORE_IDLE_S` seconds (600) is closed once
+  no request or job holds it, and opens again on its next use. REMN does not encrypt stores,
+  backups or the browser database, and the security model now says that a server keeping evidence
+  must keep its cases folder, staging area and backups on an encrypted volume.
 - Levels measured rather than inherited: 116 low rules that raise nothing on the evtx-baseline
   clean machines are now medium, and ten rules whose only findings are on those machines are now
   low (SigmaHQ rules through `rules/community/levels.json`, which a re-import keeps; REMN's own

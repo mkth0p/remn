@@ -210,6 +210,19 @@ OFFLINE_LISTS_DIR = DATA_DIR / "lists"
 YARA_RULES_DIR = DATA_DIR / "yara"
 # Server-side case stores (DuckDB, one folder per case) for gigabyte-scale evidence.
 CASES_DIR = Path(os.environ.get("FORENSIC_CASES_DIR", DATA_DIR / "cases"))
+# Memory (MiB) and worker threads each open case store may use; 0 threads is one fewer than the
+# processors, between 2 and 8. Every open store has its own, so the memory of the stores open at
+# once adds up: keep it under what the machine or container gives REMN.
+FORENSIC_STORE_MEMORY_MB = _env_int("FORENSIC_STORE_MEMORY_MB", 2048)
+FORENSIC_STORE_THREADS = _env_int("FORENSIC_STORE_THREADS", 0)
+# A store nobody has used for this many seconds is closed, and its memory released, as soon as no
+# request or job holds it; its next use opens it again. 0 keeps every store open until the server stops.
+FORENSIC_STORE_IDLE_S = _env_int("FORENSIC_STORE_IDLE_S", 600)
+# How long one query on a server store (search, count, aggregate, stack, timeline, facets, pivot,
+# row, summary, SQL) may run, and one rule of a rule run, before it is stopped and the analyst is
+# told so. 0 is no limit.
+FORENSIC_STORE_QUERY_MAX_S = _env_int("FORENSIC_STORE_QUERY_MAX_S", 60)
+FORENSIC_STORE_RULE_MAX_S = _env_int("FORENSIC_STORE_RULE_MAX_S", 300)
 
 # Bundled detection rules (YAML)
 RULES_DIR = ROOT_DIR / "rules"

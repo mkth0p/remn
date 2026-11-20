@@ -19,6 +19,19 @@ Upload temporary files are deleted when the parse ends, including when the clien
 part-way through; a resumable chunked upload that is never completed is removed by the sweep
 described below. See [Storage modes](storage.md).
 
+REMN encrypts neither a store nor a backup of one, nor the browser's database. Evidence kept
+on a server therefore needs the disk under it encrypted: the cases folder
+(`FORENSIC_CASES_DIR`), the staging area (`FORENSIC_TMP_DIR`) and wherever store backups are
+written belong on an encrypted volume (LUKS on Linux, BitLocker on Windows, FileVault on
+macOS, or a cloud provider's encrypted disks), with the key kept off that disk. With Docker
+that is the disk that holds Docker's volumes `remn-data` and `remn-tmp` (under
+`/var/lib/docker` by default). This is the minimum for evidence on a server, not an option:
+without it, whoever has the disk, a copy of a backup or an image of the virtual machine reads
+every case. The volume protects a disk that is taken or discarded, not a running server:
+whoever reaches the API with the token, or logs in to the host, reads the cases as before.
+The analyst's own machine, where the browser store lives, is covered the same way by its
+system's disk encryption.
+
 ## What leaves the machine
 
 Nothing, unless the analyst switches it on:
