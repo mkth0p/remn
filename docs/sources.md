@@ -131,6 +131,12 @@ events table:
   `ManagedIdentitySignInLogs`; a record of another category, such as `AuditLogs`, is
   counted as not read); a `.zip` of a whole acquisition folder is walked.
 
+Each export may be written in UTF-8, or in UTF-16 or UTF-32 with a byte order mark, as
+Windows PowerShell's `Export-Csv -Encoding Unicode` and `Out-File` write it. The `#TYPE`
+line `Export-Csv` writes above the header without `-NoTypeInformation` is passed over, and a
+date `ConvertTo-Json` wrote as `\/Date(milliseconds)\/` is read. A UTF-16 file without a
+byte order mark is not recognised.
+
 Outside the Azure Monitor records, whose category says what they are, a record is read as a
 sign-in only when it carries a time (`createdDateTime`), a client address (`ipAddress`) and
 the user or the application signed in to. Entra directory audit

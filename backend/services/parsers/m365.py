@@ -9,7 +9,8 @@ Microsoft-Extractor-Suite / Office-365-Extractor CSV and JSON, Untitled Goose To
 Entra portal CSV, Graph sign-in JSON - as rows of the *events* table, so the timeline, facets,
 rules, AI tools and cross-source pivots work on them unchanged.
 
-Formats (detected from the first bytes, also inside zip/tar archives):
+Formats (detected from the first bytes, in UTF-8, UTF-16 or UTF-32 with a byte order mark, also
+inside zip/tar archives):
     m365-ual-csv        CSV with an AuditData column (CreationDate, UserIds, Operations, AuditData ...)
     m365-ual-json       JSON array / NDJSON of AuditData objects, or of {..., "AuditData": "<json>"} rows
     entra-signin-json   JSON array / NDJSON of Graph signIn objects (Get-EntraSignInLogs, Goose)
@@ -34,6 +35,7 @@ import csv
 import hashlib
 import io
 import ipaddress
+import itertools
 import json
 import logging
 import os
@@ -90,13 +92,53 @@ _PRIVILEGED_ROLES = (
 
 
 # ---------------------------------------------------------------------------
+# Encoding
+# ---------------------------------------------------------------------------
+# PowerShell 5 (Export-Csv -Encoding Unicode, Out-File) and the admin centres write UTF-16 with a
+# byte order mark, and Microsoft-Extractor-Suite takes -Encoding utf32. Read as UTF-8, such an
+# export was not recognised and was reported as an event log that failed. The longer marks come
+# first: UTF-32's little-endian mark starts with UTF-16's.
+_BOMS = (
+    (b"\xff\xfe\x00\x00", "utf-32"),
+    (b"\x00\x00\xfe\xff", "utf-32"),
+    (b"\xff\xfe", "utf-16"),
+    (b"\xfe\xff", "utf-16"),
+    (b"\xef\xbb\xbf", "utf-8-sig"),
+)
+
+
+def encoding_of(head: bytes) -> str:
+    """The encoding an export's byte order mark names; UTF-8 when it has none."""
+    for bom, encoding in _BOMS:
+        if head.startswith(bom):
+            return encoding
+    return "utf-8-sig"
+
+
+def head_text(head: bytes) -> str:
+    """The first bytes of an export as text, in the encoding its byte order mark names. A head cut
+    inside a character loses that character only."""
+    encoding = encoding_of(head)
+    width = 4 if encoding == "utf-32" else 2 if encoding == "utf-16" else 1
+    return head[: len(head) - len(head) % width].decode(encoding, "replace")
+
+
+def _header_line(text: str) -> str:
+    """A table's header: its first line, or its second after the "#TYPE <type name>" line that
+    Windows PowerShell's Export-Csv writes without -NoTypeInformation."""
+    lines = text.split("\n", 2)
+    line = lines[1] if lines[0].startswith("#TYPE") and len(lines) > 1 else lines[0]
+    return line.rstrip("\r")
+
+
+# ---------------------------------------------------------------------------
 # Detection
 # ---------------------------------------------------------------------------
 def detect_format(name: str, head: bytes) -> str | None:
     """Return one of FORMATS for a UAL / Entra export, else None."""
     if not looks_like_export(name, head):
         return None
-    text = head.lstrip(b"\xef\xbb\xbf").decode("utf-8", "replace").lstrip()
+    text = head_text(head).lstrip()
     low = text.lower()
     if text.startswith(("[", "{")):
         if '"auditdata"' in low or ('"operation"' in low and ('"workload"' in low or '"creationtime"' in low)):
@@ -108,10 +150,10 @@ def detect_format(name: str, head: bytes) -> str | None:
         if any(f'"category": "{c}"' in low or f'"category":"{c}"' in low for c in _SIGNIN_CATEGORIES):
             return "entra-signin-json"
         return None
-    header = low.split("\n", 1)[0]
-    if "auditdata" in header:
+    header = _header_line(text)
+    if "auditdata" in header.lower():
         return "m365-ual-csv"
-    if is_signin(next(csv.reader([text.split("\n", 1)[0]]), [])):
+    if is_signin(next(csv.reader([header]), [])):
         return "entra-signin-csv"
     return None
 
@@ -120,10 +162,10 @@ UNRECOGNISED = "not a recognised Microsoft 365 or Entra export"
 
 
 def looks_like_export(name: str, head: bytes) -> bool:
-    """Whether a file is a table or a JSON document by its name or first byte: what a cloud export
-    is, and what an event log is not."""
+    """Whether a file is a table or a JSON document by its name or first character: what a cloud
+    export is, and what an event log is not."""
     n = (name or "").lower()
-    return n.endswith((".csv", ".json", ".jsonl", ".ndjson", ".txt", ".log")) or head.lstrip(b"\xef\xbb\xbf")[:1] in (b"[", b"{")
+    return n.endswith((".csv", ".json", ".jsonl", ".ndjson", ".txt", ".log")) or head_text(head[:8])[:1] in ("[", "{")
 
 
 _KEY_RE = re.compile(r'"([^"\\]{1,64})"\s*:')
@@ -229,9 +271,14 @@ def _culture_date(s: str, day_first: bool | None) -> datetime | None:
         return None
 
 
+# a .NET date as Windows PowerShell's ConvertTo-Json writes one: "\/Date(1756720800000)\/", the
+# milliseconds since 1970 in UTC, with the writer's offset after them when it had one
+_DOTNET_DATE_RE = re.compile(r"^/Date\((-?\d{1,15})(?:[+-]\d{4})?\)/$")
+
+
 def parse_ts(v: Any, day_first: bool | None = None) -> tuple[int | None, str | None]:
-    """ISO-8601 (with or without zone / fractional seconds), portal 'M/D/YYYY, h:mm:ss AM', or a
-    culture's numeric date -> (ms, iso). day_first is the order date_order found for the file;
+    """ISO-8601 (with or without zone / fractional seconds), portal 'M/D/YYYY, h:mm:ss AM', a
+    culture's numeric date, or a .NET "/Date(ms)/" -> (ms, iso). day_first is the order date_order found for the file;
     None keeps the portal's own month-first order for slashes and dashes. Dotted dates are always
     day-first. A time written with a zone keeps it; one without is UTC, the zone the audit log,
     Graph and the portal's "Date (UTC)" write."""
@@ -243,6 +290,12 @@ def parse_ts(v: Any, day_first: bool | None = None) -> tuple[int | None, str | N
     s = str(v).strip()
     if not s:
         return None, None
+    if m := _DOTNET_DATE_RE.match(s):
+        ms = int(m.group(1))
+        try:
+            return ms, datetime.fromtimestamp(ms / 1000, tz=UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        except (OverflowError, OSError, ValueError):
+            return None, None
     try:
         dt: datetime | None = datetime.fromisoformat(s.replace("Z", "+00:00"))
     except ValueError:
@@ -866,9 +919,12 @@ def entra_row(o: dict[str, Any], day_first: bool | None = None) -> dict[str, Any
 # Iteration
 # ---------------------------------------------------------------------------
 def _open_text(path: str | None, data: bytes | None) -> io.TextIOBase:
+    """An export as text, in the encoding its byte order mark names, the mark itself not read."""
     if path:
-        return open(path, encoding="utf-8-sig", errors="replace", newline="")
-    return io.TextIOWrapper(io.BytesIO(data or b""), encoding="utf-8-sig", errors="replace", newline="")
+        with open(path, "rb") as raw:
+            encoding = encoding_of(raw.read(4))
+        return open(path, encoding=encoding, errors="replace", newline="")
+    return io.TextIOWrapper(io.BytesIO(data or b""), encoding=encoding_of((data or b"")[:4]), errors="replace", newline="")
 
 
 # The longest record a JSON export may hold (a sign-in is a few kilobytes, an audit record rarely
@@ -1064,8 +1120,14 @@ def _audit_from_row(obj: dict[str, Any]) -> tuple[dict[str, Any] | None, Any]:
 
 def _csv_rows(fh: io.TextIOBase, stats: Any) -> Iterator[dict[str, Any]]:
     """The rows of a CSV export. A row the csv module cannot read (a field past MAX_FIELD_CHARS, a
-    stray quote) is counted as an error and the rows after it are still read."""
-    reader = csv.DictReader(fh)
+    stray quote) is counted as an error and the rows after it are still read. The "#TYPE" line
+    Windows PowerShell's Export-Csv writes above the header without -NoTypeInformation is passed
+    over."""
+    lines: Iterator[str] = iter(fh)
+    first = next(lines, "")
+    if not first.startswith("#TYPE"):
+        lines = itertools.chain([first], lines)
+    reader = csv.DictReader(lines)
     # the header is read outside the loop: a header that cannot be read fails the file
     if reader.fieldnames is None:
         return
