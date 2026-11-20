@@ -102,6 +102,7 @@ trimmed. The files are unchanged unless that README says otherwise.
 | Samples | Where | Source | Licence |
 | --- | --- | --- | --- |
 | Windows prefetch files, versions 17 to 31 | `tests/fixtures/real/prefetch/` | plaso test data, https://github.com/log2timeline/plaso | Apache-2.0 |
+| Three Unified Audit Log records of a test tenant | `tests/fixtures/real/m365/` | plaso test data, https://github.com/log2timeline/plaso | Apache-2.0 |
 | Mail written by Outlook, Lotus Notes and GroupWise, and two mbox files | `tests/fixtures/real/mail/` | Apache Tika test data, https://github.com/apache/tika | Apache-2.0 |
 
 ## Fonts
@@ -131,7 +132,7 @@ repository holds none of their files: only file names, hashes, counts and REMN's
 | --- | --- | --- | --- |
 | SigmaHQ regression samples | `tools/measure_rules.py` | https://github.com/SigmaHQ/sigma | Detection Rule License 1.1 (the repository's licence) |
 | EVTX-ATTACK-SAMPLES | `tools/measure_rules.py`, `tools/evtx_attack_samples.py`, CI | https://github.com/sbousseaden/EVTX-ATTACK-SAMPLES | GPL-3.0 |
-| Splunk attack_data | `tools/measure_rules.py` | https://github.com/splunk/attack_data | Apache-2.0 |
+| Splunk attack_data | `tools/measure_rules.py`, `tests/backend/test_real_m365.py` (heavy tests) | https://github.com/splunk/attack_data | Apache-2.0 |
 | EVTX-to-MITRE-Attack | `tools/measure_rules.py` | https://github.com/mdecrevoisier/EVTX-to-MITRE-Attack | CC0-1.0 |
 | NextronSystems evtx-baseline | `tools/measure_rules.py` | https://github.com/NextronSystems/evtx-baseline | Apache-2.0 |
 | OTRF Security-Datasets: MITRE's APT29 evaluation days 1 and 2, and the atomic Windows datasets | `tools/apt29_stories.py`, `tools/security_datasets.py` | https://github.com/OTRF/Security-Datasets | MIT |
