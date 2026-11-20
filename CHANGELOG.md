@@ -188,6 +188,19 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   the browser application, the bundled Tranco list, and the corpora behind the published rates
   (Phishing Pot is non-commercial). A test fails when a lock gains a package the notices do not
   list.
+- Server errors and limits say what they are, and engine findings join REMN's incidents. A message
+  written for the analyst, such as an export the event-log import does not recognise, is shown as
+  it is instead of as a server failure with a reference. A case store whose lockdown did not take
+  effect answers 503 saying so. Story, relationship and mail enrichment builds of a server case
+  stop at FORENSIC_STORE_QUERY_MAX_S like the other store reads, and cancelling a rule run stops
+  the rule that is running. Server case indicators keep the case of a URL's path and query, as the
+  browser store does. Health gives the largest chunked upload the staging area can really take,
+  and each package parse sets its staging room aside (at most half the area), so parses that run
+  together are never promised the same room. A parse of event logs starts in about half the time,
+  since the mail parsers load only for mail, and an error nothing caught in the parse process
+  reaches the server log by type and place only. Hayabusa detections name the user, host and
+  address REMN's rules name, so both engines' findings on one event share an incident. The public
+  profile's Caddy image ships and serves LICENSE and THIRD_PARTY_NOTICES.md.
 - Public instance limits: a chunk upload over 64 MiB is refused before it is read (by Caddy and by
   the server), unfinished uploads reserve the size they announced in the staging budget, and the
   chains and mail enrichment paths refuse a server case key in browser-only mode, as stories and
