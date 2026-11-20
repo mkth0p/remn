@@ -421,3 +421,89 @@ def _zip(members: dict[str, bytes]) -> bytes:
         for name, data in members.items():
             z.writestr(name, data)
     return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Entra ID Protection
+# ---------------------------------------------------------------------------
+def test_risk_detections_from_graph_are_read(tmp_path):
+    rows, src = _fixture(tmp_path, "entra-risk-detections.graph.json")
+    assert src.format == "entra-riskdetection-json" and src.stats.errors == 0 and len(rows) == 3
+    unfamiliar, dismissed, forwarding = rows
+    assert unfamiliar["provider"] == m365.RISK_PROVIDER and unfamiliar["channel"] == "Entra RiskDetection" and unfamiliar["category"] == "Entra risk"
+    assert unfamiliar["operation"] == "RiskDetection" and unfamiliar["description"] == "unfamiliarFeatures"
+    assert unfamiliar["subjectUser"] == "alice@contoso.com" and unfamiliar["ipAddress"] == "198.51.100.23" and unfamiliar["tsIso"] == "2026-09-01T09:58:20.000Z"
+    assert unfamiliar["level"] == 3 and unfamiliar["status"] == "atRisk" and unfamiliar["data"]["riskLevel"] == "medium"
+    assert unfamiliar["data"]["country"] == "NL" and unfamiliar["data"]["city"] == "Amsterdam" and unfamiliar["workstation"].startswith("Mozilla/5.0")
+    # what ties it to its sign-in
+    assert (
+        unfamiliar["data"]["correlationId"] == "e1f2a3b4-c5d6-4e7f-8a9b-0c1d2e3f4a5b"
+        and unfamiliar["data"]["requestId"] == "9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"
+    )
+    assert unfamiliar["recordKey"] == "entra-risk:6f2c8e1a9b4d7c3e5a0f1b2d4c6e8a0b9d1f3e5c7a9b0d2f4e6a8c0b1d3f5e7a"
+    assert dismissed["level"] == 4 and dismissed["statusText"] == "adminDismissedAllRiskForUser" and "dismissed" in dismissed["summary"]
+    # an offline detection is placed at the activity it rates, not at the time it was detected
+    assert forwarding["tsIso"] == "2026-09-01T10:25:00.000Z" and forwarding["ipAddress"] is None
+    assert (
+        forwarding["data"]["additionalInfo.alertUrl"] == "https://security.example/alerts/1"
+        and forwarding["data"]["detectedDateTime"] == "2026-09-01T11:40:00Z"
+    )
+
+
+def test_risk_detections_written_by_microsoft_extractor_suite_are_read_as_graph_ones_are(tmp_path):
+    graph, _ = _fixture(tmp_path, "entra-risk-detections.graph.json")
+    rows, src = _fixture(tmp_path, "entra-risk-detections.extractor.csv")
+    assert src.format == "entra-riskdetection-csv" and src.stats.errors == 0
+
+    def seen(r: dict) -> tuple:
+        return (
+            r["tsIso"],
+            r["description"],
+            r["subjectUser"],
+            r["ipAddress"],
+            r["status"],
+            r["level"],
+            r["recordKey"],
+            r["data"].get("country"),
+            r["workstation"],
+        )
+
+    assert [seen(r) for r in rows] == [seen(r) for r in graph]
+    # one date past the 12th shows the file is day-first; the times say no zone and are read as UTC
+    assert src.stats.date_order_guessed == 0 and src.stats.zone_assumed == 3
+    # the analyst who knows the session that wrote it was two hours ahead of UTC says so
+    stats = Stats()
+    data = (FIXTURES / "entra-risk-detections.extractor.csv").read_bytes()
+    rows = list(m365.iter_records(None, data, "entra-riskdetection-csv", stats, dates=m365.date_setting({"zone": "+02:00"})))
+    assert rows[0]["tsIso"] == "2026-09-01T07:58:20.000Z" and stats.zone_set == 3 and stats.zone_assumed == 0
+
+
+def test_risky_users_are_read_from_graph_and_from_microsoft_extractor_suite(tmp_path):
+    graph, src = _fixture(tmp_path, "entra-risky-users.graph.json")
+    assert src.format == "entra-riskyuser-json" and len(graph) == 2
+    alice, bob = graph
+    assert alice["channel"] == "Entra RiskyUser" and alice["operation"] == "RiskyUser" and alice["subjectUser"] == "alice@contoso.com"
+    assert alice["tsIso"] == "2026-09-01T11:40:00.000Z" and alice["status"] == "atRisk" and alice["level"] == 3
+    assert bob["level"] == 4 and bob["statusText"] == "userPerformedSecuredPasswordReset"
+    assert alice["recordKey"] == "entra-riskyuser:5f1c2a3b-0d4e-4f60-8a71-92b3c4d5e6f7|2026-09-01T11:40:00.000Z"
+    rows, src = _fixture(tmp_path, "entra-risky-users.extractor.csv")
+    assert src.format == "entra-riskyuser-csv" and src.stats.errors == 0
+    assert [(r["tsIso"], r["subjectUser"], r["status"], r["level"]) for r in rows] == [(r["tsIso"], r["subjectUser"], r["status"], r["level"]) for r in graph]
+    assert rows[0]["data"]["isDeleted"] == "False"
+    # the same user listed when the risk changed is another record
+    later = json.dumps(
+        [
+            {
+                **json.loads((FIXTURES / "entra-risky-users.graph.json").read_text())["value"][0],
+                "riskLastUpdatedDateTime": "2026-09-02T08:00:00Z",
+                "riskState": "remediated",
+            }
+        ]
+    )
+    rows, src = _fixture(tmp_path, "later.json", later.encode())
+    assert len(rows) == 1 and rows[0]["status"] == "remediated"
+
+
+def test_a_user_list_is_still_not_read_as_risky_users():
+    users = b"Id,DisplayName,UserPrincipalName,AccountEnabled,CreatedDateTime,UserType,RiskLevel\n1d2c,Alice,alice@contoso.com,True,1/15/2024 10:11:12 AM,Member,none\n"
+    assert m365.detect_format("Users.csv", users) is None

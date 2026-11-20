@@ -564,7 +564,14 @@ def test_a_directory_audit_export_is_read_as_directory_audits_not_sign_ins(tmp_p
 
 
 def test_risk_and_user_exports_are_not_read_as_sign_ins():
-    risky_user = {"id": str(uuid.uuid4()), "isDeleted": False, "riskLevel": "high", "riskState": "atRisk", "userPrincipalName": "alice@contoso.com"}
+    risky_user = {
+        "id": str(uuid.uuid4()),
+        "isDeleted": False,
+        "riskLevel": "high",
+        "riskState": "atRisk",
+        "riskLastUpdatedDateTime": "2026-09-01T10:00:00Z",
+        "userPrincipalName": "alice@contoso.com",
+    }
     detection = {
         "id": "a1b2c3",
         "riskEventType": "unfamiliarFeatures",
@@ -576,8 +583,9 @@ def test_risk_and_user_exports_are_not_read_as_sign_ins():
         "tokenIssuerType": "AzureAD",
         "location": {"city": "Lyon", "countryOrRegion": "FR"},
     }
-    for record in (risky_user, detection):
-        assert m365.detect_format("risk.json", json.dumps([record]).encode()) is None
+    # each is read as what it is (test_m365_sources.py)
+    assert m365.detect_format("risk.json", json.dumps([risky_user]).encode()) == "entra-riskyuser-json"
+    assert m365.detect_format("risk.json", json.dumps([detection]).encode()) == "entra-riskdetection-json"
     # a user list as Microsoft-Extractor-Suite and Get-MgUser | Export-Csv write it
     users = b"Id,DisplayName,UserPrincipalName,AccountEnabled,CreatedDateTime,UserType\n1d2c,Alice,alice@contoso.com,True,1/15/2024 10:11:12 AM,Member\n"
     assert m365.detect_format("Users.csv", users) is None

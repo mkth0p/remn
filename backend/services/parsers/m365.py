@@ -1,6 +1,6 @@
 """
-Microsoft 365 Unified Audit Log (UAL), Entra ID sign-in and Entra ID directory audit exports ->
-event rows.
+Microsoft 365 Unified Audit Log (UAL), Entra ID sign-in, Entra ID directory audit and Entra ID
+Protection exports -> event rows.
 
 Business-email-compromise investigations live on three sources: the mailbox itself, the
 Unified Audit Log (inbox rules, forwarding, MailItemsAccessed, consent grants, role changes)
@@ -18,14 +18,21 @@ inside zip/tar archives):
     entra-signin-csv    Entra portal CSV export or a Graph-property CSV
     entra-audit-json    Graph directoryAudit objects (auditLogs/directoryAudits, the portal's JSON download)
     entra-audit-csv     the portal's audit log CSV download, or directoryAudit properties as columns
+    entra-riskdetection-json  Graph riskDetection objects (identityProtection/riskDetections)
+    entra-riskdetection-csv   riskDetection properties as columns (Get-MgRiskDetection | Export-Csv,
+                              Microsoft-Extractor-Suite Get-RiskyDetections)
+    entra-riskyuser-json      Graph riskyUser objects (identityProtection/riskyUsers)
+    entra-riskyuser-csv       riskyUser properties as columns (Get-MgRiskyUser | Export-Csv, Get-RiskyUsers)
 
 Row conventions (shared with the EVTX parser so rules can mix both):
     provider   "Microsoft 365 Unified Audit Log" | "Microsoft Entra ID Sign-in" | "Microsoft Entra ID Audit"
+               | "Microsoft Entra ID Protection"
     channel    the UAL Workload (Exchange, AzureActiveDirectory, SharePoint, OneDrive ...) | "Entra SignIn"
-               | "Entra Audit"
+               | "Entra Audit" | "Entra RiskDetection" | "Entra RiskyUser"
     category   "M365 Exchange" | "M365 Entra" | "M365 SharePoint" | ... | "Entra sign-in" | "Entra audit"
+               | "Entra risk"
     operation  the UAL Operation / "SignIn" / a directory activity as the UAL names it ("Consent to
-               application.")
+               application.") / "RiskDetection" / "RiskyUser"
     subjectUser = user (actor UPN), targetUser = affected user when the operation has one
     ipAddress   client IP (port and brackets stripped), status / statusText, objectName
     data        every AuditData field flattened one level: Parameters, ExtendedProperties,
@@ -33,7 +40,8 @@ Row conventions (shared with the EVTX parser so rules can mix both):
                 Actor, AppAccessContext.*; Entra: appDisplayName, clientAppUsed, country, city,
                 riskLevelDuringSignIn, riskState, conditionalAccessStatus, errorCode ...; directory
                 audits: their modified properties under the names the UAL gives them, initiatedBy.*,
-                Target.*, additionalDetails by key
+                Target.*, additionalDetails by key; risk: riskEventType, riskLevel, riskState,
+                riskDetail, country, city, additionalInfo.<key> ...
 """
 
 from __future__ import annotations
@@ -66,7 +74,19 @@ if csv.field_size_limit() < MAX_FIELD_CHARS:
 UAL_PROVIDER = "Microsoft 365 Unified Audit Log"
 ENTRA_PROVIDER = "Microsoft Entra ID Sign-in"
 AUDIT_PROVIDER = "Microsoft Entra ID Audit"
-FORMATS = ("m365-ual-csv", "m365-ual-json", "entra-signin-json", "entra-signin-csv", "entra-audit-json", "entra-audit-csv")
+RISK_PROVIDER = "Microsoft Entra ID Protection"
+FORMATS = (
+    "m365-ual-csv",
+    "m365-ual-json",
+    "entra-signin-json",
+    "entra-signin-csv",
+    "entra-audit-json",
+    "entra-audit-csv",
+    "entra-riskdetection-json",
+    "entra-riskdetection-csv",
+    "entra-riskyuser-json",
+    "entra-riskyuser-csv",
+)
 
 _WORKLOAD_CATEGORY = {
     "exchange": "M365 Exchange",
@@ -209,14 +229,19 @@ _PORTAL_AUDIT_COLUMNS = frozenset({"correlationid", "resultreason", "actortype",
 
 
 # the field only a record of each kind has, by its lower case
-_KIND_KEY = {"audit": "activitydisplayname"}
+_KIND_KEY = {"audit": "activitydisplayname", "riskdetection": "riskeventtype", "riskyuser": "risklastupdateddatetime"}
 
 
 def entra_kind(keys: Iterable[Any]) -> str | None:
     """Which Entra record a record or a table with these field names (any case) holds, by the
     fields Microsoft documents for it: "audit" (a directoryAudit, or a row of the portal's audit
-    log download); None for anything else."""
+    log download), "riskdetection" (a riskDetection) or "riskyuser" (a riskyUser); None for
+    anything else."""
     low = {str(k).strip().lower() for k in keys}
+    if "riskeventtype" in low and low & {"activitydatetime", "detecteddatetime"}:
+        return "riskdetection"
+    if "risklastupdateddatetime" in low and low & {"risklevel", "riskstate"}:
+        return "riskyuser"
     if "activitydisplayname" in low and "activitydatetime" in low:
         return "audit"
     if _PORTAL_AUDIT_COLUMNS <= low:
@@ -1340,6 +1365,188 @@ _PORTAL_AUDIT_RE = re.compile(
 
 
 # ---------------------------------------------------------------------------
+# Entra ID Protection rows
+# ---------------------------------------------------------------------------
+# riskDetection and riskyUser, learn.microsoft.com/graph/api/resources/riskdetection and
+# .../riskyuser, with signInLocation's names, which Microsoft-Extractor-Suite writes as columns
+_RISK_NAMES = {
+    n.lower(): n
+    for n in (
+        "activity",
+        "activityDateTime",
+        "additionalInfo",
+        "correlationId",
+        "detectedDateTime",
+        "detectionTimingType",
+        "id",
+        "ipAddress",
+        "lastUpdatedDateTime",
+        "location",
+        "city",
+        "state",
+        "countryOrRegion",
+        "requestId",
+        "riskDetail",
+        "riskEventType",
+        "riskLevel",
+        "riskState",
+        "source",
+        "tokenIssuerType",
+        "userDisplayName",
+        "userId",
+        "userPrincipalName",
+        "isDeleted",
+        "isProcessing",
+        "riskLastUpdatedDateTime",
+    )
+}
+# a risk ID Protection rates medium or high, or a compromise someone confirmed
+_RISKY_LEVELS = ("medium", "high")
+_HEX_ID_RE = re.compile(r"^[0-9a-fA-F]{32,128}$")
+
+
+def _additional_info(v: Any) -> dict[str, Any]:
+    """A risk detection's additionalInfo, JSON text of [{"Key": ..., "Value": ...}], by key."""
+    if isinstance(v, str):
+        try:
+            v = json.loads(v)
+        except ValueError:
+            return {}
+    out: dict[str, Any] = {}
+    for item in v if isinstance(v, list) else []:
+        if isinstance(item, dict):
+            item = {str(k).lower(): x for k, x in item.items()}
+            if item.get("key"):
+                out[f"additionalInfo.{item['key']}"] = _scalar(item.get("value"))
+    return out
+
+
+def _risk_data(a: dict[str, Any], skip: tuple[str, ...] = ()) -> dict[str, Any]:
+    """Every field of a risk record under its own name, the location under the names a sign-in
+    gives it (country, city, state), and what additionalInfo holds by its key."""
+    data: dict[str, Any] = {}
+    loc = a.get("location") if isinstance(a.get("location"), dict) else {}
+    for k, v in a.items():
+        if k in skip or k == "location" or str(k).startswith("@"):
+            continue
+        if k == "countryOrRegion":
+            data["country"] = v
+        elif k in ("city", "state"):
+            data[k] = v
+        else:
+            data[k] = _scalar(v)
+    data.setdefault("country", loc.get("countryOrRegion"))
+    data.setdefault("city", loc.get("city"))
+    data.setdefault("state", loc.get("state"))
+    data.update(_additional_info(a.get("additionalInfo")))
+    return {k: v for k, v in data.items() if v not in (None, "")}
+
+
+def risk_detection_row(o: dict[str, Any], when: _Dates | None = None, utc: bool = False) -> dict[str, Any] | None:
+    """A Graph riskDetection (any case of its names) -> event row at the time of the risky
+    activity, or when it was detected if the record has no activity time; None for a record that
+    is not one."""
+    a = _canon(o, _RISK_NAMES)
+    kind = str(a.get("riskEventType") or "").strip()
+    if not kind:
+        return None
+    ts, iso, marks = (when or _Dates()).read(a.get("activityDateTime") or a.get("detectedDateTime"), utc)
+    user = str(_first(a, "userPrincipalName", "userDisplayName", "userId") or "").strip()
+    ip = clean_ip(a.get("ipAddress"))
+    level, state = str(a.get("riskLevel") or "").strip(), str(a.get("riskState") or "").strip()
+    risky = level.lower() in _RISKY_LEVELS or state.lower() == "confirmedcompromised"
+    data = _risk_data(a)
+    summary = f"Risk detection {kind} ({level or '?'}, {state or '?'}) for {user or '?'}"
+    if ip:
+        summary += f" from {ip}{' (' + str(data['country']) + ')' if data.get('country') else ''}"
+    if data.get("riskDetail") and str(data["riskDetail"]).lower() != "none":
+        summary += f": {data['riskDetail']}"
+    row: dict[str, Any] = {
+        "ts": ts,
+        "tsIso": iso,
+        "eventId": None,
+        "recordId": None,
+        "level": 3 if risky else 4,
+        "levelName": "Warning" if risky else "Information",
+        "provider": RISK_PROVIDER,
+        "channel": "Entra RiskDetection",
+        "computer": None,
+        "category": "Entra risk",
+        "description": kind,
+        "operation": "RiskDetection",
+        "objectName": None,
+        "user": user or None,
+        "upn": user or None,
+        "subjectUser": user or None,
+        "targetUser": user or None,
+        "ipAddress": ip,
+        "status": state or None,
+        "statusText": str(a.get("riskDetail") or "") or None,
+        "workstation": str(data.get("additionalInfo.userAgent") or "")[:200] or None,
+        "recordKey": _risk_key(a.get("id")),
+        "data": data,
+        "summary": summary[:500],
+    }
+    if marks:
+        row["_marks"] = marks
+    return row
+
+
+def _risk_key(value: Any) -> str | None:
+    """A risk detection's id is a long hexadecimal string, not a GUID: it is its identity all the same."""
+    v = str(value or "").strip()
+    return f"entra-risk:{v.lower()}" if _HEX_ID_RE.match(v) else resource_key("entra-risk", v)
+
+
+def risky_user_row(o: dict[str, Any], when: _Dates | None = None, utc: bool = False) -> dict[str, Any] | None:
+    """A Graph riskyUser (any case of its names) -> event row at the time its risk was last
+    updated: the state of one user's risk when the list was taken. None for a record that is not one."""
+    a = _canon(o, _RISK_NAMES)
+    user = str(_first(a, "userPrincipalName", "userDisplayName", "id") or "").strip()
+    if "riskLastUpdatedDateTime" not in a or not user:
+        return None
+    ts, iso, marks = (when or _Dates()).read(a.get("riskLastUpdatedDateTime"), utc)
+    level, state = str(a.get("riskLevel") or "").strip(), str(a.get("riskState") or "").strip()
+    risky = level.lower() in _RISKY_LEVELS or state.lower() == "confirmedcompromised"
+    data = _risk_data(a)
+    detail = str(a.get("riskDetail") or "")
+    summary = f"Risky user {user}: risk {level or '?'}, {state or '?'}"
+    if detail and detail.lower() != "none":
+        summary += f" ({detail})"
+    # a user's risk changes over time; the same user listed at another time is another record
+    key = record_key("entra-riskyuser", a.get("id"))
+    row: dict[str, Any] = {
+        "ts": ts,
+        "tsIso": iso,
+        "eventId": None,
+        "recordId": None,
+        "level": 3 if risky else 4,
+        "levelName": "Warning" if risky else "Information",
+        "provider": RISK_PROVIDER,
+        "channel": "Entra RiskyUser",
+        "computer": None,
+        "category": "Entra risk",
+        "description": "Risky user",
+        "operation": "RiskyUser",
+        "objectName": None,
+        "user": user,
+        "upn": user,
+        "subjectUser": user,
+        "targetUser": user,
+        "ipAddress": None,
+        "status": state or None,
+        "statusText": detail or None,
+        "workstation": None,
+        "recordKey": f"{key}|{iso}" if key and iso else None,
+        "data": data,
+        "summary": summary[:500],
+    }
+    if marks:
+        row["_marks"] = marks
+    return row
+
+
+# ---------------------------------------------------------------------------
 # Iteration
 # ---------------------------------------------------------------------------
 def _open_text(path: str | None, data: bytes | None) -> io.TextIOBase:
@@ -1764,6 +1971,29 @@ def _iter_rows(path: str | None, data: bytes | None, fmt: str, stats: Any, inclu
             when = _Dates(dates)
             for obj in _iter_json_objects(fh, stats):
                 row = audit_row(obj, when)
+                if row is None:
+                    _not_read(stats)
+                    continue
+                yield _finish(row, obj, stats, include_raw, row.pop("_marks", ()))
+        elif fmt in ("entra-riskdetection-json", "entra-riskyuser-json"):
+            read = risk_detection_row if fmt == "entra-riskdetection-json" else risky_user_row
+            when = _Dates(dates)
+            for obj in _iter_json_objects(fh, stats):
+                row = read(obj, when)
+                if row is None:
+                    _not_read(stats)
+                    continue
+                yield _finish(row, obj, stats, include_raw, row.pop("_marks", ()))
+        elif fmt in ("entra-riskdetection-csv", "entra-riskyuser-csv"):
+            read = risk_detection_row if fmt == "entra-riskdetection-csv" else risky_user_row
+            names = ("activitydatetime", "detecteddatetime") if fmt == "entra-riskdetection-csv" else ("risklastupdateddatetime",)
+
+            def is_date(k: str) -> bool:
+                return k.strip().lower() in names
+
+            when = _csv_dates(path, data, dates, is_date)
+            for obj in _csv_rows(fh, stats):
+                row = read(obj, when, any(utc_column(k) for k, v in obj.items() if v and is_date(k)))
                 if row is None:
                     _not_read(stats)
                     continue

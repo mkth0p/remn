@@ -132,7 +132,11 @@ events table:
   counted as not read);
 - Entra ID directory audits as Graph JSON (`auditLogs/directoryAudits`,
   `Get-MgAuditLogDirectoryAudit`, a page or an array of records), or the Entra admin
-  centre's audit log download as JSON or CSV.
+  centre's audit log download as JSON or CSV;
+- Entra ID Protection risk detections and risky users as Graph JSON
+  (`identityProtection/riskDetections`, `identityProtection/riskyUsers`), or their properties
+  as CSV columns (`Get-MgRiskDetection | Export-Csv`, `Get-MgRiskyUser | Export-Csv`,
+  Microsoft-Extractor-Suite's `Get-RiskyDetections` and `Get-RiskyUsers`).
 
 A `.zip` of a whole acquisition folder is walked.
 
@@ -146,9 +150,9 @@ Outside the Azure Monitor records, whose category says what they are, a record i
 sign-in only when it carries a time (`createdDateTime`), a client address (`ipAddress`) and
 the user or the application signed in to. Directory audits, risk detections, risky users
 and user lists name a `userPrincipalName` too, but they are not sign-ins: a file of
-directory audits is read as such (below), and a file of the others is listed as a member
-REMN has no parser for (in the event-log import, as "not a recognised Microsoft 365 or Entra
-export"). A JSON file is of the kind of its first record, and a record of another kind inside
+directory audits, risk detections or risky users is read as such (below), and a user list is
+listed as a member REMN has no parser for (in the event-log import, as "not a recognised
+Microsoft 365 or Entra export"). A JSON file is of the kind of its first record, and a record of another kind inside
 it is counted as not read: the evidence's statistics (`notRead`) and its member list say how
 many, and the member is marked failed. Field names are read in any case, so the
 PascalCase columns of `Get-MgAuditLogSignIn | Export-Csv` land on the same names as the
@@ -180,6 +184,24 @@ read of a record from it, and no record id, so a record downloaded twice is in t
 as .NET type names, so its rows say what was done and when but not by whom; the JSON from
 the same cmdlet holds them. Azure Monitor records of the `AuditLogs` category are not read:
 Microsoft says their schema may differ from Graph's.
+
+A risk detection becomes a row with the provider `Microsoft Entra ID Protection`, the channel
+`Entra RiskDetection`, the category `Entra risk` and the operation `RiskDetection`, at the time
+of the activity it rates (`activityDateTime`; `detectedDateTime` when it has none, and an
+offline detection is often hours later). Its `description` is the `riskEventType`, its
+`status` the `riskState` and `statusText` the `riskDetail`; the user is `subjectUser` and
+`targetUser`, the address `ipAddress`, and the place `data.country`, `data.city` and
+`data.state`, as on a sign-in. `data.correlationId` and `data.requestId` are those of the
+sign-in it rates, and each key of `additionalInfo` is `data.additionalInfo.<key>` (the
+`userAgent` is also `workstation`). A risky user becomes a row of the channel `Entra
+RiskyUser` and the operation `RiskyUser` at `riskLastUpdatedDateTime`: the state of that
+user's risk when the list was taken, so the same user listed again after the risk changed is
+a second row. Both are a warning when the risk is medium or high or the compromise was
+confirmed. A risk detection is kept once by its id. The ID Protection reports in the admin
+centre can be downloaded as CSV or JSON, but Microsoft does not document what those files
+hold: a download whose fields are the Graph property names is read, any other is not
+recognised. Azure Monitor records of the `RiskyUsers` and `UserRiskEvents` categories are not
+read.
 
 Rows carry `provider`, `channel` (the workload), `category` (`M365 Exchange`,
 `M365 Entra`, `Entra sign-in`, …), `operation`, `subjectUser` and `targetUser`,
