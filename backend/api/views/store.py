@@ -223,6 +223,16 @@ def ingest(request: HttpRequest, key: str):
             discard_upload(upload_id)
             return JsonResponse({"error": "PST/OST support requires libpff-python (see backend/requirements-optional.txt)"}, status=501)
     sha_client = str(evidence.get("sha256Client") or "")
+    # Each browser numbers the evidence it adds. Two members adding files to one case from two
+    # browsers can give two files one number, and the second would take over the first's entry and
+    # mix its rows with them; it is refused instead.
+    held = st.cursor().execute('SELECT name, "sha256Client" FROM evidence WHERE id = ?', [evidence_id]).fetchone()
+    if held is not None and (held[1] or "") != sha_client:
+        discard_upload(upload_id)
+        return JsonResponse(
+            {"error": f"evidence #{evidence_id} of this case is already another file ({held[0]}), added from another browser; add the file again", "code": "evidenceId"},
+            status=409,
+        )
     ctx = _ctx_from(options.get("settings"))
     include_raw = bool(options.get("includeRaw", True))
     keep_bodies = bool(options.get("keepBodies", True))

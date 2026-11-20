@@ -363,8 +363,8 @@ def test_server_package_ingestion_job_routes_both_record_types(tmp_path, registr
     monkeypatch.setattr("api.views.store.discard_upload", discarded.append)
     results = []
 
-    def submit(kind, case_key, fn, label):
-        job = Job(kind, case_key, label)
+    def submit(kind, case_key, fn, label, account=None):
+        job = Job(kind, case_key, label, account)
         results.append(fn(job))
         return job
 

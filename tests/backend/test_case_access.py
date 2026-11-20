@@ -175,3 +175,28 @@ def test_without_accounts_the_key_still_opens_the_case_and_membership_does_not_e
         registry.close_all()
         if old:
             registry.configure(old)
+
+
+def test_a_file_added_from_another_browser_under_a_number_the_case_already_uses_is_refused(team, monkeypatch, settings):  # noqa: F811
+    from api.views import store as store_views
+
+    settings.FILE_UPLOAD_TEMP_DIR = team.folder / "staging"
+    key = team.new_case("ana", members=("ben",))
+    registry.get(key).upsert_evidence({"id": 1, "name": "invented-ana.evtx", "kind": "evtx", "sha256Client": "a" * 64, "status": "done"})
+    started = []
+    monkeypatch.setattr(store_views.manager, "submit", lambda *a, **k: started.append(a) or type("J", (), {"id": "job"})())
+
+    def ingest(sha: str):
+        data = b"invented evidence bytes"
+        uid = team.post("ben", "/api/upload/init", {"name": "invented-ben.evtx", "size": len(data)}).json()["uploadId"]
+        Client().generic("PUT", f"/api/upload/{uid}/chunk?offset=0", data, content_type="application/octet-stream", **team.headers("ben"))
+        Client().post(f"/api/upload/{uid}/complete", **team.headers("ben"))
+        return team.post("ben", f"/api/store/{key}/ingest", {"uploadId": uid, "kind": "evtx", "evidence": {"id": 1, "name": "invented-ben.evtx", "sha256Client": sha}})
+
+    r = ingest("b" * 64)
+    assert r.status_code == 409 and r.json()["code"] == "evidenceId" and "invented-ana.evtx" in r.json()["error"]
+    assert not started
+    held = registry.get(key).cursor().execute("SELECT name FROM evidence WHERE id = 1").fetchone()
+    assert held[0] == "invented-ana.evtx"
+    # the same file again (a retry) is not another file
+    assert ingest("a" * 64).status_code == 200 and len(started) == 1
