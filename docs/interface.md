@@ -54,10 +54,13 @@ size, row count, SHA-256 computed in the browser, integrity state and the time i
 added. "Verify" re-hashes a copy of the file and compares. Removing a file deletes
 everything derived from it, as described on the [storage page](storage.md).
 A file that records a gap in itself (records missing from its numbering, a chunk that
-fails its checksum, an audit log export cut at a service limit) carries a "gaps" badge,
-and its detail lists what it cannot show. An import still running has a "cancel" button on
-its line in the jobs list, which stops it and removes what it had written, as described on
-the [storage page](storage.md#uploads-and-jobs).
+fails its checksum, an audit log, message trace or directory audit export cut at a service
+limit) carries a "gaps" badge, and its detail lists what it cannot show. The detail of a
+Microsoft 365 or Entra export whose dates did not say their order or zone shows how they
+were read, and reads the file again with a date order and a time zone set for that evidence
+([data sources](sources.md#microsoft-365-and-entra-exports)). An import still running has
+a "cancel" button on its line in the jobs list, which stops it and removes what it had
+written, as described on the [storage page](storage.md#uploads-and-jobs).
 
 ## Events and Mails
 

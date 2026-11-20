@@ -382,6 +382,23 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   ("marked false positive in case Acme on 2026-08-14"). Reviewed and false-positive findings
   sort below the rest; severity and newest remain as sorts. A decision made on the Findings page
   is now recorded as the analyst's, with its date.
+- A Microsoft 365 compromise can be investigated from the exports a responder is usually given.
+  Entra ID directory audits (Graph JSON, and the admin centre's JSON and CSV downloads, including
+  a CSV whose first columns are in the portal's language), ID Protection risk detections and risky
+  users (Graph JSON, or their properties as CSV) and the Exchange Online message trace
+  (Get-MessageTrace and Get-MessageTraceV2 written with Export-Csv, and the admin centre's
+  enhanced summary and extended reports) are read into the events table, each recognised by its
+  content; a record of another kind in such a file is counted as not read, and its member says so.
+  Every Microsoft 365 export may be written in UTF-16 or UTF-32 with a byte order mark. An
+  evidence file can be read again from its detail on the Evidence page with a date order and a
+  time zone set for it; the import records the setting, counts the records it applied to, and
+  counts the dates it guessed and the times it read as UTC. A directory activity carries the audit
+  log's name for it, so the existing rules, stories and chains find it in either export. Eight new
+  rules, not yet measured, report risk detections and risky users at medium or high risk, a risk
+  followed within a day by an inbox rule of the same account, passkeys and other sign-in methods
+  added, devices registered, application permissions granted to a service principal, and mail the
+  message trace shows leaving the organisation. A message trace export of exactly 1,000 or 5,000
+  rows, and a directory audit download of 250,000 records, carries a gaps badge.
 - Disk artifacts sit on the case timeline with what each of their times means, next to the
   event logs. An MFTECmd `$MFT` entry becomes a row per distinct `$STANDARD_INFORMATION` time and
   per `$FILE_NAME` time that differs from it, each saying which it is (`SI created, modified`,

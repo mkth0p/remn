@@ -131,7 +131,7 @@ maintains: brute force and password spraying, out-of-hours logons, RDP from outs
 PsExec and admin shares, persistence, log clearing, Defender tampering, PowerShell
 cradles and credential dumping on the Windows side; display-name spoofing, lookalike
 domains, macro, PDF and HTML-smuggling attachments, the BEC lexicon, forged headers,
-score bands and the sender-baseline rules on the mail side; and the 29 business email
+score bands and the sender-baseline rules on the mail side; and the 37 business email
 compromise rules over Microsoft 365 and Entra rows listed on the [data sources
 page](sources.md). Every rule carries MITRE ATT&CK technique ids, as of ATT&CK v19 (April
 2026), which split Defense Evasion into Stealth and Defense Impairment and moved Impair
@@ -337,7 +337,8 @@ Recorded attacks, at the versions measured:
   identifying each (`tests/fixtures/evtx-attack-samples/expected.json`);
 - the Office 365 and Entra ID datasets of Splunk attack_data (`7a5e9d5`): 67
   recordings, each labelled with its ATT&CK technique. 25 more are Entra directory
-  audit logs, other Azure Monitor records and Splunk search exports, which REMN does not read;
+  audit logs in the Azure Monitor form, other Azure Monitor records and Splunk search
+  exports, which REMN does not read;
 - EVTX-to-MITRE-Attack (`4748560`): 279 recordings, each labelled with the ATT&CK technique of
   the folder it is filed in. No rule was written against it before it was first measured
   ([the head-to-head](reviews/2026-09-25-head-to-head.md)); the rules written since after

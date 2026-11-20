@@ -360,6 +360,7 @@ class EvtxSource:
         max_member: int = MAX_MEMBER_BYTES,
         deadline: float | None = None,
         seen: m365.RecordKeys | None = None,
+        dates: m365.DateSetting | None = None,
     ) -> None:
         self.name = name
         self.path = path
@@ -369,6 +370,10 @@ class EvtxSource:
         self.max_member = max_member
         self.deadline = deadline
         self.stats = evtx_parser.Stats()
+        # the date order and time zone the analyst set for this evidence, for the cloud exports in it
+        self.dates = dates
+        if dates is not None:
+            self.stats.dates = dates.to_dict()
         # one entry per archive member: parsed (with its count and hash), skipped or error, with the reason
         self.files: list[dict[str, Any]] = []
         # the keys of the cloud records read so far, for every file of this upload (a package
@@ -416,7 +421,7 @@ class EvtxSource:
                     entry["duplicates"] = self.stats.duplicates - dup_before
                 if self.stats.repaired > rep_before:
                     entry["repaired"] = self.stats.repaired - rep_before
-                if cloud_note := m365.note({k: v - cloud_before[k] for k, v in m365.counts(self.stats).items()}):
+                if cloud_note := m365.note({k: v - cloud_before[k] for k, v in m365.counts(self.stats).items()}, self.dates):
                     entry["note"] = cloud_note
                 self.files.append(entry)
             finally:
@@ -427,7 +432,7 @@ class EvtxSource:
 
     def _iter_m365(self, path: str | None, data: bytes | None, fmt: str, source_file: str) -> Iterator[dict[str, Any]]:
         try:
-            for row in m365.iter_records(path, data, fmt, stats=self.stats, include_raw=self.include_raw, seen=self.seen_records):
+            for row in m365.iter_records(path, data, fmt, stats=self.stats, include_raw=self.include_raw, seen=self.seen_records, dates=self.dates):
                 row["sourceFile"] = source_file
                 yield row
         except Exception as exc:  # noqa: BLE001

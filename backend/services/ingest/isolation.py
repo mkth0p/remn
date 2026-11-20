@@ -230,6 +230,7 @@ class _Work:
 class _EvtxWork(_Work):
     def __init__(self, spec: dict[str, Any], deadline: float | None, run_engine: Engine) -> None:
         from services.ingest.pipeline import MAX_MEMBER_BYTES, EvtxSource
+        from services.parsers import m365
 
         super().__init__(spec, deadline, run_engine)
         o = self.options
@@ -241,6 +242,7 @@ class _EvtxWork(_Work):
             include_raw=bool(o.get("include_raw", True)),
             max_member=int(o.get("max_member") or MAX_MEMBER_BYTES),
             deadline=deadline,
+            dates=m365.date_setting(o.get("dates")),
         )
         self.format = self.source.format
         self.summaries: list[dict[str, Any]] = []
@@ -297,6 +299,7 @@ class _MailWork(_Work):
 class _PackageWork(_Work):
     def __init__(self, spec: dict[str, Any], deadline: float | None, run_engine: Engine) -> None:
         from services.ingest.package import PackageSource
+        from services.parsers import m365
         from services.parsers.mail.common import ParseContext
 
         super().__init__(spec, deadline, run_engine)
@@ -313,6 +316,7 @@ class _PackageWork(_Work):
         )
         self.package.engines = list(o.get("engines") or [])
         self.package.filesystem = bool(o.get("filesystem"))
+        self.package.dates = m365.date_setting(o.get("dates"))
         self.package.run_engine = run_engine
         self.findings = self.package.findings
         self.format = self.package.format

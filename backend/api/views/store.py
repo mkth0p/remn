@@ -30,7 +30,7 @@ from services.ingest import isolation, staging
 from services.ingest.isolation import ParseStopped
 from services.ingest.package import request_budget
 from services.ingest.pipeline import MailStats, detect_mail_format
-from services.parsers import evtx_parser
+from services.parsers import evtx_parser, m365
 from services.parsers.mail import pst as pst_mod
 from services.parsers.mail.common import ParseContext
 from services.store import queries as Q
@@ -216,6 +216,12 @@ def ingest(request: HttpRequest, key: str):
     options = body.get("options") or {}
     if kind not in ("evtx", "mail", "package"):
         return JsonResponse({"error": "kind must be evtx, mail or package"}, status=400)
+    # the date order and time zone the analyst set for the evidence, for the cloud exports in it
+    try:
+        date_setting = m365.date_setting(options.get("dates"))
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    dates = date_setting.to_dict() if date_setting is not None else None
     try:
         path, meta = get_upload(upload_id)
     except (FileNotFoundError, ValueError):
@@ -284,9 +290,10 @@ def ingest(request: HttpRequest, key: str):
                 "engines": hayabusa.engines(),
                 "filesystem": read_filesystem,
                 "budget": request_budget(claim=True),
+                "dates": dates,
             }
         elif kind == "evtx":
-            parse_options = {"include_raw": include_raw, "engines": hayabusa.available()}
+            parse_options = {"include_raw": include_raw, "engines": hayabusa.available(), "dates": dates}
         else:
             parse_options = {"ctx": ctx}
         try:
