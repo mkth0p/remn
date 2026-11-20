@@ -198,6 +198,23 @@ def test_a_collection_reports_the_compromises_it_made_on_the_member(tmp_path):
     assert "UTF-16LE" in by_name["WdSupportLogs/MPLog.txt"]["note"]
 
 
+def test_a_utf16_log_with_windows_line_ends_in_a_collection_is_read(tmp_path):
+    """Windows writes its UTF-16 logs with a byte order mark and CR LF line ends, as Velociraptor's
+    sample of a Defender log shows. The first line was read as UTF-8 to see whether it is the
+    header of a Zimmerman export: it kept its CR between NULs, the CSV reader raised on it, and
+    the whole member became an error with nothing read. The lines here are invented."""
+    log = "2026-01-01T00:00:00.001Z Engine:Config:Default MpEngine config loaded\r\n2026-01-01T00:00:05.000Z threat detected: Trojan:Win32/Synthetic\r\n"
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as z:
+        z.writestr("WdSupportLogs/MPLog-20260101-000000.log", "﻿".encode("utf-16-le") + log.encode("utf-16-le"))
+
+    source = PackageSource("pkg.zip", None, out.getvalue(), str(tmp_path), ParseContext(analyze_attachments=False))
+    rows = list(source)
+
+    assert [(f["status"], f["count"], f["note"]) for f in source.files] == [("parsed", 2, "decoded as UTF-16")]
+    assert [r.get("threatName") for r in rows] == [None, "Trojan:Win32/Synthetic"]
+
+
 def prefetch_package(count, damaged=0):
     import sys
     from pathlib import Path

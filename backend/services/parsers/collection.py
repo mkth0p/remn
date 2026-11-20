@@ -61,7 +61,7 @@ VELOCIRAPTOR: tuple[tuple[str, str], ...] = (
     ("windowsforensicslnk", "file"),
     ("windowsforensicsrecentdocs", "file"),
     ("windowsforensicsusn", "file"),
-    ("windowsntfsmft", "file"),
+    ("windowsntfsmft", "mft"),
     ("windowsforensicstimeline", "file"),
     ("windowsapplicationschromehistory", "browser-history"),
     ("windowsapplicationsedgehistory", "browser-history"),
@@ -146,7 +146,9 @@ DHCP_EVENTS = {
 def _ez_header_kind(head: bytes) -> str | None:
     """The artifact a Zimmerman parser's output holds, from its first line: the CSV header, or the
     keys of the first object of its --json output."""
-    first = head.decode("utf-8-sig", "replace").lstrip().split("\n", 1)[0].strip()
+    # decoded as the file is, not as UTF-8: a UTF-16 line read as UTF-8 keeps its CR between NULs,
+    # on which the CSV reader raises
+    first = head.decode(_text_encoding(io.BytesIO(head)), "replace").lstrip().split("\n", 1)[0].strip()
     if first.startswith("{"):
         try:
             record = json.loads(first)
@@ -452,6 +454,10 @@ def _event_export(
             message = f"{message}: {payload}" if message else payload
         # Velociraptor's flat rows carry the EventData as an object, EvtxECmd's as JSON text
         sections = {k: raw[k] for k in ("EventData", "UserData") if isinstance(raw.get(k), dict)} or _evtxecmd_payload(get("Payload"))
+        if not sections and "Payload" not in raw:
+            # Velociraptor's Windows.EventLogs artifacts that pick their fields, Kerberoasting
+            # among them, write the EventData fields they keep as columns of the row itself
+            sections = {"EventData": {k: v for k, v in raw.items() if not isinstance(v, (dict, list))}}
         process_id, thread_id, user_sid = get("ProcessId"), get("ThreadId"), get("UserId", "UserSID")
     event_number = int(event_id) if str(event_id or "").strip().isdigit() else None
     row: dict[str, Any] = {
@@ -1388,6 +1394,10 @@ def _normalize(
         "usn",
     ):
         candidate = get("FullPath", "Path", "AbsolutePath", "LocalPath", "TargetIDAbsolutePath", "FullName", "ExeInfo", "ImagePath", "FilePath")
+        if kind == "mft" and not candidate:
+            # Velociraptor's MFT artifact names the entry's path OSPath; in its other artifacts
+            # OSPath can be the file the rows were read from, so only here is it the entry's own
+            candidate = get("OSPath")
         leaf = get("FileName") if kind != "usn" else get("Name")
         if kind in ("file", "mft", "usn") and not candidate and leaf:
             # MFTECmd writes the parent path apart, and leaves it empty in a $J read without the $MFT
