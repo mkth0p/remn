@@ -203,3 +203,15 @@ def crash() -> None:
 
 def odd() -> None:
     _run(Odd)
+
+
+def start_fails() -> None:
+    """Fails in the parse process's own start, before any parser runs, with a message that quotes
+    (invented) evidence, as an exception's text often does."""
+    from services.analysis.attachments import yara_scan
+
+    def configure(rules_dir: Any) -> None:
+        raise ValueError("invented evidence text from Fabrikam-payroll.evtx")
+
+    yara_scan.configure = configure
+    _run(Environ)

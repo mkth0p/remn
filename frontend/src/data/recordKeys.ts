@@ -27,6 +27,16 @@ export interface RecordRef {
 
 type Row = Record<string, unknown>
 
+/** What a cloud record is, by the prefix of its key (services/parsers/m365.py). */
+const CLOUD_RECORDS: Record<string, string> = {
+  ual: 'audit record',
+  entra: 'sign-in',
+  'entra-audit': 'directory audit',
+  'entra-risk': 'risk detection',
+  'entra-riskyuser': 'risky user',
+  'exo-trace': 'message trace',
+}
+
 const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null)
 const int = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : null)
 
@@ -56,7 +66,7 @@ export function recordRef(row: Row, source: 'events' | 'mails', evidence?: Evide
   const cloud = text(row.recordKey)
   if (cloud) {
     const [kind, id] = cloud.includes(':') ? [cloud.slice(0, cloud.indexOf(':')), cloud.slice(cloud.indexOf(':') + 1)] : ['record', cloud]
-    return { file, record: `${kind === 'ual' ? 'audit record' : kind === 'entra' ? 'sign-in' : 'record'} ${id}`, sha256, duplicateKey: cloud, key: `${where}#${cloud}` }
+    return { file, record: `${CLOUD_RECORDS[kind] ?? 'record'} ${id}`, sha256, duplicateKey: cloud, key: `${where}#${cloud}` }
   }
   const dup = eventDuplicateKey(row)
   const rid = int(row.recordId)

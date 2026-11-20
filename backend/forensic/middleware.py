@@ -11,6 +11,10 @@ When ``FORENSIC_AUTH_TOKEN`` is set (remote/home-server deployments), the
 header value must equal the token; a wrong value gets 401 with code "auth"
 so the frontend can prompt for the token. Wrong values are counted per client
 address, and past ``FORENSIC_AUTH_FAILURES_PER_MIN`` the address gets 429.
+
+When the accounts file holds an account (forensic/accounts.py), the header value
+must be a personal token instead, the shared token is no longer accepted, and the
+request carries its account to the access check and the audit log.
 """
 
 from __future__ import annotations
@@ -24,6 +28,11 @@ import time
 
 from django.conf import settings
 from django.http import JsonResponse
+from django.urls import Resolver404, resolve
+
+from forensic import audit
+from forensic.access import case_key, check, declared, level_of, recorded
+from forensic.accounts import accounts_on, store
 
 HEADER_NAME = "HTTP_X_FORENSIC_CLIENT"
 # Answered without the header: a container health check or a load balancer probes with a plain GET
@@ -119,7 +128,21 @@ class ApiClientHeaderMiddleware:
                     return self.get_response(request)
                 return JsonResponse({"error": "missing X-Forensic-Client header"}, status=403)
             token = settings.FORENSIC_AUTH_TOKEN
-            if token:
+            accounts = store()
+            if accounts.enabled():
+                # a personal token, counted against the same allowance as a wrong shared token
+                account, claimed = accounts.authenticate(value)
+                if (limited := self._limited(request, account is not None or value in PLACEHOLDERS)) is not None:
+                    return limited
+                if account is None:
+                    if value not in PLACEHOLDERS:
+                        # for the audit log: the account the token names, when it names one
+                        request.remn_auth_failed = claimed or ""
+                    return JsonResponse(
+                        {"error": "this server has accounts: a valid personal access token is required", "code": "auth", "accounts": True}, status=401
+                    )
+                request.account = account
+            elif token:
                 right = hmac.compare_digest(value.encode("utf-8", "surrogateescape"), token.encode("utf-8"))
                 if (limited := self._limited(request, right or value in PLACEHOLDERS)) is not None:
                     return limited
@@ -128,6 +151,81 @@ class ApiClientHeaderMiddleware:
             # for the health view: this caller sent the header, and the token when one is configured
             request.forensic_client = True
         return self.get_response(request)
+
+
+class AccessMiddleware:
+    """With accounts on, refuses a request before its view runs when its account lacks what the
+    route declares (forensic/access.py), and refuses every request to a route that declares nothing.
+    With accounts off it does nothing."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        return self.get_response(request)
+
+    def process_view(self, request, view_func, view_args, view_kwargs):
+        # the one request without the client header that gets this far is the health probe
+        if not request.path.startswith("/api/") or not getattr(request, "forensic_client", False) or not accounts_on():
+            return None
+        need = declared(view_func)
+        if need is None:
+            log.error("refused a request to %s: the route declares no permission", request.path_info)
+            request.remn_refused = True
+            return JsonResponse({"error": "this route declares no permission, so it is refused while accounts are on", "code": "undeclared"}, status=403)
+        answer = check(request, need, view_kwargs)
+        if answer is not None:
+            request.remn_refused = True
+        return answer
+
+
+class AuditMiddleware:
+    """With accounts on, appends to the audit log (forensic/audit.py) every failed authentication,
+    every request the access check refused, and every request to a route that records its requests:
+    those that change something, bring evidence in or take it out, or send it to a model or a
+    provider. The status recorded is the one the request was answered with; a streamed answer that
+    fails part-way is recorded as begun. With accounts off nothing is written."""
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        resp = self.get_response(request)
+        if request.path.startswith("/api/") and accounts_on():
+            try:
+                self._record(request, resp)
+            except Exception as exc:  # noqa: BLE001
+                # the request has been answered and cannot be undone; the operator is told the entry is missing
+                log.error("the audit log could not record %s %s (%s)", request.method, request.path_info, type(exc).__name__)
+        return resp
+
+    @staticmethod
+    def _record(request, resp) -> None:
+        failed = getattr(request, "remn_auth_failed", None)
+        refused = getattr(request, "remn_refused", False)
+        account = getattr(request, "account", None)
+        match = request.resolver_match
+        if match is None:
+            try:
+                match = resolve(request.path_info)
+            except Resolver404:
+                match = None
+        need = declared(match.func) if match else None
+        key = case_key(request, need, match.kwargs) if need and match else None
+        if failed is None and not refused and not (account and need and recorded(request, need, level_of(request, need, key))):
+            return
+        outcome = "failed authentication" if failed is not None else "refused" if refused else "ok" if resp.status_code < 400 else "error"
+        audit.log().append(
+            account=account.name if account else (failed or None),
+            role=account.role if account else None,
+            address=client_address(request),
+            method=request.method,
+            route="/" + match.route if match else None,
+            path=request.path_info,
+            case=key,
+            status=resp.status_code,
+            outcome=outcome,
+        )
 
 
 # What the built index.html declares in its <meta> tag, plus frame-ancestors (header only).

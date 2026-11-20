@@ -5,9 +5,12 @@ import { refreshCounts } from '../data/ingest'
 import { getDb } from '../db/schema'
 import { toast, useStore } from '../state/store'
 import { Spinner } from './ui'
+import { viewerReason } from '../data/access'
 
 export function RescoreButton() {
   const kase = useStore((s) => s.currentCase)
+  // the server refuses a viewer every enrichment pass
+  const viewer = viewerReason(useStore((s) => s.health))
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState('')
   const [notice, setNotice] = useState('')
@@ -59,9 +62,9 @@ export function RescoreButton() {
     <span className="row small" style={{ gap: 6 }}>
       <button
         className="btn xs"
-        disabled={busy}
+        disabled={busy || !!viewer}
         onClick={run}
-        title="Update sender history, recalibrate retained mail and attachment facts, then refresh enabled mail rules. Evidence IDs and raw records are preserved."
+        title={viewer ?? 'Update sender history, recalibrate retained mail and attachment facts, then refresh enabled mail rules. Evidence IDs and raw records are preserved.'}
       >
         {busy ? <Spinner /> : null} rescore + refresh findings
       </button>

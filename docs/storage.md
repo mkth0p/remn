@@ -66,14 +66,16 @@ What one store may take from the server is bounded, and each bound is a setting 
   query opens it again. 0 keeps every store open until the server stops.
 - **Query time.** One query on a store (search, count, aggregate, stack, timeline, facets,
   pivot, a row, the summary, the indicator list, SQL from the SQL view or the analyst's
-  `sql` tool) runs at most `FORENSIC_STORE_QUERY_MAX_S` seconds (60). A query past it is
+  `sql` tool, and the reads of a story, relationship or mail enrichment build, which count
+  together as one) runs at most `FORENSIC_STORE_QUERY_MAX_S` seconds (60). A query past it is
   stopped and answered with 504, the code `queryStopped` and a message that names the limit;
   narrow the filter or the time range, or raise the limit. The export of a whole case reads
   in pages and has no overall limit.
 - **Rule time.** One rule of a server-store rule run runs at most `FORENSIC_STORE_RULE_MAX_S`
   seconds (300). A rule past it is stopped, listed among the run's errors with a message that
   names the limit and says it has no findings in that run, and the run goes on with the next
-  rule.
+  rule. Cancelling a rule run stops the rule that is running as well, within a fraction of a
+  second; the run keeps the findings of the rules that finished before it.
 
 0 turns a time limit off.
 
@@ -128,8 +130,9 @@ background job parses it; the Evidence page shows the job's progress and its err
 and `GET /api/jobs?case=<key>` lists the jobs of that case. A job is read, followed and
 cancelled only with its case's key (`/api/jobs/<id>?case=<key>`); without it, or with
 another key, the answer is the 404 of an unknown job, and no answer about a job carries
-the key. An interrupted upload resumes from the last received offset when the same file
-is dropped again.
+the key. On a server with accounts the key is not enough: the account must also be allowed
+to open the case ([Security model](security.md#accounts-roles-and-the-audit-log)). An
+interrupted upload resumes from the last received offset when the same file is dropped again.
 
 A running import can be cancelled from its line in the jobs list, in either store. The file
 stops being read and sent; a server job is asked to stop and, once it has, what the import

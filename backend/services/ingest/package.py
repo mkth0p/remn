@@ -76,19 +76,22 @@ MAX_TOTAL = 16 * 1024**3
 MAX_STRUCTURED = 64 * 1024**2
 
 
-def request_budget() -> dict[str, Any]:
+def request_budget(claim: bool = False) -> dict[str, Any]:
     """The allowances one package request shares across its nesting levels, sized from the staging
     area when the request begins. Computed by the server, which sees the whole staging area, and
-    handed to the parse wherever it runs."""
+    handed to the parse wherever it runs. With `claim` the room it may hold is set aside for it
+    (staging.parse_room) until staging.release(budget["claim"]), which the server's entry points do."""
     capacity, _ = staging.capacity()
+    room, token = staging.parse_room(claim)
     return {
         "bytes": 0,
         "files": 0,
         "decodes": 0,
         "decodeSeconds": 0.0,
         "memberCap": min(MAX_MEMBER, capacity // 2),
-        "heldCap": max(0, capacity - staging.staged_bytes()),
+        "heldCap": room,
         "held": 0,
+        "claim": token,
     }
 
 
@@ -165,6 +168,10 @@ class PackageSource:
         self.run_engine = None
         # keys of the cloud audit and sign-in records read so far, across every member
         self.seen_records = m365.RecordKeys()
+        # the date order and time zone the analyst set for this evidence, for the cloud exports in
+        # it, and what reading their dates came to across every member (shared with nested packages)
+        self.dates: m365.DateSetting | None = None
+        self.cloud_counts: dict[str, int] = dict.fromkeys(m365.DATE_COUNTS, 0)
         self.evtx_held: dict[str, tuple[dict[str, Any], str]] = {}
         # event logs that came after the hold was full: parsed, but never seen by the engines
         self.not_scanned = 0
@@ -182,6 +189,7 @@ class PackageSource:
             "unsupported": sum(f["status"] == "unsupported" for f in self.files),
             "skipped": sum(f["status"] == "skipped" for f in self.files),
             "duplicates": sum(int(f.get("duplicates") or 0) for f in self.files),
+            **m365.date_stats(self.cloud_counts, self.dates),
             "inventoryComplete": self.inventory_complete,
             "context": self.context,
             "reconciliation": reconcile(self.files, self.expectations) + self.nested_reconciliation,
@@ -719,6 +727,7 @@ class PackageSource:
                         nested.engines = list(self.engines)
                         nested.filesystem = self.filesystem
                         nested.run_engine = self.run_engine
+                        nested.dates, nested.cloud_counts = self.dates, self.cloud_counts
                         nested_error = None
                         try:
                             for row in nested:
@@ -795,7 +804,7 @@ class PackageSource:
                 elif (
                     head.startswith(b"ElfFile\x00") or low.endswith(".evtx") or m365.detect_format(member.name, head) or evtx_parser.looks_like_event_xml(head)
                 ):
-                    source = EvtxSource(member.name, tmp_path, None, self.tmp_dir, self.include_raw, seen=self.seen_records)
+                    source = EvtxSource(member.name, tmp_path, None, self.tmp_dir, self.include_raw, seen=self.seen_records, dates=self.dates)
                     entry["format"] = source.format
                     rows = (("event", r) for r in source)
                 elif (
@@ -858,7 +867,10 @@ class PackageSource:
                     entry.update(source.stats.coverage())
                     if source.stats.repaired:
                         notes["xmlRepaired"] = source.stats.repaired
-                    if cloud_note := m365.note(m365.counts(source.stats)):
+                    cloud = m365.counts(source.stats)
+                    for name in m365.DATE_COUNTS:
+                        self.cloud_counts[name] += cloud[name]
+                    if cloud_note := m365.note(cloud, self.dates):
                         notes["cloud"] = cloud_note
                 if source is not None and source.stats.errors:
                     raise ValueError(f"parser reported {source.stats.errors} error(s); any emitted rows are partial")

@@ -8,7 +8,12 @@ on PATH or `HAYABUSA_PATH`, rules beside it or at `HAYABUSA_RULES`; the containe
 it pinned by version and by the SHA-256 of the release archive) every ingested event log is
 also handed to it, and its detections come back as findings with rule ids under
 `engine:hayabusa:`, the level mapped to a severity, the MITRE techniques it tags, and refs to
-the rows REMN parsed from the same records, linked by computer, channel and record id. An
+the rows REMN parsed from the same records, linked by computer, channel and record id. A
+detection names the user, host and address of its event as REMN's own rules name them (the
+row's values in a server case, the engine's report read by REMN's parser in the browser
+store), so an incident holds the findings of both engines on that event. Where a converted
+Sigma pack is enabled, the same rule on the same record still gives one finding from each
+engine. An
 archive of event logs gives it its `.evtx` members, up to half the staging area (4 GiB at
 most); records exported as XML and cloud exports are not its input, and its summary says they
 were not scanned. In a package the logs are held for it in at most 256 MiB of staging; a log
@@ -126,7 +131,7 @@ maintains: brute force and password spraying, out-of-hours logons, RDP from outs
 PsExec and admin shares, persistence, log clearing, Defender tampering, PowerShell
 cradles and credential dumping on the Windows side; display-name spoofing, lookalike
 domains, macro, PDF and HTML-smuggling attachments, the BEC lexicon, forged headers,
-score bands and the sender-baseline rules on the mail side; and the 29 business email
+score bands and the sender-baseline rules on the mail side; and the 37 business email
 compromise rules over Microsoft 365 and Entra rows listed on the [data sources
 page](sources.md). Every rule carries MITRE ATT&CK technique ids, as of ATT&CK v19 (April
 2026), which split Defense Evasion into Stealth and Defense Impairment and moved Impair
@@ -332,7 +337,8 @@ Recorded attacks, at the versions measured:
   identifying each (`tests/fixtures/evtx-attack-samples/expected.json`);
 - the Office 365 and Entra ID datasets of Splunk attack_data (`7a5e9d5`): 67
   recordings, each labelled with its ATT&CK technique. 25 more are Entra directory
-  audit logs, other Azure Monitor records and Splunk search exports, which REMN does not read;
+  audit logs in the Azure Monitor form, other Azure Monitor records and Splunk search
+  exports, which REMN does not read;
 - EVTX-to-MITRE-Attack (`4748560`): 279 recordings, each labelled with the ATT&CK technique of
   the folder it is filed in. No rule was written against it before it was first measured
   ([the head-to-head](reviews/2026-09-25-head-to-head.md)); the rules written since after

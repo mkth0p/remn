@@ -26,6 +26,8 @@ ATT_NAMES = [n for n, _ in ATTACHMENT_COLUMNS]
 URL_NAMES = [n for n, _ in URL_COLUMNS]
 BATCH = 5000
 _IPV4 = re.compile(r"^\d+\.\d+\.\d+\.\d+$")
+# a URL's scheme, its authority (credentials and host) and the rest
+_URL_PARTS = re.compile(r"^((?:[a-z][a-z0-9+.-]*:)?//)?([^/?#]*)(.*)$", re.I | re.S)
 
 
 def _int(v: Any) -> int | None:
@@ -45,6 +47,20 @@ def _json(v: Any) -> str | None:
     return json.dumps(v, ensure_ascii=False, separators=(",", ":"), default=str)
 
 
+def ioc_value(kind: str, value: Any) -> str:
+    """The stored form of an indicator, as the browser store keeps it (iocValue in
+    frontend/src/util/format.ts). Only a URL's scheme and host are case-insensitive: its path and
+    query name another resource when their case changes, so they keep it. Every other kind folds."""
+    v = str(value).strip()[:2048]
+    if kind != "url":
+        return v.lower()
+    m = _URL_PARTS.match(v)
+    scheme, authority, rest = (m.group(1) or "", m.group(2), m.group(3)) if m else ("", "", v)
+    # credentials before the host keep their case
+    at = authority.rfind("@")
+    return scheme.lower() + authority[: at + 1] + authority[at + 1 :].lower() + rest
+
+
 class IocBatch:
     def __init__(self, evidence_id: int) -> None:
         self.evidence_id = evidence_id
@@ -53,7 +69,7 @@ class IocBatch:
     def add(self, kind: str, value: Any, source: str, ts: int | None) -> None:
         if not value:
             return
-        v = str(value).strip().lower()[:2048]
+        v = ioc_value(kind, value)
         if not v:
             return
         key = (kind, v)

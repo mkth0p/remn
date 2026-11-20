@@ -39,8 +39,11 @@ def refusal(host: str) -> str | None:
     the container cannot see: FORENSIC_PUBLISHED_ON carries that address in, and is what is judged."""
     from django.conf import settings
 
+    from forensic.accounts import accounts_on
+
     reachable_on = settings.FORENSIC_PUBLISHED_ON or host
-    if settings.FORENSIC_AUTH_TOKEN or settings.FORENSIC_ALLOW_NO_TOKEN or _loopback(reachable_on):
+    # with accounts, every request carries a personal token
+    if settings.FORENSIC_AUTH_TOKEN or accounts_on() or settings.FORENSIC_ALLOW_NO_TOKEN or _loopback(reachable_on):
         return None
     at_stake = (
         "    A browser-only instance keeps no cases, and still has to say that it is open on purpose."
@@ -53,6 +56,7 @@ def refusal(host: str) -> str | None:
             at_stake,
             "    Choose one of:",
             "      - FORENSIC_AUTH_TOKEN=<long random string>: every request must carry it (REMN_TOKEN with docker compose);",
+            "      - accounts, each with a personal token: backend/manage.py accounts create <name> --role admin;",
             "      - listen on 127.0.0.1, or publish the container's port on 127.0.0.1 and tell the server so with",
             "        FORENSIC_PUBLISHED_ON=127.0.0.1 (docker-compose.yml does both by default);",
             "      - FORENSIC_ALLOW_NO_TOKEN=1: something in front of the server decides who gets in, or the instance is",
@@ -91,7 +95,13 @@ def main() -> None:
     if (said := refusal(args.host)) is not None:
         print(said, file=sys.stderr)
         sys.exit(2)
-    if not settings.FORENSIC_AUTH_TOKEN and not _loopback(settings.FORENSIC_PUBLISHED_ON or args.host):
+    from forensic.accounts import accounts_on
+
+    if accounts_on():
+        print("[*] Accounts are on: every request needs a personal token, and requests are recorded in the audit log.")
+        if settings.FORENSIC_AUTH_TOKEN:
+            print("    FORENSIC_AUTH_TOKEN is set and is not accepted while accounts exist.")
+    elif not settings.FORENSIC_AUTH_TOKEN and not _loopback(settings.FORENSIC_PUBLISHED_ON or args.host):
         print("[!] Listening beyond loopback without an access token, as FORENSIC_ALLOW_NO_TOKEN says is intended.")
         if not settings.FORENSIC_BROWSER_ONLY:
             print("    Anyone who can reach this port can read and delete every case store.")

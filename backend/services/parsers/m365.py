@@ -1,5 +1,6 @@
 """
-Microsoft 365 Unified Audit Log (UAL) and Entra ID sign-in exports -> event rows.
+Microsoft 365 Unified Audit Log (UAL), Entra ID sign-in, Entra ID directory audit, Entra ID
+Protection and Exchange Online message trace exports -> event rows.
 
 Business-email-compromise investigations live on three sources: the mailbox itself, the
 Unified Audit Log (inbox rules, forwarding, MailItemsAccessed, consent grants, role changes)
@@ -9,23 +10,41 @@ Microsoft-Extractor-Suite / Office-365-Extractor CSV and JSON, Untitled Goose To
 Entra portal CSV, Graph sign-in JSON - as rows of the *events* table, so the timeline, facets,
 rules, AI tools and cross-source pivots work on them unchanged.
 
-Formats (detected from the first bytes, also inside zip/tar archives):
+Formats (detected from the first bytes, in UTF-8, UTF-16 or UTF-32 with a byte order mark, also
+inside zip/tar archives):
     m365-ual-csv        CSV with an AuditData column (CreationDate, UserIds, Operations, AuditData ...)
     m365-ual-json       JSON array / NDJSON of AuditData objects, or of {..., "AuditData": "<json>"} rows
     entra-signin-json   JSON array / NDJSON of Graph signIn objects (Get-EntraSignInLogs, Goose)
     entra-signin-csv    Entra portal CSV export or a Graph-property CSV
+    entra-audit-json    Graph directoryAudit objects (auditLogs/directoryAudits, the portal's JSON download)
+    entra-audit-csv     the portal's audit log CSV download, or directoryAudit properties as columns
+    entra-riskdetection-json  Graph riskDetection objects (identityProtection/riskDetections)
+    entra-riskdetection-csv   riskDetection properties as columns (Get-MgRiskDetection | Export-Csv,
+                              Microsoft-Extractor-Suite Get-RiskyDetections)
+    entra-riskyuser-json      Graph riskyUser objects (identityProtection/riskyUsers)
+    entra-riskyuser-csv       riskyUser properties as columns (Get-MgRiskyUser | Export-Csv, Get-RiskyUsers)
+    exo-messagetrace-csv         Get-MessageTrace / Get-MessageTraceV2 | Export-Csv
+    exo-messagetrace-report-csv  the Exchange admin centre's enhanced summary or extended report
 
 Row conventions (shared with the EVTX parser so rules can mix both):
-    provider   "Microsoft 365 Unified Audit Log" | "Microsoft Entra ID Sign-in"
+    provider   "Microsoft 365 Unified Audit Log" | "Microsoft Entra ID Sign-in" | "Microsoft Entra ID Audit"
+               | "Microsoft Entra ID Protection" | "Exchange Online Message Trace"
     channel    the UAL Workload (Exchange, AzureActiveDirectory, SharePoint, OneDrive ...) | "Entra SignIn"
-    category   "M365 Exchange" | "M365 Entra" | "M365 SharePoint" | ... | "Entra sign-in"
-    operation  the UAL Operation / "SignIn"
-    subjectUser = user (actor UPN), targetUser = affected user when the operation has one
+               | "Entra Audit" | "Entra RiskDetection" | "Entra RiskyUser" | "Exchange MessageTrace"
+    category   "M365 Exchange" | "M365 Entra" | "M365 SharePoint" | ... | "Entra sign-in" | "Entra audit"
+               | "Entra risk" | "Exchange message trace"
+    operation  the UAL Operation / "SignIn" / a directory activity as the UAL names it ("Consent to
+               application.") / "RiskDetection" / "RiskyUser" / "MessageTrace"
+    subjectUser = user (actor UPN, sender), targetUser = affected user (recipient) when the record has one
     ipAddress   client IP (port and brackets stripped), status / statusText, objectName
     data        every AuditData field flattened one level: Parameters, ExtendedProperties,
                 ModifiedProperties (NewValue, plus "<name>.old"), OperationProperties, Target,
                 Actor, AppAccessContext.*; Entra: appDisplayName, clientAppUsed, country, city,
-                riskLevelDuringSignIn, riskState, conditionalAccessStatus, errorCode ...
+                riskLevelDuringSignIn, riskState, conditionalAccessStatus, errorCode ...; directory
+                audits: their modified properties under the names the UAL gives them, initiatedBy.*,
+                Target.*, additionalDetails by key; risk: riskEventType, riskLevel, riskState,
+                riskDetail, country, city, additionalInfo.<key> ...; message trace: every column,
+                and SenderDomain, RecipientDomain, InternetMessageId
 """
 
 from __future__ import annotations
@@ -34,14 +53,17 @@ import csv
 import hashlib
 import io
 import ipaddress
+import itertools
 import json
 import logging
 import os
 import re
 from array import array
-from collections.abc import Iterable, Iterator
-from datetime import UTC, datetime, timedelta, timezone
+from collections.abc import Callable, Iterable, Iterator
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta, timezone, tzinfo
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 log = logging.getLogger(__name__)
 
@@ -54,7 +76,23 @@ if csv.field_size_limit() < MAX_FIELD_CHARS:
 
 UAL_PROVIDER = "Microsoft 365 Unified Audit Log"
 ENTRA_PROVIDER = "Microsoft Entra ID Sign-in"
-FORMATS = ("m365-ual-csv", "m365-ual-json", "entra-signin-json", "entra-signin-csv")
+AUDIT_PROVIDER = "Microsoft Entra ID Audit"
+RISK_PROVIDER = "Microsoft Entra ID Protection"
+TRACE_PROVIDER = "Exchange Online Message Trace"
+FORMATS = (
+    "m365-ual-csv",
+    "m365-ual-json",
+    "entra-signin-json",
+    "entra-signin-csv",
+    "entra-audit-json",
+    "entra-audit-csv",
+    "entra-riskdetection-json",
+    "entra-riskdetection-csv",
+    "entra-riskyuser-json",
+    "entra-riskyuser-csv",
+    "exo-messagetrace-csv",
+    "exo-messagetrace-report-csv",
+)
 
 _WORKLOAD_CATEGORY = {
     "exchange": "M365 Exchange",
@@ -90,40 +128,90 @@ _PRIVILEGED_ROLES = (
 
 
 # ---------------------------------------------------------------------------
+# Encoding
+# ---------------------------------------------------------------------------
+# PowerShell 5 (Export-Csv -Encoding Unicode, Out-File) and the admin centres write UTF-16 with a
+# byte order mark, and Microsoft-Extractor-Suite takes -Encoding utf32. Read as UTF-8, such an
+# export was not recognised and was reported as an event log that failed. The longer marks come
+# first: UTF-32's little-endian mark starts with UTF-16's.
+_BOMS = (
+    (b"\xff\xfe\x00\x00", "utf-32"),
+    (b"\x00\x00\xfe\xff", "utf-32"),
+    (b"\xff\xfe", "utf-16"),
+    (b"\xfe\xff", "utf-16"),
+    (b"\xef\xbb\xbf", "utf-8-sig"),
+)
+
+
+def encoding_of(head: bytes) -> str:
+    """The encoding an export's byte order mark names; UTF-8 when it has none."""
+    for bom, encoding in _BOMS:
+        if head.startswith(bom):
+            return encoding
+    return "utf-8-sig"
+
+
+def head_text(head: bytes) -> str:
+    """The first bytes of an export as text, in the encoding its byte order mark names. A head cut
+    inside a character loses that character only."""
+    encoding = encoding_of(head)
+    width = 4 if encoding == "utf-32" else 2 if encoding == "utf-16" else 1
+    return head[: len(head) - len(head) % width].decode(encoding, "replace")
+
+
+def _header_line(text: str) -> str:
+    """A table's header: its first line, or its second after the "#TYPE <type name>" line that
+    Windows PowerShell's Export-Csv writes without -NoTypeInformation."""
+    lines = text.split("\n", 2)
+    line = lines[1] if lines[0].startswith("#TYPE") and len(lines) > 1 else lines[0]
+    return line.rstrip("\r")
+
+
+# ---------------------------------------------------------------------------
 # Detection
 # ---------------------------------------------------------------------------
 def detect_format(name: str, head: bytes) -> str | None:
     """Return one of FORMATS for a UAL / Entra export, else None."""
     if not looks_like_export(name, head):
         return None
-    text = head.lstrip(b"\xef\xbb\xbf").decode("utf-8", "replace").lstrip()
+    text = head_text(head).lstrip()
     low = text.lower()
     if text.startswith(("[", "{")):
         if '"auditdata"' in low or ('"operation"' in low and ('"workload"' in low or '"creationtime"' in low)):
             return "m365-ual-json"
-        if is_signin(_KEY_RE.findall(text)):
+        keys = _KEY_RE.findall(text)
+        kind = entra_kind(keys)
+        # a file is of the kind of its first record: a sign-in file with a directory audit in it is
+        # a sign-in file, whose audit record is not read
+        if is_signin(keys) and not (kind and low.find(f'"{_KIND_KEY[kind]}"') < low.find('"createddatetime"')):
             return "entra-signin-json"
         # Azure Monitor diagnostic records (Log Analytics, Event Hub, storage account): the
         # sign-in is under "properties", past the head
         if any(f'"category": "{c}"' in low or f'"category":"{c}"' in low for c in _SIGNIN_CATEGORIES):
             return "entra-signin-json"
-        return None
-    header = low.split("\n", 1)[0]
-    if "auditdata" in header:
+        # Azure Monitor records of the other categories hold an audit or risk record under
+        # "properties" in a schema Microsoft says may differ from Graph's: they are not read
+        if _MONITOR_CATEGORY_RE.search(low):
+            return None
+        return f"entra-{kind}-json" if kind else None
+    header = _header_line(text)
+    if "auditdata" in header.lower():
         return "m365-ual-csv"
-    if is_signin(next(csv.reader([text.split("\n", 1)[0]]), [])):
+    columns = next(csv.reader([header]), [])
+    if is_signin(columns):
         return "entra-signin-csv"
-    return None
+    kind = entra_kind(columns)
+    return f"entra-{kind}-csv" if kind else trace_kind(columns)
 
 
 UNRECOGNISED = "not a recognised Microsoft 365 or Entra export"
 
 
 def looks_like_export(name: str, head: bytes) -> bool:
-    """Whether a file is a table or a JSON document by its name or first byte: what a cloud export
-    is, and what an event log is not."""
+    """Whether a file is a table or a JSON document by its name or first character: what a cloud
+    export is, and what an event log is not."""
     n = (name or "").lower()
-    return n.endswith((".csv", ".json", ".jsonl", ".ndjson", ".txt", ".log")) or head.lstrip(b"\xef\xbb\xbf")[:1] in (b"[", b"{")
+    return n.endswith((".csv", ".json", ".jsonl", ".ndjson", ".txt", ".log")) or head_text(head[:8])[:1] in ("[", "{")
 
 
 _KEY_RE = re.compile(r'"([^"\\]{1,64})"\s*:')
@@ -138,6 +226,54 @@ def is_signin(keys: Iterable[Any]) -> bool:
     low = {str(k).strip().lower() for k in keys}
     low = {(_PORTAL_MAP.get(k) or k).lower() for k in low}
     return "createddatetime" in low and "ipaddress" in low and bool(low & _SIGNIN_WHO)
+
+
+_MONITOR_CATEGORY_RE = re.compile(r'"category"\s*:\s*"(?:auditlogs|riskyusers|userriskevents|serviceprincipalriskevents|riskyserviceprincipals)"')
+
+
+def trace_kind(columns: Iterable[Any]) -> str | None:
+    """Which message trace a table with these columns is: Get-MessageTrace or Get-MessageTraceV2
+    written with Export-Csv ("exo-messagetrace-csv"), or a report downloaded from the Exchange
+    admin centre ("exo-messagetrace-report-csv"); None for anything else."""
+    low = {_report_name(c) for c in columns}
+    if {"received", "senderaddress", "recipientaddress"} <= low:
+        return "exo-messagetrace-csv"
+    if {"sender_address", "message_id", "network_message_id"} <= low and low & {"origin_timestamp", "date_time"}:
+        return "exo-messagetrace-report-csv"
+    return None
+
+
+def _report_name(column: Any) -> str:
+    """A column of a message trace report by the name the Exchange admin centre documents: in lower
+    case, and without the "_utc" a download may end a time column with."""
+    name = str(column).strip().lower()
+    return name[:-4] if name.endswith("_utc") else name
+
+
+# The columns the Entra admin centre writes in its audit log download whatever the language of the
+# portal; the date, service, category, activity and result columns are translated.
+_PORTAL_AUDIT_COLUMNS = frozenset({"correlationid", "resultreason", "actortype", "target1type"})
+
+
+# the field only a record of each kind has, by its lower case
+_KIND_KEY = {"audit": "activitydisplayname", "riskdetection": "riskeventtype", "riskyuser": "risklastupdateddatetime"}
+
+
+def entra_kind(keys: Iterable[Any]) -> str | None:
+    """Which Entra record a record or a table with these field names (any case) holds, by the
+    fields Microsoft documents for it: "audit" (a directoryAudit, or a row of the portal's audit
+    log download), "riskdetection" (a riskDetection) or "riskyuser" (a riskyUser); None for
+    anything else."""
+    low = {str(k).strip().lower() for k in keys}
+    if "riskeventtype" in low and low & {"activitydatetime", "detecteddatetime"}:
+        return "riskdetection"
+    if "risklastupdateddatetime" in low and low & {"risklevel", "riskstate"}:
+        return "riskyuser"
+    if "activitydisplayname" in low and "activitydatetime" in low:
+        return "audit"
+    if _PORTAL_AUDIT_COLUMNS <= low:
+        return "audit"
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -200,11 +336,11 @@ _CULTURE_RE = re.compile(
 )
 
 
-def _culture_date(s: str, day_first: bool | None) -> datetime | None:
+def _culture_date(s: str, day_first: bool | None, zone: tzinfo | None = None) -> datetime | None:
     m = _CULTURE_RE.match(s)
     if not m:
         return None
-    a, sep, b, c, hour, minute, second, fraction, half, zone = m.groups()
+    a, sep, b, c, hour, minute, second, fraction, half, written = m.groups()
     if len(a) == 4:
         year, month, day = int(a), int(b), int(c)
     elif len(c) != 4:
@@ -218,23 +354,32 @@ def _culture_date(s: str, day_first: bool | None) -> datetime | None:
         if not 1 <= h <= 12:
             return None
         h = h % 12 + (12 if half.lower() == "pm" else 0)
-    tz = UTC
-    if zone and zone != "Z":
-        sign = -1 if zone[0] == "-" else 1
-        digits = zone[1:].replace(":", "")
+    # a zone written with the time is the time's own; the evidence's zone is for a time without one
+    tz = zone or UTC
+    if written and written != "Z":
+        sign = -1 if written[0] == "-" else 1
+        digits = written[1:].replace(":", "")
         tz = timezone(sign * timedelta(hours=int(digits[:2]), minutes=int(digits[2:])))
+    elif written == "Z":
+        tz = UTC
     try:
         return datetime(year, month, day, h, int(minute), int(second or 0), int((fraction or "0")[:6].ljust(6, "0")), tzinfo=tz)
     except ValueError:
         return None
 
 
-def parse_ts(v: Any, day_first: bool | None = None) -> tuple[int | None, str | None]:
-    """ISO-8601 (with or without zone / fractional seconds), portal 'M/D/YYYY, h:mm:ss AM', or a
-    culture's numeric date -> (ms, iso). day_first is the order date_order found for the file;
-    None keeps the portal's own month-first order for slashes and dashes. Dotted dates are always
-    day-first. A time written with a zone keeps it; one without is UTC, the zone the audit log,
-    Graph and the portal's "Date (UTC)" write."""
+# a .NET date as Windows PowerShell's ConvertTo-Json writes one: "\/Date(1756720800000)\/", the
+# milliseconds since 1970 in UTC, with the writer's offset after them when it had one
+_DOTNET_DATE_RE = re.compile(r"^/Date\((-?\d{1,15})(?:[+-]\d{4})?\)/$")
+
+
+def parse_ts(v: Any, day_first: bool | None = None, zone: tzinfo | None = None) -> tuple[int | None, str | None]:
+    """ISO-8601 (with or without zone / fractional seconds), portal 'M/D/YYYY, h:mm:ss AM', a
+    culture's numeric date, or a .NET "/Date(ms)/" -> (ms, iso). day_first is the order date_order
+    found for the file, or the order set for the evidence; None keeps the portal's own month-first
+    order for slashes and dashes. Dotted dates are always day-first. A time written with a zone
+    keeps it; one without is in ``zone``, else UTC, the zone the audit log, Graph and the portal's
+    "Date (UTC)" write. _Dates says which times the evidence's zone is for."""
     if v is None:
         return None, None
     if isinstance(v, (int, float)):
@@ -243,16 +388,145 @@ def parse_ts(v: Any, day_first: bool | None = None) -> tuple[int | None, str | N
     s = str(v).strip()
     if not s:
         return None, None
+    if m := _DOTNET_DATE_RE.match(s):
+        ms = int(m.group(1))
+        try:
+            return ms, datetime.fromtimestamp(ms / 1000, tz=UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        except (OverflowError, OSError, ValueError):
+            return None, None
     try:
         dt: datetime | None = datetime.fromisoformat(s.replace("Z", "+00:00"))
     except ValueError:
-        dt = _culture_date(s, day_first)
+        dt = _culture_date(s, day_first, zone)
     if dt is None:
         return None, None
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
+        dt = dt.replace(tzinfo=zone or UTC)
     dt = dt.astimezone(UTC)
     return int(dt.timestamp() * 1000), dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def culture_written(v: Any) -> bool:
+    """Whether a time is written as a culture or a spreadsheet writes one (9/1/2026 10:00 AM,
+    01.09.2026 10:00) and says nothing of its zone: the form Export-Csv gives a DateTime, whose
+    zone is whatever the value held. An ISO 8601 time is written by Graph or the audit log
+    service, in UTC."""
+    m = _CULTURE_RE.match(str(v or "").strip())
+    return bool(m) and not m.group(10)
+
+
+def _naive_iso(v: Any) -> bool:
+    """Whether a time is ISO 8601 without a zone ("2026-09-01T10:00:00")."""
+    s = str(v or "").strip()
+    try:
+        return datetime.fromisoformat(s).tzinfo is None if "T" in s and not s.endswith("Z") else False
+    except ValueError:
+        return False
+
+
+def utc_column(name: Any) -> bool:
+    """Whether a column's name says its times are UTC ("Date (UTC)", "origin_timestamp_utc"), in
+    which case no setting of the evidence moves them."""
+    return "utc" in re.split(r"[^a-z]+", str(name or "").lower())
+
+
+# ---------------------------------------------------------------------------
+# The date order and time zone an evidence file is read in
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class DateSetting:
+    """What the analyst says of one evidence file's dates where the file cannot say: the order of a
+    numeric date's day and month, and the zone of a culture-written time without one. It is chosen
+    for the evidence, recorded with it, and each file read with it says which of its records it
+    applied to."""
+
+    day_first: bool | None = None
+    zone: tzinfo | None = None
+    zone_name: str = ""
+
+    @property
+    def order(self) -> str:
+        return "" if self.day_first is None else "day-first" if self.day_first else "month-first"
+
+    def to_dict(self) -> dict[str, str]:
+        return {k: v for k, v in (("order", self.order), ("zone", self.zone_name)) if v}
+
+
+_ZONE_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_+\-/]{0,63}$")
+_OFFSET_RE = re.compile(r"^(?:UTC|GMT)?\s*([+-])(\d{1,2})(?::?(\d{2}))?$", re.IGNORECASE)
+
+
+def date_setting(value: Any) -> DateSetting | None:
+    """The date setting a request gives for one evidence file, {"order": "day-first" |
+    "month-first", "zone": "UTC" | "+02:00" | "Europe/Paris"}, as JSON text or an object; None when
+    it sets neither. A value that cannot be used raises ValueError, its message written for the
+    analyst."""
+    if value in (None, "", {}):
+        return None
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            raise ValueError("the date setting is not JSON") from None
+    if not isinstance(value, dict):
+        raise ValueError("the date setting is an object with an order and a zone")
+    order = str(value.get("order") or "").strip().lower()
+    if order not in ("", "day-first", "month-first"):
+        raise ValueError(f"the date order {order[:40]!r} is neither day-first nor month-first")
+    name = str(value.get("zone") or "").strip()
+    zone = time_zone(name) if name else None
+    if not order and zone is None:
+        return None
+    return DateSetting(day_first=None if not order else order == "day-first", zone=zone, zone_name=name if zone is not None else "")
+
+
+def time_zone(name: str) -> tzinfo:
+    """A zone by its name: UTC, an offset (+02:00, -0530, UTC+2) or an IANA name (Europe/Paris), whose
+    offset follows daylight saving time. Raises ValueError for anything else."""
+    if name.upper() in ("UTC", "Z", "GMT"):
+        return UTC
+    if m := _OFFSET_RE.match(name):
+        hours, minutes = int(m.group(2)), int(m.group(3) or 0)
+        if hours > 14 or minutes > 59:
+            raise ValueError(f"the offset {name[:20]!r} is not one a clock uses")
+        return timezone((-1 if m.group(1) == "-" else 1) * timedelta(hours=hours, minutes=minutes))
+    if _ZONE_NAME_RE.match(name):
+        try:
+            return ZoneInfo(name)
+        except (ZoneInfoNotFoundError, ValueError):
+            pass
+    raise ValueError(f"the time zone {name[:64]!r} is not known: give UTC, an offset such as +02:00, or a name such as Europe/Paris")
+
+
+class _Dates:
+    """How the times of one file are read: in the date order its own dates show, unless the evidence
+    sets one, and a culture-written time without a zone in the evidence's zone, or UTC. local: the
+    export writes its times in a zone of the reader's choosing, so an ISO 8601 time without a zone
+    is local too (the message trace reports, in the zone of the admin who asked for them)."""
+
+    def __init__(self, setting: DateSetting | None = None, file_order: bool | None = None, local: bool = False) -> None:
+        self.set_order = setting is not None and setting.day_first is not None
+        self.day_first = setting.day_first if setting is not None and setting.day_first is not None else file_order
+        self.zone = setting.zone if setting is not None else None
+        self.local = local
+
+    def read(self, value: Any, utc: bool = False) -> tuple[int | None, str | None, tuple[str, ...]]:
+        """(ms, iso, marks) of one time; utc when the export's column says its times are UTC. The
+        marks name what the record is counted for: dated in an order the file did not show, in the
+        order or the zone the evidence sets, or read as UTC with nothing to say so."""
+        moved = not utc and (culture_written(value) or (self.local and _naive_iso(value)))
+        ms, iso = parse_ts(value, self.day_first, self.zone if moved else None)
+        marks: tuple[str, ...] = ()
+        if guessed_order(value):
+            if self.set_order:
+                marks += ("date_order_set",)
+            elif self.day_first is None:
+                marks += ("date_order_guessed",)
+        if ms is None and self.set_order and parse_ts(value, not self.day_first)[0] is not None:
+            marks += ("date_order_contradicted",)
+        if moved and ms is not None:
+            marks += ("zone_set",) if self.zone is not None else ("zone_assumed",)
+        return ms, iso, marks
 
 
 class _Cut(str):
@@ -713,7 +987,7 @@ _GRAPH_NAMES = {
 _GRAPH_NAMES["riskeventtypesv2"] = "riskEventTypes_v2"
 # Export-Csv writes an object it cannot flatten as its .NET type name: a status, a location or a
 # device that the export does not hold, never a value.
-_TYPE_NAME_RE = re.compile(r"^(?:Microsoft\.Graph\.(?:Beta\.)?PowerShell\.Models\.\w+|System\.[\w.`]+(?:\[[^\]]*\])+)$")
+_TYPE_NAME_RE = re.compile(r"^(?:Microsoft\.Graph\.(?:Beta\.)?PowerShell\.Models\.\w+(?:\[\])?|System\.[\w.`]+(?:\[[^\]]*\])+)$")
 
 
 def _graph_keys(d: dict[str, Any]) -> dict[str, Any]:
@@ -863,12 +1137,579 @@ def entra_row(o: dict[str, Any], day_first: bool | None = None) -> dict[str, Any
 
 
 # ---------------------------------------------------------------------------
+# Entra directory audit rows
+# ---------------------------------------------------------------------------
+def _canon(d: dict[str, Any], names: dict[str, str]) -> dict[str, Any]:
+    """d with its keys under the names Microsoft documents (names: lower case -> documented), in
+    whatever case the export wrote them (the Graph PowerShell SDK writes PascalCase), nested
+    objects included. A value Export-Csv wrote as a .NET type name is left out: the export does
+    not hold it. A name already in documented form wins over another case of it."""
+    out: dict[str, Any] = {}
+    for k, v in d.items():
+        if isinstance(v, str) and _TYPE_NAME_RE.match(v.strip()):
+            continue
+        name = names.get(str(k).strip().lower(), str(k))
+        if isinstance(v, dict):
+            v = _canon(v, names)
+        elif isinstance(v, list):
+            v = [_canon(x, names) if isinstance(x, dict) else x for x in v]
+        if name not in out or k == name:
+            out[name] = v
+    return out
+
+
+# directoryAudit and the types it holds (auditActivityInitiator, userIdentity, appIdentity,
+# targetResource, modifiedProperty, keyValue), learn.microsoft.com/graph/api/resources/directoryaudit
+_AUDIT_NAMES = {
+    n.lower(): n
+    for n in (
+        "activityDateTime",
+        "activityDisplayName",
+        "additionalDetails",
+        "category",
+        "correlationId",
+        "id",
+        "initiatedBy",
+        "loggedByService",
+        "operationType",
+        "result",
+        "resultReason",
+        "targetResources",
+        "user",
+        "app",
+        "displayName",
+        "userPrincipalName",
+        "ipAddress",
+        "appId",
+        "servicePrincipalId",
+        "servicePrincipalName",
+        "type",
+        "groupType",
+        "modifiedProperties",
+        "oldValue",
+        "newValue",
+        "key",
+        "value",
+    )
+}
+# the audit log writes a directory activity with a closing period ("Consent to application.");
+# rules, stories and chains know the activities by those names. Privileged Identity Management
+# names its own without one, and the audit log spells this one with a dash and a space instead.
+_ACTIVITY_AS_WRITTEN = frozenset({"update application - certificates and secrets management"})
+
+
+def ual_operation(activity: str, service: Any = None) -> str:
+    """A directory activity ("Consent to application") under the name the Unified Audit Log gives
+    it ("Consent to application.")."""
+    low = activity.lower()
+    if not activity or activity.endswith(".") or low in _ACTIVITY_AS_WRITTEN or "privileged identity management" in str(service or "").lower():
+        return activity
+    return activity + "."
+
+
+_GUID_IN_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+
+
+def resource_key(prefix: str, value: Any) -> str | None:
+    """record_key for an id that holds a GUID among other text, as a directory audit's does
+    ("Directory_<guid>_<suffix>"): the whole id is the record's identity. An id without a GUID in
+    it gives no key, as in record_key."""
+    v = str(value or "").strip()
+    return f"{prefix}:{v.lower()}" if len(v) <= 200 and _GUID_IN_RE.search(v) else None
+
+
+def audit_row(o: dict[str, Any], when: _Dates | None = None, utc: bool = False) -> dict[str, Any] | None:
+    """A Graph directoryAudit (any case of its names) -> event row, its time read by ``when``
+    (utc: the column it came from says UTC); None for a record that is not one."""
+    a = _canon(o, _AUDIT_NAMES)
+    activity = str(a.get("activityDisplayName") or "").strip()
+    if not activity:
+        return None
+    ts, iso, marks = (when or _Dates()).read(a.get("activityDateTime"), utc)
+    initiator = a.get("initiatedBy") if isinstance(a.get("initiatedBy"), dict) else {}
+    by_user = initiator.get("user") if isinstance(initiator.get("user"), dict) else {}
+    by_app = initiator.get("app") if isinstance(initiator.get("app"), dict) else {}
+    actor = str(_first(by_user, "userPrincipalName", "displayName", "id") or _first(by_app, "displayName", "servicePrincipalName", "appId") or "").strip()
+    ip = clean_ip(by_user.get("ipAddress") or a.get("ipAddress"))
+    targets = [t for t in a.get("targetResources") or [] if isinstance(t, dict)]
+    target_user = next((str(t["userPrincipalName"]) for t in targets if t.get("userPrincipalName")), None)
+    named = [t for t in targets if t.get("displayName")]
+    obj = next((str(t["displayName"]) for t in named if str(t.get("type") or "").lower() != "user"), None) or (str(named[0]["displayName"]) if named else None)
+    result = str(a.get("result") or "").strip()
+    data: dict[str, Any] = {
+        k: a.get(k) for k in ("id", "correlationId", "activityDisplayName", "category", "loggedByService", "operationType", "result", "resultReason")
+    }
+    for who, ident in (("user", by_user), ("app", by_app)):
+        for k, v in ident.items():
+            data[f"initiatedBy.{who}.{k}"] = _scalar(v)
+    if targets:
+        data["Target"] = _cut("; ".join(str(t.get("id")) for t in targets if t.get("id")), 2000)
+        data["Target.Type"] = _cut(", ".join(str(t.get("type") or "") for t in targets), 200)
+        data["Target.DisplayName"] = _cut("; ".join(str(t["displayName"]) for t in named), 2000)
+        data["Target.UserPrincipalName"] = "; ".join(str(t["userPrincipalName"]) for t in targets if t.get("userPrincipalName"))
+    # what changed, under the names the audit log gives it (Role.DisplayName, ConsentAction.Permissions,
+    # StrongAuthenticationMethod); the first target's value when two name the same property
+    for t in targets:
+        for prop in t.get("modifiedProperties") or []:
+            if isinstance(prop, dict) and prop.get("displayName"):
+                name = str(prop["displayName"])
+                data.setdefault(name, _clean_json_string(prop.get("newValue")))
+                old = _clean_json_string(prop.get("oldValue"))
+                if old not in (None, "", "[]"):
+                    data.setdefault(name + ".old", old)
+    for detail in a.get("additionalDetails") or []:
+        if isinstance(detail, dict) and detail.get("key"):
+            data.setdefault(str(detail["key"]), _scalar(detail.get("value")))
+    # what the export holds beyond the documented properties is kept as it is
+    for k, v in a.items():
+        if k not in _AUDIT_KEPT and not str(k).startswith("@"):
+            data.setdefault(str(k), _scalar(v))
+    data = {k: v for k, v in data.items() if v not in (None, "")}
+    failed = result.lower() in ("failure", "timeout")
+    summary = f"{activity} by {actor or '?'}"
+    if ip:
+        summary += f" from {ip}"
+    if data.get("Role.DisplayName"):
+        summary += f": role {data['Role.DisplayName']}"
+    if target_user or obj:
+        summary += f" on {target_user or obj}"
+    if data.get("ConsentAction.Permissions"):
+        summary += f" {str(data['ConsentAction.Permissions'])[:120]}"
+    if result and result.lower() != "success":
+        summary += f" [{result}{': ' + str(a['resultReason']) if a.get('resultReason') else ''}]"
+    row: dict[str, Any] = {
+        "ts": ts,
+        "tsIso": iso,
+        "eventId": None,
+        "recordId": None,
+        "level": 3 if failed else 4,
+        "levelName": "Warning" if failed else "Information",
+        "provider": AUDIT_PROVIDER,
+        "channel": "Entra Audit",
+        "computer": None,
+        "category": "Entra audit",
+        "description": activity,
+        "operation": ual_operation(activity, a.get("loggedByService")),
+        "objectName": obj[:500] if obj else None,
+        "objectType": next((str(t["type"]) for t in targets if t.get("type")), None),
+        "user": actor or None,
+        "upn": actor or None,
+        "subjectUser": actor or None,
+        "targetUser": target_user,
+        "ipAddress": ip,
+        "status": result or None,
+        "statusText": str(a.get("resultReason") or "") or None,
+        "failureReason": (str(a.get("resultReason") or "") or None) if failed else None,
+        "workstation": str(data.get("User-Agent") or "")[:200] or None,
+        "recordKey": resource_key("entra-audit", a.get("id")),
+        "data": data,
+        "summary": summary[:500],
+    }
+    if marks:
+        row["_marks"] = marks
+    return row
+
+
+# the properties audit_row reads into a row; any other is kept under its own name
+_AUDIT_KEPT = frozenset(
+    {"activityDateTime", "activityDisplayName", "additionalDetails", "category", "correlationId", "id", "initiatedBy"}
+    | {"loggedByService", "operationType", "result", "resultReason", "targetResources", "ipAddress"}
+)
+
+
+def _portal_audit(columns: list[str]) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """What reads a row of the Entra admin centre's audit log download (columns: its header) as a
+    directoryAudit. The portal writes the date, service, category, activity and result columns in
+    the language it is shown in, so they are read by their place, first and third to sixth;
+    CorrelationId and ResultReason, second and seventh, are written in English whatever the
+    language. Its actor is a user (ActorUserPrincipalName) or an application (ActorServicePrincipal*),
+    its targets up to three with up to five modified properties each, and its additional details
+    up to six."""
+    named = {c.strip().lower(): c for c in columns}
+    placed = len(columns) >= 7 and columns[1].strip().lower() == "correlationid" and columns[6].strip().lower() == "resultreason"
+    date, service, category, activity, result = (columns[i] for i in (0, 2, 3, 4, 5)) if placed else ("",) * 5
+
+    def col(rec: dict[str, Any], name: str) -> Any:
+        v = rec.get(named.get(name.lower(), name))
+        return v if v not in (None, "") else None
+
+    def convert(rec: dict[str, Any]) -> dict[str, Any]:
+        used = {date, service, category, activity, result}
+        app = {
+            "displayName": col(rec, "ActorDisplayName") if not col(rec, "ActorUserPrincipalName") else None,
+            "servicePrincipalId": col(rec, "ActorServicePrincipalId"),
+            "servicePrincipalName": col(rec, "ActorServicePrincipalName"),
+        }
+        user = {
+            "id": col(rec, "ActorObjectId"),
+            "displayName": col(rec, "ActorDisplayName"),
+            "userPrincipalName": col(rec, "ActorUserPrincipalName"),
+            "ipAddress": col(rec, "IPAddress"),
+        }
+        is_app = not user["userPrincipalName"] and bool(app["servicePrincipalId"] or app["servicePrincipalName"])
+        targets = []
+        for n in range(1, 4):
+            props = []
+            for m in range(1, 6):
+                head = f"Target{n}ModifiedProperty{m}"
+                if col(rec, head + "Name"):
+                    props.append({"displayName": col(rec, head + "Name"), "oldValue": col(rec, head + "OldValue"), "newValue": col(rec, head + "NewValue")})
+            target = {
+                "type": col(rec, f"Target{n}Type"),
+                "displayName": col(rec, f"Target{n}DisplayName"),
+                "id": col(rec, f"Target{n}ObjectId"),
+                "userPrincipalName": col(rec, f"Target{n}UserPrincipalName"),
+                "modifiedProperties": props,
+            }
+            if any(target[k] for k in ("type", "displayName", "id", "userPrincipalName")):
+                targets.append(target)
+        details = [
+            {"key": col(rec, f"AdditionalDetail{n}Key"), "value": col(rec, f"AdditionalDetail{n}Value")}
+            for n in range(1, 7)
+            if col(rec, f"AdditionalDetail{n}Key")
+        ]
+        out: dict[str, Any] = {
+            "activityDateTime": rec.get(date) if date else None,
+            "activityDisplayName": rec.get(activity) if activity else None,
+            "loggedByService": rec.get(service) if service else None,
+            "category": rec.get(category) if category else None,
+            "result": rec.get(result) if result else None,
+            "correlationId": col(rec, "CorrelationId"),
+            "resultReason": col(rec, "ResultReason"),
+            "initiatedBy": {"app": {k: v for k, v in app.items() if v} or None} if is_app else {"user": {k: v for k, v in user.items() if v} or None},
+            "targetResources": targets,
+            "additionalDetails": details,
+        }
+        if not is_app and (app["servicePrincipalId"] or app["servicePrincipalName"]):
+            out["initiatedBy"]["app"] = {k: v for k, v in app.items() if v and k != "displayName"}
+        if col(rec, "ActorType"):
+            out["ActorType"] = col(rec, "ActorType")
+        # a column the download is not documented to hold is kept as it is
+        for k, v in rec.items():
+            if k not in used and not _PORTAL_AUDIT_RE.match(str(k).strip()) and v not in (None, ""):
+                out.setdefault(str(k), v)
+        return out
+
+    return convert
+
+
+_PORTAL_AUDIT_RE = re.compile(
+    r"^(?:CorrelationId|ResultReason|ActorType|ActorDisplayName|ActorObjectId|ActorUserPrincipalName|IPAddress|ActorServicePrincipalId|ActorServicePrincipalName"
+    r"|Target[1-3](?:Type|DisplayName|ObjectId|UserPrincipalName|ModifiedProperty[1-5](?:Name|OldValue|NewValue))|AdditionalDetail[1-6](?:Key|Value))$",
+    re.IGNORECASE,
+)
+
+
+# ---------------------------------------------------------------------------
+# Entra ID Protection rows
+# ---------------------------------------------------------------------------
+# riskDetection and riskyUser, learn.microsoft.com/graph/api/resources/riskdetection and
+# .../riskyuser, with signInLocation's names, which Microsoft-Extractor-Suite writes as columns
+_RISK_NAMES = {
+    n.lower(): n
+    for n in (
+        "activity",
+        "activityDateTime",
+        "additionalInfo",
+        "correlationId",
+        "detectedDateTime",
+        "detectionTimingType",
+        "id",
+        "ipAddress",
+        "lastUpdatedDateTime",
+        "location",
+        "city",
+        "state",
+        "countryOrRegion",
+        "requestId",
+        "riskDetail",
+        "riskEventType",
+        "riskLevel",
+        "riskState",
+        "source",
+        "tokenIssuerType",
+        "userDisplayName",
+        "userId",
+        "userPrincipalName",
+        "isDeleted",
+        "isProcessing",
+        "riskLastUpdatedDateTime",
+    )
+}
+# a risk ID Protection rates medium or high, or a compromise someone confirmed
+_RISKY_LEVELS = ("medium", "high")
+_HEX_ID_RE = re.compile(r"^[0-9a-fA-F]{32,128}$")
+
+
+def _additional_info(v: Any) -> dict[str, Any]:
+    """A risk detection's additionalInfo, JSON text of [{"Key": ..., "Value": ...}], by key."""
+    if isinstance(v, str):
+        try:
+            v = json.loads(v)
+        except ValueError:
+            return {}
+    out: dict[str, Any] = {}
+    for item in v if isinstance(v, list) else []:
+        if isinstance(item, dict):
+            item = {str(k).lower(): x for k, x in item.items()}
+            if item.get("key"):
+                out[f"additionalInfo.{item['key']}"] = _scalar(item.get("value"))
+    return out
+
+
+def _risk_data(a: dict[str, Any], skip: tuple[str, ...] = ()) -> dict[str, Any]:
+    """Every field of a risk record under its own name, the location under the names a sign-in
+    gives it (country, city, state), and what additionalInfo holds by its key."""
+    data: dict[str, Any] = {}
+    loc = a.get("location") if isinstance(a.get("location"), dict) else {}
+    for k, v in a.items():
+        if k in skip or k == "location" or str(k).startswith("@"):
+            continue
+        if k == "countryOrRegion":
+            data["country"] = v
+        elif k in ("city", "state"):
+            data[k] = v
+        else:
+            data[k] = _scalar(v)
+    data.setdefault("country", loc.get("countryOrRegion"))
+    data.setdefault("city", loc.get("city"))
+    data.setdefault("state", loc.get("state"))
+    data.update(_additional_info(a.get("additionalInfo")))
+    return {k: v for k, v in data.items() if v not in (None, "")}
+
+
+def risk_detection_row(o: dict[str, Any], when: _Dates | None = None, utc: bool = False) -> dict[str, Any] | None:
+    """A Graph riskDetection (any case of its names) -> event row at the time of the risky
+    activity, or when it was detected if the record has no activity time; None for a record that
+    is not one."""
+    a = _canon(o, _RISK_NAMES)
+    kind = str(a.get("riskEventType") or "").strip()
+    if not kind:
+        return None
+    ts, iso, marks = (when or _Dates()).read(a.get("activityDateTime") or a.get("detectedDateTime"), utc)
+    user = str(_first(a, "userPrincipalName", "userDisplayName", "userId") or "").strip()
+    ip = clean_ip(a.get("ipAddress"))
+    level, state = str(a.get("riskLevel") or "").strip(), str(a.get("riskState") or "").strip()
+    risky = level.lower() in _RISKY_LEVELS or state.lower() == "confirmedcompromised"
+    data = _risk_data(a)
+    summary = f"Risk detection {kind} ({level or '?'}, {state or '?'}) for {user or '?'}"
+    if ip:
+        summary += f" from {ip}{' (' + str(data['country']) + ')' if data.get('country') else ''}"
+    if data.get("riskDetail") and str(data["riskDetail"]).lower() != "none":
+        summary += f": {data['riskDetail']}"
+    row: dict[str, Any] = {
+        "ts": ts,
+        "tsIso": iso,
+        "eventId": None,
+        "recordId": None,
+        "level": 3 if risky else 4,
+        "levelName": "Warning" if risky else "Information",
+        "provider": RISK_PROVIDER,
+        "channel": "Entra RiskDetection",
+        "computer": None,
+        "category": "Entra risk",
+        "description": kind,
+        "operation": "RiskDetection",
+        "objectName": None,
+        "user": user or None,
+        "upn": user or None,
+        "subjectUser": user or None,
+        "targetUser": user or None,
+        "ipAddress": ip,
+        "status": state or None,
+        "statusText": str(a.get("riskDetail") or "") or None,
+        "workstation": str(data.get("additionalInfo.userAgent") or "")[:200] or None,
+        "recordKey": _risk_key(a.get("id")),
+        "data": data,
+        "summary": summary[:500],
+    }
+    if marks:
+        row["_marks"] = marks
+    return row
+
+
+def _risk_key(value: Any) -> str | None:
+    """A risk detection's id is a long hexadecimal string, not a GUID: it is its identity all the same."""
+    v = str(value or "").strip()
+    return f"entra-risk:{v.lower()}" if _HEX_ID_RE.match(v) else resource_key("entra-risk", v)
+
+
+def risky_user_row(o: dict[str, Any], when: _Dates | None = None, utc: bool = False) -> dict[str, Any] | None:
+    """A Graph riskyUser (any case of its names) -> event row at the time its risk was last
+    updated: the state of one user's risk when the list was taken. None for a record that is not one."""
+    a = _canon(o, _RISK_NAMES)
+    user = str(_first(a, "userPrincipalName", "userDisplayName", "id") or "").strip()
+    if "riskLastUpdatedDateTime" not in a or not user:
+        return None
+    ts, iso, marks = (when or _Dates()).read(a.get("riskLastUpdatedDateTime"), utc)
+    level, state = str(a.get("riskLevel") or "").strip(), str(a.get("riskState") or "").strip()
+    risky = level.lower() in _RISKY_LEVELS or state.lower() == "confirmedcompromised"
+    data = _risk_data(a)
+    detail = str(a.get("riskDetail") or "")
+    summary = f"Risky user {user}: risk {level or '?'}, {state or '?'}"
+    if detail and detail.lower() != "none":
+        summary += f" ({detail})"
+    # a user's risk changes over time; the same user listed at another time is another record
+    key = record_key("entra-riskyuser", a.get("id"))
+    row: dict[str, Any] = {
+        "ts": ts,
+        "tsIso": iso,
+        "eventId": None,
+        "recordId": None,
+        "level": 3 if risky else 4,
+        "levelName": "Warning" if risky else "Information",
+        "provider": RISK_PROVIDER,
+        "channel": "Entra RiskyUser",
+        "computer": None,
+        "category": "Entra risk",
+        "description": "Risky user",
+        "operation": "RiskyUser",
+        "objectName": None,
+        "user": user,
+        "upn": user,
+        "subjectUser": user,
+        "targetUser": user,
+        "ipAddress": None,
+        "status": state or None,
+        "statusText": detail or None,
+        "workstation": None,
+        "recordKey": f"{key}|{iso}" if key and iso else None,
+        "data": data,
+        "summary": summary[:500],
+    }
+    if marks:
+        row["_marks"] = marks
+    return row
+
+
+# ---------------------------------------------------------------------------
+# Exchange Online message trace rows
+# ---------------------------------------------------------------------------
+# what the message trace says of a message it did not deliver, as a word of its status
+_UNDELIVERED = frozenset({"failed", "fail", "filteredasspam", "quarantined", "quarantine"})
+
+
+def _domain(address: Any) -> str | None:
+    """The domain of an address, in lower case, as internal_domains lists them."""
+    a = str(address or "").strip().lower()
+    return a.rsplit("@", 1)[1] if "@" in a else None
+
+
+def _trace_row(
+    sender: str, recipient: str, status: str, when: tuple[int | None, str | None], data: dict[str, Any], subject: str, message_id: str, ip: str, to_ip: str
+) -> dict[str, Any]:
+    """One message to one recipient, as the message trace saw it."""
+    # InternetMessageId is how an audit record and a mailbox message name the same message
+    data = {**data, "SenderDomain": _domain(sender), "RecipientDomain": _domain(recipient), "InternetMessageId": message_id}
+    data = {k: _scalar(v) for k, v in data.items() if v not in (None, "")}
+    undelivered = bool(set(re.findall(r"[a-z]+", status.lower())) & _UNDELIVERED)
+    summary = f"Message from {sender or '?'} to {recipient or '?'}: {status or '?'}"
+    if subject:
+        summary += f", '{str(subject)[:120]}'"
+    if ip:
+        summary += f" from {ip}"
+    return {
+        "ts": when[0],
+        "tsIso": when[1],
+        "eventId": None,
+        "recordId": None,
+        "level": 3 if undelivered else 4,
+        "levelName": "Warning" if undelivered else "Information",
+        "provider": TRACE_PROVIDER,
+        "channel": "Exchange MessageTrace",
+        "computer": None,
+        "category": "Exchange message trace",
+        "description": status or "Message",
+        "operation": "MessageTrace",
+        "objectName": str(subject)[:500] if subject else None,
+        "user": sender or None,
+        "upn": sender or None,
+        "subjectUser": sender or None,
+        "targetUser": recipient or None,
+        "ipAddress": clean_ip(ip),
+        "destinationIp": clean_ip(to_ip),
+        "status": status or None,
+        "recordKey": None,
+        "data": data,
+        "summary": summary[:500],
+    }
+
+
+def trace_rows(rec: dict[str, Any], when: _Dates, received: str) -> list[dict[str, Any]]:
+    """A row of Get-MessageTrace or Get-MessageTraceV2 written with Export-Csv (the MessageTrace
+    report's fields: Received, SenderAddress, RecipientAddress, Subject, Status, FromIP, ToIP,
+    Size, MessageId, MessageTraceId ...) -> its event row; none when it names neither a sender
+    nor a recipient. received: the column its time is in. The cmdlets write their times in UTC,
+    Microsoft says, so no zone set for the evidence moves them."""
+    canon = {str(k).strip().lower(): k for k in rec}
+
+    def col(name: str) -> Any:
+        v = rec.get(canon.get(name.lower(), name))
+        return str(v).strip() if v not in (None, "") else ""
+
+    sender, recipient = col("SenderAddress"), col("RecipientAddress")
+    if not sender and not recipient:
+        return []
+    ts, iso, marks = when.read(rec.get(received), utc=True)
+    status = col("Status")
+    row = _trace_row(sender, recipient, status, (ts, iso), dict(rec), col("Subject"), col("MessageId"), col("FromIP"), col("ToIP"))
+    trace_id = col("MessageTraceId").strip("{}")
+    # one message to one recipient in one state: the same row in two exports of the same hours
+    if _GUID_RE.match(trace_id) and recipient:
+        row["recordKey"] = f"exo-trace:{trace_id.lower()}|{recipient.lower()}|{status.lower()}"
+    if marks:
+        row["_marks"] = marks
+    return [row]
+
+
+# "<address>##<status>": one recipient of a message and what happened to it there
+_RECIPIENT_STATUS_RE = re.compile(r"^\s*([^#;\s]+)##(.*)$")
+
+
+def report_rows(rec: dict[str, Any], when: _Dates, time_column: str) -> list[dict[str, Any]]:
+    """A row of the Exchange admin centre's enhanced summary report (one message, its recipients
+    in Recipient_status as "<address>##<status>") or extended report (one event of a message, its
+    recipients in recipient_address, separated by ";") -> one event row per recipient; none when
+    it names neither a sender nor a recipient. time_column: the column its time is in."""
+    canon = {_report_name(k): k for k in rec}
+
+    def col(name: str) -> str:
+        v = rec.get(canon.get(name, name))
+        return str(v).strip() if v not in (None, "") else ""
+
+    sender = col("sender_address")
+    statuses = col("recipient_status")
+    # recipients of the enhanced summary are written one after the other; Microsoft does not say
+    # how they are separated, so a ";" counts as a separator only before another "<address>##"
+    parts = [p for p in re.split(r";(?=[^;#\s]+##)", statuses) if p.strip()] if "##" in statuses else []
+    pairs = [(m.group(1), m.group(2).strip()) for p in parts if (m := _RECIPIENT_STATUS_RE.match(p))]
+    if not pairs:
+        status = col("event_id") or statuses
+        pairs = [(r.strip(), status) for r in col("recipient_address").split(";") if r.strip()] or [("", status)]
+    if not sender and not any(r for r, _ in pairs):
+        return []
+    ts, iso, marks = when.read(rec.get(time_column), utc_column(time_column))
+    rows = []
+    for recipient, status in pairs:
+        ip = col("original_client_ip") or col("client_ip")
+        row = _trace_row(sender, recipient, status, (ts, iso), dict(rec), col("message_subject"), col("message_id"), ip, col("server_ip"))
+        row["direction"] = col("directionality") or None
+        if marks:
+            row["_marks"] = marks
+        rows.append(row)
+    return rows
+
+
+# ---------------------------------------------------------------------------
 # Iteration
 # ---------------------------------------------------------------------------
 def _open_text(path: str | None, data: bytes | None) -> io.TextIOBase:
+    """An export as text, in the encoding its byte order mark names, the mark itself not read."""
     if path:
-        return open(path, encoding="utf-8-sig", errors="replace", newline="")
-    return io.TextIOWrapper(io.BytesIO(data or b""), encoding="utf-8-sig", errors="replace", newline="")
+        with open(path, "rb") as raw:
+            encoding = encoding_of(raw.read(4))
+        return open(path, encoding=encoding, errors="replace", newline="")
+    return io.TextIOWrapper(io.BytesIO(data or b""), encoding=encoding_of((data or b"")[:4]), errors="replace", newline="")
 
 
 # The longest record a JSON export may hold (a sign-in is a few kilobytes, an audit record rarely
@@ -1064,8 +1905,10 @@ def _audit_from_row(obj: dict[str, Any]) -> tuple[dict[str, Any] | None, Any]:
 
 def _csv_rows(fh: io.TextIOBase, stats: Any) -> Iterator[dict[str, Any]]:
     """The rows of a CSV export. A row the csv module cannot read (a field past MAX_FIELD_CHARS, a
-    stray quote) is counted as an error and the rows after it are still read."""
-    reader = csv.DictReader(fh)
+    stray quote) is counted as an error and the rows after it are still read. The "#TYPE" line
+    Windows PowerShell's Export-Csv writes above the header without -NoTypeInformation is passed
+    over."""
+    reader = csv.DictReader(_table_lines(fh))
     # the header is read outside the loop: a header that cannot be read fails the file
     if reader.fieldnames is None:
         return
@@ -1079,6 +1922,24 @@ def _csv_rows(fh: io.TextIOBase, stats: Any) -> Iterator[dict[str, Any]]:
                 stats.errors += 1
             continue
         yield {k: v for k, v in rec.items() if k is not None}
+
+
+def _table_lines(fh: io.TextIOBase) -> Iterator[str]:
+    """The lines of a table without the "#TYPE <type name>" line Export-Csv may write above it."""
+    lines: Iterator[str] = iter(fh)
+    first = next(lines, "")
+    return lines if first.startswith("#TYPE") else itertools.chain([first], lines)
+
+
+def _csv_header(path: str | None, data: bytes | None) -> list[str]:
+    """A table's column names."""
+    fh = _open_text(path, data)
+    try:
+        return next(csv.reader(_table_lines(fh)), [])
+    except csv.Error:
+        return []
+    finally:
+        fh.close()
 
 
 def _key_hash(key: str) -> int:
@@ -1132,16 +1993,25 @@ class RecordKeys:
 
 
 def iter_records(
-    path: str | None, data: bytes | None, fmt: str, stats: Any = None, include_raw: bool = True, seen: RecordKeys | None = None
+    path: str | None,
+    data: bytes | None,
+    fmt: str,
+    stats: Any = None,
+    include_raw: bool = True,
+    seen: RecordKeys | None = None,
+    dates: DateSetting | None = None,
 ) -> Iterator[dict[str, Any]]:
-    """Yield event rows from a UAL / Entra export in the given format (see FORMATS). A record
+    """Yield event rows from a UAL / Entra export in the given format (see FORMATS), its dates read
+    in the order and the zone ``dates`` sets for the evidence where the file cannot say. A record
     whose key (record_key) is already in ``seen`` is the same record exported again: it is
     counted in ``stats.duplicates`` and not yielded: Search-UnifiedAuditLog's ReturnLargeSet
     pages repeat records within one file, and overlapping time slices repeat them across files.
     Pass one RecordKeys for every file of an upload so an archive of slices gives each record
     once. A record read once it is full is counted in ``stats.repeats_unchecked``."""
     seen = RecordKeys() if seen is None else seen
-    for row in _iter_rows(path, data, fmt, stats, include_raw):
+    if stats is not None and dates is not None:
+        stats.dates = dates.to_dict()
+    for row in _iter_rows(path, data, fmt, stats, include_raw, dates):
         marks = row.pop("_marks", ())
         key = row.get("recordKey")
         if key:
@@ -1159,13 +2029,34 @@ def iter_records(
         yield row
 
 
-# what each count on a cloud export's stats says on its member of an archive or a package
+# what each count on a cloud export's stats says on its member of an archive or a package; {order}
+# and {zone} are what the evidence sets
 _NOTES = (
+    ("not_read", "{:,} record(s) are not of the kind the file holds and were not read"),
     ("cut", "{:,} record(s) hold a value cut at its length limit, marked by a closing …"),
     ("undated", "{:,} record(s) have no time: their date is missing or could not be read"),
     ("date_order_guessed", "{:,} record(s) were dated month-first: no date in the file has a day above 12 to show its order"),
+    ("date_order_set", "{:,} record(s) were dated {order}, the date order set for the evidence"),
+    ("date_order_contradicted", "{:,} record(s) have a date that cannot be read {order}, the date order set for the evidence, but can be read the other way"),
+    ("zone_set", "{:,} record(s) were read in {zone}, the time zone set for the evidence: their times say none"),
+    ("zone_assumed", "{:,} record(s) were read as UTC: their times say no time zone, and none is set for the evidence"),
     ("repeats_unchecked", "{:,} record(s) were read once the ids held to find repeats were full, and were not compared with one another"),
 )
+
+
+# the counts that say how the dates of the cloud exports were read
+DATE_COUNTS = ("date_order_guessed", "date_order_set", "date_order_contradicted", "zone_set", "zone_assumed")
+
+
+def date_stats(counts: dict[str, int], dates: DateSetting | None) -> dict[str, Any]:
+    """What an evidence's statistics say of its cloud exports' dates: the setting they were read
+    with, and the counts of DATE_COUNTS that are not zero, as Stats.to_dict names them."""
+    out: dict[str, Any] = {"dates": dates.to_dict()} if dates is not None else {}
+    for name in DATE_COUNTS:
+        if counts.get(name):
+            head, *rest = name.split("_")
+            out[head + "".join(w.title() for w in rest)] = counts[name]
+    return out
 
 
 def counts(stats: Any) -> dict[str, int]:
@@ -1173,9 +2064,20 @@ def counts(stats: Any) -> dict[str, int]:
     return {name: int(getattr(stats, name, 0) or 0) for name, _ in _NOTES}
 
 
-def note(counts: dict[str, int]) -> str:
-    """Those counts in words, for one file: "" when there is nothing to say."""
-    return "; ".join(text.format(counts[name]) for name, text in _NOTES if counts.get(name))
+def note(counts: dict[str, int], dates: DateSetting | None = None) -> str:
+    """Those counts in words, for one file read with the evidence's date setting: "" when there is
+    nothing to say."""
+    order = dates.order if dates is not None and dates.order else "in the order set"
+    zone = dates.zone_name if dates is not None and dates.zone_name else "the zone set"
+    return "; ".join(text.format(counts[name], order=order, zone=zone) for name, text in _NOTES if counts.get(name))
+
+
+def _not_read(stats: Any) -> None:
+    """A record of a recognised export that is not of the export's kind: an error of the file, and
+    said as what it is."""
+    if stats is not None:
+        stats.errors += 1
+        stats.not_read = getattr(stats, "not_read", 0) + 1
 
 
 def _count(row: dict[str, Any], stats: Any) -> None:
@@ -1185,7 +2087,7 @@ def _count(row: dict[str, Any], stats: Any) -> None:
         stats.count += 1
 
 
-def _iter_rows(path: str | None, data: bytes | None, fmt: str, stats: Any, include_raw: bool) -> Iterator[dict[str, Any]]:
+def _iter_rows(path: str | None, data: bytes | None, fmt: str, stats: Any, include_raw: bool, dates: DateSetting | None = None) -> Iterator[dict[str, Any]]:
     # rows are counted by the caller once it knows they are kept; errors are counted here
     fh = _open_text(path, data)
     try:
@@ -1210,17 +2112,72 @@ def _iter_rows(path: str | None, data: bytes | None, fmt: str, stats: Any, inclu
                 signin = _signin_of(obj)
                 if signin is None:
                     # another diagnostic category (AuditLogs, RiskyUsers, ...): not a sign-in, not read
-                    if stats is not None:
-                        stats.errors += 1
+                    _not_read(stats)
                     continue
                 yield _finish(entra_row(signin), obj, stats, include_raw)
         elif fmt == "entra-signin-csv":
-            day_first = _csv_date_order(path, data)
+            when = _csv_dates(path, data, dates, _date_column)
             for obj in _csv_rows(fh, stats):
-                row = _finish(entra_row(obj, day_first), obj, stats, include_raw)
-                if day_first is None and any(guessed_order(v) for k, v in obj.items() if _date_column(k)):
-                    row["_marks"] = (*row.get("_marks", ()), "date_order_guessed")
-                yield row
+                row = entra_row(obj)
+                row["ts"], row["tsIso"], marks = _csv_when(obj, _date_column, when)
+                yield _finish(row, obj, stats, include_raw, marks)
+        elif fmt == "entra-audit-json":
+            when = _Dates(dates)
+            for obj in _iter_json_objects(fh, stats):
+                row = audit_row(obj, when)
+                if row is None:
+                    _not_read(stats)
+                    continue
+                yield _finish(row, obj, stats, include_raw, row.pop("_marks", ()))
+        elif fmt in ("entra-riskdetection-json", "entra-riskyuser-json"):
+            read = risk_detection_row if fmt == "entra-riskdetection-json" else risky_user_row
+            when = _Dates(dates)
+            for obj in _iter_json_objects(fh, stats):
+                row = read(obj, when)
+                if row is None:
+                    _not_read(stats)
+                    continue
+                yield _finish(row, obj, stats, include_raw, row.pop("_marks", ()))
+        elif fmt in ("entra-riskdetection-csv", "entra-riskyuser-csv"):
+            read = risk_detection_row if fmt == "entra-riskdetection-csv" else risky_user_row
+            names = ("activitydatetime", "detecteddatetime") if fmt == "entra-riskdetection-csv" else ("risklastupdateddatetime",)
+
+            def is_date(k: str) -> bool:
+                return k.strip().lower() in names
+
+            when = _csv_dates(path, data, dates, is_date)
+            for obj in _csv_rows(fh, stats):
+                row = read(obj, when, any(utc_column(k) for k, v in obj.items() if v and is_date(k)))
+                if row is None:
+                    _not_read(stats)
+                    continue
+                yield _finish(row, obj, stats, include_raw, row.pop("_marks", ()))
+        elif fmt in ("exo-messagetrace-csv", "exo-messagetrace-report-csv"):
+            columns = _csv_header(path, data)
+            if fmt == "exo-messagetrace-csv":
+                date = next((c for c in columns if c.strip().lower() == "received"), "Received")
+                when = _csv_dates(path, data, dates, lambda k: k == date)
+            else:
+                date = next((c for c in columns if _report_name(c) in ("origin_timestamp", "date_time")), "")
+                when = _csv_dates(path, data, dates, lambda k: k == date, local=True)
+            for obj in _csv_rows(fh, stats):
+                rows = trace_rows(obj, when, date) if fmt == "exo-messagetrace-csv" else report_rows(obj, when, date)
+                if not rows:
+                    _not_read(stats)
+                for row in rows:
+                    yield _finish(row, obj, stats, include_raw, row.pop("_marks", ()))
+        elif fmt == "entra-audit-csv":
+            columns = _csv_header(path, data)
+            graph = next((c for c in columns if c.strip().lower() == "activitydatetime"), None)
+            portal = None if graph else _portal_audit(columns)
+            date = graph or (columns[0] if columns else "")
+            when = _csv_dates(path, data, dates, lambda k: k == date)
+            for obj in _csv_rows(fh, stats):
+                row = audit_row(portal(obj) if portal else obj, when, utc_column(date))
+                if row is None:
+                    _not_read(stats)
+                    continue
+                yield _finish(row, obj, stats, include_raw, row.pop("_marks", ()))
         else:
             raise ValueError(f"unknown M365 format {fmt}")
     finally:
@@ -1232,16 +2189,32 @@ def _date_column(name: str) -> bool:
     return (_PORTAL_MAP.get(low) or _GRAPH_NAMES.get(low)) == "createdDateTime"
 
 
-def _csv_date_order(path: str | None, data: bytes | None) -> bool | None:
-    """The date order of a sign-in CSV, from a first pass over its date column that stops at the
-    first date settling it (or at the first date not written as numbers, whose order does not
-    matter). Deciding from the first 5,000 rows read a day-first export whose first days were all
-    12 or below month-first, every date of it wrong."""
+def _csv_dates(path: str | None, data: bytes | None, dates: DateSetting | None, is_date: Callable[[str], bool], local: bool = False) -> _Dates:
+    """How a CSV's times are read: in the order the evidence sets, or else the order its own dates
+    show (is_date names its date columns)."""
+    if dates is not None and dates.day_first is not None:
+        return _Dates(dates, local=local)
+    return _Dates(dates, _csv_date_order(path, data, is_date), local)
+
+
+def _csv_when(rec: dict[str, Any], is_date: Callable[[str], bool], when: _Dates) -> tuple[int | None, str | None, tuple[str, ...]]:
+    """The time of a CSV row, from its first date column that holds one, and what it is counted for."""
+    for k, v in rec.items():
+        if v and is_date(k):
+            return when.read(v, utc_column(k))
+    return None, None, ()
+
+
+def _csv_date_order(path: str | None, data: bytes | None, is_date: Callable[[str], bool]) -> bool | None:
+    """The date order of a CSV, from a first pass over its date columns that stops at the first
+    date settling it (or at the first date not written as numbers, whose order does not matter).
+    Deciding from the first 5,000 rows read a day-first export whose first days were all 12 or
+    below month-first, every date of it wrong."""
     fh = _open_text(path, data)
     try:
         for rec in _csv_rows(fh, None):
             for k, v in rec.items():
-                if v and _date_column(k):
+                if v and is_date(k):
                     if not _NUMERIC_DATE_RE.match(str(v)):
                         return None
                     order = date_order([v])
@@ -1252,11 +2225,11 @@ def _csv_date_order(path: str | None, data: bytes | None) -> bool | None:
     return None
 
 
-def _finish(row: dict[str, Any], source: dict[str, Any], stats: Any, include_raw: bool) -> dict[str, Any]:
+def _finish(row: dict[str, Any], source: dict[str, Any], stats: Any, include_raw: bool, marks: tuple[str, ...] = ()) -> dict[str, Any]:
+    """The row with its raw record, and what it is counted for (marks, from reading its time, and
+    whether a value was cut or it has no time), counted by iter_records once it knows the row is kept."""
     if include_raw:
         row["raw"] = _cut(json.dumps(source, ensure_ascii=False, separators=(",", ":")), 200_000)
-    # what the row is counted for, by iter_records once it knows the row is kept
-    marks: tuple[str, ...] = ()
     if isinstance(row.get("raw"), _Cut) or any(isinstance(v, _Cut) for v in row["data"].values()):
         marks += ("cut",)
     if row.get("ts") is None:

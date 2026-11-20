@@ -396,6 +396,9 @@ def _m365_step(ev: dict[str, Any], art: dict[str, set[str]], settings: dict[str,
     op = _lower(ev.get("operation"))
     cat = _lower(ev.get("category"))
     notes: list[str] = []
+    if cat == "exchange message trace":
+        # a tenant's message trace is mostly ordinary mail: a message is a step when a rule flags it
+        return None
     if cat == "entra sign-in" or op == "signin":
         ok = str(ev.get("status") or "0") == "0"
         w = 1 if ok else 0
@@ -542,7 +545,8 @@ def _host_step(ev: dict[str, Any], art: dict[str, set[str]]) -> tuple[int, str, 
 
 def _is_m365(ev: dict[str, Any]) -> bool:
     p = _lower(ev.get("provider"))
-    return "unified audit" in p or "entra" in p or _lower(ev.get("category")).startswith(("m365", "entra"))
+    # the Exchange Online message trace is the tenant's too, though neither audit log nor Entra
+    return "unified audit" in p or "entra" in p or "exchange online" in p or _lower(ev.get("category")).startswith(("m365", "entra"))
 
 
 # ---------------------------------------------------------------------------

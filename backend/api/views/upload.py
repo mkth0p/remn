@@ -23,6 +23,7 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.http import require_http_methods, require_POST
 
 from api.params import BadParameter, whole_number
+from forensic.access import permission
 from services.ingest import staging
 from services.ingest.staging import DIRECTORY_SUFFIXES, size_text, staged_bytes
 
@@ -192,6 +193,7 @@ def start_sweeper() -> bool:
     return True
 
 
+@permission("work")
 @require_POST
 def init(request: HttpRequest):
     try:
@@ -252,6 +254,8 @@ def init(request: HttpRequest):
     return JsonResponse({"uploadId": upload_id, "chunkSize": settings.FORENSIC_CHUNK_MB * 1024 * 1024})
 
 
+# an upload is recorded once at init and once at complete, not once per chunk
+@permission("work", record=False)
 @require_http_methods(["PUT", "POST"])
 def chunk(request: HttpRequest, upload_id: str):
     try:
@@ -290,6 +294,7 @@ def chunk(request: HttpRequest, upload_id: str):
     return JsonResponse({"received": meta["received"], "size": meta["size"]})
 
 
+@permission("work")
 @require_POST
 def complete(request: HttpRequest, upload_id: str):
     try:
@@ -314,6 +319,7 @@ def complete(request: HttpRequest, upload_id: str):
     return JsonResponse({"uploadId": upload_id, "sha256": meta["sha256"], "size": meta["size"], "name": meta["name"]})
 
 
+@permission("work")
 @require_http_methods(["GET", "DELETE"])
 def status(request: HttpRequest, upload_id: str):
     try:

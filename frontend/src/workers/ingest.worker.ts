@@ -7,7 +7,7 @@
  */
 import { createSHA256 } from 'hash-wasm'
 import { refKey, resolveEngineRefs, type EngineFinding } from '../data/engineFindings'
-import { getDb, type AttachmentRow, type EventRow, type Facet, type Ioc, type IocsCapped, type MailBody, type MailRow, type UrlRow } from '../db/schema'
+import { getDb, type AttachmentRow, type DateSetting, type EventRow, type Facet, type Ioc, type IocsCapped, type MailBody, type MailRow, type UrlRow } from '../db/schema'
 import { setApiToken, streamNdjson } from '../api/client'
 import { iocValue, isPublicIp } from '../util/format'
 import { duplicateEvidence } from '../data/duplicateEvidence'
@@ -36,6 +36,8 @@ export interface IngestRequest {
   token?: string
   /** parse an EVTX file in this worker instead of uploading it (the file must start with an EVTX header) */
   parseInBrowser?: boolean
+  /** the date order and time zone set for the evidence, for the Microsoft 365 and Entra exports in it */
+  dates?: DateSetting
 }
 export interface HashRequest {
   cmd: 'hash'
@@ -326,6 +328,8 @@ async function ingest(req: IngestRequest): Promise<void> {
   form.append('sourceName', req.sourceName ?? file.name)
   form.append('raw', req.includeRaw ? '1' : '0')
   if (req.readFileSystem) form.append('filesystem', '1')
+  // the mail reader has no dates to read this way
+  if (req.dates && kind !== 'mail') form.append('dates', JSON.stringify(req.dates))
   if (kind !== 'evtx')
     form.append(
       'settings',

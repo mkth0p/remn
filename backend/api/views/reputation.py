@@ -6,16 +6,19 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.http import require_GET, require_POST
 
 from api.params import BadParameter, seconds
+from forensic.access import permission
 from services.reputation.base import KINDS, registry, summarize
 
 MAX_ITEMS = 200
 
 
+@permission("signed-in")
 @require_GET
 def providers(request: HttpRequest):
     return JsonResponse({"providers": registry.list(), "cacheSize": len(registry.cache)})
 
 
+@permission("work")
 @require_POST
 def lookup(request: HttpRequest):
     try:

@@ -188,6 +188,19 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   the browser application, the bundled Tranco list, and the corpora behind the published rates
   (Phishing Pot is non-commercial). A test fails when a lock gains a package the notices do not
   list.
+- Server errors and limits say what they are, and engine findings join REMN's incidents. A message
+  written for the analyst, such as an export the event-log import does not recognise, is shown as
+  it is instead of as a server failure with a reference. A case store whose lockdown did not take
+  effect answers 503 saying so. Story, relationship and mail enrichment builds of a server case
+  stop at FORENSIC_STORE_QUERY_MAX_S like the other store reads, and cancelling a rule run stops
+  the rule that is running. Server case indicators keep the case of a URL's path and query, as the
+  browser store does. Health gives the largest chunked upload the staging area can really take,
+  and each package parse sets its staging room aside (at most half the area), so parses that run
+  together are never promised the same room. A parse of event logs starts in about half the time,
+  since the mail parsers load only for mail, and an error nothing caught in the parse process
+  reaches the server log by type and place only. Hayabusa detections name the user, host and
+  address REMN's rules name, so both engines' findings on one event share an incident. The public
+  profile's Caddy image ships and serves LICENSE and THIRD_PARTY_NOTICES.md.
 - Public instance limits: a chunk upload over 64 MiB is refused before it is read (by Caddy and by
   the server), unfinished uploads reserve the size they announced in the staging budget, and the
   chains and mail enrichment paths refuse a server case key in browser-only mode, as stories and
@@ -335,6 +348,24 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   parsed into who, what and from where, in the server and the browser parser alike. The rules
   catch 27 files of EVTX-to-MITRE-Attack the default rules missed and fire on none of the
   evtx-baseline machines.
+- A server that a small team shares can give each person an account. `backend/manage.py accounts`
+  creates, lists, disables, enables and rotates accounts, revokes their tokens, changes their
+  roles and sets who may open a case. The accounts live in `accounts.json` in the data directory,
+  written whole and readable by the server's account only; each token is random, shown once and
+  kept as a salted digest. While that file holds no account nothing changes: no token on one's own
+  machine, or the one shared `FORENSIC_AUTH_TOKEN`, which stays as the single-user mode. Once it
+  holds one, every request needs a personal token. An admin sees every case and the audit log, an
+  analyst creates cases and works on the ones it owns or is a member of, and a viewer reads its
+  cases and changes nothing. A case records its owner and members, its key alone no longer opens
+  it, and the case and job listings show each account only what it may read. Every route declares
+  what it needs, and a test fails on one that does not. Every change, every upload, import and
+  export, every refused request and every failed sign-in is appended to `audit.log` in an HMAC
+  chain under `FORENSIC_AUDIT_KEY` (or a key in `audit.key`); an admin checks the chain with
+  `manage.py audit verify` or `GET /api/audit/verify`, and it does not protect against whoever
+  holds the key. The page asks for the personal token, shows the account and its role, and
+  disables a viewer's changes with the reason; a case's owner adds members in Settings. Findings,
+  notes and decisions stay in each browser. A file added from a second browser under an evidence
+  number the case already uses is refused instead of mixed with the first.
 - PowerShell 4103 and 800 events now carry the command they record, rebuilt from its parameter
   bindings or taken as typed, with the user and the script, in the server and the browser parser
   alike. Twelve rules read those commands (`rules/windows/powershell-commands.yaml`):
@@ -364,6 +395,23 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   ("marked false positive in case Acme on 2026-08-14"). Reviewed and false-positive findings
   sort below the rest; severity and newest remain as sorts. A decision made on the Findings page
   is now recorded as the analyst's, with its date.
+- A Microsoft 365 compromise can be investigated from the exports a responder is usually given.
+  Entra ID directory audits (Graph JSON, and the admin centre's JSON and CSV downloads, including
+  a CSV whose first columns are in the portal's language), ID Protection risk detections and risky
+  users (Graph JSON, or their properties as CSV) and the Exchange Online message trace
+  (Get-MessageTrace and Get-MessageTraceV2 written with Export-Csv, and the admin centre's
+  enhanced summary and extended reports) are read into the events table, each recognised by its
+  content; a record of another kind in such a file is counted as not read, and its member says so.
+  Every Microsoft 365 export may be written in UTF-16 or UTF-32 with a byte order mark. An
+  evidence file can be read again from its detail on the Evidence page with a date order and a
+  time zone set for it; the import records the setting, counts the records it applied to, and
+  counts the dates it guessed and the times it read as UTC. A directory activity carries the audit
+  log's name for it, so the existing rules, stories and chains find it in either export. Eight new
+  rules, not yet measured, report risk detections and risky users at medium or high risk, a risk
+  followed within a day by an inbox rule of the same account, passkeys and other sign-in methods
+  added, devices registered, application permissions granted to a service principal, and mail the
+  message trace shows leaving the organisation. A message trace export of exactly 1,000 or 5,000
+  rows, and a directory audit download of 250,000 records, carries a gaps badge.
 - Disk artifacts sit on the case timeline with what each of their times means, next to the
   event logs. An MFTECmd `$MFT` entry becomes a row per distinct `$STANDARD_INFORMATION` time and
   per `$FILE_NAME` time that differs from it, each saying which it is (`SI created, modified`,

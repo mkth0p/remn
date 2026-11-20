@@ -20,11 +20,13 @@ class JobCancelled(Exception):
 
 
 class Job:
-    def __init__(self, kind: str, case_key: str | None, label: str = "") -> None:
+    def __init__(self, kind: str, case_key: str | None, label: str = "", account: str | None = None) -> None:
         self.id = uuid.uuid4().hex
         self.kind = kind
         self.case_key = case_key
         self.label = label
+        # the account that started it, on a server with accounts: it may cancel the job it started
+        self.account = account
         self.status = "queued"
         self.progress: dict[str, Any] = {}
         self.result: Any = None
@@ -84,8 +86,8 @@ class JobManager:
         self._lock = threading.Lock()
         self._sem = threading.Semaphore(max_workers)
 
-    def submit(self, kind: str, case_key: str | None, fn: Callable[[Job], Any], label: str = "") -> Job:
-        job = Job(kind, case_key, label)
+    def submit(self, kind: str, case_key: str | None, fn: Callable[[Job], Any], label: str = "", account: str | None = None) -> Job:
+        job = Job(kind, case_key, label, account)
         with self._lock:
             self._jobs[job.id] = job
             self._gc()

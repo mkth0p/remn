@@ -26,10 +26,11 @@ import importlib
 import pathlib
 import random
 import re
+import sys
 import time
 
 import pytest
-from regex_harness import BUDGET_S, RUNAWAY, UP_TO_LAST, full_length, in_child, suspects
+from regex_harness import BUDGET_S, RUNAWAY, UP_TO_LAST, first_failure, in_child, interruptible, suspects
 
 from services.analysis.lookalike import display_name_looks_like_email
 from services.parsers import m365
@@ -141,16 +142,41 @@ def _sites() -> dict[tuple[str | bytes, int, str], str]:
 SITES = _sites()
 
 
+def _failure(source: str | bytes, flags: int, how: str) -> tuple[tuple[str, str, str], int, float] | str | None:
+    """first_failure of one pattern, or RUNAWAY. Where a call cannot be interrupted at its limit
+    (Windows has no interval timer), the pattern is timed in a child, which is stopped after
+    CHILD_S: a pattern that backtracks then fails its own test rather than ending the run."""
+    if interruptible():
+        return first_failure(re.compile(source, flags), how)
+    found = in_child(f"h.first_failure(re.compile({source!r}, {flags}), {how!r})", CHILD_S)
+    if found is None or found == RUNAWAY:
+        return found
+    shape, length, spent = found
+    return tuple(shape), length, spent
+
+
 @pytest.mark.parametrize("key", list(SITES), ids=[SITES[k] for k in SITES])
 def test_a_pattern_of_the_backend_answers_hostile_text_in_linear_time(key: tuple[str | bytes, int, str]):
     source, flags, how = key
-    pattern = re.compile(source, flags)
-    for shape in suspects(pattern, how):
-        length, spent = full_length(pattern, how, shape)
-        assert spent < BUDGET_S, (
-            f"{SITES[key]}: {pattern.pattern!r} ({how}) took {'over ' if spent == float('inf') else ''}"
+    found = _failure(source, flags, how)
+    assert found != RUNAWAY, f"{SITES[key]}: {source!r} ({how}) was still running after {CHILD_S:g} s"
+    if found is not None:
+        shape, length, spent = found
+        pytest.fail(
+            f"{SITES[key]}: {source!r} ({how}) took {'over ' if spent == float('inf') else ''}"
             f"{min(spent, 2 * BUDGET_S):.2f} s on {length:,} characters built from {shape!r}"
         )
+
+
+def test_without_an_interval_timer_each_pattern_is_timed_in_a_child_that_is_stopped(monkeypatch):
+    """Windows has no interval timer: one call that backtracked ran until the whole run ended at
+    RUNAWAY_S. There each pattern is timed in a child instead, and a child still running at its
+    limit is stopped and the pattern fails."""
+    monkeypatch.setattr(sys.modules[__name__], "interruptible", lambda: False)
+    assert _failure(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", 0, "search") not in (None, RUNAWAY)
+    assert _failure(r"^[a-z]+$", 0, "match") is None
+    # a child that cannot interrupt the call either, on a pattern that backtracks exponentially
+    assert in_child("(setattr(h, 'interruptible', lambda: False), h.first_failure(re.compile(r'^(?:a|a)*$'), 'match'))[1]", 3) == RUNAWAY
 
 
 def test_the_harness_reads_every_module_and_both_kinds_of_pattern():

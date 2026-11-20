@@ -23,9 +23,11 @@ RUN npm run build
 
 # The app alone, for the public profile (docker-compose.public.yml): Caddy serves the frontend build
 # from its own image, so the process that parses hostile files never serves the page visitors run.
-# Built with --target static; the default build below is unchanged.
+# Built with --target static; the default build below is unchanged. The licence and the notices of
+# the packages the build holds go with it, as they go with the default image, and are served beside it.
 FROM caddy:2-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f AS static
 COPY --from=frontend /src/frontend/dist /srv/remn
+COPY LICENSE THIRD_PARTY_NOTICES.md /srv/remn/
 
 FROM python:3.13-slim@sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f AS python-build
 ENV PIP_NO_CACHE_DIR=1
