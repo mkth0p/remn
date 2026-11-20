@@ -493,7 +493,7 @@ def test_hostile_text_is_read_in_under_a_second(what, run):
 
 RULES = pathlib.Path(__file__).resolve().parents[2] / "rules"
 
-# file | rule | field | the pattern before | what a value starts with | pieces
+# file | rule | field (or its path) | the pattern before | what a value starts with | pieces
 RULE_REWRITES = [
     (
         "collection/host-artifacts.yaml",
@@ -511,6 +511,62 @@ RULE_REWRITES = [
         "\\",
         ["-", "a", "svc", "1", "23", "\\", "-1-stdin", "-12-stdout", "-stderr", "--3-stdin", "x"],
     ),
+    (
+        "mail/content-attachments.yaml",
+        "mail-bank-detail-change",
+        "any_of/2/subject|re",
+        r"(?i)(nouveau|new|chang|update|mise à jour).*(rib|iban|bank|banc|coordonn)",
+        "",
+        ["new ", "Update", "mise à jour", "chang", " ", "rib", "IBAN", "bank", "banc", "coordonn", "x", "\n"],
+    ),
+    (
+        "windows/evasion-execution.yaml",
+        "win-lolbin-suspicious-commandline",
+        "any_of_2/15/commandLine|re",
+        r'(?i)/(i|package|a|x|j[mu]?)\s*"?[^"]*\.(png|jpe?g|gif|txt|dat|tmp|bin|dll|exe)"?(\s|$)',
+        "msiexec ",
+        ["/i", "/package", "/x", "/jm", " ", "\t", '"', "a", "C:\\x", ".dll", ".exe", ".png", ".msi", "x", "/q"],
+    ),
+    (
+        "windows/evasion-execution.yaml",
+        "win-msiexec-quiet-install",
+        "commandLine|not_re",
+        r'(?i)/(i|package|a|x|j[mu]?)\s*"?[^"]*\.(png|jpe?g|gif|txt|dat|tmp|bin|dll|exe)"?(\s|$)',
+        "msiexec ",
+        ["/i", "/a", "/ju", " ", '"', "b", "D:\\y", ".txt", ".tmp", ".msi", "y", "/quiet", "\n"],
+    ),
+    (
+        "windows/technique-gaps.yaml",
+        "win-packet-capture-tool",
+        "any_of/3/commandLine|re",
+        r"\bnetsh(\.exe)?\s+trace\s+start\b[^\n]*capture=yes",
+        "netsh trace start",
+        [" ", "capture=yes", "capture=no", "netsh trace start", "netsh.exe trace start ", "\n", "x", "tracefile=c:\\t.etl"],
+    ),
+    (
+        "windows/powershell-commands.yaml",
+        "win-ps-printer-port-to-file",
+        "commandLine|re",
+        r"add-printerport\s.*-name\s+'?(\.\\|[a-z]:\\|\\\\)",
+        "Add-PrinterPort ",
+        ["-Name ", "'", "C:\\", ".\\", "\\\\", " ", "x", "\n", "Add-PrinterPort ", "-name"],
+    ),
+    (
+        "windows/technique-gaps.yaml",
+        "win-fsutil-symlink-evaluation",
+        "commandLine|re",
+        r"fsutil(\.exe)?\s+behavior\s+set\s+symlinkevaluation\s+[^\n]*r2[lr]:1",
+        "fsutil behavior set symlinkevaluation",
+        [" ", "\t", "\n", "R2L:1", "r2r:1", "R2R:0", "L2L:1", "x", "fsutil behavior set symlinkevaluation "],
+    ),
+    (
+        "windows/technique-gaps.yaml",
+        "win-remote-computer-management",
+        "commandLine|re",
+        r"(compmgmt|services|eventvwr|lusrmgr|taskschd|gpedit|fsmgmt)\.msc[^\n]*/computer[:=]",
+        "mmc ",
+        ["compmgmt.msc", "services.msc", "eventvwr.msc", " ", "/computer:", "/computer=", "/computer", "\n", "x", "srv01"],
+    ),
 ]
 
 
@@ -518,7 +574,10 @@ RULE_REWRITES = [
 def test_a_rewritten_rule_pattern_matches_the_values_it_matched_before_in_the_store(file, rule, field, before, head, pieces):
     # the store runs a rule's pattern with RE2 (case-insensitive) as sqlfilter writes it; the browser's
     # engine, which backtracks, is compared in frontend/src/test/regexRewrites.test.ts
-    now = next(d for d in yaml.safe_load_all((RULES / file).read_text(encoding="utf-8")) if d and d.get("id") == rule)["where"][field]
+    # the field, or the keys and list indexes before it ("any_of/2/subject|re")
+    now: Any = next(d for d in yaml.safe_load_all((RULES / file).read_text(encoding="utf-8")) if d and d.get("id") == rule)["where"]
+    for step in field.split("/"):
+        now = now[int(step)] if isinstance(now, list) else now[step]
     assert now != before
     rng = random.Random(rule)
     values = [head + soup(rng, pieces, 12) for _ in range(SAMPLES)]

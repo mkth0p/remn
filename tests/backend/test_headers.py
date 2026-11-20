@@ -92,9 +92,17 @@ def test_the_public_proxy_serves_the_page_with_djangos_headers_and_sends_only_th
         k: r[k] for k in ("X-Content-Type-Options", "Referrer-Policy", "Cross-Origin-Opener-Policy", "Cross-Origin-Resource-Policy", "Permissions-Policy")
     }
     assert headers == {"Content-Security-Policy": CSP_BROWSER_ONLY, "X-Frame-Options": settings.X_FRAME_OPTIONS, **expected}
-    # the image Caddy runs holds the build, from the same commit as the parser
+    # the image Caddy runs holds the build, from the same commit as the parser, with the licence and
+    # the third-party notices served beside it
     docker = (root / "Dockerfile").read_text(encoding="utf-8")
-    assert re.search(r"^FROM caddy:[^\s]+@sha256:[0-9a-f]{64} AS static\nCOPY --from=frontend /src/frontend/dist /srv/remn$", docker, re.M)
+    assert re.search(
+        r"^FROM caddy:[^\s]+@sha256:[0-9a-f]{64} AS static\nCOPY --from=frontend /src/frontend/dist /srv/remn\nCOPY LICENSE THIRD_PARTY_NOTICES.md /srv/remn/$",
+        docker,
+        re.M,
+    )
+    assert _block(app, "header /THIRD_PARTY_NOTICES.md {").split() == ["Content-Type", '"text/plain;', 'charset=utf-8"', "defer"]
+    dockerignore = (root / ".dockerignore").read_text(encoding="utf-8").splitlines()
+    assert "!LICENSE" in dockerignore and "!THIRD_PARTY_NOTICES.md" in dockerignore
     compose = (root / "docker-compose.public.yml").read_text(encoding="utf-8")
     service = compose[compose.index("  caddy:") :]
     assert "target: static" in service and "REMN_BUILD_ID: ${REMN_BUILD_ID:-}" in service

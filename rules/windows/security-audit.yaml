@@ -424,14 +424,15 @@ group_by: [computer, processName]
 threshold: ">= 1"
 ---
 id: win-uac-bypass-token-duplication
-title: UAC bypass by token duplication (auto-elevated binary, then a seclogon logon)
+title: UAC bypass by token duplication (auto-elevated binary and a seclogon logon within five seconds)
 description: >-
   An auto-elevating Windows binary (wusa, taskmgr, fodhelper, computerdefaults ...) was started with an elevated
-  token (4688, TokenElevationType %%1937) and within five seconds the Secondary Logon service made a
-  NewCredentials logon (4624 type 9, seclogo) on the same host. That is the token-duplication UAC bypass
+  token (4688, TokenElevationType %%1937) and the Secondary Logon service made a NewCredentials logon (4624
+  type 9, seclogo) on the same host within five seconds of it, in either order: the rule does not check which
+  came first, though the bypass starts the binary before the logon. That is the token-duplication UAC bypass
   (UACME, WinPwnage, Invoke-TokenDuplication / UAC-TokenMagic): the tool starts an auto-elevated process without
   a prompt, duplicates its token and calls CreateProcessWithLogonW to run a high-integrity shell (T1548.002,
-  T1134.002). Benign cause: a user opening an elevated Task Manager just before a runas /netonly, which is rare.
+  T1134.002). Benign cause: a user opening an elevated Task Manager just before or after a runas /netonly, which is rare.
 severity: high
 source: events
 attack: [T1548.002, T1134.002]

@@ -178,13 +178,15 @@ where:
     # /format naming a stylesheet file or URL (XSL script processing), not one of wmic's own formats (/format:list)
     - { processName|endswith: wmic.exe, commandLine|re: '(?i)[/-]format:\s*"?[^\s"]*[.\\/:%]' }
     - { image|endswith: wmic.exe, commandLine|re: '(?i)[/-]format:\s*"?[^\s"]*[.\\/:%]' }
-    # a package from a URL, a package that is not one, a DLL registered from outside Program Files
+    # a package from a URL, a package that is not one, a DLL registered from outside Program Files; the
+    # package's path is read up to 260 characters (MAX_PATH), as an unbounded one is retried from each
+    # switch in the browser
     - { processName|endswith: msiexec.exe, commandLine|contains: ["http:", "https:", "ftp:"] }
-    - { processName|endswith: msiexec.exe, commandLine|re: '(?i)/(i|package|a|x|j[mu]?)\s*"?[^"]*\.(png|jpe?g|gif|txt|dat|tmp|bin|dll|exe)"?(\s|$)' }
+    - { processName|endswith: msiexec.exe, commandLine|re: '(?i)/(i|package|a|x|j[mu]?)\s*("\s*)?([^"\s][^"]{0,259})?\.(png|jpe?g|gif|txt|dat|tmp|bin|dll|exe)"?(\s|$)' }
     - { processName|endswith: msiexec.exe, commandLine|re: '(?i)\s/[yz]\s', commandLine|not_re: '(?i)\s/[yz]\s*"?[a-z]:\\program files' }
     # a package from a URL, a package that is not one, a DLL registered from outside Program Files
     - { image|endswith: msiexec.exe, commandLine|contains: ["http:", "https:", "ftp:"] }
-    - { image|endswith: msiexec.exe, commandLine|re: '(?i)/(i|package|a|x|j[mu]?)\s*"?[^"]*\.(png|jpe?g|gif|txt|dat|tmp|bin|dll|exe)"?(\s|$)' }
+    - { image|endswith: msiexec.exe, commandLine|re: '(?i)/(i|package|a|x|j[mu]?)\s*("\s*)?([^"\s][^"]{0,259})?\.(png|jpe?g|gif|txt|dat|tmp|bin|dll|exe)"?(\s|$)' }
     - { image|endswith: msiexec.exe, commandLine|re: '(?i)\s/[yz]\s', commandLine|not_re: '(?i)\s/[yz]\s*"?[a-z]:\\program files' }
     - { processName|endswith: [cscript.exe, wscript.exe], commandLine|contains: ["\\temp\\", "\\appdata\\", "\\users\\public\\", "\\downloads\\", "//e:", "/e:", ".js", ".jse", ".vbs", ".vbe", ".wsf", "http"] }
     - { image|endswith: [cscript.exe, wscript.exe], commandLine|contains: ["\\temp\\", "\\appdata\\", "\\users\\public\\", "\\downloads\\", "//e:", "/e:", ".js", ".jse", ".vbs", ".vbe", ".wsf", "http"] }
@@ -221,7 +223,8 @@ where:
     - { image|endswith: msiexec.exe }
   commandLine|contains: ["/q", "/quiet", "\\temp\\", "\\appdata\\"]
   commandLine|not_contains: ["http:", "https:", "ftp:"]
-  commandLine|not_re: '(?i)/(i|package|a|x|j[mu]?)\s*"?[^"]*\.(png|jpe?g|gif|txt|dat|tmp|bin|dll|exe)"?(\s|$)'
+  # the package that is not one, read as win-lolbin-suspicious-commandline reads it
+  commandLine|not_re: '(?i)/(i|package|a|x|j[mu]?)\s*("\s*)?([^"\s][^"]{0,259})?\.(png|jpe?g|gif|txt|dat|tmp|bin|dll|exe)"?(\s|$)'
 group_by: [computer, processName, image]
 threshold: ">= 1"
 ---

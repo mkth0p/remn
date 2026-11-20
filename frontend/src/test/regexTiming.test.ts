@@ -40,12 +40,10 @@ const TAILS = ['', '\0']
 const EXEMPT: Record<string, string> = {
   [String.raw`ai/evidence.ts /^([a-z]+)\s*[:#\s]\s*(\S+)$/i`]: 'a row reference the model writes in a tool call',
   [String.raw`ai/transport.ts /\/+$/`]: 'the endpoint address the analyst types in the settings',
-  [String.raw`views/SettingsView.tsx /\/+$/`]: 'the endpoint address the analyst types in the settings',
+  [String.raw`views/settings/AiPanel.tsx /\/+$/`]: 'the endpoint address the analyst types in the settings',
   [String.raw`components/graphLayout.ts /([\d.]+)px/`]: "a font the app's own stylesheet names",
   [String.raw`data/claims.ts /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g`]: 'text the model wrote (an answer or a summary), read to check the addresses it names',
   [String.raw`data/reportDocx.ts /\[([^\]]+)\]\(([^)]+)\)/g`]: "the analyst's notes and the model's answers, written into a Word report on request",
-  [String.raw`util/format.ts /("(?:\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g`]:
-    'JSON after HTML escaping, which holds no double quote, so the string branch never starts',
   [String.raw`rules/filter.ts /<[^>]*>/g`]: 'applied up to the last ">" only, which regexRewrites.test.ts times end to end',
 }
 
@@ -59,21 +57,12 @@ const BUILT: Record<string, string> = {
   'rules/filter.ts p': "a rule's own pattern (the re operator), which the rule author writes",
 }
 
-// a token, any text, then another token: the browser tries it again from each occurrence of the first
-// token, and keeping what it matches would take an atomic group or a lookaround, which the server's
-// RE2 does not have. The browser runs rules in a worker, so a slow value delays the run, not the page.
-const RETRIED = 'retried from each occurrence of its first token; no rewrite that RE2 also reads keeps what it matches'
-
-/** Patterns of REMN's own rule packs left as they are, by rule, with why. */
-const RULE_EXEMPT: Record<string, string> = {
-  'mail-bank-detail-change': RETRIED,
-  'win-lolbin-suspicious-commandline': RETRIED,
-  'win-msiexec-quiet-install': RETRIED,
-  'win-packet-capture-tool': RETRIED,
-  'win-ps-printer-port-to-file': RETRIED,
-  'win-fsutil-symlink-evaluation': RETRIED,
-  'win-remote-computer-management': RETRIED,
-}
+/**
+ * Patterns of REMN's own rule packs left as they are, by rule, with why. A token, any text, then
+ * another token is tried again from each occurrence of the first token: bound the text between them
+ * (a gap of up to 1,000 characters on the line, the most RE2 repeats) instead of adding the rule here.
+ */
+const RULE_EXEMPT: Record<string, string> = {}
 
 interface Site {
   key: string

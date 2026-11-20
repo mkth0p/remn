@@ -1,6 +1,7 @@
 import { getDb, type Evidence, type Finding } from '../db/schema'
 import { evidenceIssue } from './reportHtml'
 import { packageCoverageIssues } from './packageCoverage'
+import { EN, type ReportText } from './reportText'
 
 /**
  * What must be true before a report is issued as final. A report is a DRAFT, and says so on its
@@ -27,69 +28,36 @@ export interface PreflightInput {
   claims?: { checked: number; unsupported: number; contradicted: number; texts: number; textsUnsupported: number }
 }
 
-export function preflightChecks(p: PreflightInput): PreflightCheck[] {
+/** The checks, labelled in the words of a report's language (the interface reads them in English). */
+export function preflightChecks(p: PreflightInput, t: ReportText = EN): PreflightCheck[] {
+  const w = t.preflight
   const incomplete = p.evidence.filter((e) => (e.kind === 'package' ? packageCoverageIssues(e).length > 0 : !!evidenceIssue(e)))
   const unverified = p.evidence.filter((e) => e.integrity !== 'verified')
   const rules = p.rules
-  const rulesProblem = !rules
-    ? 'the state of the last rule run is not known'
-    : rules.lastRun == null
-      ? 'the detection rules have not run on this case'
-      : rules.errors
-        ? `${rules.errors} rule(s) failed in the last run`
-        : rules.evidenceAfter
-          ? `${rules.evidenceAfter} evidence file(s) were added after the last rule run`
-          : ''
+  const rulesProblem = !rules ? w.unknown : rules.lastRun == null ? w.notRun : rules.errors ? w.failed(rules.errors) : rules.evidenceAfter ? w.after(rules.evidenceAfter) : ''
   return [
-    { id: 'rules', label: 'Detection rules ran on all the evidence', ok: !rulesProblem, detail: rulesProblem || 'the last run covered every file' },
+    { id: 'rules', label: w.rules, ok: !rulesProblem, detail: rulesProblem || w.rulesOk },
     {
       id: 'read',
-      label: 'Every evidence file was read completely',
+      label: w.read,
       ok: !incomplete.length,
-      detail: incomplete.length
-        ? `${incomplete
-            .map((e) => e.name)
-            .slice(0, 4)
-            .join(', ')}${incomplete.length > 4 ? ` and ${incomplete.length - 4} more` : ''}`
-        : 'no parse error, limit or unread member',
+      detail: incomplete.length ? w.readList(incomplete.map((e) => e.name).slice(0, 4), incomplete.length - 4) : w.readOk,
     },
-    {
-      id: 'integrity',
-      label: 'Every evidence file has a verified digest',
-      ok: !unverified.length,
-      detail: unverified.length ? `${unverified.length} file(s) without a verified SHA-256` : 'browser and server digests match',
-    },
-    { id: 'decided', label: 'Every item has a decision', ok: !p.undecided, detail: p.undecided ? `${p.undecided} item(s) without a decision` : 'the review is complete' },
-    {
-      id: 'ai',
-      label: 'Decisions taken from the model were checked',
-      ok: !p.aiDecided,
-      detail: p.aiDecided ? `${p.aiDecided} decision(s) came from the model's proposals` : 'every decision is the analyst’s',
-    },
-    {
-      id: 'printed',
-      label: 'Every confirmed item is printed',
-      ok: !p.unprintedConfirmed,
-      detail: p.unprintedConfirmed ? `${p.unprintedConfirmed} confirmed item(s) below the severity floor or left out` : 'the report carries every confirmed item',
-    },
-    claimsCheck(p.claims),
+    { id: 'integrity', label: w.integrity, ok: !unverified.length, detail: unverified.length ? w.integrityBad(unverified.length) : w.integrityOk },
+    { id: 'decided', label: w.decided, ok: !p.undecided, detail: p.undecided ? w.decidedBad(p.undecided) : w.decidedOk },
+    { id: 'ai', label: w.ai, ok: !p.aiDecided, detail: p.aiDecided ? w.aiBad(p.aiDecided) : w.aiOk },
+    { id: 'printed', label: w.printed, ok: !p.unprintedConfirmed, detail: p.unprintedConfirmed ? w.printedBad(p.unprintedConfirmed) : w.printedOk },
+    claimsCheck(p.claims, t),
   ]
 }
 
-function claimsCheck(c: PreflightInput['claims']): PreflightCheck {
-  const label = 'What the report says holds against the rows it cites'
-  if (!c) return { id: 'claims', label, ok: false, detail: 'the printed findings and texts are still being checked against their rows' }
-  const problems = [
-    c.contradicted ? `${c.contradicted} finding(s) contradicted by their rows` : '',
-    c.unsupported ? `${c.unsupported} finding(s) whose rows are not all in the case` : '',
-    c.textsUnsupported ? `${c.textsUnsupported} text(s) naming values their rows do not hold` : '',
-  ].filter(Boolean)
-  return {
-    id: 'claims',
-    label,
-    ok: !problems.length,
-    detail: problems.length ? problems.join('; ') : `${c.checked} finding(s) and ${c.texts} text(s) read back against their rows`,
-  }
+function claimsCheck(c: PreflightInput['claims'], t: ReportText): PreflightCheck {
+  const w = t.preflight
+  if (!c) return { id: 'claims', label: w.claims, ok: false, detail: w.claimsPending }
+  const problems = [c.contradicted ? w.contradicted(c.contradicted) : '', c.unsupported ? w.unsupported(c.unsupported) : '', c.textsUnsupported ? w.textsUnsupported(c.textsUnsupported) : ''].filter(
+    Boolean,
+  )
+  return { id: 'claims', label: w.claims, ok: !problems.length, detail: problems.length ? problems.join('; ') : w.claimsOk(c.checked, c.texts) }
 }
 
 export interface ReportIssue {

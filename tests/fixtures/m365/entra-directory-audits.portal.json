@@ -1,0 +1,92 @@
+[
+  {
+    "id": "Directory_8c1d4f2e-3b5a-4c6d-9e7f-0a1b2c3d4e5f_KX2RG_10234561",
+    "category": "ApplicationManagement",
+    "correlationId": "8c1d4f2e-3b5a-4c6d-9e7f-0a1b2c3d4e5f",
+    "result": "success",
+    "resultReason": "",
+    "activityDisplayName": "Consent to application",
+    "activityDateTime": "2026-09-01T10:05:12.4810000Z",
+    "loggedByService": "Core Directory",
+    "initiatedBy": {
+      "user": {
+        "id": "5f1c2a3b-0d4e-4f60-8a71-92b3c4d5e6f7",
+        "displayName": "Alice Example",
+        "userPrincipalName": "alice@contoso.com",
+        "ipAddress": "198.51.100.23"
+      },
+      "app": null
+    },
+    "targetResources": [
+      {
+        "id": "7e8f9a0b-1c2d-4e3f-8a4b-5c6d7e8f9a0b",
+        "displayName": "Mail Sync Helper",
+        "type": "ServicePrincipal",
+        "userPrincipalName": null,
+        "groupType": null,
+        "modifiedProperties": [
+          {
+            "displayName": "ConsentContext.IsAdminConsent",
+            "oldValue": null,
+            "newValue": "\"False\""
+          },
+          {
+            "displayName": "ConsentContext.OnBehalfOfAll",
+            "oldValue": null,
+            "newValue": "\"False\""
+          },
+          {
+            "displayName": "ConsentAction.Permissions",
+            "oldValue": null,
+            "newValue": "\"[] => [[Id: 1, ClientId: 7e8f9a0b, PrincipalId: 5f1c2a3b, ResourceId: 2b3c4d5e, ConsentType: Principal, Scope: Mail.Read Mail.Send offline_access]]; \""
+          },
+          {
+            "displayName": "TargetId.ServicePrincipalNames",
+            "oldValue": null,
+            "newValue": "\"c3d4e5f6-a7b8-4c9d-8e0f-1a2b3c4d5e6f\""
+          }
+        ]
+      }
+    ],
+    "additionalDetails": [
+      {
+        "key": "User-Agent",
+        "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+      },
+      {
+        "key": "AppId",
+        "value": "c3d4e5f6-a7b8-4c9d-8e0f-1a2b3c4d5e6f"
+      }
+    ]
+  },
+  {
+    "id": "UserManagement_2d3e4f5a-6b7c-4d8e-9f0a-1b2c3d4e5f6a_RG7XZ_20934871",
+    "category": "UserManagement",
+    "correlationId": "2d3e4f5a-6b7c-4d8e-9f0a-1b2c3d4e5f6a",
+    "result": "success",
+    "resultReason": "User registered Authenticator App with Notification and Code",
+    "activityDisplayName": "User registered security info",
+    "activityDateTime": "2026-09-01T10:09:40.1000000Z",
+    "loggedByService": "Authentication Methods",
+    "initiatedBy": {
+      "user": {
+        "id": "5f1c2a3b-0d4e-4f60-8a71-92b3c4d5e6f7",
+        "displayName": "Alice Example",
+        "userPrincipalName": "alice@contoso.com",
+        "ipAddress": "198.51.100.23"
+      },
+      "app": null
+    },
+    "targetResources": [
+      {
+        "id": "5f1c2a3b-0d4e-4f60-8a71-92b3c4d5e6f7",
+        "displayName": "Alice Example",
+        "type": "User",
+        "userPrincipalName": "alice@contoso.com",
+        "groupType": null,
+        "modifiedProperties": []
+      }
+    ],
+    "additionalDetails": []
+  }
+]

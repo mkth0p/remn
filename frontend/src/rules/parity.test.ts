@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import yaml from 'js-yaml'
 import { describe, expect, it } from 'vitest'
-import type { Row, SettingsLike } from './filter'
+import { RE_VALUE_MAX, type Row, type SettingsLike } from './filter'
 import { MAX_FINDINGS, runRule, validateRule, type Rule, type RuleDiag } from './engine'
 
 /**
@@ -87,6 +87,40 @@ describe('engine parity past the finding cap', () => {
         .sort()
       const cut = diags.find((d) => d.reason === 'truncated')
       expect({ rule: v.rule.id, keys, cut: cut && { detail: cut.detail, dropped: cut.dropped } }).toEqual({ rule: v.rule.id, keys: cap.findings[v.rule.id], cut: cap.cuts[v.rule.id] })
+    }
+  })
+})
+
+describe('engine parity on values longer than a regular expression reads', () => {
+  // rules on rows of their own (tools/parity_fixture.py long_case); a long text is stored as pieces repeated
+  const long = JSON.parse(readFileSync(join(FIX, 'long.json'), 'utf-8')) as {
+    max: number
+    rows: Row[]
+    rules: unknown[]
+    findings: Record<string, string[]>
+    cuts: Record<string, { detail: string; longValues: number }>
+  }
+  const expand = (v: unknown): unknown => {
+    if (!v || typeof v !== 'object' || !('repeat' in v) || !Array.isArray(v.repeat)) return v
+    return (v.repeat as [string, number][]).map(([piece, times]) => piece.repeat(times)).join('')
+  }
+  const rows: Row[] = long.rows.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, expand(v)])))
+
+  it('reads as many characters of a value', () => {
+    expect(RE_VALUE_MAX).toBe(long.max)
+  })
+
+  it('finds the same and counts the same rows read in part for every rule', () => {
+    expect(long.rules).toHaveLength(Object.keys(long.cuts).length)
+    for (const r of long.rules) {
+      const v = validateRule(r)
+      if (!v.ok) throw new Error(v.error)
+      const diags: RuleDiag[] = []
+      const keys = runRule(v.rule, { rows, onDiag: (d) => diags.push(d) })
+        .map((f) => f.key)
+        .sort()
+      const cuts = diags.filter((d) => d.reason === 'values_cut').map((d) => ({ detail: d.detail, longValues: d.longValues }))
+      expect({ rule: v.rule.id, keys, cuts }).toEqual({ rule: v.rule.id, keys: long.findings[v.rule.id], cuts: [long.cuts[v.rule.id]] })
     }
   })
 })

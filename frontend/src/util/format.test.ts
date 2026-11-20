@@ -1,5 +1,6 @@
+// @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fmtTs, fmtUtc, setLocalTime, tzLabel } from './format'
+import { fmtTs, fmtUtc, highlightJson, setLocalTime, tzLabel } from './format'
 
 // 2026-03-04 09:15:00.250 UTC, an invented moment
 const at = Date.UTC(2026, 2, 4, 9, 15, 0, 250)
@@ -46,5 +47,44 @@ describe('times on screen', () => {
     setLocalTime(true)
     zone(-60)
     expect(fmtUtc(at)).toBe('2026-03-04 09:15:00Z')
+  })
+})
+
+describe('highlighted JSON', () => {
+  it('marks keys, strings, numbers, booleans and null', () => {
+    const html = highlightJson({ user: 'carla', eventId: 4625, elevated: true, parent: null })
+    expect(html).toContain('<span class="k">&quot;user&quot;:</span> <span class="s">&quot;carla&quot;</span>')
+    expect(html).toContain('<span class="k">&quot;eventId&quot;:</span> <span class="n">4625</span>')
+    expect(html).toContain('<span class="b">true</span>')
+    expect(html).toContain('<span class="z">null</span>')
+  })
+
+  it('leaves the digits and words inside a string alone', () => {
+    const html = highlightJson({ account: 'admin1', note: "it's null or true" })
+    expect(html).toContain('<span class="s">&quot;admin1&quot;</span>')
+    expect(html).toContain('<span class="s">&quot;it&#39;s null or true&quot;</span>')
+    expect(html).not.toContain('class="n"')
+    expect(html).not.toContain('class="z"')
+  })
+
+  it('escapes every value, so markup in a record stays text', () => {
+    // an invented record carrying markup in a key and a value
+    const html = highlightJson({ '<b>k</b>': '<img src=x onerror="alert(1)">', '&amp;': '"quoted"' })
+    const pre = document.createElement('pre')
+    pre.innerHTML = html
+    expect(pre.querySelector('img, b')).toBeNull()
+    expect(pre.textContent).toBe(JSON.stringify({ '<b>k</b>': '<img src=x onerror="alert(1)">', '&amp;': '"quoted"' }, null, 2))
+    expect([...pre.querySelectorAll('span')].map((s) => s.className)).toEqual(['k', 's', 'k', 's'])
+  })
+  it('reads a string never closed once, and shows the rest as text', () => {
+    // invented text, not JSON: escaped quotes with no closing one, which a pattern would read again from each quote
+    const hostile = '"' + '\\"'.repeat(16_000)
+    const started = performance.now()
+    const html = highlightJson(hostile)
+    expect(performance.now() - started).toBeLessThan(100)
+    const pre = document.createElement('pre')
+    pre.innerHTML = html
+    expect(pre.textContent).toBe(hostile)
+    expect(highlightJson('{"a": 1, "b": "open')).toBe('{<span class="k">&quot;a&quot;:</span> <span class="n">1</span>, <span class="k">&quot;b&quot;:</span> &quot;open')
   })
 })

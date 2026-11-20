@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import platform
 import sys
 import threading
@@ -10,10 +11,13 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_GET
 
 from api.services import ollama_service
+from forensic.access import permission
+from forensic.accounts import accounts_on
 from forensic.build import VERSION, build_id, source_url
 from services.ai import claude_code
 from services.analysis import hayabusa
 from services.analysis.attachments import yara_scan
+from services.ingest import staging
 from services.parsers.mail import pst
 from services.reputation.base import registry
 
@@ -38,6 +42,20 @@ def _ollama() -> tuple[dict, list]:
         return _probe[1], _probe[2]
 
 
+def _chunked_gb() -> float:
+    """The largest chunked upload the server takes, in GiB rounded down to a tenth: the configured
+    ceiling (FORENSIC_MAX_CHUNKED_GB), or what the staging area can hold if that is less, as upload
+    init refuses a larger file whatever the ceiling says."""
+    ceiling = settings.FORENSIC_MAX_CHUNKED_GB * staging.GIB
+    try:
+        ceiling = min(ceiling, staging.capacity()[0])
+    except OSError:
+        # a staging area that cannot be read is said when an upload is tried, not here
+        pass
+    return math.floor(ceiling * 10 / staging.GIB) / 10
+
+
+@permission("signed-in")
 @require_GET
 def health(request):
     if not getattr(request, "forensic_client", False):
@@ -45,6 +63,7 @@ def health(request):
         # can reach the port. It learns that the server answers, and nothing about the server.
         return JsonResponse({"ok": True})
     browser_only = settings.FORENSIC_BROWSER_ONLY
+    account = getattr(request, "account", None)
     if browser_only:
         # no server-side model in this mode, and nothing about the machine that a stranger needs
         ai: dict = {"reachable": False, "host": "", "models": [], "defaultModel": "", "error": "browser-only mode: no server-side model"}
@@ -65,7 +84,7 @@ def health(request):
         "limits": {
             "maxUploadMb": settings.FORENSIC_MAX_UPLOAD_MB,
             "inMemoryMb": settings.FORENSIC_IN_MEMORY_MB,
-            "maxChunkedGb": settings.FORENSIC_MAX_CHUNKED_GB,
+            "maxChunkedGb": _chunked_gb(),
             "chunkMb": settings.FORENSIC_CHUNK_MB,
             "uploadMaxAgeS": settings.FORENSIC_UPLOAD_MAX_AGE_S,
         },
@@ -80,6 +99,9 @@ def health(request):
             "hayabusa": hayabusa.available(),
         },
         "providers": [] if browser_only else registry.list(),
+        # whether every request needs a personal token, and the account this one was made with
+        "accounts": accounts_on(),
+        "account": {"name": account.name, "role": account.role} if account else None,
         "rulesDir": str(settings.RULES_DIR),
         "dataDir": str(settings.DATA_DIR),
         "engines": hayabusa.engines(),

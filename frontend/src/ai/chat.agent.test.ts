@@ -179,6 +179,30 @@ describe('proposals that are never accepted in bulk', () => {
     expect(await acceptAll(kase)).toMatchObject({ accepted: 0, held: 1 })
   })
 
+  it('writes to the ledger, once, that the evidence the analyst put to it addresses a model', async () => {
+    const story = 'Walk me through story s1.\n\n' + wrapEvidence('story', JSON.stringify({ steps: [{ title: LURE, refs: ['ev:1'] }] }), [])
+    script.push({ text: 'Failures [ev:1].' })
+    const msgs = await runAgent([{ role: 'user', content: story }], kase, { mode: 'analyst', tools: true, agent: { seen: new SeenSet() } })
+    const first = await loadLedger(1)
+    expect(first.map((e) => e.kind)).toEqual(['run', 'notice', 'answer'])
+    expect(first[1].text).toBe('the question: 1 place(s) addressed to a model')
+    expect(JSON.parse(first[1].data).suspects).toHaveLength(1)
+    // the next question of the same conversation carries no evidence of its own: no second notice
+    script.push({ text: 'Two failures [ev:1].' })
+    await runAgent([...msgs, { role: 'user', content: 'how many?' }], kase, { mode: 'analyst', tools: true, agent: { seen: new SeenSet() } })
+    expect((await loadLedger(1)).filter((e) => e.kind === 'notice')).toHaveLength(1)
+    expect((await verifyLedger(1)).intact).toBe(true)
+  })
+
+  it('writes to the ledger that evidence the analyst put to it was too long to check whole', async () => {
+    const story = 'Walk me through story s2.\n\n' + wrapEvidence('story', JSON.stringify({ steps: [{ title: 'x'.repeat(20_500), refs: ['ev:1'] }] }), [])
+    script.push({ text: 'Failures [ev:1].' })
+    await runAgent([{ role: 'user', content: story }], kase, { mode: 'analyst', tools: true, agent: { seen: new SeenSet() } })
+    const notice = (await loadLedger(1)).find((e) => e.kind === 'notice')
+    expect(notice?.text).toBe('the question: 1 place(s) too long or too deep to check for text addressed to a model')
+    expect(JSON.parse(notice!.data)).toEqual({ unread: 1 })
+  })
+
   it('accepts in bulk what a run that read nothing of the kind proposed', async () => {
     script.push({ calls: [search] }, { calls: [note('ev:1')] }, { text: 'Failures [ev:1].' })
     await runAgent([{ role: 'user', content: 'what failed?' }], kase, { mode: 'analyst', tools: true, agent: { seen: new SeenSet() } })

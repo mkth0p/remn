@@ -1,0 +1,4 @@
+"Received","SenderAddress","RecipientAddress","Subject","Status","FromIP","ToIP","MessageId","MessageTraceId"
+"01/09/2026 10:31:02","alice@contoso.com","payments@attacker.example","RE: Invoice 4471 - updated bank details","Delivered","198.51.100.23","192.0.2.80","<AM9PR01MB0001.example@AM9PR01MB0001.eurprd01.prod.outlook.com>","1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+"01/09/2026 10:40:00","supplier@fabrikam.example","alice@contoso.com","Invoice 4472","Delivered","192.0.2.25","","<20260901104000.1234@mail.fabrikam.example>","2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e"
+"01/09/2026 10:40:05","supplier@fabrikam.example","collect@attacker.example","Invoice 4472","Delivered","","192.0.2.80","<20260901104000.1234@mail.fabrikam.example>","3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f"

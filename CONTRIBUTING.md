@@ -7,7 +7,8 @@ Windows:
 ```
 py -3.13 -m venv .venv
 .venv\Scripts\python.exe -m pip install -r backend\requirements.txt -r backend\requirements-dev.txt
-cd frontend && npm ci
+cd frontend
+npm ci
 ```
 
 Linux and macOS:
@@ -18,9 +19,10 @@ python3.13 -m venv .venv
 cd frontend && npm ci
 ```
 
-Run the API with `.venv\Scripts\python.exe backend\manage.py runserver 127.0.0.1:8000`
-and the frontend with `npm run dev` in `frontend/`, or both on one port with
-`backend\run.py` after `npm run build`. `docs/setup.md` has the details and the
+Run the API with `.venv/bin/python backend/manage.py runserver 127.0.0.1:8000`
+(`.venv\Scripts\python.exe backend\manage.py runserver 127.0.0.1:8000` on Windows) and the
+frontend with `npm run dev` in `frontend/`, or both on one port with `backend/run.py` after
+`npm run build`. `docs/setup.md` has the details and the
 optional pieces (PST support, YARA, GeoLite2, Ollama).
 
 ## Before you push

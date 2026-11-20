@@ -12,7 +12,7 @@ from collections.abc import Callable
 from typing import Any
 
 from services.store.casestore import CaseStore, QueryStopped, TimeLimit, q
-from services.store.sqlfilter import Ctx, FilterError, _setting, compile_cond, resolve
+from services.store.sqlfilter import RE_VALUE_MAX, Ctx, FilterError, _setting, compile_cond, long_value_condition, resolve
 
 SEVERITIES = ["info", "low", "medium", "high", "critical"]
 # the spaces after an optional unit or comparator belong to it: two runs of spaces side by side
@@ -175,18 +175,102 @@ def rule_problem(rule: dict[str, Any]) -> str | None:
     return None
 
 
-def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any], notes: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+def regex_fields(rule: dict[str, Any]) -> list[str]:
+    """The fields a rule's regular expressions (re, not_re, re_cs) read in its where, exclude and any_in_group.
+    Mirrors regexFields in frontend/src/rules/engine.ts."""
+    out: list[str] = []
+
+    def walk(c: Any) -> None:
+        if isinstance(c, list):
+            for x in c:
+                walk(x)
+        elif isinstance(c, dict):
+            for k, v in c.items():
+                if re.match(r"^(any_of|all_of)(_\d+)?$", k) or k == "not":
+                    walk(v)
+                elif re.search(r"\|(re|not_re|re_cs)$", k) and k.split("|")[0] not in out:
+                    out.append(k.split("|")[0])
+
+    for c in (rule.get("where"), rule.get("exclude"), rule.get("any_in_group")):
+        walk(c)
+    return out
+
+
+def long_value_rows(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any]) -> int:
+    """The rows of a rule (those of its event ids, or every row of its source) holding a value longer than
+    RE_VALUE_MAX characters in a field its regular expressions read, which they read the start of.
+    The browser engine counts the same rows (longRegexValue in frontend/src/rules/engine.ts)."""
+    fields = regex_fields(rule)
+    if not fields:
+        return 0
+    source = rule_source(rule)
+    ctx = Ctx(source=source, settings=settings, re_max=RE_VALUE_MAX)
+    long = " OR ".join(long_value_condition(f, ctx) for f in fields)
+    ids = _rule_event_ids(rule.get("where")) if source == "events" else None
+    pinned = f'"eventId" IN ({", ".join(str(int(i)) for i in ids)}) AND ' if ids else ""
+    return int(store.cursor().execute(f"SELECT count(*) FROM {source} WHERE {pinned}({long})", ctx.params).fetchone()[0])
+
+
+def fields_with_long_values(store: CaseStore, source: str, fields: list[str], settings: dict[str, Any]) -> set[str] | None:
+    """The fields in which some row of the source holds a value longer than RE_VALUE_MAX characters, in one
+    scan for every rule of a run: a rule reading none of them has no row to count. None when it cannot tell."""
+    ctx = Ctx(source=source, settings=settings, re_max=RE_VALUE_MAX)
+    known, counts = [], []
+    for f in fields:
+        try:
+            counts.append(f"count(*) FILTER (WHERE {long_value_condition(f, ctx)})")
+            known.append(f)
+        except FilterError:
+            # a field the store does not have: the rule that reads it fails on its own
+            continue
+    if not known:
+        return set()
+    try:
+        cur = store.cursor()
+        if source == "events":
+            # a value is no longer than the text of its column, whose length in bytes is known without
+            # reading it: when no column holds a text that long, no field does (a path into data included)
+            types = cur.execute("SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'events'").fetchall()
+            texts = [c for c, t in types if t in ("VARCHAR", "JSON")]
+            longest = cur.execute("SELECT " + ", ".join(f"coalesce(max(strlen(CAST({q(c)} AS VARCHAR))), 0)" for c in texts) + " FROM events").fetchone()
+            if all(n <= RE_VALUE_MAX for n in longest):
+                return set()
+        row = cur.execute(f"SELECT {', '.join(counts)} FROM {source}", ctx.params).fetchone()
+    except Exception:  # noqa: BLE001
+        return None
+    return {f for f, n in zip(known, row, strict=True) if n}
+
+
+def values_cut_detail(rows: int) -> str:
+    """What a rule says when its regular expressions read some of its rows only in part (rules/engine.ts writes the same)."""
+    return (
+        f"{rows:,} row(s) held a value longer than {RE_VALUE_MAX:,} characters in a field its regular expressions read: "
+        f"they read its first {RE_VALUE_MAX:,} characters, and a match past them is not found"
+    )
+
+
+def run_rule(
+    store: CaseStore, rule: dict[str, Any], settings: dict[str, Any], notes: dict[str, Any] | None = None, *, long_fields: set[str] | None = None
+) -> list[dict[str, Any]]:
+    """The findings of one rule. With notes, what the run says of it (the findings left out, the rows its regular
+    expressions read in part); long_fields, when given, are the only fields in which a row can hold a long value."""
     problem = rule_problem(rule)
     if problem:
         raise FilterError(problem)
     source = rule_source(rule)
     ts_field = "date" if source == "mails" else "ts"
-    ctx = Ctx(source=source, settings=settings)
+    ctx = Ctx(source=source, settings=settings, re_max=RE_VALUE_MAX)
     req = rule.get("require_setting")
     if req:
         camel = re.sub(r"_([a-z])", lambda m: m.group(1).upper(), req)
         if not (settings.get(req) or settings.get(camel)):
             return []
+    # never silent: the rows whose values its regular expressions read only the start of (once, not
+    # again for the collapsed form of the rule, which reads the same rows)
+    if notes is not None and not rule.get("_collapsed") and (long_fields is None or set(regex_fields(rule)) & long_fields):
+        cut = long_value_rows(store, rule, settings)
+        if cut:
+            notes["longValues"] = cut
     where = _where_sql(rule, settings, ctx, ts_field)
     base = {
         "ruleId": rule["id"],
@@ -246,7 +330,7 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any], n
     # list (before WHERE) and again in HAVING, so the grouped query is compiled into a fresh context
     # in exactly that order; compiling it once and reusing the text left placeholders unbound
     # (the internal-name-on-external-domain rule failed on every store).
-    ctx = Ctx(source=source, settings=settings)
+    ctx = Ctx(source=source, settings=settings, re_max=RE_VALUE_MAX)
     gexprs = _entity_exprs(group_by, ctx) if group_by else []
     gkeys = [f"lower(coalesce({e}, ''))" for _, e in gexprs]
     dexpr = f"lower(CAST({resolve(rule['distinct'], ctx).sql} AS VARCHAR))" if rule.get("distinct") else None
@@ -453,7 +537,7 @@ def run_rule(store: CaseStore, rule: dict[str, Any], settings: dict[str, Any], n
         within = parse_duration(then.get("within")) or 0
         join = list(then.get("join") or group_by)
         for f in findings:
-            tctx = Ctx(source=source, settings=settings)
+            tctx = Ctx(source=source, settings=settings, re_max=RE_VALUE_MAX)
             cond = compile_cond(then["where"], tctx)
             end = f.get("tsEnd") or f.get("ts") or 0
             parts = [cond, f"{q(ts_field)} >= {tctx.p(f.get('ts') or 0)}", f"{q(ts_field)} <= {tctx.p(end + within)}"]
@@ -617,7 +701,7 @@ def diagnose_zero(store: CaseStore, rule: dict[str, Any], settings: dict[str, An
         return {**base, "reason": "missing_setting", "detail": f'setting "{req}" is empty'}
     missing = _empty_positive_settings(rule.get("where"), settings)
     cur = store.cursor()
-    ctx = Ctx(source=source, settings=settings)
+    ctx = Ctx(source=source, settings=settings, re_max=RE_VALUE_MAX)
     where = compile_cond(rule.get("where"), ctx)
     n_where = int(cur.execute(f"SELECT count(*) FROM {source} WHERE {where}", ctx.params).fetchone()[0])
     if n_where == 0:
@@ -630,7 +714,7 @@ def diagnose_zero(store: CaseStore, rule: dict[str, Any], settings: dict[str, An
             if present == 0:
                 detail = f"event id(s) {', '.join(map(str, ids))} absent from this case (channel not collected?)"
         return {**base, "reason": "no_selector_match", "detail": detail}
-    ctx2 = Ctx(source=source, settings=settings)
+    ctx2 = Ctx(source=source, settings=settings, re_max=RE_VALUE_MAX)
     w2 = compile_cond(rule.get("where"), ctx2)
     if rule.get("exclude"):
         w2 += f" AND NOT ({compile_cond(rule['exclude'], ctx2)})"
@@ -673,11 +757,18 @@ def run_rules(
     present: tuple[set[int], set[str]] | None = None
     if any(r.get("source") == "events" for r in rules):
         try:
-            with TimeLimit(rule_max_s, RULE_STOPPED):
+            with TimeLimit(rule_max_s, RULE_STOPPED, cancelled):
                 present = present_selectors(store)
         except Exception:  # noqa: BLE001
             # without the list every rule is run, which finds the same and costs more
             present = None
+    # the fields some row holds a long value in, by source: most cases have none, and then no rule counts its rows
+    long_fields: dict[str, set[str] | None] = {}
+    for source in {r.get("source") for r in rules if r.get("enabled") is not False and r.get("source") in RULE_SOURCES}:
+        fields = sorted({f for r in rules if r.get("enabled") is not False and r.get("source") == source for f in regex_fields(r)})
+        # held to a rule's limit and stopped by a cancel, as the rules are: a stopped scan cannot tell (None)
+        with TimeLimit(rule_max_s, RULE_STOPPED, cancelled):
+            long_fields[source] = fields_with_long_values(store, source, fields, settings) if fields else set()
     for i, rule in enumerate(rules):
         if cancelled and cancelled():
             break
@@ -695,9 +786,12 @@ def run_rules(
                 continue
         notes: dict[str, Any] = {}
         try:
-            with TimeLimit(rule_max_s, RULE_STOPPED):
-                found = run_rule(store, rule, settings, notes)
+            with TimeLimit(rule_max_s, RULE_STOPPED, cancelled):
+                found = run_rule(store, rule, settings, notes, long_fields=long_fields.get(rule.get("source")))
         except QueryStopped as exc:
+            if cancelled and cancelled():
+                # stopped by the cancel, not by the limit: the rule did not finish and is not counted
+                break
             errors.append({"ruleId": rule.get("id", "?"), "error": str(exc)})
             found = []
             failed = True
@@ -707,6 +801,18 @@ def run_rules(
             failed = True
         by_rule[rule.get("id", "?")] = len(found)
         all_findings.extend(found)
+        if notes.get("longValues"):
+            diagnostics.append(
+                {
+                    "ruleId": rule.get("id", "?"),
+                    "reason": "values_cut",
+                    "detail": values_cut_detail(notes["longValues"]),
+                    "longValues": notes["longValues"],
+                    "matched": len(found),
+                    "afterExclude": len(found),
+                    "afterTime": len(found),
+                }
+            )
         if notes.get("truncated"):
             diagnostics.append(
                 {
@@ -721,9 +827,11 @@ def run_rules(
             )
         if not found and not failed and diagnose:
             try:
-                with TimeLimit(rule_max_s, RULE_STOPPED):
+                with TimeLimit(rule_max_s, RULE_STOPPED, cancelled):
                     diagnostics.append(diagnose_zero(store, rule, settings))
             except Exception as exc:  # noqa: BLE001
+                if cancelled and cancelled():
+                    break
                 diagnostics.append(
                     {
                         "ruleId": rule.get("id", "?"),

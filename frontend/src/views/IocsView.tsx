@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { VirtualTable, type Column } from '../components/VirtualTable'
 import { Drawer, usePivot } from '../components/Detail'
 import { Badge, JsonView, Progress, Toggle } from '../components/ui'
+import { confirmAction } from '../components/confirm'
 import { checkReputation } from '../data/iocs'
 import { getSource } from '../data/source'
 import { getDb, type Ioc, type IocsCapped } from '../db/schema'
@@ -11,6 +12,7 @@ import { safeHref } from '../util/safe'
 import { exportCsv, exportJson, iocsToStix } from '../util/export'
 import { IconShield } from '../components/Icons'
 import { refreshCounts } from '../data/ingest'
+import { viewerReason } from '../data/access'
 
 const PAGE = 2000
 
@@ -58,7 +60,7 @@ export function IocsView() {
     if (!kase.settings.networkAllowed) return toast('warn', 'Enable external lookups first (toggle above). Each lookup discloses the indicator to the provider.')
     const todo = items.filter((i) => ['ip', 'domain', 'url', 'hash'].includes(i.kind))
     if (!todo.length) return toast('warn', 'nothing to check (ip / domain / url / hash only)')
-    if (todo.length > 300 && !confirm(`Check ${todo.length} indicators? This may take a while and hit rate limits.`)) return
+    if (todo.length > 300 && !(await confirmAction(`Check ${todo.length} indicators? This may take a while and hit rate limits.`, { title: 'Check the indicators', action: 'Check' }))) return
     setProgress({ done: 0, total: todo.length })
     await checkReputation(kase, todo, (done, total) => setProgress({ done, total }))
     setProgress(null)
@@ -98,6 +100,8 @@ export function IocsView() {
   const configured = health?.providers.filter((p) => p.configured) ?? []
   // browser-only: the server refuses lookups (403), so none are offered
   const browserOnly = health?.mode === 'browser-only'
+  // a lookup sends an indicator out on the case's behalf: the server refuses a viewer
+  const viewer = viewerReason(health)
   const uncheckedCount = rows.filter((i) => !i.checkedAt && ['ip', 'domain', 'url', 'hash'].includes(i.kind)).length
   return (
     <div className="view">
@@ -123,10 +127,10 @@ export function IocsView() {
         )}
         {!browserOnly && (
           <>
-            <button className="btn primary sm" disabled={!!progress} onClick={() => check(rows.filter((i) => !i.checkedAt))}>
+            <button className="btn primary sm" disabled={!!progress || !!viewer} title={viewer ?? undefined} onClick={() => check(rows.filter((i) => !i.checkedAt))}>
               <IconShield /> check unchecked ({uncheckedCount})
             </button>
-            <button className="btn sm" disabled={!!progress} onClick={() => check(rows)}>
+            <button className="btn sm" disabled={!!progress || !!viewer} title={viewer ?? undefined} onClick={() => check(rows)}>
               re-check shown
             </button>
           </>
@@ -196,6 +200,7 @@ export function IocsView() {
       </div>
       <div className="relative" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <VirtualTable
+          label="Indicators"
           rows={rows}
           columns={columns}
           rowKey={(r) => `${r.kind}:${r.value}`}
@@ -220,7 +225,7 @@ export function IocsView() {
               <button className="btn sm" onClick={() => pivot(selected.value, undefined, 'mails')}>
                 mails mentioning it
               </button>
-              <button className="btn sm primary" onClick={() => check([selected])}>
+              <button className="btn sm primary" disabled={!!viewer} title={viewer ?? undefined} onClick={() => check([selected])}>
                 check reputation
               </button>
             </div>

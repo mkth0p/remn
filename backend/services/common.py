@@ -12,6 +12,13 @@ from datetime import UTC, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any, BinaryIO
 
+
+class AnalystMessage(ValueError):
+    """An error whose text the code wrote for the analyst: what could not be done and what was kept.
+    It names no path and quotes nothing from the evidence, so a client is told it as it is
+    (api.errors.failure), where any other exception's text is kept to the server log."""
+
+
 _ISO_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:[.,](\d+))?\s*(Z|UTC|[+-]\d{2}:?\d{2})?$")
 
 

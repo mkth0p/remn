@@ -323,7 +323,9 @@ source: events
 attack: [T1222.001]
 entities: [computer, commandLine, user]
 where:
-  commandLine|re: 'fsutil(\.exe)?\s+behavior\s+set\s+symlinkevaluation\s+[^\n]*r2[lr]:1'
+  # up to 1,000 characters on the line before the setting: an unbounded gap is retried from each
+  # occurrence of the command in the browser
+  commandLine|re: 'fsutil(\.exe)?\s+behavior\s+set\s+symlinkevaluation\s+[^\n]{0,1000}r2[lr]:1'
 ---
 id: win-lsa-protection-disabled
 title: LSA protection (RunAsPPL) turned off
@@ -469,7 +471,9 @@ where:
     - image|endswith: ['\dumpcap.exe', '\tshark.exe', '\windump.exe', '\tcpdump.exe']
     - processName|endswith: ['\dumpcap.exe', '\tshark.exe', '\windump.exe', '\tcpdump.exe']
     - commandLine|re: '\bpktmon(\.exe)?\s+(start|filter\s+add)'
-    - commandLine|re: '\bnetsh(\.exe)?\s+trace\s+start\b[^\n]*capture=yes'
+    # up to 1,000 characters on the line before capture=yes: an unbounded gap is retried from each
+    # occurrence of the command in the browser
+    - commandLine|re: '\bnetsh(\.exe)?\s+trace\s+start\b[^\n]{0,1000}capture=yes'
 ---
 id: win-remote-computer-management
 title: Computer Management or another MMC snap-in opened against a remote host
@@ -479,7 +483,9 @@ source: events
 attack: [T1021, T1021.003]
 entities: [computer, commandLine, user]
 where:
-  commandLine|re: '(compmgmt|services|eventvwr|lusrmgr|taskschd|gpedit|fsmgmt)\.msc[^\n]*/computer[:=]'
+  # up to 1,000 characters on the line before /computer: an unbounded gap is retried from each
+  # occurrence of a snap-in in the browser
+  commandLine|re: '(compmgmt|services|eventvwr|lusrmgr|taskschd|gpedit|fsmgmt)\.msc[^\n]{0,1000}/computer[:=]'
 ---
 id: win-msdtc-unusual-parent
 title: MSDTC started by something other than the service manager

@@ -1,6 +1,7 @@
 import { useRef, useState, type ReactNode } from 'react'
 import { classNames } from '../util/format'
 import { folderFiles } from '../data/folder'
+import { pressable } from './pressable'
 
 export function Dropzone({
   onFiles,
@@ -24,6 +25,7 @@ export function Dropzone({
   const folder = useRef<HTMLInputElement>(null)
   return (
     <div
+      {...pressable}
       className={classNames('dropzone', over && 'over')}
       style={compact ? { padding: 12 } : undefined}
       onClick={() => input.current?.click()}

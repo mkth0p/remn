@@ -4,6 +4,7 @@ import type { Stack, StackField } from '../data/queries'
 import type { Filter } from '../rules/filter'
 import { fmtNum, fmtTs, tzLabel } from '../util/format'
 import { Spinner } from './ui'
+import { pressableRow } from './pressable'
 
 /**
  * Stacking (least-frequency analysis) on the Events page: every value of one field among the rows
@@ -125,7 +126,7 @@ export function StackPanel({ ds, filter, version, onPick }: { ds: DataSource; fi
           <tbody>
             {(stack?.rows ?? []).map((r) => (
               <tr key={r.value}>
-                <td className="click" style={{ wordBreak: 'break-all' }} title="Show these events" onClick={() => onPick(field, r.value)}>
+                <td {...pressableRow} className="click" style={{ wordBreak: 'break-all' }} title="Show these events" onClick={() => onPick(field, r.value)}>
                   {r.value}
                 </td>
                 <td>{fmtNum(r.count)}</td>

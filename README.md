@@ -11,7 +11,7 @@ Evidence stays on the machines you choose: in the browser's own database, or in 
 file on the server for gigabyte cases. An instance open to the internet runs browser-only:
 the server parses each file and keeps none of it.
 
-![Findings page](docs/images/findings.png)
+![The Findings page of the demo case](docs/images/findings.png)
 
 ## What it does
 
@@ -98,30 +98,34 @@ For development, run the API with `manage.py runserver` and the frontend with
 
 ## Documentation
 
-- [Setup and run](docs/setup.md) — requirements, installation, remote access
-- [Storage modes](docs/storage.md) — browser store, server store, uploads, the checklist before real exports
-- [Data sources](docs/sources.md) — event logs, mailboxes, Microsoft 365 and Entra, deleted mail
-- [Investigation packages](docs/packages.md) — adapters, coverage, observations and relationships
-- [Detection](docs/detection.md) — rule DSL, community packs, mail risk scoring, engine parity
-- [Stories](docs/stories.md) — who is who, sessions, hops and process trees, phases, campaigns, where a story stops
-- [Attack chains](docs/chains.md) — how chains are built and scored
-- [Interface](docs/interface.md) — the pages, the review workflow, the report
-- [AI analyst](docs/ai.md) — the investigating agent, playbooks, approval inbox, AI ledger, transports
-- [Validation and test data](docs/validation.md) — public corpora, measured rates, test suites
-- [Optional archive honeypot](docs/honeypot.md) — isolated decoy, reference trail, private replay and REMN package export
-- [Security model](docs/security.md) — what leaves the machine, what is stored where
+The [documentation index](docs/README.md) lists every page. The ones to start with:
+
+- [Setup and run](docs/setup.md): requirements, installation, Docker, remote access, accounts
+- [Frequently asked questions](docs/faq.md): what leaves the machine, what REMN reads and does not do, how findings are measured, licences
+- [Architecture](docs/architecture.md): the parts, where evidence goes, the processes, accounts and roles
+- [Storage modes](docs/storage.md): browser store, server store, uploads, the checklist before real exports
+- [Data sources](docs/sources.md) and [investigation packages](docs/packages.md): what is read and how
+- [Detection](docs/detection.md): rule sets, community packs, measured rules, detection level, mail risk scoring
+- [Writing rules](docs/rules.md): the rule format, how a rule is checked and measured, importing Sigma and Sublime rules
+- [Stories](docs/stories.md) and [attack chains](docs/chains.md): how the case is read and scored
+- [Interface](docs/interface.md): the pages, the review workflow, the report
+- [AI analyst](docs/ai.md): the investigating agent, the approval inbox, the AI ledger, transports
+- [API reference](docs/api.md): every route, the role it needs, its fields
+- [Validation and test data](docs/validation.md): public corpora, measured rates, test suites
+- [Security model](docs/security.md): what leaves the machine, what is stored where
 
 ## Where things stand
 
 Every event rule is measured with `tools/measure_rules.py` on public recordings of attacks
 and on the logs of seven clean Windows lab machines, at pinned versions of each source. The
 committed measure, `rules/measures.json`, was taken on 2026-09-25 (the 116 rules whose logic
-changed on 2026-11-19 were measured again that day): of the 3,009 event rules measured then,
-1,020 fire on a recording of what they look for, and the app marks the
+changed on 2026-11-19 were measured again that day, and the 94 that had no measure or had changed
+on 2026-11-20): of the 3,101 event rules measured then,
+1,038 fire on a recording of what they look for, and the app marks the
 findings of the others as leads. A recording counts as detected when a rule of its ATT&CK
 technique raises a finding of any severity anywhere in the file; whether the finding is on
 the attack's own events is not checked. Counted that way, the rules enabled by default
-detect 241 of the 535 Windows datasets of Splunk attack_data and 115 of the 279 files of
+detect 249 of the 535 Windows datasets of Splunk attack_data and 115 of the 279 files of
 EVTX-to-MITRE-Attack, two libraries no rule had been written against when they were first
 measured, and 271 of the 278 files of EVTX-ATTACK-SAMPLES, which the rules were reviewed
 against. On the clean machines REMN's own rules raised 154 findings at high or critical.
@@ -132,8 +136,8 @@ a rule stops detecting a recording or a high one gets noisier.
 The mail risk score was run on public phishing and legitimate mail corpora, with the rates in
 [docs/validation.md](docs/validation.md); its weights were adjusted on those same corpora, so
 the rates are not a held-out measure. Not yet exercised on real multi-gigabyte acquisitions. Attachments are analysed statically;
-nothing is opened or run. The remote mode uses one shared token and no encryption at
-rest. See [SECURITY.md](SECURITY.md).
+nothing is opened or run. A shared server uses one token, or accounts with roles and an
+audit log, and no encryption at rest. See [SECURITY.md](SECURITY.md).
 
 ## Contributing and licence
 

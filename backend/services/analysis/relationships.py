@@ -100,7 +100,9 @@ def origin(row: dict[str, Any]) -> str:
     """Where an event row comes from, the way chains.py tells cloud audit rows from host logs."""
     provider = clean(row.get("provider")).casefold()
     category = clean(row.get("category")).casefold()
-    return "m365" if "unified audit" in provider or "entra" in provider or category.startswith(("m365", "entra")) else "host"
+    # the Exchange Online message trace is the tenant's too, though neither audit log nor Entra
+    cloud = "unified audit" in provider or "entra" in provider or "exchange online" in provider
+    return "m365" if cloud or category.startswith(("m365", "entra")) else "host"
 
 
 def clean(value: Any) -> str:

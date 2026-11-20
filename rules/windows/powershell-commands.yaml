@@ -180,7 +180,9 @@ entities: [computer, subjectUser, commandLine]
 where:
   eventId|in: [4103, 800]
   provider|contains: PowerShell
-  commandLine|re: 'add-printerport\s.*-name\s+''?(\.\\|[a-z]:\\|\\\\)'
+  # up to 1,000 characters between the cmdlet and its -Name: an unbounded gap is retried from each
+  # occurrence of the cmdlet in the browser
+  commandLine|re: 'add-printerport\s.{0,1000}-name\s+''?(\.\\|[a-z]:\\|\\\\)'
 group_by: [computer, subjectUser]
 threshold: ">= 1"
 ---

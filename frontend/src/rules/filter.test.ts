@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { compileFilter, extractEventIds, getPath, ipInCidr, isOutsideHours, localHourAndDay, matchCondition, settingList } from './filter'
+import { compileFilter, extractEventIds, getPath, ipInCidr, isOutsideHours, localHourAndDay, matchCondition, RE_VALUE_MAX, settingList } from './filter'
 
 const row = {
   eventId: 4625,
@@ -112,6 +112,17 @@ describe('compileFilter', () => {
     expect(localHourAndDay(row.ts, 'Europe/Paris').hour).toBe(0)
     expect(isOutsideHours(23, 22, 6)).toBe(false)
     expect(isOutsideHours(12, 22, 6)).toBe(true)
+  })
+})
+
+describe('a long value', () => {
+  it('is read whole by a search, and on its first characters by a condition given a bound', () => {
+    const long = { commandLine: `${'a'.repeat(RE_VALUE_MAX)} evil` }
+    expect(compileFilter({ conditions: [{ field: 'commandLine', op: 're', value: 'evil' }] })(long)).toBe(true)
+    expect(compileFilter({ regex: { field: 'commandLine', pattern: 'evil' } })(long)).toBe(true)
+    expect(matchCondition(long, { field: 'commandLine', op: 're', value: 'evil' })).toBe(true)
+    expect(matchCondition(long, { field: 'commandLine', op: 're', value: 'evil' }, undefined, RE_VALUE_MAX)).toBe(false)
+    expect(matchCondition(long, { field: 'commandLine', op: 'not_re', value: 'evil' }, undefined, RE_VALUE_MAX)).toBe(true)
   })
 })
 

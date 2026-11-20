@@ -1,38 +1,22 @@
-import { useEffect, useMemo, useState } from 'react'
-import { getSource } from '../data/source'
-import { chainCoverageWarnings, loadChains, type Chain } from '../data/chains'
-import { listNotes } from '../data/caseNotes'
-import { chainSeverity, effectiveSeverity, loadChainReviews, loadReportSettings, selectForReport, unprintedConfirmed, type ChainReview, type ReportSettings } from '../data/review'
-import { getDb, type CaseNote, type Evidence, type Finding, type Ioc } from '../db/schema'
+import { useState } from 'react'
+import { saveReportSettings, type ClientReport, type ReportSettings } from '../data/review'
 import { buildIncidents } from '../rules/incidents'
 import { toast, useStore } from '../state/store'
-import { fmtNum, renderMarkdown } from '../util/format'
-import { downloadBlob, exportCaseBundle, importCaseBundle } from '../util/export'
-import { navigatorLayer, timelineRecords, toTimelineCsv, toTimesketchJsonl } from '../util/responderExports'
+import { downloadBlob } from '../util/export'
 import { buildReportDocx, DOCX_MIME } from '../data/reportDocx'
-import { Badge, Spinner } from '../components/ui'
-import { Dropzone } from '../components/Dropzone'
-import { renderGraphPng } from '../components/ChainGraph'
-import { buildReportHtml, loadReportFont, type AiUsage, type ReportData } from '../data/reportHtml'
-import { summariseLedger } from '../ai/ledger'
+import { buildReportHtml, evidencePeriod, impactInventory, ruleAuthors, spineStartingPoint, type ReportData } from '../data/reportHtml'
 import { draftExecutiveSummary } from '../data/reportSummary'
 import { buildCampaignGraph } from '../data/chainGraph'
-import { IconAi, IconCheck, IconDownload } from '../components/Icons'
-import { reportRelationships, type RelationshipReview } from '../data/relationshipReviews'
-import { findingsStaleness } from '../data/findingsState'
-import { aiDecided, issueStatus, loadReportIssue, preflightChecks, saveReportIssue, type ReportIssue } from '../data/reportPreflight'
-import { loadEvidenceGaps, type GapStatement } from '../data/evidenceGaps'
-import { loadRules, settingsForRules } from '../data/rules'
-import { measuredOn, readMeasure, type MeasureReading } from '../data/ruleMeasures'
-import { loadReportClaims, type ReportClaims } from '../data/claims'
-import { buildStories, loadStories, loadStoryNotes, storiesStaleness, storyInputs, storyRowIds, type StoryNotes, type StoryResult } from '../data/stories'
-import { loadStoryDecisions, storiesForReport, type StoryDecisions } from '../data/storyDecisions'
-import type { Rule } from '../rules/engine'
-import { loadAnswers, loadScenarioChoice, questionsForReport } from '../data/questions/answers'
-import { loadEvidenceProfile, type EvidenceProfile } from '../data/questions/coverage'
-import type { QuestionAnswer } from '../db/schema'
-
-const ORDER = ['critical', 'high', 'medium', 'low', 'info']
+import { saveReportIssue, type ReportIssue } from '../data/reportPreflight'
+import { measuredOn } from '../data/ruleMeasures'
+import { buildStories } from '../data/stories'
+import { ClientPanel } from './report/ClientPanel'
+import { reportFigures } from './report/model'
+import { ReportBars, ReportHeader } from './report/ReportHeader'
+import { openReport, printReport } from './report/reportOutput'
+import { CaseBundlePanel, ContentsPanel, PreflightPanel, ResponderExports, SummaryPanel } from './report/ReportPanels'
+import { useReportContents } from './report/useReportContents'
+import { useReportData } from './report/useReportData'
 
 /**
  * Report: built from the Review page's decisions (severity floor, what is in or out, rescored
@@ -41,199 +25,73 @@ const ORDER = ['critical', 'high', 'medium', 'low', 'info']
  */
 export function ReportView() {
   const kase = useStore((s) => s.currentCase)
-  const rulesVersion = useStore((s) => s.rulesVersion)
   const setView = useStore((s) => s.setView)
-  const [evidence, setEvidence] = useState<Evidence[]>([])
-  const [findings, setFindings] = useState<Finding[]>([])
-  const [chains, setChains] = useState<Chain[]>([])
-  /** the case's stories, the analyst's notes on them, and why the stories no longer read the case as it is */
-  const [storyResult, setStoryResult] = useState<StoryResult | null>(null)
-  const [storyNotes, setStoryNotes] = useState<StoryNotes>({})
-  /** the analyst's decisions on the stories (data/storyDecisions.ts), applied to them as the Stories page applies them */
-  const [storyDecisions, setStoryDecisions] = useState<StoryDecisions>({})
-  const [storiesStale, setStoriesStale] = useState<string[]>([])
+  const {
+    evidence,
+    findings,
+    chains,
+    storyResult,
+    storyNotes,
+    storyDecisions,
+    storiesStale,
+    coverageWarnings,
+    reviews,
+    relationships,
+    settings,
+    setSettings,
+    iocs,
+    iocCounts,
+    aiUsage,
+    issue,
+    setIssue,
+    rulesState,
+    gaps,
+    measures,
+    ruleMap,
+    notes,
+    questionScenarios,
+    answers,
+    profile,
+    summary,
+    setSummary,
+    summaryBy,
+    setSummaryBy,
+    summaryAt,
+    setSummaryAt,
+    fontData,
+    scope,
+  } = useReportData(kase)
   const [rebuilding, setRebuilding] = useState(false)
-  const [coverageWarnings, setCoverageWarnings] = useState<string[]>([])
-  const [reviews, setReviews] = useState<Record<string, ChainReview>>({})
-  const [relationships, setRelationships] = useState<RelationshipReview[]>([])
-  const [settings, setSettings] = useState<ReportSettings | null>(null)
-  const [iocs, setIocs] = useState<Ioc[]>([])
-  const [iocCounts, setIocCounts] = useState<{ total: number; checked: number }>({ total: 0, checked: 0 })
-  const [aiUsage, setAiUsage] = useState<AiUsage | undefined>(undefined)
-  const [issue, setIssue] = useState<ReportIssue>({ waivers: {} })
   // the preview is drawn during render, which must not read the clock: it shows when the page opened
   const [previewAt] = useState(() => Date.now())
-  const [rulesState, setRulesState] = useState<{ lastRun: number | null; evidenceAfter: number; errors: number } | undefined>(undefined)
-  /** what the evidence cannot show, for "Where it stops" */
-  const [gaps, setGaps] = useState<GapStatement[]>([])
-  /** how far each rule's finding can be taken as a detection */
-  const [measures, setMeasures] = useState<Record<string, MeasureReading>>({})
-  /** the rules as they are now, to check each printed finding's rows against */
-  const [ruleMap, setRuleMap] = useState<Map<string, Rule>>(new Map())
-  /** the printed findings and texts read back against the rows they cite */
-  const [claims, setClaims] = useState<ReportClaims | undefined>(undefined)
   const measureSources = useStore((s) => s.meta?.measures)
-  const [notes, setNotes] = useState<CaseNote[]>([])
-  /** the investigative scenarios chosen for the case, the answers, and what evidence the case holds (data/questions) */
-  const [questionScenarios, setQuestionScenarios] = useState<string[]>([])
-  const [answers, setAnswers] = useState<Map<string, QuestionAnswer>>(new Map())
-  const [profile, setProfile] = useState<EvidenceProfile | null>(null)
-  const mailCount = useStore((s) => s.counts.mails)
-  const [summary, setSummary] = useState<string>('')
-  /** who wrote the summary last: the model's draft is labelled in the report until the analyst edits it */
-  const [summaryBy, setSummaryBy] = useState<'analyst' | 'ai' | undefined>(undefined)
-  const [summaryAt, setSummaryAt] = useState<number | undefined>(undefined)
   const [busy, setBusy] = useState(false)
-  const [progress, setProgress] = useState('')
-  const [fontData, setFontData] = useState<string | undefined>(undefined)
-  useEffect(() => {
-    loadReportFont().then(setFontData)
-  }, [])
-  useEffect(() => {
-    if (!kase?.id) return
-    const db = getDb()
-    db.evidence.where('caseId').equals(kase.id).toArray().then(setEvidence)
-    db.findings
-      .where('caseId')
-      .equals(kase.id)
-      .toArray()
-      .then((f) => setFindings(f.sort((a, b) => ORDER.indexOf(effectiveSeverity(a)) - ORDER.indexOf(effectiveSeverity(b)) || (a.ts ?? 0) - (b.ts ?? 0))))
-    getSource(kase)
-      .listIocs({ onlyBad: true, limit: 500 })
-      .then((r) => setIocs(r.rows))
-      .catch(() => setIocs([]))
-    // what the report says about enrichment follows the lookups that ran, not the setting
-    Promise.all([getSource(kase).listIocs({ limit: 1 }), getSource(kase).listIocs({ unchecked: true, limit: 1 })])
-      .then(([all, unchecked]) => setIocCounts({ total: all.total, checked: Math.max(0, all.total - unchecked.total) }))
-      .catch(() => setIocCounts({ total: 0, checked: 0 }))
-    loadReportIssue(kase.id).then(setIssue)
-    loadEvidenceGaps(kase.id, getSource(kase))
-      .then(setGaps)
-      .catch(() => setGaps([]))
-    loadRules(kase.id)
-      .then((rs) => {
-        setMeasures(Object.fromEntries(rs.map((r) => [r.rule.id, readMeasure(r.measured, r.origin)])))
-        setRuleMap(new Map(rs.filter((r) => !r.error).map((r) => [r.rule.id, r.rule])))
-      })
-      .catch(() => setMeasures({}))
-    summariseLedger(kase.id)
-      .then(setAiUsage)
-      .catch(() => setAiUsage(undefined))
-    findingsStaleness(kase.id)
-      .then((s) => setRulesState({ lastRun: s.lastRun, evidenceAfter: s.evidenceAfter, errors: s.errors.length }))
-      .catch(() => setRulesState(undefined))
-    db.kv.get(`report-summary-${kase.id}`).then((k) => setSummary((k?.value as string) ?? ''))
-    db.kv.get(`report-summary-by-${kase.id}`).then((k) => setSummaryBy((k?.value as 'analyst' | 'ai' | undefined) ?? undefined))
-    db.kv.get(`report-summary-at-${kase.id}`).then((k) => setSummaryAt((k?.value as number | undefined) ?? undefined))
-    listNotes(kase.id).then(setNotes)
-    loadScenarioChoice(kase.id).then(setQuestionScenarios)
-    loadAnswers(kase.id).then(setAnswers)
-    loadChains(kase.id).then((r) => {
-      setChains(r?.chains ?? [])
-      setCoverageWarnings(chainCoverageWarnings(r?.stats))
-    })
-    loadStories(kase.id).then(async (r) => {
-      setStoryResult(r)
-      setStoriesStale(r ? storiesStaleness(r, await storyInputs(kase)) : [])
-    })
-    loadStoryNotes(kase.id).then(setStoryNotes)
-    loadStoryDecisions(kase.id).then(setStoryDecisions)
-    loadChainReviews(kase.id).then(setReviews)
-    reportRelationships(kase.id).then(setRelationships)
-    loadReportSettings(kase.id).then(setSettings)
-  }, [kase, rulesVersion])
-  useEffect(() => {
-    if (!kase?.id || !questionScenarios.length) return
-    loadEvidenceProfile(getSource(kase), mailCount)
-      .then(setProfile)
-      .catch(() => setProfile(null))
-  }, [kase, questionScenarios.length, mailCount])
-  const questions = useMemo(() => questionsForReport(questionScenarios, answers, profile), [questionScenarios, answers, profile])
-  const selection = useMemo(() => (settings ? selectForReport(findings, chains, reviews, settings) : { findings: [], chains: [] }), [findings, chains, reviews, settings])
-  const printedStories = useMemo(
-    () =>
-      settings
-        ? storiesForReport(storyResult, storyNotes, storyDecisions, findings, settings.minSeverity, settings.onlyReviewed, 20)
-        : { stories: [], left: 0, orphans: 0, dismissed: 0, decided: [], decisionsOrphaned: 0 },
-    [storyResult, storyNotes, storyDecisions, findings, settings],
-  )
-  // graph pictures for the report, drawn off-screen from the same models as the Chains page
-  const [graphs, setGraphs] = useState<Record<string, string>>({})
-  useEffect(() => {
-    if (!settings?.includeGraphs || !selection.chains.length) {
-      setGraphs({})
-      return
-    }
-    const out: Record<string, string> = {}
-    for (const c of selection.chains) {
-      const png = renderGraphPng({ mode: 'chain', chain: c })
-      if (png) out[c.id] = png
-    }
-    if (selection.chains.length > 1) {
-      const png = renderGraphPng({ mode: 'campaign', chains: selection.chains })
-      if (png) out['campaign'] = png
-    }
-    setGraphs(out)
-  }, [selection.chains, settings?.includeGraphs])
-  // what the report will print, read back against the rows it cites (after the summary settles)
-  useEffect(() => {
-    if (!kase?.id || !settings) return
-    let alive = true
-    setClaims(undefined)
-    const printed = buildIncidents(selection.findings, { chains: selection.chains, severityOf: (c) => chainSeverity(c, reviews[c.id]) }).filter((i) => i.kind !== 'chain')
-    const timer = setTimeout(() => {
-      loadReportClaims({
-        source: getSource(kase),
-        findings: selection.findings,
-        rules: ruleMap,
-        settings: settingsForRules(kase),
-        evidence,
-        chains: selection.chains,
-        narratives: Object.fromEntries(Object.entries(reviews).map(([id, r]) => [id, r.narrative])),
-        incidents: printed,
-        summary,
-        stories: printedStories.stories.filter((st) => st.note).map((st) => ({ key: st.key, title: st.story.title, note: st.note!, ids: storyRowIds(st.story) })),
-      })
-        .then((c) => alive && setClaims(c))
-        .catch(() => alive && setClaims(undefined))
-    }, 400)
-    return () => {
-      alive = false
-      clearTimeout(timer)
-    }
-  }, [kase, settings, selection, reviews, ruleMap, evidence, summary, printedStories])
+  const { questions, selection, printedStories, graphs, claims } = useReportContents({
+    kase,
+    settings,
+    findings,
+    chains,
+    reviews,
+    evidence,
+    summary,
+    ruleMap,
+    stories: { result: storyResult, notes: storyNotes, decisions: storyDecisions },
+    questions: { scenarios: questionScenarios, answers, profile },
+  })
   if (!kase || !settings) return null
-  const shown = selection.findings
-  // findings linked to a printed chain are printed with it, not as incidents
-  const grouped = buildIncidents(shown, { chains: selection.chains, severityOf: (c) => chainSeverity(c, reviews[c.id]) })
-  const incidents = grouped.filter((i) => i.kind !== 'chain')
-  const membersOf = new Map(grouped.filter((i) => i.kind === 'chain' && i.chain).map((i) => [i.chain!.id, i.findings.filter((f) => f.ruleId !== 'chain')]))
-  const bySev = shown.reduce((acc, f) => ((acc[effectiveSeverity(f)] = (acc[effectiveSeverity(f)] ?? 0) + 1), acc), {} as Record<string, number>)
-  const curated = notes.filter((n) => n.kind === 'timeline').sort((a, b) => a.ts - b.ts)
-  const tasks = notes.filter((n) => n.kind === 'task').sort((a, b) => Number(a.done ?? false) - Number(b.done ?? false) || a.createdAt - b.createdAt)
-  const analystNotes = notes.filter((n) => n.kind === 'note').sort((a, b) => a.createdAt - b.createdAt)
-  // same unit as the Review page: incidents without a decision plus chains without a verdict
-  const undecided = buildIncidents(findings, { chains }).filter((i) => (i.kind === 'chain' && i.chain ? !reviews[i.chain.id]?.verdict : i.status === 'new')).length
-  const hiddenConfirmed = unprintedConfirmed(findings, chains, reviews, selection)
-  // a confirmed story the report leaves out (below the floor, past the first twenty) is a confirmed item not printed too
-  const hiddenStories = printedStories.decided.filter((s) => s.verdict === 'confirmed' && !s.printed).length
-  const printedChecks = shown.map((f) => (f.id != null ? claims?.findings[f.id] : undefined)).filter((c) => !!c)
-  const claimSummary = claims && {
-    checked: printedChecks.length,
-    unsupported: printedChecks.filter((c) => c.status === 'unsupported').length,
-    contradicted: printedChecks.filter((c) => c.status === 'contradicted').length,
-    texts: claims.texts.length,
-    textsUnsupported: claims.texts.filter((t) => t.check.status === 'unsupported').length,
-  }
-  const unverified = [
-    ...shown.flatMap((f) => {
-      const c = f.id != null ? claims?.findings[f.id] : undefined
-      return c && c.status !== 'verified' ? [{ what: `${f.title} (${f.ruleId})`, status: c.status, reasons: c.reasons }] : []
-    }),
-    ...(claims?.texts ?? []).filter((t) => t.check.status === 'unsupported').map((t) => ({ what: t.what, status: t.check.status, reasons: t.check.reasons })),
-  ]
-  const checks = preflightChecks({ evidence, rules: rulesState, undecided, aiDecided: aiDecided(findings), unprintedConfirmed: hiddenConfirmed.length + hiddenStories, claims: claimSummary })
-  const status = issueStatus(checks, issue)
+  const { shown, incidents, membersOf, bySev, curated, tasks, analystNotes, undecided, hiddenConfirmed, unverified, checks, status, words, printedStatus } = reportFigures({
+    settings,
+    findings,
+    chains,
+    reviews,
+    selection,
+    printedStories,
+    claims,
+    notes,
+    evidence,
+    rulesState,
+    issue,
+  })
   /** The stories read again from the case as it is now; the page reloads what it prints once they are. */
   const rebuildStories = async () => {
     setRebuilding(true)
@@ -296,7 +154,7 @@ export function ReportView() {
     notes: analystNotes,
     undecided,
     unprintedConfirmed: hiddenConfirmed,
-    issue: { status: status.status, finalAt: status.finalAt, open: status.open, waived: status.waived },
+    issue: { status: printedStatus.status, finalAt: printedStatus.finalAt, open: printedStatus.open, waived: printedStatus.waived },
     rules: rulesState,
     iocsTotal: iocCounts.total,
     iocsChecked: iocCounts.checked,
@@ -316,262 +174,63 @@ export function ReportView() {
     storiesDismissed: printedStories.dismissed,
     storyDecisionsOrphaned: printedStories.decisionsOrphaned,
     questions,
+    scope,
+    ruleAuthors: ruleAuthors(ruleMap.values()),
   })
   const html = (generatedAt?: number) => buildReportHtml(reportData(generatedAt))
+  /** a change to the client part of the report settings, kept with the case and its bundle */
+  const patchClient = (patch: Partial<ClientReport>) => patchSettings({ client: { ...settings.client, ...patch } })
+  const patchSettings = (patch: Partial<ReportSettings>) => {
+    const next = { ...settings, ...patch }
+    setSettings(next)
+    void saveReportSettings(kase.id!, next)
+  }
   const fileBase = kase.name.replace(/[^a-z0-9_-]+/gi, '_')
-  // what a responder carries into their own tools: every finding but the false positives, and the analyst's timeline
-  const responderFindings = findings.filter((f) => f.status !== 'false_positive')
-  const exportTimeline = (format: 'jsonl' | 'csv') => {
-    const { records, untimed } = timelineRecords({ findings: responderFindings, notes: curated })
-    if (format === 'jsonl') downloadBlob(`${fileBase}-timeline.jsonl`, new Blob([toTimesketchJsonl(records)], { type: 'application/x-ndjson' }))
-    else downloadBlob(`${fileBase}-timeline.csv`, new Blob(['\ufeff' + toTimelineCsv(records)], { type: 'text/csv;charset=utf-8' }))
-    if (untimed) toast('ok', `${fmtNum(records.length)} line(s) exported; ${fmtNum(untimed)} item(s) without an event time left out`)
-  }
-  /** The report in its own tab: the browser's own print-to-PDF, or to keep it open next to the case. */
-  const openReport = () => {
-    const url = URL.createObjectURL(new Blob([html()], { type: 'text/html' }))
-    const w = window.open(url, '_blank')
-    if (w) w.opener = null
-    else toast('err', 'the browser blocked the new tab: allow pop-ups for this site, or use "download HTML"', 0)
-    setTimeout(() => URL.revokeObjectURL(url), 120_000)
-  }
-  // the report is built from case data: it prints from a frame that runs no script (so nothing in it can
-  // reach the case database) but keeps the app's origin, which the browser needs before it lets the page
-  // call print() on the frame; a sandbox without allow-same-origin makes that call a SecurityError
-  const printReport = () => {
-    const frame = document.createElement('iframe')
-    frame.setAttribute('sandbox', 'allow-same-origin allow-modals')
-    // laid out at full size (a zero-size frame prints blank in some browsers) but invisible and inert
-    frame.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;border:0;opacity:0;pointer-events:none;z-index:-1'
-    frame.srcdoc = html()
-    frame.onload = () => {
-      const win = frame.contentWindow
-      try {
-        win?.addEventListener('afterprint', () => frame.remove())
-        win?.focus()
-        win?.print()
-      } catch (e) {
-        frame.remove()
-        toast('err', `the browser refused to print from the page (${(e as Error).message}); the report opens in a new tab, print it from there`, 0)
-        openReport()
-        return
-      }
-      setTimeout(() => frame.remove(), 120_000)
-    }
-    document.body.appendChild(frame)
-  }
   return (
     <div className="view">
-      <div className="view-header">
-        <div className="desc">
-          <h1>Report</h1>
-          <span className="sub">
-            {printedStories.stories.length} stor{printedStories.stories.length === 1 ? 'y' : 'ies'} · {selection.chains.length} chain(s) · {incidents.length} incident(s) · {shown.length} finding(s)
-            from {settings.minSeverity} up · {iocs.length} flagged IOC(s) · {evidence.length} evidence file(s)
-            {undecided ? ` · ${fmtNum(undecided)} item(s) not yet reviewed` : ' · everything reviewed'}
-            {questions ? ` · ${fmtNum(questions.counts.open)} of ${fmtNum(questions.counts.open + questions.counts.answered + questions.counts.cannot)} question(s) open` : ''}
-          </span>
-        </div>
-        <span className="spacer" />
-        <button className="btn sm" onClick={() => setView('review')}>
-          <IconCheck /> review and choose contents
-        </button>
-        <button className="btn sm" onClick={generateSummary} disabled={busy}>
-          {busy ? <Spinner /> : <IconAi />} AI executive summary
-        </button>
-        <button className="btn sm primary" onClick={() => downloadBlob(`${fileBase}-report.html`, new Blob([html()], { type: 'text/html' }))}>
-          <IconDownload /> download HTML
-        </button>
-        <button
-          className="btn sm"
-          title="the same report as a Word document to edit before it goes out (the graphs stay in the HTML report)"
-          onClick={() => downloadBlob(`${fileBase}-report.docx`, new Blob([buildReportDocx(reportData()) as BlobPart], { type: DOCX_MIME }))}
-        >
-          <IconDownload /> Word
-        </button>
-        <button className="btn sm" onClick={openReport}>
-          open in a tab
-        </button>
-        <button className="btn sm" onClick={printReport}>
-          print / PDF
-        </button>
-      </div>
+      <ReportHeader
+        counts={{
+          stories: printedStories.stories.length,
+          chains: selection.chains.length,
+          incidents: incidents.length,
+          findings: shown.length,
+          iocs: iocs.length,
+          evidence: evidence.length,
+          undecided,
+        }}
+        minSeverity={settings.minSeverity}
+        questions={questions}
+        busy={busy}
+        onReview={() => setView('review')}
+        onSummary={generateSummary}
+        onHtml={() => downloadBlob(`${fileBase}-report.html`, new Blob([html()], { type: 'text/html' }))}
+        onWord={() => downloadBlob(`${fileBase}-report.docx`, new Blob([buildReportDocx(reportData()) as BlobPart], { type: DOCX_MIME }))}
+        onTab={() => openReport(html())}
+        onPrint={() => printReport(html())}
+      />
       <div className="view-body col" style={{ gap: 14 }}>
-        {undecided > 0 && (
-          <div className="bulkbar" style={{ background: 'var(--sev-medium-bg)', borderColor: 'rgba(217,130,43,0.35)', color: 'var(--sev-medium)', borderRadius: 'var(--radius)' }}>
-            <b>{fmtNum(undecided)} item(s) have no decision yet.</b>
-            <span>The report prints whatever passes the severity floor; the Review page lets you confirm, dismiss, rescore and annotate first.</span>
-            <span className="spacer" />
-            <button className="btn xs" onClick={() => setView('review')}>
-              go to Review
-            </button>
-          </div>
-        )}
-        {storiesStale.length > 0 && storyResult && (
-          <div className="bulkbar" role="status" style={{ background: 'var(--sev-medium-bg)', borderColor: 'rgba(217,130,43,0.35)', color: 'var(--sev-medium)', borderRadius: 'var(--radius)' }}>
-            <b>The stories are out of date.</b>
-            <span>{storiesStale.join('; ')}. The report says so until they are built again.</span>
-            <span className="spacer" />
-            <button className="btn xs" onClick={rebuildStories} disabled={rebuilding}>
-              {rebuilding ? <Spinner /> : null} rebuild stories
-            </button>
-          </div>
-        )}
-        <div className="panel">
-          <div className="panel-h">
-            preflight · the report is <b style={{ color: status.status === 'final' ? 'var(--ok)' : 'var(--warn)' }}>{status.status === 'final' ? 'final' : 'a draft'}</b>
-            <span className="spacer" />
-            {status.status === 'final' ? (
-              <button className="btn xs" onClick={() => updateIssue({ ...issue, finalAt: undefined })}>
-                back to draft
-              </button>
-            ) : (
-              <button
-                className="btn xs primary"
-                disabled={status.open.length > 0}
-                title={status.open.length ? 'every open check needs to pass or be waived with a reason' : 'print the report as final, with the waivers listed'}
-                onClick={() => updateIssue({ ...issue, finalAt: Date.now() })}
-              >
-                issue as final
-              </button>
-            )}
-          </div>
-          <div className="panel-b col" style={{ gap: 6 }}>
-            {checks.map((c) => (
-              <div key={c.id} className="row small" style={{ gap: 8, alignItems: 'flex-start' }}>
-                <Badge sev={c.ok ? 'ok' : issue.waivers[c.id]?.trim() ? 'medium' : 'high'}>{c.ok ? 'ok' : issue.waivers[c.id]?.trim() ? 'waived' : 'open'}</Badge>
-                <div className="col" style={{ gap: 2, flex: 1 }}>
-                  <span>
-                    {c.label} <span className="muted">· {c.detail}</span>
-                  </span>
-                  {!c.ok && (
-                    <input
-                      className="input small"
-                      placeholder="waive: the reason, printed in the report"
-                      defaultValue={issue.waivers[c.id] ?? ''}
-                      onBlur={(e) => updateIssue({ ...issue, waivers: { ...issue.waivers, [c.id]: e.target.value } })}
-                    />
-                  )}
-                </div>
-              </div>
-            ))}
-            {unverified.length > 0 && (
-              <div className="col small" style={{ gap: 2 }} data-testid="unverified-claims">
-                <span className="muted">Not borne out by the rows they cite ({fmtNum(unverified.length)}):</span>
-                {unverified.slice(0, 20).map((u, i) => (
-                  <span key={`${u.what}-${i}`}>
-                    <Badge sev={u.status === 'contradicted' ? 'high' : 'medium'}>{u.status}</Badge> {u.what}: <span className="muted">{u.reasons.join('; ')}</span>
-                  </span>
-                ))}
-                {unverified.length > 20 && <span className="muted">and {fmtNum(unverified.length - 20)} more</span>}
-              </div>
-            )}
-            <div className="hint">
-              A draft says so on its cover. Final needs every check to pass or to be waived with a reason; a new open check (evidence added, a rule run that failed) returns it to draft.
-            </div>
-          </div>
-        </div>
+        <ReportBars undecided={undecided} storiesStale={storyResult ? storiesStale : []} rebuilding={rebuilding} onReview={() => setView('review')} onRebuild={rebuildStories} />
+        <PreflightPanel status={status} checks={checks} issue={issue} onIssue={updateIssue} unverified={unverified} />
         <div className="grid-2">
-          <div className="panel">
-            <div className="panel-h">executive summary</div>
-            <div className="panel-b">
-              {summary ? (
-                <div className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(summary) }} />
-              ) : (
-                <div className="muted small">Click "AI executive summary" to have the local model draft it from the reviewed chains and incidents, or write your own below.</div>
-              )}
-              <textarea
-                className="textarea"
-                style={{ marginTop: 8, minHeight: 120 }}
-                value={summary}
-                onChange={(e) => {
-                  setSummary(e.target.value)
-                  setSummaryBy('analyst')
-                }}
-                onBlur={() => {
-                  setSummaryAt(Date.now())
-                  void getDb().kv.bulkPut([
-                    { key: `report-summary-${kase.id}`, value: summary },
-                    { key: `report-summary-by-${kase.id}`, value: summaryBy ?? 'analyst' },
-                    { key: `report-summary-at-${kase.id}`, value: Date.now() },
-                  ])
-                }}
-                placeholder="edit the summary…"
-              />
-            </div>
-          </div>
+          <SummaryPanel caseId={kase.id} summary={summary} setSummary={setSummary} summaryBy={summaryBy} setSummaryBy={setSummaryBy} setSummaryAt={setSummaryAt} />
           <div className="col">
-            <div className="panel">
-              <div className="panel-h">
-                contents <span className="muted">· set on the Review page</span>
-              </div>
-              <div className="panel-b row wrap" style={{ gap: 8 }}>
-                <Badge sev="accent">from {settings.minSeverity} up</Badge>
-                <Badge>{settings.includeChains ? `chains · steps: ${settings.chainDetail}` : 'no chains'}</Badge>
-                {ORDER.map((s) => (
-                  <Badge key={s} sev={s}>
-                    {s} {bySev[s] ?? 0}
-                  </Badge>
-                ))}
-                <Badge sev={settings.includeTimeline ? 'ok' : 'info'}>timeline {curated.length}</Badge>
-                <Badge sev={settings.includeTasks ? 'ok' : 'info'}>tasks {tasks.length}</Badge>
-                <Badge sev={settings.includeNotes ? 'ok' : 'info'}>notes {analystNotes.length}</Badge>
-              </div>
-            </div>
-            <div className="panel">
-              <div className="panel-h">responder exports</div>
-              <div className="panel-b col">
-                <div className="row wrap" style={{ gap: 8 }}>
-                  <button className="btn sm" onClick={() => exportTimeline('jsonl')}>
-                    <IconDownload /> timeline for Timesketch (.jsonl)
-                  </button>
-                  <button className="btn sm" onClick={() => exportTimeline('csv')}>
-                    <IconDownload /> timeline for Timeline Explorer (.csv)
-                  </button>
-                  <button
-                    className="btn sm"
-                    onClick={() => downloadBlob(`${fileBase}-attack-layer.json`, new Blob([JSON.stringify(navigatorLayer(kase, responderFindings), null, 2)], { type: 'application/json' }))}
-                  >
-                    <IconDownload /> ATT&amp;CK Navigator layer
-                  </button>
-                </div>
-                <div className="hint">
-                  Every finding except the false positives, whatever the report's floor, and the case timeline entries. Times are UTC. The layer colours each technique by the worst severity of its
-                  findings. The Events page exports its filtered rows as a timeline too.
-                </div>
-              </div>
-            </div>
-            <div className="panel">
-              <div className="panel-h">case bundle (move the case to another machine)</div>
-              <div className="panel-b col">
-                <div className="row">
-                  <button className="btn sm" onClick={() => exportCaseBundle(kase, setProgress).catch((e) => toast('err', e.message))}>
-                    <IconDownload /> export case bundle (.remn.ndjson)
-                  </button>
-                  <span className="small dim">{progress}</span>
-                </div>
-                <Dropzone
-                  compact
-                  multiple={false}
-                  onFiles={(f) =>
-                    importCaseBundle(f[0], setProgress)
-                      .then((id) =>
-                        toast(
-                          'ok',
-                          `case imported (#${id}) - switch to it from the case selector. External lookups are off in the imported case whatever the bundle had; switch them on there if it may use them.`,
-                          9000,
-                        ),
-                      )
-                      .catch((e) => toast('err', e.message, 0))
-                  }
-                >
-                  <div className="big">drop a bundle to import</div>
-                </Dropzone>
-                <div className="hint">The bundle contains every row of the case and a SHA-256 of its content, verified at import.</div>
-              </div>
-            </div>
+            <ContentsPanel settings={settings} bySev={bySev} timeline={curated.length} tasks={tasks.length} notes={analystNotes.length} />
+            <ResponderExports kase={kase} fileBase={fileBase} findings={findings} timeline={curated} />
+            <CaseBundlePanel kase={kase} />
           </div>
         </div>
+        <ClientPanel
+          key={kase.id}
+          client={settings.client}
+          onChange={patchClient}
+          language={settings.language}
+          branding={settings.branding}
+          onSettings={patchSettings}
+          spineDraft={spineStartingPoint(printedStories.stories, words)}
+          scope={scope}
+          period={evidencePeriod(evidence)}
+          impact={impactInventory(reportData(previewAt))}
+        />
         <div className="panel">
           <div className="panel-h">preview</div>
           <div className="panel-b">

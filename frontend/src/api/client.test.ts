@@ -52,6 +52,19 @@ describe('onAuthError', () => {
     expect(handler).toHaveBeenCalledTimes(1)
   })
 
+  it('says whether the server asks for a personal token or the shared one', async () => {
+    const handler = vi.fn()
+    onAuthError(handler)
+    for (const body of [
+      { error: 'a personal access token is required', code: 'auth', accounts: true },
+      { error: 'invalid access token', code: 'auth' },
+    ]) {
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(body), { status: 401, headers: { 'Content-Type': 'application/json' } }))
+      await expect(apiGet('/api/health')).rejects.toThrow(body.error)
+    }
+    expect(handler.mock.calls).toEqual([[true], [false]])
+  })
+
   it('does not fire on plain 401 without the auth code', async () => {
     const handler = vi.fn()
     onAuthError(handler)

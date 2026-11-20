@@ -1,15 +1,17 @@
 import { persistEngineFindings, type EngineFinding } from './engineFindings'
 import { autoRunAfterIngest } from './findingsState'
 import { apiPost, API_HEADERS } from '../api/client'
-import { getDb, requestPersistentStorage, type Case, type Evidence } from '../db/schema'
+import { getDb, requestPersistentStorage, type Case, type DateSetting, type Evidence } from '../db/schema'
 import { log, toast, useStore } from '../state/store'
 import type { IngestRequest } from '../workers/ingest.worker'
 import { chunkedUpload, type UploadResult } from './upload'
 import { waitForJob } from './jobs'
 import { getSource } from './source'
+import { datesRead, describeDates } from './dateSetting'
 import { duplicateEvidence } from './duplicateEvidence'
 import { whileImporting } from './interruptedImports'
 import { deployment } from './deployment'
+import { viewerReason } from './access'
 
 let jobSeq = 1
 
@@ -107,6 +109,15 @@ export function requestIngest(files: File[], kase: Case, kindOverride?: 'evtx' |
   const health = useStore.getState().health
   // browser-only mode caps chunked uploads at the single-request limit; a full server stages up to maxChunkedGb
   const limitMb = health?.mode === 'browser-only' ? health.limits?.maxUploadMb : health?.limits?.maxChunkedGb ? health.limits.maxChunkedGb * 1024 : undefined
+  // on a server with accounts a viewer adds no evidence: the server neither parses nor stores it.
+  // Only an .evtx file this browser parses itself, into a case kept here, goes on.
+  const viewer = viewerReason(health)
+  if (viewer) {
+    const kept = kase.storage === 'server' ? [] : files.filter((f) => parsedInBrowser(f, kase, kindOverride ?? detectKind(f)))
+    if (kept.length < files.length) toast('warn', `${files.length - kept.length} file(s) not added. ${viewer}`, 0)
+    files = kept
+    if (!files.length) return
+  }
   if (kase.storage !== 'server' && limitMb) {
     // a file parsed here is never uploaded, so the server's limit does not apply to it
     const over = files.filter((f) => f.size > limitMb * 1024 * 1024 && !parsedInBrowser(f, kase, kindOverride ?? detectKind(f)))
@@ -191,9 +202,37 @@ export async function ingestFiles(files: File[], kase: Case, kind: (file: File) 
   }
 }
 
-export async function ingestFile(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package', ctrl?: AbortController): Promise<number> {
-  if (kase.storage === 'server' && kase.serverKey) return ingestToServer(file, kase, kind, ctrl)
-  return ingestToBrowser(file, kase, kind, ctrl)
+export async function ingestFile(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package', ctrl?: AbortController, dates?: DateSetting): Promise<number> {
+  if (kase.storage === 'server' && kase.serverKey) return ingestToServer(file, kase, kind, ctrl, dates)
+  return ingestToBrowser(file, kase, kind, ctrl, dates)
+}
+
+/** How an evidence file's dates were read, said once it is read; nothing when there is nothing to say. */
+function logDates(name: string, stats: unknown, dates: DateSetting | undefined): void {
+  const st = stats && typeof stats === 'object' ? (stats as Record<string, unknown>) : undefined
+  const read = datesRead({ stats: st, dates })
+  if (!read) return
+  // a guess, a zone assumed or a date the set order cannot read: the analyst can read it again otherwise
+  const doubt = ['dateOrderGuessed', 'zoneAssumed', 'dateOrderContradicted'].some((k) => Number(st?.[k] ?? 0) > 0)
+  const counts = read.counts.length ? `: ${read.counts.join('; ')}` : ''
+  log(doubt ? 'warn' : 'info', `[${name}] ${read.setting}${counts}${doubt ? '. The evidence detail sets the date order and zone to read it again.' : ''}`)
+}
+
+/**
+ * Read an evidence file again with another date order or time zone. The file dropped must be the
+ * one the evidence was read from (its SHA-256 recorded at import); the evidence is removed, as
+ * removing it would, and the file imported again with the setting. The analyst's note on the
+ * evidence is kept. Returns the new evidence's id.
+ */
+export async function readAgain(evidence: Evidence, file: File, kase: Case, dates: DateSetting | undefined, hash: (file: File) => Promise<string> = hashOnly): Promise<number> {
+  const sha256 = await hash(file)
+  if (evidence.sha256Client && sha256 !== evidence.sha256Client) throw new Error(`${file.name} is not the file of this evidence: its SHA-256 is ${sha256}, the evidence's ${evidence.sha256Client}`)
+  await getSource(kase).deleteEvidence(evidence.id!)
+  log('info', `[${evidence.name}] evidence #${evidence.id} removed to be read again: ${describeDates(dates)}`)
+  refreshCounts(kase)
+  const id = await ingestFile(file, kase, evidence.kind, undefined, dates)
+  if (evidence.note) await getDb().evidence.update(id, { note: evidence.note })
+  return id
 }
 
 /**
@@ -229,7 +268,7 @@ async function dropCancelledImport(file: File, kase: Case, evidenceId: number, j
   }
 }
 
-async function createEvidence(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package', importLock?: string): Promise<number> {
+async function createEvidence(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package', importLock?: string, dates?: DateSetting): Promise<number> {
   const evidence: Evidence = {
     caseId: kase.id!,
     name: file.webkitRelativePath || file.name,
@@ -242,6 +281,7 @@ async function createEvidence(file: File, kase: Case, kind: 'evtx' | 'mail' | 'p
     count: 0,
     analyst: kase.analyst,
     importLock,
+    ...(dates ? { dates } : {}),
   }
   return getDb().evidence.add(evidence)
 }
@@ -249,9 +289,9 @@ async function createEvidence(file: File, kase: Case, kind: 'evtx' | 'mail' | 'p
 // ---------------------------------------------------------------------------
 // server store: chunked upload + ingestion job
 // ---------------------------------------------------------------------------
-export async function ingestToServer(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package', ctrl = new AbortController()): Promise<number> {
+export async function ingestToServer(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package', ctrl = new AbortController(), dates?: DateSetting): Promise<number> {
   const db = getDb()
-  const evidenceId = await createEvidence(file, kase, kind)
+  const evidenceId = await createEvidence(file, kase, kind, undefined, dates)
   const jobId = jobSeq++
   imports.set(jobId, ctrl)
   const s = useStore.getState()
@@ -289,6 +329,7 @@ export async function ingestToServer(file: File, kase: Case, kind: 'evtx' | 'mai
         includeRaw: kase.settings.includeRaw !== false,
         keepBodies: kase.settings.keepBodies !== false,
         fileSystem: kase.settings.readFileSystem === true,
+        ...(dates ? { dates } : {}),
         settings: {
           internalDomains: kase.settings.internalDomains,
           brands: kase.settings.brands,
@@ -318,6 +359,7 @@ export async function ingestToServer(file: File, kase: Case, kind: 'evtx' | 'mai
     }
     useStore.getState().upsertJob({ id: jobId, phase: 'done', rows: r.count ?? 0, progress: 1 })
     log('ok', `[${file.name}] ${r.count} rows stored on the server in ${r.seconds ?? '?'} s (format ${r.format})`)
+    logDates(file.name, r.stats, dates)
     toast('ok', `${file.name}: ${(r.count ?? 0).toLocaleString('en-US')} rows ingested (server store)`)
   } catch (e) {
     if (ctrl.signal.aborted) {
@@ -342,14 +384,14 @@ export async function ingestToServer(file: File, kase: Case, kind: 'evtx' | 'mai
 // ---------------------------------------------------------------------------
 // browser store: worker (hash + NDJSON stream + IndexedDB)
 // ---------------------------------------------------------------------------
-export function ingestToBrowser(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package', ctrl = new AbortController()): Promise<number> {
+export function ingestToBrowser(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package', ctrl = new AbortController(), dates?: DateSetting): Promise<number> {
   // the lock is taken before the evidence exists, so no other tab ever sees it unlocked
-  return whileImporting((lock) => importToBrowser(file, kase, kind, lock, ctrl))
+  return whileImporting((lock) => importToBrowser(file, kase, kind, lock, ctrl, dates))
 }
 
-async function importToBrowser(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package', lock: string | undefined, ctrl: AbortController): Promise<number> {
+async function importToBrowser(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package', lock: string | undefined, ctrl: AbortController, dates?: DateSetting): Promise<number> {
   const db = getDb()
-  const evidenceId = await createEvidence(file, kase, kind, lock)
+  const evidenceId = await createEvidence(file, kase, kind, lock, dates)
   const jobId = jobSeq++
   imports.set(jobId, ctrl)
   const store = useStore.getState()
@@ -392,6 +434,7 @@ async function importToBrowser(file: File, kase: Case, kind: 'evtx' | 'mail' | '
     sourceName: file.webkitRelativePath || file.name,
     includeRaw: kase.settings.includeRaw !== false,
     readFileSystem: kase.settings.readFileSystem === true,
+    dates,
     settings: {
       internalDomains: kase.settings.internalDomains,
       brands: kase.settings.brands,
@@ -472,6 +515,7 @@ async function importToBrowser(file: File, kase: Case, kind: 'evtx' | 'mail' | '
             m.error ? 'warn' : 'ok',
             `[${file.name}] ${m.count} rows stored${dup ? `, ${dup} repeated record(s) not added again` : ''} - integrity ${integ}${m.error ? ' - server error: ' + m.error : ''}`,
           )
+          logDates(file.name, m.stats, dates)
           if (integ === 'mismatch') toast('err', local ? `${file.name}: the file changed while it was read!` : `${file.name}: server hash differs from the browser hash!`, 0)
           else toast(m.error ? 'warn' : 'ok', `${file.name}: ${m.count} rows ingested`)
           worker.terminate()

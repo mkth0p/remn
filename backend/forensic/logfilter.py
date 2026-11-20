@@ -18,7 +18,8 @@ _EVIDENCE_LOGGERS = ("services.", "api.", "django.request", "waitress")
 
 def _describe(exc: BaseException) -> str:
     tb = traceback.extract_tb(exc.__traceback__)[-1:] if exc.__traceback__ else []
-    where = f" at {tb[0].filename.rsplit('/', 1)[-1]}:{tb[0].lineno}" if tb else ""
+    # the file name only, from a Windows path as from any other
+    where = f" at {tb[0].filename.replace(chr(92), '/').rsplit('/', 1)[-1]}:{tb[0].lineno}" if tb else ""
     return f"{type(exc).__name__}{where}"
 
 

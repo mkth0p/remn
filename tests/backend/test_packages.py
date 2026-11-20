@@ -363,8 +363,8 @@ def test_server_package_ingestion_job_routes_both_record_types(tmp_path, registr
     monkeypatch.setattr("api.views.store.discard_upload", discarded.append)
     results = []
 
-    def submit(kind, case_key, fn, label):
-        job = Job(kind, case_key, label)
+    def submit(kind, case_key, fn, label, account=None):
+        job = Job(kind, case_key, label, account)
         results.append(fn(job))
         return job
 
@@ -382,6 +382,36 @@ def test_server_package_ingestion_job_routes_both_record_types(tmp_path, registr
     assert discarded == ["synthetic-upload"]
     evidence = Q.summary(registry.get(key))["evidence"][0]
     assert evidence["kind"] == "package" and len(evidence["stats"]["files"]) == 8
+
+
+def test_a_server_package_job_sets_its_staging_room_aside_until_it_ends(tmp_path, registry, monkeypatch):
+    from api.jobs import Job
+    from services.ingest import isolation, staging
+
+    blob = package_bytes()
+    path = tmp_path / "input.zip"
+    path.write_bytes(blob)
+    monkeypatch.setattr("api.views.store.registry", registry)
+    monkeypatch.setattr("api.views.store.get_upload", lambda _: (path, {"name": path.name, "size": len(blob), "sha256": hashlib.sha256(blob).hexdigest()}))
+    monkeypatch.setattr("api.views.store.discard_upload", lambda _: None)
+    monkeypatch.setattr("api.views.store.manager.submit", lambda kind, case_key, fn, label, **_: fn(Job(kind, case_key, label)) and Job(kind, case_key, label))
+    seen = []
+    start = isolation.start
+
+    def recorded(kind, **kwargs):
+        seen.append((kwargs["options"]["budget"]["heldCap"], staging.claimed_bytes()))
+        return start(kind, **kwargs)
+
+    monkeypatch.setattr(isolation, "start", recorded)
+    response = Client().post(
+        f"/api/store/{uuid.uuid4()}/ingest",
+        json.dumps({"uploadId": "synthetic-upload", "kind": "package", "evidence": {"id": 7}}),
+        content_type="application/json",
+        **HDR,
+    )
+    assert response.status_code == 200, response.content
+    assert len(seen) == 1 and seen[0][0] > 0 and seen[0][1] == seen[0][0]
+    assert staging.claimed_bytes() == 0
 
 
 def _member(name, count, artifact_type, status="parsed", **extra):

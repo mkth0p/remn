@@ -28,7 +28,8 @@ that is the disk that holds Docker's volumes `remn-data` and `remn-tmp` (under
 `/var/lib/docker` by default). This is the minimum for evidence on a server, not an option:
 without it, whoever has the disk, a copy of a backup or an image of the virtual machine reads
 every case. The volume protects a disk that is taken or discarded, not a running server:
-whoever reaches the API with the token, or logs in to the host, reads the cases as before.
+whoever reaches the API with a token that opens the cases, or logs in to the host, reads them
+as before.
 The analyst's own machine, where the browser store lives, is covered the same way by its
 system's disk encryption.
 
@@ -55,7 +56,7 @@ pack importer download from their sources on request, never during an investigat
 ## Hardening in place
 
 - The server binds to `127.0.0.1` and keeps no database. It does not start on an address
-  other machines can reach without an access token, unless `FORENSIC_ALLOW_NO_TOKEN=1`
+  other machines can reach without an access token or accounts, unless `FORENSIC_ALLOW_NO_TOKEN=1`
   says that this is intended; a container is judged by the address its port is published
   on (`FORENSIC_PUBLISHED_ON`, which `docker-compose.yml` sets). Every `/api` call needs the
   `X-Forensic-Client` header (cookie-less CSRF protection); cross-origin preflights are
@@ -68,8 +69,8 @@ pack importer download from their sources on request, never during an investigat
   the documented commands send before they hold a token (`remn`, `1`) are refused but not
   counted. Behind a proxy without `FORENSIC_TRUST_PROXY=1` every client shares the proxy's
   address and so one allowance.
-  The remote mode is one shared token, with no per-user accounts or audit log; keep such a
-  deployment private.
+  The shared token is the single-user mode: everyone who holds it is the same user, opens every
+  case and leaves no record. A team on one server uses accounts instead (next section).
 - Parsed content is treated as hostile: React escaping, HTML previews in a sandboxed
   iframe with DOMPurify, images blocked, links disabled and defanged. Attachments are
   analysed statically, never opened or executed.
@@ -81,10 +82,14 @@ pack importer download from their sources on request, never during an investigat
   repeat, and fail on a pattern that runs past its budget at 100,000 characters, naming it
   and its file. A pattern that reads no evidence, or whose caller limits the text it
   searches, is listed in the test with the reason. The store runs a rule's `re` pattern
-  with RE2, which does not backtrack. The browser engine does: seven bundled rules and some
-  converted community rules keep a pattern that a crafted value of that length slows down,
-  in the rules worker rather than the page, because no rewrite that RE2 also accepts keeps
-  what they match.
+  with RE2, which does not backtrack. The browser engine does: some converted community
+  rules keep a pattern that a crafted value slows down, in the rules worker rather than the
+  page. Both engines give a rule's regular expression the first 65,536 characters of a
+  value and count the rows read in part (docs/rules.md), which holds such a pattern to
+  seconds; three converted patterns (two SigmaHQ admin-share command lines and a Sublime
+  sender name) take a time that grows with the cube of the value and stay slow within that
+  bound. A bundled rule bounds the text between two tokens instead (`[^\n]{0,1000}`), which
+  RE2 also reads.
 - The browser application carries a Content Security Policy (no inline script, scripts
   and workers from the app origin only, WebAssembly allowed for hashing, frames only for
   the sandboxed mail and report documents, no object or base tags) as a `<meta>` tag in
@@ -110,7 +115,8 @@ pack importer download from their sources on request, never during an investigat
   Every DuckDB connection also runs with external access disabled and the configuration
   locked, so a prompt-injected query cannot read or write files on the server or load
   extensions. The two settings are read back when a case store opens, and a store on
-  which they did not take effect is not opened.
+  which they did not take effect is not opened: the case answers 503 (`storeLockdown`)
+  with a message that says so, and the server log has what the engine applied.
 - Identifiers that reach the filesystem are validated (case keys and upload ids by
   pattern, pack ids without separators, static files resolved inside the build
   directory); rule archives are capped per member and in total; CSV exports neutralise
@@ -125,6 +131,83 @@ pack importer download from their sources on request, never during an investigat
 - The Docker image is built from base images pinned by digest, takes Debian's security
   updates at build time, runs as a non-root user without a package manager, and is
   scanned by Trivy in continuous integration.
+
+## Accounts, roles and the audit log
+
+A server that a small team shares runs with accounts. The accounts and the cases each may open
+are in one file, `accounts.json` in the data directory (`FORENSIC_DATA_DIR`), which
+`backend/manage.py accounts` writes; [Setup](setup.md#accounts-for-a-team) has the commands. While
+that file holds no account the server works as without it: no token on a machine of one's own, or
+the one shared `FORENSIC_AUTH_TOKEN`. Once it holds one:
+
+- **Every request carries a personal token**, in the same `X-Forensic-Client` header, and the
+  shared token is no longer accepted. A token is 32 random bytes with a short public id
+  (`remn_<id>_<secret>`), shown once when it is made and kept only as a salted SHA-256 digest; the
+  file is replaced whole on every change and is readable by the server's account only (0600; on
+  Windows it has the permissions of its folder). A token is revoked, or rotated (every token of the
+  account revoked and a new one made); an account is disabled, which refuses its tokens until it
+  is enabled again. Changes take effect at the next request, without a restart. Wrong tokens count
+  against the same per-address allowance as wrong shared tokens. A file that exists and cannot be
+  read refuses every request rather than opening the server.
+- **A role per account.**
+
+  | Role | May |
+  |---|---|
+  | admin | everything: every case, its membership and owner, the stores no case record covers, the audit log |
+  | analyst | create cases, add and remove evidence, run lookups and enrichment, on the cases it owns or is a member of; change the members of the cases it owns |
+  | viewer | read the cases it is a member of (search, rule runs, stories, the AI analyst, export) and change nothing on the server; cancel a job it started |
+
+- **A case records its owner and members.** The analyst or admin whose request first writes to a
+  new case key becomes its owner. The owner or an admin changes the members, by account name;
+  only an admin gives a case another owner, and only the owner or an admin deletes it. The case
+  key no longer opens a store on its own: a request for a case its account may not open gets the
+  same 404 as a key nobody uses, and a member whose role does not allow a change gets a 403 that
+  says why. The case listing (`GET /api/store`) and the job routes show each account only the
+  cases it may read. A store written before accounts were turned on has no record: only an admin
+  opens it until an owner is given (`manage.py accounts case <key> --owner <name>`).
+- **The page follows the server.** When the server asks for a personal token the page says so;
+  once signed in, the sidebar shows the account and its role, with **sign out**. A viewer's
+  controls that would change something (adding or removing evidence, lookups, enrichment,
+  emptying or deleting a server case, changing its members) are disabled, with the reason in
+  their tooltip. Settings shows a server case's owner and members under **case access**, where
+  its owner changes them. The server refuses these requests whatever the page does.
+- **Every route declares what it needs** (`backend/forensic/access.py`), and with accounts on a
+  route that declares nothing is refused. `tests/backend/test_route_permissions.py` enumerates
+  the URL patterns and fails on a route without a declaration.
+
+**The audit log.** With accounts on, the server appends one line to `audit.log` in the data
+directory for every request that changes something on the server, brings evidence in (uploads,
+parses, imports), takes it out (exports) or sends it to a model or a reputation provider, for
+every failed authentication, and for every request the access check refuses; reads are not
+recorded. Each entry holds the time (UTC), the account and its role, the client address, the
+method, the route and path, the case, the HTTP status and the outcome; for a failed
+authentication, the account the token names, when it names one. The management command records
+the changes it makes to accounts and cases the same way. The status is the one the request was
+answered with: a streamed export that fails part-way is recorded as begun.
+
+Each entry carries an HMAC-SHA-256 of itself and of the entry before it, under the audit key:
+`FORENSIC_AUDIT_KEY`, or, when that is empty, a random key written at first use to `audit.key`
+beside the log (0600). An admin checks the chain with `manage.py audit verify` or `GET
+/api/audit/verify`, and reads it with `manage.py audit show` or `GET /api/audit`. Verification
+finds an entry that was changed, removed, inserted or moved, and an entry written without the key;
+nobody without the key can write one that passes. Entries cut off the end leave a chain that
+still holds: `verify` prints the newest entry's code, and given an earlier one with `--head`
+(`?head=` on the route) it fails when that entry is no longer in the log. Note the code somewhere
+the server cannot write; the server also checks the entry it wrote last while it runs.
+
+What the audit log does not protect against: whoever holds the key, which includes whoever runs
+the server or can read its data directory or environment, can rewrite the whole log so that it
+passes. It records, it does not prevent: a request is answered before its entry is written, and
+an entry that cannot be written (a full disk) is reported in the server log, not undone. Setting
+`FORENSIC_AUDIT_KEY` keeps the key out of the data directory, so a copy of that directory, a
+backup of it or a parse process (which starts without the server's environment) cannot rewrite
+the log; it does not keep it from the server's administrator.
+
+Still out of scope: single sign-on (OIDC, SAML) and multi-factor authentication, passwords
+and sessions (a token is the only credential), encryption at rest (above), and shared case state:
+findings, notes, decisions and the AI sessions still live in each analyst's browser, so a member
+who opens a case sees its evidence, not another member's findings or notes. A viewer can still mark
+findings in its own browser; nothing it does there reaches the server.
 
 ## Browser-only mode and request budgets
 
@@ -269,7 +352,8 @@ The log is the one thing on a browser-only server that outlives a parse. It hold
 lines: requests refused, sweeps, the engine's state. A failure in the parsing code, in a request
 or in the web server is logged by exception type and place (`UnicodeDecodeError at common.py:104`),
 never with the exception's text, which is often a piece of the input or a path on the server. This
-holds in every mode; `FORENSIC_DEBUG=1` keeps the text and the traceback for a developer on their
+holds in every mode, and for an error nothing caught in the parse process, which writes to the
+server's own stderr; `FORENSIC_DEBUG=1` keeps the text and the traceback for a developer on their
 own machine, and has no such effect in browser-only mode. In browser-only mode the log also never
 names a file, member or attachment. `docker-compose.public.yml` rotates the log (three files of
 10 MB) rather than keeping it for the life of the container.
@@ -278,11 +362,14 @@ A client is told no more than the log holds. A request, a parse or a job that fa
 answers with what failed, the exception's type and a reference (`the store query failed on the
 server (OSError); the server log has the cause under reference 3f9a01c2`), and the log line of
 that failure carries the same reference, so the operator can find the cause for the analyst who
-reports it. Two kinds of text are still passed on as they are: a statement or filter the database
+reports it. Three kinds of text are still passed on as they are: a statement or filter the database
 cannot run gets DuckDB's diagnostic as a 400, because the analyst, and the model's `sql` tool,
-correct the query from it; and the per-file entries of a package or mailbox ingest (a member that
+correct the query from it; the per-file entries of a package or mailbox ingest (a member that
 could not be read, an unparseable message) keep the parser's message for that file, which can
-quote the file.
+quote the file; and a message the code wrote for the analyst, which names no path and quotes
+nothing from the evidence, is told as it is wherever it stops a parse or a job (a table given to
+the event log import that is none of the Microsoft 365 or Entra exports REMN reads is answered
+`not a recognised Microsoft 365 or Entra export`, not with a reference).
 
 This is what lets a public instance take real evidence: the exposure of a file is bounded to one
 parse, and nothing of it is kept. Before the first upload to a parser on another machine, the app
@@ -373,9 +460,10 @@ have been taken over is not a boundary, so where the system offers none, this pa
 instead.
 
 What a parse process still reaches is what its account can. As the server's own account, that
-is the staging area with any other upload in it, the case stores, and a `.env` file if the
-configuration is kept in one: the access token is then in that file even though it is not in the
-environment. Running the server as root with `FORENSIC_PARSE_UID` set to an unprivileged account
+is the staging area with any other upload in it, the case stores, the accounts file (digests of
+the tokens, not the tokens), the audit log and its key when `FORENSIC_AUDIT_KEY` is not set, and a
+`.env` file if the configuration is kept in one: the access token is then in that file even though
+it is not in the environment. Running the server as root with `FORENSIC_PARSE_UID` set to an unprivileged account
 (a name or a number) closes that on Linux and macOS: the parse runs as that account, in a folder
 it owns (0700), on evidence the server hands it by a link, and the staging area, the case stores
 and the configuration stay the server's. The interpreter, the virtual environment and the code
@@ -390,7 +478,8 @@ A parse process that has been taken over can still fill the disk under the stagi
 takes something this server does not set up: a container (the public compose), cgroups or a job
 object.
 
-Starting the parse process adds about 0.2 s to every file. On an archive of 90,000 synthetic
+Starting the parse process adds about 0.1 s to every file, about 0.2 s for a mailbox or a
+package, whose parsers take longer to load. On an archive of 90,000 synthetic
 events the browser-store stream was 7% slower and the server-store ingest 25% shorter, because
 the parse and the writes to the store then run side by side on two cores.
 
@@ -409,8 +498,9 @@ that default.
 
 For the full mode, one change came with this: listing every server store (`GET
 /api/store`) is an operator action and is only answered when an access token is
-configured. A case reaches its store by the key it holds, and the keys are random, so
-without the listing a store cannot be found by a client that was never given it. The
+configured; with accounts, each account is listed the cases it may read. A case reaches its
+store by the key it holds, and the keys are random, so without the listing a store cannot be
+found by a client that was never given it; with accounts, the key is not enough either. The
 background jobs follow the same rule: they are listed per case (`GET /api/jobs?case=<key>`),
 a job is read, followed and cancelled only with its case's key, and no answer about a job
 carries the key. Reading a store (an export included) never creates one: a key nobody wrote
@@ -437,7 +527,10 @@ change to the case:
   the check to read whole. The triage pass marks every proposal of a batch in which any item
   does the same (`frontend/src/ai/evidence.ts`, `evidence.test.ts`). The check is a handful
   of English patterns and finds about one in four of an invented set of payloads; what it
-  misses goes through "accept all" unmarked ([AI analyst](ai.md#evidence-that-addresses-the-model)).
+  misses goes through "accept all" unmarked ([AI analyst](ai.md#evidence-that-addresses-the-model)),
+  except a decision that would lower a severity, leave an item out of the report or mark it
+  a false positive, which always waits for the analyst (`frontend/src/ai/inbox.ts`
+  `heldByAction`).
 - Every prompt on those paths says the case text is evidence, never an instruction, and
   that a record asking to be ignored or marked benign is evidence of intent to be named
   in the reason (`backend/services/ai/prompts.py`, `claude_code.py`, the triage

@@ -129,11 +129,70 @@ const RULE_REWRITES: [string, string, string, string, string, string[]][] = [
     '\\',
     ['-', 'a', 'svc', '1', '23', '\\', '-1-stdin', '-12-stdout', '-stderr', '--3-stdin', 'x'],
   ],
+  [
+    'mail-bank-detail-change',
+    'mail/content-attachments.yaml',
+    'any_of/2/subject|re',
+    String.raw`(?i)(nouveau|new|chang|update|mise à jour).*(rib|iban|bank|banc|coordonn)`,
+    '',
+    ['new ', 'Update', 'mise à jour', 'chang', ' ', 'rib', 'IBAN', 'bank', 'banc', 'coordonn', 'x', '\n'],
+  ],
+  [
+    'win-lolbin-suspicious-commandline',
+    'windows/evasion-execution.yaml',
+    'any_of_2/15/commandLine|re',
+    String.raw`(?i)/(i|package|a|x|j[mu]?)\s*"?[^"]*\.(png|jpe?g|gif|txt|dat|tmp|bin|dll|exe)"?(\s|$)`,
+    'msiexec ',
+    ['/i', '/package', '/x', '/jm', ' ', '\t', '"', 'a', 'C:\\x', '.dll', '.exe', '.png', '.msi', 'x', '/q'],
+  ],
+  [
+    'win-msiexec-quiet-install',
+    'windows/evasion-execution.yaml',
+    'commandLine|not_re',
+    String.raw`(?i)/(i|package|a|x|j[mu]?)\s*"?[^"]*\.(png|jpe?g|gif|txt|dat|tmp|bin|dll|exe)"?(\s|$)`,
+    'msiexec ',
+    ['/i', '/a', '/ju', ' ', '"', 'b', 'D:\\y', '.txt', '.tmp', '.msi', 'y', '/quiet', '\n'],
+  ],
+  [
+    'win-packet-capture-tool',
+    'windows/technique-gaps.yaml',
+    'any_of/3/commandLine|re',
+    String.raw`\bnetsh(\.exe)?\s+trace\s+start\b[^\n]*capture=yes`,
+    'netsh trace start',
+    [' ', 'capture=yes', 'capture=no', 'netsh trace start', 'netsh.exe trace start ', '\n', 'x', 'tracefile=c:\\t.etl'],
+  ],
+  [
+    'win-ps-printer-port-to-file',
+    'windows/powershell-commands.yaml',
+    'commandLine|re',
+    String.raw`add-printerport\s.*-name\s+'?(\.\\|[a-z]:\\|\\\\)`,
+    'Add-PrinterPort ',
+    ['-Name ', "'", 'C:\\', '.\\', '\\\\', ' ', 'x', '\n', 'Add-PrinterPort ', '-name'],
+  ],
+  [
+    'win-fsutil-symlink-evaluation',
+    'windows/technique-gaps.yaml',
+    'commandLine|re',
+    String.raw`fsutil(\.exe)?\s+behavior\s+set\s+symlinkevaluation\s+[^\n]*r2[lr]:1`,
+    'fsutil behavior set symlinkevaluation',
+    [' ', '\t', '\n', 'R2L:1', 'r2r:1', 'R2R:0', 'L2L:1', 'x', 'fsutil behavior set symlinkevaluation '],
+  ],
+  [
+    'win-remote-computer-management',
+    'windows/technique-gaps.yaml',
+    'commandLine|re',
+    String.raw`(compmgmt|services|eventvwr|lusrmgr|taskschd|gpedit|fsmgmt)\.msc[^\n]*/computer[:=]`,
+    'mmc ',
+    ['compmgmt.msc', 'services.msc', 'eventvwr.msc', ' ', '/computer:', '/computer=', '/computer', '\n', 'x', 'srv01'],
+  ],
 ]
 
-function rulePattern(file: string, rule: string, field: string): string {
-  const docs = yaml.loadAll(readFileSync(join(RULES, file), 'utf-8')) as { id?: string; where?: Record<string, string> }[]
-  return docs.find((d) => d?.id === rule)?.where?.[field] ?? ''
+/** The pattern at a path of a rule's where: a field, or the keys and list indexes before it ("any_of/2/subject|re"). */
+function rulePattern(file: string, rule: string, path: string): string {
+  const docs = yaml.loadAll(readFileSync(join(RULES, file), 'utf-8')) as { id?: string; where?: unknown }[]
+  let at: unknown = docs.find((d) => d?.id === rule)?.where
+  for (const step of path.split('/')) at = at && typeof at === 'object' ? (at as Record<string, unknown>)[step] : undefined
+  return typeof at === 'string' ? at : ''
 }
 
 describe("the rewritten patterns of REMN's own rule packs", () => {
