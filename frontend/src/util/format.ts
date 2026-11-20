@@ -206,15 +206,26 @@ export function renderMarkdown(md: string): string {
   return out.join('\n')
 }
 
+/**
+ * JSON as HTML with its keys, strings, numbers, booleans and nulls in spans. The tokens are found in
+ * the JSON itself and each piece is escaped on its own: matched after escaping, a quote is already
+ * &quot; and no string or key is ever found, while the digits of an entity such as &#39; are.
+ */
 export function highlightJson(value: unknown): string {
   const json = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
-  return escapeHtml(json).replace(/("(?:\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g, (m) => {
+  const token = /"(?:\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(?:true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?/g
+  let out = ''
+  let last = 0
+  for (const m of json.matchAll(token)) {
+    const t = m[0]
     let cls = 'n'
-    if (m.startsWith('"')) cls = m.endsWith(':') ? 'k' : 's'
-    else if (/true|false/.test(m)) cls = 'b'
-    else if (m === 'null') cls = 'z'
-    return `<span class="${cls}">${m}</span>`
-  })
+    if (t.startsWith('"')) cls = m[1] ? 'k' : 's'
+    else if (t === 'true' || t === 'false') cls = 'b'
+    else if (t === 'null') cls = 'z'
+    out += `${escapeHtml(json.slice(last, m.index))}<span class="${cls}">${escapeHtml(t)}</span>`
+    last = m.index + t.length
+  }
+  return out + escapeHtml(json.slice(last))
 }
 
 export function shortHash(h: string | null | undefined, n = 12): string {
