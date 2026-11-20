@@ -21,7 +21,7 @@ import zipfile
 from collections.abc import Callable, Iterator
 from typing import Any
 
-from services.common import sha256_file
+from services.common import AnalystMessage, sha256_file
 from services.ingest.staging import member_ceiling
 from services.parsers import evtx_parser, m365
 from services.parsers.mail import mbox as mbox_mod
@@ -382,7 +382,7 @@ class EvtxSource:
             yield from self._iter_m365(self.path, self.data, self.format, self.name)
             return
         if self.format == UNRECOGNISED:
-            raise ValueError(m365.UNRECOGNISED)
+            raise AnalystMessage(m365.UNRECOGNISED)
         for member in iter_archive(self.path, self.data, self.format, self.files, self.max_member, self.deadline):
             low = member.name.lower()
             if low.endswith(".evtx"):
@@ -640,7 +640,7 @@ class MailSource:
     def __iter__(self) -> Iterator[dict[str, Any]]:
         fmt = self.format
         if fmt == "pst" and not pst_mod.available():
-            raise RuntimeError("PST/OST support requires libpff-python (see backend/requirements-optional.txt)")
+            raise AnalystMessage("PST/OST support requires libpff-python (see backend/requirements-optional.txt)")
         if fmt in ("eml", "msg"):
             size = len(self.data) if self.data is not None else os.path.getsize(self.path or "")
             try:

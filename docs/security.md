@@ -278,11 +278,14 @@ A client is told no more than the log holds. A request, a parse or a job that fa
 answers with what failed, the exception's type and a reference (`the store query failed on the
 server (OSError); the server log has the cause under reference 3f9a01c2`), and the log line of
 that failure carries the same reference, so the operator can find the cause for the analyst who
-reports it. Two kinds of text are still passed on as they are: a statement or filter the database
+reports it. Three kinds of text are still passed on as they are: a statement or filter the database
 cannot run gets DuckDB's diagnostic as a 400, because the analyst, and the model's `sql` tool,
-correct the query from it; and the per-file entries of a package or mailbox ingest (a member that
+correct the query from it; the per-file entries of a package or mailbox ingest (a member that
 could not be read, an unparseable message) keep the parser's message for that file, which can
-quote the file.
+quote the file; and a message the code wrote for the analyst, which names no path and quotes
+nothing from the evidence, is told as it is wherever it stops a parse or a job (a table given to
+the event log import that is none of the Microsoft 365 or Entra exports REMN reads is answered
+`not a recognised Microsoft 365 or Entra export`, not with a reference).
 
 This is what lets a public instance take real evidence: the exposure of a file is bounded to one
 parse, and nothing of it is kept. Before the first upload to a parser on another machine, the app

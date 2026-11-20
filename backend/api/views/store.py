@@ -164,8 +164,8 @@ def ingest(request: HttpRequest, key: str):
         return JsonResponse({"error": "evidence.id is required"}, status=400)
     name = str(evidence.get("name") or meta.get("name") or "upload")
     if kind == "mail" and not pst_mod.available():
-        # said here, as the browser-store path says it: inside the job it would be one more failure
-        # whose text is not shown
+        # said here, as the browser-store path says it, before a job is started for a file it
+        # cannot read
         with open(path, "rb") as fh:
             head = fh.read(4096)
         if detect_mail_format(name, head) == "pst":

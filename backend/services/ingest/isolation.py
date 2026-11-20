@@ -41,7 +41,7 @@ import psutil
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 
-from services.common import json_default
+from services.common import AnalystMessage, json_default
 from services.ingest.pipeline import DeadlineExceeded
 
 log = logging.getLogger(__name__)
@@ -98,7 +98,8 @@ class ParseStopped(Exception):
 
 class ParseFailed(Exception):
     """A parse that raised in its process. The parent raises it under the type name the child
-    reported, so a client is told the same kind of failure as before."""
+    reported, so a client is told the same kind of failure as before, and as an AnalystMessage
+    when the child raised one."""
 
 
 class CpuLimit(BaseException):
@@ -790,7 +791,10 @@ class IsolatedParse:
         if what == "cpu":
             raise self._stopped(f"the parse reached its {cpu_limit():,} s processor-time limit (FORENSIC_PARSE_MAX_CPU_S)")
         type_name = str(stop.get("type") or "")
-        cls = type(type_name if _IDENTIFIER.match(type_name) else "Exception", (ParseFailed,), {"__module__": __name__})
+        # text the parser wrote for the analyst stays theirs to read. A child taken over could mark
+        # any text so, which puts no more in front of the analyst than the rows it sends already do.
+        bases = (AnalystMessage, ParseFailed) if stop.get("forAnalyst") is True else (ParseFailed,)
+        cls = type(type_name if _IDENTIFIER.match(type_name) else "Exception", bases, {"__module__": __name__})
         raise cls(str(stop.get("message") or "")[:500])
 
     def _ended_early(self) -> ParseStopped:
@@ -1154,7 +1158,7 @@ def child_main(kinds: dict[str, type[_Work]] | None = None) -> None:
     except CpuLimit:
         stop = {"kind": "cpu"}
     except Exception as exc:  # noqa: BLE001
-        stop = {"kind": "error", "type": type(exc).__name__, "message": str(exc)[:500]}
+        stop = {"kind": "error", "type": type(exc).__name__, "message": str(exc)[:500], "forAnalyst": isinstance(exc, AnalystMessage)}
     state = None
     if work is not None:
         try:
