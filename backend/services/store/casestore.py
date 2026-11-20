@@ -105,17 +105,19 @@ _time_limit: ContextVar[TimeLimit | None] = ContextVar("store_time_limit", defau
 
 
 class TimeLimit:
-    """Stops the queries a block runs on case stores once `seconds` have passed, and raises
-    QueryStopped with `message` ("{seconds}" in it is filled in). 0 or less is no limit.
+    """Stops the queries a block runs on case stores once `seconds` have passed, or as soon as
+    `cancelled` returns true, and raises QueryStopped with `message` ("{seconds}" in it is filled
+    in). 0 or less is no time limit.
 
     DuckDB has no statement timeout. A watcher interrupts every cursor that CaseStore.cursor() hands
     out inside the block, and repeats the interrupt until the block ends, since an interrupt that
     lands between two statements is cleared by the next one. A block inside another is watched by
     both."""
 
-    def __init__(self, seconds: float, message: str) -> None:
+    def __init__(self, seconds: float, message: str, cancelled: Callable[[], bool] | None = None) -> None:
         self.seconds = float(seconds or 0)
         self.message = message
+        self.cancelled = cancelled
         self.stopped = False
         self._cursors: list[duckdb.DuckDBPyConnection] = []
         self._lock = threading.Lock()
@@ -131,8 +133,24 @@ class TimeLimit:
             limit = limit._outer
         return con
 
+    def _due(self) -> bool:
+        """Waits until the block ends (False) or its queries are to be stopped (True). A cancel is
+        looked for every tenth of a second, so a cancelled job does not wait for its query to end."""
+        deadline = time.monotonic() + self.seconds if self.seconds > 0 else None
+        while True:
+            step = 0.1 if self.cancelled is not None else None
+            if deadline is not None:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    return True
+                step = left if step is None else min(step, left)
+            if self._done.wait(step):
+                return False
+            if self.cancelled is not None and self.cancelled():
+                return True
+
     def _interrupt(self) -> None:
-        if self._done.wait(self.seconds):
+        if not self._due():
             return
         self.stopped = True
         while True:
@@ -147,7 +165,7 @@ class TimeLimit:
                 return
 
     def __enter__(self) -> TimeLimit:
-        if self.seconds > 0:
+        if self.seconds > 0 or self.cancelled is not None:
             self._outer = _time_limit.get()
             self._token = _time_limit.set(self)
             threading.Thread(target=self._interrupt, name="store-time-limit", daemon=True).start()

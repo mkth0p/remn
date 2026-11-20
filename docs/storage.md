@@ -74,7 +74,8 @@ What one store may take from the server is bounded, and each bound is a setting 
 - **Rule time.** One rule of a server-store rule run runs at most `FORENSIC_STORE_RULE_MAX_S`
   seconds (300). A rule past it is stopped, listed among the run's errors with a message that
   names the limit and says it has no findings in that run, and the run goes on with the next
-  rule.
+  rule. Cancelling a rule run stops the rule that is running as well, within a fraction of a
+  second; the run keeps the findings of the rules that finished before it.
 
 0 turns a time limit off.
 

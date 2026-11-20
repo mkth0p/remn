@@ -199,6 +199,33 @@ def test_a_rule_past_its_time_limit_is_stopped_said_and_the_run_goes_on(server_r
     assert result["byRule"] == {"invented-slow": 0, "invented-quick": 1}
 
 
+def test_cancelling_a_rule_run_stops_the_rule_that_is_running(server_registry, settings):
+    settings.FORENSIC_STORE_RULE_MAX_S = 0
+    key = str(uuid.uuid4())
+    st = server_registry.get(key)
+    _endless_mails(st)
+    rules = [
+        {"id": "invented-slow", "title": "an invented subject", "severity": "low", "source": "mails", "where": {"subject|contains": "invented"}},
+        {"id": "invented-next", "title": "another invented subject", "severity": "low", "source": "mails", "where": {"subject|contains": "other"}},
+    ]
+    with _Guard(st) as guard:
+        r = Client().post(f"/api/store/{key}/rules/run", data=json.dumps({"rules": rules, "settings": {}}), content_type="application/json", **HDR)
+        assert r.status_code == 200, r.content
+        job_id = r.json()["jobId"]
+        # the cancel is sent once the first rule's query has started
+        deadline = time.time() + 10
+        while len(guard.cursors) < 2 and time.time() < deadline:
+            time.sleep(0.05)
+        time.sleep(0.3)
+        t0 = time.time()
+        assert Client().delete(f"/api/jobs/{job_id}?case={key}", **HDR).json() == {"cancelled": True}
+        job = _wait_for(key, job_id)
+    assert time.time() - t0 < 5
+    assert job["status"] == "cancelled", job
+    # the rule that was stopped is neither counted nor reported as failed, and the next one did not run
+    assert job["result"]["byRule"] == {} and job["result"]["errors"] == []
+
+
 def test_a_rule_run_has_no_time_limit_unless_one_is_given(tmp_path):
     reg = StoreRegistry()
     reg.configure(tmp_path)
