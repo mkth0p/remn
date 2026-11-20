@@ -507,3 +507,106 @@ def test_risky_users_are_read_from_graph_and_from_microsoft_extractor_suite(tmp_
 def test_a_user_list_is_still_not_read_as_risky_users():
     users = b"Id,DisplayName,UserPrincipalName,AccountEnabled,CreatedDateTime,UserType,RiskLevel\n1d2c,Alice,alice@contoso.com,True,1/15/2024 10:11:12 AM,Member,none\n"
     assert m365.detect_format("Users.csv", users) is None
+
+
+# ---------------------------------------------------------------------------
+# Exchange Online message trace
+# ---------------------------------------------------------------------------
+def test_a_message_trace_from_get_messagetrace_is_read(tmp_path):
+    rows, src = _fixture(tmp_path, "exo-messagetrace.get-messagetrace.csv")
+    assert src.format == "exo-messagetrace-csv" and src.stats.errors == 0 and len(rows) == 5
+    reply = rows[0]
+    assert reply["provider"] == m365.TRACE_PROVIDER and reply["channel"] == "Exchange MessageTrace" and reply["category"] == "Exchange message trace"
+    assert reply["operation"] == "MessageTrace" and reply["status"] == "Delivered" and reply["level"] == 4
+    assert (
+        reply["subjectUser"] == "alice@contoso.com"
+        and reply["targetUser"] == "payments@attacker.example"
+        and reply["objectName"] == "RE: Invoice 4471 - updated bank details"
+    )
+    assert reply["ipAddress"] == "198.51.100.23" and reply["destinationIp"] == "192.0.2.80" and reply["tsIso"] == "2026-09-01T10:31:02.000Z"
+    assert reply["data"]["SenderDomain"] == "contoso.com" and reply["data"]["RecipientDomain"] == "attacker.example" and reply["data"]["Size"] == "48211"
+    # the message opens the mailbox message and the audit records that name it
+    assert reply["data"]["InternetMessageId"] == "<AM9PR01MB0001.example@AM9PR01MB0001.eurprd01.prod.outlook.com>"
+    assert reply["recordKey"] == "exo-trace:1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d|payments@attacker.example|delivered"
+    assert rows[4]["status"] == "FilteredAsSpam" and rows[4]["level"] == 3
+    # the cmdlet writes its times in UTC, Microsoft says: they are not counted as assumed, and no zone moves them
+    assert src.stats.zone_assumed == 0
+    stats = Stats()
+    data = (FIXTURES / "exo-messagetrace.get-messagetrace.csv").read_bytes()
+    moved = list(m365.iter_records(None, data, "exo-messagetrace-csv", stats, dates=m365.date_setting({"zone": "Europe/Paris"})))
+    assert [r["tsIso"] for r in moved] == [r["tsIso"] for r in rows] and stats.zone_set == 0
+    # a column REMN does not know is kept
+    text = data.decode("utf-16")
+    head, rest = text.split("\r\n", 1)
+    extra = (head + ',"PSComputerName"\r\n' + rest.replace("\r\n", ',"outlook.office365.com"\r\n')).encode("utf-16")
+    (row, *_), _ = _fixture(tmp_path, "trace.csv", extra)
+    assert row["data"]["PSComputerName"] == "outlook.office365.com"
+
+
+def test_a_message_trace_from_get_messagetracev2_is_read_in_the_order_set_for_it(tmp_path):
+    """Every date at day 12 or below: read month-first and counted, until the analyst says the
+    export was written day-first."""
+    rows, src = _fixture(tmp_path, "exo-messagetrace.get-messagetracev2.csv")
+    assert src.format == "exo-messagetrace-csv" and len(rows) == 3
+    assert rows[0]["tsIso"] == "2026-01-09T10:31:02.000Z" and src.stats.date_order_guessed == 3
+    stats = Stats()
+    data = (FIXTURES / "exo-messagetrace.get-messagetracev2.csv").read_bytes()
+    rows = list(m365.iter_records(None, data, "exo-messagetrace-csv", stats, dates=m365.date_setting({"order": "day-first"})))
+    v1, _ = _fixture(tmp_path, "exo-messagetrace.get-messagetrace.csv")
+    assert [(r["tsIso"], r["subjectUser"], r["targetUser"], r["recordKey"]) for r in rows] == [
+        (r["tsIso"], r["subjectUser"], r["targetUser"], r["recordKey"]) for r in v1[:3]
+    ]
+    assert stats.date_order_set == 3 and stats.date_order_guessed == 0
+
+
+def test_the_downloadable_message_trace_reports_are_read_one_recipient_a_row(tmp_path):
+    rows, src = _fixture(tmp_path, "exo-messagetrace.enhanced-summary.csv")
+    assert src.format == "exo-messagetrace-report-csv" and src.stats.errors == 0
+    assert [(r["subjectUser"], r["targetUser"], r["status"], r["direction"]) for r in rows] == [
+        ("alice@contoso.com", "payments@attacker.example", "Receive, Send", "Outbound"),
+        ("supplier@fabrikam.example", "alice@contoso.com", "Receive, Deliver", "Inbound"),
+        ("supplier@fabrikam.example", "collect@attacker.example", "Receive, Send", "Inbound"),
+    ]
+    assert rows[1]["ipAddress"] == "192.0.2.25" and rows[1]["data"]["network_message_id"] == "7a8b9c0d-1e2f-4a3b-8c4d-5e6f7a8b9c0d"
+    # a report is written in the zone of the admin who asked for it: a time that says none is
+    # counted, and read in the zone set for the evidence
+    assert rows[0]["tsIso"] == "2026-09-01T10:31:02.417Z" and src.stats.zone_assumed == 3
+    stats = Stats()
+    data = (FIXTURES / "exo-messagetrace.enhanced-summary.csv").read_bytes()
+    rows = list(m365.iter_records(None, data, "exo-messagetrace-report-csv", stats, dates=m365.date_setting({"zone": "+02:00"})))
+    assert rows[0]["tsIso"] == "2026-09-01T08:31:02.417Z" and stats.zone_set == 3
+    # a column that says it is UTC is not moved
+    utc = data.replace(b'"origin_timestamp"', b'"origin_timestamp_utc"')
+    rows = list(m365.iter_records(None, utc, "exo-messagetrace-report-csv", dates=m365.date_setting({"zone": "+02:00"})))
+    assert m365.detect_format("report.csv", utc) == "exo-messagetrace-report-csv" and rows[0]["tsIso"] == "2026-09-01T10:31:02.417Z"
+    rows, src = _fixture(tmp_path, "exo-messagetrace.extended.csv")
+    assert src.format == "exo-messagetrace-report-csv" and len(rows) == 4
+    assert [(r["data"]["source"], r["status"], r["targetUser"]) for r in rows] == [
+        ("SMTP", "RECEIVE", "alice@contoso.com"),
+        ("STOREDRIVER", "DELIVER", "alice@contoso.com"),
+        ("MAILBOXRULE", "RECEIVE", "collect@attacker.example"),
+        ("SMTP", "SEND", "collect@attacker.example"),
+    ]
+    assert rows[3]["destinationIp"] == "192.0.2.80" and rows[2]["data"]["reference"] == "1201"
+
+
+def test_a_message_trace_row_without_a_sender_or_a_recipient_is_counted_not_read():
+    data = b'"Received","SenderAddress","RecipientAddress","Status"\r\n"9/1/2026 10:31:02 AM","","","Delivered"\r\n"9/1/2026 10:32:02 AM","alice@contoso.com","bob@contoso.com","Delivered"\r\n'
+    stats = Stats()
+    rows = list(m365.iter_records(None, data, "exo-messagetrace-csv", stats))
+    assert len(rows) == 1 and stats.errors == 1 and stats.not_read == 1
+
+
+def test_message_trace_directory_audit_and_risk_rows_are_cloud_rows_to_the_analysis(tmp_path):
+    """A message trace row read as a host's event made a host of nobody in the stories and a host
+    step in the chains; the tenant's rows are the tenant's."""
+    from services.analysis import chains, relationships, stories
+
+    rows = []
+    for name in ("exo-messagetrace.get-messagetrace.csv", "entra-directory-audits.graph.json", "entra-risk-detections.graph.json"):
+        rows += _fixture(tmp_path, name)[0]
+    assert all(relationships.origin(r) == "m365" and stories._is_cloud(r) and chains._is_m365(r) for r in rows)
+    # a message is a chain step only when a rule flags it; a consent is one whatever the rules say
+    assert chains._m365_step(rows[0], {}, {}) is None
+    consent = next(r for r in rows if r["operation"] == "Consent to application.")
+    assert chains._m365_step(consent, {}, {})[1].startswith("OAuth consent granted")

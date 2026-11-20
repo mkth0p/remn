@@ -136,7 +136,10 @@ events table:
 - Entra ID Protection risk detections and risky users as Graph JSON
   (`identityProtection/riskDetections`, `identityProtection/riskyUsers`), or their properties
   as CSV columns (`Get-MgRiskDetection | Export-Csv`, `Get-MgRiskyUser | Export-Csv`,
-  Microsoft-Extractor-Suite's `Get-RiskyDetections` and `Get-RiskyUsers`).
+  Microsoft-Extractor-Suite's `Get-RiskyDetections` and `Get-RiskyUsers`);
+- the Exchange Online message trace as `Get-MessageTrace` or `Get-MessageTraceV2` output
+  written with `Export-Csv` (Microsoft-Extractor-Suite's `Get-MessageTraceLog`), or the
+  Exchange admin centre's downloadable enhanced summary and extended reports.
 
 A `.zip` of a whole acquisition folder is walked.
 
@@ -203,6 +206,30 @@ hold: a download whose fields are the Graph property names is read, any other is
 recognised. Azure Monitor records of the `RiskyUsers` and `UserRiskEvents` categories are not
 read.
 
+A message trace becomes rows with the provider `Exchange Online Message Trace`, the channel
+`Exchange MessageTrace`, the category `Exchange message trace` and the operation
+`MessageTrace`, one for each recipient of a message: the sender is `subjectUser`, the
+recipient `targetUser`, the subject `objectName`, the delivery status `status` (a message
+that failed, was quarantined or filtered as spam is a warning), the address that sent it to
+the service `ipAddress` and the one the service sent it to `destinationIp`. Every column is
+kept under its own name in `data`, with `data.SenderDomain`, `data.RecipientDomain` and
+`data.InternetMessageId`, which opens the mailbox message and the audit records that name the
+same message. The cmdlets write their times in UTC, Microsoft says, so a zone set for the
+evidence does not move them, but `Export-Csv` writes them in the session's date order. A row
+of `Get-MessageTrace` is kept once by its `MessageTraceId`, recipient and status;
+`Get-MessageTraceV2`'s output properties are not documented, and its export is read by the
+same column names (`Received`, `SenderAddress`, `RecipientAddress` and the others its
+parameters are named after), any other column kept as it is. The enhanced summary report
+gives a row for each `<address>##<status>` of `Recipient_status` (Microsoft does not say what
+separates two recipients; a `;` before another `<address>##` is taken as the separator) and
+its `directionality` as `direction`; the extended report gives a row for each recipient of
+each event, its `event_id` as the status and its `source` (`MAILBOXRULE` for a message an
+inbox rule sent) in `data.source`. A report writes its times in the zone of the admin who
+asked for it, so a time without a zone, in a column whose name does not say UTC, is counted
+(`zoneAssumed`) and read in the zone set for the evidence. A report has no id for its rows,
+so a report downloaded twice is in the case twice. The admin centre's "Export results" of the
+summary shown on screen is not recognised: Microsoft does not document its columns.
+
 Rows carry `provider`, `channel` (the workload), `category` (`M365 Exchange`,
 `M365 Entra`, `Entra sign-in`, …), `operation`, `subjectUser` and `targetUser`,
 `ipAddress`, `status`, `objectName`, and every AuditData field under `data.<Name>`
@@ -239,7 +266,7 @@ way (`undated`), since it is not on the timeline.
 The date order and the time zone can be set for an evidence file where its exports cannot
 say (the `dates` field of the import request: `{"order": "day-first" | "month-first",
 "zone": "UTC" | "+02:00" | "Europe/Paris"}`). The order set is used for every numeric date of
-its Entra exports in place of the order the file shows; a date that cannot be read in it but
+its Entra and message trace exports in place of the order the file shows; a date that cannot be read in it but
 can the other way is counted (`dateOrderContradicted`) and left without a time. The zone set
 is used for each time a culture wrote without a zone, and never for an ISO 8601 time, a time
 with an offset, or a column whose name says UTC; a zone given by name follows daylight

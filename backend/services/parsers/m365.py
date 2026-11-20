@@ -1,6 +1,6 @@
 """
-Microsoft 365 Unified Audit Log (UAL), Entra ID sign-in, Entra ID directory audit and Entra ID
-Protection exports -> event rows.
+Microsoft 365 Unified Audit Log (UAL), Entra ID sign-in, Entra ID directory audit, Entra ID
+Protection and Exchange Online message trace exports -> event rows.
 
 Business-email-compromise investigations live on three sources: the mailbox itself, the
 Unified Audit Log (inbox rules, forwarding, MailItemsAccessed, consent grants, role changes)
@@ -23,17 +23,19 @@ inside zip/tar archives):
                               Microsoft-Extractor-Suite Get-RiskyDetections)
     entra-riskyuser-json      Graph riskyUser objects (identityProtection/riskyUsers)
     entra-riskyuser-csv       riskyUser properties as columns (Get-MgRiskyUser | Export-Csv, Get-RiskyUsers)
+    exo-messagetrace-csv         Get-MessageTrace / Get-MessageTraceV2 | Export-Csv
+    exo-messagetrace-report-csv  the Exchange admin centre's enhanced summary or extended report
 
 Row conventions (shared with the EVTX parser so rules can mix both):
     provider   "Microsoft 365 Unified Audit Log" | "Microsoft Entra ID Sign-in" | "Microsoft Entra ID Audit"
-               | "Microsoft Entra ID Protection"
+               | "Microsoft Entra ID Protection" | "Exchange Online Message Trace"
     channel    the UAL Workload (Exchange, AzureActiveDirectory, SharePoint, OneDrive ...) | "Entra SignIn"
-               | "Entra Audit" | "Entra RiskDetection" | "Entra RiskyUser"
+               | "Entra Audit" | "Entra RiskDetection" | "Entra RiskyUser" | "Exchange MessageTrace"
     category   "M365 Exchange" | "M365 Entra" | "M365 SharePoint" | ... | "Entra sign-in" | "Entra audit"
-               | "Entra risk"
+               | "Entra risk" | "Exchange message trace"
     operation  the UAL Operation / "SignIn" / a directory activity as the UAL names it ("Consent to
-               application.") / "RiskDetection" / "RiskyUser"
-    subjectUser = user (actor UPN), targetUser = affected user when the operation has one
+               application.") / "RiskDetection" / "RiskyUser" / "MessageTrace"
+    subjectUser = user (actor UPN, sender), targetUser = affected user (recipient) when the record has one
     ipAddress   client IP (port and brackets stripped), status / statusText, objectName
     data        every AuditData field flattened one level: Parameters, ExtendedProperties,
                 ModifiedProperties (NewValue, plus "<name>.old"), OperationProperties, Target,
@@ -41,7 +43,8 @@ Row conventions (shared with the EVTX parser so rules can mix both):
                 riskLevelDuringSignIn, riskState, conditionalAccessStatus, errorCode ...; directory
                 audits: their modified properties under the names the UAL gives them, initiatedBy.*,
                 Target.*, additionalDetails by key; risk: riskEventType, riskLevel, riskState,
-                riskDetail, country, city, additionalInfo.<key> ...
+                riskDetail, country, city, additionalInfo.<key> ...; message trace: every column,
+                and SenderDomain, RecipientDomain, InternetMessageId
 """
 
 from __future__ import annotations
@@ -75,6 +78,7 @@ UAL_PROVIDER = "Microsoft 365 Unified Audit Log"
 ENTRA_PROVIDER = "Microsoft Entra ID Sign-in"
 AUDIT_PROVIDER = "Microsoft Entra ID Audit"
 RISK_PROVIDER = "Microsoft Entra ID Protection"
+TRACE_PROVIDER = "Exchange Online Message Trace"
 FORMATS = (
     "m365-ual-csv",
     "m365-ual-json",
@@ -86,6 +90,8 @@ FORMATS = (
     "entra-riskdetection-csv",
     "entra-riskyuser-json",
     "entra-riskyuser-csv",
+    "exo-messagetrace-csv",
+    "exo-messagetrace-report-csv",
 )
 
 _WORKLOAD_CATEGORY = {
@@ -195,7 +201,7 @@ def detect_format(name: str, head: bytes) -> str | None:
     if is_signin(columns):
         return "entra-signin-csv"
     kind = entra_kind(columns)
-    return f"entra-{kind}-csv" if kind else None
+    return f"entra-{kind}-csv" if kind else trace_kind(columns)
 
 
 UNRECOGNISED = "not a recognised Microsoft 365 or Entra export"
@@ -223,6 +229,27 @@ def is_signin(keys: Iterable[Any]) -> bool:
 
 
 _MONITOR_CATEGORY_RE = re.compile(r'"category"\s*:\s*"(?:auditlogs|riskyusers|userriskevents|serviceprincipalriskevents|riskyserviceprincipals)"')
+
+
+def trace_kind(columns: Iterable[Any]) -> str | None:
+    """Which message trace a table with these columns is: Get-MessageTrace or Get-MessageTraceV2
+    written with Export-Csv ("exo-messagetrace-csv"), or a report downloaded from the Exchange
+    admin centre ("exo-messagetrace-report-csv"); None for anything else."""
+    low = {_report_name(c) for c in columns}
+    if {"received", "senderaddress", "recipientaddress"} <= low:
+        return "exo-messagetrace-csv"
+    if {"sender_address", "message_id", "network_message_id"} <= low and low & {"origin_timestamp", "date_time"}:
+        return "exo-messagetrace-report-csv"
+    return None
+
+
+def _report_name(column: Any) -> str:
+    """A column of a message trace report by the name the Exchange admin centre documents: in lower
+    case, and without the "_utc" a download may end a time column with."""
+    name = str(column).strip().lower()
+    return name[:-4] if name.endswith("_utc") else name
+
+
 # The columns the Entra admin centre writes in its audit log download whatever the language of the
 # portal; the date, service, category, activity and result columns are translated.
 _PORTAL_AUDIT_COLUMNS = frozenset({"correlationid", "resultreason", "actortype", "target1type"})
@@ -351,9 +378,8 @@ def parse_ts(v: Any, day_first: bool | None = None, zone: tzinfo | None = None) 
     culture's numeric date, or a .NET "/Date(ms)/" -> (ms, iso). day_first is the order date_order
     found for the file, or the order set for the evidence; None keeps the portal's own month-first
     order for slashes and dashes. Dotted dates are always day-first. A time written with a zone
-    keeps it. A culture-written time without one is in ``zone`` when the evidence sets one, else
-    UTC; an ISO 8601 time without one is UTC, the zone the audit log, Graph and the portal's
-    "Date (UTC)" write."""
+    keeps it; one without is in ``zone``, else UTC, the zone the audit log, Graph and the portal's
+    "Date (UTC)" write. _Dates says which times the evidence's zone is for."""
     if v is None:
         return None, None
     if isinstance(v, (int, float)):
@@ -375,8 +401,7 @@ def parse_ts(v: Any, day_first: bool | None = None, zone: tzinfo | None = None) 
     if dt is None:
         return None, None
     if dt.tzinfo is None:
-        # "2026-09-01 10:00:00" is how a culture writing the year first writes a time
-        dt = dt.replace(tzinfo=zone if zone is not None and culture_written(s) else UTC)
+        dt = dt.replace(tzinfo=zone or UTC)
     dt = dt.astimezone(UTC)
     return int(dt.timestamp() * 1000), dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
@@ -388,6 +413,15 @@ def culture_written(v: Any) -> bool:
     service, in UTC."""
     m = _CULTURE_RE.match(str(v or "").strip())
     return bool(m) and not m.group(10)
+
+
+def _naive_iso(v: Any) -> bool:
+    """Whether a time is ISO 8601 without a zone ("2026-09-01T10:00:00")."""
+    s = str(v or "").strip()
+    try:
+        return datetime.fromisoformat(s).tzinfo is None if "T" in s and not s.endswith("Z") else False
+    except ValueError:
+        return False
 
 
 def utc_column(name: Any) -> bool:
@@ -466,19 +500,21 @@ def time_zone(name: str) -> tzinfo:
 
 class _Dates:
     """How the times of one file are read: in the date order its own dates show, unless the evidence
-    sets one, and a culture-written time without a zone in the evidence's zone, or UTC."""
+    sets one, and a culture-written time without a zone in the evidence's zone, or UTC. local: the
+    export writes its times in a zone of the reader's choosing, so an ISO 8601 time without a zone
+    is local too (the message trace reports, in the zone of the admin who asked for them)."""
 
-    def __init__(self, setting: DateSetting | None = None, file_order: bool | None = None) -> None:
+    def __init__(self, setting: DateSetting | None = None, file_order: bool | None = None, local: bool = False) -> None:
         self.set_order = setting is not None and setting.day_first is not None
         self.day_first = setting.day_first if setting is not None and setting.day_first is not None else file_order
         self.zone = setting.zone if setting is not None else None
+        self.local = local
 
     def read(self, value: Any, utc: bool = False) -> tuple[int | None, str | None, tuple[str, ...]]:
         """(ms, iso, marks) of one time; utc when the export's column says its times are UTC. The
         marks name what the record is counted for: dated in an order the file did not show, in the
         order or the zone the evidence sets, or read as UTC with nothing to say so."""
-        culture = culture_written(value)
-        moved = culture and not utc
+        moved = not utc and (culture_written(value) or (self.local and _naive_iso(value)))
         ms, iso = parse_ts(value, self.day_first, self.zone if moved else None)
         marks: tuple[str, ...] = ()
         if guessed_order(value):
@@ -1547,6 +1583,124 @@ def risky_user_row(o: dict[str, Any], when: _Dates | None = None, utc: bool = Fa
 
 
 # ---------------------------------------------------------------------------
+# Exchange Online message trace rows
+# ---------------------------------------------------------------------------
+# what the message trace says of a message it did not deliver, as a word of its status
+_UNDELIVERED = frozenset({"failed", "fail", "filteredasspam", "quarantined", "quarantine"})
+
+
+def _domain(address: Any) -> str | None:
+    """The domain of an address, in lower case, as internal_domains lists them."""
+    a = str(address or "").strip().lower()
+    return a.rsplit("@", 1)[1] if "@" in a else None
+
+
+def _trace_row(
+    sender: str, recipient: str, status: str, when: tuple[int | None, str | None], data: dict[str, Any], subject: str, message_id: str, ip: str, to_ip: str
+) -> dict[str, Any]:
+    """One message to one recipient, as the message trace saw it."""
+    # InternetMessageId is how an audit record and a mailbox message name the same message
+    data = {**data, "SenderDomain": _domain(sender), "RecipientDomain": _domain(recipient), "InternetMessageId": message_id}
+    data = {k: _scalar(v) for k, v in data.items() if v not in (None, "")}
+    undelivered = bool(set(re.findall(r"[a-z]+", status.lower())) & _UNDELIVERED)
+    summary = f"Message from {sender or '?'} to {recipient or '?'}: {status or '?'}"
+    if subject:
+        summary += f", '{str(subject)[:120]}'"
+    if ip:
+        summary += f" from {ip}"
+    return {
+        "ts": when[0],
+        "tsIso": when[1],
+        "eventId": None,
+        "recordId": None,
+        "level": 3 if undelivered else 4,
+        "levelName": "Warning" if undelivered else "Information",
+        "provider": TRACE_PROVIDER,
+        "channel": "Exchange MessageTrace",
+        "computer": None,
+        "category": "Exchange message trace",
+        "description": status or "Message",
+        "operation": "MessageTrace",
+        "objectName": str(subject)[:500] if subject else None,
+        "user": sender or None,
+        "upn": sender or None,
+        "subjectUser": sender or None,
+        "targetUser": recipient or None,
+        "ipAddress": clean_ip(ip),
+        "destinationIp": clean_ip(to_ip),
+        "status": status or None,
+        "recordKey": None,
+        "data": data,
+        "summary": summary[:500],
+    }
+
+
+def trace_rows(rec: dict[str, Any], when: _Dates, received: str) -> list[dict[str, Any]]:
+    """A row of Get-MessageTrace or Get-MessageTraceV2 written with Export-Csv (the MessageTrace
+    report's fields: Received, SenderAddress, RecipientAddress, Subject, Status, FromIP, ToIP,
+    Size, MessageId, MessageTraceId ...) -> its event row; none when it names neither a sender
+    nor a recipient. received: the column its time is in. The cmdlets write their times in UTC,
+    Microsoft says, so no zone set for the evidence moves them."""
+    canon = {str(k).strip().lower(): k for k in rec}
+
+    def col(name: str) -> Any:
+        v = rec.get(canon.get(name.lower(), name))
+        return str(v).strip() if v not in (None, "") else ""
+
+    sender, recipient = col("SenderAddress"), col("RecipientAddress")
+    if not sender and not recipient:
+        return []
+    ts, iso, marks = when.read(rec.get(received), utc=True)
+    status = col("Status")
+    row = _trace_row(sender, recipient, status, (ts, iso), dict(rec), col("Subject"), col("MessageId"), col("FromIP"), col("ToIP"))
+    trace_id = col("MessageTraceId").strip("{}")
+    # one message to one recipient in one state: the same row in two exports of the same hours
+    if _GUID_RE.match(trace_id) and recipient:
+        row["recordKey"] = f"exo-trace:{trace_id.lower()}|{recipient.lower()}|{status.lower()}"
+    if marks:
+        row["_marks"] = marks
+    return [row]
+
+
+# "<address>##<status>": one recipient of a message and what happened to it there
+_RECIPIENT_STATUS_RE = re.compile(r"^\s*([^#;\s]+)##(.*)$")
+
+
+def report_rows(rec: dict[str, Any], when: _Dates, time_column: str) -> list[dict[str, Any]]:
+    """A row of the Exchange admin centre's enhanced summary report (one message, its recipients
+    in Recipient_status as "<address>##<status>") or extended report (one event of a message, its
+    recipients in recipient_address, separated by ";") -> one event row per recipient; none when
+    it names neither a sender nor a recipient. time_column: the column its time is in."""
+    canon = {_report_name(k): k for k in rec}
+
+    def col(name: str) -> str:
+        v = rec.get(canon.get(name, name))
+        return str(v).strip() if v not in (None, "") else ""
+
+    sender = col("sender_address")
+    statuses = col("recipient_status")
+    # recipients of the enhanced summary are written one after the other; Microsoft does not say
+    # how they are separated, so a ";" counts as a separator only before another "<address>##"
+    parts = [p for p in re.split(r";(?=[^;#\s]+##)", statuses) if p.strip()] if "##" in statuses else []
+    pairs = [(m.group(1), m.group(2).strip()) for p in parts if (m := _RECIPIENT_STATUS_RE.match(p))]
+    if not pairs:
+        status = col("event_id") or statuses
+        pairs = [(r.strip(), status) for r in col("recipient_address").split(";") if r.strip()] or [("", status)]
+    if not sender and not any(r for r, _ in pairs):
+        return []
+    ts, iso, marks = when.read(rec.get(time_column), utc_column(time_column))
+    rows = []
+    for recipient, status in pairs:
+        ip = col("original_client_ip") or col("client_ip")
+        row = _trace_row(sender, recipient, status, (ts, iso), dict(rec), col("message_subject"), col("message_id"), ip, col("server_ip"))
+        row["direction"] = col("directionality") or None
+        if marks:
+            row["_marks"] = marks
+        rows.append(row)
+    return rows
+
+
+# ---------------------------------------------------------------------------
 # Iteration
 # ---------------------------------------------------------------------------
 def _open_text(path: str | None, data: bytes | None) -> io.TextIOBase:
@@ -1998,6 +2152,20 @@ def _iter_rows(path: str | None, data: bytes | None, fmt: str, stats: Any, inclu
                     _not_read(stats)
                     continue
                 yield _finish(row, obj, stats, include_raw, row.pop("_marks", ()))
+        elif fmt in ("exo-messagetrace-csv", "exo-messagetrace-report-csv"):
+            columns = _csv_header(path, data)
+            if fmt == "exo-messagetrace-csv":
+                date = next((c for c in columns if c.strip().lower() == "received"), "Received")
+                when = _csv_dates(path, data, dates, lambda k: k == date)
+            else:
+                date = next((c for c in columns if _report_name(c) in ("origin_timestamp", "date_time")), "")
+                when = _csv_dates(path, data, dates, lambda k: k == date, local=True)
+            for obj in _csv_rows(fh, stats):
+                rows = trace_rows(obj, when, date) if fmt == "exo-messagetrace-csv" else report_rows(obj, when, date)
+                if not rows:
+                    _not_read(stats)
+                for row in rows:
+                    yield _finish(row, obj, stats, include_raw, row.pop("_marks", ()))
         elif fmt == "entra-audit-csv":
             columns = _csv_header(path, data)
             graph = next((c for c in columns if c.strip().lower() == "activitydatetime"), None)
@@ -2021,12 +2189,12 @@ def _date_column(name: str) -> bool:
     return (_PORTAL_MAP.get(low) or _GRAPH_NAMES.get(low)) == "createdDateTime"
 
 
-def _csv_dates(path: str | None, data: bytes | None, dates: DateSetting | None, is_date: Callable[[str], bool]) -> _Dates:
+def _csv_dates(path: str | None, data: bytes | None, dates: DateSetting | None, is_date: Callable[[str], bool], local: bool = False) -> _Dates:
     """How a CSV's times are read: in the order the evidence sets, or else the order its own dates
     show (is_date names its date columns)."""
     if dates is not None and dates.day_first is not None:
-        return _Dates(dates)
-    return _Dates(dates, _csv_date_order(path, data, is_date))
+        return _Dates(dates, local=local)
+    return _Dates(dates, _csv_date_order(path, data, is_date), local)
 
 
 def _csv_when(rec: dict[str, Any], is_date: Callable[[str], bool], when: _Dates) -> tuple[int | None, str | None, tuple[str, ...]]:
