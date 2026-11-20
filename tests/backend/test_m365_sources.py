@@ -12,10 +12,40 @@ from pathlib import Path
 
 import make_m365
 import pytest
+import yaml
 
 from services.ingest.pipeline import EvtxSource, detect_evtx_format
 from services.parsers import m365
 from services.parsers.evtx_parser import Stats
+from services.store import rules as R
+from services.store.casestore import StoreRegistry
+from services.store.writers import EventWriter
+
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "m365"
+RULES = Path(__file__).resolve().parents[2] / "rules" / "m365" / "bec.yaml"
+
+
+@pytest.fixture
+def store(tmp_path):
+    reg = StoreRegistry()
+    reg.configure(tmp_path / "cases")
+    yield reg.get("5a0c6c1e-3a52-4d1b-9a43-6f0e5b1d2c3a")
+    reg.close_all()
+
+
+def _fired(store, rows: list[dict], settings: dict | None = None) -> dict[str, list]:
+    """The BEC rules that fire on these rows, with what they found."""
+    w = EventWriter(store, 1)
+    for row in rows:
+        w.add(row)
+    w.flush()
+    rules = [d for d in yaml.safe_load_all(RULES.read_text(encoding="utf-8")) if isinstance(d, dict)]
+    return {r["id"]: hits for r in rules if (hits := R.run_rule(store, r, settings or {"internal_domains": ["contoso.com"]}))}
+
+
+def _fixture(tmp_path: Path, name: str, data: bytes | None = None) -> tuple[list[dict], EvtxSource]:
+    """A fixture read through the event-log import, as a file of its own."""
+    return _source(tmp_path, name, (FIXTURES / name).read_bytes() if data is None else data)
 
 
 def _ual_csv(records: list[dict], type_line: bool = False) -> str:
@@ -239,3 +269,155 @@ def test_the_ingest_endpoints_take_the_date_setting(tmp_path):
         **hdr,
     )
     assert resp.status_code == 400 and "sideways" in resp.json()["error"]
+
+
+# ---------------------------------------------------------------------------
+# Entra directory audits
+# ---------------------------------------------------------------------------
+def _by_op(rows: list[dict]) -> dict[str, dict]:
+    return {r["operation"]: r for r in rows}
+
+
+def test_a_graph_page_of_directory_audits_is_read(tmp_path):
+    rows, src = _fixture(tmp_path, "entra-directory-audits.graph.json")
+    assert src.format == "entra-audit-json" and src.stats.errors == 0 and len(rows) == 6
+    ops = _by_op(rows)
+    assert set(ops) == {
+        "Consent to application.",
+        "User registered security info.",
+        "Register device.",
+        "Add service principal credentials.",
+        "Add app role assignment to service principal.",
+        "Add member to role.",
+    }
+    consent = ops["Consent to application."]
+    assert consent["provider"] == m365.AUDIT_PROVIDER and consent["channel"] == "Entra Audit" and consent["category"] == "Entra audit"
+    assert consent["description"] == "Consent to application" and consent["data"]["activityDisplayName"] == "Consent to application"
+    assert consent["subjectUser"] == "alice@contoso.com" and consent["ipAddress"] == "198.51.100.23" and consent["objectName"] == "Mail Sync Helper"
+    assert consent["tsIso"] == "2026-09-01T10:05:12.481Z" and consent["status"] == "success" and consent["level"] == 4
+    assert "Scope: Mail.Read Mail.Send offline_access" in consent["data"]["ConsentAction.Permissions"]
+    assert consent["data"]["ConsentContext.IsAdminConsent"] == "False" and consent["workstation"].startswith("Mozilla/5.0")
+    assert consent["data"]["initiatedBy.user.id"] == "5f1c2a3b-0d4e-4f60-8a71-92b3c4d5e6f7" and consent["data"]["Target.Type"] == "ServicePrincipal"
+    assert consent["recordKey"] == "entra-audit:directory_8c1d4f2e-3b5a-4c6d-9e7f-0a1b2c3d4e5f_kx2rg_10234561"
+    role = ops["Add member to role."]
+    assert (
+        role["data"]["Role.DisplayName"] == "Global Administrator" and role["targetUser"] == "bob@contoso.com" and role["objectName"] == "Global Administrator"
+    )
+    assert role["subjectUser"] == "admin@contoso.com" and "role Global Administrator on bob@contoso.com" in role["summary"]
+    # an activity an application performed names the application
+    granted = ops["Add app role assignment to service principal."]
+    assert granted["subjectUser"] == "Mail Sync Helper" and granted["ipAddress"] is None and granted["data"]["AppRole.Value"] == "Mail.ReadWrite"
+    failed = ops["Add service principal credentials."]
+    assert failed["level"] == 3 and failed["status"] == "failure" and failed["statusText"] == "Microsoft.Online.Workflows.InsufficientPrivilegesException"
+    device = ops["Register device."]
+    assert device["objectName"] == "DESKTOP-EXAMPLE1" and device["objectType"] == "Device" and device["data"]["Device Trust Type"] == "Workplace"
+    # read again, in this file or another of the upload, a record is kept once
+    rows, src = _fixture(
+        tmp_path, "twice.json", json.dumps({"value": json.loads((FIXTURES / "entra-directory-audits.graph.json").read_text())["value"] * 2}).encode()
+    )
+    assert len(rows) == 6 and src.stats.duplicates == 6
+
+
+def test_the_portal_downloads_are_read_as_graph_records_are(tmp_path):
+    graph = {r["description"]: r for r in _fixture(tmp_path, "entra-directory-audits.graph.json")[0]}
+    rows, src = _fixture(tmp_path, "entra-directory-audits.portal.json")
+    assert src.format == "entra-audit-json" and [r["operation"] for r in rows] == ["Consent to application.", "User registered security info."]
+    rows, src = _fixture(tmp_path, "entra-directory-audits.portal.csv")
+    assert src.format == "entra-audit-csv" and src.stats.errors == 0 and len(rows) == 6
+
+    def seen(r: dict) -> tuple:
+        return (
+            r["operation"],
+            r["tsIso"],
+            r["subjectUser"],
+            r["targetUser"],
+            r["ipAddress"],
+            r["objectName"],
+            r["status"],
+            r["level"],
+            r["data"].get("Role.DisplayName"),
+        )
+
+    assert sorted(seen(r) for r in rows) == sorted(seen(r) for r in graph.values())
+    consent = _by_op(rows)["Consent to application."]
+    assert consent["data"]["ConsentAction.Permissions"] == graph["Consent to application"]["data"]["ConsentAction.Permissions"]
+    assert (
+        consent["data"]["ActorType"] == "User"
+        and consent["data"]["loggedByService"] == "Core Directory"
+        and consent["data"]["category"] == "ApplicationManagement"
+    )
+    # the portal writes the date, service, category, activity and result columns in its own
+    # language: they are read by their place, whatever they are called
+    text = (FIXTURES / "entra-directory-audits.portal.csv").read_bytes().decode("utf-8")
+    head, rest = text.split("\r\n", 1)
+    translated = (
+        head.replace("日付 (UTC)", "Datum (UTC)")
+        .replace("サービス", "Dienst")
+        .replace("カテゴリ", "Kategorie")
+        .replace("アクティビティ", "Aktivität")
+        .replace("結果", "Ergebnis")
+    )
+    again, _ = _fixture(tmp_path, "audit-de.csv", (translated + "\r\n" + rest).encode("utf-16"))
+    assert sorted(seen(r) for r in again) == sorted(seen(r) for r in rows)
+
+
+def test_directory_audits_written_by_export_csv_are_read_without_what_it_could_not_write():
+    """Get-MgAuditLogDirectoryAudit | Export-Csv writes the initiator, the targets and the details
+    as .NET type names: the rows say what was done and when, and keep the columns REMN does not know."""
+    model = "Microsoft.Graph.PowerShell.Models"
+    data = (
+        "#TYPE Microsoft.Graph.PowerShell.Models.MicrosoftGraphDirectoryAudit\r\n"
+        '"ActivityDateTime","ActivityDisplayName","AdditionalDetails","Category","CorrelationId","Id","InitiatedBy","LoggedByService",'
+        '"OperationType","Result","ResultReason","TargetResources","AdditionalProperties","ExportedBy"\r\n'
+        f'"9/15/2026 10:05:12 AM","Consent to application","{model}.IMicrosoftGraphKeyValue[]","ApplicationManagement",'
+        f'"8c1d4f2e-3b5a-4c6d-9e7f-0a1b2c3d4e5f","Directory_8c1d4f2e-3b5a-4c6d-9e7f-0a1b2c3d4e5f_KX2RG_1","{model}.MicrosoftGraphAuditActivityInitiator",'
+        f'"Core Directory","Assign","success","","{model}.IMicrosoftGraphTargetResource[]",'
+        '"System.Collections.Generic.Dictionary`2[System.String,System.Object]","responder"\r\n'
+    ).encode("utf-16")
+    assert m365.detect_format("audit.csv", data) == "entra-audit-csv"
+    stats = Stats()
+    (row,) = list(m365.iter_records(None, data, "entra-audit-csv", stats))
+    assert row["operation"] == "Consent to application." and row["tsIso"] == "2026-09-15T10:05:12.000Z" and row["subjectUser"] is None
+    assert row["data"]["ExportedBy"] == "responder" and not any("Microsoft.Graph" in str(v) or "System." in str(v) for v in row["data"].values())
+    # the time is written as the session's culture writes it, without a zone
+    assert stats.zone_assumed == 1
+
+
+def test_a_record_that_is_not_a_directory_audit_is_counted_not_read(tmp_path):
+    page = json.loads((FIXTURES / "entra-directory-audits.graph.json").read_text())
+    page["value"] = page["value"][:2] + [make_m365.entra_signins()[0]]
+    data = json.dumps(page).encode()
+    rows, stats = _package(tmp_path, "audit.zip", _zip({"tenant/AuditLogs.json": data}))
+    (member,) = stats["files"]
+    assert len(rows) == 2 and member["status"] == "error" and member["note"] == "1 record(s) are not of the kind the file holds and were not read"
+    rows, src = _fixture(tmp_path, "AuditLogs.json", data)
+    assert len(rows) == 2 and src.stats.errors == 1 and src.stats.to_dict()["notRead"] == 1
+
+
+def test_azure_monitor_records_of_the_audit_log_are_not_taken_for_graph_records():
+    """Their schema may differ from Graph's, Microsoft says: they are not read, and said so."""
+    record = {
+        "time": "2026-09-01T10:05:12Z",
+        "category": "AuditLogs",
+        "operationName": "Consent to application",
+        "properties": {"activityDisplayName": "Consent to application", "activityDateTime": "2026-09-01T10:05:12Z"},
+    }
+    assert m365.detect_format("audit.json", json.dumps(record).encode()) is None
+    assert detect_evtx_format("audit.json", json.dumps(record).encode()) == "unrecognised"
+
+
+def test_the_bec_rules_fire_on_directory_audits(tmp_path, store):
+    """The rules know the audit log's names for these activities, and a directory audit is named
+    the same way, so a consent, a role or new security info is found in either export."""
+    rows, _ = _fixture(tmp_path, "entra-directory-audits.graph.json")
+    fired = _fired(store, rows)
+    assert {"m365-app-consent", "m365-privileged-role-assigned", "m365-role-assigned-any", "m365-mfa-or-password-change", "m365-app-registered"} <= set(fired)
+    assert fired["m365-app-consent"][0]["entities"]["subjectUser"] == "alice@contoso.com"
+
+
+def _zip(members: dict[str, bytes]) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for name, data in members.items():
+            z.writestr(name, data)
+    return buf.getvalue()

@@ -113,7 +113,7 @@ synchronised OST, becomes a row of its own in its folder, with the subject "(unr
 message)", "(unreadable folder)", "(unreadable folder contents)" or "(unreadable orphan item)",
 the flag `parse_error` and libpff's error, and the import counts it among its errors.
 
-## Microsoft 365 audit and Entra sign-in exports
+## Microsoft 365 and Entra exports
 
 Business email compromise investigations rest on the tenant's own logs. Drop the exports
 the acquisition tools produce next to the mailbox export and they become rows of the
@@ -129,7 +129,12 @@ events table:
   an Event Hub or a storage account (the sign-in under `properties`, categories
   `SignInLogs`, `NonInteractiveUserSignInLogs`, `ServicePrincipalSignInLogs` and
   `ManagedIdentitySignInLogs`; a record of another category, such as `AuditLogs`, is
-  counted as not read); a `.zip` of a whole acquisition folder is walked.
+  counted as not read);
+- Entra ID directory audits as Graph JSON (`auditLogs/directoryAudits`,
+  `Get-MgAuditLogDirectoryAudit`, a page or an array of records), or the Entra admin
+  centre's audit log download as JSON or CSV.
+
+A `.zip` of a whole acquisition folder is walked.
 
 Each export may be written in UTF-8, or in UTF-16 or UTF-32 with a byte order mark, as
 Windows PowerShell's `Export-Csv -Encoding Unicode` and `Out-File` write it. The `#TYPE`
@@ -139,16 +144,42 @@ byte order mark is not recognised.
 
 Outside the Azure Monitor records, whose category says what they are, a record is read as a
 sign-in only when it carries a time (`createdDateTime`), a client address (`ipAddress`) and
-the user or the application signed in to. Entra directory audit
-records, risk detections, risky users and user lists name a `userPrincipalName` too, but
-they are not sign-ins: a file of them is listed as a member REMN has no parser for (in the
-event-log import, as "not a recognised Microsoft 365 or Entra export"), and such a record
-inside a sign-in file is counted as not read. Field names are read in any case, so the
+the user or the application signed in to. Directory audits, risk detections, risky users
+and user lists name a `userPrincipalName` too, but they are not sign-ins: a file of
+directory audits is read as such (below), and a file of the others is listed as a member
+REMN has no parser for (in the event-log import, as "not a recognised Microsoft 365 or Entra
+export"). A JSON file is of the kind of its first record, and a record of another kind inside
+it is counted as not read: the evidence's statistics (`notRead`) and its member list say how
+many, and the member is marked failed. Field names are read in any case, so the
 PascalCase columns of `Get-MgAuditLogSignIn | Export-Csv` land on the same names as the
 Graph JSON; a column that export wrote as a .NET type name (`Status`, `Location`,
 `DeviceDetail`) is left out. A sign-in whose export gives neither a status nor an error code
 has no `status`, and its summary says the outcome is not in the export: it is not counted as
 a successful sign-in.
+
+A directory audit becomes a row with the provider `Microsoft Entra ID Audit`, the channel
+`Entra Audit` and the category `Entra audit`. Its `operation` is the activity as the Unified
+Audit Log names it, with a closing period (`Consent to application.`, `Add member to
+role.`), so the rules, stories and chains that know an audit log record know the same
+activity in a directory audit; `description` and `data.activityDisplayName` keep Entra's own
+spelling, and Privileged Identity Management activities keep theirs. The initiator, a user
+or an application, is `subjectUser`, and its address `ipAddress`; the first target with a
+user principal name is `targetUser`, and the first named target that is not a user
+`objectName`. Each modified property is `data.<name>` with its new value and
+`data.<name>.old` with its old one (`data.Role.DisplayName`, `data.ConsentAction.Permissions`),
+each additional detail `data.<key>` (`data.User-Agent`), and the initiator and the targets
+`data.initiatedBy.*` and `data.Target.*`. A field REMN does not know is kept under its own
+name in `data`. A record whose id holds a GUID is kept once, as an audit log record is.
+
+The admin centre's CSV download writes the date, service, category, activity and result
+columns in the language of the portal, so those five are read by their place, first and third
+to sixth; the other columns are named in English in every language. It holds at most three
+targets with five modified properties each and six additional details, which is all REMN can
+read of a record from it, and no record id, so a record downloaded twice is in the case twice.
+`Get-MgAuditLogDirectoryAudit | Export-Csv` writes the initiator, the targets and the details
+as .NET type names, so its rows say what was done and when but not by whom; the JSON from
+the same cmdlet holds them. Azure Monitor records of the `AuditLogs` category are not read:
+Microsoft says their schema may differ from Graph's.
 
 Rows carry `provider`, `channel` (the workload), `category` (`M365 Exchange`,
 `M365 Entra`, `Entra sign-in`, …), `operation`, `subjectUser` and `targetUser`,

@@ -1,5 +1,6 @@
 """
-Microsoft 365 Unified Audit Log (UAL) and Entra ID sign-in exports -> event rows.
+Microsoft 365 Unified Audit Log (UAL), Entra ID sign-in and Entra ID directory audit exports ->
+event rows.
 
 Business-email-compromise investigations live on three sources: the mailbox itself, the
 Unified Audit Log (inbox rules, forwarding, MailItemsAccessed, consent grants, role changes)
@@ -15,18 +16,24 @@ inside zip/tar archives):
     m365-ual-json       JSON array / NDJSON of AuditData objects, or of {..., "AuditData": "<json>"} rows
     entra-signin-json   JSON array / NDJSON of Graph signIn objects (Get-EntraSignInLogs, Goose)
     entra-signin-csv    Entra portal CSV export or a Graph-property CSV
+    entra-audit-json    Graph directoryAudit objects (auditLogs/directoryAudits, the portal's JSON download)
+    entra-audit-csv     the portal's audit log CSV download, or directoryAudit properties as columns
 
 Row conventions (shared with the EVTX parser so rules can mix both):
-    provider   "Microsoft 365 Unified Audit Log" | "Microsoft Entra ID Sign-in"
+    provider   "Microsoft 365 Unified Audit Log" | "Microsoft Entra ID Sign-in" | "Microsoft Entra ID Audit"
     channel    the UAL Workload (Exchange, AzureActiveDirectory, SharePoint, OneDrive ...) | "Entra SignIn"
-    category   "M365 Exchange" | "M365 Entra" | "M365 SharePoint" | ... | "Entra sign-in"
-    operation  the UAL Operation / "SignIn"
+               | "Entra Audit"
+    category   "M365 Exchange" | "M365 Entra" | "M365 SharePoint" | ... | "Entra sign-in" | "Entra audit"
+    operation  the UAL Operation / "SignIn" / a directory activity as the UAL names it ("Consent to
+               application.")
     subjectUser = user (actor UPN), targetUser = affected user when the operation has one
     ipAddress   client IP (port and brackets stripped), status / statusText, objectName
     data        every AuditData field flattened one level: Parameters, ExtendedProperties,
                 ModifiedProperties (NewValue, plus "<name>.old"), OperationProperties, Target,
                 Actor, AppAccessContext.*; Entra: appDisplayName, clientAppUsed, country, city,
-                riskLevelDuringSignIn, riskState, conditionalAccessStatus, errorCode ...
+                riskLevelDuringSignIn, riskState, conditionalAccessStatus, errorCode ...; directory
+                audits: their modified properties under the names the UAL gives them, initiatedBy.*,
+                Target.*, additionalDetails by key
 """
 
 from __future__ import annotations
@@ -58,7 +65,8 @@ if csv.field_size_limit() < MAX_FIELD_CHARS:
 
 UAL_PROVIDER = "Microsoft 365 Unified Audit Log"
 ENTRA_PROVIDER = "Microsoft Entra ID Sign-in"
-FORMATS = ("m365-ual-csv", "m365-ual-json", "entra-signin-json", "entra-signin-csv")
+AUDIT_PROVIDER = "Microsoft Entra ID Audit"
+FORMATS = ("m365-ual-csv", "m365-ual-json", "entra-signin-json", "entra-signin-csv", "entra-audit-json", "entra-audit-csv")
 
 _WORKLOAD_CATEGORY = {
     "exchange": "M365 Exchange",
@@ -145,19 +153,29 @@ def detect_format(name: str, head: bytes) -> str | None:
     if text.startswith(("[", "{")):
         if '"auditdata"' in low or ('"operation"' in low and ('"workload"' in low or '"creationtime"' in low)):
             return "m365-ual-json"
-        if is_signin(_KEY_RE.findall(text)):
+        keys = _KEY_RE.findall(text)
+        kind = entra_kind(keys)
+        # a file is of the kind of its first record: a sign-in file with a directory audit in it is
+        # a sign-in file, whose audit record is not read
+        if is_signin(keys) and not (kind and low.find(f'"{_KIND_KEY[kind]}"') < low.find('"createddatetime"')):
             return "entra-signin-json"
         # Azure Monitor diagnostic records (Log Analytics, Event Hub, storage account): the
         # sign-in is under "properties", past the head
         if any(f'"category": "{c}"' in low or f'"category":"{c}"' in low for c in _SIGNIN_CATEGORIES):
             return "entra-signin-json"
-        return None
+        # Azure Monitor records of the other categories hold an audit or risk record under
+        # "properties" in a schema Microsoft says may differ from Graph's: they are not read
+        if _MONITOR_CATEGORY_RE.search(low):
+            return None
+        return f"entra-{kind}-json" if kind else None
     header = _header_line(text)
     if "auditdata" in header.lower():
         return "m365-ual-csv"
-    if is_signin(next(csv.reader([header]), [])):
+    columns = next(csv.reader([header]), [])
+    if is_signin(columns):
         return "entra-signin-csv"
-    return None
+    kind = entra_kind(columns)
+    return f"entra-{kind}-csv" if kind else None
 
 
 UNRECOGNISED = "not a recognised Microsoft 365 or Entra export"
@@ -182,6 +200,28 @@ def is_signin(keys: Iterable[Any]) -> bool:
     low = {str(k).strip().lower() for k in keys}
     low = {(_PORTAL_MAP.get(k) or k).lower() for k in low}
     return "createddatetime" in low and "ipaddress" in low and bool(low & _SIGNIN_WHO)
+
+
+_MONITOR_CATEGORY_RE = re.compile(r'"category"\s*:\s*"(?:auditlogs|riskyusers|userriskevents|serviceprincipalriskevents|riskyserviceprincipals)"')
+# The columns the Entra admin centre writes in its audit log download whatever the language of the
+# portal; the date, service, category, activity and result columns are translated.
+_PORTAL_AUDIT_COLUMNS = frozenset({"correlationid", "resultreason", "actortype", "target1type"})
+
+
+# the field only a record of each kind has, by its lower case
+_KIND_KEY = {"audit": "activitydisplayname"}
+
+
+def entra_kind(keys: Iterable[Any]) -> str | None:
+    """Which Entra record a record or a table with these field names (any case) holds, by the
+    fields Microsoft documents for it: "audit" (a directoryAudit, or a row of the portal's audit
+    log download); None for anything else."""
+    low = {str(k).strip().lower() for k in keys}
+    if "activitydisplayname" in low and "activitydatetime" in low:
+        return "audit"
+    if _PORTAL_AUDIT_COLUMNS <= low:
+        return "audit"
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -886,7 +926,7 @@ _GRAPH_NAMES = {
 _GRAPH_NAMES["riskeventtypesv2"] = "riskEventTypes_v2"
 # Export-Csv writes an object it cannot flatten as its .NET type name: a status, a location or a
 # device that the export does not hold, never a value.
-_TYPE_NAME_RE = re.compile(r"^(?:Microsoft\.Graph\.(?:Beta\.)?PowerShell\.Models\.\w+|System\.[\w.`]+(?:\[[^\]]*\])+)$")
+_TYPE_NAME_RE = re.compile(r"^(?:Microsoft\.Graph\.(?:Beta\.)?PowerShell\.Models\.\w+(?:\[\])?|System\.[\w.`]+(?:\[[^\]]*\])+)$")
 
 
 def _graph_keys(d: dict[str, Any]) -> dict[str, Any]:
@@ -1033,6 +1073,270 @@ def entra_row(o: dict[str, Any], day_first: bool | None = None) -> dict[str, Any
         "data": data,
         "summary": summary[:500],
     }
+
+
+# ---------------------------------------------------------------------------
+# Entra directory audit rows
+# ---------------------------------------------------------------------------
+def _canon(d: dict[str, Any], names: dict[str, str]) -> dict[str, Any]:
+    """d with its keys under the names Microsoft documents (names: lower case -> documented), in
+    whatever case the export wrote them (the Graph PowerShell SDK writes PascalCase), nested
+    objects included. A value Export-Csv wrote as a .NET type name is left out: the export does
+    not hold it. A name already in documented form wins over another case of it."""
+    out: dict[str, Any] = {}
+    for k, v in d.items():
+        if isinstance(v, str) and _TYPE_NAME_RE.match(v.strip()):
+            continue
+        name = names.get(str(k).strip().lower(), str(k))
+        if isinstance(v, dict):
+            v = _canon(v, names)
+        elif isinstance(v, list):
+            v = [_canon(x, names) if isinstance(x, dict) else x for x in v]
+        if name not in out or k == name:
+            out[name] = v
+    return out
+
+
+# directoryAudit and the types it holds (auditActivityInitiator, userIdentity, appIdentity,
+# targetResource, modifiedProperty, keyValue), learn.microsoft.com/graph/api/resources/directoryaudit
+_AUDIT_NAMES = {
+    n.lower(): n
+    for n in (
+        "activityDateTime",
+        "activityDisplayName",
+        "additionalDetails",
+        "category",
+        "correlationId",
+        "id",
+        "initiatedBy",
+        "loggedByService",
+        "operationType",
+        "result",
+        "resultReason",
+        "targetResources",
+        "user",
+        "app",
+        "displayName",
+        "userPrincipalName",
+        "ipAddress",
+        "appId",
+        "servicePrincipalId",
+        "servicePrincipalName",
+        "type",
+        "groupType",
+        "modifiedProperties",
+        "oldValue",
+        "newValue",
+        "key",
+        "value",
+    )
+}
+# the audit log writes a directory activity with a closing period ("Consent to application.");
+# rules, stories and chains know the activities by those names. Privileged Identity Management
+# names its own without one, and the audit log spells this one with a dash and a space instead.
+_ACTIVITY_AS_WRITTEN = frozenset({"update application - certificates and secrets management"})
+
+
+def ual_operation(activity: str, service: Any = None) -> str:
+    """A directory activity ("Consent to application") under the name the Unified Audit Log gives
+    it ("Consent to application.")."""
+    low = activity.lower()
+    if not activity or activity.endswith(".") or low in _ACTIVITY_AS_WRITTEN or "privileged identity management" in str(service or "").lower():
+        return activity
+    return activity + "."
+
+
+_GUID_IN_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+
+
+def resource_key(prefix: str, value: Any) -> str | None:
+    """record_key for an id that holds a GUID among other text, as a directory audit's does
+    ("Directory_<guid>_<suffix>"): the whole id is the record's identity. An id without a GUID in
+    it gives no key, as in record_key."""
+    v = str(value or "").strip()
+    return f"{prefix}:{v.lower()}" if len(v) <= 200 and _GUID_IN_RE.search(v) else None
+
+
+def audit_row(o: dict[str, Any], when: _Dates | None = None, utc: bool = False) -> dict[str, Any] | None:
+    """A Graph directoryAudit (any case of its names) -> event row, its time read by ``when``
+    (utc: the column it came from says UTC); None for a record that is not one."""
+    a = _canon(o, _AUDIT_NAMES)
+    activity = str(a.get("activityDisplayName") or "").strip()
+    if not activity:
+        return None
+    ts, iso, marks = (when or _Dates()).read(a.get("activityDateTime"), utc)
+    initiator = a.get("initiatedBy") if isinstance(a.get("initiatedBy"), dict) else {}
+    by_user = initiator.get("user") if isinstance(initiator.get("user"), dict) else {}
+    by_app = initiator.get("app") if isinstance(initiator.get("app"), dict) else {}
+    actor = str(_first(by_user, "userPrincipalName", "displayName", "id") or _first(by_app, "displayName", "servicePrincipalName", "appId") or "").strip()
+    ip = clean_ip(by_user.get("ipAddress") or a.get("ipAddress"))
+    targets = [t for t in a.get("targetResources") or [] if isinstance(t, dict)]
+    target_user = next((str(t["userPrincipalName"]) for t in targets if t.get("userPrincipalName")), None)
+    named = [t for t in targets if t.get("displayName")]
+    obj = next((str(t["displayName"]) for t in named if str(t.get("type") or "").lower() != "user"), None) or (str(named[0]["displayName"]) if named else None)
+    result = str(a.get("result") or "").strip()
+    data: dict[str, Any] = {
+        k: a.get(k) for k in ("id", "correlationId", "activityDisplayName", "category", "loggedByService", "operationType", "result", "resultReason")
+    }
+    for who, ident in (("user", by_user), ("app", by_app)):
+        for k, v in ident.items():
+            data[f"initiatedBy.{who}.{k}"] = _scalar(v)
+    if targets:
+        data["Target"] = _cut("; ".join(str(t.get("id")) for t in targets if t.get("id")), 2000)
+        data["Target.Type"] = _cut(", ".join(str(t.get("type") or "") for t in targets), 200)
+        data["Target.DisplayName"] = _cut("; ".join(str(t["displayName"]) for t in named), 2000)
+        data["Target.UserPrincipalName"] = "; ".join(str(t["userPrincipalName"]) for t in targets if t.get("userPrincipalName"))
+    # what changed, under the names the audit log gives it (Role.DisplayName, ConsentAction.Permissions,
+    # StrongAuthenticationMethod); the first target's value when two name the same property
+    for t in targets:
+        for prop in t.get("modifiedProperties") or []:
+            if isinstance(prop, dict) and prop.get("displayName"):
+                name = str(prop["displayName"])
+                data.setdefault(name, _clean_json_string(prop.get("newValue")))
+                old = _clean_json_string(prop.get("oldValue"))
+                if old not in (None, "", "[]"):
+                    data.setdefault(name + ".old", old)
+    for detail in a.get("additionalDetails") or []:
+        if isinstance(detail, dict) and detail.get("key"):
+            data.setdefault(str(detail["key"]), _scalar(detail.get("value")))
+    # what the export holds beyond the documented properties is kept as it is
+    for k, v in a.items():
+        if k not in _AUDIT_KEPT and not str(k).startswith("@"):
+            data.setdefault(str(k), _scalar(v))
+    data = {k: v for k, v in data.items() if v not in (None, "")}
+    failed = result.lower() in ("failure", "timeout")
+    summary = f"{activity} by {actor or '?'}"
+    if ip:
+        summary += f" from {ip}"
+    if data.get("Role.DisplayName"):
+        summary += f": role {data['Role.DisplayName']}"
+    if target_user or obj:
+        summary += f" on {target_user or obj}"
+    if data.get("ConsentAction.Permissions"):
+        summary += f" {str(data['ConsentAction.Permissions'])[:120]}"
+    if result and result.lower() != "success":
+        summary += f" [{result}{': ' + str(a['resultReason']) if a.get('resultReason') else ''}]"
+    row: dict[str, Any] = {
+        "ts": ts,
+        "tsIso": iso,
+        "eventId": None,
+        "recordId": None,
+        "level": 3 if failed else 4,
+        "levelName": "Warning" if failed else "Information",
+        "provider": AUDIT_PROVIDER,
+        "channel": "Entra Audit",
+        "computer": None,
+        "category": "Entra audit",
+        "description": activity,
+        "operation": ual_operation(activity, a.get("loggedByService")),
+        "objectName": obj[:500] if obj else None,
+        "objectType": next((str(t["type"]) for t in targets if t.get("type")), None),
+        "user": actor or None,
+        "upn": actor or None,
+        "subjectUser": actor or None,
+        "targetUser": target_user,
+        "ipAddress": ip,
+        "status": result or None,
+        "statusText": str(a.get("resultReason") or "") or None,
+        "failureReason": (str(a.get("resultReason") or "") or None) if failed else None,
+        "workstation": str(data.get("User-Agent") or "")[:200] or None,
+        "recordKey": resource_key("entra-audit", a.get("id")),
+        "data": data,
+        "summary": summary[:500],
+    }
+    if marks:
+        row["_marks"] = marks
+    return row
+
+
+# the properties audit_row reads into a row; any other is kept under its own name
+_AUDIT_KEPT = frozenset(
+    {"activityDateTime", "activityDisplayName", "additionalDetails", "category", "correlationId", "id", "initiatedBy"}
+    | {"loggedByService", "operationType", "result", "resultReason", "targetResources", "ipAddress"}
+)
+
+
+def _portal_audit(columns: list[str]) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """What reads a row of the Entra admin centre's audit log download (columns: its header) as a
+    directoryAudit. The portal writes the date, service, category, activity and result columns in
+    the language it is shown in, so they are read by their place, first and third to sixth;
+    CorrelationId and ResultReason, second and seventh, are written in English whatever the
+    language. Its actor is a user (ActorUserPrincipalName) or an application (ActorServicePrincipal*),
+    its targets up to three with up to five modified properties each, and its additional details
+    up to six."""
+    named = {c.strip().lower(): c for c in columns}
+    placed = len(columns) >= 7 and columns[1].strip().lower() == "correlationid" and columns[6].strip().lower() == "resultreason"
+    date, service, category, activity, result = (columns[i] for i in (0, 2, 3, 4, 5)) if placed else ("",) * 5
+
+    def col(rec: dict[str, Any], name: str) -> Any:
+        v = rec.get(named.get(name.lower(), name))
+        return v if v not in (None, "") else None
+
+    def convert(rec: dict[str, Any]) -> dict[str, Any]:
+        used = {date, service, category, activity, result}
+        app = {
+            "displayName": col(rec, "ActorDisplayName") if not col(rec, "ActorUserPrincipalName") else None,
+            "servicePrincipalId": col(rec, "ActorServicePrincipalId"),
+            "servicePrincipalName": col(rec, "ActorServicePrincipalName"),
+        }
+        user = {
+            "id": col(rec, "ActorObjectId"),
+            "displayName": col(rec, "ActorDisplayName"),
+            "userPrincipalName": col(rec, "ActorUserPrincipalName"),
+            "ipAddress": col(rec, "IPAddress"),
+        }
+        is_app = not user["userPrincipalName"] and bool(app["servicePrincipalId"] or app["servicePrincipalName"])
+        targets = []
+        for n in range(1, 4):
+            props = []
+            for m in range(1, 6):
+                head = f"Target{n}ModifiedProperty{m}"
+                if col(rec, head + "Name"):
+                    props.append({"displayName": col(rec, head + "Name"), "oldValue": col(rec, head + "OldValue"), "newValue": col(rec, head + "NewValue")})
+            target = {
+                "type": col(rec, f"Target{n}Type"),
+                "displayName": col(rec, f"Target{n}DisplayName"),
+                "id": col(rec, f"Target{n}ObjectId"),
+                "userPrincipalName": col(rec, f"Target{n}UserPrincipalName"),
+                "modifiedProperties": props,
+            }
+            if any(target[k] for k in ("type", "displayName", "id", "userPrincipalName")):
+                targets.append(target)
+        details = [
+            {"key": col(rec, f"AdditionalDetail{n}Key"), "value": col(rec, f"AdditionalDetail{n}Value")}
+            for n in range(1, 7)
+            if col(rec, f"AdditionalDetail{n}Key")
+        ]
+        out: dict[str, Any] = {
+            "activityDateTime": rec.get(date) if date else None,
+            "activityDisplayName": rec.get(activity) if activity else None,
+            "loggedByService": rec.get(service) if service else None,
+            "category": rec.get(category) if category else None,
+            "result": rec.get(result) if result else None,
+            "correlationId": col(rec, "CorrelationId"),
+            "resultReason": col(rec, "ResultReason"),
+            "initiatedBy": {"app": {k: v for k, v in app.items() if v} or None} if is_app else {"user": {k: v for k, v in user.items() if v} or None},
+            "targetResources": targets,
+            "additionalDetails": details,
+        }
+        if not is_app and (app["servicePrincipalId"] or app["servicePrincipalName"]):
+            out["initiatedBy"]["app"] = {k: v for k, v in app.items() if v and k != "displayName"}
+        if col(rec, "ActorType"):
+            out["ActorType"] = col(rec, "ActorType")
+        # a column the download is not documented to hold is kept as it is
+        for k, v in rec.items():
+            if k not in used and not _PORTAL_AUDIT_RE.match(str(k).strip()) and v not in (None, ""):
+                out.setdefault(str(k), v)
+        return out
+
+    return convert
+
+
+_PORTAL_AUDIT_RE = re.compile(
+    r"^(?:CorrelationId|ResultReason|ActorType|ActorDisplayName|ActorObjectId|ActorUserPrincipalName|IPAddress|ActorServicePrincipalId|ActorServicePrincipalName"
+    r"|Target[1-3](?:Type|DisplayName|ObjectId|UserPrincipalName|ModifiedProperty[1-5](?:Name|OldValue|NewValue))|AdditionalDetail[1-6](?:Key|Value))$",
+    re.IGNORECASE,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1243,11 +1547,7 @@ def _csv_rows(fh: io.TextIOBase, stats: Any) -> Iterator[dict[str, Any]]:
     stray quote) is counted as an error and the rows after it are still read. The "#TYPE" line
     Windows PowerShell's Export-Csv writes above the header without -NoTypeInformation is passed
     over."""
-    lines: Iterator[str] = iter(fh)
-    first = next(lines, "")
-    if not first.startswith("#TYPE"):
-        lines = itertools.chain([first], lines)
-    reader = csv.DictReader(lines)
+    reader = csv.DictReader(_table_lines(fh))
     # the header is read outside the loop: a header that cannot be read fails the file
     if reader.fieldnames is None:
         return
@@ -1261,6 +1561,24 @@ def _csv_rows(fh: io.TextIOBase, stats: Any) -> Iterator[dict[str, Any]]:
                 stats.errors += 1
             continue
         yield {k: v for k, v in rec.items() if k is not None}
+
+
+def _table_lines(fh: io.TextIOBase) -> Iterator[str]:
+    """The lines of a table without the "#TYPE <type name>" line Export-Csv may write above it."""
+    lines: Iterator[str] = iter(fh)
+    first = next(lines, "")
+    return lines if first.startswith("#TYPE") else itertools.chain([first], lines)
+
+
+def _csv_header(path: str | None, data: bytes | None) -> list[str]:
+    """A table's column names."""
+    fh = _open_text(path, data)
+    try:
+        return next(csv.reader(_table_lines(fh)), [])
+    except csv.Error:
+        return []
+    finally:
+        fh.close()
 
 
 def _key_hash(key: str) -> int:
@@ -1353,6 +1671,7 @@ def iter_records(
 # what each count on a cloud export's stats says on its member of an archive or a package; {order}
 # and {zone} are what the evidence sets
 _NOTES = (
+    ("not_read", "{:,} record(s) are not of the kind the file holds and were not read"),
     ("cut", "{:,} record(s) hold a value cut at its length limit, marked by a closing …"),
     ("undated", "{:,} record(s) have no time: their date is missing or could not be read"),
     ("date_order_guessed", "{:,} record(s) were dated month-first: no date in the file has a day above 12 to show its order"),
@@ -1392,6 +1711,14 @@ def note(counts: dict[str, int], dates: DateSetting | None = None) -> str:
     return "; ".join(text.format(counts[name], order=order, zone=zone) for name, text in _NOTES if counts.get(name))
 
 
+def _not_read(stats: Any) -> None:
+    """A record of a recognised export that is not of the export's kind: an error of the file, and
+    said as what it is."""
+    if stats is not None:
+        stats.errors += 1
+        stats.not_read = getattr(stats, "not_read", 0) + 1
+
+
 def _count(row: dict[str, Any], stats: Any) -> None:
     try:
         stats.add(row)
@@ -1424,8 +1751,7 @@ def _iter_rows(path: str | None, data: bytes | None, fmt: str, stats: Any, inclu
                 signin = _signin_of(obj)
                 if signin is None:
                     # another diagnostic category (AuditLogs, RiskyUsers, ...): not a sign-in, not read
-                    if stats is not None:
-                        stats.errors += 1
+                    _not_read(stats)
                     continue
                 yield _finish(entra_row(signin), obj, stats, include_raw)
         elif fmt == "entra-signin-csv":
@@ -1434,6 +1760,26 @@ def _iter_rows(path: str | None, data: bytes | None, fmt: str, stats: Any, inclu
                 row = entra_row(obj)
                 row["ts"], row["tsIso"], marks = _csv_when(obj, _date_column, when)
                 yield _finish(row, obj, stats, include_raw, marks)
+        elif fmt == "entra-audit-json":
+            when = _Dates(dates)
+            for obj in _iter_json_objects(fh, stats):
+                row = audit_row(obj, when)
+                if row is None:
+                    _not_read(stats)
+                    continue
+                yield _finish(row, obj, stats, include_raw, row.pop("_marks", ()))
+        elif fmt == "entra-audit-csv":
+            columns = _csv_header(path, data)
+            graph = next((c for c in columns if c.strip().lower() == "activitydatetime"), None)
+            portal = None if graph else _portal_audit(columns)
+            date = graph or (columns[0] if columns else "")
+            when = _csv_dates(path, data, dates, lambda k: k == date)
+            for obj in _csv_rows(fh, stats):
+                row = audit_row(portal(obj) if portal else obj, when, utc_column(date))
+                if row is None:
+                    _not_read(stats)
+                    continue
+                yield _finish(row, obj, stats, include_raw, row.pop("_marks", ()))
         else:
             raise ValueError(f"unknown M365 format {fmt}")
     finally:

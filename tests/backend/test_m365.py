@@ -546,18 +546,21 @@ def _sources_of(path) -> tuple[list[dict], dict]:
     return list(source), source.stats()
 
 
-def test_a_directory_audit_export_is_not_read_as_sign_ins(tmp_path):
+def test_a_directory_audit_export_is_read_as_directory_audits_not_sign_ins(tmp_path):
     """A directoryAudits page names a userPrincipalName and an ipAddress, and every record of it
-    became a successful, undated sign-in of nobody. It is not an export REMN reads, and is said so."""
+    became a successful, undated sign-in of nobody. It is read as what it is."""
     page = {"@odata.context": "https://graph.microsoft.com/v1.0/$metadata#auditLogs/directoryAudits", "value": [_directory_audit(i) for i in range(3)]}
     f = tmp_path / "AuditLogs.json"
     f.write_text(json.dumps(page, indent=2), encoding="utf-8")
-    assert m365.detect_format(f.name, f.read_bytes()[:65536]) is None
+    assert m365.detect_format(f.name, f.read_bytes()[:65536]) == "entra-audit-json"
     rows, stats = _sources_of(f)
-    assert rows == [] and stats["files"][0]["status"] == "unsupported"
-    # given to the event-log import, it is not read as an event log either
-    with pytest.raises(ValueError, match="not a recognised Microsoft 365 or Entra export"):
-        list(EvtxSource(f.name, str(f), None, str(tmp_path)))
+    assert stats["files"][0]["status"] == "parsed" and len(rows) == 3
+    assert {(r["provider"], r["operation"], r["subjectUser"], r["targetUser"]) for r in rows} == {
+        (m365.AUDIT_PROVIDER, "Update user.", "admin@contoso.com", "alice@contoso.com")
+    }
+    # given to the event-log import, it is read the same way
+    rows, src = _rows(str(f))
+    assert src.format == "entra-audit-json" and [r["tsIso"] for r in rows] == ["2026-09-01T10:00:00.000Z"] * 3 and src.stats.errors == 0
 
 
 def test_risk_and_user_exports_are_not_read_as_sign_ins():
