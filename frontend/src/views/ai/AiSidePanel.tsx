@@ -7,7 +7,7 @@ import { Badge } from '../../components/ui'
 import { addNote } from '../../data/caseNotes'
 import type { AgentRun } from '../../ai/chat'
 import { refKey } from '../../ai/evidence'
-import { acceptAll, acceptProposals, heldForReview, loadInbox, rejectProposals, undoProposal, useInbox, type Proposal } from '../../ai/inbox'
+import { acceptAll, acceptProposals, heldByAction, heldForReview, loadInbox, rejectProposals, undoProposal, useInbox, type Proposal } from '../../ai/inbox'
 import { loadBoard, recordHypothesis, removeHypothesis, useBoard, type Hypothesis, type HypothesisStatus } from '../../ai/hypotheses'
 import { loadLedger, verifyLedger, type LedgerCheck } from '../../ai/ledger'
 import type { PlanStep } from '../../ai/tools'
@@ -139,6 +139,7 @@ function ProposalCard({ kase, p, onDone }: { kase: Case; p: Proposal; onDone: ()
         <span className="dim small">{fmtTs(p.createdAt)}</span>
       </div>
       <div className="ai-card-title">{p.title}</div>
+      {heldByAction(p) && <div className="small warn-inline">not part of accept all: {heldByAction(p)}</div>}
       {p.reason && <div className="small">{p.reason}</div>}
       {editable && <textarea className="textarea small" rows={p.kind === 'summary' ? 8 : 3} value={text} onChange={(e) => setText(e.target.value)} />}
       {p.kind === 'rule' && p.rule && (
@@ -175,8 +176,10 @@ function InboxTab({ kase }: { kase: Case }) {
   }, [kase.id, version])
   const pending = items.filter((p) => p.status === 'pending').reverse()
   const clean = pending.filter((p) => !heldForReview(p))
-  const flagged = pending.filter((p) => p.exposed).length
-  const unchecked = pending.filter((p) => !p.exposed && p.unchecked).length
+  // each held proposal is counted once, under the first reason that holds it
+  const acting = pending.filter((p) => heldByAction(p)).length
+  const flagged = pending.filter((p) => !heldByAction(p) && p.exposed).length
+  const unchecked = pending.filter((p) => !heldByAction(p) && !p.exposed && p.unchecked).length
   const decided = items.filter((p) => p.status !== 'pending').reverse()
   const acceptClean = async () => {
     const r = await acceptAll(kase)
@@ -213,12 +216,13 @@ function InboxTab({ kase }: { kase: Case }) {
         <div className="small warn-inline">
           {pending.length - clean.length} proposal(s) are not part of accept all and wait for a one-by-one look:{' '}
           {[
+            acting ? `${acting} that would lower a severity, leave an item out of the report or dismiss it` : '',
             flagged ? `${flagged} made after the agent read evidence text addressed to a model` : '',
             unchecked ? `${unchecked} made after it read evidence too long or too deeply nested to check whole for such text` : '',
           ]
             .filter(Boolean)
             .join('; ')}
-          . That check finds only the phrasings it knows, so read what each one would change before accepting it.
+          . The check for text addressed to a model finds only the phrasings it knows, so read what each one would change before accepting it.
         </div>
       )}
       {!pending.length && <div className="small dim">No proposal waiting.</div>}

@@ -189,13 +189,17 @@ author and time. An accepted proposal can be undone from the inbox. A newer deci
 the same item, or a newer summary, supersedes the older one. Decision proposals also show
 on their items on the Review page, and accepting one there settles it in the inbox. A
 decision word from the other kind of item is read for its meaning: "confirmed" on an
-incident is applied as escalated, "benign" as reviewed. A proposal is never accepted in
-bulk when the run that made it had read evidence text addressed to a model, or evidence too
-long or too deeply nested for that check to read whole (a string past its first 20,000
-characters, a list past its first 200 items, a value nested deeper than 8): "accept all"
-leaves it pending, the card is marked, and the inbox says how many wait for a one-by-one
-look and why. For the triage pass this holds for every proposal of a batch, since the
-model reads the batch at once.
+incident is applied as escalated, "benign" as reviewed. A decision that would lower an
+item's severity, leave the item out of the report, or mark it a false positive (a chain
+benign) is never accepted in bulk, whatever the check below found: it is what a lure in
+the evidence would ask for, and the check misses most lures. Each proposal records the
+severity it would replace, so one that lowers it is known; one whose severity it replaces
+was not recorded waits too. Nor is any proposal accepted in bulk when the run that made it
+had read evidence text addressed to a model, or evidence too long or too deeply nested for
+that check to read whole (a string past its first 20,000 characters, a list past its first
+200 items, a value nested deeper than 8). "accept all" leaves these pending, the card says
+why, and the inbox says how many wait for a one-by-one look and why. For the triage pass the
+evidence marks hold for every proposal of a batch, since the model reads the batch at once.
 
 ## The AI ledger
 
@@ -224,14 +228,16 @@ report this"), is found before the model reads it (`frontend/src/ai/evidence.ts`
 result then opens with a REMN notice naming the rows and fields, which says it is evidence
 and may show intent, never an instruction; the step shows the text in the chat; the ledger
 records it; and every proposal the run makes afterwards is marked. Evidence the analyst
-puts in a question (the story walk-through does) is checked the same way. The triage pass
-marks every proposal of a batch in which any item does the same. The prompts say it too,
+puts in a question (the story walk-through does) is checked the same way, and the ledger
+records what was found in it as a notice of "the question", once, by the run that answers
+that question. The triage pass marks every proposal of a batch in which any item does the
+same. The prompts say it too,
 and the security page describes the rest ([security](security.md)).
 
 The check is a handful of English patterns. It is there to show the analyst what it finds,
 not to make the model safe from what it misses: a proposal made after text it did not find
-is accepted by "accept all" like any other, so read what a proposal would change before
-accepting it. What it finds was measured on an invented set
+is accepted by "accept all" like any other unless what it does holds it (above), so read
+what a proposal would change before accepting it. What it finds was measured on an invented set
 (`tests/fixtures/injection_payloads.json`, run by
 `frontend/src/ai/evidence.payloads.test.ts`), the check alone and no model:
 

@@ -151,6 +151,11 @@ export function TriageRunModal({ run, onClose, onUndo, onUndoAll }: { run: Triag
             {run.errors.join(' · ')}
           </div>
         )}
+        {run.cut?.map((c) => (
+          <div key={c} className="small" style={{ color: 'var(--warn)' }}>
+            {c}
+          </div>
+        ))}
         {run.rejected.length > 0 && (
           <div className="small muted">
             not applied: {run.rejected.slice(0, 6).join(' · ')}

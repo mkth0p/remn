@@ -37,7 +37,8 @@ export interface Proposal {
   citations: RowRef[]
   /** decision: 'finding:<id>' | 'chain:<id>' | 'incident:<id>' */
   target?: string
-  decision?: { decision?: Decision; severity?: Severity; include?: boolean; unlink?: number[]; narrative?: string; note?: string }
+  /** `from`: the item's severity when the decision was proposed, so a proposal that lowers it is known */
+  decision?: { decision?: Decision; severity?: Severity; from?: Severity; include?: boolean; unlink?: number[]; narrative?: string; note?: string }
   note?: { kind: CaseNote['kind']; text: string; ts?: number | null; link?: CaseNote['link'] }
   mark?: { source: 'events' | 'mails'; refs: number[]; verdict: RowMarkVerdict; tags: string[] }
   rule?: { yaml: string; ruleId: string; test: { findings: number; errors: string[]; sample: string[] } }
@@ -204,12 +205,32 @@ export async function acceptProposals(kase: Case, ids: string[], edits: Record<s
   return { accepted, failed }
 }
 
+const RANK: Record<Severity, number> = { info: 0, low: 1, medium: 2, high: 3, critical: 4 }
+
+/**
+ * Why a decision waits for the analyst whatever was read before it, or null. What a lure in the
+ * evidence would ask for is a decision that hides: one that lowers a severity, leaves an item out
+ * of the report or dismisses it as a false positive (a benign chain).
+ */
+export function heldByAction(p: Proposal): string | null {
+  const d = p.kind === 'decision' ? p.decision : undefined
+  if (d?.decision === 'false_positive') return 'it would mark the item a false positive'
+  if (d?.decision === 'benign') return 'it would mark the chain benign'
+  if (d?.include === false) return 'it would leave the item out of the report'
+  if (d?.severity && !d.from) return `it would set the severity to ${d.severity}, and the severity it replaces was not recorded`
+  if (d?.severity && d.from && RANK[d.severity] < RANK[d.from]) return `it would lower the severity from ${d.from} to ${d.severity}`
+  return null
+}
+
 /**
  * Why a proposal waits for the analyst to look at it alone, or null when "accept all" may take it.
- * The check for text addressed to a model finds only what it has patterns for, so it is not what
- * makes accepting in bulk safe; what it found, and what it could not read, keep a proposal out.
+ * A decision that hides waits whatever the check for text addressed to a model found, since that
+ * check finds only the phrasings it has patterns for (a lure in another language, encoded or split
+ * passes). What it did find, and what it could not read whole, keep any proposal out too.
  */
 export function heldForReview(p: Proposal): string | null {
+  const byAction = heldByAction(p)
+  if (byAction) return byAction
   if (p.exposed) return 'the agent proposed it after reading evidence text addressed to a model'
   if (p.unchecked) return 'the agent proposed it after reading evidence too long or too deeply nested to check whole for such text'
   return null

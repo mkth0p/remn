@@ -344,6 +344,7 @@ describe('ReviewView', () => {
         asked: 2,
         errors: [],
         rejected: ['incident:9: unknown id'],
+        cut: ['batch 1 of 1: its items came to 91,204 characters and the prompt carries 90,000, so the model read 1 of its 2 item(s) in part or not at all: Scheduled task with suspicious command'],
         proposed: false,
         entries: [
           {
@@ -375,6 +376,7 @@ describe('ReviewView', () => {
       expect(modal()).toContain('persistence by a task')
       expect(modal()).toContain('1 of 2 item(s) got no decision')
       expect(modal()).toContain('not applied: incident:9: unknown id')
+      expect(modal()).toContain('so the model read 1 of its 2 item(s) in part or not at all: Scheduled task with suspicious command')
       fireEvent.click(button('undo'))
       await waitFor(async () => expect((await db.findings.toArray()).map((x) => x.status)).toEqual(['new', 'new']), WAIT)
       await waitFor(() => expect(document.querySelector('.triage-table')?.textContent).toContain('undone'), WAIT)

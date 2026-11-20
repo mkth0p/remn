@@ -378,8 +378,11 @@ analyst applies or dismisses it, exactly like a proposal from the chat. A popup 
 proposals of the pass (item, decision, severity before and after, in or out of the
 report, reason). Text in the evidence can try to steer a model, and a pass that wrote its
 answers straight away could take a critical incident out of the report with nobody
-looking; a proposal to lower a severity or leave an item out deserves a second look. The
-executive summary is drafted from the Report page.
+looking; a proposal to lower a severity, leave an item out or dismiss it is never taken by
+"accept all" and waits for the analyst one by one. A prompt carries at most 90,000
+characters of a batch's items: past that the rest of the batch is cut, and the popup, a
+message for a single item and the AI ledger name the items the model read in part or not
+at all. The executive summary is drafted from the Report page.
 
 The triage prompt is `SYSTEM_TRIAGE` in `backend/services/ai/prompts.py`. The reply is a
 JSON array checked item by item: unknown ids, wrong words and unlink ids that are not

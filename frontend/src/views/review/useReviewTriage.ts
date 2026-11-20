@@ -49,6 +49,7 @@ export function useReviewTriage({
     setSuggesting(true)
     try {
       const run = await runTriage(kase, [it], reviews)
+      if (run.cut?.length) toast('warn', run.cut.join('; '), 0)
       if (run.errors.length) toast('err', run.errors.join('; '), 0)
       else if (!run.entries.length) toast('err', `the model gave no usable decision${run.rejected.length ? `: ${run.rejected[0]}` : ''}`, 0)
       reload()
