@@ -363,7 +363,9 @@ ledger with a check of its hash chain. Past investigations are listed on the lef
 The Review page is where a case gets cleared. It walks the analyst through every attack
 chain (by score) and then every incident (by severity), one card at a time, with `j` and
 `k` to move and `r`, `e`, `f` and `x` for reviewed, confirmed, false positive and
-in-or-out of the report.
+in-or-out of the report. The verdict bar above them shows what the report's cover will
+print: the verdict, the completeness of the review (how complete it is, not how sure its
+conclusion is), how many items are decided, and the threat profile.
 
 A chain card takes a verdict (confirmed, unsure, benign), a severity, an inclusion switch
 and a narrative that replaces the automatic summary in the report; "draft with the

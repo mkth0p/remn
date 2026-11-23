@@ -8,7 +8,8 @@ const HEX = (
 )
 
 /**
- * The state of the case as the report will print it, live: the verdict seal, the confidence, how
+ * The state of the case as the report will print it, live: the verdict seal, the completeness of
+ * the review (how complete it is, not how sure its conclusion is, as the cover says), how
  * far the review has come, and the threat profile as one badge per tactic (filled when a confirmed
  * item carries it, outlined when only observed). The same functions build the report's cover, so
  * what the analyst sees here is what the reader will see there.
@@ -42,8 +43,8 @@ export function VerdictBar({
       <div className="verdict-text">
         <div className="line">{verdict.detail}</div>
         <div className="row wrap small" style={{ gap: 10 }}>
-          <span className={`conf ${confidence.level}`}>
-            <b>confidence {confidence.level}</b>
+          <span className={`conf ${confidence.level}`} title="how complete the review is, not how sure its conclusion is">
+            <b>completeness {confidence.level}</b>
             <span className="muted">{confidence.reasons.slice(0, 2).join(' · ')}</span>
           </span>
           <span className="muted">

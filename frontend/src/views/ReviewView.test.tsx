@@ -137,6 +137,10 @@ describe('ReviewView', () => {
         WAIT,
       )
       expect(screen.getByText('print the report')).toBeTruthy()
+      // the bar and the done panel rate how complete the review is, as the cover does, not how sure it is
+      expect(document.querySelector('.verdict-bar .conf b')?.textContent).toMatch(/^completeness (high|medium|low)$/)
+      expect(document.querySelector('.review-done')?.textContent).toMatch(/, completeness (high|medium|low)\./)
+      expect(document.querySelector('.verdict-bar')?.textContent).not.toMatch(/confidence/)
       // the persistence badge is filled now that a confirmed item carries T1053
       expect(document.querySelector('.verdict-badges .hex.confirmed')).toBeTruthy()
     },

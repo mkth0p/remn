@@ -272,7 +272,7 @@ export function ReviewView() {
               <IconCheck />
               <span>
                 Every item is decided. The report will open on <b>{report.verdict.label}</b>
-                {report.verdict.severity ? ` (${report.verdict.severity})` : ''}, confidence {report.confidence.level}.
+                {report.verdict.severity ? ` (${report.verdict.severity})` : ''}, completeness {report.confidence.level}.
               </span>
               <button className="btn sm primary" onClick={() => setView('report')}>
                 <IconReport /> print the report
