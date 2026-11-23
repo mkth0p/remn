@@ -16,12 +16,15 @@ inside zip/tar archives):
     m365-ual-json       JSON array / NDJSON of AuditData objects, or of {..., "AuditData": "<json>"} rows
     entra-signin-json   JSON array / NDJSON of Graph signIn objects (Get-EntraSignInLogs, Goose)
     entra-signin-csv    Entra portal CSV export or a Graph-property CSV
-    entra-audit-json    Graph directoryAudit objects (auditLogs/directoryAudits, the portal's JSON download)
+    entra-audit-json    Graph directoryAudit objects (auditLogs/directoryAudits, the portal's JSON download,
+                        or under "properties" of Azure Monitor records of the AuditLogs category)
     entra-audit-csv     the portal's audit log CSV download, or directoryAudit properties as columns
-    entra-riskdetection-json  Graph riskDetection objects (identityProtection/riskDetections)
+    entra-riskdetection-json  Graph riskDetection objects (identityProtection/riskDetections, or
+                              Azure Monitor records of the UserRiskEvents category)
     entra-riskdetection-csv   riskDetection properties as columns (Get-MgRiskDetection | Export-Csv,
                               Microsoft-Extractor-Suite Get-RiskyDetections)
-    entra-riskyuser-json      Graph riskyUser objects (identityProtection/riskyUsers)
+    entra-riskyuser-json      Graph riskyUser objects (identityProtection/riskyUsers, or Azure
+                              Monitor records of the RiskyUsers category)
     entra-riskyuser-csv       riskyUser properties as columns (Get-MgRiskyUser | Export-Csv, Get-RiskyUsers)
     exo-messagetrace-csv         Get-MessageTrace / Get-MessageTraceV2 | Export-Csv
     exo-messagetrace-report-csv  the Exchange admin centre's enhanced summary or extended report
@@ -181,18 +184,16 @@ def detect_format(name: str, head: bytes) -> str | None:
             return "m365-ual-json"
         keys = _KEY_RE.findall(text)
         kind = entra_kind(keys)
-        # a file is of the kind of its first record: a sign-in file with a directory audit in it is
-        # a sign-in file, whose audit record is not read
+        # Azure Monitor diagnostic records (Log Analytics, Event Hub, storage account) hold the
+        # record under "properties", past the head, and their category says what it is. A file is
+        # of the kind of its first record: the first category, when no Graph record comes before it
+        monitor = _MONITOR_CATEGORY_RE.search(low)
+        graph = [i for i in (low.find('"createddatetime"'), *(low.find(f'"{k}"') for k in _KIND_KEY.values())) if i >= 0]
+        if monitor and (not graph or monitor.start() < min(graph)):
+            return _MONITOR_FORMATS.get(monitor.group(1))
+        # a sign-in file with a directory audit in it is a sign-in file, whose audit record is not read
         if is_signin(keys) and not (kind and low.find(f'"{_KIND_KEY[kind]}"') < low.find('"createddatetime"')):
             return "entra-signin-json"
-        # Azure Monitor diagnostic records (Log Analytics, Event Hub, storage account): the
-        # sign-in is under "properties", past the head
-        if any(f'"category": "{c}"' in low or f'"category":"{c}"' in low for c in _SIGNIN_CATEGORIES):
-            return "entra-signin-json"
-        # Azure Monitor records of the other categories hold an audit or risk record under
-        # "properties" in a schema Microsoft says may differ from Graph's: they are not read
-        if _MONITOR_CATEGORY_RE.search(low):
-            return None
         return f"entra-{kind}-json" if kind else None
     header = _header_line(text)
     if "auditdata" in header.lower():
@@ -228,7 +229,21 @@ def is_signin(keys: Iterable[Any]) -> bool:
     return "createddatetime" in low and "ipaddress" in low and bool(low & _SIGNIN_WHO)
 
 
-_MONITOR_CATEGORY_RE = re.compile(r'"category"\s*:\s*"(?:auditlogs|riskyusers|userriskevents|serviceprincipalriskevents|riskyserviceprincipals)"')
+# the Azure Monitor categories of Entra's logs, and the format a file whose first record is of each
+# is read as; the risks of service principals are not read
+_MONITOR_CATEGORY_RE = re.compile(
+    r'"category"\s*:\s*"(signinlogs|noninteractiveusersigninlogs|serviceprincipalsigninlogs|managedidentitysigninlogs'
+    r'|auditlogs|riskyusers|userriskevents|serviceprincipalriskevents|riskyserviceprincipals)"'
+)
+_MONITOR_FORMATS = {
+    "signinlogs": "entra-signin-json",
+    "noninteractiveusersigninlogs": "entra-signin-json",
+    "serviceprincipalsigninlogs": "entra-signin-json",
+    "managedidentitysigninlogs": "entra-signin-json",
+    "auditlogs": "entra-audit-json",
+    "riskyusers": "entra-riskyuser-json",
+    "userriskevents": "entra-riskdetection-json",
+}
 
 
 def trace_kind(columns: Iterable[Any]) -> str | None:
@@ -951,6 +966,31 @@ def _signin_of(obj: Any) -> dict[str, Any] | None:
     # the envelope's time, when the sign-in itself has none
     if not props.get("createdDateTime") and obj.get("time"):
         props["createdDateTime"] = obj["time"]
+    return props
+
+
+# The Azure Monitor categories whose records hold, under "properties", a directory audit, a risky
+# user or a risk detection with the Graph record's names, by the kind entra_kind gives it; and the
+# fields that take the record's time from the envelope when it has none, the first one set
+_MONITOR_KINDS = {"auditlogs": "audit", "riskyusers": "riskyuser", "userriskevents": "riskdetection"}
+_MONITOR_TIME = {"audit": ("activityDateTime",), "riskyuser": ("riskLastUpdatedDateTime",), "riskdetection": ("detectedDateTime", "activityDateTime")}
+
+
+def _monitor_record(obj: Any, kind: str) -> dict[str, Any] | None:
+    """The record of this kind an exported object holds: a Graph record as it is, or the
+    "properties" of an Azure Monitor record of the category that holds that kind. None for an
+    Azure Monitor record of another category, or for something that is not an object."""
+    if not isinstance(obj, dict):
+        return None
+    category = str(obj.get("category") or "").lower()
+    if not isinstance(obj.get("properties"), dict) or (category not in _MONITOR_KINDS and category not in _SIGNIN_CATEGORIES):
+        return obj
+    if _MONITOR_KINDS.get(category) != kind:
+        return None
+    props = dict(obj["properties"])
+    fields = _MONITOR_TIME[kind]
+    if obj.get("time") and not any(v for k, v in props.items() if str(k).lower() in {f.lower() for f in fields}):
+        props[fields[0]] = obj["time"]
     return props
 
 
@@ -2125,16 +2165,19 @@ def _iter_rows(path: str | None, data: bytes | None, fmt: str, stats: Any, inclu
         elif fmt == "entra-audit-json":
             when = _Dates(dates)
             for obj in _iter_json_objects(fh, stats):
-                row = audit_row(obj, when)
+                record = _monitor_record(obj, "audit")
+                row = audit_row(record, when) if record is not None else None
                 if row is None:
                     _not_read(stats)
                     continue
                 yield _finish(row, obj, stats, include_raw, row.pop("_marks", ()))
         elif fmt in ("entra-riskdetection-json", "entra-riskyuser-json"):
             read = risk_detection_row if fmt == "entra-riskdetection-json" else risky_user_row
+            kind = "riskdetection" if fmt == "entra-riskdetection-json" else "riskyuser"
             when = _Dates(dates)
             for obj in _iter_json_objects(fh, stats):
-                row = read(obj, when)
+                record = _monitor_record(obj, kind)
+                row = read(record, when) if record is not None else None
                 if row is None:
                     _not_read(stats)
                     continue

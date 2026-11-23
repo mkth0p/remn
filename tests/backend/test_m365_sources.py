@@ -394,16 +394,75 @@ def test_a_record_that_is_not_a_directory_audit_is_counted_not_read(tmp_path):
     assert len(rows) == 2 and src.stats.errors == 1 and src.stats.to_dict()["notRead"] == 1
 
 
-def test_azure_monitor_records_of_the_audit_log_are_not_taken_for_graph_records():
-    """Their schema may differ from Graph's, Microsoft says: they are not read, and said so."""
-    record = {
-        "time": "2026-09-01T10:05:12Z",
-        "category": "AuditLogs",
-        "operationName": "Consent to application",
-        "properties": {"activityDisplayName": "Consent to application", "activityDateTime": "2026-09-01T10:05:12Z"},
+def _monitor(category: str, operation: str, record: dict, time: str = "2026-09-01T12:00:00.1234567Z") -> dict:
+    """An Azure Monitor record as Entra's diagnostic settings write one to an Event Hub or a storage
+    account, the record under "properties" (learn.microsoft.com/entra/identity/monitoring-health,
+    "Interpret the audit logs schema in Azure Monitor"). The tenant is invented."""
+    return {
+        "time": time,
+        "resourceId": "/tenants/00000000-0000-4000-8000-000000000001/providers/Microsoft.aadiam",
+        "operationName": operation,
+        "operationVersion": "1.0",
+        "category": category,
+        "tenantId": "00000000-0000-4000-8000-000000000001",
+        "resultSignature": "None",
+        "durationMs": 0,
+        "callerIpAddress": "203.0.113.7",
+        "correlationId": record.get("correlationId") or "00000000-0000-4000-8000-000000000002",
+        "Level": 4,
+        "properties": record,
     }
-    assert m365.detect_format("audit.json", json.dumps(record).encode()) is None
-    assert detect_evtx_format("audit.json", json.dumps(record).encode()) == "unrecognised"
+
+
+def _same_rows(rows: list[dict]) -> list[dict]:
+    return [{k: v for k, v in r.items() if k not in ("raw", "sourceFile")} for r in rows]
+
+
+@pytest.mark.parametrize(
+    ("fixture", "category", "operation", "fmt"),
+    [
+        ("entra-directory-audits.graph.json", "AuditLogs", "Add member to role", "entra-audit-json"),
+        ("entra-risky-users.graph.json", "RiskyUsers", "Risky user", "entra-riskyuser-json"),
+        ("entra-risk-detections.graph.json", "UserRiskEvents", "User Risk Detection", "entra-riskdetection-json"),
+    ],
+)
+def test_azure_monitor_records_of_the_audit_and_risk_logs_are_read_as_their_graph_records(tmp_path, fixture, category, operation, fmt):
+    """Entra's diagnostic settings write a directory audit, a risky user or a risk detection under
+    "properties" of an Azure Monitor record, as they do a sign-in, with the Graph record's names;
+    attack_data's Entra audit recordings are in that form. Such a file was not recognised. Each
+    record now gives the row its Graph form gives."""
+    graph = json.loads((FIXTURES / fixture).read_text())["value"]
+    data = "\n".join(json.dumps(_monitor(category, operation, r)) for r in graph).encode()
+    assert m365.detect_format("azure-audit.log", data[:4096]) == fmt
+    rows, src = _source(tmp_path, "azure-audit.log", data)
+    expected, _ = _fixture(tmp_path, fixture)
+    assert src.format == fmt and src.stats.errors == 0
+    assert _same_rows(rows) == _same_rows(expected) and len(rows) == len(graph)
+    # the envelope's time stands in for a record that has none of its own
+    bare = {k: v for k, v in graph[0].items() if k not in ("activityDateTime", "riskLastUpdatedDateTime", "detectedDateTime")}
+    (row,) = list(m365.iter_records(None, json.dumps(_monitor(category, operation, bare)).encode(), fmt))
+    assert row["tsIso"] == "2026-09-01T12:00:00.123Z"
+
+
+def test_a_file_of_azure_monitor_records_is_of_the_category_of_its_first_record():
+    """A capture of Entra's diagnostic settings holds records of every category. The file is read
+    as its first record's kind, and a record of another category in it is counted not read; the
+    risks of service principals are not read at all."""
+    audit = json.loads((FIXTURES / "entra-directory-audits.graph.json").read_text())["value"][0]
+    sign_in = {**make_m365.entra_signins()[0]}
+    records = [_monitor("AuditLogs", "Add member to role", audit), _monitor("SignInLogs", "Sign-in activity", sign_in)]
+    data = "\n".join(json.dumps(r) for r in records).encode()
+    assert m365.detect_format("azure.log", data) == "entra-audit-json"
+    stats = Stats()
+    rows = list(m365.iter_records(None, data, "entra-audit-json", stats=stats))
+    assert len(rows) == 1 and stats.errors == 1 and stats.to_dict()["notRead"] == 1
+    data = "\n".join(json.dumps(r) for r in reversed(records)).encode()
+    assert m365.detect_format("azure.log", data) == "entra-signin-json"
+    other = _monitor(
+        "ServicePrincipalRiskEvents", "Service principal risk detection", {"id": "1", "riskEventType": "x", "activityDateTime": "2026-09-01T10:00:00Z"}
+    )
+    assert m365.detect_format("azure.log", json.dumps(other).encode()) is None
+    assert detect_evtx_format("azure.log", json.dumps(other).encode()) == "unrecognised"
 
 
 def test_the_bec_rules_fire_on_directory_audits(tmp_path, store):
