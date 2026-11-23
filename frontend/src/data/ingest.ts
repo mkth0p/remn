@@ -202,9 +202,14 @@ export async function ingestFiles(files: File[], kase: Case, kind: (file: File) 
   }
 }
 
-export async function ingestFile(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package', ctrl?: AbortController, dates?: DateSetting): Promise<number> {
-  if (kase.storage === 'server' && kase.serverKey) return ingestToServer(file, kase, kind, ctrl, dates)
-  return ingestToBrowser(file, kase, kind, ctrl, dates)
+/**
+ * Import one file. `replaces` names the evidence a file read again stands in for: the file is then
+ * imported even though that evidence holds it, and the records that evidence holds are written
+ * again rather than taken for repeats, since it is removed once this read succeeds.
+ */
+export async function ingestFile(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package', ctrl?: AbortController, dates?: DateSetting, replaces?: number): Promise<number> {
+  if (kase.storage === 'server' && kase.serverKey) return ingestToServer(file, kase, kind, ctrl, dates, replaces)
+  return ingestToBrowser(file, kase, kind, ctrl, dates, replaces)
 }
 
 /** How an evidence file's dates were read, said once it is read; nothing when there is nothing to say. */
@@ -220,18 +225,52 @@ function logDates(name: string, stats: unknown, dates: DateSetting | undefined):
 
 /**
  * Read an evidence file again with another date order or time zone. The file dropped must be the
- * one the evidence was read from (its SHA-256 recorded at import); the evidence is removed, as
- * removing it would, and the file imported again with the setting. The analyst's note on the
- * evidence is kept. Returns the new evidence's id.
+ * one the evidence was read from (its SHA-256 recorded at import). The file is imported again with
+ * the setting, as a new evidence beside the old one, and the old one is removed, as removing it
+ * would, only once that read has succeeded. A read that fails or is cancelled is removed instead,
+ * and the evidence stays as it was. The analyst's note on the evidence is kept. Returns the new
+ * evidence's id.
  */
 export async function readAgain(evidence: Evidence, file: File, kase: Case, dates: DateSetting | undefined, hash: (file: File) => Promise<string> = hashOnly): Promise<number> {
   const sha256 = await hash(file)
   if (evidence.sha256Client && sha256 !== evidence.sha256Client) throw new Error(`${file.name} is not the file of this evidence: its SHA-256 is ${sha256}, the evidence's ${evidence.sha256Client}`)
-  await getSource(kase).deleteEvidence(evidence.id!)
-  log('info', `[${evidence.name}] evidence #${evidence.id} removed to be read again: ${describeDates(dates)}`)
-  refreshCounts(kase)
-  const id = await ingestFile(file, kase, evidence.kind, undefined, dates)
-  if (evidence.note) await getDb().evidence.update(id, { note: evidence.note })
+  log('info', `[${evidence.name}] evidence #${evidence.id} read again: ${describeDates(dates)}; it is replaced once the new read succeeds`)
+  // the rules run once the old evidence is gone, not over both copies
+  const quiet: Case = { ...kase, settings: { ...kase.settings, autoRunRules: false } }
+  const id = await ingestFile(file, quiet, evidence.kind, undefined, dates, evidence.id)
+  const db = getDb()
+  const read = await db.evidence.get(id)
+  const failed = !read
+    ? 'was cancelled'
+    : read.status !== 'done'
+      ? `failed${read.error ? `: ${read.error}` : ''}`
+      : read.integrity === 'mismatch'
+        ? 'did not receive the same bytes as the file'
+        : undefined
+  if (failed) {
+    let cleared = 0
+    if (read) {
+      try {
+        cleared = (await getSource(kase).deleteEvidence(id)).findings
+      } catch (e) {
+        log('err', `[${evidence.name}] the failed read, evidence #${id}, could not be removed (${(e as Error).message}); remove it on the Evidence page`)
+      }
+    }
+    log('warn', `[${evidence.name}] evidence #${evidence.id} kept as it was: the new read ${failed}`)
+    refreshCounts(kase)
+    if (cleared) autoRunAfterIngest(kase)
+    throw new Error(`the new read ${failed}; evidence #${evidence.id} is kept as it was`)
+  }
+  if (evidence.note) await db.evidence.update(id, { note: evidence.note })
+  try {
+    await getSource(kase).deleteEvidence(evidence.id!)
+  } catch (e) {
+    throw new Error(`evidence #${id} holds the new read, but evidence #${evidence.id} could not be removed (${(e as Error).message}); remove it on the Evidence page`, { cause: e })
+  } finally {
+    refreshCounts(kase)
+    autoRunAfterIngest(kase)
+  }
+  log('info', `[${evidence.name}] evidence #${evidence.id} replaced by evidence #${id}`)
   return id
 }
 
@@ -289,7 +328,7 @@ async function createEvidence(file: File, kase: Case, kind: 'evtx' | 'mail' | 'p
 // ---------------------------------------------------------------------------
 // server store: chunked upload + ingestion job
 // ---------------------------------------------------------------------------
-export async function ingestToServer(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package', ctrl = new AbortController(), dates?: DateSetting): Promise<number> {
+export async function ingestToServer(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package', ctrl = new AbortController(), dates?: DateSetting, replaces?: number): Promise<number> {
   const db = getDb()
   const evidenceId = await createEvidence(file, kase, kind, undefined, dates)
   const jobId = jobSeq++
@@ -307,7 +346,8 @@ export async function ingestToServer(file: File, kase: Case, kind: 'evtx' | 'mai
       },
       ctrl.signal,
     )
-    const duplicate = up.sha256Client === up.sha256Server ? await duplicateEvidence(kase.id!, evidenceId, file.webkitRelativePath || file.name, kind, up.sha256Client) : undefined
+    // a file read again is the file of the evidence it replaces, and is read whatever that holds
+    const duplicate = replaces == null && up.sha256Client === up.sha256Server ? await duplicateEvidence(kase.id!, evidenceId, file.webkitRelativePath || file.name, kind, up.sha256Client) : undefined
     if (duplicate) {
       await fetch(`/api/upload/${up.uploadId}`, { method: 'DELETE', headers: API_HEADERS })
       await db.evidence.delete(evidenceId)
@@ -330,6 +370,7 @@ export async function ingestToServer(file: File, kase: Case, kind: 'evtx' | 'mai
         keepBodies: kase.settings.keepBodies !== false,
         fileSystem: kase.settings.readFileSystem === true,
         ...(dates ? { dates } : {}),
+        ...(replaces != null ? { replaces } : {}),
         settings: {
           internalDomains: kase.settings.internalDomains,
           brands: kase.settings.brands,
@@ -384,12 +425,12 @@ export async function ingestToServer(file: File, kase: Case, kind: 'evtx' | 'mai
 // ---------------------------------------------------------------------------
 // browser store: worker (hash + NDJSON stream + IndexedDB)
 // ---------------------------------------------------------------------------
-export function ingestToBrowser(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package', ctrl = new AbortController(), dates?: DateSetting): Promise<number> {
+export function ingestToBrowser(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package', ctrl = new AbortController(), dates?: DateSetting, replaces?: number): Promise<number> {
   // the lock is taken before the evidence exists, so no other tab ever sees it unlocked
-  return whileImporting((lock) => importToBrowser(file, kase, kind, lock, ctrl, dates))
+  return whileImporting((lock) => importToBrowser(file, kase, kind, lock, ctrl, dates, replaces))
 }
 
-async function importToBrowser(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package', lock: string | undefined, ctrl: AbortController, dates?: DateSetting): Promise<number> {
+async function importToBrowser(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package', lock: string | undefined, ctrl: AbortController, dates?: DateSetting, replaces?: number): Promise<number> {
   const db = getDb()
   const evidenceId = await createEvidence(file, kase, kind, lock, dates)
   const jobId = jobSeq++
@@ -435,6 +476,7 @@ async function importToBrowser(file: File, kase: Case, kind: 'evtx' | 'mail' | '
     includeRaw: kase.settings.includeRaw !== false,
     readFileSystem: kase.settings.readFileSystem === true,
     dates,
+    replaces,
     settings: {
       internalDomains: kase.settings.internalDomains,
       brands: kase.settings.brands,

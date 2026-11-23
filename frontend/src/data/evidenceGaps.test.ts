@@ -271,6 +271,30 @@ describe('what the evidence cannot show', () => {
     expect(gaps[2].text).toContain('AuditLogs_2026-09-02.csv: exactly 250,000 directory audit records, the most the Entra admin centre downloads in one file.')
   })
 
+  it('names a Graph export whose last page links to a next one, alone or in an archive', () => {
+    const alone = ev(6, 'signins.json', { count: 1000, nextPage: 1 }, 'entra-signin-json')
+    const note = '1 file(s) end with a Graph page that links to a next one (@odata.nextLink): the pages after it were not downloaded, and their records are not in the case'
+    const pkg = ev(
+      7,
+      'tenant.zip',
+      {
+        nextPage: 1,
+        files: [
+          { name: 'tenant/AuditLogs.json', status: 'parsed', format: 'entra-audit-json', count: 6, note },
+          { name: 'tenant/SignIns.json', status: 'parsed', format: 'entra-signin-json', count: 4 },
+        ],
+      },
+      'zip',
+    )
+    const gaps = evidenceGaps({ evidence: [alone, pkg] })
+    expect(gaps.map((g) => [g.kind, g.severity, g.evidenceId])).toEqual([
+      ['export-cap', 'high', 6],
+      ['export-cap', 'high', 7],
+    ])
+    expect(gaps[0].text).toBe('signins.json: its last Graph page links to a next one (@odata.nextLink) that was not downloaded. Records on the pages after it are missing.')
+    expect(gaps[1].text).toContain('tenant/AuditLogs.json: its last Graph page links to a next one')
+  })
+
   it('says which package members were read only in part, and how far', () => {
     const pkg = ev(
       5,

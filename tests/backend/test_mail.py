@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import base64
+import email
+from email import policy
+from email.message import EmailMessage
+
 import make_samples
 
 from services.analysis.headers import parse_received, received_chain
@@ -268,6 +273,67 @@ def test_synthetic_headers_from_pst_not_penalised():
     assert "no_message_id" in set(control["flags"])
 
 
+def test_a_msg_without_transport_headers_keeps_recipients_and_sender_whose_names_hold_an_address():
+    """Outlook keeps an address as the display name of a contact who has none, and extract-msg
+    writes the recipients of a message without transport headers as "name <address>" joined by
+    semicolons. Python's strict address parser refused the whole value: the message lost its To
+    list, was flagged as sent to undisclosed recipients, and had no sender. The addresses are
+    invented."""
+    from types import SimpleNamespace
+
+    from services.parsers.mail.common import build_row
+    from services.parsers.mail.msg import _headers_from_msg
+
+    msg = SimpleNamespace(
+        header=None,
+        sender="j.dupont@interne.fr <j.dupont@interne.fr>",
+        to="m.martin@interne.fr <m.martin@interne.fr>; Paul Bernard <p.bernard@interne.fr>",
+        cc="Comptabilite (compta@interne.fr) <compta@interne.fr>",
+        bcc=None,
+        subject="Point hebdo",
+        messageId=None,
+        inReplyTo=None,
+        date=None,
+    )
+    headers, synthetic = _headers_from_msg(msg)
+    assert synthetic
+    row = build_row(headers, "On se voit jeudi.", None, [], CTX, extra={"sourceFormat": "msg", "syntheticHeaders": True})
+    assert (row["fromName"], row["fromAddr"]) == ("j.dupont@interne.fr", "j.dupont@interne.fr")
+    assert [(r["name"], r["addr"]) for r in row["to"]] == [("m.martin@interne.fr", "m.martin@interne.fr"), ("Paul Bernard", "p.bernard@interne.fr")]
+    assert [r["addr"] for r in row["cc"]] == ["compta@interne.fr"]
+    assert row["recipientCount"] == 3
+    assert "undisclosed_recipients" not in row["flags"] and "display_name_email_mismatch" not in row["flags"]
+    # without the sender's SMTP address extract-msg gives the name alone, which Outlook writes as
+    # "Name (address)" for a contact: it was read as the address "jean" named "j.dupont@interne.fr",
+    # a sender who does not exist, flagged as a display name hiding another address
+    msg.sender = "Jean Dupont (j.dupont@interne.fr)"
+    headers, _ = _headers_from_msg(msg)
+    row = build_row(headers, "On se voit jeudi.", None, [], CTX, extra={"sourceFormat": "msg", "syntheticHeaders": True})
+    assert (row["fromName"], row["fromAddr"]) == ("Jean Dupont", "j.dupont@interne.fr")
+    assert "display_name_email_mismatch" not in row["flags"]
+
+
+def test_a_display_name_that_holds_another_address_is_read_as_a_name_and_flagged():
+    """An unquoted display name holding an address is how a lure shows a trusted sender. The
+    address is the one in angle brackets, never the one in the name; the addresses are invented."""
+    from services.analysis.headers import parse_address, parse_addresses
+
+    assert parse_address("support@bank.example <attacker@evil.example>") == ("support@bank.example", "attacker@evil.example")
+    # the form behind CVE-2023-27043: the address is the one in angle brackets, not alice's
+    assert parse_address("alice@example.org)<bob@example.org>")[1] == "bob@example.org"
+    assert [a["addr"] for a in parse_addresses(["alice@example.org)<bob@example.org>, carol@example.org"])] == ["bob@example.org", "carol@example.org"]
+    # what the strict parser reads is read as before
+    assert parse_addresses(["undisclosed-recipients:;"]) == []
+    assert [a["addr"] for a in parse_addresses(["Team: a@x.example, b@x.example;"])] == ["a@x.example", "b@x.example"]
+    row = parse_message_bytes(
+        b"From: support@bank.example <attacker@evil.example>\nTo: j.dupont@interne.fr\nSubject: Account review\n"
+        b"Date: Tue, 01 Sep 2026 09:02:10 +0000\nMessage-ID: <a@evil.example>\n\nPlease review your account.\n",
+        CTX,
+    )
+    assert (row["fromName"], row["fromAddr"]) == ("support@bank.example", "attacker@evil.example")
+    assert "display_name_email_mismatch" in row["flags"]
+
+
 def _forwarded_lure(extra: list[tuple[str, str]]) -> bytes:
     return make_samples.mail(
         '"IT Department" <it@interne.fr>',
@@ -330,6 +396,53 @@ def test_a_pass_for_another_domain_does_not_authenticate_an_internal_from():
 
     f = set(row["flags"])
     assert "internal_spoof" in f and not aligned_auth(row), (row["risk"], sorted(f))
+
+
+def _forwarded_as_attachment(attached: bytes, encoding: str | None = None) -> bytes:
+    """An invented user forwards a message to the security desk as an attachment, with one line of their own."""
+    outer = EmailMessage(policy=policy.SMTP)
+    outer["From"] = "Jean Dupont <j.dupont@interne.fr>"
+    outer["To"] = "soc@interne.fr"
+    outer["Subject"] = "FW: Password expires today"
+    outer["Date"] = "Tue, 01 Sep 2026 22:20:00 +0000"
+    outer["Message-ID"] = "<fw-1@interne.fr>"
+    outer.set_content("Is this one real? Jean")
+    outer.add_attachment(email.message_from_bytes(attached, policy=policy.default))
+    data = outer.as_bytes()
+    if encoding == "base64":
+        # some clients encode the attached message, which RFC 2046 does not allow
+        head, _, rest = data.partition(b"Content-Type: message/rfc822\n")
+        part_head, _, body = rest.partition(b"\n\n")
+        inner, _, tail = body.partition(b"\n--")
+        data = head + b"Content-Type: message/rfc822\nContent-Transfer-Encoding: base64\n" + part_head + b"\n\n" + base64.encodebytes(inner) + b"\n--" + tail
+    return data
+
+
+def test_a_lure_forwarded_as_an_attachment_is_scored_as_an_attachment_not_as_the_forwarders_words():
+    """The lure's text and links were read into the forwarder's own body, and its parts were not
+    an attachment. They belong to the attached message, which the attachment analysis reads."""
+    lure = make_samples.mail(
+        '"IT Support" <it-support@interne-fr.co>',
+        "j.dupont@interne.fr",
+        "Password expires today",
+        "Your password expires today. Verify your account now: http://185.220.101.4/login.php?u=j.dupont@interne.fr",
+        extra_headers=make_samples.RECEIVED_BAD,
+        date="Tue, 01 Sep 2026 22:13:40 +0000",
+    )
+    for encoding in (None, "base64"):
+        row = parse_message_bytes(_forwarded_as_attachment(lure, encoding), CTX)
+        assert row["bodyText"].strip() == "Is this one real? Jean", encoding
+        assert row["urlCount"] == 0 and "credential_phishing_pattern" not in row["flags"], encoding
+        assert row["attachmentCount"] == 1, encoding
+        [attached] = row["attachments"]
+        assert attached["name"] == "forwarded.eml"
+        assert attached["details"]["mail"]["subject"] == "Password expires today"
+        assert {"nested_mail", "nested_url_ip_literal", "nested_credential_phishing_pattern"} <= set(attached["flags"])
+        # the lure is scored where it is, and the forwarding message carries it as an attached
+        # message, as an Outlook message attached to another already was
+        assert attached["details"]["mail"]["risk"] >= 70
+        assert {"att_nested_mail", "att_nested_credential_phishing_pattern"} <= set(row["flags"])
+        assert row["risk"] >= int(attached["risk"] * 0.9) > 0
 
 
 def test_credential_lure_from_suspicious_sender_still_high():

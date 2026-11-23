@@ -9,7 +9,8 @@
  * - chunks that fail the EVTX checksum (records changed after Windows wrote them, or damaged);
  * - record numbers in none of the files read between two files of one log (a missing archive);
  * - logs that start after the first finding (overwritten, or not collected);
- * - Unified Audit Log exports cut at a service limit (exactly 5,000 or 50,000 records);
+ * - Unified Audit Log exports cut at a service limit (exactly 5,000 or 50,000 records), and Graph
+ *   exports whose last page links to a next one that was not downloaded;
  * - MailItemsAccessed throttled (item reads not recorded for 24 hours);
  * - Entra sign-ins that start after the first finding (Entra keeps them 7 or 30 days);
  * - package members read only in part: an export past the parse limit, a text log past its line
@@ -375,9 +376,20 @@ function startsLate(seqs: Located[], incidentStart: number): GapStatement[] {
   return out
 }
 
-/** Cloud exports that hold exactly as many records as their source returns at most. */
+/**
+ * Cloud exports that hold exactly as many records as their source returns at most, and Graph exports
+ * whose last page links to a next one (@odata.nextLink): the parser counts such a file (nextPage) and
+ * says so on its member of an archive or a package.
+ */
 function exportCaps(evidence: Evidence[]): GapStatement[] {
   const out: GapStatement[] = []
+  const linked = (e: Evidence, file: string) =>
+    out.push({
+      kind: 'export-cap',
+      severity: 'high',
+      text: `${file}: its last Graph page links to a next one (@odata.nextLink) that was not downloaded. Records on the pages after it are missing.`,
+      evidenceId: e.id,
+    })
   const check = (e: Evidence, file: string, format: unknown, count: unknown, duplicates: unknown) => {
     const cap = EXPORT_CAPS.find((c) => c.formats.includes(String(format)))
     const n = Number(count ?? 0) + Number(duplicates ?? 0)
@@ -391,7 +403,11 @@ function exportCaps(evidence: Evidence[]): GapStatement[] {
   }
   for (const e of evidence) {
     check(e, e.name, e.format, e.stats?.count, e.stats?.duplicates)
-    for (const f of records(e.stats)) if (f.status === 'parsed') check(e, String(f.name ?? e.name), f.format, f.count, f.duplicates)
+    const members = records(e.stats)
+    for (const f of members) if (f.status === 'parsed') check(e, String(f.name ?? e.name), f.format, f.count, f.duplicates)
+    const cut = members.filter((f) => typeof f.note === 'string' && f.note.includes('@odata.nextLink'))
+    for (const f of cut) linked(e, String(f.name ?? e.name))
+    if (!cut.length && Number(e.stats?.nextPage ?? 0) > 0) linked(e, e.name)
   }
   return out
 }

@@ -97,10 +97,23 @@ and a message with more is flagged `attachments_truncated` while its attachment 
 the real one. An attachment over 60 MiB in a PST or OST is not read: it is listed with the
 size the mailbox declares, no hash, and the flag `not_read`.
 
+A message attached to another (a `message/rfc822` part of an `.eml` or `.mbox` message, also
+when a client wrote it in base64 as GroupWise does, or an Outlook item inside a `.msg`) is one
+of its attachments, flagged `nested_mail`. Its text and links stay out of the outer message's
+body: the attachment analysis reads it as a mail and keeps its subject, sender, date, flags and
+own score in the attachment's details.
+
 A `.msg` saved in 8-bit strings rather than Unicode is read in the code page it names. Outlook
 does not always write the message code page; when only the internet code page is there (a
 message in Chinese saved as Big5, for example), that one is used, rather than the Western
 European default that turned such a subject and sender into unreadable characters.
+
+A display name that holds an address without quotes is read as a name, and the sender's
+address is the one in angle brackets: Outlook keeps an address as the name of a contact who has
+none and writes a contact as "Name (address)", and a lure shows a trusted address there, which
+is flagged `display_name_email_mismatch`. A list in which one entry cannot be read is read entry
+by entry, so a `.msg` without transport headers, whose recipients are joined by semicolons,
+keeps them.
 
 ### Deleted and orphaned mail (PST and OST)
 
@@ -136,30 +149,44 @@ events table:
   `ManagedIdentitySignInLogs`; a record of another category, such as `AuditLogs`, is
   counted as not read);
 - Entra ID directory audits as Graph JSON (`auditLogs/directoryAudits`,
-  `Get-MgAuditLogDirectoryAudit`, a page or an array of records), or the Entra admin
-  centre's audit log download as JSON or CSV;
+  `Get-MgAuditLogDirectoryAudit`, a page or an array of records), the Entra admin
+  centre's audit log download as JSON or CSV, or the Azure Monitor records of the
+  `AuditLogs` category;
 - Entra ID Protection risk detections and risky users as Graph JSON
-  (`identityProtection/riskDetections`, `identityProtection/riskyUsers`), or their properties
+  (`identityProtection/riskDetections`, `identityProtection/riskyUsers`), their properties
   as CSV columns (`Get-MgRiskDetection | Export-Csv`, `Get-MgRiskyUser | Export-Csv`,
-  Microsoft-Extractor-Suite's `Get-RiskyDetections` and `Get-RiskyUsers`);
+  Microsoft-Extractor-Suite's `Get-RiskyDetections` and `Get-RiskyUsers`), or the Azure
+  Monitor records of the `UserRiskEvents` and `RiskyUsers` categories;
 - the Exchange Online message trace as `Get-MessageTrace` or `Get-MessageTraceV2` output
   written with `Export-Csv` (Microsoft-Extractor-Suite's `Get-MessageTraceLog`), or the
   Exchange admin centre's downloadable enhanced summary and extended reports.
 
 A `.zip` of a whole acquisition folder is walked.
 
-Not read, each for the reason given further down: Azure Monitor records of the `AuditLogs`,
-`RiskyUsers` and `UserRiskEvents` categories; ID Protection reports downloaded from the admin
+An Azure Monitor record holds the record under `properties`, with the names of the Graph
+record, and its category says what it is: it gives the row its Graph form gives, the record's
+time taken from the envelope's `time` when it has none. A file of them is of the category of
+its first record, as a JSON file is of the kind of its first record, except that a file whose
+first records include a sign-in is read as sign-ins; a record of another category in it is
+counted as not read. The risks of service principals (`ServicePrincipalRiskEvents`,
+`RiskyServicePrincipals`) are not read.
+
+Not read, each for the reason given further down: ID Protection reports downloaded from the admin
 centre whose fields are not the Graph property names; the Exchange admin centre's "Export
-results" of the message trace shown on screen; a UTF-16 file without a byte order mark. A
-Graph page that ends with `@odata.nextLink` is one page of a longer list: REMN reads the
-records it holds and does not say that more pages exist.
+results" of the message trace shown on screen.
+
+A Graph page that links to a next one (`@odata.nextLink`) is one page of a longer list. REMN
+reads the records it holds; a file whose last page has such a link stops before the end of the
+list, and the records of the pages after it are not in the case. Such a file is counted in the
+evidence's statistics (`nextPage`), said on its member of an archive or a package, and carries a
+"gaps" badge on the Evidence page, as an export cut at its limit does.
 
 Each export may be written in UTF-8, or in UTF-16 or UTF-32 with a byte order mark, as
 Windows PowerShell's `Export-Csv -Encoding Unicode` and `Out-File` write it. The `#TYPE`
 line `Export-Csv` writes above the header without `-NoTypeInformation` is passed over, and a
 date `ConvertTo-Json` wrote as `\/Date(milliseconds)\/` is read. A UTF-16 file without a
-byte order mark is not recognised.
+byte order mark is read too: the NUL beside each character of the text an export starts with
+says that it is UTF-16, and in which byte order.
 
 Outside the Azure Monitor records, whose category says what they are, a record is read as a
 sign-in only when it carries a time (`createdDateTime`), a client address (`ipAddress`) and
@@ -194,13 +221,14 @@ The admin centre's CSV download writes the date, service, category, activity and
 columns in the language of the portal, so those five are read by their place, first and third
 to sixth; the other columns are named in English in every language. It holds at most three
 targets with five modified properties each and six additional details, which is all REMN can
-read of a record from it, and no record id, so a record downloaded twice is in the case twice.
+read of a record from it, and no record id. A row that repeats another exactly, as a record
+downloaded twice does, is the same record: it is kept once, and the evidence's statistics
+(`duplicates`) and its member list say how many repeats were dropped.
 `Get-MgAuditLogDirectoryAudit | Export-Csv` writes the initiator, the targets and the details
 as .NET type names, so its rows say what was done and when but not by whom; the JSON from
 the same cmdlet holds them. The admin centre downloads at most 250,000 audit records a file:
 a CSV or JSON download of exactly that many carries a "gaps" badge on the Evidence page, since
-the records after it in its time window are probably missing. Azure Monitor records of the
-`AuditLogs` category are not read: Microsoft says their schema may differ from Graph's.
+the records after it in its time window are probably missing.
 
 A risk detection becomes a row with the provider `Microsoft Entra ID Protection`, the channel
 `Entra RiskDetection`, the category `Entra risk` and the operation `RiskDetection`, at the time
@@ -217,8 +245,7 @@ a second row. Both are a warning when the risk is medium or high or the compromi
 confirmed. A risk detection is kept once by its id. The ID Protection reports in the admin
 centre can be downloaded as CSV or JSON, but Microsoft does not document what those files
 hold: a download whose fields are the Graph property names is read, any other is not
-recognised. Azure Monitor records of the `RiskyUsers` and `UserRiskEvents` categories are not
-read.
+recognised.
 
 A message trace becomes rows with the provider `Exchange Online Message Trace`, the channel
 `Exchange MessageTrace`, the category `Exchange message trace` and the operation
@@ -283,11 +310,15 @@ way (`undated`), since it is not on the timeline.
 The date order and the time zone can be set for an evidence file where its exports cannot
 say. The detail of such a file on the Evidence page says how its dates were read and what was
 guessed or assumed, and sets an order and a zone for it: the original file is dropped again,
-checked against the SHA-256 recorded when it was imported, and the evidence is removed and
-the file imported again with the setting (its analyst note is kept; its findings are cleared
-until the rules run again). The console says which setting each import used. The import
-request takes it as the `dates` field: `{"order": "day-first" | "month-first", "zone": "UTC"
-| "+02:00" | "Europe/Paris"}`. The order set is used for every numeric date of the file's
+checked against the SHA-256 recorded when it was imported, and imported again with the
+setting as a new evidence beside the old one. The old evidence is removed only once that read
+has succeeded (its analyst note is kept; its findings are cleared until the rules run again).
+A read that fails or is cancelled is removed instead, the old evidence stays as it was, and the
+console and the message say why. While both are in the case, the records of the old one are
+not taken for records the case already holds, so the new read keeps them all. The console says
+which setting each import used. The import request takes it as the `dates` field:
+`{"order": "day-first" | "month-first", "zone": "UTC" | "+02:00" | "Europe/Paris"}`, and the
+evidence a reading again replaces as `replaces`. The order set is used for every numeric date of the file's
 Entra and message trace exports in place of the order the file shows; a date that cannot be
 read in it but can the other way is counted (`dateOrderContradicted`) and left without a
 time. The zone set

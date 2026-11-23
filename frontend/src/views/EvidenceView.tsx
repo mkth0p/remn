@@ -258,7 +258,7 @@ function EvidenceDates({ evidence, kase, onRead }: { evidence: Evidence; kase: C
   const setting = dateSetting(order, zone)
   const again = async (file: File) => {
     if (error) return toast('err', error)
-    const question = `Remove evidence #${evidence.id} and import ${file.name} again with ${describeDates(setting)}? Its findings are cleared until the rules run again; your decisions are kept.`
+    const question = `Import ${file.name} again with ${describeDates(setting)}, and replace evidence #${evidence.id} with it once it is read? If the read fails, the evidence stays as it is. Its findings are cleared until the rules run again; your decisions are kept.`
     if (!(await confirmAction(question, { title: 'Read the file again', action: 'Read again', danger: true }))) return
     onRead()
     readAgain(evidence, file, kase, setting).catch((e: Error) => toast('err', `${file.name} not read again: ${e.message}`, 0))
@@ -292,8 +292,8 @@ function EvidenceDates({ evidence, kase, onRead }: { evidence: Evidence; kase: C
         </div>
       )}
       <div className="hint">
-        To read the file with this setting, drop the original file again. Its SHA-256 is checked against the one recorded at import; the evidence is then removed and the file imported again, and its
-        findings are cleared until the rules run again.
+        To read the file with this setting, drop the original file again. Its SHA-256 is checked against the one recorded at import; the file is then imported again, and the evidence is replaced by
+        the new read once it succeeds. A read that fails leaves the evidence as it was. Its findings are cleared until the rules run again.
       </div>
       <Dropzone multiple={false} onFiles={(f) => again(f[0])} compact>
         <div className="big">drop the file to read it again</div>

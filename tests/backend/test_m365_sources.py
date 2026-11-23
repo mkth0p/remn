@@ -93,6 +93,55 @@ def test_an_audit_log_csv_written_in_utf_16_or_utf_32_is_read(tmp_path, encoding
     assert rows[0]["operation"] == records[0]["Operation"]
 
 
+@pytest.mark.parametrize("encoding", ["utf-16-le", "utf-16-be"])
+def test_an_export_in_utf_16_without_a_byte_order_mark_is_read(tmp_path, encoding):
+    """.NET's Encoding.Unicode written without its preamble, and a file cut from a longer one, are
+    UTF-16 with nothing declaring it. Read as UTF-8 such an export was not recognised; the NUL
+    beside each character of its text says how it is written."""
+    records = make_m365.ual_records()[:4]
+    data = _ual_csv(records).encode(encoding)
+    assert data[:2] not in (b"\xff\xfe", b"\xfe\xff")
+    assert detect_evtx_format("audit.csv", data[:65536]) == "m365-ual-csv"
+    rows, src = _source(tmp_path, "audit.csv", data)
+    assert src.stats.errors == 0 and [r["recordKey"] for r in rows] == [m365.record_key("ual", r["Id"]) for r in records]
+    signins = make_m365.entra_signins()[:3]
+    data = json.dumps(signins).encode(encoding)
+    assert detect_evtx_format("SignIns.json", data[:65536]) == "entra-signin-json"
+    rows, src = _source(tmp_path, "SignIns.json", data)
+    assert src.stats.errors == 0 and [r["user"] for r in rows] == [s["userPrincipalName"] for s in signins]
+
+
+@pytest.mark.parametrize("indent", [None, 2])
+def test_a_graph_export_whose_last_page_links_to_a_next_one_says_the_pages_after_it_are_missing(tmp_path, indent):
+    """A Graph page that ends with @odata.nextLink is one page of a longer list. An export that
+    stops there was read as if it were whole: the records of the pages after it are not in the
+    case, and the file now says so. A file whose last page has no link is whole, whatever its
+    earlier pages say; the links are invented."""
+    link = "https://graph.microsoft.com/v1.0/auditLogs/signIns?$skiptoken=invented"
+    signins = make_m365.entra_signins()[:4]
+    pages = [
+        {"@odata.context": "https://graph.microsoft.com/v1.0/$metadata#auditLogs/signIns", "@odata.nextLink": link, "value": signins[:2]},
+        {"@odata.context": "https://graph.microsoft.com/v1.0/$metadata#auditLogs/signIns", "value": signins[2:], "@odata.nextLink": link},
+    ]
+    sep = "\n" if indent is None else "\n\n"
+    cut = sep.join(json.dumps(p, indent=indent) for p in pages).encode()
+    stats = Stats()
+    rows = list(m365.iter_records(None, cut, "entra-signin-json", stats=stats))
+    assert len(rows) == 4 and stats.errors == 0 and stats.to_dict()["nextPage"] == 1
+    assert m365.note(m365.counts(stats)) == (
+        "1 file(s) end with a Graph page that links to a next one (@odata.nextLink): the pages after it were not downloaded, and their records are not in the case"
+    )
+    whole = sep.join(json.dumps(p, indent=indent) for p in [pages[0], {k: v for k, v in pages[1].items() if k != "@odata.nextLink"}]).encode()
+    stats = Stats()
+    assert len(list(m365.iter_records(None, whole, "entra-signin-json", stats=stats))) == 4 and "nextPage" not in stats.to_dict()
+    # a directory audit page, in a package: the member says it
+    audits = json.loads((FIXTURES / "entra-directory-audits.graph.json").read_text())
+    audits["@odata.nextLink"] = "https://graph.microsoft.com/v1.0/auditLogs/directoryAudits?$skiptoken=invented"
+    rows, stats = _package(tmp_path, "audit.zip", _zip({"tenant/AuditLogs.json": json.dumps(audits, indent=indent).encode()}))
+    (member,) = stats["files"]
+    assert len(rows) == len(audits["value"]) and member["status"] == "parsed" and "@odata.nextLink" in member["note"]
+
+
 def test_sign_ins_written_in_utf_16_are_read_as_json_and_as_csv(tmp_path):
     signins = make_m365.entra_signins()[:4]
     data = json.dumps(signins, indent=2).encode("utf-16")
@@ -361,6 +410,25 @@ def test_the_portal_downloads_are_read_as_graph_records_are(tmp_path):
     assert sorted(seen(r) for r in again) == sorted(seen(r) for r in rows)
 
 
+def test_a_row_the_portal_download_repeats_exactly_is_kept_once_and_counted(tmp_path):
+    """The admin centre's audit log CSV has no record id, so a record downloaded twice, in one file
+    or in two downloads of overlapping days, was in the case twice. A row that repeats another
+    exactly is the same record: it is kept once, and the duplicates are counted."""
+    text = (FIXTURES / "entra-directory-audits.portal.csv").read_bytes().decode("utf-8")
+    head, rest = text.split("\r\n", 1)
+    lines = [line for line in rest.split("\r\n") if line]
+    doubled = "\r\n".join([head, *lines, lines[0], lines[2]]) + "\r\n"
+    rows, src = _fixture(tmp_path, "audit.csv", doubled.encode("utf-8"))
+    assert src.format == "entra-audit-csv" and len(rows) == 6 and src.stats.duplicates == 2 and src.stats.errors == 0
+    # two downloads of the same days in one archive: each record once, the repeats counted on the member
+    rows, stats = _package(tmp_path, "audit.zip", _zip({"a/audit.csv": text.encode("utf-8"), "b/audit.csv": text.encode("utf-8")}))
+    assert len(rows) == 6 and [f.get("duplicates", 0) for f in stats["files"]] == [0, 6] and stats["duplicates"] == 6
+    # a row that differs in any value is another record
+    changed = "\r\n".join([head, *lines, lines[0].replace("success", "failure", 1)]) + "\r\n"
+    rows, src = _fixture(tmp_path, "audit.csv", changed.encode("utf-8"))
+    assert len(rows) == 7 and src.stats.duplicates == 0
+
+
 def test_directory_audits_written_by_export_csv_are_read_without_what_it_could_not_write():
     """Get-MgAuditLogDirectoryAudit | Export-Csv writes the initiator, the targets and the details
     as .NET type names: the rows say what was done and when, and keep the columns REMN does not know."""
@@ -394,16 +462,77 @@ def test_a_record_that_is_not_a_directory_audit_is_counted_not_read(tmp_path):
     assert len(rows) == 2 and src.stats.errors == 1 and src.stats.to_dict()["notRead"] == 1
 
 
-def test_azure_monitor_records_of_the_audit_log_are_not_taken_for_graph_records():
-    """Their schema may differ from Graph's, Microsoft says: they are not read, and said so."""
-    record = {
-        "time": "2026-09-01T10:05:12Z",
-        "category": "AuditLogs",
-        "operationName": "Consent to application",
-        "properties": {"activityDisplayName": "Consent to application", "activityDateTime": "2026-09-01T10:05:12Z"},
+def _monitor(category: str, operation: str, record: dict, time: str = "2026-09-01T12:00:00.1234567Z") -> dict:
+    """An Azure Monitor record as Entra's diagnostic settings write one to an Event Hub or a storage
+    account, the record under "properties" (learn.microsoft.com/entra/identity/monitoring-health,
+    "Interpret the audit logs schema in Azure Monitor"). The tenant is invented."""
+    return {
+        "time": time,
+        "resourceId": "/tenants/00000000-0000-4000-8000-000000000001/providers/Microsoft.aadiam",
+        "operationName": operation,
+        "operationVersion": "1.0",
+        "category": category,
+        "tenantId": "00000000-0000-4000-8000-000000000001",
+        "resultSignature": "None",
+        "durationMs": 0,
+        "callerIpAddress": "203.0.113.7",
+        "correlationId": record.get("correlationId") or "00000000-0000-4000-8000-000000000002",
+        "Level": 4,
+        "properties": record,
     }
-    assert m365.detect_format("audit.json", json.dumps(record).encode()) is None
-    assert detect_evtx_format("audit.json", json.dumps(record).encode()) == "unrecognised"
+
+
+def _same_rows(rows: list[dict]) -> list[dict]:
+    return [{k: v for k, v in r.items() if k not in ("raw", "sourceFile")} for r in rows]
+
+
+@pytest.mark.parametrize(
+    ("fixture", "category", "operation", "fmt"),
+    [
+        ("entra-directory-audits.graph.json", "AuditLogs", "Add member to role", "entra-audit-json"),
+        ("entra-risky-users.graph.json", "RiskyUsers", "Risky user", "entra-riskyuser-json"),
+        ("entra-risk-detections.graph.json", "UserRiskEvents", "User Risk Detection", "entra-riskdetection-json"),
+    ],
+)
+def test_azure_monitor_records_of_the_audit_and_risk_logs_are_read_as_their_graph_records(tmp_path, fixture, category, operation, fmt):
+    """Entra's diagnostic settings write a directory audit, a risky user or a risk detection under
+    "properties" of an Azure Monitor record, as they do a sign-in, with the Graph record's names;
+    attack_data's Entra audit recordings are in that form. Such a file was not recognised. Each
+    record now gives the row its Graph form gives."""
+    graph = json.loads((FIXTURES / fixture).read_text())["value"]
+    data = "\n".join(json.dumps(_monitor(category, operation, r)) for r in graph).encode()
+    assert m365.detect_format("azure-audit.log", data[:4096]) == fmt
+    rows, src = _source(tmp_path, "azure-audit.log", data)
+    expected, _ = _fixture(tmp_path, fixture)
+    assert src.format == fmt and src.stats.errors == 0
+    assert _same_rows(rows) == _same_rows(expected) and len(rows) == len(graph)
+    # the envelope's time stands in for a record that has none of its own
+    bare = {k: v for k, v in graph[0].items() if k not in ("activityDateTime", "riskLastUpdatedDateTime", "detectedDateTime")}
+    (row,) = list(m365.iter_records(None, json.dumps(_monitor(category, operation, bare)).encode(), fmt))
+    assert row["tsIso"] == "2026-09-01T12:00:00.123Z"
+
+
+def test_a_file_of_azure_monitor_records_is_of_the_category_of_its_first_record():
+    """A capture of Entra's diagnostic settings holds records of several categories. The file is
+    read as its first record's kind, and a record of another category in it is counted not read;
+    a file that holds sign-ins is read as sign-ins, as before. The risks of service principals are
+    not read."""
+    audit = json.loads((FIXTURES / "entra-directory-audits.graph.json").read_text())["value"][0]
+    risky = json.loads((FIXTURES / "entra-risky-users.graph.json").read_text())["value"][0]
+    records = [_monitor("AuditLogs", "Add member to role", audit), _monitor("RiskyUsers", "Risky user", risky)]
+    for order, fmt in ((records, "entra-audit-json"), (records[::-1], "entra-riskyuser-json")):
+        data = "\n".join(json.dumps(r) for r in order).encode()
+        assert m365.detect_format("azure.log", data) == fmt
+        stats = Stats()
+        rows = list(m365.iter_records(None, data, fmt, stats=stats))
+        assert len(rows) == 1 and stats.errors == 1 and stats.to_dict()["notRead"] == 1
+    data = "\n".join(json.dumps(r) for r in [*records, _monitor("SignInLogs", "Sign-in activity", make_m365.entra_signins()[0])]).encode()
+    assert m365.detect_format("azure.log", data) == "entra-signin-json"
+    other = _monitor(
+        "ServicePrincipalRiskEvents", "Service principal risk detection", {"id": "1", "riskEventType": "x", "activityDateTime": "2026-09-01T10:00:00Z"}
+    )
+    assert m365.detect_format("azure.log", json.dumps(other).encode()) is None
+    assert detect_evtx_format("azure.log", json.dumps(other).encode()) == "unrecognised"
 
 
 def test_the_bec_rules_fire_on_directory_audits(tmp_path, store):

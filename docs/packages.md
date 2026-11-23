@@ -173,6 +173,11 @@ such as MPRegistry, MPStateInfo and MPDetection, are kept whole however long the
 are. The member records how many lines were read and how many were kept; the file
 itself is inventoried and hashed in full either way.
 
+MPLog starts each line it writes with the time, in UTC, and a line that does is an event
+at that time on the timeline. A line without a time of its own, such as the rest of a
+resource-scan block, stays an observation. In the other Defender logs a time at the start
+of a line is used only when it states its zone (`Z` or an offset).
+
 Collected artifacts are mapped into the fields the rules read, and a few export shapes
 needed specific handling before any rule could reach them. `schtasks /fo csv` writes
 its headers in the host's language and carries the command under "Task To Run", so

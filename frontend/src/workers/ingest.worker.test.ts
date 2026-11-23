@@ -24,7 +24,7 @@ afterEach(async () => {
   mocks.post.mockClear()
 })
 
-async function run(rows: Record<string, unknown>[], done = true, dates?: IngestRequest['dates']) {
+async function run(rows: Record<string, unknown>[], done = true, dates?: IngestRequest['dates'], replaces?: number) {
   const db = getDb()
   const id = await db.evidence.add({ caseId: 1, name: 'package.zip', kind: 'package', size: 1, status: 'hashing', integrity: 'pending', count: 0, addedAt: 1 })
   mocks.stream.mockImplementation(async (_url, _form, onRow) => {
@@ -43,6 +43,7 @@ async function run(rows: Record<string, unknown>[], done = true, dates?: IngestR
       includeRaw: true,
       settings: { internalDomains: [], brands: [], vipNames: [] },
       dates,
+      replaces,
     },
   })
   return id
@@ -93,6 +94,26 @@ it('adds a cloud record the case already holds only once, and counts it once', a
   // the skipped record adds nothing to the facets: the address is counted for the rows written
   const ip = (await db.facets.toArray()).find((f) => f.field === 'ipAddress' && f.value === '198.51.100.2')
   expect(ip?.count).toBe(2)
+})
+it('reads a file again whole beside the evidence it replaces, which holds the same file and records', async () => {
+  const signIn = (key: string, ip: string) => ({ type: 'event', ts: 1, provider: 'Microsoft Entra ID Sign-in', operation: 'SignIn', ipAddress: ip, recordKey: key })
+  const rows = [signIn('entra:1', '198.51.100.1'), signIn('entra:2', '198.51.100.2')]
+  const first = await run(rows)
+  const db = getDb()
+  // the same file again, not as a reading again, is skipped as already imported
+  await run(rows)
+  expect(mocks.post).toHaveBeenCalledWith(expect.objectContaining({ type: 'duplicate', evidenceId: first }))
+  mocks.post.mockClear()
+  const again = await run(rows, true, { order: 'day-first' }, first)
+  expect(mocks.post).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'duplicate' }))
+  expect(await db.evidence.get(again)).toMatchObject({ status: 'done', count: 2 })
+  expect(mocks.post).toHaveBeenCalledWith(expect.objectContaining({ type: 'done', count: 2, duplicates: 0 }))
+  expect((await db.events.where('evidenceId').equals(again).toArray()).map((r) => r.recordKey).sort()).toEqual(['entra:1', 'entra:2'])
+  // a third evidence of the same records still finds them held
+  await db.evidence.update(again, { sha256Client: 'b'.repeat(64), sha256Server: 'b'.repeat(64) })
+  await db.evidence.update(first, { sha256Client: 'c'.repeat(64), sha256Server: 'c'.repeat(64) })
+  const third = await run(rows)
+  expect(await db.evidence.get(third)).toMatchObject({ status: 'done', count: 0, stats: { duplicates: 2 } })
 })
 it('sends the date order and zone set for the evidence with the file, and nothing when none is set', async () => {
   const first = await run([], true, { order: 'day-first', zone: 'Europe/Paris' })

@@ -465,6 +465,10 @@ scoring:
   content and bank-change wording remain review signals. Stronger findings require
   payload behaviour or corroborating identity, link or authentication evidence. Related
   attachment flags contribute once per family.
+- A message attached to another counts as an attachment flagged `nested_mail`. Its own
+  flags are listed on the outer message with the prefix `att_nested_`, and its own score is
+  kept in the attachment's details; that score does not raise the outer message's, so a lure
+  a user forwards to the security desk as an attachment does not make the forward a lure.
 
 Mail details show the calibration version, the evidence confidence, the grouped score
 drivers, the attachment risk and the analysis limitations. Findings display priority
