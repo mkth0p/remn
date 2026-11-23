@@ -7,14 +7,14 @@ import type { MeasureSources, RuleMeasure } from '../data/ruleMeasures'
 
 export const API_HEADERS: Record<string, string> = { 'X-Forensic-Client': 'remn' }
 
-/** Set the shared access token for remote deployments (FORENSIC_AUTH_TOKEN on the server). Mutated in place so every module (and worker) sharing this instance picks it up. */
+/** Set the access token: the shared one of a remote deployment (FORENSIC_AUTH_TOKEN on the server), or a personal one on a server with accounts. Mutated in place so every module (and worker) sharing this instance picks it up. */
 export function setApiToken(token: string | null): void {
   API_HEADERS['X-Forensic-Client'] = token?.trim() || 'remn'
 }
 
-let authErrorHandler: (() => void) | null = null
-/** Called once per 401 with code "auth" - the app shows the token gate. */
-export function onAuthError(fn: (() => void) | null): void {
+let authErrorHandler: ((accounts: boolean) => void) | null = null
+/** Called once per 401 with code "auth" - the app shows the token gate; `accounts` when the server asks for a personal token. */
+export function onAuthError(fn: ((accounts: boolean) => void) | null): void {
   authErrorHandler = fn
 }
 
@@ -33,7 +33,7 @@ async function handle(resp: Response): Promise<unknown> {
   const body = ct.includes('application/json') ? await resp.json().catch(() => null) : await resp.text().catch(() => '')
   if (!resp.ok) {
     const msg = (body && typeof body === 'object' && 'error' in body && String((body as { error: unknown }).error)) || `${resp.status} ${resp.statusText}`
-    if (resp.status === 401 && body && typeof body === 'object' && (body as { code?: string }).code === 'auth') authErrorHandler?.()
+    if (resp.status === 401 && body && typeof body === 'object' && (body as { code?: string }).code === 'auth') authErrorHandler?.((body as { accounts?: boolean }).accounts === true)
     throw new ApiError(resp.status, msg, body)
   }
   return body
@@ -185,7 +185,13 @@ export interface Health {
   /** external detection engines this server runs on every event log it ingests */
   engines?: string[]
   providers: ProviderInfo[]
+  /** the server has accounts: every request carries a personal token */
+  accounts?: boolean
+  /** the account this page signs in with, on a server with accounts */
+  account?: { name: string; role: Role } | null
 }
+/** admin: the accounts and every case; analyst: its own cases and those it is a member of; viewer: reads the cases it is a member of and changes nothing */
+export type Role = 'admin' | 'analyst' | 'viewer'
 export interface ProviderInfo {
   name: string
   kinds: string[]

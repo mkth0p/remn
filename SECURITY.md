@@ -34,7 +34,9 @@ report and asks for a private channel, with nothing of the report in it.
   database. A server that keeps evidence must keep its cases folder, staging area and
   backups on an encrypted volume; `docs/security.md` says what that covers and what it
   does not.
-- No multi-user model: the remote mode uses one shared token.
+- No single sign-on: a team on one server uses accounts with personal tokens and three
+  roles, and an audit log whose chain whoever holds its key (the server's administrator
+  included) could rewrite. Without accounts, the remote mode is one shared token.
 - No sandboxed execution: attachments are analysed statically (structure, macros,
   scripts, URLs, YARA), never opened or run.
 - Model output is untrusted. Evidence text reaches the model, so a crafted mail can try
