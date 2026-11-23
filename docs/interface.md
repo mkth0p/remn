@@ -208,7 +208,8 @@ it ran (`sigmaId`), on the record a finding of REMN's conversion of the same Sig
 the same, so a rule Hayabusa split into parts under new ids stays a finding of its own, and so
 does an engine finding the analyst already decided on. It stands on its own again when REMN's
 finding goes (its rule turned off, or the rules cleared by an evidence removal) and goes with
-its evidence.
+its evidence. The server does not yet send `sigmaId` with Hayabusa's findings, so until it does
+the two stay separate findings.
 
 The queue is sorted by priority unless the sort control says severity or newest: what to look
 at first, deterministic and explained, in the way THOR and Cyber Triage rank what they find
