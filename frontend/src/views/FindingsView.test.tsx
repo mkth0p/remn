@@ -11,6 +11,7 @@ vi.mock('../components/RescoreButton', () => ({ RescoreButton: () => null }))
 vi.mock('../data/ingest', () => ({ refreshCounts: vi.fn(async () => undefined) }))
 
 import { FindingsView } from './FindingsView'
+import { evidenceBlocks } from '../ai/evidence'
 
 const WAIT = { timeout: 8000 }
 const TEST_TIMEOUT = 30_000 // jsdom + fake-indexeddb are slow on first render
@@ -366,8 +367,9 @@ describe('FindingsView', () => {
       await waitFor(() => expect(document.querySelector('.flyout')).toBeTruthy(), WAIT)
       fireEvent.click(screen.getByRole('button', { name: 'ask the analyst' }))
       expect(useStore.getState().view).toBe('ai')
-      expect(useStore.getState().aiPrompt).toContain('Rule win-log-cleared (critical): Security audit log cleared.')
-      expect(useStore.getState().aiPrompt).toContain('ids 42, 43')
+      // the finding travels as evidence, between the markers a tool result has, its rows as citations
+      const [block] = evidenceBlocks(useStore.getState().aiPrompt ?? '')
+      expect(JSON.parse(block)).toMatchObject({ rule: 'win-log-cleared', severity: 'critical', title: 'Security audit log cleared', refs: ['ev:42', 'ev:43'] })
       useStore.setState({ view: 'findings' })
       fireEvent.click(screen.getByRole('button', { name: 'open 2 row(s)' }))
       expect(useStore.getState().view).toBe('events')

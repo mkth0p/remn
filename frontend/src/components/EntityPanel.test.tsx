@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultSettings, RemnDB, setDb, type Case, type EventRow, type MailRow } from '../db/schema'
 import type { Filter } from '../rules/filter'
+import { evidenceBlocks } from '../ai/evidence'
 
 // the case's rows, as its store would answer for them
 const store = vi.hoisted(() => ({
@@ -110,7 +111,9 @@ describe('an entity page', () => {
     await screen.findByText('1,002 event(s)')
     fireEvent.click(screen.getByRole('button', { name: /ask the analyst/ }))
     expect(useStore.getState().view).toBe('ai')
-    expect(useStore.getState().aiPrompt).toContain('m.durand@corp.example. 1 finding(s), 1002 event(s), 1 mail(s)')
+    // what the page counted travels as evidence, between the markers a tool result has
+    const [block] = evidenceBlocks(useStore.getState().aiPrompt ?? '')
+    expect(JSON.parse(block)).toMatchObject({ user: 'm.durand@corp.example', findings: 1, events: 1002, mails: 1 })
   })
 
   it('says when nothing in the case references the entity, and stops the queries of the one it leaves', async () => {

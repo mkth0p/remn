@@ -11,6 +11,7 @@ import { CiteForQuestion } from './CiteForQuestion'
 import { namedMessageIds } from '../data/namedMessages'
 import { sanitizeMailHtml } from './mailHtml'
 import { pressable, pressableRow } from './pressable'
+import { askAbout } from '../ai/evidence'
 
 const SEV_ORDER = ['critical', 'high', 'medium', 'low', 'info']
 
@@ -91,7 +92,7 @@ export function EventDetail({ row: initial, onClose }: { row: EventRow; onClose:
   const explain = () => {
     const { raw: _r, data, ...rest } = row
     void _r
-    setAiPrompt(`Explain this Windows event and suggest pivots:\n\`\`\`json\n${JSON.stringify({ ...rest, data }, null, 1).slice(0, 6000)}\n\`\`\``)
+    setAiPrompt(askAbout(`Explain Windows event ev:${row.id} and suggest pivots.`, 'event', { ...rest, data }, { max: 6000, rest: 'get_event' }))
     setView('ai')
   }
   return (
@@ -317,7 +318,13 @@ export function MailDetail({
   }
   const explain = () => {
     setAiPrompt(
-      `Analyse this e-mail (mail id ${row.id}) for phishing / BEC indicators and tell me what to check next. Use get_mail with includeBody if needed. Summary: subject "${row.subject}", from ${row.fromName} <${row.fromAddr}>, origin IP ${row.originIp}, risk ${row.risk}, flags: ${row.flags.join(', ')}`,
+      askAbout(`Analyse e-mail mail:${row.id} for phishing / BEC indicators and tell me what to check next. Use get_mail with includeBody if needed.`, 'mail', {
+        subject: row.subject,
+        from: { name: row.fromName, address: row.fromAddr },
+        originIp: row.originIp,
+        risk: row.risk,
+        flags: row.flags,
+      }),
     )
     setView('ai')
   }

@@ -7,6 +7,7 @@ import { fmtNum, fmtTs, tzLabel } from '../util/format'
 import { Badge, Dot, Flyout, Sev, Tabs } from './ui'
 import { IconAi, IconGlobe, IconHost, IconMail, IconUser } from './Icons'
 import { pressable, pressableRow } from './pressable'
+import { askAbout } from '../ai/evidence'
 
 export type EntityKind = EntityRef['kind']
 export type { EntityRef }
@@ -262,7 +263,14 @@ export function EntityPanel() {
   const Icon = KIND_ICON[entity.kind]
   const ask = () => {
     setAiPrompt(
-      `Summarise what this ${entity.kind} did in the case and what to check next: ${entity.value}. ${findings.length} finding(s), ${counts.events ?? events.length} event(s), ${counts.mails ?? mails.length} mail(s) involve it; first seen ${first ? new Date(first).toISOString() : 'n/a'}, last seen ${last ? new Date(last).toISOString() : 'n/a'}.`,
+      askAbout(`Summarise what this ${entity.kind} did in the case and what to check next.`, entity.kind, {
+        [entity.kind]: entity.value,
+        findings: findings.length,
+        events: counts.events ?? events.length,
+        mails: counts.mails ?? mails.length,
+        firstSeen: first ? new Date(first).toISOString() : null,
+        lastSeen: last ? new Date(last).toISOString() : null,
+      }),
     )
     setView('ai')
     close()

@@ -194,6 +194,33 @@ describe('proposals that are never accepted in bulk', () => {
     expect((await verifyLedger(1)).intact).toBe(true)
   })
 
+  it('writes to the ledger that a finding put to it with explain carries text addressed to a model', async () => {
+    const { explainFindingPrompt } = await import('../views/findings/model')
+    const question = explainFindingPrompt({
+      id: 4,
+      caseId: 1,
+      ruleId: 'win-task',
+      key: 'k',
+      title: 'Scheduled task',
+      description: LURE,
+      severity: 'high',
+      source: 'events',
+      ts: 1,
+      entities: { computer: 'WS-1' },
+      count: 1,
+      refs: [1],
+      attack: [],
+      status: 'new',
+      createdAt: 1,
+    })
+    script.push({ calls: [search] }, { calls: [note('ev:1')] }, { text: 'A task [ev:1].' })
+    await runAgent([{ role: 'user', content: question }], kase, { mode: 'analyst', tools: true, agent: { seen: new SeenSet() } })
+    const notice = (await loadLedger(1)).find((e) => e.kind === 'notice')
+    expect(notice?.text).toBe('the question: 1 place(s) addressed to a model')
+    // what the agent proposes after reading it waits for the analyst
+    expect((await loadInbox(1))[0]).toMatchObject({ exposed: true })
+  })
+
   it('writes to the ledger that evidence the analyst put to it was too long to check whole', async () => {
     const story = 'Walk me through story s2.\n\n' + wrapEvidence('story', JSON.stringify({ steps: [{ title: 'x'.repeat(20_500), refs: ['ev:1'] }] }), [])
     script.push({ text: 'Failures [ev:1].' })
