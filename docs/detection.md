@@ -180,18 +180,24 @@ Each pack directory holds the rules grouped by log source (`process_creation.yam
 `registry_set.yaml`, …) or by Sublime rule family, a `pack.json` manifest with the
 upstream repository, the exact commit, the licence and the counts, the upstream
 `LICENSE` verbatim, and `skipped.json` naming every upstream rule that was not converted
-and why. A SigmaHQ rule converted with a caveat (an unknown service matched by channel name,
-`cased` on an equality) carries it in its YAML under `sigma.warnings`, and `pack.json` counts
-them. A rule is skipped rather than weakened: `fieldref`, `expand` and the time-part
+and why. A rule converted with a caveat carries it in its YAML, under `sigma.warnings` (an
+unknown service matched by channel name, `cased` on an equality) or `sublime.warnings` (a URL
+path matched inside the full URL, a Sublime list approximated with REMN's own), and
+`pack.json` counts them. A rule is skipped rather than weakened: `fieldref`, `expand` and the time-part
 modifiers, a `timeframe`, any modifier outside the Sigma 2.1 list, `file_access` sources, Sublime ML
 classifiers, `file.explode`, link analysis, and so on. One translation is looser than the
-original and is not reported on the rule: a Sublime `any()` with several conditions on one
-collection (attachments, links) matches when each condition holds for some member rather than
-all of them for the same one; it makes a rule match more, never less. What translates exactly is
+original: a Sublime `any()` with several conditions on one collection (attachments, links)
+matches when each condition holds for some member rather than all of them for the same one; it
+makes a rule match more, never less, and the rule's warnings say so. What translates exactly is
 translated: `base64`, `base64offset` and `utf16`/`wide` values become the literal strings
 the encoded value can appear as (all three alignments), matched case-sensitively; `neq`
 becomes a negated equality; `cased` selects the case-sensitive operators; a regex keeps its
 case (`re_cs`) unless `|i` is given, and the flags `m` and `s` travel as an inline group;
+MQL's `strings.contains`, `starts_with`, `ends_with`, `regex.contains` and `regex.match` keep
+case on a text field (`contains_cs`, `startswith_cs`, `endswith_cs`, `re_cs`); three upstream
+patterns whose time grows with the cube of the value in the browser engine (two SigmaHQ
+admin-share command lines and a Sublime sender name) are written in a linear form that matches
+the same values (docs/rules.md);
 keywords, searched in the event's JSON text, are written as that text holds them (a quote as
 `\"`, a backslash as `\\`); IPv6 CIDRs translate when they name one address or
 a prefix within the first group (`::1/128`, `fe80::/10`, `fc00::/7`). The SigmaHQ rules are
@@ -224,7 +230,12 @@ a chain of `lower(col) LIKE ?` (5.6 s per rule down to 0.04 s).
 branch heads on GitHub, fetches those exact commits, converts them with the same code as
 the import buttons and rewrites the pack directories in place (stable order, no YAML
 aliases), so an update is one reviewable commit. `--zip <archive> --sha <commit>` works
-offline from a downloaded archive.
+offline from a downloaded archive. `sublime --from-pack` converts the Sublime pack again from
+the MQL source and metadata each of its rules keeps, for a converter change when the upstream
+archive cannot be fetched: the upstream commit and `skipped.json` stay as they were, so a rule
+the earlier converter skipped is not tried again, and `pack.json` records the date under
+`upstream.reconverted`. The pack shipped now was converted that way on 2026-11-23 from the
+commit fetched on 2026-09-05.
 
 **Importing other collections** ("import Sigma" and "import Sublime" in the Rules page)
 converts one `.yml` or a `.zip` through `POST /api/rules/convert/sigma` and

@@ -6,7 +6,7 @@ import { hostKey } from '../data/stories'
 import { psPipeline } from '../parsers/evtx/flatten'
 import { strip } from '../parsers/evtx/py'
 import { parseDuration, parseThreshold } from '../rules/engine'
-import { compileRegex, matchCondition } from '../rules/filter'
+import { compileRegex, matchCondition, RE_VALUE_MAX } from '../rules/filter'
 
 /**
  * The patterns made linear answer as they did before, and the code that applies them stays fast.
@@ -222,5 +222,78 @@ describe("the rewritten patterns of REMN's own rule packs", () => {
     const t0 = performance.now()
     re.test(value)
     expect(performance.now() - t0).toBeLessThan(1000)
+  })
+})
+
+// rule | pack file | the pattern upstream wrote | pieces | values a backtracking engine took minutes on
+const COMMUNITY_REWRITES: [string, string, string, string[], string[]][] = [
+  [
+    'sigma-3abd6094-7027-475f-9630-8ab9be7b9725',
+    'sigma-windows/process_creation.yaml',
+    String.raw`\ \\\\.*\\.*\$`,
+    [' ', '\\', '\\\\', ' \\\\', '$', 'a', '\n', ' ', 'net use', 'C$'],
+    [' \\\\'.repeat(RE_VALUE_MAX / 4), ' \\'.repeat(RE_VALUE_MAX / 2), ' \\\\a\\'.repeat(RE_VALUE_MAX / 8), ' '.repeat(RE_VALUE_MAX)],
+  ],
+  [
+    'sigma-855bc8b5-2ae8-402e-a9ed-b889e6df1900',
+    'sigma-windows/process_creation.yaml',
+    String.raw`\\\\.*\\.*\$`,
+    ['\\', '\\\\', '$', 'a', '\n', 'C$', ' ', 'Sysvol'],
+    ['\\\\'.repeat(RE_VALUE_MAX / 2), '\\\\a\\'.repeat(RE_VALUE_MAX / 4), '\\'.repeat(RE_VALUE_MAX)],
+  ],
+  [
+    'sublime-6154f197-9543-50d8-af3d-f8a7e1d79cf8',
+    'sublime/abuse.yaml',
+    String.raw`.*\|.*(Manager|Careers|Recruitment|Specialist|Global)`,
+    ['|', 'manager', 'Careers', 'GLOBAL', 'Recruit', 'ment', 'Glob', 'a', ' ', '\n'],
+    ['|'.repeat(RE_VALUE_MAX), '|Manage'.repeat(RE_VALUE_MAX / 8), 'a|'.repeat(RE_VALUE_MAX / 2)],
+  ],
+]
+
+/** The linear pattern a community rule carries: its only one that reads the value line by line from its start. */
+function linearPattern(file: string, rule: string): string {
+  const found: string[] = []
+  const walk = (at: unknown, key = ''): void => {
+    if (typeof at === 'string' && key.includes('|re') && at.startsWith('^(?:[^\\n]*\\n)*')) found.push(at)
+    else if (Array.isArray(at)) at.forEach((v) => walk(v, key))
+    else if (at && typeof at === 'object') Object.entries(at).forEach(([k, v]) => walk(v, k))
+  }
+  const docs = yaml.loadAll(readFileSync(join(RULES, 'community', file), 'utf-8')) as { id?: string; where?: unknown }[]
+  walk(docs.find((d) => d?.id === rule)?.where)
+  expect(found).toHaveLength(1)
+  return found[0]
+}
+
+describe('the linear forms of three community patterns', () => {
+  it.each(COMMUNITY_REWRITES.map((r, i) => [r[0], i] as const))('%s matches the values its upstream pattern matched', (_rule, i) => {
+    const [rule, file, before, pieces] = COMMUNITY_REWRITES[i]
+    const now = linearPattern(file, rule)
+    const [old, rewritten] = [compileRegex(before, 'i') as RegExp, compileRegex(now, 'i') as RegExp]
+    // as the store reads `.`, any character but a newline: here a carriage return or a line separator
+    // between the tokens no longer stops a match, as it does not in the store
+    const storeOld = compileRegex(before.replaceAll('.*', '[^\\n]*'), 'i') as RegExp
+    const next = seeded(i + 80)
+    let matched = 0
+    for (let n = 0; n < SAMPLES * 4; n++) {
+      const s = soup(next, pieces, 16)
+      expect(rewritten.test(s), JSON.stringify(s)).toBe(old.test(s))
+      if (old.test(s)) matched++
+      const t = soup(next, [...pieces, '\r', ' ', ' '], 16)
+      expect(rewritten.test(t), JSON.stringify(t)).toBe(storeOld.test(t))
+    }
+    expect(matched).toBeGreaterThan(200)
+  })
+
+  it.each(COMMUNITY_REWRITES.map((r, i) => [r[0], i] as const))('%s reads a hostile value as long as a rule reads in under a second', (_rule, i) => {
+    const [rule, file, , , hostile] = COMMUNITY_REWRITES[i]
+    const re = compileRegex(linearPattern(file, rule), 'i') as RegExp
+    // the upstream patterns took more than a second on a few thousand of these characters, eight
+    // times as long at twice the length
+    for (const value of hostile) {
+      expect(value.length).toBeLessThanOrEqual(RE_VALUE_MAX)
+      const t0 = performance.now()
+      re.test(value)
+      expect(performance.now() - t0, value.slice(0, 20)).toBeLessThan(1000)
+    }
   })
 })

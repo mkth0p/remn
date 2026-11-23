@@ -18,13 +18,14 @@
     "paths": [
       "detection-rules"
     ],
-    "fetched": "2026-09-05"
+    "fetched": "2026-09-05",
+    "reconverted": "2026-11-23"
   },
   "counts": {
     "upstream": 1227,
     "converted": 189,
     "skipped": 1038,
-    "warnings": 466
+    "warnings": 461
   },
   "skipReasons": [
     [
