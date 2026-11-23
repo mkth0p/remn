@@ -210,7 +210,8 @@ each entry hashed with the one before, so an entry changed afterwards, an entry 
 among later ones, or a gap in the numbering breaks the chain at that point. The chain has no
 key and is kept in the browser's database: it does not show the newest entries removed, nor
 the chain hashed again from any entry onward by whoever holds the case. The ledger tab lists
-the entries and verifies the chain; the triage pass and the executive summary are recorded
+the entries and verifies the chain, says what the check finds and what it does not, and shows
+the head whole, as the report prints it; the triage pass and the executive summary are recorded
 too. It travels in the case bundle. The report prints a section "How AI was used": runs,
 models and where they ran, tool calls, what was proposed and what became of it by kind, the
 notices, the state of the chain with its head (the last entry's SHA-256, printed whole) and a
