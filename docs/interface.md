@@ -103,7 +103,12 @@ Microsoft 365 or Entra export whose dates did not say their order or zone shows 
 were read, and reads the file again with a date order and a time zone set for that evidence
 ([data sources](sources.md#microsoft-365-and-entra-exports)). An import still running has
 a "cancel" button on its line in the jobs list, which stops it and removes what it had
-written, as described on the [storage page](storage.md#uploads-and-jobs).
+written, as described on the [storage page](storage.md#uploads-and-jobs). In the coverage table
+of a package or archive, a member whose note says part of the file was not read (lines past a
+limit, records past a cap, records not of the file's kind, the lines of a Defender log that name
+nothing it acts on) is marked "partial"; one whose note only says how a file read whole was read
+(records without a time, values cut at their length limit, rows repaired, an encoding) is marked
+"with notes".
 
 ## Events and Mails
 
