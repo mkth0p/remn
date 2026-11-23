@@ -264,6 +264,18 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   in their files). Detections go from 235 to 245 of 535 attack_data recordings, 109 to 112 of 279
   EVTX-to-MITRE-Attack files and 260 to 264 of 278 EVTX-ATTACK-SAMPLES files, and medium and
   higher findings on the clean machines from 2,134 to 1,684.
+- The parsers are tested on files the real tools wrote, and the defects those files showed are
+  fixed. Prefetch from Windows 8.1 (version 26) is read instead of failing; a Windows 7 file no
+  longer gains a run in 1601; the Windows 10 1903 and Windows 11 layouts give their real run count
+  and the executable's full path. An Outlook `.msg` whose 8-bit strings only its internet code
+  page names (Big5, for example) is no longer mojibake. A UTF-16 log with Windows line ends is no
+  longer a failed member. Velociraptor's `Windows.NTFS.MFT` rows give every time of the entry
+  under its path, and the EventData columns of its `Windows.EventLogs.Kerberoasting` rows reach
+  the fields the Kerberoasting rule reads. Samples from plaso and Apache Tika are committed under
+  `tests/fixtures/real/`; samples that are too large, under the AGPL or that name people
+  (Velociraptor, Splunk attack_data, some of Tika's) are downloaded by pinned URL and SHA-256 by
+  tests marked heavy, which run nightly in CI. Expected values come from those projects' own tests
+  and golden outputs, or from an independent second reading.
 - The staging area is sized from its disk, and archives expand only as far as it and their own
   size allow. Outside browser-only mode `FORENSIC_TMP_MAX_GB` now defaults to 0, which lets the
   staging area use the free space of its disk less a tenth of that disk (at most 10 GiB), so a

@@ -9,8 +9,12 @@ import zipfile
 
 
 def prefetch(path):
+    from dissect.target.plugins.os.windows import prefetch as layouts
     from dissect.target.plugins.os.windows.prefetch import Prefetch
 
+    # dissect reads version 30 with the version 26 layout (Windows 8.1) but does not list version
+    # 26 itself, so a Windows 8.1 file failed as not implemented although the layout is there.
+    layouts.prefetch_version_structs.setdefault(26, layouts.prefetch_version_structs[30])
     with open(path, "rb") as fh:
         header = fh.read(8)
         if header[:4] == b"MAM\x04" and struct.unpack_from("<I", header, 4)[0] > 64 * 1024**2:
@@ -22,17 +26,26 @@ def prefetch(path):
         if parsed.version == 17:
             raise ValueError("Prefetch v17 is not supported by this adapter; export to structured records")
         executable = parsed.header.name.decode("utf-16-le").split("\x00", 1)[0]
-        dates = sorted(set(([parsed.latest_timestamp] if parsed.fn.last_run_time else []) + parsed.previous_timestamps))
+        # version 23 keeps one run time; the 16 bytes after it, which dissect offers as earlier
+        # runs, are not times and read as a few minutes after 1601
+        earlier = parsed.previous_timestamps if parsed.version >= 26 else []
+        dates = sorted(set(([parsed.latest_timestamp] if parsed.fn.last_run_time else []) + earlier))
+        record = {"Name": executable, "RunCount": parsed.fn.run_count, "ReferencedFiles": parsed.metrics, "PrefetchVersion": parsed.version}
+        if parsed.version >= 30 and parsed.fn.metrics_array_offset == 0x128:
+            # the layout of Windows 10 1903 and later, told apart by where its metrics array
+            # starts, keeps the run count at offset 116 of the file information, not 124 (libscca)
+            parsed.fh.seek(84 + 116)
+            record["RunCount"] = struct.unpack("<I", parsed.fh.read(4))[0]
+            # it also names the executable's full path, which the referenced files lack when the
+            # program ran from a place they do not list, such as a network share
+            parsed.fh.seek(84 + 128)
+            offset, size = struct.unpack("<II", parsed.fh.read(8))
+            parsed.fh.seek(offset)
+            record["ExecutablePath"] = parsed.fh.read(min(size, 4096)).decode("utf-16-le", "replace").split("\x00", 1)[0] or None
         if not dates:
-            yield {"Name": executable, "RunCount": parsed.fn.run_count, "ReferencedFiles": parsed.metrics, "PrefetchVersion": parsed.version}
+            yield record
         for date in dates:
-            yield {
-                "Name": executable,
-                "LastRunTime": date.isoformat(),
-                "RunCount": parsed.fn.run_count,
-                "ReferencedFiles": parsed.metrics,
-                "PrefetchVersion": parsed.version,
-            }
+            yield {**record, "LastRunTime": date.isoformat()}
 
 
 def registry(path):
