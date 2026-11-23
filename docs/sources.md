@@ -97,6 +97,12 @@ and a message with more is flagged `attachments_truncated` while its attachment 
 the real one. An attachment over 60 MiB in a PST or OST is not read: it is listed with the
 size the mailbox declares, no hash, and the flag `not_read`.
 
+A message attached to another (a `message/rfc822` part of an `.eml` or `.mbox` message, also
+when a client wrote it in base64 as GroupWise does, or an Outlook item inside a `.msg`) is one
+of its attachments, flagged `nested_mail`. Its text and links stay out of the outer message's
+body: the attachment analysis reads it as a mail and keeps its subject, sender, date, flags and
+own score in the attachment's details.
+
 A `.msg` saved in 8-bit strings rather than Unicode is read in the code page it names. Outlook
 does not always write the message code page; when only the internet code page is there (a
 message in Chinese saved as Big5, for example), that one is used, rather than the Western

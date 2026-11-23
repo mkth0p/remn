@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import base64
+import email
+from email import policy
+from email.message import EmailMessage
+
 import make_samples
 
 from services.analysis.headers import parse_received, received_chain
@@ -330,6 +335,53 @@ def test_a_pass_for_another_domain_does_not_authenticate_an_internal_from():
 
     f = set(row["flags"])
     assert "internal_spoof" in f and not aligned_auth(row), (row["risk"], sorted(f))
+
+
+def _forwarded_as_attachment(attached: bytes, encoding: str | None = None) -> bytes:
+    """An invented user forwards a message to the security desk as an attachment, with one line of their own."""
+    outer = EmailMessage(policy=policy.SMTP)
+    outer["From"] = "Jean Dupont <j.dupont@interne.fr>"
+    outer["To"] = "soc@interne.fr"
+    outer["Subject"] = "FW: Password expires today"
+    outer["Date"] = "Tue, 01 Sep 2026 22:20:00 +0000"
+    outer["Message-ID"] = "<fw-1@interne.fr>"
+    outer.set_content("Is this one real? Jean")
+    outer.add_attachment(email.message_from_bytes(attached, policy=policy.default))
+    data = outer.as_bytes()
+    if encoding == "base64":
+        # some clients encode the attached message, which RFC 2046 does not allow
+        head, _, rest = data.partition(b"Content-Type: message/rfc822\n")
+        part_head, _, body = rest.partition(b"\n\n")
+        inner, _, tail = body.partition(b"\n--")
+        data = head + b"Content-Type: message/rfc822\nContent-Transfer-Encoding: base64\n" + part_head + b"\n\n" + base64.encodebytes(inner) + b"\n--" + tail
+    return data
+
+
+def test_a_lure_forwarded_as_an_attachment_is_scored_as_an_attachment_not_as_the_forwarders_words():
+    """The lure's text and links were read into the forwarder's own body, and its parts were not
+    an attachment. They belong to the attached message, which the attachment analysis reads."""
+    lure = make_samples.mail(
+        '"IT Support" <it-support@interne-fr.co>',
+        "j.dupont@interne.fr",
+        "Password expires today",
+        "Your password expires today. Verify your account now: http://185.220.101.4/login.php?u=j.dupont@interne.fr",
+        extra_headers=make_samples.RECEIVED_BAD,
+        date="Tue, 01 Sep 2026 22:13:40 +0000",
+    )
+    for encoding in (None, "base64"):
+        row = parse_message_bytes(_forwarded_as_attachment(lure, encoding), CTX)
+        assert row["bodyText"].strip() == "Is this one real? Jean", encoding
+        assert row["urlCount"] == 0 and "credential_phishing_pattern" not in row["flags"], encoding
+        assert row["attachmentCount"] == 1, encoding
+        [attached] = row["attachments"]
+        assert attached["name"] == "forwarded.eml"
+        assert attached["details"]["mail"]["subject"] == "Password expires today"
+        assert {"nested_mail", "nested_url_ip_literal", "nested_credential_phishing_pattern"} <= set(attached["flags"])
+        # the lure is scored where it is, and the forwarding message carries it as an attached
+        # message, as an Outlook message attached to another already was
+        assert attached["details"]["mail"]["risk"] >= 70
+        assert {"att_nested_mail", "att_nested_credential_phishing_pattern"} <= set(row["flags"])
+        assert row["risk"] >= int(attached["risk"] * 0.9) > 0
 
 
 def test_credential_lure_from_suspicious_sender_still_high():
