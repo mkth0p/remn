@@ -184,16 +184,21 @@ def detect_format(name: str, head: bytes) -> str | None:
             return "m365-ual-json"
         keys = _KEY_RE.findall(text)
         kind = entra_kind(keys)
-        # Azure Monitor diagnostic records (Log Analytics, Event Hub, storage account) hold the
-        # record under "properties", past the head, and their category says what it is. A file is
-        # of the kind of its first record: the first category, when no Graph record comes before it
+        # a file is of the kind of its first record: a sign-in file with a directory audit in it is
+        # a sign-in file, whose audit record is not read
+        if is_signin(keys) and not (kind and low.find(f'"{_KIND_KEY[kind]}"') < low.find('"createddatetime"')):
+            return "entra-signin-json"
+        # Azure Monitor diagnostic records (Log Analytics, Event Hub, storage account): the
+        # sign-in is under "properties", past the head
+        if any(f'"category": "{c}"' in low or f'"category":"{c}"' in low for c in _SIGNIN_CATEGORIES):
+            return "entra-signin-json"
+        # Azure Monitor records of the other categories hold a directory audit or a risk record
+        # under "properties": the first one's category says the file's kind, unless a Graph record
+        # comes before it
         monitor = _MONITOR_CATEGORY_RE.search(low)
         graph = [i for i in (low.find('"createddatetime"'), *(low.find(f'"{k}"') for k in _KIND_KEY.values())) if i >= 0]
         if monitor and (not graph or monitor.start() < min(graph)):
             return _MONITOR_FORMATS.get(monitor.group(1))
-        # a sign-in file with a directory audit in it is a sign-in file, whose audit record is not read
-        if is_signin(keys) and not (kind and low.find(f'"{_KIND_KEY[kind]}"') < low.find('"createddatetime"')):
-            return "entra-signin-json"
         return f"entra-{kind}-json" if kind else None
     header = _header_line(text)
     if "auditdata" in header.lower():
@@ -229,17 +234,10 @@ def is_signin(keys: Iterable[Any]) -> bool:
     return "createddatetime" in low and "ipaddress" in low and bool(low & _SIGNIN_WHO)
 
 
-# the Azure Monitor categories of Entra's logs, and the format a file whose first record is of each
-# is read as; the risks of service principals are not read
-_MONITOR_CATEGORY_RE = re.compile(
-    r'"category"\s*:\s*"(signinlogs|noninteractiveusersigninlogs|serviceprincipalsigninlogs|managedidentitysigninlogs'
-    r'|auditlogs|riskyusers|userriskevents|serviceprincipalriskevents|riskyserviceprincipals)"'
-)
+# the Azure Monitor categories of Entra's logs other than the sign-ins, and the format a file whose
+# first record is of each is read as; the risks of service principals are not read
+_MONITOR_CATEGORY_RE = re.compile(r'"category"\s*:\s*"(auditlogs|riskyusers|userriskevents|serviceprincipalriskevents|riskyserviceprincipals)"')
 _MONITOR_FORMATS = {
-    "signinlogs": "entra-signin-json",
-    "noninteractiveusersigninlogs": "entra-signin-json",
-    "serviceprincipalsigninlogs": "entra-signin-json",
-    "managedidentitysigninlogs": "entra-signin-json",
     "auditlogs": "entra-audit-json",
     "riskyusers": "entra-riskyuser-json",
     "userriskevents": "entra-riskdetection-json",

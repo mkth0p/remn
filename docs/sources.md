@@ -166,9 +166,11 @@ A `.zip` of a whole acquisition folder is walked.
 An Azure Monitor record holds the record under `properties`, with the names of the Graph
 record, and its category says what it is: it gives the row its Graph form gives, the record's
 time taken from the envelope's `time` when it has none. A file of them is of the category of
-its first record, as a JSON file is of the kind of its first record, and a record of another
-category in it is counted as not read. The risks of service principals
-(`ServicePrincipalRiskEvents`, `RiskyServicePrincipals`) are not read.
+its first record, as a JSON file is of the kind of its first record, except that a file whose
+first records include a sign-in is read as sign-ins; a record of another category in it is
+counted as not read. The
+risks of service principals (`ServicePrincipalRiskEvents`, `RiskyServicePrincipals`) are not
+read.
 
 Not read, each for the reason given further down: ID Protection reports downloaded from the admin
 centre whose fields are not the Graph property names; the Exchange admin centre's "Export

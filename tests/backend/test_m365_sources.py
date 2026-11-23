@@ -445,18 +445,20 @@ def test_azure_monitor_records_of_the_audit_and_risk_logs_are_read_as_their_grap
 
 
 def test_a_file_of_azure_monitor_records_is_of_the_category_of_its_first_record():
-    """A capture of Entra's diagnostic settings holds records of every category. The file is read
-    as its first record's kind, and a record of another category in it is counted not read; the
-    risks of service principals are not read at all."""
+    """A capture of Entra's diagnostic settings holds records of several categories. The file is
+    read as its first record's kind, and a record of another category in it is counted not read;
+    a file that holds sign-ins is read as sign-ins, as before. The risks of service principals are
+    not read."""
     audit = json.loads((FIXTURES / "entra-directory-audits.graph.json").read_text())["value"][0]
-    sign_in = {**make_m365.entra_signins()[0]}
-    records = [_monitor("AuditLogs", "Add member to role", audit), _monitor("SignInLogs", "Sign-in activity", sign_in)]
-    data = "\n".join(json.dumps(r) for r in records).encode()
-    assert m365.detect_format("azure.log", data) == "entra-audit-json"
-    stats = Stats()
-    rows = list(m365.iter_records(None, data, "entra-audit-json", stats=stats))
-    assert len(rows) == 1 and stats.errors == 1 and stats.to_dict()["notRead"] == 1
-    data = "\n".join(json.dumps(r) for r in reversed(records)).encode()
+    risky = json.loads((FIXTURES / "entra-risky-users.graph.json").read_text())["value"][0]
+    records = [_monitor("AuditLogs", "Add member to role", audit), _monitor("RiskyUsers", "Risky user", risky)]
+    for order, fmt in ((records, "entra-audit-json"), (records[::-1], "entra-riskyuser-json")):
+        data = "\n".join(json.dumps(r) for r in order).encode()
+        assert m365.detect_format("azure.log", data) == fmt
+        stats = Stats()
+        rows = list(m365.iter_records(None, data, fmt, stats=stats))
+        assert len(rows) == 1 and stats.errors == 1 and stats.to_dict()["notRead"] == 1
+    data = "\n".join(json.dumps(r) for r in [*records, _monitor("SignInLogs", "Sign-in activity", make_m365.entra_signins()[0])]).encode()
     assert m365.detect_format("azure.log", data) == "entra-signin-json"
     other = _monitor(
         "ServicePrincipalRiskEvents", "Service principal risk detection", {"id": "1", "riskEventType": "x", "activityDateTime": "2026-09-01T10:00:00Z"}
