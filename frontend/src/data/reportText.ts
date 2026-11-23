@@ -102,6 +102,8 @@ const enGap = (g: GapSay): string => {
       const cap = EN_CAPS[g.source]
       return `${g.file}: exactly ${fmtNum(g.records)} ${cap.records}, ${cap.limits[g.records] ?? ''}. ${cap.missing} after that point in its time window are probably missing.`
     }
+    case 'export-next-page':
+      return `${g.file}: its last Graph page links to a next one (@odata.nextLink) that was not downloaded. Records on the pages after it are missing.`
     case 'xml-export':
       return (
         `${g.file}: ${fmtNum(g.records)} event record${s(g.records)} exported as XML. An export holds what its query selected and not the log file's own record numbering, ` +
@@ -907,6 +909,8 @@ const frGap = (g: GapSay): string => {
       const cap = FR_CAPS[g.source]
       return `${g.file} : exactement ${frNum(g.records)} ${cap.records}, ${cap.limits[g.records] ?? ''}. ${cap.missing} postérieurs à ce point de sa période manquent probablement.`
     }
+    case 'export-next-page':
+      return `${g.file} : sa dernière page Graph renvoie à une page suivante (@odata.nextLink) qui n'a pas été téléchargée. Les enregistrements des pages suivantes manquent.`
     case 'xml-export':
       return (
         `${g.file} : ${frNum(g.records)} ${g.records < 2 ? "enregistrement d'événement exporté" : "enregistrements d'événements exportés"} en XML. Un export contient ce que sa requête a sélectionné, sans la numérotation propre du fichier journal : ` +

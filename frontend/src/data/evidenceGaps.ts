@@ -94,6 +94,7 @@ export type GapSay =
   | { kind: 'missing-between-files'; channel: string; computer: string; from: number; to: number; before: string; beforeLast: number; after: string; afterFirst: number }
   | { kind: 'log-starts-late'; computer: string; start: number; logs: [string, number][]; count: number }
   | { kind: 'export-cap'; file: string; records: number; source: ExportSource }
+  | { kind: 'export-next-page'; file: string }
   | { kind: 'xml-export'; file: string; records: number }
   | { kind: 'parse-limit'; file: string; kept: number }
   | { kind: 'read-in-part'; file: string; note: string }
@@ -157,7 +158,9 @@ const said = (severity: GapStatement['severity'], say: GapSay, evidenceId?: numb
         ? 'clock-set-back'
         : say.kind === 'parse-limit'
           ? 'read-in-part'
-          : say.kind,
+          : say.kind === 'export-next-page'
+            ? 'export-cap'
+            : say.kind,
   severity,
   text: EN.gap(say),
   say,
@@ -390,13 +393,7 @@ function startsLate(seqs: Located[], incidentStart: number): GapStatement[] {
  */
 function exportCaps(evidence: Evidence[]): GapStatement[] {
   const out: GapStatement[] = []
-  const linked = (e: Evidence, file: string) =>
-    out.push({
-      kind: 'export-cap',
-      severity: 'high',
-      text: `${file}: its last Graph page links to a next one (@odata.nextLink) that was not downloaded. Records on the pages after it are missing.`,
-      evidenceId: e.id,
-    })
+  const linked = (e: Evidence, file: string) => out.push(said('high', { kind: 'export-next-page', file }, e.id))
   const check = (e: Evidence, file: string, format: unknown, count: unknown, duplicates: unknown) => {
     const cap = EXPORT_CAPS.find((c) => c.formats.includes(String(format)))
     const n = Number(count ?? 0) + Number(duplicates ?? 0)

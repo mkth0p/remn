@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Evidence, Finding } from '../db/schema'
 import { evidenceGaps, fileSequences, incidentStart, type FileSequenceStats } from './evidenceGaps'
+import { reportText } from './reportText'
 
 const T0 = Date.UTC(2026, 8, 8, 10, 0, 0)
 const H = 3_600_000
@@ -293,6 +294,10 @@ describe('what the evidence cannot show', () => {
     ])
     expect(gaps[0].text).toBe('signins.json: its last Graph page links to a next one (@odata.nextLink) that was not downloaded. Records on the pages after it are missing.')
     expect(gaps[1].text).toContain('tenant/AuditLogs.json: its last Graph page links to a next one')
+    // a French report words the same statement in French
+    expect(reportText('fr').gap(gaps[0].say)).toBe(
+      "signins.json : sa dernière page Graph renvoie à une page suivante (@odata.nextLink) qui n'a pas été téléchargée. Les enregistrements des pages suivantes manquent.",
+    )
   })
 
   it('says which package members were read only in part, and how far', () => {
