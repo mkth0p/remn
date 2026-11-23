@@ -273,6 +273,67 @@ def test_synthetic_headers_from_pst_not_penalised():
     assert "no_message_id" in set(control["flags"])
 
 
+def test_a_msg_without_transport_headers_keeps_recipients_and_sender_whose_names_hold_an_address():
+    """Outlook keeps an address as the display name of a contact who has none, and extract-msg
+    writes the recipients of a message without transport headers as "name <address>" joined by
+    semicolons. Python's strict address parser refused the whole value: the message lost its To
+    list, was flagged as sent to undisclosed recipients, and had no sender. The addresses are
+    invented."""
+    from types import SimpleNamespace
+
+    from services.parsers.mail.common import build_row
+    from services.parsers.mail.msg import _headers_from_msg
+
+    msg = SimpleNamespace(
+        header=None,
+        sender="j.dupont@interne.fr <j.dupont@interne.fr>",
+        to="m.martin@interne.fr <m.martin@interne.fr>; Paul Bernard <p.bernard@interne.fr>",
+        cc="Comptabilite (compta@interne.fr) <compta@interne.fr>",
+        bcc=None,
+        subject="Point hebdo",
+        messageId=None,
+        inReplyTo=None,
+        date=None,
+    )
+    headers, synthetic = _headers_from_msg(msg)
+    assert synthetic
+    row = build_row(headers, "On se voit jeudi.", None, [], CTX, extra={"sourceFormat": "msg", "syntheticHeaders": True})
+    assert (row["fromName"], row["fromAddr"]) == ("j.dupont@interne.fr", "j.dupont@interne.fr")
+    assert [(r["name"], r["addr"]) for r in row["to"]] == [("m.martin@interne.fr", "m.martin@interne.fr"), ("Paul Bernard", "p.bernard@interne.fr")]
+    assert [r["addr"] for r in row["cc"]] == ["compta@interne.fr"]
+    assert row["recipientCount"] == 3
+    assert "undisclosed_recipients" not in row["flags"] and "display_name_email_mismatch" not in row["flags"]
+    # without the sender's SMTP address extract-msg gives the name alone, which Outlook writes as
+    # "Name (address)" for a contact: it was read as the address "jean" named "j.dupont@interne.fr",
+    # a sender who does not exist, flagged as a display name hiding another address
+    msg.sender = "Jean Dupont (j.dupont@interne.fr)"
+    headers, _ = _headers_from_msg(msg)
+    row = build_row(headers, "On se voit jeudi.", None, [], CTX, extra={"sourceFormat": "msg", "syntheticHeaders": True})
+    assert (row["fromName"], row["fromAddr"]) == ("Jean Dupont", "j.dupont@interne.fr")
+    assert "display_name_email_mismatch" not in row["flags"]
+
+
+def test_a_display_name_that_holds_another_address_is_read_as_a_name_and_flagged():
+    """An unquoted display name holding an address is how a lure shows a trusted sender. The
+    address is the one in angle brackets, never the one in the name; the addresses are invented."""
+    from services.analysis.headers import parse_address, parse_addresses
+
+    assert parse_address("support@bank.example <attacker@evil.example>") == ("support@bank.example", "attacker@evil.example")
+    # the form behind CVE-2023-27043: the address is the one in angle brackets, not alice's
+    assert parse_address("alice@example.org)<bob@example.org>")[1] == "bob@example.org"
+    assert [a["addr"] for a in parse_addresses(["alice@example.org)<bob@example.org>, carol@example.org"])] == ["bob@example.org", "carol@example.org"]
+    # what the strict parser reads is read as before
+    assert parse_addresses(["undisclosed-recipients:;"]) == []
+    assert [a["addr"] for a in parse_addresses(["Team: a@x.example, b@x.example;"])] == ["a@x.example", "b@x.example"]
+    row = parse_message_bytes(
+        b"From: support@bank.example <attacker@evil.example>\nTo: j.dupont@interne.fr\nSubject: Account review\n"
+        b"Date: Tue, 01 Sep 2026 09:02:10 +0000\nMessage-ID: <a@evil.example>\n\nPlease review your account.\n",
+        CTX,
+    )
+    assert (row["fromName"], row["fromAddr"]) == ("support@bank.example", "attacker@evil.example")
+    assert "display_name_email_mismatch" in row["flags"]
+
+
 def _forwarded_lure(extra: list[tuple[str, str]]) -> bytes:
     return make_samples.mail(
         '"IT Department" <it@interne.fr>',

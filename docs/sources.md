@@ -108,6 +108,13 @@ does not always write the message code page; when only the internet code page is
 message in Chinese saved as Big5, for example), that one is used, rather than the Western
 European default that turned such a subject and sender into unreadable characters.
 
+A display name that holds an address without quotes is read as a name, and the sender's
+address is the one in angle brackets: Outlook keeps an address as the name of a contact who has
+none and writes a contact as "Name (address)", and a lure shows a trusted address there, which
+is flagged `display_name_email_mismatch`. A list in which one entry cannot be read is read entry
+by entry, so a `.msg` without transport headers, whose recipients are joined by semicolons,
+keeps them.
+
 ### Deleted and orphaned mail (PST and OST)
 
 Messages inside Deleted Items and the Exchange Recoverable Items dumpster (Purges,
