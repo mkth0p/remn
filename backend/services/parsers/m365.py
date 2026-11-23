@@ -1880,6 +1880,9 @@ _GRAPH_ENVELOPE = (
 )
 
 
+_AUDIT_DATA_KEYS = ("AuditData", "auditdata", "Auditdata", "auditData")
+
+
 def _audit_from_row(obj: dict[str, Any]) -> tuple[dict[str, Any] | None, Any]:
     """Accept a bare AuditData object, an export row carrying AuditData as a JSON string/object,
     or a Graph auditLogRecord, whose record is under auditData."""
@@ -2091,20 +2094,18 @@ def _iter_rows(path: str | None, data: bytes | None, fmt: str, stats: Any, inclu
     # rows are counted by the caller once it knows they are kept; errors are counted here
     fh = _open_text(path, data)
     try:
-        if fmt == "m365-ual-csv":
-            for rec in _csv_rows(fh, stats):
-                ad, rtype = _audit_from_row(rec)
-                if ad is None:
-                    if stats is not None:
-                        stats.errors += 1
-                    continue
-                yield _finish(ual_row(ad, rtype), ad, stats, include_raw)
-        elif fmt == "m365-ual-json":
-            for obj in _iter_json_objects(fh, stats):
+        if fmt in ("m365-ual-csv", "m365-ual-json"):
+            for obj in _csv_rows(fh, stats) if fmt == "m365-ual-csv" else _iter_json_objects(fh, stats):
                 ad, rtype = _audit_from_row(obj)
                 if ad is None:
-                    if stats is not None:
-                        stats.errors += 1
+                    # a row of the CSV or a record with audit data that cannot be read is a broken
+                    # audit record; a record with none is of another kind (a sign-in, a record of
+                    # some other export) and not read
+                    if fmt == "m365-ual-csv" or any(k in obj for k in _AUDIT_DATA_KEYS):
+                        if stats is not None:
+                            stats.errors += 1
+                    else:
+                        _not_read(stats)
                     continue
                 yield _finish(ual_row(ad, rtype), ad, stats, include_raw)
         elif fmt == "entra-signin-json":

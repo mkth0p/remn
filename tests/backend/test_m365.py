@@ -223,6 +223,24 @@ def test_an_ndjson_line_that_does_not_parse_is_counted():
     assert len(rows) == 1 and stats.errors == 1
 
 
+def test_a_record_that_is_not_an_audit_record_in_a_unified_audit_log_is_counted_not_read():
+    """A sign-in among audit records is not a broken audit record: it is of another kind and not
+    read, as the other readers say of such a record. An audit record whose AuditData is not JSON
+    is still a broken one."""
+    from services.parsers.evtx_parser import Stats
+
+    ual = make_m365.ual_records()[:2]
+    for fmt, data in (
+        ("m365-ual-json", "\n".join(json.dumps(r) for r in [*ual, make_m365.entra_signins()[0], {"AuditData": "{not json"}]).encode()),
+        ("m365-ual-json", json.dumps([{"AuditData": json.dumps(r)} for r in ual] + [make_m365.entra_signins()[0], {"AuditData": "{not json"}]).encode()),
+    ):
+        stats = Stats()
+        assert m365.detect_format("audit.json", data) == fmt
+        rows = list(m365.iter_records(None, data, fmt, stats=stats))
+        assert len(rows) == 2 and stats.errors == 2 and stats.to_dict()["notRead"] == 1
+        assert m365.note(m365.counts(stats)) == "1 record(s) are not of the kind the file holds and were not read"
+
+
 def _update_inbox_rules(actions: list[dict], condition: dict) -> dict:
     return m365.ual_row(
         {
