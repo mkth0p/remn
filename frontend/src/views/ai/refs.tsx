@@ -1,4 +1,5 @@
 import { refKey, type RowRef } from '../../ai/evidence'
+import { pressable } from '../../components/pressable'
 import { openRef } from './openRef'
 
 export function RefChips({ refs, max = 12 }: { refs: RowRef[]; max?: number }) {
@@ -6,7 +7,7 @@ export function RefChips({ refs, max = 12 }: { refs: RowRef[]; max?: number }) {
   return (
     <span className="cites">
       {refs.slice(0, max).map((r) => (
-        <a key={refKey(r)} className="cite ok" onClick={() => openRef(r)} title={`open ${refKey(r)}`}>
+        <a {...pressable} key={refKey(r)} className="cite ok" onClick={() => openRef(r)} title={`open ${refKey(r)}`}>
           {refKey(r).replace(':', ' ')}
         </a>
       ))}

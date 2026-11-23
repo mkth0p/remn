@@ -7,20 +7,10 @@ import { fmtNum, fmtTs, tzLabel } from '../util/format'
 import { Badge, Dot, Flyout, Sev, Tabs } from './ui'
 import { IconAi, IconGlobe, IconHost, IconMail, IconUser } from './Icons'
 import { pressable, pressableRow } from './pressable'
+import { askAbout } from '../ai/evidence'
 
 export type EntityKind = EntityRef['kind']
 export type { EntityRef }
-
-/** Which entity page a field's value belongs to, or null when the field is not an entity. */
-export function entityKind(field: string): EntityKind | null {
-  const f = field.toLowerCase()
-  if (/^(targetuser|subjectuser|user|membername|upn|username|account|identity)$/.test(f)) return 'user'
-  if (/^(computer|host|hosts|workstation|hostname|sourcehostname|destinationhostname)$/.test(f)) return 'host'
-  if (/^(ipaddress|ip|ips|sourceip|destinationip|originip|clientip)$/.test(f)) return 'ip'
-  if (/^(fromaddr|attacker|attackeraddresses|replyto|sender|senders|toaddr|recipient)$/.test(f)) return 'address'
-  if (/^(fromdomain|fromregistrable|domain|domains|registrable)$/.test(f)) return 'domain'
-  return null
-}
 
 function eventFilter(e: EntityRef): Filter | null {
   const v = e.value
@@ -262,7 +252,14 @@ export function EntityPanel() {
   const Icon = KIND_ICON[entity.kind]
   const ask = () => {
     setAiPrompt(
-      `Summarise what this ${entity.kind} did in the case and what to check next: ${entity.value}. ${findings.length} finding(s), ${counts.events ?? events.length} event(s), ${counts.mails ?? mails.length} mail(s) involve it; first seen ${first ? new Date(first).toISOString() : 'n/a'}, last seen ${last ? new Date(last).toISOString() : 'n/a'}.`,
+      askAbout(`Summarise what this ${entity.kind} did in the case and what to check next.`, entity.kind, {
+        [entity.kind]: entity.value,
+        findings: findings.length,
+        events: counts.events ?? events.length,
+        mails: counts.mails ?? mails.length,
+        firstSeen: first ? new Date(first).toISOString() : null,
+        lastSeen: last ? new Date(last).toISOString() : null,
+      }),
     )
     setView('ai')
     close()

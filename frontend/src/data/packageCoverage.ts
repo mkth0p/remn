@@ -23,3 +23,17 @@ export function coverageMembers(stats: Record<string, unknown> | undefined): Rec
   const list = Array.isArray(stats?.files) ? stats.files : Array.isArray(stats?.members) ? stats.members : []
   return list.filter((f): f is Record<string, unknown> => !!f && typeof f === 'object' && 'status' in f)
 }
+
+/**
+ * The clauses of a member's note that say part of the file was not read or not kept: lines past a
+ * limit, records past a function's cap, records not of the file's kind, the lines of a Defender log
+ * that name nothing it acts on. The other clauses (a date read one way or without a time, a value
+ * cut at its length limit, rows repaired or kept with a mismatch marked, an encoding, an engine
+ * that did not scan the file) say how a file read whole was read.
+ */
+const LEFT_OUT = [/\bkept the first [\d,]+ lines\b/, /\bstopped at [\d,]+ records\b/, /\bwere not read\b/, /\blines read, [\d,]+ kept\b/]
+
+/** Whether a member's note says part of the file was not read (the server writes the note, as clauses joined by "; "). */
+export function noteLeavesOut(note: unknown): boolean {
+  return typeof note === 'string' && LEFT_OUT.some((re) => re.test(note))
+}

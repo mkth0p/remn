@@ -35,7 +35,9 @@ interface Props<T> {
  * count and each row's place in it included, since most rows are not drawn), a sortable column
  * header is a button, and the rows are reached from the keyboard: Tab enters the table on the
  * row last used, the arrows, Page Up, Page Down, Home and End move between rows, Enter opens one and
- * Space selects it when the table selects rows (opens it otherwise).
+ * Space selects it when the table selects rows (opens it otherwise). A value a press acts on (a
+ * column with `click`) is a button inside its cell, out of the Tab order: the right and left arrows
+ * move from the row to its values and back, and Enter or Space presses one.
  */
 export function VirtualTable<T extends object>({
   rows,
@@ -89,6 +91,12 @@ export function VirtualTable<T extends object>({
     if (to != null) {
       e.preventDefault()
       go(to)
+    } else if (e.key === 'ArrowRight') {
+      const value = e.currentTarget.querySelector<HTMLElement>('[data-value]')
+      if (value) {
+        e.preventDefault()
+        value.focus()
+      }
     } else if (e.key === 'Enter') {
       e.preventDefault()
       onRowClick?.(row)
@@ -96,6 +104,27 @@ export function VirtualTable<T extends object>({
       e.preventDefault()
       if (selectable) onToggleSelect!(rowKey(row), row)
       else onRowClick?.(row)
+    }
+  }
+  // the keys of a value inside a row: the arrows move along the row's values, back to the row and to
+  // the rows above and below, Enter and Space press it
+  const onValueKey = (e: KeyboardEvent<HTMLElement>, index: number) => {
+    const rowEl = e.currentTarget.closest<HTMLElement>('[role="row"]')
+    const values = rowEl ? [...rowEl.querySelectorAll<HTMLElement>('[data-value]')] : []
+    const at = values.indexOf(e.currentTarget)
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      e.stopPropagation()
+      e.currentTarget.click()
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault()
+      values[at + 1]?.focus()
+    } else if (e.key === 'ArrowLeft' || e.key === 'Escape') {
+      e.preventDefault()
+      ;(e.key === 'ArrowLeft' && at > 0 ? values[at - 1] : rowEl)?.focus()
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      go(index + (e.key === 'ArrowDown' ? 1 : -1))
     }
   }
   return (
@@ -167,20 +196,28 @@ export function VirtualTable<T extends object>({
                 {columns.map((c) => {
                   const value = (row as Record<string, unknown>)[c.key]
                   const content = c.render ? c.render(row) : value == null ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value)
+                  const pressable = !!c.click && value != null && value !== ''
                   return (
                     <div
                       key={c.key}
                       role="cell"
-                      className={classNames(c.click && value != null && value !== '' && 'click')}
+                      className={classNames(pressable && 'click')}
                       title={c.title ? c.title(row) : typeof content === 'string' ? content : undefined}
                       onClick={(e) => {
-                        if (c.click && value != null && value !== '') {
+                        if (pressable) {
                           e.stopPropagation()
-                          c.click(row, value)
+                          c.click!(row, value)
                         }
                       }}
                     >
-                      {content}
+                      {pressable ? (
+                        // in a table whose rows take no keys the value is a Tab stop of its own
+                        <span role="button" tabIndex={keyboard ? -1 : 0} data-value="" className="vcell-value" onKeyDown={(e) => onValueKey(e, vi.index)}>
+                          {content}
+                        </span>
+                      ) : (
+                        content
+                      )}
                     </div>
                   )
                 })}

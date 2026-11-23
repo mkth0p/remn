@@ -1,4 +1,4 @@
-import type { MouseEvent } from 'react'
+import type { KeyboardEvent, MouseEvent } from 'react'
 import { useStore } from '../../state/store'
 import { parseRef, type RowRef } from '../../ai/evidence'
 
@@ -24,6 +24,15 @@ export function openRef(ref: RowRef | string): void {
 export function onCiteClick(e: MouseEvent<HTMLElement>): void {
   const el = (e.target as HTMLElement).closest('[data-cite]') as HTMLElement | null
   if (!el || !el.classList.contains('ok')) return
+  e.preventDefault()
+  openRef(el.dataset.cite ?? '')
+}
+
+/** Key handler for the same block: Enter or Space on a citation chip opens it, as a press does. */
+export function onCiteKey(e: KeyboardEvent<HTMLElement>): void {
+  if (e.key !== 'Enter' && e.key !== ' ') return
+  const el = e.target as HTMLElement
+  if (!el.matches('[data-cite].ok')) return
   e.preventDefault()
   openRef(el.dataset.cite ?? '')
 }

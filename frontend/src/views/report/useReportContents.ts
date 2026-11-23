@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { renderGraphPng } from '../../components/ChainGraph'
+import { renderGraphPng } from '../../components/graphDrawing'
 import type { Chain } from '../../data/chains'
 import { loadReportClaims, type ReportClaims } from '../../data/claims'
 import { questionsForReport } from '../../data/questions/answers'

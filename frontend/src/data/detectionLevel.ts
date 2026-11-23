@@ -252,9 +252,11 @@ export const WIDESPREAD_MIN_HOSTS = 3
  * half the hosts the case's findings name (at least two, of at least three) is this network's
  * background, whatever the clean machines said, so its undecided findings fold per host where it
  * raised more than one. Rules the level never folds (custom rules, level 5) stay as they are, and
- * so does every finding an analyst has looked at. Nothing is dropped. Measured on 2,184 merged
- * attack cases at level 2, it cut the lines per clean machine by 14% (81 to 69) and the lines read
- * before the first finding of the attack by 9 to 12%.
+ * so does every finding an analyst has looked at. Nothing is dropped. The thresholds (half the
+ * hosts, at least two of at least three) are a judgement: the comparison they were chosen on is not
+ * in the repository, so nothing here can reproduce a figure from it. The lines per clean machine of
+ * docs/detection.md, which tools/detection_levels.py reproduces, count each machine alone, where
+ * this fold never applies.
  */
 export function foldWidespread<F extends Finding>(findings: F[], floors: Record<string, number> | undefined, keep: (f: F) => boolean = (f) => f.status !== 'new'): F[] {
   if (!floors) return findings

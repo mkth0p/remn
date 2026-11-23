@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import type { ChatMessage } from '../../ai/chat'
 import { citationChips, type SeenSet } from '../../ai/evidence'
 import { renderMarkdown } from '../../util/format'
-import { onCiteClick } from './openRef'
+import { onCiteClick, onCiteKey } from './openRef'
 
 const argSummary = (args: Record<string, unknown>) => {
   const s = JSON.stringify(args ?? {})
@@ -20,7 +20,7 @@ function sentenceCounts(c: NonNullable<ChatMessage['cites']>): string {
 /** Markdown with its citations turned into chips: verified ones open the row, the others say they were never returned. */
 export function CitedMarkdown({ text, seen }: { text: string; seen: SeenSet | null }) {
   const html = useMemo(() => citationChips(renderMarkdown(text), seen), [text, seen])
-  return <div onClick={onCiteClick} dangerouslySetInnerHTML={{ __html: html }} />
+  return <div onClick={onCiteClick} onKeyDown={onCiteKey} dangerouslySetInnerHTML={{ __html: html }} />
 }
 
 export function AiMessage({ m, seen, showTools }: { m: ChatMessage; seen: SeenSet; showTools: boolean }) {

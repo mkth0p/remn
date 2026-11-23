@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { VirtualTable, type Column } from '../components/VirtualTable'
-import { Drawer, usePivot } from '../components/Detail'
+import { Drawer } from '../components/Detail'
+import { usePivot } from '../components/usePivot'
 import { Badge, JsonView, Progress, Toggle } from '../components/ui'
 import { confirmAction } from '../components/confirm'
 import { checkReputation } from '../data/iocs'

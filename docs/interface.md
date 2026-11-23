@@ -68,9 +68,15 @@ The Review page adds `r`, `e`, `f` and `x` for its decisions. The tables of Even
 Findings and Indicators are tables to a screen reader, with their row count, and take the
 keyboard: Tab enters on the row last used, the arrows, Page Up, Page Down, Home and End move
 between rows, Enter opens one and Space selects it where the table selects rows; a sortable
-column header is a button. A switch is a button that Space flips. The items of the other
-lists and the values that open something (stories, steps, chains, evidence, facets, an entity's
-value) are reached with Tab and pressed with Enter or Space, and the focus shows as a ring.
+column header is a button. A value in a row that filters on a press (an event id, a host, a
+user, an address) is a button inside its cell: the right and left arrows move from the row to
+its values and back, and Enter or Space presses one. The bars of the histogram above the Events
+and Mails tables that hold records are buttons in one Tab stop: the left and right arrows, Home
+and End move between them, and Enter or Space narrows the time range to one. A switch is a
+button that Space flips. The items of the other lists and the values that open something
+(stories, steps, chains, evidence, facets, an entity's value, a hop's address or a link's
+domain in a mail, the citations of the AI analyst's answers) are reached with Tab and pressed
+with Enter or Space, and the focus shows as a ring.
 
 Opening another page moves the keyboard focus to its heading, or to the page itself where it
 has none, so a screen reader names the page and the next Tab starts in it. A dialog takes the
@@ -97,7 +103,18 @@ Microsoft 365 or Entra export whose dates did not say their order or zone shows 
 were read, and reads the file again with a date order and a time zone set for that evidence
 ([data sources](sources.md#microsoft-365-and-entra-exports)). An import still running has
 a "cancel" button on its line in the jobs list, which stops it and removes what it had
-written, as described on the [storage page](storage.md#uploads-and-jobs).
+written, as described on the [storage page](storage.md#uploads-and-jobs). In the coverage table
+of a package or archive, a member whose note says part of the file was not read (lines past a
+limit, records past a cap, records not of the file's kind, the lines of a Defender log that name
+nothing it acts on) is marked "partial"; one whose note only says how a file read whole was read
+(records without a time, values cut at their length limit, rows repaired, an encoding) is marked
+"with notes".
+
+Each browser numbers the files it adds. In a server case, which members fill from several
+browsers, a new file takes the next number above the highest the server holds for the case, so
+it does not take a number another browser already gave. Two files added from two browsers in the
+same moment can still be given one number; the server refuses the second (409), and its error
+says to add the file again, which then takes the next free number.
 
 ## Events and Mails
 
@@ -185,7 +202,14 @@ rule) and Notes. The ATT&CK tab counts techniques observed against the enabled r
 map to them. A finding of a rule never seen to detect what it looks for on a recorded attack
 is marked "lead" in the list, and the flyout says what the rule's measure shows: the
 recorded attacks it fires on, and how often it fires on the logs of clean machines (see
-[measured rules](detection.md#measured-rules)).
+[measured rules](detection.md#measured-rules)). An engine's finding that names the Sigma rule
+it ran (`sigmaId`), on the record a finding of REMN's conversion of the same SigmaHQ rule
+(`sigma-<id>`) cites, is kept inside REMN's finding, whose flyout names both: the ids must be
+the same, so a rule Hayabusa split into parts under new ids stays a finding of its own, and so
+does an engine finding the analyst already decided on. It stands on its own again when REMN's
+finding goes (its rule turned off, or the rules cleared by an evidence removal) and goes with
+its evidence. The server does not yet send `sigmaId` with Hayabusa's findings, so until it does
+the two stay separate findings.
 
 The queue is sorted by priority unless the sort control says severity or newest: what to look
 at first, deterministic and explained, in the way THOR and Cyber Triage rank what they find
@@ -352,7 +376,9 @@ ledger with a check of its hash chain. Past investigations are listed on the lef
 The Review page is where a case gets cleared. It walks the analyst through every attack
 chain (by score) and then every incident (by severity), one card at a time, with `j` and
 `k` to move and `r`, `e`, `f` and `x` for reviewed, confirmed, false positive and
-in-or-out of the report.
+in-or-out of the report. The verdict bar above them shows what the report's cover will
+print: the verdict, the completeness of the review (how complete it is, not how sure its
+conclusion is), how many items are decided, and the threat profile.
 
 A chain card takes a verdict (confirmed, unsure, benign), a severity, an inclusion switch
 and a narrative that replaces the automatic summary in the report; "draft with the

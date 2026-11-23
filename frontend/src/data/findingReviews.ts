@@ -5,7 +5,8 @@ import { reviewKey, tableRows, withRecordKeys, type RowLoader } from './findingA
 type Review = Pick<Finding, 'status' | 'notes' | 'createdAt' | 'severityOverride' | 'reportExclude' | 'chainUnlinked' | 'decidedBy' | 'decidedAt' | 'aiReason' | 'notesBy'> &
   Partial<Pick<Finding, 'source' | 'refs' | 'recordKeys' | 'ruleId' | 'key'>>
 
-const decided = (f: Finding) => f.status !== 'new' || !!f.notes || !!f.severityOverride || !!f.reportExclude || !!f.chainUnlinked || !!f.aiReason
+/** Whether the analyst (or the model) has decided on the finding or written on it. */
+export const decided = (f: Finding) => f.status !== 'new' || !!f.notes || !!f.severityOverride || !!f.reportExclude || !!f.chainUnlinked || !!f.aiReason
 
 /** Explicitly reset severity only, including the copy retained across rule refreshes. */
 export async function resetFindingSeverityOverrides(caseId: number, ids: number[]): Promise<void> {

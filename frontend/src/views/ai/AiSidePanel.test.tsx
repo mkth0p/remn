@@ -53,4 +53,18 @@ describe('the side panel of the AI analyst', () => {
     await user.click(screen.getByRole('button', { name: 'verify the chain' }))
     expect(await screen.findByText(/intact/)).toBeTruthy()
   })
+
+  it('shows the head of the chain whole, as the report prints it, and says what the check does not find', async () => {
+    await appendLedger(1, 'run', 'what failed?', { model: 'invented:1b' })
+    const last = await appendLedger(1, 'answer', 'two failures', null)
+    const user = userEvent.setup()
+    panel()
+    await user.click(screen.getByRole('button', { name: 'ledger' }))
+    await user.click(screen.getByRole('button', { name: 'verify the chain' }))
+    expect((await screen.findByRole('status')).textContent).toBe('✓ intact · 2 entries')
+    expect(screen.getByTitle('the SHA-256 of the newest entry').textContent).toBe(last.hash)
+    expect(last.hash).toMatch(/^[0-9a-f]{64}$/)
+    expect(screen.getByText(/It does not find the newest entries removed, nor the chain written again from any entry onward/)).toBeTruthy()
+    expect(screen.queryByText(/an entry changed afterwards breaks the chain/)).toBeNull()
+  })
 })

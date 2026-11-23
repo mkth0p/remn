@@ -361,6 +361,14 @@ export interface Finding {
   aiReason?: string
   /** who wrote the note last (a note the model drafted is replaced by the next triage; the analyst's is kept) */
   notesBy?: 'analyst' | 'ai'
+  /** an external engine's finding (Hayabusa): the id of the Sigma rule it ran, as the engine reports it */
+  sigmaId?: string
+  /**
+   * the same detection by an external engine: its rule ran the Sigma rule this finding's rule was
+   * converted from (the same id), on the same record. One finding is kept for both, and this names
+   * the other (data/engineDuplicates.ts)
+   */
+  alsoBy?: { engine: string; ruleId: string; title: string; severity: Severity }[]
 }
 
 /** kv iocs-capped-<caseId>: the imports that stopped collecting indicators at the limit, or the recount after a removal that did. */
@@ -659,6 +667,8 @@ export const CASE_KV_KEYS = (caseId: number) =>
     'report-final',
     // the investigative scenarios chosen for the case (data/questions/answers.ts); the answers are rows of questionAnswers
     'question-scenarios',
+    // an engine's findings kept inside REMN's finding of the same Sigma rule on the same record (data/engineDuplicates.ts)
+    'engine-duplicates',
   ].map((p) => `${p}-${caseId}`)
 
 /** kv keys of one case that carry an extra suffix after the case id (one record per hypothesis). */
