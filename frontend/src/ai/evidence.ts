@@ -129,7 +129,7 @@ export function citationsIn(text: string, seen: SeenSet): Citation[] {
 
 /**
  * Turn the citations of an HTML string (already escaped and rendered) into chips: a verified one
- * is a link the page opens, an unverified one says the tools never returned it.
+ * is a button the page opens (Tab reaches it), an unverified one says the tools never returned it.
  */
 export function citationChips(html: string, seen: SeenSet | null): string {
   return html.replace(CITE_RE, (_all, body: string) => {
@@ -147,7 +147,7 @@ export function citationChips(html: string, seen: SeenSet | null): string {
       const label = key.replace(':', ' ')
       chips.push(
         ok
-          ? `<a class="cite ok" data-cite="${key}" title="open ${label}">${label}</a>`
+          ? `<a class="cite ok" data-cite="${key}" role="button" tabindex="0" title="open ${label}">${label}</a>`
           : `<span class="cite bad" data-cite="${key}" title="not returned by any tool in this conversation: unverified">${label}?</span>`,
       )
     }

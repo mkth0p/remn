@@ -18,7 +18,7 @@ const COLUMNS: Column<Row>[] = [
 ]
 
 /** A table as a page holds it: its sort, its open row and its selection. */
-function Page({ onOpen = () => {}, select = false }: { onOpen?: (r: Row) => void; select?: boolean }) {
+function Page({ onOpen = () => {}, select = false, columns = COLUMNS }: { onOpen?: (r: Row) => void; select?: boolean; columns?: Column<Row>[] }) {
   const [sort, setSort] = useState<{ field: string; dir: 'asc' | 'desc' }>({ field: 'host', dir: 'asc' })
   const [open, setOpen] = useState<number | null>(null)
   const [picked, setPicked] = useState(new Set<string | number>())
@@ -27,7 +27,7 @@ function Page({ onOpen = () => {}, select = false }: { onOpen?: (r: Row) => void
     <VirtualTable
       label="Events"
       rows={rows}
-      columns={COLUMNS}
+      columns={columns}
       rowKey={(r) => r.id}
       selectedKey={open}
       onRowClick={(r) => {
@@ -125,6 +125,45 @@ describe('VirtualTable', () => {
     await user.tab({ shift: true })
     expect(document.activeElement).toBe(rowOf('ws-01'))
     expect(screen.getAllByRole('row').filter((r) => r.tabIndex === 0)).toEqual([rowOf('ws-01')])
+  })
+
+  it('reaches the values a press filters on from their row with the arrows, and presses one with Enter or Space', async () => {
+    const user = userEvent.setup()
+    const onOpen = vi.fn()
+    const onHost = vi.fn()
+    const onEvent = vi.fn()
+    const pivots: Column<Row>[] = [
+      { ...COLUMNS[0], click: (r) => onHost(r.host) },
+      { ...COLUMNS[1], click: (r) => onEvent(r.eventId) },
+    ]
+    render(<Page onOpen={onOpen} columns={pivots} />)
+    const row = rowOf('ws-02')
+    const [host, event] = within(row).getAllByRole('button')
+    expect([host.textContent, event.textContent]).toEqual(['ws-02', '4624'])
+    // the values stay out of the Tab order: the rows are one stop
+    expect([host.tabIndex, event.tabIndex]).toEqual([-1, -1])
+    row.focus()
+    await user.keyboard('{ArrowRight}')
+    expect(document.activeElement).toBe(host)
+    await user.keyboard('{Enter}')
+    expect(onHost).toHaveBeenCalledWith('ws-02')
+    await user.keyboard('{ArrowRight} ')
+    expect(document.activeElement).toBe(event)
+    expect(onEvent).toHaveBeenCalledWith(4624)
+    // a press on a value is not a press on its row
+    expect(onOpen).not.toHaveBeenCalled()
+    await user.keyboard('{ArrowLeft}{ArrowLeft}')
+    expect(document.activeElement).toBe(row)
+    await user.keyboard('{ArrowRight}{ArrowDown}')
+    await waitFor(() => expect(document.activeElement).toBe(rowOf('ws-03')))
+  })
+
+  it('makes each value a Tab stop of its own where the rows take no keys', () => {
+    render(<VirtualTable label="Events" rows={ROWS.slice(0, 2)} columns={[{ ...COLUMNS[0], click: () => {} }, COLUMNS[1]]} rowKey={(r) => r.id} />)
+    expect(screen.getAllByRole('button').map((b) => [b.textContent, b.tabIndex])).toEqual([
+      ['ws-01', 0],
+      ['ws-02', 0],
+    ])
   })
 
   it('selects a row with Space where the table selects rows, and opens it with Enter', async () => {

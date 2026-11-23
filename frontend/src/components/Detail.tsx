@@ -697,8 +697,12 @@ export function MailDetail({
                 <td className="ellipsis" style={{ maxWidth: 220 }} title={h.from}>
                   {h.from}
                 </td>
-                <td className="click" onClick={() => h.fromIp && setEntity({ kind: 'ip', value: h.fromIp })}>
-                  {h.fromIp}
+                <td className={h.fromIp ? 'click' : undefined} onClick={() => h.fromIp && setEntity({ kind: 'ip', value: h.fromIp })}>
+                  {h.fromIp && (
+                    <span {...pressable} title="open the IP page">
+                      {h.fromIp}
+                    </span>
+                  )}
                 </td>
                 <td className="ellipsis" style={{ maxWidth: 160 }}>
                   {h.by}
@@ -731,7 +735,7 @@ export function MailDetail({
             {row.urls.map((u, i) => (
               <tr key={i}>
                 <td className="click" style={{ maxWidth: 420, wordBreak: 'break-all' }} onClick={() => setEntity({ kind: 'domain', value: u.domain || u.host })} title="open the domain page">
-                  {u.defanged}
+                  <span {...pressable}>{u.defanged}</span>
                 </td>
                 <td className="ellipsis sans" style={{ maxWidth: 160 }}>
                   {u.text}

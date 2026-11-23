@@ -79,7 +79,13 @@ export function IncidentCard({
             .map(([k, v]) => {
               const kind = entityKind(k)
               return (
-                <span key={k} className={classNames('pill', kind && 'click')} onClick={() => kind && setEntity({ kind, value: String(v) })} title={kind ? 'open the entity page' : k}>
+                <span
+                  key={k}
+                  {...(kind ? pressable : {})}
+                  className={classNames('pill', kind && 'click')}
+                  onClick={() => kind && setEntity({ kind, value: String(v) })}
+                  title={kind ? 'open the entity page' : k}
+                >
                   <span className="muted">{k}</span> {String(v)}
                 </span>
               )

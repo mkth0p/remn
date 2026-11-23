@@ -68,9 +68,15 @@ The Review page adds `r`, `e`, `f` and `x` for its decisions. The tables of Even
 Findings and Indicators are tables to a screen reader, with their row count, and take the
 keyboard: Tab enters on the row last used, the arrows, Page Up, Page Down, Home and End move
 between rows, Enter opens one and Space selects it where the table selects rows; a sortable
-column header is a button. A switch is a button that Space flips. The items of the other
-lists and the values that open something (stories, steps, chains, evidence, facets, an entity's
-value) are reached with Tab and pressed with Enter or Space, and the focus shows as a ring.
+column header is a button. A value in a row that filters on a press (an event id, a host, a
+user, an address) is a button inside its cell: the right and left arrows move from the row to
+its values and back, and Enter or Space presses one. The bars of the histogram above the Events
+and Mails tables that hold records are buttons in one Tab stop: the left and right arrows, Home
+and End move between them, and Enter or Space narrows the time range to one. A switch is a
+button that Space flips. The items of the other lists and the values that open something
+(stories, steps, chains, evidence, facets, an entity's value, a hop's address or a link's
+domain in a mail, the citations of the AI analyst's answers) are reached with Tab and pressed
+with Enter or Space, and the focus shows as a ring.
 
 Opening another page moves the keyboard focus to its heading, or to the page itself where it
 has none, so a screen reader names the page and the next Tab starts in it. A dialog takes the
