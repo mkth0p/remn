@@ -357,7 +357,8 @@ lines: requests refused, sweeps, the engine's state. A failure in the parsing co
 or in the web server is logged by exception type and place (`UnicodeDecodeError at common.py:104`),
 never with the exception's text, which is often a piece of the input or a path on the server. This
 holds in every mode, and for an error nothing caught in the parse process, which writes to the
-server's own stderr; `FORENSIC_DEBUG=1` keeps the text and the traceback for a developer on their
+server's own stderr; that process then ends at once with exit status 1, which the analyst is told
+as the parse process ending unexpectedly. `FORENSIC_DEBUG=1` keeps the text and the traceback for a developer on their
 own machine, and has no such effect in browser-only mode. In browser-only mode the log also never
 names a file, member or attachment. `docker-compose.public.yml` rotates the log (three files of
 10 MB) rather than keeping it for the life of the container.
