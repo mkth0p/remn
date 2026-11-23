@@ -12,6 +12,7 @@ import { namedMessageIds } from '../data/namedMessages'
 import { sanitizeMailHtml } from './mailHtml'
 import { pressable, pressableRow } from './pressable'
 import { askAbout } from '../ai/evidence'
+import { usePivot } from './usePivot'
 
 const SEV_ORDER = ['critical', 'high', 'medium', 'low', 'info']
 
@@ -37,23 +38,6 @@ export function Drawer({ title, onClose, children, actions }: { title: React.Rea
       <div className="drawer-b">{children}</div>
     </div>
   )
-}
-
-export function usePivot() {
-  const setView = useStore((s) => s.setView)
-  const setEventsFilter = useStore((s) => s.setEventsFilter)
-  const setMailsFilter = useStore((s) => s.setMailsFilter)
-  return (value: string, field?: string, target?: 'events' | 'mails') => {
-    const v = value.trim()
-    if (!v) return
-    if (target === 'mails' || (!target && field && ['fromAddr', 'fromDomain', 'originIp', 'subject', 'fromName'].includes(field))) {
-      setMailsFilter(field && !['summary'].includes(field) ? { conditions: [{ field, op: 'eq', value: v }] } : { text: v })
-      setView('mails')
-    } else {
-      setEventsFilter(field && !['summary', 'raw', 'message', 'commandLine', 'scriptBlockText'].includes(field) ? { conditions: [{ field, op: 'eq', value: v }] } : { text: v })
-      setView('events')
-    }
-  }
 }
 
 export function EventDetail({ row: initial, onClose }: { row: EventRow; onClose: () => void }) {

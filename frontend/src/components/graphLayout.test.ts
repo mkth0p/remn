@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Chain, ChainStep } from '../data/chains'
 import { buildCampaignGraph, buildChainGraph, type Graph } from '../data/chainGraph'
-import { drawGraph, graphOption, PRINT_TOKENS, type GraphTokens } from './ChainGraph'
+import { drawGraph, graphOption, PRINT_TOKENS, type GraphTokens } from './graphDrawing'
 import { estimateWidth, shortenPaths, wrapText, type GraphLayout, type PlacedNode } from './graphLayout'
 
 const M = 60_000

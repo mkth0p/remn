@@ -27,7 +27,8 @@ vi.mock('../data/source', () => ({
   }),
 }))
 
-const { EntityPanel, entityKind } = await import('./EntityPanel')
+const { EntityPanel } = await import('./EntityPanel')
+const { entityKind } = await import('./entityKind')
 const { useStore } = await import('../state/store')
 
 let db: RemnDB

@@ -15,6 +15,7 @@ import { exportCsv, exportJson } from '../util/export'
 import { BaselineButton } from '../components/BaselineButton'
 import { RescoreButton } from '../components/RescoreButton'
 import { Dot, Flag } from '../components/ui'
+import { riskSev } from './mailRisk'
 import { IconMore, IconPaperclip } from '../components/Icons'
 
 const FACETS: FacetDef[] = [
@@ -68,8 +69,6 @@ const FIELDS = [
 ]
 const LIMIT = 3000
 const QUIET_FLAGS = /^(spf_none|dkim_none|dmarc_none|html_only|from_webmail|single_hop|no_origin_ip)$/
-
-export const riskSev = (risk: number) => (risk >= 80 ? 'critical' : risk >= 60 ? 'high' : risk >= 40 ? 'medium' : risk >= 20 ? 'low' : 'info')
 
 /**
  * Mails: query bar, histogram of the result set, dense table, and a bottom preview pane

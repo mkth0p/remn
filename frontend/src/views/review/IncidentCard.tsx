@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { AddToTimeline } from '../../components/AddToTimeline'
-import { entityKind } from '../../components/EntityPanel'
+import { entityKind } from '../../components/entityKind'
 import { IconAi, IconArrowLeft, IconCheck } from '../../components/Icons'
 import { Sev, Spinner, Toggle } from '../../components/ui'
 import { SEVERITIES, type ReportSettings } from '../../data/review'
