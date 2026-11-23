@@ -554,12 +554,19 @@ The same panel sets the language and the firm. The report, HTML and Word, is wri
 or in French; the Report page itself stays English. Every heading, label and sentence the report
 writes itself comes from the dictionary of that language, dates and numbers are written the way
 it writes them (01/03/2026 08:00:00 UTC, 12 345, 1,50 Ko in French), and the HTML document and
-the Word document say their language. What the analysis states and what the analyst writes are
-printed as they are: the limits of the evidence, the reasons a claim does not hold, a story's
-spine, rule and incident titles, and the questions of DFIQ stay in English. A firm name, a cover
-line and a logo (PNG or JPEG, 200 KB at most; the panel says so and refuses a larger file) take
-the place of REMN's wordmark on the cover, at the foot and in the title; the logo is embedded in
-the HTML report and in the Word file. With none of them set the report looks as it always has.
+the Word document say their language. That includes what REMN works out in the browser: the
+limits of the evidence, the reasons a claim does not hold and where its rows are, what each
+incident groups, the coverage of each question, REMN's own scenarios and questions, what the
+stories and chains could not read, the codes of the ATT&CK tactics on the cover and the kinds of
+the model's proposals. The Report page keeps its English from the same values. What others wrote
+is printed as they wrote it, and the French report says which parts those are: rule and finding
+titles, the questions of DFIQ (quoted as DFIQ publishes them), the step titles, ties, phase bases,
+spine and automatic summaries the server's story and chain analysis writes in English, and the
+model's text, marked as quoted without translation. What the analyst writes is printed as written.
+A firm name, a cover line and a logo (PNG or JPEG, 200 KB at most; the panel says so and refuses a
+larger file) take the place of REMN's wordmark on the cover, at the foot and in the title; the
+logo is embedded in the HTML report and in the Word file. With none of them set the report looks
+as it always has.
 Printed from a Chromium browser, every page past the cover carries a running header (the firm or
 REMN, the case, the marking) and every page its number and the page count; other browsers print
 without them. The Word report numbers its pages in its footer.

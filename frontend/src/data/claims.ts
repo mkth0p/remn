@@ -22,14 +22,30 @@
 import type { Evidence, Finding } from '../db/schema'
 import { compileCond, ruleReadFields, timePred, type Rule } from '../rules/engine'
 import { getPath, type SettingsLike } from '../rules/filter'
-import { fmtNum, fmtUtc } from '../util/format'
 import type { DataSource } from './source'
 import { recordRef, type RecordRef } from './recordKeys'
+import { EN } from './reportText'
 import { citationsIn, SeenSet } from '../ai/evidence'
 
 export type ClaimStatus = 'verified' | 'unsupported' | 'contradicted'
 /** A text's check: its rows hold every value it names, it names none, or one is in none of them. */
 export type TextStatus = 'verified' | 'nothing_to_check' | 'unsupported'
+
+/**
+ * Why a finding or a text does not hold against its rows, as values: reasons is their English
+ * writing, which the interface prints; the report writes them in its own language (data/reportText.ts claim).
+ */
+export type ClaimWhy =
+  | { kind: 'no-rows' }
+  | { kind: 'rows-missing'; missing: number; checked: number }
+  | { kind: 'no-match'; records: RecordRef[]; more: number }
+  | { kind: 'value-absent'; field: string; values: string[] }
+  | { kind: 'time'; ts: number; first: number }
+  | { kind: 'text-absent'; values: string[]; more: number; rows: number }
+  | { kind: 'text-absent-case'; values: string[]; more: number }
+
+/** What a checked text is, for the report to name it in its own language. */
+export type TextAbout = { kind: 'chain'; title: string } | { kind: 'incident'; title: string } | { kind: 'story'; title: string } | { kind: 'summary' }
 
 export interface ClaimCheck {
   status: ClaimStatus
@@ -38,6 +54,7 @@ export interface ClaimCheck {
   checked: number
   /** why it is not verified, in words */
   reasons: string[]
+  why: ClaimWhy[]
   /** the first rows it cites, by their place in their file */
   records: RecordRef[]
   /** what could not be checked, when something could not */
@@ -49,7 +66,11 @@ export interface TextCheck {
   /** the values it names that the check looked for */
   named: string[]
   reasons: string[]
+  why: ClaimWhy[]
 }
+
+/** reasons and their English writing together */
+const because = (why: ClaimWhy[]) => ({ reasons: why.map(EN.claim.reason), why })
 
 type Row = Record<string, unknown>
 
@@ -84,7 +105,6 @@ function sameValue(have: string, want: string): boolean {
   const wn = Number(w)
   return h !== '' && w !== '' && Number.isFinite(hn) && Number.isFinite(wn) && hn === wn
 }
-const plural = (n: number, one: string, many = `${one}s`) => (n === 1 ? one : many)
 
 /** The columns a rule reads that the rows read back do not carry (a search may leave out raw XML or a mail's body). */
 function unreadable(rule: Rule, rows: Row[]): string[] {
@@ -113,15 +133,12 @@ export function checkFinding({ finding: f, rows, rule, settings, evidence }: Fin
   const read = checkedIds.map((id) => rows.get(id)).filter((r): r is Row => !!r)
   const refOf = (r: Row) => recordRef(r, f.source, evidence?.get(Number(r.evidenceId)))
   const records = read.slice(0, 3).map(refOf)
-  const contradicted: string[] = []
-  const unsupported: string[] = []
+  const contradicted: ClaimWhy[] = []
+  const unsupported: ClaimWhy[] = []
   let partial: string | undefined
-  if (!f.refs.length) unsupported.push('it cites no row')
+  if (!f.refs.length) unsupported.push({ kind: 'no-rows' })
   const missing = checkedIds.length - read.length
-  if (missing)
-    unsupported.push(
-      `${fmtNum(missing)} of the ${fmtNum(checkedIds.length)} ${plural(checkedIds.length, 'row')} it cites ${missing === 1 ? 'is' : 'are'} not in the case: removed, or numbered anew when evidence was added again`,
-    )
+  if (missing) unsupported.push({ kind: 'rows-missing', missing, checked: checkedIds.length })
   const tsField = f.source === 'mails' ? 'date' : 'ts'
   let matching = read
   if (rule && rule.source === f.source && rule.where && read.length) {
@@ -135,13 +152,7 @@ export function checkFinding({ finding: f, rows, rule, settings, evidence }: Fin
       const main = (r: Row) => where(r) && !(exclude && exclude(r)) && (!time || time(r))
       const off = read.filter((r) => !main(r) && !(then && then(r)))
       matching = read.filter(main)
-      if (off.length)
-        contradicted.push(
-          `${off
-            .slice(0, 2)
-            .map((r) => `${refOf(r).file} ${refOf(r).record}`)
-            .join(' and ')}${off.length > 2 ? ` and ${fmtNum(off.length - 2)} more` : ''} no longer ${off.length === 1 ? 'matches' : 'match'} the rule`,
-        )
+      if (off.length) contradicted.push({ kind: 'no-match', records: off.slice(0, 2).map(refOf), more: Math.max(0, off.length - 2) })
     }
   } else if (!rule && !['chain'].includes(f.ruleId) && !f.ruleId.startsWith('engine:')) partial = 'its rule is no longer loaded: the rows were not checked against it'
   // the values it names: from its first row, or listed from all its rows for a distinct count
@@ -157,17 +168,17 @@ export function checkFinding({ finding: f, rows, rule, settings, evidence }: Fin
       const holds = (w: string) => read.some((r) => sameValue(str(getPath(r, field)), w))
       const absent = wanted.filter((w) => !holds(w))
       // a column a server search leaves out cannot be said to be absent
-      if (absent.length && read.some((r) => getPath(r, field) !== undefined)) contradicted.push(`it names ${field} ${absent.slice(0, 2).join(', ')}, which none of its rows holds`)
+      if (absent.length && read.some((r) => getPath(r, field) !== undefined)) contradicted.push({ kind: 'value-absent', field, values: absent.slice(0, 2) })
     }
   }
   // its time is its first matching row's, when its first rows were all read back
   const times = matching.map((r) => r[tsField]).filter((t): t is number => typeof t === 'number')
   if (f.ts != null && times.length && !missing && f.ruleId !== 'chain') {
     const first = Math.min(...times)
-    if (Math.abs(f.ts - first) > TIME_SLACK_MS) contradicted.push(`its time, ${fmtUtc(f.ts)}, is not its first row's (${fmtUtc(first)})`)
+    if (Math.abs(f.ts - first) > TIME_SLACK_MS) contradicted.push({ kind: 'time', ts: f.ts, first })
   }
   const status: ClaimStatus = contradicted.length ? 'contradicted' : unsupported.length ? 'unsupported' : 'verified'
-  return { status, cited: f.refs.length, checked: checkedIds.length, reasons: [...contradicted, ...unsupported].slice(0, REASONS), records, partial }
+  return { status, cited: f.refs.length, checked: checkedIds.length, ...because([...contradicted, ...unsupported].slice(0, REASONS)), records, partial }
 }
 
 // ---------------------------------------------------------------------------
@@ -209,15 +220,13 @@ function rowText(r: Row): string {
 /** A text against the rows it is about: every address, hash and case name it names should be in them. */
 export function checkText(text: string, rows: Row[], names: Iterable<string> = []): TextCheck {
   const named = namedValues(text, names)
-  if (!named.length) return { status: 'nothing_to_check', named, reasons: [] }
+  if (!named.length) return { status: 'nothing_to_check', named, ...because([]) }
   const hay = rows.map(rowText).join('\n')
   const absent = named.filter((v) => !hay.includes(v))
   return {
     status: absent.length ? 'unsupported' : 'verified',
     named,
-    reasons: absent.length
-      ? [`it names ${absent.slice(0, 4).join(', ')}${absent.length > 4 ? ` and ${fmtNum(absent.length - 4)} more` : ''}, which none of its ${fmtNum(rows.length)} ${plural(rows.length, 'row')} holds`]
-      : [],
+    ...because(absent.length ? [{ kind: 'text-absent', values: absent.slice(0, 4), more: Math.max(0, absent.length - 4), rows: rows.length }] : []),
   }
 }
 
@@ -228,7 +237,7 @@ export function checkText(text: string, rows: Row[], names: Iterable<string> = [
  */
 export async function checkTextInCase(text: string, source: DataSource): Promise<TextCheck> {
   const named = namedValues(text)
-  if (!named.length) return { status: 'nothing_to_check', named, reasons: [] }
+  if (!named.length) return { status: 'nothing_to_check', named, ...because([]) }
   const absent: string[] = []
   let scanned = 0
   for (const v of named.slice(0, 40)) {
@@ -244,7 +253,7 @@ export async function checkTextInCase(text: string, source: DataSource): Promise
   return {
     status: absent.length ? 'unsupported' : 'verified',
     named,
-    reasons: absent.length ? [`it names ${absent.slice(0, 4).join(', ')}${absent.length > 4 ? ` and ${fmtNum(absent.length - 4)} more` : ''}, which no row of the evidence holds`] : [],
+    ...because(absent.length ? [{ kind: 'text-absent-case', values: absent.slice(0, 4), more: Math.max(0, absent.length - 4) }] : []),
   }
 }
 
@@ -300,7 +309,7 @@ export interface ReportClaims {
   /** each printed finding, by finding id */
   findings: Record<number, ClaimCheck>
   /** each text the report prints about rows: a chain's narrative (chain:<id>), an incident's notes (incident:<lead finding id>), the summary */
-  texts: { key: string; what: string; check: TextCheck }[]
+  texts: { key: string; what: string; about: TextAbout; check: TextCheck }[]
 }
 
 interface ChainLike {
@@ -343,6 +352,7 @@ export async function loadReportClaims(input: {
   const checks = await checkFindings(findings, input.rules, source, input.settings, input.evidence)
   const names = caseNames(findings)
   const texts: ReportClaims['texts'] = []
+  const text = (key: string, about: TextAbout, check: TextCheck) => ({ key, what: EN.claim.about(about), about, check })
   for (const c of input.chains) {
     const narrative = input.narratives[c.id]
     if (!narrative?.trim()) continue
@@ -353,22 +363,22 @@ export async function loadReportClaims(input: {
       ids[s.source].push(...(s.refs ?? []).slice(0, CHECKED_ROWS))
     }
     const [ev, ml] = await Promise.all([readRows(source, 'events', ids.events), readRows(source, 'mails', ids.mails)])
-    texts.push({ key: `chain:${c.id}`, what: `the narrative of chain "${c.title ?? c.id}"`, check: checkText(narrative, [...ev.values(), ...ml.values()], names) })
+    texts.push(text(`chain:${c.id}`, { kind: 'chain', title: c.title ?? c.id }, checkText(narrative, [...ev.values(), ...ml.values()], names)))
   }
   for (const i of input.incidents) {
-    const text = [i.lead.notes, i.lead.aiReason].filter(Boolean).join('\n')
-    if (!text.trim()) continue
+    const notes = [i.lead.notes, i.lead.aiReason].filter(Boolean).join('\n')
+    if (!notes.trim()) continue
     const ids = { events: [] as number[], mails: [] as number[] }
     for (const f of i.findings) ids[f.source].push(...f.refs.slice(0, CHECKED_ROWS))
     const [ev, ml] = await Promise.all([readRows(source, 'events', ids.events), readRows(source, 'mails', ids.mails)])
-    texts.push({ key: `incident:${i.lead.id ?? i.title}`, what: `the notes on "${i.title}"`, check: checkText(text, [...ev.values(), ...ml.values()], names) })
+    texts.push(text(`incident:${i.lead.id ?? i.title}`, { kind: 'incident', title: i.title }, checkText(notes, [...ev.values(), ...ml.values()], names)))
   }
   for (const st of input.stories ?? []) {
     if (!st.note.trim()) continue
     const [ev, ml] = await Promise.all([readRows(source, 'events', st.ids.events), readRows(source, 'mails', st.ids.mails)])
-    texts.push({ key: `story:${st.key}`, what: `the note on the story "${st.title}"`, check: checkText(st.note, [...ev.values(), ...ml.values()], names) })
+    texts.push(text(`story:${st.key}`, { kind: 'story', title: st.title }, checkText(st.note, [...ev.values(), ...ml.values()], names)))
   }
-  if (input.summary.trim()) texts.push({ key: 'summary', what: 'the executive summary', check: await checkTextInCase(input.summary, source) })
+  if (input.summary.trim()) texts.push(text('summary', { kind: 'summary' }, await checkTextInCase(input.summary, source)))
   return { findings: Object.fromEntries(checks), texts }
 }
 

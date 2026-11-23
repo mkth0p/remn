@@ -416,7 +416,7 @@ export function reportDocumentXml(d: ReportData): string {
           ),
         )
         for (const l of storyDecisionTexts(dec, t)) body.push(caption(l))
-        const gaps = storyOwnGaps(s)
+        const gaps = storyOwnGaps(s, t)
         if (gaps.length) body.push(caption(`${t.story.stops} ${gaps.join(' ')}`))
       }
     }
@@ -484,7 +484,7 @@ export function reportDocumentXml(d: ReportData): string {
     body.push(para(t.incident.introDocx))
     for (const i of d.incidents) {
       body.push(heading(i.title, 2))
-      body.push(para([sevRun(i.severity), ` · ${t.status[i.status] ?? i.status} · ${i.subtitle} · ${span(t, i.ts, i.tsEnd)} · ${t.incident.rows(i.refs.length)}`]))
+      body.push(para([sevRun(i.severity), ` · ${t.status[i.status] ?? i.status} · ${t.incident.subtitle(i.about)} · ${span(t, i.ts, i.tsEnd)} · ${t.incident.rows(i.refs.length)}`]))
       const ents = Object.entries(i.entities).slice(0, 6)
       if (ents.length) body.push(caption(ents.map(([k, v]) => `${k}=${String(v)}`).join(' · ')))
       if (i.lead.notes) {
@@ -504,7 +504,7 @@ export function reportDocumentXml(d: ReportData): string {
         table(
           t.evidence.head,
           d.evidence.map((e) => {
-            const issue = e.kind === 'package' ? packageCoverageIssues(e).join('; ') : evidenceIssue(e, t)
+            const issue = e.kind === 'package' ? packageCoverageIssues(e, t).join('; ') : evidenceIssue(e, t)
             return [
               e.name,
               e.format || e.kind,
@@ -525,7 +525,7 @@ export function reportDocumentXml(d: ReportData): string {
       body.push(
         table(
           t.evidence.packageHead,
-          packages.map((e) => [e.name, packageCoverageIssues(e).join('; ') || t.evidence.noIssues]),
+          packages.map((e) => [e.name, packageCoverageIssues(e, t).join('; ') || t.evidence.noIssues]),
         ),
       )
     }

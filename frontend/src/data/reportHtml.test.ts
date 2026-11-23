@@ -351,15 +351,21 @@ describe('what the report claims about the case', () => {
     const html = buildReportHtml(
       data({
         gaps: [
-          { kind: 'record-holes', severity: 'high', text: 'Security on DC01 (<b>x</b>.evtx): 3 records missing from its numbering.', evidenceId: 1 },
-          { kind: 'mail-throttled', severity: 'high', text: 'MailItemsAccessed for a@example.test was throttled.' },
+          {
+            kind: 'record-holes',
+            severity: 'high',
+            text: 'Security on DC01 (<b>x</b>.evtx): 3 records missing from its numbering.',
+            say: { kind: 'record-holes', where: { file: '<b>x</b>.evtx', channel: 'Security', computer: 'DC01' }, floor: false, missing: 3, gaps: 1, first: 4, last: 8, largest: [5, 7] },
+            evidenceId: 1,
+          },
+          { kind: 'mail-throttled', severity: 'high', text: 'MailItemsAccessed for a@example.test was throttled.', say: { kind: 'mail-throttled', user: 'a@example.test', from: 0 } },
         ],
       }),
     )
     const limits = html.slice(html.indexOf('<h4>Where it stops</h4>'))
-    expect(limits).toContain('<li>Security on DC01 (&lt;b&gt;x&lt;/b&gt;.evtx): 3 records missing from its numbering.</li>')
+    expect(limits).toContain('<li>Security on DC01 (&lt;b&gt;x&lt;/b&gt;.evtx): 3 records missing from its numbering, in 1 gap between record 4 and 8')
     expect(limits.indexOf('records missing')).toBeLessThan(limits.indexOf('Times are UTC'))
-    expect(limits).toContain('MailItemsAccessed for a@example.test was throttled.')
+    expect(limits).toContain('MailItemsAccessed for a@example.test was throttled from 1970-01-01 00:00:00Z')
   })
 
   it('marks the findings of a rule never seen to detect what it looks for, and says so in its method', () => {
@@ -382,16 +388,39 @@ describe('what the report claims about the case', () => {
   it('says under each rule whether its rows bear it out, where they are, and lists what does not hold', () => {
     const d = data()
     const byRule = (r: string) => d.findings.find((x) => x.ruleId === r)!.id!
-    const rec = { file: 'box.mbox', record: 'message 8', key: 'k' }
+    const rec = { file: 'box.mbox', record: 'message 8', at: { kind: 'message' as const, n: 8 }, key: 'k' }
+    const nine = { file: 'box.mbox', record: 'message 9', at: { kind: 'message' as const, n: 9 }, key: 'k9' }
     const claims = {
       findings: {
-        [byRule('mail-credential-phishing')]: { status: 'verified' as const, cited: 1, checked: 1, reasons: [], records: [rec] },
-        [byRule('other')]: { status: 'contradicted' as const, cited: 1, checked: 1, reasons: ['box.mbox message 9 no longer matches the rule'], records: [] },
+        [byRule('mail-credential-phishing')]: { status: 'verified' as const, cited: 1, checked: 1, reasons: [], why: [], records: [rec] },
+        [byRule('other')]: {
+          status: 'contradicted' as const,
+          cited: 1,
+          checked: 1,
+          reasons: ['box.mbox message 9 no longer matches the rule'],
+          why: [{ kind: 'no-match' as const, records: [nine], more: 0 }],
+          records: [],
+        },
       },
       texts: [
-        { key: 'summary', what: 'the executive summary', check: { status: 'unsupported' as const, named: ['198.51.100.9'], reasons: ['it names 198.51.100.9, which no row of the evidence holds'] } },
-        { key: 'chain:alice', what: 'the narrative of chain "alice"', check: { status: 'nothing_to_check' as const, named: [], reasons: [] } },
-        { key: 'incident:7', what: 'the notes on "x"', check: { status: 'verified' as const, named: ['203.0.113.7'], reasons: [] } },
+        {
+          key: 'summary',
+          what: 'the executive summary',
+          about: { kind: 'summary' as const },
+          check: {
+            status: 'unsupported' as const,
+            named: ['198.51.100.9'],
+            reasons: ['it names 198.51.100.9, which no row of the evidence holds'],
+            why: [{ kind: 'text-absent-case' as const, values: ['198.51.100.9'], more: 0 }],
+          },
+        },
+        {
+          key: 'chain:alice',
+          what: 'the narrative of chain "alice"',
+          about: { kind: 'chain' as const, title: 'alice' },
+          check: { status: 'nothing_to_check' as const, named: [], reasons: [], why: [] },
+        },
+        { key: 'incident:7', what: 'the notes on "x"', about: { kind: 'incident' as const, title: 'x' }, check: { status: 'verified' as const, named: ['203.0.113.7'], reasons: [], why: [] } },
       ],
     }
     const html = buildReportHtml({ ...d, claims })
@@ -467,7 +496,19 @@ describe('what the report claims about the case', () => {
     const key = 'person|x|1970-01-01'
     const claims = {
       findings: {},
-      texts: [{ key: `story:${key}`, what: 'the note', check: { status: 'unsupported' as const, named: ['10.9.9.9'], reasons: ['it names 10.9.9.9, which no row of the story holds'] } }],
+      texts: [
+        {
+          key: `story:${key}`,
+          what: 'the note on story "x"',
+          about: { kind: 'story' as const, title: 'x' },
+          check: {
+            status: 'unsupported' as const,
+            named: ['10.9.9.9'],
+            reasons: ['it names 10.9.9.9, which none of its 2 rows holds'],
+            why: [{ kind: 'text-absent' as const, values: ['10.9.9.9'], more: 0, rows: 2 }],
+          },
+        },
+      ],
     }
     const html = buildReportHtml(data({ stories: [{ story, key, note: 'He came in over **RDP** from 10.9.9.9.' }], storiesLeft: 2, claims }))
     const section = html.slice(html.indexOf('<h2>Stories</h2>'), html.indexOf('<h2>Attack chains</h2>'))
@@ -479,7 +520,7 @@ describe('what the report claims about the case', () => {
     expect(section).toContain('task created &lt;x&gt;')
     expect(section).toContain('<strong>RDP</strong>')
     expect(section).not.toContain('the automatic summary of the story')
-    expect(section).toContain('Checked against its rows: it names 10.9.9.9, which no row of the story holds.')
+    expect(section).toContain('Checked against its rows: it names 10.9.9.9, which none of its 2 rows holds.')
     expect(section).toContain('Where it stops: WS-004 has no Sysmon process records')
     expect(section).toContain('2 more stories are not printed')
     // a report without stories has no Stories section

@@ -10,13 +10,22 @@
  * a message's Message-ID, a Unified Audit Log or sign-in record's id.
  */
 import type { Evidence } from '../db/schema'
-import { fmtNum } from '../util/format'
+import { EN } from './reportText'
+
+/** A record's place in its file, as values: record is its English writing, the report writes it in its own language. */
+export type RecordPlace =
+  | { kind: 'message'; n: number }
+  | { kind: 'message-id'; id: string }
+  | { kind: 'cloud'; what: string; id: string }
+  | { kind: 'record'; n: number; channel?: string; computer?: string }
+  | { kind: 'row'; n: number | string }
 
 export interface RecordRef {
   /** the file as uploaded, and the archive or package member it was read from */
   file: string
   /** its place in that file, as a reader of the file finds it */
   record: string
+  at: RecordPlace
   /** SHA-256 of the member (in a package) or of the upload */
   sha256?: string
   /** the same for the same record read from another file or export */
@@ -26,16 +35,6 @@ export interface RecordRef {
 }
 
 type Row = Record<string, unknown>
-
-/** What a cloud record is, by the prefix of its key (services/parsers/m365.py). */
-const CLOUD_RECORDS: Record<string, string> = {
-  ual: 'audit record',
-  entra: 'sign-in',
-  'entra-audit': 'directory audit',
-  'entra-risk': 'risk detection',
-  'entra-riskyuser': 'risky user',
-  'exo-trace': 'message trace',
-}
 
 const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null)
 const int = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : null)
@@ -57,26 +56,27 @@ export function recordRef(row: Row, source: 'events' | 'mails', evidence?: Evide
   const file = inner ? `${upload} › ${inner}` : upload
   const sha256 = text(row.sourceSha256) ?? text(evidence?.sha256Server) ?? text(evidence?.sha256Client) ?? undefined
   const where = `${sha256 ?? upload}:${inner ?? ''}`
+  const placed = (at: RecordPlace) => ({ file, record: EN.record(at), at, sha256 })
   if (source === 'mails') {
     const index = int(row.sourceIndex)
     const mid = text(row.messageId)
-    const record = index != null ? `message ${fmtNum(index + 1)}` : mid ? `Message-ID ${mid}` : `row ${String(row.id)}`
-    return { file, record, sha256, duplicateKey: mid ? `mid:${mid.toLowerCase()}` : undefined, key: `${where}#${index != null ? `m${index}` : `mid:${mid ?? row.id}`}` }
+    const at: RecordPlace = index != null ? { kind: 'message', n: index + 1 } : mid ? { kind: 'message-id', id: mid } : { kind: 'row', n: String(row.id) }
+    return { ...placed(at), duplicateKey: mid ? `mid:${mid.toLowerCase()}` : undefined, key: `${where}#${index != null ? `m${index}` : `mid:${mid ?? row.id}`}` }
   }
   const cloud = text(row.recordKey)
   if (cloud) {
     const [kind, id] = cloud.includes(':') ? [cloud.slice(0, cloud.indexOf(':')), cloud.slice(cloud.indexOf(':') + 1)] : ['record', cloud]
-    return { file, record: `${CLOUD_RECORDS[kind] ?? 'record'} ${id}`, sha256, duplicateKey: cloud, key: `${where}#${cloud}` }
+    return { ...placed({ kind: 'cloud', what: kind, id }), duplicateKey: cloud, key: `${where}#${cloud}` }
   }
   const dup = eventDuplicateKey(row)
   const rid = int(row.recordId)
   if (rid != null) {
     // a log forwarded from several machines numbers each machine's records apart
-    const whose = text(row.computer) && text(row.channel) ? ` (${text(row.channel)} on ${text(row.computer)})` : ''
-    return { file, record: `record ${fmtNum(rid)}${whose}`, sha256, duplicateKey: dup, key: `${where}#${dup ?? rid}` }
+    const whose = text(row.computer) && text(row.channel) ? { channel: text(row.channel)!, computer: text(row.computer)! } : {}
+    return { ...placed({ kind: 'record', n: rid, ...whose }), duplicateKey: dup, key: `${where}#${dup ?? rid}` }
   }
   const index = int(row.sourceIndex)
-  return { file, record: index != null ? `row ${fmtNum(index + 1)}` : `row ${String(row.id)}`, sha256, duplicateKey: dup, key: `${where}#${index != null ? `i${index}` : `id${String(row.id)}`}` }
+  return { ...placed({ kind: 'row', n: index != null ? index + 1 : String(row.id) }), duplicateKey: dup, key: `${where}#${index != null ? `i${index}` : `id${String(row.id)}`}` }
 }
 
 /** "Security.evtx record 4,200 (Security on DC01)", for the report. */

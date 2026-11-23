@@ -143,10 +143,7 @@
    ]
   },
   "files": {
-   "label": "file system records (MFT",
-   "USN": null,
-   "LNK": null,
-   "jump lists)": null,
+   "label": "file system records (MFT, USN, LNK, jump lists)",
    "categories": [
     "collection:file",
     "collection:shellbag"

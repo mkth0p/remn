@@ -22,6 +22,7 @@ import { effectiveSeverity } from '../rules/incidents'
 import { CHAIN_DATA_KEYS, persistChainResult, type ChainResult } from './chains'
 import { settingsForRules } from './rules'
 import type { ReportStoryDecisions } from './storyDecisions'
+import { EN, type ReportText } from './reportText'
 
 export type Confidence = 'strong' | 'medium' | 'weak'
 /** How surely a story's flagged steps are its subject's (its ties, not the intrusion). */
@@ -876,14 +877,15 @@ export async function storyInputs(kase: Case): Promise<StoryInputs> {
  * finding marked false positive, a severity set by hand, evidence added or removed and a change of
  * settings each move what a build reads, as findingsStaleness tells the findings from the evidence.
  */
-export function storiesStaleness(res: StoryResult | null, now: StoryInputs): string[] {
+export function storiesStaleness(res: StoryResult | null, now: StoryInputs, t: ReportText = EN): string[] {
   if (!res) return []
   const was = res.inputs
-  if (!was) return ['they were built before REMN kept what a build reads, so they may not match the findings']
+  const w = t.storyStale
+  if (!was) return [w.unknown]
   const out: string[] = []
-  if (was.findings !== now.findings) out.push('the findings changed since they were built (a rule run, a false positive or a severity set by hand)')
-  if (was.evidence !== now.evidence) out.push('the evidence changed since they were built')
-  if (was.settings !== now.settings) out.push("the case's settings changed since they were built")
+  if (was.findings !== now.findings) out.push(w.findings)
+  if (was.evidence !== now.evidence) out.push(w.evidence)
+  if (was.settings !== now.settings) out.push(w.settings)
   return out
 }
 
@@ -1130,52 +1132,44 @@ export async function loadStories(caseId: number): Promise<StoryResult | null> {
   return (k?.value as StoryResult) ?? null
 }
 
-const num = (n: number) => n.toLocaleString('en')
-
-/** What a build could not read, in words: the selections that hit their cap, with what each left out when the page knows. */
-export function storyCoverageWarnings(stats: StoryResult['stats'] | undefined): string[] {
+/** What a build could not read, in the words of a report's language: the selections that hit their cap, with what each left out when the page knows. */
+export function storyCoverageWarnings(stats: StoryResult['stats'] | undefined, t: ReportText = EN): string[] {
   const cut = stats?.cut ?? {}
   const n = (k: string) => Number(cut[k] ?? 0)
-  const context = [
-    n('context-identities') ? `${num(n('context-identities'))} naming the flagged people` : '',
-    n('context-addresses') ? `${num(n('context-addresses'))} from the flagged addresses` : '',
-    n('context-hosts') ? `${num(n('context-hosts'))} on the flagged hosts` : '',
-  ].filter(Boolean)
-  const mib = `${POST_BUDGET / 1024 / 1024} MiB`
+  const w = t.storyCut
   const labels: Record<string, string> = {
-    flagged: `More than ${num(EVENT_CAP)} records carry findings: the stories read the first ${num(EVENT_CAP)}${n('flagged') ? ` and left ${num(n('flagged'))} out` : ''}.`,
-    refs: `${n('refs') ? num(n('refs')) : 'Some'} finding(s) cite more than ${num(FINDING_REFS)} records: the stories read the first ${num(FINDING_REFS)} of each.`,
-    identities: `The records naming the flagged people passed ${num(EVENT_CAP)}: the stories read the tasks, services and account changes among them first, then those nearest the flags.`,
-    addresses: `The records from the flagged addresses passed ${num(EVENT_CAP)}: the stories read the tasks, services and account changes among them first, then those nearest the flags.`,
-    hosts: `The logons, processes and services on the flagged hosts passed ${num(EVENT_CAP)}: the stories read the tasks, services and account changes among them first, then those nearest the flags.`,
-    context: `The records around the flags passed ${num(EVENT_CAP)}, which a browser case reads under one cap for the flagged people, addresses and hosts together: the stories read the tasks, services and account changes among them first, then those nearest the flags${context.length ? ` and left out ${context.join(', ')}` : ''}.`,
-    flaggedMails: `More than ${num(MAIL_CAP)} mails carry findings: the stories read the first ${num(MAIL_CAP)}${n('flaggedMails') ? ` and left ${num(n('flaggedMails'))} out` : ''}.`,
-    seeds: `${n('seeds') ? num(n('seeds') + SEED_CAP) : `More than ${SEED_CAP}`} mails score a risk of ${SEED_RISK} or more: the stories read the ${SEED_CAP} riskiest.`,
-    undated: `${n('undated') ? num(n('undated')) : 'Some'} flagged or high-risk mail(s) carry no date: no story can place them, so none reads them.`,
-    windows: `The flags fall in ${n('windows') ? num(n('windows')) : 'more than ' + MAX_WINDOWS} separate periods: the stories read one period from the first flag to the last instead, where the caps are reached sooner.`,
-    replies: `Only ${num(MAIL_CAP)} of the mails the flagged people sent were read, those nearest the flags.`,
-    dns: `The DNS answers on the flagged hosts passed ${num(DNS_CAP)}: the addresses they give to hosts come from those nearest the flags.`,
-    dhcp: `The DHCP leases passed ${num(DHCP_CAP)}: the addresses they give to hosts come from the first ones.`,
-    dc: `The domain controllers' Kerberos and NTLM records of the flagged people, hosts and addresses passed ${num(DC_CAP)}: the stories read those naming a flagged account or host first, then those nearest the flags, so a hop may miss the ticket that names its source.`,
-    'name-keys': 'The flagged records name more than 2,000 accounts: the stories read the records of the 2,000 they name most.',
-    'host-keys': 'More than 500 hosts carry flags: the stories read the logons, processes and services of the 500 with the most.',
-    'address-keys': 'The flags name more than 500 outside addresses: the stories read the records from the 500 they name most.',
-    trimmed: `The rows of the build passed ${mib}, more than the server takes in one request: the long text of ${num(n('trimmed'))} record(s) (command lines, script blocks, summaries) was cut to ${num(TRIM_TO)} characters.`,
-    size: `The rows of the build passed ${mib} even so: ${num(n('size'))} of them were left out, the records around the flags first.`,
-    accounts: `The case writes its accounts in more than ${num(ACCOUNT_RECORD_CAP)} ways: who is who reads the most frequent ones and those of the records the stories read.`,
+    flagged: w.flagged(EVENT_CAP, n('flagged')),
+    refs: w.refs(n('refs'), FINDING_REFS),
+    identities: w.identities(EVENT_CAP),
+    addresses: w.addresses(EVENT_CAP),
+    hosts: w.hosts(EVENT_CAP),
+    context: w.context(EVENT_CAP, n('context-identities'), n('context-addresses'), n('context-hosts')),
+    flaggedMails: w.flaggedMails(MAIL_CAP, n('flaggedMails')),
+    seeds: w.seeds(n('seeds'), SEED_CAP, SEED_RISK),
+    undated: w.undated(n('undated')),
+    windows: w.windows(n('windows'), MAX_WINDOWS),
+    replies: w.replies(MAIL_CAP),
+    dns: w.dns(DNS_CAP),
+    dhcp: w.dhcp(DHCP_CAP),
+    dc: w.dc(DC_CAP),
+    'name-keys': w.nameKeys,
+    'host-keys': w.hostKeys,
+    'address-keys': w.addressKeys,
+    trimmed: w.trimmed(POST_BUDGET / 1024 / 1024, n('trimmed'), TRIM_TO),
+    size: w.size(POST_BUDGET / 1024 / 1024, n('size')),
+    accounts: w.accounts(ACCOUNT_RECORD_CAP),
   }
   const out = (stats?.truncated ?? []).map((k) => labels[k]).filter(Boolean)
-  if (stats?.identityScope === 'rows')
-    out.push('Who is who was read from the records this build read, not the whole case: a bare account name is joined to the only account of that name among them, though the case may hold another.')
-  if (stats?.storiesTruncated) out.push('Only the highest-scoring 200 stories are kept: the flags of the others are listed with those in no story.')
+  if (stats?.identityScope === 'rows') out.push(w.identityRows)
+  if (stats?.storiesTruncated) out.push(w.storiesTruncated)
   return out
 }
 
 /** What the evidence cannot show for one story: its hosts' coverage, and a start that no record of it shows. */
-export function storyOwnGaps(story: Story): string[] {
+export function storyOwnGaps(story: Story, t: ReportText = EN): string[] {
   const out = [...story.gaps]
   const have = new Set(story.phases.map((p) => p.phase))
-  if (!have.has('initial-access') && story.phases.length >= 2) out.push('No record of the story shows how it started: initial access is not in the evidence it reads.')
+  if (!have.has('initial-access') && story.phases.length >= 2) out.push(t.storyCut.noWayIn)
   return out
 }
 

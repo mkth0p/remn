@@ -1,6 +1,7 @@
 import { resolveUsers } from './identity'
 import type { Finding, Severity } from '../db/schema'
 import type { Chain } from '../data/chains'
+import { EN } from '../data/reportText'
 
 /**
  * Incidents: findings grouped around what an analyst actually reviews.
@@ -20,11 +21,23 @@ import type { Chain } from '../data/chains'
 export type IncidentKind = 'chain' | 'mail' | 'entity' | 'group'
 export type Status = Finding['status']
 
+/**
+ * What the line under an incident's title states, as values: the interface writes it in English
+ * (subtitle), the report in its own language from the same values (data/reportText.ts).
+ */
+export type IncidentAbout =
+  | { kind: 'chain'; score: number; steps: number; linked: number }
+  | { kind: 'mail'; from: string | null; findings: number; rules: number }
+  | { kind: 'entity'; lead: string; findings: number; rules: number; seenAs: string[] }
+  | { kind: 'findings'; findings: number; rules: number }
+  | { kind: 'group'; entities: [string, string][]; rows: number }
+
 export interface Incident {
   id: string
   kind: IncidentKind
   title: string
   subtitle: string
+  about: IncidentAbout
   severity: Severity
   source: 'events' | 'mails' | 'mixed'
   ts: number | null
@@ -131,7 +144,7 @@ function sortMembers(members: Finding[]): Finding[] {
   return [...members].sort((a, b) => rank(effectiveSeverity(a)) - rank(effectiveSeverity(b)) || b.count - a.count || (a.ts ?? 0) - (b.ts ?? 0))
 }
 
-function finish(id: string, kind: IncidentKind, members: Finding[], title?: string, subtitle?: string): Incident {
+function finish(id: string, kind: IncidentKind, members: Finding[], title?: string, said?: IncidentAbout): Incident {
   const findings = sortMembers(members)
   // a member marked false positive no longer decides the severity or the headline
   const active = findings.filter((f) => f.status !== 'false_positive')
@@ -144,13 +157,13 @@ function finish(id: string, kind: IncidentKind, members: Finding[], title?: stri
   const times = findings.map((f) => f.ts).filter((t): t is number => t != null)
   const ends = findings.map((f) => f.tsEnd ?? f.ts).filter((t): t is number => t != null)
   const sources = new Set(findings.map((f) => f.source))
-  const n = findings.length
-  const sub = subtitle ?? `${n} finding${n === 1 ? '' : 's'} from ${rules.length} rule${rules.length === 1 ? '' : 's'}`
+  const about: IncidentAbout = said ?? { kind: 'findings', findings: findings.length, rules: rules.length }
   return {
     id,
     kind,
     title: title ?? lead.title,
-    subtitle: sub,
+    subtitle: EN.incident.subtitle(about),
+    about,
     severity: effectiveSeverity(lead),
     source: sources.size === 1 ? findings[0].source : 'mixed',
     ts: times.length ? Math.min(...times) : null,
@@ -225,13 +238,7 @@ export function buildIncidents(findings: Finding[], opts: IncidentOptions = {}):
     if (!members) continue
     const own = members.find((f) => f.ruleId === 'chain')
     const n = members.length - (own ? 1 : 0)
-    const inc = finish(
-      `chain:${c.id}`,
-      'chain',
-      members,
-      `Attack chain · ${c.identityLabel}`,
-      `score ${c.score} · ${c.steps.length} step${c.steps.length === 1 ? '' : 's'} · ${n} linked finding${n === 1 ? '' : 's'}`,
-    )
+    const inc = finish(`chain:${c.id}`, 'chain', members, `Attack chain · ${c.identityLabel}`, { kind: 'chain', score: c.score, steps: c.steps.length, linked: n })
     inc.chain = c
     inc.severity = opts.severityOf ? opts.severityOf(c) : c.severity
     if (own) inc.lead = own
@@ -243,7 +250,7 @@ export function buildIncidents(findings: Finding[], opts: IncidentOptions = {}):
     const title = withSubject?.entities.subject || sortMembers(members)[0].title
     const n = members.length
     const rules = new Set(members.map((f) => f.ruleId)).size
-    out.push(finish(`mail:${id}`, 'mail', members, title, `${from ? `from ${from} · ` : ''}${n} finding${n === 1 ? '' : 's'} from ${rules} rule${rules === 1 ? '' : 's'}`))
+    out.push(finish(`mail:${id}`, 'mail', members, title, { kind: 'mail', from: from ?? null, findings: n, rules }))
   }
   for (const [key, e] of byEntity) {
     const timed = e.items.filter((f) => f.ts != null).sort((a, b) => a.ts! - b.ts!)
@@ -255,15 +262,7 @@ export function buildIncidents(findings: Finding[], opts: IncidentOptions = {}):
       const items = cluster.items
       const rules = new Set(items.map((f) => f.ruleId)).size
       const seenAs = [...(aliases.get(key) ?? [])].filter((a) => a.toLowerCase() !== e.value.toLowerCase())
-      out.push(
-        finish(
-          `${key}|${n++}`,
-          'entity',
-          items,
-          e.value,
-          `${sortMembers(items)[0].title} · ${items.length} finding${items.length === 1 ? '' : 's'} from ${rules} rule${rules === 1 ? '' : 's'}${seenAs.length ? ` · also seen as ${seenAs.slice(0, 3).join(', ')}` : ''}`,
-        ),
-      )
+      out.push(finish(`${key}|${n++}`, 'entity', items, e.value, { kind: 'entity', lead: sortMembers(items)[0].title, findings: items.length, rules, seenAs: seenAs.slice(0, 3) }))
       cluster = null
     }
     for (const f of timed) {
@@ -281,18 +280,7 @@ export function buildIncidents(findings: Finding[], opts: IncidentOptions = {}):
   }
   for (const members of groups) {
     const f = members[0]
-    out.push(
-      finish(
-        `group:${f.ruleId}|${f.key}`,
-        'group',
-        members,
-        f.title,
-        Object.entries(f.entities)
-          .slice(0, 3)
-          .map(([k, v]) => `${k}=${v}`)
-          .join(' · ') || `${f.count} row(s)`,
-      ),
-    )
+    out.push(finish(`group:${f.ruleId}|${f.key}`, 'group', members, f.title, { kind: 'group', entities: Object.entries(f.entities).slice(0, 3), rows: f.count }))
   }
   return out.sort((a, b) => rank(a.severity) - rank(b.severity) || b.rules.length - a.rules.length || (b.ts ?? 0) - (a.ts ?? 0))
 }

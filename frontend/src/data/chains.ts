@@ -1,5 +1,6 @@
 import { getDb, type Finding, type Severity } from '../db/schema'
 import { replaceFindings } from './findingReviews'
+import { EN, type ReportText } from './reportText'
 
 export interface ChainStep {
   kind: 'mail' | 'event'
@@ -176,15 +177,8 @@ export async function loadChains(caseId: number): Promise<ChainResult | null> {
   return (k?.value as ChainResult) ?? null
 }
 
-export function chainCoverageWarnings(stats: Record<string, number> = {}): string[] {
-  const labels: Record<string, string> = {
-    eventsTruncated: 'Mail correlation: only the first 50,000 matching events were considered.',
-    authEventsTruncated: 'Authentication campaigns: only the first 50,000 authentication events were considered.',
-    seedsTruncated: 'Mail seed selection reached its limit (300 seeds or 500 finding references).',
-    repliesTruncated: 'Only the first 5,000 matching replies were considered.',
-    chainsTruncated: 'Only the highest-scoring chains are displayed.',
-  }
-  return Object.entries(labels)
+export function chainCoverageWarnings(stats: Record<string, number> = {}, t: ReportText = EN): string[] {
+  return Object.entries(t.chainCut)
     .filter(([key]) => stats[key])
     .map(([, label]) => label)
 }
