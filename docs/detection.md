@@ -196,9 +196,12 @@ keywords, searched in the event's JSON text, are written as that text holds them
 `\"`, a backslash as `\\`); IPv6 CIDRs translate when they name one address or
 a prefix within the first group (`::1/128`, `fe80::/10`, `fc00::/7`). The SigmaHQ rules are
 redistributed under the Detection Rule License 1.1, the Sublime rules under MIT. That licence
-asks that a match keeps the rule's author: each converted rule keeps it under `sigma.author`, and
-the report prints it beside the rule's findings. The Findings page, the CSV and STIX exports and
-Hayabusa's detections do not carry it yet.
+asks that a match keeps the rule's author: each converted rule keeps it under `sigma.author`, the
+report prints it beside the rule's findings, the finding's flyout shows it under About, the
+findings CSV export carries it in a `ruleAuthor` column, and each action of a story's Attack Flow
+names its rule and the author in its external references. Hayabusa's detections have none to
+carry: REMN reads Hayabusa's verbose profile, whose output has no RuleAuthor column, so each of
+those places says the author was not recorded by Hayabusa instead of leaving it blank.
 
 The Rules page lists the packs with a toggle each. `/api/meta` only carries the
 manifests; a pack's rules are fetched once per session from

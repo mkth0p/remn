@@ -26,6 +26,7 @@ export function FindingFlyout({
   all,
   priority,
   readings,
+  author,
   lastRun,
   cuts,
   tab,
@@ -47,6 +48,8 @@ export function FindingFlyout({
   all: Finding[]
   priority?: Priority
   readings: Map<string, MeasureReading>
+  /** the author its rule names, or that Hayabusa did not record one (rules/authors.ts); empty for a rule that names none */
+  author: string
   lastRun: LastRun | null
   cuts: RuleDiag[]
   tab: FlyTab
@@ -177,6 +180,7 @@ export function FindingFlyout({
           <div className="section">
             <h3>About</h3>
             <div>{selected.description || <span className="muted">the rule has no description</span>}</div>
+            {author && <div className="small">rule author: {author}</div>}
             <div className="row wrap" style={{ gap: 6 }}>
               {selected.attack.map((t) =>
                 attackHref(t) ? (

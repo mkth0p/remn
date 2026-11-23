@@ -6,7 +6,7 @@ import { spineBasis, spineSteps } from './storyFlow'
 import type { ChainReview, ClientReport, ReportSettings } from './review'
 import { chainSeverity, effectiveSeverity, stepVisible } from './review'
 import { HOST_FIELDS, USER_FIELDS, type Incident } from '../rules/incidents'
-import type { Rule } from '../rules/engine'
+import { ruleAuthorOf, ruleAuthors } from '../rules/authors'
 import type { RelationshipReview } from './relationshipReviews'
 import { packageCoverageIssues } from './packageCoverage'
 import { defang, escapeHtml, isPublicIp, renderMarkdown } from '../util/format'
@@ -123,19 +123,8 @@ export interface ReportData {
   ruleAuthors?: Record<string, string>
 }
 
-/**
- * The author each rule names, by rule id. A rule converted from SigmaHQ keeps its Sigma header,
- * author included; REMN's own rules name none.
- */
-export function ruleAuthors(rules: Iterable<Rule>): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const rule of rules) {
-    const sigma = 'sigma' in rule ? rule.sigma : undefined
-    const author = sigma && typeof sigma === 'object' && 'author' in sigma ? sigma.author : undefined
-    if (typeof author === 'string' && author.trim()) out[rule.id] = author.trim()
-  }
-  return out
-}
+// kept here as well, where the Report page has always read it
+export { ruleAuthors }
 
 /** The model's part in the case, as the report prints it. */
 export interface AiUsage {
@@ -1149,7 +1138,13 @@ function textNote(t: ReportText, key: string, claims?: ReportClaims): string {
 }
 
 /** After a rule's id: who wrote it, when the rule says. */
-const authorMark = (t: ReportText, author: string | undefined) => (author ? ` · ${h(t.finding.by(author))}` : '')
+/** the author beside a rule's findings: the one it names, or that Hayabusa did not record one; nothing for REMN's own rules */
+export const authorWords = (t: ReportText, ruleId: string, authors: Record<string, string> = {}) =>
+  authors[ruleId] ? t.finding.by(authors[ruleId]) : ruleAuthorOf(ruleId, authors, t.finding.noAuthor)
+const authorMark = (t: ReportText, ruleId: string, authors?: Record<string, string>) => {
+  const said = authorWords(t, ruleId, authors)
+  return said ? ` · ${h(said)}` : ''
+}
 
 function groupedFindings(
   t: ReportText,
@@ -1164,7 +1159,7 @@ function groupedFindings(
     t.finding.groupHead,
     groups.map((g) => [
       pill(t, g.severity) + (g.severity !== g.ruleSeverity ? `<span class="sub">${h(t.finding.ruleSeverity(g.ruleSeverity))}</span>` : ''),
-      `${h(g.title)}<span class="sub"><code>${h(g.ruleId)}</code>${authorMark(t, authors[g.ruleId])}${measureMark(t, measures[g.ruleId])}${g.escalations.length ? ' · ' + h(g.escalations.slice(0, 2).join(' · ')) : ''}</span>${claimNote(t, g.ids, claims)}`,
+      `${h(g.title)}<span class="sub"><code>${h(g.ruleId)}</code>${authorMark(t, g.ruleId, authors)}${measureMark(t, measures[g.ruleId])}${g.escalations.length ? ' · ' + h(g.escalations.slice(0, 2).join(' · ')) : ''}</span>${claimNote(t, g.ids, claims)}`,
       `<span class="nowrap">${t.num(g.findings)} · ${t.num(g.rows)}</span>`,
       `<span class="nowrap">${span(t, g.first, g.last)}</span>`,
       g.attack
@@ -2067,7 +2062,7 @@ export function buildReportHtml(d: ReportData): string {
           t.finding.ruleHead,
           groups.map((g) => [
             pill(t, g.severity),
-            `${h(g.title)}<span class="sub"><code>${h(g.ruleId)}</code>${authorMark(t, d.ruleAuthors?.[g.ruleId])}${measureMark(t, d.measures?.[g.ruleId])}${g.attack.length ? ' · ' + h(g.attack.slice(0, 4).join(' ')) : ''}</span>${claimNote(t, g.ids, d.claims)}`,
+            `${h(g.title)}<span class="sub"><code>${h(g.ruleId)}</code>${authorMark(t, g.ruleId, d.ruleAuthors)}${measureMark(t, d.measures?.[g.ruleId])}${g.attack.length ? ' · ' + h(g.attack.slice(0, 4).join(' ')) : ''}</span>${claimNote(t, g.ids, d.claims)}`,
             `<span class="nowrap">${t.num(g.findings)} · ${t.num(g.rows)}</span>`,
             `<span class="nowrap">${span(t, g.first, g.last)}</span>`,
             Object.entries(g.statuses)

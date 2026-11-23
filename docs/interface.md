@@ -181,8 +181,9 @@ is stored, and setting an incident's status sets every member. Flat, rule, entit
 source views keep the per-rule detail. Severity tiles show the change since the last run,
 and the flyouts carry About, Investigation (entity pages, referenced rows), Insights
 (prevalence of the entities in the case, related chains, false-positive history of the
-rule) and Notes. The ATT&CK tab counts techniques observed against the enabled rules that
-map to them. A finding of a rule never seen to detect what it looks for on a recorded attack
+rule) and Notes; About names the author the finding's rule gives, or says Hayabusa did not
+record one for its detections. The ATT&CK tab counts techniques observed against the enabled
+rules that map to them. A finding of a rule never seen to detect what it looks for on a recorded attack
 is marked "lead" in the list, and the flyout says what the rule's measure shows: the
 recorded attacks it fires on, and how often it fires on the logs of clean machines (see
 [measured rules](detection.md#measured-rules)).
@@ -220,7 +221,7 @@ never leaves the browser. Reviewed and false-positive findings sort below the ot
 the score and the reasons that moved it ("1 of 40 hosts", "+2 rules, 1 tactic", "rule
 dismissed 2x", "false positive before"), its tooltip and the finding flyout say each in a sentence ("marked false
 positive in case Acme on 2026-08-14"), an incident ranks by its first finding to look at, and
-the CSV export carries the score.
+the CSV export carries the score and the rule's author.
 
 Findings with a saved review severity override show an asterisk and the original rule
 severity in their detail, and the incident uses the review severity too. "Reset to rule

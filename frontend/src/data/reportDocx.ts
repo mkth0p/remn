@@ -17,6 +17,7 @@ import {
   techniqueRow,
   techniqueTable,
   bottomLine,
+  authorWords,
   claimLine,
   computeConfidence,
   computeVerdict,
@@ -645,7 +646,7 @@ export function reportDocumentXml(d: ReportData): string {
         const claim = claimLine(g.ids, d.claims, t)
         return [
           g.severity !== g.ruleSeverity ? `${sev(g.severity)}\n${t.finding.ruleSeverity(g.ruleSeverity)}` : sev(g.severity),
-          `${g.title}\n${g.ruleId}${d.ruleAuthors?.[g.ruleId] ? ` · ${t.finding.by(d.ruleAuthors[g.ruleId])}` : ''}${measure ? ` · ${measure.lead ? measure.text.toUpperCase() : measure.text}` : ''}${g.escalations.length ? ` · ${g.escalations.slice(0, 2).join(' · ')}` : ''}${
+          `${g.title}\n${g.ruleId}${authorWords(t, g.ruleId, d.ruleAuthors) ? ` · ${authorWords(t, g.ruleId, d.ruleAuthors)}` : ''}${measure ? ` · ${measure.lead ? measure.text.toUpperCase() : measure.text}` : ''}${g.escalations.length ? ` · ${g.escalations.slice(0, 2).join(' · ')}` : ''}${
             claim
               ? `\n${claim.word}${claim.where ? ` · ${claim.where}${claim.more ? ` ${t.andMore(claim.more)}` : ''}` : ''}${claim.status !== 'verified' && claim.reasons.length ? `: ${claim.reasons.join(' ')}` : ''}`
               : ''
