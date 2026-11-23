@@ -196,7 +196,13 @@ rule) and Notes. The ATT&CK tab counts techniques observed against the enabled r
 map to them. A finding of a rule never seen to detect what it looks for on a recorded attack
 is marked "lead" in the list, and the flyout says what the rule's measure shows: the
 recorded attacks it fires on, and how often it fires on the logs of clean machines (see
-[measured rules](detection.md#measured-rules)).
+[measured rules](detection.md#measured-rules)). An engine's finding that names the Sigma rule
+it ran (`sigmaId`), on the record a finding of REMN's conversion of the same SigmaHQ rule
+(`sigma-<id>`) cites, is kept inside REMN's finding, whose flyout names both: the ids must be
+the same, so a rule Hayabusa split into parts under new ids stays a finding of its own, and so
+does an engine finding the analyst already decided on. It stands on its own again when REMN's
+finding goes (its rule turned off, or the rules cleared by an evidence removal) and goes with
+its evidence.
 
 The queue is sorted by priority unless the sort control says severity or newest: what to look
 at first, deterministic and explained, in the way THOR and Cyber Triage rank what they find

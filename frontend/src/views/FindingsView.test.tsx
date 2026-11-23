@@ -353,6 +353,34 @@ describe('FindingsView', () => {
   )
 
   it(
+    'says on a finding that Hayabusa found the same record with the same Sigma rule',
+    async () => {
+      await db.findings.clear()
+      await db.findings.add(
+        f({
+          ruleId: 'sigma-0d3c4a5b-0000-4000-8000-000000000001',
+          severity: 'medium',
+          title: 'Suspicious Process Creation In Downloads',
+          source: 'events',
+          refs: [42],
+          alsoBy: [{ engine: 'hayabusa', ruleId: 'engine:hayabusa:proc-creation-win-susp-downloads-exec', title: 'Suspicious Process Creation In Downloads', severity: 'high' }],
+        }),
+      )
+      await act(async () => {
+        render(<FindingsView />)
+      })
+      await waitFor(() => expect(sub()).toContain('1 finding(s)'), WAIT)
+      fireEvent.click(screen.getByRole('button', { name: 'flat' }))
+      fireEvent.keyDown(window, { key: 'j' })
+      await waitFor(() => expect(document.querySelector('.flyout')).toBeTruthy(), WAIT)
+      expect(document.querySelector('[data-also-by]')?.textContent).toBe(
+        'Also found on the same record by Hayabusa ("Suspicious Process Creation In Downloads", high), which ran the same Sigma rule: one finding is kept for both.',
+      )
+    },
+    TEST_TIMEOUT,
+  )
+
+  it(
     'asks the analyst about a finding, and opens its rows on the page of its source',
     async () => {
       await db.findings.clear()

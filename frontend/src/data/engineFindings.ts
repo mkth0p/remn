@@ -7,6 +7,7 @@
  */
 import { getDb, type Finding } from '../db/schema'
 import { tableRows, withRecordKeys } from './findingAnchors'
+import { forgetHeld, reconcileEngineDuplicates } from './engineDuplicates'
 
 export const ENGINE_RULE_PREFIX = 'engine:'
 
@@ -32,7 +33,8 @@ export function isEngineFinding(ruleId: string): boolean {
 /**
  * Store an engine's findings for one piece of evidence, replacing what the same engine produced
  * for that evidence before, and leaving what it produced for other evidence alone. Analyst
- * decisions on a finding whose key survives are kept.
+ * decisions on a finding whose key survives are kept. A finding REMN's conversion of the same Sigma
+ * rule also made on the same record is then kept inside REMN's (engineDuplicates.ts).
  */
 export async function persistEngineFindings(caseId: number, evidenceId: number, engine: string, findings: EngineFinding[]): Promise<number> {
   const db = getDb()
@@ -40,7 +42,8 @@ export async function persistEngineFindings(caseId: number, evidenceId: number, 
   const prefix = `${ENGINE_RULE_PREFIX}${engine}:`
   const evidence = await db.evidence.where('caseId').equals(caseId).toArray()
   const keyed = await withRecordKeys(findings, evidence, tableRows(db))
-  return db.transaction('rw', [db.findings], async () => {
+  const stored = await db.transaction('rw', [db.findings, db.kv], async () => {
+    await forgetHeld(caseId, evidenceId, engine)
     const previous = await db.findings
       .where('caseId')
       .equals(caseId)
@@ -72,4 +75,6 @@ export async function persistEngineFindings(caseId: number, evidenceId: number, 
     for (let i = 0; i < rows.length; i += 2000) await db.findings.bulkAdd(rows.slice(i, i + 2000))
     return rows.length
   })
+  await reconcileEngineDuplicates(caseId)
+  return stored
 }

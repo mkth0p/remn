@@ -11,6 +11,8 @@ const stored = vi.hoisted(() => ({ replaceFindings: vi.fn(), refoldWidespread: v
 vi.mock('./findingReviews', () => stored)
 const source = vi.hoisted(() => ({ getSource: vi.fn() }))
 vi.mock('./source', () => source)
+const duplicates = vi.hoisted(() => ({ reconcileEngineDuplicates: vi.fn() }))
+vi.mock('./engineDuplicates', () => duplicates)
 
 import { dryRunRule, loadRules, parseRuleYaml, rulesAtLevel, runRules, runRulesFor, serverRowLoader, settingsForRules, type LoadedRule } from './rules'
 
@@ -257,6 +259,9 @@ describe('runRulesFor', () => {
     const res = await run
     expect(res.total).toBe(1)
     expect(stored.refoldWidespread).toHaveBeenCalledWith(1, { a: 1 })
+    // Hayabusa's findings of the same Sigma rules and records join the run's, once it has refolded
+    expect(duplicates.reconcileEngineDuplicates).toHaveBeenCalledWith(1)
+    expect(duplicates.reconcileEngineDuplicates.mock.invocationCallOrder[0]).toBeGreaterThan(stored.refoldWidespread.mock.invocationCallOrder[0])
     const saved = (await db.kv.get('ruleDiags-1'))?.value as { byRule: Record<string, number>; diagnostics: unknown[] }
     expect(saved.byRule).toEqual({ a: 1 })
     expect(saved.diagnostics).toHaveLength(3)

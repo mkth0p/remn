@@ -3,6 +3,7 @@ import type { DetectionLevel } from './detectionLevel'
 import { sevCounts } from '../rules/incidents'
 import { log, toast, useStore } from '../state/store'
 import { pruneOrphanFindings } from './findingReviews'
+import { reconcileEngineDuplicates } from './engineDuplicates'
 import { loadRules, rulesAtLevel, runRulesFor } from './rules'
 
 /**
@@ -72,7 +73,11 @@ export async function runEnabledRules(kase: Case, reason: RulesRun['reason'] = '
       caseId,
       rules.map((r) => r.rule.id),
     )
-    if (pruned) toast('info', `${pruned} finding(s) of rules that no longer exist were removed`)
+    if (pruned) {
+      toast('info', `${pruned} finding(s) of rules that no longer exist were removed`)
+      // an engine's finding kept inside one of them stands alone again
+      await reconcileEngineDuplicates(caseId)
+    }
     await db.kv.put({ key: `findingCounts-${caseId}`, value: { previous: before, at: Date.now() } })
     // a rescore whose findings refresh did not finish is complete once a full run succeeds
     const cal = (await db.kv.get(`mail-calibration-${caseId}`))?.value as { state?: string } | undefined

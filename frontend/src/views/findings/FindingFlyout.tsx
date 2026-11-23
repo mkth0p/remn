@@ -16,6 +16,7 @@ import { attackHref } from '../../util/safe'
 import { REFS_OPEN, relatedChains, STATUSES, STATUS_LABEL, type LastRun, type Status } from './model'
 import { FindingSeverity, OverrideLabel, SeverityOverrideNotice, StatusBadge } from './parts'
 import { pressable } from '../../components/pressable'
+import { ENGINE_NAME } from '../../data/engineDuplicates'
 
 export type FlyTab = 'overview' | 'table' | 'json'
 
@@ -198,6 +199,12 @@ export function FindingFlyout({
                 escalated by: {selected.escalation}
               </div>
             )}
+            {selected.alsoBy?.length ? (
+              <div className="small" data-also-by>
+                Also found on the same record by {selected.alsoBy.map((a) => `${ENGINE_NAME[a.engine] ?? a.engine} ("${a.title}", ${a.severity})`).join(' and ')}, which ran the same Sigma rule: one
+                finding is kept for both.
+              </div>
+            ) : null}
             {lastRun?.errors?.some((e) => e.startsWith(selected.ruleId)) && (
               <div className="small" style={{ color: 'var(--warn)' }}>
                 this rule reported an error in the last run; the finding may be from an earlier run

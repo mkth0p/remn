@@ -8,6 +8,7 @@ import { caseLevel, severityFloors } from './detectionLevel'
 import { enabledPackIds, getPackRules } from './packs'
 import type { RuleMeasure } from './ruleMeasures'
 import { refoldWidespread, replaceFindings } from './findingReviews'
+import { reconcileEngineDuplicates } from './engineDuplicates'
 import type { RowLoader } from './findingAnchors'
 import type { DataSource } from './source'
 import { fmtNum } from '../util/format'
@@ -217,6 +218,8 @@ export async function runRulesFor(
   // the case's own hosts as the measure of noise: a rule firing on most of them folds
   const refolded = await refoldWidespread(kase.id!, floors)
   if (refolded) log('info', `${refolded} finding(s) of rules that fire on most of the case's hosts were folded`)
+  // Hayabusa's finding of a Sigma rule the run also fired on the same record joins it, and one whose pair is gone stands alone again
+  await reconcileEngineDuplicates(kase.id!)
   await saveDiagnostics(kase.id!, res)
   return res
 }
