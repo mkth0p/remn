@@ -6,6 +6,7 @@ import { enabledPackIds, ruleYaml, setPackEnabled, shortSha } from '../data/pack
 import { getDb } from '../db/schema'
 import { toast, useStore } from '../state/store'
 import { Badge, Modal, Spinner, Toggle } from '../components/ui'
+import { confirmAction } from '../components/confirm'
 import { RuleImport } from '../components/RuleImport'
 import { IconAi, IconEdit, IconPlus, IconTrash } from '../components/Icons'
 import type { RuleDiag } from '../rules/engine'
@@ -31,6 +32,7 @@ const DIAG_LABEL: Record<RuleDiag['reason'], { label: string; sev: string }> = {
   below_threshold: { label: 'below threshold', sev: 'info' },
   not_applicable: { label: 'not applicable', sev: 'info' },
   truncated: { label: 'cut short', sev: 'medium' },
+  values_cut: { label: 'long values read in part', sev: 'medium' },
 }
 
 const MEASURE_SEV: Record<MeasureVerdict, string> = { detects: 'ok', misses: 'medium', lead: 'info', changed: 'info', settings: 'info', custom: 'accent', unmeasured: 'info' }
@@ -79,7 +81,7 @@ function PackCard({ pack, on, busy, selected, onToggle, onShow }: { pack: PackIn
   return (
     <div className="card" style={{ padding: '8px 12px', minWidth: 260, flex: '1 1 260px', outline: selected ? '1px solid var(--accent)' : undefined }} data-pack={pack.id}>
       <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-        <Toggle on={on} onChange={onToggle} />
+        <Toggle on={on} onChange={onToggle} name={`enable ${pack.name}`} />
         <strong style={{ flex: 1 }}>{pack.name}</strong>
         <Badge sev="info">{pack.source}</Badge>
       </div>
@@ -217,7 +219,7 @@ export function RulesView() {
   }
   const remove = async (r: LoadedRule) => {
     const id = Number(r.file.split(':')[1])
-    if (!confirm(`Delete custom rule ${r.rule.id}?`)) return
+    if (!(await confirmAction(`Delete custom rule ${r.rule.id}?`, { title: 'Delete the rule', action: 'Delete', danger: true }))) return
     await getDb().customRules.delete(id)
     bump()
   }
@@ -382,7 +384,7 @@ export function RulesView() {
             {shown.slice(0, MAX_ROWS).map((r) => (
               <tr key={r.file + r.rule.id}>
                 <td>
-                  <Toggle on={r.enabled} onChange={(v) => toggle(r, v)} />
+                  <Toggle on={r.enabled} onChange={(v) => toggle(r, v)} name={`enable ${r.rule.id}`} />
                 </td>
                 <td className="mono small">{r.rule.id}</td>
                 <td>
@@ -411,17 +413,24 @@ export function RulesView() {
                     if (!lastRun) return <span className="muted small">—</span>
                     const n = lastRun.byRule?.[r.rule.id]
                     const cut = lastRun.diagnostics.find((x) => x.ruleId === r.rule.id && x.reason === 'truncated')
+                    // values its regular expressions read only the start of, said beside whatever else it found
+                    const long = lastRun.diagnostics.find((x) => x.ruleId === r.rule.id && x.reason === 'values_cut')
+                    const also = long ? ` · ${long.detail}` : ''
                     if (n && n > 0)
                       return (
-                        <Badge sev={cut ? DIAG_LABEL.truncated.sev : 'ok'} title={cut ? `${n} finding(s) kept: ${cut.detail}` : `${n} finding(s) in the last run`}>
-                          {cut ? (cut.dropped ? `${fmtNum(n)}, ${fmtNum(cut.dropped)} left out` : `${n}+`) : n}
+                        <Badge sev={cut || long ? DIAG_LABEL.truncated.sev : 'ok'} title={(cut ? `${n} finding(s) kept: ${cut.detail}` : `${n} finding(s) in the last run`) + also}>
+                          {cut ? (cut.dropped ? `${fmtNum(n)}, ${fmtNum(cut.dropped)} left out` : `${n}+`) : long ? `${n}, long values read in part` : n}
                         </Badge>
                       )
-                    const d = lastRun.diagnostics.find((x) => x.ruleId === r.rule.id)
+                    const d = lastRun.diagnostics.find((x) => x.ruleId === r.rule.id && x.reason !== 'values_cut') ?? long
                     if (d)
                       return (
-                        <Badge sev={DIAG_LABEL[d.reason].sev} title={d.detail || `${d.matched} matched · ${d.afterExclude} after exclude · ${d.afterTime} after time filter`}>
+                        <Badge
+                          sev={long ? DIAG_LABEL.values_cut.sev : DIAG_LABEL[d.reason].sev}
+                          title={(d.detail || `${d.matched} matched · ${d.afterExclude} after exclude · ${d.afterTime} after time filter`) + (d === long ? '' : also)}
+                        >
                           {DIAG_LABEL[d.reason].label}
+                          {long && d !== long ? ', long values read in part' : ''}
                         </Badge>
                       )
                     if (n === 0) return <span className="muted small">0</span>
@@ -452,11 +461,12 @@ export function RulesView() {
                     className="btn xs"
                     onClick={() => setEdit({ id: r.origin === 'custom' ? Number(r.file.split(':')[1]) : undefined, yaml: yamlOf(r) })}
                     title={r.origin === 'custom' ? 'edit' : 'copy as custom rule'}
+                    aria-label={r.origin === 'custom' ? 'edit' : 'copy as custom rule'}
                   >
                     <IconEdit />
                   </button>
                   {r.origin === 'custom' && (
-                    <button className="btn xs danger" onClick={() => remove(r)}>
+                    <button className="btn xs danger" onClick={() => remove(r)} aria-label="delete the custom rule">
                       <IconTrash />
                     </button>
                   )}

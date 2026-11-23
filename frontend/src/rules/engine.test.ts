@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   compileCond,
+  longRegexValue,
   MAX_FINDINGS,
   parseDuration,
   parseThreshold,
@@ -14,6 +15,7 @@ import {
   type Rule,
   type RuleDiag,
 } from './engine'
+import { firstChars, RE_VALUE_MAX } from './filter'
 
 const T0 = Date.UTC(2026, 8, 1, 22, 0, 0)
 let id = 1
@@ -215,6 +217,86 @@ describe('the finding cap', () => {
     ])
     expect(cut).toMatchObject({ dropped: 1, detail: '1 of 3 findings left out past the cap of 2; kept the first 2 bursts in the order of the grouped fields' })
     expect(run({ ...burst, max_findings: 3 }, rows).cut).toBeUndefined()
+  })
+})
+
+describe('regular expressions on long values', () => {
+  const pad = 'a'.repeat(RE_VALUE_MAX)
+  const max = RE_VALUE_MAX.toLocaleString('en-US')
+  const rows = () => [
+    ev(4688, 0, { computer: 'WS01', commandLine: 'x evil' }),
+    ev(4688, 1, { computer: 'WS02', commandLine: `${pad} evil` }),
+    ev(4688, 2, { computer: 'WS03', commandLine: `evil ${pad}` }),
+  ]
+  const rule = (where: Rule['where'], extra: Partial<Rule> = {}): Rule => ({ id: 'long', title: 'l', severity: 'low', source: 'events', where, ...extra })
+  const run = (r: Rule, rs: Record<string, unknown>[]) => {
+    const diags: RuleDiag[] = []
+    const found = runRule(r, { rows: rs, onDiag: (d) => diags.push(d) })
+    return { found, cuts: diags.filter((d) => d.reason === 'values_cut') }
+  }
+
+  it('reads the first RE_VALUE_MAX characters of a value and says how many rows held a longer one', () => {
+    const rs = rows()
+    const { found, cuts } = run(rule({ eventId: 4688, 'commandLine|re': '\\bevil\\b' }), rs)
+    expect(found.map((f) => f.refs[0])).toEqual([rs[0].id, rs[2].id])
+    expect(cuts).toEqual([
+      {
+        ruleId: 'long',
+        reason: 'values_cut',
+        detail: `2 row(s) held a value longer than ${max} characters in a field its regular expressions read: they read its first ${max} characters, and a match past them is not found`,
+        matched: 2,
+        afterExclude: 2,
+        afterTime: 2,
+        longValues: 2,
+      },
+    ])
+  })
+
+  it('lets not_re pass a row whose match lies past the characters it reads', () => {
+    const rs = rows()
+    expect(run(rule({ eventId: 4688, 'commandLine|not_re': 'evil' }), rs).found.map((f) => f.refs[0])).toEqual([rs[1].id])
+  })
+
+  it('reads a value of exactly RE_VALUE_MAX characters whole and says nothing of it', () => {
+    const rs = [ev(4688, 0, { commandLine: `${'a'.repeat(RE_VALUE_MAX - 5)} evil` })]
+    expect(run(rule({ 'commandLine|re': 'evil$' }), rs)).toMatchObject({ found: [{ refs: [rs[0].id] }], cuts: [] })
+  })
+
+  it('says nothing when no regular expression of the rule reads the long value', () => {
+    const rs = rows()
+    // contains reads the whole value, and the long values are in a field no regular expression reads
+    const contains = run(rule({ eventId: 4688, 'commandLine|contains': 'evil' }), rs)
+    expect(contains.found).toHaveLength(3)
+    expect(contains.cuts).toEqual([])
+    expect(run(rule({ eventId: 4688, 'image|re': 'evil' }), rs).cuts).toEqual([])
+    expect(longRegexValue(rule({ eventId: 4688 }))).toBeNull()
+  })
+
+  it('counts a long value read by a nested condition, an exclusion or a list once per row', () => {
+    const rs = rows()
+    const nested = run(rule({ eventId: 4688, any_of: [{ 'commandLine|re': 'nothing' }, { 'computer|eq': 'WS01' }] }, { exclude: { 'parentCommandLine|re': 'x' } }), rs)
+    expect(nested.cuts.map((d) => d.longValues)).toEqual([2])
+    const listed = [
+      { id: 1, to: ['a@example.com', `${pad}@example.com`] },
+      { id: 2, to: ['b@example.com'] },
+    ]
+    expect(run({ id: 'to', title: 't', severity: 'low', source: 'mails', where: { 'to|re': 'example' } }, listed).cuts.map((d) => d.longValues)).toEqual([1])
+  })
+
+  it('says the cut once for a rule collapsed past its row count', () => {
+    const rs = rows()
+    const { found, cuts } = run(rule({ eventId: 4688, 'commandLine|re': 'evil' }, { entities: ['computer'], collapse_after: 1 }), rs)
+    expect(found.map((f) => f.escalation)).toEqual(['collapsed: 2 matching rows', 'collapsed: 2 matching rows'])
+    expect(cuts.map((d) => d.longValues)).toEqual([2])
+  })
+
+  it('counts characters as the store does, by code point and not by UTF-16 unit', () => {
+    const wide = '\u{1d400}'
+    expect(firstChars(`${wide}${wide}b`, 2)).toBe(`${wide}${wide}`)
+    expect(firstChars('abc', 5)).toBe('abc')
+    // as many characters as are read, one of them two UTF-16 units long: read whole
+    const rs = [ev(4688, 0, { commandLine: `${'a'.repeat(RE_VALUE_MAX - 6)}${wide} evil` })]
+    expect(run(rule({ 'commandLine|re': 'evil$' }), rs)).toMatchObject({ found: [{ refs: [rs[0].id] }], cuts: [] })
   })
 })
 

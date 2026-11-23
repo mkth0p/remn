@@ -37,6 +37,11 @@ of the recordings and clean machines (a clean machine larger than a share is spl
 --merge FILE... makes the measure of the N files, as one run would, with --out, --detail and
 --gate. The workflow runs eight shares.
 
+A change to a few rules measures those alone: --rules ID... (or @FILE, one id a line) runs only
+them, on every recording and clean machine, and replaces their measures in --out and --detail,
+keeping every other rule's and the date of the full measure; it refuses when the datasets read
+are not the ones that measure was taken on. --gate then reads the rules it measured.
+
 Recorded attacks:
 - the SigmaHQ regression samples: one recording per rule, made by the rule's author;
 - EVTX-ATTACK-SAMPLES, with the rules reviewed as identifying each file
@@ -401,7 +406,7 @@ def fetch_recordings(recordings: list[Recording], root: Path, cache: Path) -> No
 _W: dict[str, Any] = {}
 
 
-def _worker_init(tmp: str) -> None:
+def _worker_init(tmp: str, only: list[str] | None = None) -> None:
     sets = event_rules()
     from services.store import rules as R
     from services.store.casestore import StoreRegistry
@@ -409,7 +414,7 @@ def _worker_init(tmp: str) -> None:
     rules, seen = [], set()
     for rs in sets.values():
         for r in rs:
-            if r.get("id") and r["id"] not in seen:
+            if r.get("id") and r["id"] not in seen and (only is None or r["id"] in only):
                 seen.add(r["id"])
                 rules.append({**r, "enabled": True})
     reg = StoreRegistry()
@@ -646,12 +651,12 @@ def plan(recordings: list[Recording], machines: list[Path], shares: int) -> list
     return units
 
 
-def measure(units: list[Unit], recordings: list[Recording], jobs: int) -> tuple[dict[str, Any], list[str]]:
-    """The rules run on each unit: what they did on each recording, and on each part of each machine."""
+def measure(units: list[Unit], recordings: list[Recording], jobs: int, only: list[str] | None = None) -> tuple[dict[str, Any], list[str]]:
+    """The rules (every one, or only those named) run on each unit: what they did on each recording, and on each part of each machine."""
     results: dict[str, Any] = {"recordings": {}, "machines": {}}
     problems: list[str] = []
     tmp = tempfile.mkdtemp(prefix="remn-measure-")
-    with ProcessPoolExecutor(max_workers=jobs, initializer=_worker_init, initargs=(tmp,)) as pool:
+    with ProcessPoolExecutor(max_workers=jobs, initializer=_worker_init, initargs=(tmp, only)) as pool:
         # the largest first: the machines take longest
         futures = {}
         for u in sorted(units, key=lambda u: -u.weight):
@@ -693,11 +698,11 @@ def apply_results(results: dict[str, Any], recordings: list[Recording]) -> dict[
     return clean
 
 
-def merge(paths: list[Path]) -> tuple[list[Recording], dict[str, dict[str, Any]], dict[str, dict[str, int]], int, list[str]]:
+def merge(paths: list[Path], only: list[str] | None = None) -> tuple[list[Recording], dict[str, dict[str, Any]], dict[str, dict[str, int]], int, list[str]]:
     """
-    The shares --shard wrote, as one measure. It fails unless every share of one plan is there once
-    and every recording and every part of every clean machine was measured: a share missing is
-    never a measure with less in it.
+    The shares --shard wrote, as one measure. It fails unless every share of one plan is there once,
+    measured the rules --rules names (every rule without it), and every recording and every part of
+    every clean machine was measured: a share missing is never a measure with less in it.
     """
     raws = [json.loads(p.read_text(encoding="utf-8")) for p in paths]
     first = raws[0]
@@ -708,6 +713,8 @@ def merge(paths: list[Path]) -> tuple[list[Recording], dict[str, dict[str, Any]]
         for k in ("units", "recordings", "leftOut", "maxMb"):
             if r[k] != first[k]:
                 sys.exit(f"share {r['share']} was planned on other datasets than share {first['share']} ({k} differ)")
+        if r.get("rules") != (sorted(only) if only else None):
+            sys.exit(f"share {r['share']} measured other rules than --rules names")
     results: dict[str, Any] = {"recordings": {}, "machines": {}}
     for r in raws:
         results["recordings"].update(r["results"]["recordings"])
@@ -772,10 +779,81 @@ def gate(before: dict[str, Any], after: dict[str, Any], rules: dict[str, dict[st
     return lost, noisier, notes
 
 
-def fetch(root: Path) -> None:
-    """Every dataset at its pinned version under root, as --datasets reads them; one already there is kept."""
-    import subprocess
+# tries of a download before the run fails, and the wait before the second (longer each time)
+FETCH_TRIES = 4
+FETCH_WAIT_S = 10.0
+
+
+def download(url: str, dest: Path, tries: int = FETCH_TRIES, wait_s: float = FETCH_WAIT_S) -> Path:
+    """
+    The file at url, saved to dest through a .part file and kept only when whole. A connection
+    dropped or reset, a server error, or fewer bytes than the response announced is tried again,
+    up to tries times; a request the server refuses (a 4xx answer) is not.
+    """
+    import http.client
+    import time
+    import urllib.error
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    partial = dest.with_name(dest.name + ".part")
+    for attempt in range(1, tries + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=600) as resp, open(partial, "wb") as fh:  # noqa: S310 - a fixed https host
+                announced = resp.headers.get("Content-Length")
+                got = 0
+                while chunk := resp.read(1 << 20):
+                    fh.write(chunk)
+                    got += len(chunk)
+            if announced is not None and got != int(announced):
+                raise http.client.IncompleteRead(b"", int(announced) - got)
+            partial.replace(dest)
+            return dest
+        except (OSError, http.client.HTTPException) as exc:
+            refused = isinstance(exc, urllib.error.HTTPError) and exc.code < 500
+            if refused or attempt == tries:
+                partial.unlink(missing_ok=True)
+                raise
+            print(f"  {url}: {exc!r}; trying again ({attempt + 1} of {tries})", flush=True)
+            time.sleep(wait_s * attempt)
+    raise AssertionError("not reached")
+
+
+def fetch_archive(url: str, archive: Path, target: Path, tries: int = FETCH_TRIES, wait_s: float = FETCH_WAIT_S) -> None:
+    """
+    A .tgz release asset unpacked into target. It is downloaded whole into archive first, then
+    unpacked into a folder beside target that takes its name once complete, so a download cut
+    short is fetched again and a machine half unpacked is never taken for a whole one. An archive
+    that will not unpack is fetched once more; once unpacked it is removed, as it takes disk the
+    run needs.
+    """
+    import shutil
     import tarfile
+
+    work = target.with_name(target.name + ".part")
+    for round_ in (1, 2):
+        if not archive.is_file():
+            download(url, archive, tries, wait_s)
+        shutil.rmtree(work, ignore_errors=True)
+        work.mkdir(parents=True)
+        try:
+            with tarfile.open(archive, "r:gz") as tar:
+                tar.extractall(work, filter="data")
+            break
+        except (tarfile.TarError, EOFError, OSError):
+            archive.unlink(missing_ok=True)
+            shutil.rmtree(work, ignore_errors=True)
+            if round_ == 2:
+                raise
+            print(f"  {archive.name} did not unpack; fetching it again", flush=True)
+    shutil.rmtree(target, ignore_errors=True)
+    work.replace(target)
+    archive.unlink()
+
+
+def fetch(root: Path, cache: Path | None = None) -> None:
+    """Every dataset at its pinned version under root, as --datasets reads them; one already there is kept.
+    The clean machines' archives are downloaded into cache (root when none is given) before they are unpacked."""
+    import subprocess
 
     root.mkdir(parents=True, exist_ok=True)
     for key, name in LAYOUT.items():
@@ -786,11 +864,9 @@ def fetch(root: Path) -> None:
                 target = dest / machine
                 if target.is_dir() and any(target.rglob("*.evtx")):
                     continue
-                target.mkdir(parents=True, exist_ok=True)
                 url = f"https://github.com/{pin['repo']}/releases/download/{pin['tag']}/{machine}.tgz"
                 print(f"fetching {url}", flush=True)
-                with urllib.request.urlopen(url, timeout=600) as resp, tarfile.open(fileobj=resp, mode="r|gz") as tar:  # noqa: S310 - a fixed https host
-                    tar.extractall(target, filter="data")
+                fetch_archive(url, (cache or root) / "evtx-baseline" / pin["tag"] / f"{machine}.tgz", target)
             continue
         if dest.is_dir() and any(dest.iterdir()):
             continue
@@ -804,6 +880,37 @@ def fetch(root: Path) -> None:
             ["git", "-C", str(dest), "checkout", "-q", "FETCH_HEAD"],
         ):
             subprocess.run(cmd, check=True, env=env)  # noqa: S603 - fixed arguments
+
+
+def chosen_rules(names: list[str], rules: dict[str, dict[str, Any]]) -> list[str]:
+    """The rule ids --rules names, read from a file for @FILE; an id no event rule has is an error."""
+    ids: list[str] = []
+    for name in names:
+        if name.startswith("@"):
+            ids += [x.strip() for x in Path(name[1:]).read_text(encoding="utf-8").splitlines() if x.strip() and not x.startswith("#")]
+        else:
+            ids.append(name)
+    unknown = sorted(set(ids) - set(rules))
+    if unknown:
+        sys.exit(f"--rules names {len(unknown)} id(s) no event rule has: {', '.join(unknown[:5])}")
+    return sorted(set(ids))
+
+
+def replace_measures(
+    committed: dict[str, Any], committed_detail: dict[str, Any], payload: dict[str, Any], detail: dict[str, Any], only: list[str]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """
+    The committed measure and detail with the measures of the rules named replaced by the new ones
+    (a rule the new detail has nothing for loses its entry there). The datasets read must be the ones
+    the committed measure was taken on, recording for recording: otherwise the rules measured and
+    the others would not be measured on the same recordings.
+    """
+    if committed.get("sources") != payload["sources"] or committed_detail.get("unread") != detail["unread"]:
+        sys.exit("--rules: the datasets read are not the ones the committed measure was taken on; measure every rule")
+    keep = set(only)
+    merged = {**committed, "rules": {**{k: v for k, v in committed["rules"].items() if k not in keep}, **payload["rules"]}}
+    merged_detail = {**committed_detail, "rules": {**{k: v for k, v in committed_detail["rules"].items() if k not in keep}, **detail["rules"]}}
+    return merged, merged_detail
 
 
 def dump(payload: dict[str, Any]) -> str:
@@ -844,6 +951,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--shard", help="I/N: measure the I-th of N shares of the recordings and clean machines (1 <= I <= N) and write them to --raw")
     ap.add_argument("--raw", type=Path, help="with --shard: where the share measured is written, for --merge")
     ap.add_argument("--merge", type=Path, nargs="+", help="take the measures from the --raw files of every share instead of measuring")
+    ap.add_argument(
+        "--rules",
+        nargs="+",
+        metavar="ID",
+        help="measure only these rules (ids, or @FILE with one id a line) and replace their measures in --out and --detail, keeping the others",
+    )
     a = ap.parse_args(argv)
     shard = None
     if a.shard:
@@ -856,7 +969,7 @@ def main(argv: list[str] | None = None) -> int:
     if a.merge and (a.shard or a.fetch):
         ap.error("--merge measures nothing: it takes no --shard or --fetch")
     if a.datasets and a.fetch:
-        fetch(a.datasets)
+        fetch(a.datasets, a.cache)
     for key, name in LAYOUT.items():
         attr = DEST[key]
         if getattr(a, attr) is None and not a.merge:
@@ -873,10 +986,13 @@ def main(argv: list[str] | None = None) -> int:
         for r in rs:
             rules.setdefault(r["id"], r)
     rule_tech = {rid: techniques(r.get("attack")) for rid, r in rules.items()}
-    settings_needed = {rid: s for rid, r in rules.items() if (s := needs_settings(R, r))}
+    only = chosen_rules(a.rules, rules) if a.rules else None
+    if only is not None and not a.shard and not (a.out.is_file() and a.detail and a.detail.is_file()):
+        ap.error("--rules replaces measures in the measure and detail files --out and --detail name, which must exist")
+    settings_needed = {rid: s for rid, r in rules.items() if (s := needs_settings(R, r)) and (only is None or rid in only)}
 
     if a.merge:
-        recordings, clean, left_out, max_mb, problems = merge(a.merge)
+        recordings, clean, left_out, max_mb, problems = merge(a.merge, only)
         a.max_dataset_mb = max_mb
         print(f"{len(rules)} event rules; {len(recordings)} recordings; {len(clean)} clean machines, from {len(a.merge)} shares", flush=True)
     else:
@@ -893,7 +1009,7 @@ def main(argv: list[str] | None = None) -> int:
                 by_set[rec.dataset].append(rec)
             recordings = [rec for recs in by_set.values() for rec in recs[: a.limit]]
         machines = sorted(p for p in a.baseline.iterdir() if p.is_dir() and any(p.rglob("*.evtx")))
-        print(f"{len(rules)} event rules; {len(recordings)} recordings; {len(machines)} clean machines", flush=True)
+        print(f"{len(only) if only else len(rules)} event rules; {len(recordings)} recordings; {len(machines)} clean machines", flush=True)
         units = plan(recordings, machines, shard[1] if shard else 1)
         mine = [u for u in units if u.share == (shard[0] if shard else 1)]
         fetch_recordings([recordings[u.ref] for u in mine if u.kind == "recording"], a.attack_data, a.cache)
@@ -902,7 +1018,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"share {shard[0]} of {shard[1]}: {len(mine)} of {len(units)} units, {sum(u.weight for u in mine) / 1e9:.2f} of {sum(u.weight for u in units) / 1e9:.2f} GB",
                 flush=True,
             )
-        results, problems = measure(mine, recordings, a.jobs)
+        results, problems = measure(mine, recordings, a.jobs, only)
         if shard:
             a.raw.write_text(
                 json.dumps(
@@ -913,6 +1029,7 @@ def main(argv: list[str] | None = None) -> int:
                         "recordings": [rec.meta() for rec in recordings],
                         "leftOut": left_out,
                         "maxMb": a.max_dataset_mb,
+                        "rules": sorted(only) if only else None,
                         "results": results,
                         "problems": problems,
                     }
@@ -927,6 +1044,8 @@ def main(argv: list[str] | None = None) -> int:
     measures: dict[str, dict[str, Any]] = {}
     detail_rules: dict[str, dict[str, Any]] = {}
     for rid, rule in sorted(rules.items()):
+        if only is not None and rid not in only:
+            continue
         m: dict[str, Any] = {"h": logic_hash(rule)}
         if rid in settings_needed:
             m["settings"] = settings_needed[rid]
@@ -992,7 +1111,6 @@ def main(argv: list[str] | None = None) -> int:
         },
         "rules": measures,
     }
-    a.out.write_text(dump(payload), encoding="utf-8")
     detail = {
         "version": 1,
         "measured": payload["measured"],
@@ -1001,6 +1119,11 @@ def main(argv: list[str] | None = None) -> int:
         "unread": sorted(f"{r.dataset}:{r.name}" for r in recordings if not r.rows),
         "rules": detail_rules,
     }
+    if only is not None:
+        payload, detail = replace_measures(
+            json.loads(a.out.read_text(encoding="utf-8")), json.loads(a.detail.read_text(encoding="utf-8")), payload, detail, only
+        )
+    a.out.write_text(dump(payload), encoding="utf-8")
     if a.detail:
         a.detail.write_text(dump(detail), encoding="utf-8")
 

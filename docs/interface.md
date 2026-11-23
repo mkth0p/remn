@@ -25,27 +25,64 @@ The app opens on a home page until some case in the browser holds evidence, and 
 last case's dashboard after that; the wordmark leads back to the home page. It has its own
 type (IBM Plex Sans and Mono) and palette, apart from the case pages, and shows what REMN
 reads, how the rules are measured and what the measures show. The rule totals, the
-recordings, the clean-host baseline and the example rule's record come from
-`rules/measures.json` through `/api/meta`, so they follow every measurement; the
-comparisons with Hayabusa and Chainsaw, the held-out attack_data run, the evtx-baseline
-false positives and the mail corpora are the dated results of the reviews they cite
-(`frontend/src/data/landingFigures.ts`). New case names a case, picks its store and can
+recordings, what the rules enabled by default detect in each library, the clean-host
+baseline and the findings on it are read from the committed measure
+(`rules/measures.json`, `rules/measures-detail.json` and the SigmaHQ packs) when the page is
+built, counted as the README counts them (`frontend/src/data/measureFigures.ts`), so a new
+measure changes the page with no figure typed; the example rule's record comes from the
+server with the rule. The tactic map and the APT29 hosts come from a separate run of every
+rule (`tools/library_measures.py`, `frontend/src/data/libraryMeasures.json`) and say so;
+the lines per detection level are counted on the same measure's clean machines by
+`tools/detection_levels.py` (`frontend/src/data/detectionLevels.gen.json`); the mail corpora are the dated results of
+[validation](validation.md), on corpora the score's weights were adjusted on. New case names a case, picks its store and can
 take evidence as it is created; the first visit's case, while still untouched, is taken
 over rather than left empty. Open demo case opens the Northstar lab in the browser.
 
 The sidebar collapses to an icon rail with the button at its foot, remembered per
 browser.
 
-A page that fails while it is drawn shows what failed in its place, with "try again",
-"reload the page" and the details to copy, and the console says so; the sidebar and the
-other pages stay usable. When the browser does not let the app open its database at start
-(a private window, site data turned off, storage full, a database written by a newer
-version), the page says so and why instead of waiting.
+The address names the case and the page, and on Findings, Stories, Events and Mails the
+finding, story (with its step), event or mail open there, as in
+`/case/12-lx3k9q2a/findings?finding=314`; the home page is `/home`. A reload opens the same
+place, Back and Forward move between the pages as they were visited, and the tab's title
+names the page (never the case). A link or a bookmark opens its place only in the browser
+that holds the case: each browser numbers its cases itself, so the address also carries
+when the case was created, and a link from another browser, or to a case deleted since, is
+refused with a message and the app opens as it would without it. A finding, event or mail
+that is not of the linked case is not opened.
+
+A page that fails while it is drawn shows what failed in its place, with "go back" (to the
+page shown before it in this tab), "try again", "reload the page" and the details to copy,
+and the console says so; the sidebar and the other pages stay usable. Each page's code is
+fetched the first time it is opened; when it cannot be, most often because REMN was updated on
+the server after the tab was opened, the page says to reload, and the reload keeps the place.
+When the browser does not let the app open its database at start (a private window, site data
+turned off, storage full, a database written by a newer version), the page says so and why
+instead of waiting. When another REMN tab of an older version keeps the database open while
+this one needs to upgrade it, the start says so and waits for that tab to be closed or
+reloaded.
 
 On the Mails and Findings lists, `j` and `k` move the selection and `/` focuses the search;
 the Stories, Graph and Review pages move between their steps or cards with `j` and `k` too.
-The other lists, Events and Indicators among them, are used with the mouse. The Review page
-adds `r`, `e`, `f` and `x` for its decisions.
+The Review page adds `r`, `e`, `f` and `x` for its decisions. The tables of Events, Mails,
+Findings and Indicators are tables to a screen reader, with their row count, and take the
+keyboard: Tab enters on the row last used, the arrows, Page Up, Page Down, Home and End move
+between rows, Enter opens one and Space selects it where the table selects rows; a sortable
+column header is a button. A switch is a button that Space flips. The items of the other
+lists and the values that open something (stories, steps, chains, evidence, facets, an entity's
+value) are reached with Tab and pressed with Enter or Space, and the focus shows as a ring.
+
+Opening another page moves the keyboard focus to its heading, or to the page itself where it
+has none, so a screen reader names the page and the next Tab starts in it. A dialog takes the
+focus when it opens, keeps Tab and Shift+Tab among its own controls and gives the focus back to
+the button that opened it when it closes. The questions asked before something is removed or
+moved (a case or its data, evidence, a custom rule, a note, a story note not saved, a move to
+the server store, a check of many indicators) are asked in such a dialog, not the browser's,
+with the focus on Cancel when the answer removes something. Buttons that show only an icon
+carry a name a screen reader reads out. The messages in the corner are read out as they come,
+an error at once, and each has a button that dismisses it. Every colour text is written in
+reads at 4.5:1 or more on each surface of its theme (WCAG AA), which a test computes from
+`theme.css`.
 
 ## Evidence
 
@@ -54,10 +91,13 @@ size, row count, SHA-256 computed in the browser, integrity state and the time i
 added. "Verify" re-hashes a copy of the file and compares. Removing a file deletes
 everything derived from it, as described on the [storage page](storage.md).
 A file that records a gap in itself (records missing from its numbering, a chunk that
-fails its checksum, an audit log export cut at a service limit) carries a "gaps" badge,
-and its detail lists what it cannot show. An import still running has a "cancel" button on
-its line in the jobs list, which stops it and removes what it had written, as described on
-the [storage page](storage.md#uploads-and-jobs).
+fails its checksum, an audit log, message trace or directory audit export cut at a service
+limit) carries a "gaps" badge, and its detail lists what it cannot show. The detail of a
+Microsoft 365 or Entra export whose dates did not say their order or zone shows how they
+were read, and reads the file again with a date order and a time zone set for that evidence
+([data sources](sources.md#microsoft-365-and-entra-exports)). An import still running has
+a "cancel" button on its line in the jobs list, which stops it and removes what it had
+written, as described on the [storage page](storage.md#uploads-and-jobs).
 
 ## Events and Mails
 
@@ -162,9 +202,14 @@ finding folded below the case's detection level counts as the findings it stands
 Other rules on the same host or for the same user within 24 hours add a
 point each and a point more for each other ATT&CK tactic among them, up to 6. The same rule on
 the same entities (what it found, such as the program, command line or service, not the host,
-account or address, unless the rule names nothing else) escalated by an analyst before, in this
-case or another case of this browser, adds 5; marked false positive before, the finding keeps
-a quarter of its score. The case also learns from its own review: each finding of a rule an
+account or address, unless the rule names nothing else) escalated by an analyst before in this
+case adds 5; marked false positive before, the finding keeps a quarter of its score. Decisions
+taken in another case of the browser count only when the analyst chooses that case: the "past
+decisions" control beside the sort lists the other cases holding decisions, with how many of
+each kind, and is shown only when there are some. Choose a case only when it is the same
+client's, since a program one network runs every day can be the intruder's on the next. The
+choice belongs to the case and is kept in the browser, not exported with the case, because case
+numbers are the browser's own. The case also learns from its own review: each finding of a rule an
 analyst marks false positive in this case halves the score of the rule's other findings on that
 host and takes a fifth off its findings on the other hosts (findings on the same entities are the
 memory's, not counted twice), so the queue moves past what is benign on this network as the
@@ -211,7 +256,9 @@ dismissed), a story with others merged into it says "+N merged", and the second 
 story is listed on its own.
 
 The selected story opens with its subject (the account, whose forms and joins are one click
-away, or the host), its score, span and the confidence of its ties, a few plain sentences, the
+away, or the host), its score, span and confidence (high, medium or low: how surely its flagged
+steps are its subject's, with the basis of that on hover, as [Stories](stories.md) explains), a
+few plain sentences, the
 sources its findings name, its hosts, its campaign, a link to review its phishing chain, and the
 analyst's note, checked against the story's own records. The **story decision** bar under it
 sets open, reviewed, confirmed incident, benign or false positive, with a reason (required for
@@ -268,7 +315,8 @@ misses its sample, fires on clean machines, changed, needs settings) with the se
 behind it on hover, and a filter lists the leads, the rules that miss their own test sample
 or those that fire on clean machines. Above the packs, the case's detection level (1, fewest
 lines, to 5, every finding on its own; see [detection level](detection.md#detection-level)) is a
-slider with what the level keeps on its own and how many lines it was measured to give; moving it
+slider with what the level keeps on its own, what every level detects in the committed rule
+measure, and how many lines it gives on the measure's clean machines; moving it
 offers to rerun the rules at the new level, and the "level" column gives the lowest level at which
 each rule's findings stand on their own. Below that level they are folded, one per rule and host,
 and a folded finding's title says how many it stands for; a rule that fires on most of the case's
@@ -339,8 +387,11 @@ analyst applies or dismisses it, exactly like a proposal from the chat. A popup 
 proposals of the pass (item, decision, severity before and after, in or out of the
 report, reason). Text in the evidence can try to steer a model, and a pass that wrote its
 answers straight away could take a critical incident out of the report with nobody
-looking; a proposal to lower a severity or leave an item out deserves a second look. The
-executive summary is drafted from the Report page.
+looking; a proposal to lower a severity, leave an item out or dismiss it is never taken by
+"accept all" and waits for the analyst one by one. A prompt carries at most 90,000
+characters of a batch's items: past that the rest of the batch is cut, and the popup, a
+message for a single item and the AI ledger name the items the model read in part or not
+at all. The executive summary is drafted from the Report page.
 
 The triage prompt is `SYSTEM_TRIAGE` in `backend/services/ai/prompts.py`. The reply is a
 JSON array checked item by item: unknown ids, wrong words and unlink ids that are not
@@ -352,11 +403,18 @@ steering the model is on the [security page](security.md).
 
 ## Report
 
+![The Report page of the demo case, with its preflight checks](images/report.png)
+
 The Report page assembles the report from the Review page's decisions and says how many
 items still have no decision. It holds the executive summary (drafted by the model or
 written by hand), the case bundle export and import, and a preview. "Download HTML"
 saves the report, "print / PDF" opens the browser's print dialog on it, and "open in a
-tab" shows it as its own page for the browser's print-to-PDF. Printing runs from a frame
+tab" shows it as its own page for the browser's print-to-PDF. "Word" saves the same report
+as a .docx to edit before it goes out (`frontend/src/data/reportDocx.ts`): the same sections
+in the same order, built from the same data and the same sentences, including the questions,
+the stories with their spine, phases and the analyst's decisions, the chain steps, each rule's
+lead mark and claim note, the records a reviewed relationship rests on, how a model was used
+and the whole of "Where it stops"; only the graphs stay in the HTML report. Printing runs from a frame
 that runs no script but keeps the app's origin, which the browser requires before the
 page may call print on it.
 
@@ -412,10 +470,12 @@ The printed report (`frontend/src/data/reportHtml.ts`) is one self-contained HTM
 REMN's own look, laid out for A4 and print-to-PDF. Every time in it is UTC, whatever the
 display setting. Its verdict is about the case, not about what prints: a confirmed item
 below the severity floor or left out still counts, and the cover says how many are not
-printed. Its confidence is never "high" while a file was not read completely (a parse
+printed. The cover rates how complete the review is ("completeness"), not how sure its
+conclusion is: it is never "high" while an item is undecided, a file was not read completely (a parse
 error, a limit, a skipped archive member, listed in the evidence table's "read" column),
 while the rules have not run or evidence arrived after the last run, and it says
-indicators were checked only when a lookup actually ran on them. "What happened" says
+indicators were checked only when a lookup actually ran on them. A confidence in the
+conclusion is printed only when the analyst gives one, as the analyst's. "What happened" says
 when it lists only the first of more items. The cover carries the wordmark (the
 Gulax face embedded as base64 from the app's own files), an accent rule, the case name,
 five key numbers, a severity bar, the decision counts and a numbered table of contents.
@@ -425,12 +485,16 @@ detail level), the other incidents with their notes and member findings at the e
 severity, the indicators, the case timeline, the tasks, the notes, the findings in time
 order, "How AI was used" when a model took part (runs, models and where they ran, tool
 calls, what it proposed and what became of it, whether the AI ledger's hash chain holds)
-and the case settings.
+and the case settings. The engagement, scope, conclusion, impact, containment,
+recommendations and techniques join them as described under [For a client](#for-a-client).
 
 Each rule's line in the report is marked "lead" when the rule was never seen to detect what
 it looks for, and notes when it also fires on clean machines; the method says how many of the
 rules behind the printed findings detect recorded attacks, and "Where it stops" counts the
-findings that come from leads.
+findings that come from leads. A rule that names its author, as every Sigma rule does, carries
+that name beside its id ("by ...") wherever the HTML and Word reports print the rule's line, and
+the findings section then adds that the Sigma rules are their authors' work, shared by SigmaHQ
+under the Detection Rule License 1.1, which asks that a match keeps its rule's author.
 
 Stories come first ([Stories](stories.md#in-the-report)): a card per story with its phases in
 order, what marks each, the analyst's note, the analyst's decisions on it and where its evidence
@@ -448,6 +512,57 @@ the same step (the same title, source, machine and ties in a row) print as one r
 count and a time span, at most 60 rows per chain, and table headers repeat on every page.
 Every string from the case is escaped, markdown fields go through the app's renderer, and
 only PNG data URLs the app drew itself are embedded.
+
+### For a client
+
+The "client report" panel of the Report page holds what an outside responder adds before the
+report goes to a client. It is stored with the report settings of the case, so it travels in
+the case bundle. Each part is printed only when filled in:
+
+- the engagement: client, engagement reference, engagement dates, who requested it, the
+  distribution list and the version history, first in the report, with the client and the
+  reference on the cover;
+- the handling: a TLP level (TLP 2.0: clear, green, amber, amber+strict, red) and a
+  confidentiality line, printed on the cover, at the foot of the HTML report and in the header
+  of every page of the Word report;
+- the scope: objectives, the period examined, the systems and accounts in and out of scope.
+  Where the analyst wrote no period or nothing in scope, the report prints what the evidence
+  covers and says so: the first and last record the files hold, the hosts the records come from
+  and the user accounts they name (the 500 most frequent of each; machine, service and built-in
+  accounts left out). Nothing is printed as out of scope unless the analyst wrote it;
+- the conclusion: the initial access and the root cause, in the analyst's words, and the
+  analyst's confidence in it when they give one. "Start from the story spine" puts the way in
+  of a printed story's spine (the confirmed story first) in the field as a starting point; the
+  report does not print it until the analyst has rewritten it, and says so under "Where it
+  stops". A report with a confirmed item and no stated conclusion says so there too;
+- the impact: the analyst's account of what was reached or taken, above a table of the accounts
+  and hosts the confirmed items name, printed or not (the people a confirmed chain or story is
+  about, the hosts it ran on, the accounts and hosts of the findings confirmed with them), each
+  with when it was seen, its worst severity and the items that name it;
+- the containment actions taken, with their dates, and the recommendations, short, medium and
+  long term.
+
+Two parts are drawn from the decisions alone. The indicators of compromise list the outside
+addresses, domains, mail senders, URLs and hashes the confirmed chains, stories and findings
+name, whether or not a reputation lookup ran, with those a reputation service flagged; each
+says where it comes from, addresses that are not public and the case's own domains are left
+out, and past 300 the report says how many more there are. The ATT&CK techniques table lists
+each technique of the printed findings (false positives left out) and of the confirmed ones,
+with its tactic, its findings, its rules and whether a confirmed item carries it.
+
+The same panel sets the language and the firm. The report, HTML and Word, is written in English
+or in French; the Report page itself stays English. Every heading, label and sentence the report
+writes itself comes from the dictionary of that language, dates and numbers are written the way
+it writes them (01/03/2026 08:00:00 UTC, 12 345, 1,50 Ko in French), and the HTML document and
+the Word document say their language. What the analysis states and what the analyst writes are
+printed as they are: the limits of the evidence, the reasons a claim does not hold, a story's
+spine, rule and incident titles, and the questions of DFIQ stay in English. A firm name, a cover
+line and a logo (PNG or JPEG, 200 KB at most; the panel says so and refuses a larger file) take
+the place of REMN's wordmark on the cover, at the foot and in the title; the logo is embedded in
+the HTML report and in the Word file. With none of them set the report looks as it always has.
+Printed from a Chromium browser, every page past the cover carries a running header (the firm or
+REMN, the case, the marking) and every page its number and the page count; other browsers print
+without them. The Word report numbers its pages in its footer.
 
 ## Case notes
 

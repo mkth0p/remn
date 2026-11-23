@@ -73,6 +73,13 @@
 		header /assets/* Cache-Control "public, max-age=31536000, immutable"
 		header @view Cache-Control "no-store"
 		header /index.html Cache-Control "no-store"
+		# The image carries the licence and the third-party notices (Dockerfile, static stage). The
+		# notices are sent as text in UTF-8, since some of the names they hold are not ASCII; the
+		# licence, a file with no extension and ASCII only, is sent as text already.
+		header /THIRD_PARTY_NOTICES.md {
+			Content-Type "text/plain; charset=utf-8"
+			defer
+		}
 		# files are read, nothing else: a POST to the page is refused rather than answered with it
 		@write not method GET HEAD
 		respond @write 405

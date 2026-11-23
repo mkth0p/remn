@@ -3,6 +3,7 @@ import { PHASE_LABEL, type Confidence, type Story, type StoryFinding, type Story
 import { spineBasis, spineSteps } from '../data/storyFlow'
 import { fmtNum, fmtTs } from '../util/format'
 import { Badge, Dot } from './ui'
+import { pressable } from './pressable'
 
 /**
  * A story's spine (docs/stories.md, "Spine"): the few steps that carry it from the way in to the
@@ -81,10 +82,10 @@ export function StorySpine({
               const marks = [ways.has(s.id) && 'way in', s.id === basis?.anchor && 'anchor'].filter(Boolean) as string[]
               return (
                 <li
+                  {...pressable}
                   key={s.id}
                   className={['spine-step', f?.severity ?? 'info', selected === s.id && 'active', ways.has(s.id) && 'way-in', s.id === basis?.anchor && 'anchor'].filter(Boolean).join(' ')}
                   onClick={() => onSelect(s.id)}
-                  role="button"
                   aria-current={selected === s.id || undefined}
                 >
                   <span className="when">

@@ -94,6 +94,17 @@ own questions in the same file (ids starting with 0) are REMN's.
 | --- | --- | --- | --- |
 | Tranco list V367N, the top 10,000 domains, fetched 2026-09-05 | `backend/services/reference/tranco_top10k.txt` (with `tranco.json`) on the server, and `frontend/src/reference/tranco10k.ts`, which is part of the browser application | https://tranco-list.eu; Le Pochat et al., "Tranco: A Research-Oriented Top Sites Ranking Hardened Against Manipulation", NDSS 2019 | The Tranco site states no licence for the list. The list is built from other providers' rankings, among them Cloudflare Radar (CC BY-NC 4.0, non-commercial) and the Chrome UX Report (CC BY-SA 4.0); whether their terms carry over to the list is not settled. |
 
+## Samples written by real tools, in the test fixtures (`tests/fixtures/real/`)
+
+Each folder's README names every file's source at a pinned commit, its SHA-256 and what was
+trimmed. The files are unchanged unless that README says otherwise.
+
+| Samples | Where | Source | Licence |
+| --- | --- | --- | --- |
+| Windows prefetch files, versions 17 to 31 | `tests/fixtures/real/prefetch/` | plaso test data, https://github.com/log2timeline/plaso | Apache-2.0 |
+| Three Unified Audit Log records of a test tenant | `tests/fixtures/real/m365/` | plaso test data, https://github.com/log2timeline/plaso | Apache-2.0 |
+| Mail written by Outlook, Lotus Notes and GroupWise, and two mbox files | `tests/fixtures/real/mail/` | Apache Tika test data, https://github.com/apache/tika | Apache-2.0 |
+
 ## Fonts
 
 | Font | Source | Licence |
@@ -113,22 +124,24 @@ own questions in the same file (ids starting with 0) are REMN's.
 
 ## Test corpora and attack recordings (downloaded for the tools, never committed)
 
-The detection measures and the mail rates REMN publishes are taken on these. The repository
-holds none of their files: only file names, counts and REMN's own results.
+The detection measures and the mail rates REMN publishes are taken on these, and the parser
+tests marked heavy download theirs by URL and SHA-256 (`tests/backend/real_samples.py`). The
+repository holds none of their files: only file names, hashes, counts and REMN's own results.
 
 | Corpus | Used by | Source | Licence |
 | --- | --- | --- | --- |
 | SigmaHQ regression samples | `tools/measure_rules.py` | https://github.com/SigmaHQ/sigma | Detection Rule License 1.1 (the repository's licence) |
 | EVTX-ATTACK-SAMPLES | `tools/measure_rules.py`, `tools/evtx_attack_samples.py`, CI | https://github.com/sbousseaden/EVTX-ATTACK-SAMPLES | GPL-3.0 |
-| Splunk attack_data | `tools/measure_rules.py` | https://github.com/splunk/attack_data | Apache-2.0 |
+| Splunk attack_data | `tools/measure_rules.py`, `tests/backend/test_real_m365.py` (heavy tests) | https://github.com/splunk/attack_data | Apache-2.0 |
 | EVTX-to-MITRE-Attack | `tools/measure_rules.py` | https://github.com/mdecrevoisier/EVTX-to-MITRE-Attack | CC0-1.0 |
 | NextronSystems evtx-baseline | `tools/measure_rules.py` | https://github.com/NextronSystems/evtx-baseline | Apache-2.0 |
 | OTRF Security-Datasets: MITRE's APT29 evaluation days 1 and 2, and the atomic Windows datasets | `tools/apt29_stories.py`, `tools/security_datasets.py` | https://github.com/OTRF/Security-Datasets | MIT |
 | Nazario phishing corpus | `tools/validate_public.py` | https://monkey.org/~jose/phishing/ | CC BY 4.0, as `docs/validation.md` records it; not verified again for this file |
 | Phishing Pot | `tools/validate_public.py` | https://github.com/rf-peixoto/phishing_pot | CC BY-NC 4.0: non-commercial use only. The phishing rates in `docs/validation.md` are measured partly on it |
 | SpamAssassin public corpus | `tools/validate_public.py` | https://spamassassin.apache.org/old/publiccorpus/ | Not verified |
-| Apache Tika test PST | `tools/validate_public.py` | https://github.com/apache/tika | Apache-2.0 (the repository's licence) |
+| Apache Tika test PST and test mail | `tools/validate_public.py`, `tests/backend/test_real_mail.py` (heavy tests) | https://github.com/apache/tika | Apache-2.0 (the repository's licence) |
 | Invictus IR Microsoft 365 audit log dataset | `tools/validate_public.py` | https://github.com/invictus-ir/o365_dataset | CC BY 4.0 |
+| Velociraptor test data and golden outputs | `tests/backend/test_real_*.py`, heavy tests | https://github.com/Velocidex/velociraptor | AGPL-3.0 (the repository's licence) |
 
 ## Base images of the Docker builds
 

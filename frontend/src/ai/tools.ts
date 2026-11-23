@@ -15,7 +15,7 @@ import { loadChains } from '../data/chains'
 import { loadStories, PHASE_LABEL, refRow, storyGaps, type Story } from '../data/stories'
 import { chainMembership } from '../rules/incidents'
 import { normaliseDecision, type Decision } from '../data/aiReview'
-import { stepVisible } from '../data/review'
+import { chainSeverity, effectiveSeverity, loadChainReviews, stepVisible } from '../data/review'
 import { listNotes } from '../data/caseNotes'
 import { dryRunRule, loadRules, parseRuleYaml } from '../data/rules'
 import { runQuery } from '../data/queryClient'
@@ -907,6 +907,8 @@ async function agentTool(name: string, args: Record<string, unknown>, ctx: ToolC
       const severity = SEVERITY_ORDER.includes(sevRaw) ? (sevRaw as Finding['severity']) : undefined
       let target: string
       let label: string
+      // the item's severity now, so a proposal that lowers it waits for the analyst (inbox.heldForReview)
+      let from: Finding['severity']
       let kind: 'chain' | 'incident' = 'incident'
       const cites = checkCites(args.cites, seen)
       if (args.chain_id) {
@@ -915,6 +917,7 @@ async function agentTool(name: string, args: Record<string, unknown>, ctx: ToolC
         if (!c) return fail(`no chain ${chainId}; use get_chain or list_findings`)
         target = `chain:${c.id}`
         label = `chain ${c.identityLabel}`
+        from = chainSeverity(c, (await loadChainReviews(caseId))[c.id])
         kind = 'chain'
         if (seen.has(target) && !cites.ok.some((r) => refKey(r) === target)) cites.ok.unshift({ source: 'chains', id: c.id })
       } else if (args.finding_id != null) {
@@ -923,6 +926,7 @@ async function agentTool(name: string, args: Record<string, unknown>, ctx: ToolC
         if (!f || f.caseId !== caseId) return fail(`no finding ${str(args.finding_id)}`)
         target = `finding:${f.id}`
         label = f.title
+        from = effectiveSeverity(f)
         if (seen.has(target) && !cites.ok.some((r) => refKey(r) === target)) cites.ok.unshift({ source: 'findings', id: f.id! })
       } else return fail('give finding_id or chain_id')
       const decision = args.decision != null ? (normaliseDecision(args.decision, kind) ?? undefined) : undefined
@@ -935,7 +939,7 @@ async function agentTool(name: string, args: Record<string, unknown>, ctx: ToolC
         reason: reason.slice(0, 900),
         citations: cites.ok,
         target,
-        decision: { decision: decision as Decision | undefined, severity, include: typeof args.include === 'boolean' ? args.include : undefined, unlink: unlink.length ? unlink : undefined },
+        decision: { decision: decision as Decision | undefined, severity, from, include: typeof args.include === 'boolean' ? args.include : undefined, unlink: unlink.length ? unlink : undefined },
         ...base,
       })
       return done(

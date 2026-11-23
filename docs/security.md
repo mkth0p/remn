@@ -82,10 +82,14 @@ pack importer download from their sources on request, never during an investigat
   repeat, and fail on a pattern that runs past its budget at 100,000 characters, naming it
   and its file. A pattern that reads no evidence, or whose caller limits the text it
   searches, is listed in the test with the reason. The store runs a rule's `re` pattern
-  with RE2, which does not backtrack. The browser engine does: seven bundled rules and some
-  converted community rules keep a pattern that a crafted value of that length slows down,
-  in the rules worker rather than the page, because no rewrite that RE2 also accepts keeps
-  what they match.
+  with RE2, which does not backtrack. The browser engine does: some converted community
+  rules keep a pattern that a crafted value slows down, in the rules worker rather than the
+  page. Both engines give a rule's regular expression the first 65,536 characters of a
+  value and count the rows read in part (docs/rules.md), which holds such a pattern to
+  seconds; three converted patterns (two SigmaHQ admin-share command lines and a Sublime
+  sender name) take a time that grows with the cube of the value and stay slow within that
+  bound. A bundled rule bounds the text between two tokens instead (`[^\n]{0,1000}`), which
+  RE2 also reads.
 - The browser application carries a Content Security Policy (no inline script, scripts
   and workers from the app origin only, WebAssembly allowed for hashing, frames only for
   the sandboxed mail and report documents, no object or base tags) as a `<meta>` tag in
@@ -111,7 +115,8 @@ pack importer download from their sources on request, never during an investigat
   Every DuckDB connection also runs with external access disabled and the configuration
   locked, so a prompt-injected query cannot read or write files on the server or load
   extensions. The two settings are read back when a case store opens, and a store on
-  which they did not take effect is not opened.
+  which they did not take effect is not opened: the case answers 503 (`storeLockdown`)
+  with a message that says so, and the server log has what the engine applied.
 - Identifiers that reach the filesystem are validated (case keys and upload ids by
   pattern, pack ids without separators, static files resolved inside the build
   directory); rule archives are capped per member and in total; CSV exports neutralise
@@ -347,7 +352,8 @@ The log is the one thing on a browser-only server that outlives a parse. It hold
 lines: requests refused, sweeps, the engine's state. A failure in the parsing code, in a request
 or in the web server is logged by exception type and place (`UnicodeDecodeError at common.py:104`),
 never with the exception's text, which is often a piece of the input or a path on the server. This
-holds in every mode; `FORENSIC_DEBUG=1` keeps the text and the traceback for a developer on their
+holds in every mode, and for an error nothing caught in the parse process, which writes to the
+server's own stderr; `FORENSIC_DEBUG=1` keeps the text and the traceback for a developer on their
 own machine, and has no such effect in browser-only mode. In browser-only mode the log also never
 names a file, member or attachment. `docker-compose.public.yml` rotates the log (three files of
 10 MB) rather than keeping it for the life of the container.
@@ -356,11 +362,14 @@ A client is told no more than the log holds. A request, a parse or a job that fa
 answers with what failed, the exception's type and a reference (`the store query failed on the
 server (OSError); the server log has the cause under reference 3f9a01c2`), and the log line of
 that failure carries the same reference, so the operator can find the cause for the analyst who
-reports it. Two kinds of text are still passed on as they are: a statement or filter the database
+reports it. Three kinds of text are still passed on as they are: a statement or filter the database
 cannot run gets DuckDB's diagnostic as a 400, because the analyst, and the model's `sql` tool,
-correct the query from it; and the per-file entries of a package or mailbox ingest (a member that
+correct the query from it; the per-file entries of a package or mailbox ingest (a member that
 could not be read, an unparseable message) keep the parser's message for that file, which can
-quote the file.
+quote the file; and a message the code wrote for the analyst, which names no path and quotes
+nothing from the evidence, is told as it is wherever it stops a parse or a job (a table given to
+the event log import that is none of the Microsoft 365 or Entra exports REMN reads is answered
+`not a recognised Microsoft 365 or Entra export`, not with a reference).
 
 This is what lets a public instance take real evidence: the exposure of a file is bounded to one
 parse, and nothing of it is kept. Before the first upload to a parser on another machine, the app
@@ -469,7 +478,8 @@ A parse process that has been taken over can still fill the disk under the stagi
 takes something this server does not set up: a container (the public compose), cgroups or a job
 object.
 
-Starting the parse process adds about 0.2 s to every file. On an archive of 90,000 synthetic
+Starting the parse process adds about 0.1 s to every file, about 0.2 s for a mailbox or a
+package, whose parsers take longer to load. On an archive of 90,000 synthetic
 events the browser-store stream was 7% slower and the server-store ingest 25% shorter, because
 the parse and the writes to the store then run side by side on two cores.
 
@@ -517,7 +527,10 @@ change to the case:
   the check to read whole. The triage pass marks every proposal of a batch in which any item
   does the same (`frontend/src/ai/evidence.ts`, `evidence.test.ts`). The check is a handful
   of English patterns and finds about one in four of an invented set of payloads; what it
-  misses goes through "accept all" unmarked ([AI analyst](ai.md#evidence-that-addresses-the-model)).
+  misses goes through "accept all" unmarked ([AI analyst](ai.md#evidence-that-addresses-the-model)),
+  except a decision that would lower a severity, leave an item out of the report or mark it
+  a false positive, which always waits for the analyst (`frontend/src/ai/inbox.ts`
+  `heldByAction`).
 - Every prompt on those paths says the case text is evidence, never an instruction, and
   that a record asking to be ignored or marked benign is evidence of intent to be named
   in the reason (`backend/services/ai/prompts.py`, `claude_code.py`, the triage

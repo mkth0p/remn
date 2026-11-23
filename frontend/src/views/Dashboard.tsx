@@ -32,6 +32,8 @@ export function Dashboard() {
   const [findings, setFindings] = useState<Finding[]>([])
   const [storage, setStorage] = useState<{ usage: number; quota: number; persisted: boolean | null } | null>(null)
   const [summary, setSummary] = useState<Summary | null>(null)
+  // why the summary could not be read: the page says so rather than show its figures as empty
+  const [summaryError, setSummaryError] = useState<string | null>(null)
   const ds = useMemo(() => (kase ? getSource(kase) : null), [kase])
   useEffect(() => {
     if (!kase?.id || !ds) return
@@ -45,8 +47,14 @@ export function Dashboard() {
       .then((f) => setFindings(f.sort((a, b) => ['info', 'low', 'medium', 'high', 'critical'].indexOf(b.severity) - ['info', 'low', 'medium', 'high', 'critical'].indexOf(a.severity)).slice(0, 12)))
     estimateStorage().then(setStorage)
     ds.summary()
-      .then((s) => setSummary(s as Summary))
-      .catch(() => setSummary(null))
+      .then((s) => {
+        setSummary(s as Summary)
+        setSummaryError(null)
+      })
+      .catch((e: unknown) => {
+        setSummary(null)
+        setSummaryError(e instanceof Error ? e.message : String(e))
+      })
     refreshCounts(kase)
   }, [kase, ds, rulesVersion, jobs.length])
   if (!kase) return null
@@ -68,6 +76,11 @@ export function Dashboard() {
         </Badge>
       </div>
       <div className="view-body col" style={{ gap: 14 }}>
+        {summaryError && (
+          <div className="hint" role="alert">
+            The case summary could not be read ({summaryError}): the time range of the events{isServer ? ' and the size of the store are' : ' is'} not shown.
+          </div>
+        )}
         <div className="grid-4">
           <Kpi
             tone="accent"
@@ -141,7 +154,7 @@ export function Dashboard() {
             <div className="stat">
               <span className="label">{isServer ? 'server store size' : 'browser storage'}</span>
               <span className="value" style={{ fontSize: 16 }}>
-                {isServer ? fmtBytes(summary?.sizeBytes ?? 0) : storage ? `${fmtBytes(storage.usage)} / ${fmtBytes(storage.quota)}` : '—'}
+                {isServer ? (summaryError ? 'not read' : fmtBytes(summary?.sizeBytes ?? 0)) : storage ? `${fmtBytes(storage.usage)} / ${fmtBytes(storage.quota)}` : '—'}
               </span>
             </div>
             {!isServer && storage && (

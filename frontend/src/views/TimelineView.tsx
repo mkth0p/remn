@@ -11,6 +11,7 @@ import { useStore } from '../state/store'
 import { classNames, escapeHtml, fmtNum, fmtTs, getLocalTime } from '../util/format'
 import { Badge, Dot, Sev } from '../components/ui'
 import { IconClock } from '../components/Icons'
+import { pressable } from '../components/pressable'
 
 echarts.use([BarChart, ScatterChart, GridComponent, TooltipComponent, DataZoomComponent, BrushComponent, LegendComponent, MarkLineComponent, ToolboxComponent, CanvasRenderer])
 
@@ -356,7 +357,7 @@ export function TimelineView() {
               </div>
             )}
             {inRange.slice(0, 400).map((m, i) => (
-              <div key={i} className="step" style={{ gridTemplateColumns: '150px 14px 1fr' }} onClick={m.open}>
+              <div {...pressable} key={i} className="step" style={{ gridTemplateColumns: '150px 14px 1fr' }} onClick={m.open}>
                 <span className="t">{fmtTs(m.ts)}</span>
                 <Dot sev={m.severity} />
                 <span>

@@ -194,12 +194,20 @@ def _stop(signum: int, frame: object) -> None:
     raise _Runaway
 
 
+def interruptible() -> bool:
+    """Whether a call can be interrupted at its limit: there is an interval timer (Windows has none)
+    and this is the main thread, the only one its signal reaches. `re` holds the interpreter lock
+    for a whole match, so no other thread can stop one."""
+    return hasattr(signal, "setitimer") and threading.current_thread() is threading.main_thread()
+
+
 def timed(run: Callable[[], object], limit_s: float) -> float:
     """Processor time of one call. Where the platform has interval timers (not Windows), a call that
     runs past the limit is interrupted and counts as endless. Where it has none, a call that runs
     past RUNAWAY_S ends the whole interpreter with the stack of every thread, so a pattern that
-    backtracks fails the run where it is instead of holding it until the job's own time limit."""
-    guard = hasattr(signal, "setitimer") and threading.current_thread() is threading.main_thread()
+    backtracks fails the run where it is instead of holding it until the job's own time limit; a
+    test times a pattern in a child there (in_child), which is stopped long before."""
+    guard = interruptible()
     previous = signal.signal(signal.SIGALRM, _stop) if guard else None
     if guard:
         signal.setitimer(signal.ITIMER_REAL, limit_s)
@@ -280,3 +288,13 @@ def full_length(pattern: re.Pattern, how: str, shape: tuple[str, str, str]) -> t
     full = text(shape, length, isinstance(pattern.pattern, bytes))
     apply = applier(pattern, how)
     return length, timed(lambda: apply(full), 2 * BUDGET_S)
+
+
+def first_failure(pattern: re.Pattern, how: str) -> tuple[tuple[str, str, str], int, float] | None:
+    """The first input on which the pattern runs past the budget at the full length, with that length
+    and the processor time it took; None when it answers every input in time."""
+    for shape in suspects(pattern, how):
+        length, spent = full_length(pattern, how, shape)
+        if spent >= BUDGET_S:
+            return shape, length, spent
+    return None

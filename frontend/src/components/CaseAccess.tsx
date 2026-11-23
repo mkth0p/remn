@@ -41,7 +41,13 @@ export function CaseAccessPanel({ kase, access, onChange }: { kase: Case; access
             access.members.map((m) => (
               <span key={m} className="badge mono">
                 {m}{' '}
-                <button className="btn ghost xs" disabled={!own || busy} title={own ? `remove ${m}` : OWNER_REASON} onClick={() => save(access.members.filter((x) => x !== m))}>
+                <button
+                  className="btn ghost xs"
+                  disabled={!own || busy}
+                  title={own ? `remove ${m}` : OWNER_REASON}
+                  aria-label={`remove ${m}`}
+                  onClick={() => save(access.members.filter((x) => x !== m))}
+                >
                   ×
                 </button>
               </span>

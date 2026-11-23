@@ -157,6 +157,29 @@ def test_reputation_worst_ranks_malicious_above_suspicious(store):
     assert Q.get_row(store, "mails", mail["id"])["reputationWorst"] == "malicious"
 
 
+def test_url_indicators_keep_the_case_of_their_path_and_query_and_fold_scheme_and_host(store):
+    # invented addresses on a reserved test domain; the two links differ only in the case of their path
+    links = ["HTTPS://Files.Example.TEST/Share/AbC?Token=XyZ", "https://files.example.test/share/abc?token=xyz", "https://User:PW@Files.Example.TEST/x"]
+    w = MailWriter(store, 1)
+    for i, link in enumerate(links):
+        w.add({"subject": f"invented {i}", "date": 1788300000000 + i, "urls": [{"url": link, "normalized": link, "scheme": "https", "domain": "example.test"}]})
+    w.flush()
+    urls = {r["value"] for r in Q.list_iocs(store)["rows"] if r["kind"] == "url"}
+    assert urls == {"https://files.example.test/Share/AbC?Token=XyZ", "https://files.example.test/share/abc?token=xyz", "https://User:PW@files.example.test/x"}
+    domains = {r["value"] for r in Q.list_iocs(store)["rows"] if r["kind"] == "domain"}
+    assert domains == {"example.test"}
+    # a verdict on the stored form still reaches the mail that carries the link
+    store.set_reputation([{"kind": "url", "value": "https://files.example.test/Share/AbC?Token=XyZ", "verdict": "malicious", "tags": [], "checkedAt": 1}])
+    store.mirror_reputation_to_mails()
+    flagged = Q.search(store, "mails", {"conditions": [{"field": "reputation.worst", "op": "eq", "value": "malicious"}]})["rows"]
+    assert {m["subject"] for m in flagged} == {"invented 0"}
+    # and a verdict on a link stored all in lower case, as stores written before kept it, still reaches its mail
+    store.set_reputation([{"kind": "url", "value": "https://user:pw@files.example.test/x", "verdict": "suspicious", "tags": [], "checkedAt": 1}])
+    store.mirror_reputation_to_mails()
+    flagged = Q.search(store, "mails", {"conditions": [{"field": "reputation.worst", "op": "eq", "value": "suspicious"}]})["rows"]
+    assert {m["subject"] for m in flagged} == {"invented 2"}
+
+
 class _UnappliedSetting:
     """A connection on which one statement of the lockdown fails, or does nothing, as it would after an
     engine upgrade renamed the setting."""
@@ -201,6 +224,36 @@ def test_a_store_opens_only_with_file_access_off_and_its_configuration_locked(tm
             # the connection is closed, not left open without its lockdown
             with pytest.raises(duckdb.ConnectionException):
                 opened[0].con.execute("SELECT 1")
+
+
+def test_a_store_whose_lockdown_did_not_take_effect_answers_503_saying_so(tmp_path, monkeypatch):
+    from services.store.casestore import registry
+
+    old = registry.root
+    registry.configure(tmp_path / "cases")
+    key = str(uuid.uuid4())
+    CaseStore(tmp_path / "cases", key).close()
+    connect = duckdb.connect
+    monkeypatch.setattr(duckdb, "connect", lambda path: _UnappliedSetting(connect(path), "SET lock_configuration", True))
+    try:
+        c = Client(raise_request_exception=False)
+        answers = [
+            c.get(f"/api/store/{key}", **HDR),
+            c.post(f"/api/store/{key}/count", data=json.dumps({"source": "events"}), content_type="application/json", **HDR),
+            c.post("/api/stories/build", data=json.dumps({"storeKey": key}), content_type="application/json", **HDR),
+            c.post("/api/relationships/build", data=json.dumps({"storeKey": key}), content_type="application/json", **HDR),
+            c.post("/api/enrich/mails", data=json.dumps({"storeKey": key}), content_type="application/json", **HDR),
+            c.post("/api/enrich/mails/rescore", data=json.dumps({"storeKey": key}), content_type="application/json", **HDR),
+        ]
+    finally:
+        registry.close_all()
+        if old:
+            registry.configure(old)
+    for r in answers:
+        assert r.status_code == 503, (r.request["PATH_INFO"], r.content)
+        said = r.json()
+        assert said["code"] == "storeLockdown" and "ref" not in said
+        assert "lockdown did not take effect" in said["error"] and "enable_external_access" in said["error"]
 
 
 def test_server_rules_engine(store):
@@ -407,6 +460,79 @@ def test_a_rule_keeps_its_own_max_findings_and_the_default_cap_on_the_server(sto
     assert cut["bursts-2"]["detail"] == "1 of 3 findings left out past the cap of 2; kept the first 2 bursts in the order of the grouped fields"
     # exactly as many bursts as the cap: nothing was left out, so nothing is said to be
     assert res["byRule"]["bursts-3"] == 3 and "bursts-3" not in cut
+
+
+def test_a_rule_reads_the_first_characters_of_a_long_value_with_its_regex_and_says_how_many_rows_held_one(store):
+    from services.store.sqlfilter import RE_VALUE_MAX
+
+    pad = "a" * RE_VALUE_MAX
+    w = EventWriter(store, 1)
+    w.add(_event(1, eventId=4688, computer="WS01", commandLine="x evil"))
+    w.add(_event(2, eventId=4688, computer="WS02", commandLine=pad + " evil"))
+    w.add(_event(3, eventId=4688, computer="WS03", commandLine="evil " + pad))
+    # as many characters as are read, one of them four bytes long: read whole
+    w.add(_event(4, eventId=4688, computer="WS04", commandLine="a" * (RE_VALUE_MAX - 6) + "\U0001d400 evil"))
+    w.flush()
+    ids = {r["computer"]: r["id"] for r in Q.search(store, "events", None, full=True)["rows"]}
+
+    def run(rule):
+        res = R.run_rules(store, [{"id": "long", "title": "l", "severity": "low", "source": "events", **rule}], {})
+        assert not res["errors"], res["errors"]
+        return sorted(int(f["refs"][0]) for f in res["findings"]), [d for d in res["diagnostics"] if d["reason"] == "values_cut"]
+
+    found, cuts = run({"where": {"eventId": 4688, "commandLine|re": r"\bevil$|^evil\b"}})
+    assert found == [ids["WS01"], ids["WS03"], ids["WS04"]]
+    max_ = f"{RE_VALUE_MAX:,}"
+    assert [(d["longValues"], d["detail"]) for d in cuts] == [
+        (
+            2,
+            f"2 row(s) held a value longer than {max_} characters in a field its regular expressions read: they read its first {max_} characters, and a match past them is not found",
+        )
+    ]
+    # not_re passes the row whose match lies past what it reads
+    assert run({"where": {"eventId": 4688, "commandLine|not_re": "evil"}})[0] == [ids["WS02"]]
+    assert run({"where": {"eventId": 4688, "commandLine|re_cs": "evil$"}})[0] == [ids["WS01"], ids["WS04"]]
+    # a nested condition and an exclusion read the same; a rule without a regular expression says nothing
+    nested = run({"where": {"eventId": 4688, "any_of": [{"commandLine|re": "nothing"}, {"computer": "WS01"}]}, "exclude": {"parentCommandLine|re": "x"}})
+    assert nested[0] == [ids["WS01"]] and [d["longValues"] for d in nested[1]] == [2]
+    assert run({"where": {"eventId": 4688, "commandLine|contains": "evil"}}) == ([ids["WS01"], ids["WS02"], ids["WS03"], ids["WS04"]], [])
+    # collapsed past its row count, the rule reads the same rows and says so once
+    collapsed = run({"where": {"eventId": 4688, "commandLine|re": "evil"}, "entities": ["computer"], "collapse_after": 1})
+    assert len(collapsed[0]) == 3 and [d["longValues"] for d in collapsed[1]] == [2]
+    # an analyst's search reads the whole value
+    assert Q.count(store, "events", {"conditions": [{"field": "commandLine", "op": "re", "value": "a evil$"}]}) == 1
+
+
+def test_a_long_value_under_data_is_counted_as_one_in_a_column(store):
+    from services.store.sqlfilter import RE_VALUE_MAX
+
+    w = EventWriter(store, 1)
+    w.add(_event(1, eventId=4104, data={"ScriptBlockText": "a" * RE_VALUE_MAX + " evil"}))
+    w.add(_event(2, eventId=4104, data={"ScriptBlockText": "evil"}))
+    w.flush()
+    rule = {"id": "long", "title": "l", "severity": "low", "source": "events", "where": {"eventId": 4104, "data.ScriptBlockText|re": "evil$"}}
+    res = R.run_rules(store, [rule], {})
+    assert len(res["findings"]) == 1
+    assert [d["longValues"] for d in res["diagnostics"] if d["reason"] == "values_cut"] == [1]
+
+
+def test_a_rule_counts_a_long_value_in_a_mail_list_or_body_once_per_mail(store):
+    from services.store.sqlfilter import RE_VALUE_MAX
+
+    pad = "a" * RE_VALUE_MAX
+    w = MailWriter(store, 2)
+    w.add({"subject": "one", "date": T0, "to": [{"addr": "a@example.com"}, {"addr": pad + "@example.com"}], "bodyText": pad + " wire transfer"})
+    w.add({"subject": "two", "date": T0, "to": [{"addr": "b@example.com"}], "bodyText": "wire transfer " + pad})
+    w.flush()
+
+    def run(where):
+        res = R.run_rules(store, [{"id": "long", "title": "l", "severity": "low", "source": "mails", "where": where}], {})
+        assert not res["errors"], res["errors"]
+        return len(res["findings"]), [d["longValues"] for d in res["diagnostics"] if d["reason"] == "values_cut"]
+
+    assert run({"toList|re": "example"}) == (2, [1])
+    assert run({"bodyText|re": "wire transfer"}) == (1, [2])
+    assert run({"subject|re": "one|two"}) == (2, [])
 
 
 def test_then_is_checked_for_every_finding(store):

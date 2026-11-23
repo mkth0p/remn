@@ -1,7 +1,9 @@
-import { Fragment, useEffect, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import type { Severity } from '../db/schema'
 import { classNames, highlightJson, riskClass } from '../util/format'
+import { useDialogFocus } from './dialogFocus'
 import { IconClose, IconCopy, IconMoon, IconSun } from './Icons'
+import { pressable } from './pressable'
 import { useStore } from '../state/store'
 import { currentTheme, setTheme, type Theme } from '../ui/theme'
 
@@ -33,7 +35,7 @@ export function Chip({ children, onRemove, neg, title }: { children: ReactNode; 
     <span className={classNames('chip', neg && 'neg')} title={title}>
       {children}
       {onRemove && (
-        <span className="x" onClick={onRemove} role="button" aria-label="remove">
+        <span className="x" onClick={onRemove} {...pressable} aria-label="remove">
           ×
         </span>
       )}
@@ -41,10 +43,11 @@ export function Chip({ children, onRemove, neg, title }: { children: ReactNode; 
   )
 }
 
-export function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label?: ReactNode }) {
+/** A switch: a button, so Tab reaches it and Space or Enter flips it; `name` names one that shows no label. */
+export function Toggle({ on, onChange, label, name }: { on: boolean; onChange: (v: boolean) => void; label?: ReactNode; name?: string }) {
   return (
     <label className="row" style={{ cursor: 'pointer', gap: 8 }}>
-      <span className={classNames('toggle', on && 'on')} onClick={() => onChange(!on)} role="switch" aria-checked={on} />
+      <button type="button" className={classNames('toggle', on && 'on')} onClick={() => onChange(!on)} role="switch" aria-checked={on} aria-label={name} />
       {label && <span className="dim small">{label}</span>}
     </label>
   )
@@ -68,11 +71,16 @@ export function Modal({ title, onClose, children, footer, wide }: { title: React
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
   }, [onClose])
+  const ref = useRef<HTMLDivElement>(null)
+  const titleId = useId()
+  useDialogFocus(ref)
   return (
     <div className="modal-bg" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" style={wide ? { width: 'min(1000px, 94vw)' } : undefined}>
+      <div className="modal" ref={ref} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} style={wide ? { width: 'min(1000px, 94vw)' } : undefined}>
         <div className="modal-h">
-          <h2 style={{ flex: 1 }}>{title}</h2>
+          <h2 id={titleId} style={{ flex: 1 }}>
+            {title}
+          </h2>
           <button className="btn ghost sm" onClick={onClose} aria-label="close">
             <IconClose />
           </button>
@@ -106,7 +114,7 @@ export function KV({ items, onPivot }: { items: [string, unknown][]; onPivot?: (
           return (
             <Fragment key={k}>
               <div className="k">{k}</div>
-              <div className={classNames('v', onPivot && 'click')} onClick={() => onPivot?.(s, k)} title={onPivot ? 'pivot on this value' : undefined}>
+              <div className={classNames('v', onPivot && 'click')} onClick={() => onPivot?.(s, k)} title={onPivot ? 'pivot on this value' : undefined} {...(onPivot ? pressable : {})}>
                 {s}
               </div>
             </Fragment>
@@ -230,7 +238,7 @@ export function Kpi({
   title?: string
 }) {
   return (
-    <div className={classNames('kpi', tone, onClick && 'click')} onClick={onClick} title={title}>
+    <div className={classNames('kpi', tone, onClick && 'click')} onClick={onClick} title={title} {...(onClick ? pressable : {})}>
       {icon && <div className="icon">{icon}</div>}
       <div className="body">
         <div className="value">

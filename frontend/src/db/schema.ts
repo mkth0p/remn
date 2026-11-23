@@ -105,6 +105,19 @@ export interface Evidence {
   importLock?: string
   /** where the file was parsed: 'browser' when it never left this page */
   parsedIn?: 'browser' | 'server'
+  /** the date order and time zone the file was read in where it does not say (data/dateSetting.ts) */
+  dates?: DateSetting
+}
+
+/**
+ * What the analyst says of one evidence file's dates where the file cannot say: the order of a
+ * numeric date's day and month, and the zone of a time written without one. Microsoft 365 and
+ * Entra exports are read with it; the import says which records it applied to.
+ */
+export interface DateSetting {
+  order?: 'day-first' | 'month-first'
+  /** UTC, an offset (+02:00) or an IANA zone name (Europe/Paris) */
+  zone?: string
 }
 
 export interface EventRow {

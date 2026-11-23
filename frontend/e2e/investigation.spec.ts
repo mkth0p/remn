@@ -38,6 +38,7 @@ test('built app hashes and ingests mail, detects it, reviews it and restores its
   const content = await readFile(target, 'utf8')
   expect(content).toContain('"status":"reviewed"')
   expect(content).toContain('"sha256":')
-  await page.locator('input[type=file]').last().setInputFiles(target)
+  // the case bundle's own drop zone: the report page has other file inputs (the firm's logo)
+  await page.locator('.panel').filter({ hasText: 'case bundle (move the case' }).locator('.dropzone input[type=file]').setInputFiles(target)
   await expect(page.getByText(/case imported/)).toBeVisible({ timeout: 60_000 })
 })

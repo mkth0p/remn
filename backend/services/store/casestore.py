@@ -65,6 +65,11 @@ class StoreBusyError(RuntimeError):
     """A case store another program holds open (a backup, a restore, a second server on the same folder)."""
 
 
+class StoreLockdownError(RuntimeError):
+    """A case store whose lockdown did not take effect: the engine did not apply the settings that
+    keep its queries away from the server's files. It is closed, not opened without them."""
+
+
 class QueryStopped(Exception):
     """A query on a store stopped at its time limit. The message says which limit and what to do."""
 
@@ -100,17 +105,19 @@ _time_limit: ContextVar[TimeLimit | None] = ContextVar("store_time_limit", defau
 
 
 class TimeLimit:
-    """Stops the queries a block runs on case stores once `seconds` have passed, and raises
-    QueryStopped with `message` ("{seconds}" in it is filled in). 0 or less is no limit.
+    """Stops the queries a block runs on case stores once `seconds` have passed, or as soon as
+    `cancelled` returns true, and raises QueryStopped with `message` ("{seconds}" in it is filled
+    in). 0 or less is no time limit.
 
     DuckDB has no statement timeout. A watcher interrupts every cursor that CaseStore.cursor() hands
     out inside the block, and repeats the interrupt until the block ends, since an interrupt that
     lands between two statements is cleared by the next one. A block inside another is watched by
     both."""
 
-    def __init__(self, seconds: float, message: str) -> None:
+    def __init__(self, seconds: float, message: str, cancelled: Callable[[], bool] | None = None) -> None:
         self.seconds = float(seconds or 0)
         self.message = message
+        self.cancelled = cancelled
         self.stopped = False
         self._cursors: list[duckdb.DuckDBPyConnection] = []
         self._lock = threading.Lock()
@@ -126,8 +133,24 @@ class TimeLimit:
             limit = limit._outer
         return con
 
+    def _due(self) -> bool:
+        """Waits until the block ends (False) or its queries are to be stopped (True). A cancel is
+        looked for every tenth of a second, so a cancelled job does not wait for its query to end."""
+        deadline = time.monotonic() + self.seconds if self.seconds > 0 else None
+        while True:
+            step = 0.1 if self.cancelled is not None else None
+            if deadline is not None:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    return True
+                step = left if step is None else min(step, left)
+            if self._done.wait(step):
+                return False
+            if self.cancelled is not None and self.cancelled():
+                return True
+
     def _interrupt(self) -> None:
-        if self._done.wait(self.seconds):
+        if not self._due():
             return
         self.stopped = True
         while True:
@@ -142,7 +165,7 @@ class TimeLimit:
                 return
 
     def __enter__(self) -> TimeLimit:
-        if self.seconds > 0:
+        if self.seconds > 0 or self.cancelled is not None:
             self._outer = _time_limit.get()
             self._token = _time_limit.set(self)
             threading.Thread(target=self._interrupt, name="store-time-limit", daemon=True).start()
@@ -667,7 +690,11 @@ class CaseStore:
         if applied != [(False, True)]:
             self._con.close()
             log.error("case store %s not opened: its lockdown did not take effect (%s)", key, applied)
-            raise RuntimeError("case store not opened: its lockdown did not take effect")
+            raise StoreLockdownError(
+                "the case store was not opened: its lockdown did not take effect (the database engine did not apply enable_external_access = false "
+                "and lock_configuration = true, which keep queries away from the server's files). The server log has what it applied; a DuckDB "
+                "other than the version backend/requirements.txt pins is the likely cause."
+            )
         # a store this code cannot read, or whose upgrade fails, is closed rather than kept half-open
         try:
             self._init_schema()
@@ -889,7 +916,10 @@ class CaseStore:
                 FROM ioc_reputation r WHERE r.kind = 'ip' AND r.value = lower(mails."originIp") AND r.verdict IN ('malicious', 'suspicious', 'clean')
             """)
             # Verdicts are ranked as numbers: max() over the labels themselves is alphabetical,
-            # which put 'suspicious' above 'malicious' on a mail that has both.
+            # which put 'suspicious' above 'malicious' on a mail that has both. A link is matched in
+            # the form its indicator is stored in (writers.ioc_value: scheme and host in lower case,
+            # credentials, path and query as they are), or all in lower case as stores written
+            # before that keep it.
             con.execute("""
                 UPDATE mails SET "reputationWorst" = sub.worst FROM (
                     SELECT m.id, CASE max(CASE r.verdict WHEN 'malicious' THEN 3 WHEN 'suspicious' THEN 2 ELSE 1 END)
@@ -898,7 +928,13 @@ class CaseStore:
                     JOIN ioc_reputation r ON (
                         (r.kind = 'ip' AND r.value = lower(m."originIp"))
                         OR (r.kind = 'domain' AND r.value = lower(m."fromRegistrable"))
-                        OR (r.kind = 'url' AND r.value IN (SELECT lower(coalesce(u.normalized, u.url)) FROM urls u WHERE u."mailId" = m.id))
+                        OR (r.kind = 'url' AND r.value IN (
+                            SELECT lower(p.s) || p.a || lower(p.h) || p.r FROM (
+                                SELECT regexp_extract(coalesce(u.normalized, u.url), '^((?:[a-z][a-z0-9+.-]*:)?//)?([^/?#]*@)?([^/?#]*)(.*)$', ['s', 'a', 'h', 'r'], 'is') AS p
+                                FROM urls u WHERE u."mailId" = m.id
+                            )
+                            UNION ALL SELECT lower(coalesce(u.normalized, u.url)) FROM urls u WHERE u."mailId" = m.id
+                        ))
                         OR (r.kind = 'domain' AND r.value IN (SELECT lower(u.domain) FROM urls u WHERE u."mailId" = m.id))
                         OR (r.kind = 'hash' AND r.value IN (SELECT lower(a.sha256) FROM attachments a WHERE a."mailId" = m.id))
                     )

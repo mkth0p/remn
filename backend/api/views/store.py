@@ -26,16 +26,16 @@ from forensic.access import may, permission
 from forensic.accounts import accounts_on, store
 from services.analysis import hayabusa
 from services.common import ndjson_line
-from services.ingest import isolation
+from services.ingest import isolation, staging
 from services.ingest.isolation import ParseStopped
 from services.ingest.package import request_budget
 from services.ingest.pipeline import MailStats, detect_mail_format
-from services.parsers import evtx_parser
+from services.parsers import evtx_parser, m365
 from services.parsers.mail import pst as pst_mod
 from services.parsers.mail.common import ParseContext
 from services.store import queries as Q
 from services.store import rules as R
-from services.store.casestore import KEY_RE, QueryStopped, StoreBusyError, StoreVersionError, TimeLimit, registry
+from services.store.casestore import KEY_RE, QueryStopped, StoreBusyError, StoreLockdownError, StoreVersionError, TimeLimit, registry
 from services.store.sqlfilter import FilterError
 from services.store.writers import EventWriter, MailWriter
 
@@ -57,6 +57,22 @@ def _json(request: HttpRequest) -> dict[str, Any]:
         return {}
 
 
+# a store that exists and could not be opened, for a reason its message gives
+REFUSED = (StoreVersionError, StoreBusyError, StoreLockdownError)
+
+
+def refused(exc: Exception) -> JsonResponse:
+    """The answer to a store that could not be opened. Each message was written for the analyst and
+    the operator: what stopped it, and what to do."""
+    if isinstance(exc, StoreVersionError):
+        return JsonResponse({"error": str(exc), "code": "storeVersion"}, status=409)
+    if isinstance(exc, StoreBusyError):
+        busy = JsonResponse({"error": str(exc), "code": "storeBusy"}, status=503)
+        busy["Retry-After"] = "30"
+        return busy
+    return JsonResponse({"error": str(exc), "code": "storeLockdown"}, status=503)
+
+
 def _store(key: str, create: bool = True):
     try:
         return registry.get(key, create=create), None
@@ -64,13 +80,8 @@ def _store(key: str, create: bool = True):
         return None, JsonResponse({"error": "invalid case key"}, status=400)
     except FileNotFoundError:
         return None, JsonResponse({"error": "unknown case store"}, status=404)
-    except StoreVersionError as exc:
-        # the message was written for the analyst and the operator: which versions, and what to do
-        return None, JsonResponse({"error": str(exc), "code": "storeVersion"}, status=409)
-    except StoreBusyError as exc:
-        busy = JsonResponse({"error": str(exc), "code": "storeBusy"}, status=503)
-        busy["Retry-After"] = "30"
-        return None, busy
+    except REFUSED as exc:
+        return None, refused(exc)
 
 
 QUERY_STOPPED = (
@@ -205,6 +216,12 @@ def ingest(request: HttpRequest, key: str):
     options = body.get("options") or {}
     if kind not in ("evtx", "mail", "package"):
         return JsonResponse({"error": "kind must be evtx, mail or package"}, status=400)
+    # the date order and time zone the analyst set for the evidence, for the cloud exports in it
+    try:
+        date_setting = m365.date_setting(options.get("dates"))
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    dates = date_setting.to_dict() if date_setting is not None else None
     try:
         path, meta = get_upload(upload_id)
     except (FileNotFoundError, ValueError):
@@ -215,8 +232,8 @@ def ingest(request: HttpRequest, key: str):
         return JsonResponse({"error": "evidence.id is required"}, status=400)
     name = str(evidence.get("name") or meta.get("name") or "upload")
     if kind == "mail" and not pst_mod.available():
-        # said here, as the browser-store path says it: inside the job it would be one more failure
-        # whose text is not shown
+        # said here, as the browser-store path says it, before a job is started for a file it
+        # cannot read
         with open(path, "rb") as fh:
             head = fh.read(4096)
         if detect_mail_format(name, head) == "pst":
@@ -272,10 +289,11 @@ def ingest(request: HttpRequest, key: str):
                 "package_id": str(meta.get("sha256") or ""),
                 "engines": hayabusa.engines(),
                 "filesystem": read_filesystem,
-                "budget": request_budget(),
+                "budget": request_budget(claim=True),
+                "dates": dates,
             }
         elif kind == "evtx":
-            parse_options = {"include_raw": include_raw, "engines": hayabusa.available()}
+            parse_options = {"include_raw": include_raw, "engines": hayabusa.available(), "dates": dates}
         else:
             parse_options = {"ctx": ctx}
         try:
@@ -329,6 +347,8 @@ def ingest(request: HttpRequest, key: str):
             )
             raise
         finally:
+            if "budget" in parse_options:
+                staging.release(parse_options["budget"]["claim"])
             discard_upload(upload_id)
         integrity = "verified" if (sha_client and sha_client == meta.get("sha256")) else ("mismatch" if sha_client else "pending")
         st.upsert_evidence(

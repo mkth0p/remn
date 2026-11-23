@@ -1,0 +1,27 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#identityProtection/riskyUsers",
+  "value": [
+    {
+      "id": "5f1c2a3b-0d4e-4f60-8a71-92b3c4d5e6f7",
+      "isDeleted": false,
+      "isProcessing": false,
+      "riskLastUpdatedDateTime": "2026-09-01T11:40:00Z",
+      "riskLevel": "medium",
+      "riskState": "atRisk",
+      "riskDetail": "none",
+      "userDisplayName": "Alice Example",
+      "userPrincipalName": "alice@contoso.com"
+    },
+    {
+      "id": "4d5e6f7a-8b9c-4d0e-9f1a-2b3c4d5e6f7a",
+      "isDeleted": false,
+      "isProcessing": false,
+      "riskLastUpdatedDateTime": "2026-08-31T08:00:00Z",
+      "riskLevel": "none",
+      "riskState": "remediated",
+      "riskDetail": "userPerformedSecuredPasswordReset",
+      "userDisplayName": "Bob Example",
+      "userPrincipalName": "bob@contoso.com"
+    }
+  ]
+}

@@ -19,15 +19,17 @@ import tempfile
 import time
 import zipfile
 from collections.abc import Callable, Iterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from services.common import sha256_file
+from services.common import AnalystMessage, sha256_file
 from services.ingest.staging import member_ceiling
 from services.parsers import evtx_parser, m365
-from services.parsers.mail import mbox as mbox_mod
-from services.parsers.mail import pst as pst_mod
-from services.parsers.mail.common import ParseContext, parse_message_bytes
-from services.parsers.mail.msg import parse_msg_bytes
+
+# The mail parsers are imported where mail is read. They bring the attachment analyser, the URL
+# and look-alike checks, tldextract and requests, about half the start of a parse process, which
+# a parse of event logs does not need.
+if TYPE_CHECKING:
+    from services.parsers.mail.common import ParseContext
 
 log = logging.getLogger(__name__)
 
@@ -77,6 +79,8 @@ def detect_mail_format(name: str, head: bytes) -> str:
         return "pst"
     if head.startswith(_OLE):
         return "msg"
+    from services.parsers.mail import mbox as mbox_mod
+
     if mbox_mod.looks_like_mbox(head) or n.endswith((".mbox", ".mbx")):
         return "mbox"
     if n.endswith((".pst", ".ost")):
@@ -356,6 +360,7 @@ class EvtxSource:
         max_member: int = MAX_MEMBER_BYTES,
         deadline: float | None = None,
         seen: m365.RecordKeys | None = None,
+        dates: m365.DateSetting | None = None,
     ) -> None:
         self.name = name
         self.path = path
@@ -365,6 +370,10 @@ class EvtxSource:
         self.max_member = max_member
         self.deadline = deadline
         self.stats = evtx_parser.Stats()
+        # the date order and time zone the analyst set for this evidence, for the cloud exports in it
+        self.dates = dates
+        if dates is not None:
+            self.stats.dates = dates.to_dict()
         # one entry per archive member: parsed (with its count and hash), skipped or error, with the reason
         self.files: list[dict[str, Any]] = []
         # the keys of the cloud records read so far, for every file of this upload (a package
@@ -382,7 +391,7 @@ class EvtxSource:
             yield from self._iter_m365(self.path, self.data, self.format, self.name)
             return
         if self.format == UNRECOGNISED:
-            raise ValueError(m365.UNRECOGNISED)
+            raise AnalystMessage(m365.UNRECOGNISED)
         for member in iter_archive(self.path, self.data, self.format, self.files, self.max_member, self.deadline):
             low = member.name.lower()
             if low.endswith(".evtx"):
@@ -412,7 +421,7 @@ class EvtxSource:
                     entry["duplicates"] = self.stats.duplicates - dup_before
                 if self.stats.repaired > rep_before:
                     entry["repaired"] = self.stats.repaired - rep_before
-                if cloud_note := m365.note({k: v - cloud_before[k] for k, v in m365.counts(self.stats).items()}):
+                if cloud_note := m365.note({k: v - cloud_before[k] for k, v in m365.counts(self.stats).items()}, self.dates):
                     entry["note"] = cloud_note
                 self.files.append(entry)
             finally:
@@ -423,7 +432,7 @@ class EvtxSource:
 
     def _iter_m365(self, path: str | None, data: bytes | None, fmt: str, source_file: str) -> Iterator[dict[str, Any]]:
         try:
-            for row in m365.iter_records(path, data, fmt, stats=self.stats, include_raw=self.include_raw, seen=self.seen_records):
+            for row in m365.iter_records(path, data, fmt, stats=self.stats, include_raw=self.include_raw, seen=self.seen_records, dates=self.dates):
                 row["sourceFile"] = source_file
                 yield row
         except Exception as exc:  # noqa: BLE001
@@ -567,6 +576,8 @@ def _error_row(folder: str, exc: Exception, fmt: str) -> dict[str, Any]:
 
 def iter_mbox_fileobj(fileobj: Any, ctx: ParseContext, folder: str) -> Iterator[dict[str, Any]]:
     """Split an mbox stream on 'From ' separator lines without needing a path."""
+    from services.parsers.mail.common import parse_message_bytes
+
     from_line = re.compile(rb"^From .*\r?\n$")
     buf: list[bytes] = []
     buffered = 0  # bytes of the current message, counted past the limit without keeping them
@@ -638,9 +649,13 @@ class MailSource:
         self.format = detect_mail_format(name, head)
 
     def __iter__(self) -> Iterator[dict[str, Any]]:
+        from services.parsers.mail import pst as pst_mod
+        from services.parsers.mail.common import parse_message_bytes
+        from services.parsers.mail.msg import parse_msg_bytes
+
         fmt = self.format
         if fmt == "pst" and not pst_mod.available():
-            raise RuntimeError("PST/OST support requires libpff-python (see backend/requirements-optional.txt)")
+            raise AnalystMessage("PST/OST support requires libpff-python (see backend/requirements-optional.txt)")
         if fmt in ("eml", "msg"):
             size = len(self.data) if self.data is not None else os.path.getsize(self.path or "")
             try:
@@ -684,6 +699,11 @@ class MailSource:
         return row
 
     def _iter_archive(self) -> Iterator[dict[str, Any]]:
+        from services.parsers.mail import mbox as mbox_mod
+        from services.parsers.mail import pst as pst_mod
+        from services.parsers.mail.common import parse_message_bytes
+        from services.parsers.mail.msg import parse_msg_bytes
+
         index = 0
         for member in iter_archive(self.path, self.data, self.format, self.members, self.max_member, self.deadline):
             low = member.name.lower()

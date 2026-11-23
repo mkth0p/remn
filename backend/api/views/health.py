@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import platform
 import sys
 import threading
@@ -16,6 +17,7 @@ from forensic.build import VERSION, build_id, source_url
 from services.ai import claude_code
 from services.analysis import hayabusa
 from services.analysis.attachments import yara_scan
+from services.ingest import staging
 from services.parsers.mail import pst
 from services.reputation.base import registry
 
@@ -38,6 +40,19 @@ def _ollama() -> tuple[dict, list]:
             caps = ollama_service().capabilities(settings.OLLAMA_MODEL) if ai.get("reachable") else []
             _probe = (time.monotonic(), ai, caps)
         return _probe[1], _probe[2]
+
+
+def _chunked_gb() -> float:
+    """The largest chunked upload the server takes, in GiB rounded down to a tenth: the configured
+    ceiling (FORENSIC_MAX_CHUNKED_GB), or what the staging area can hold if that is less, as upload
+    init refuses a larger file whatever the ceiling says."""
+    ceiling = settings.FORENSIC_MAX_CHUNKED_GB * staging.GIB
+    try:
+        ceiling = min(ceiling, staging.capacity()[0])
+    except OSError:
+        # a staging area that cannot be read is said when an upload is tried, not here
+        pass
+    return math.floor(ceiling * 10 / staging.GIB) / 10
 
 
 @permission("signed-in")
@@ -69,7 +84,7 @@ def health(request):
         "limits": {
             "maxUploadMb": settings.FORENSIC_MAX_UPLOAD_MB,
             "inMemoryMb": settings.FORENSIC_IN_MEMORY_MB,
-            "maxChunkedGb": settings.FORENSIC_MAX_CHUNKED_GB,
+            "maxChunkedGb": _chunked_gb(),
             "chunkMb": settings.FORENSIC_CHUNK_MB,
             "uploadMaxAgeS": settings.FORENSIC_UPLOAD_MAX_AGE_S,
         },

@@ -643,6 +643,9 @@ export interface DecidedStory {
   start: number
   end: number
   hosts: string[]
+  /** who it is about, and the outside addresses it came from (the report's impact and indicators read them) */
+  subject?: { kind: 'person' | 'host'; label: string }
+  attackerAddresses?: string[]
   /** the case's findings on its steps that are not disputed, false positives left out */
   findings: Finding[]
   /** whether the report prints it */
@@ -718,6 +721,8 @@ export function storiesForReport(res: StoryResult | null, notes: StoryNotes, dec
         start: v.story.start,
         end: v.story.end,
         hosts: v.story.hosts,
+        subject: { kind: v.story.subject.kind, label: v.story.subject.label },
+        attackerAddresses: v.story.attackerAddresses,
         findings: v.story.findings.map((k) => byKey.get(k)).filter((f): f is Finding => !!f && f.status !== 'false_positive'),
         printed: printed.has(v),
       })),

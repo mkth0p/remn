@@ -1,4 +1,13 @@
-import { DEFAULT_DETECTION_LEVEL, DETECTION_LEVELS, levelInfo, levelMeasured, MEASURED_ON, type DetectionLevel } from '../data/detectionLevel'
+import measure from 'virtual:rule-measure'
+import { DEFAULT_DETECTION_LEVEL, DETECTION_LEVELS, levelInfo, levelMeasured, type DetectionLevel } from '../data/detectionLevel'
+import { fmtNum } from '../util/format'
+
+/** What every level detects, since none drops a finding: the libraries the README quotes, as the committed rule measure gives them. */
+const DETECTS = (() => {
+  const shown = ['attackDataWindows', 'evtxToMitre', 'attackSamples'].flatMap((k) => measure.libraries.filter((l) => l.key === k))
+  const each = shown.map((l) => `${fmtNum(l.detected)} of the ${fmtNum(l.recordings)} ${l.name}`)
+  return `No level drops a finding, so every level detects what the enabled rules detect: on the rule measure of ${measure.measured}, at any severity, ${each.slice(0, -1).join(', ')} and ${each[each.length - 1]} recordings.`
+})()
 
 /**
  * The detection level as a five-stop slider: fewer lines to the left (the findings of noisy rules
@@ -39,7 +48,7 @@ export function DetectionLevelPicker({ value, onChange, disabled, compact }: { v
       </div>
       {!compact && (
         <div className="small muted" style={{ marginTop: 2 }}>
-          {levelMeasured(value)} Measured {MEASURED_ON.date}.
+          {DETECTS} {levelMeasured(value)}
         </div>
       )}
     </div>

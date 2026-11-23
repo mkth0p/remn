@@ -3,7 +3,7 @@
  * Rule worker: runs the YAML rules against IndexedDB and stores findings.
  */
 import { getDb, type MailRow } from '../db/schema'
-import { compileCond, ruleApplicable, ruleEventIds, ruleFields, ruleReadFields, runRule, type PresentSelectors, type Rule, type RuleDiag } from '../rules/engine'
+import { compileCond, longRegexValue, ruleApplicable, ruleEventIds, ruleFields, ruleReadFields, runRule, type PresentSelectors, type Rule, type RuleDiag } from '../rules/engine'
 import type { Row, SettingsLike } from '../rules/filter'
 import { replaceFindings } from '../data/findingReviews'
 
@@ -199,7 +199,10 @@ async function run(req: RunRequest): Promise<void> {
       let thenRows: (() => Row[]) | undefined
       const fields = ruleFields(rule.where)
       if (rule.source === 'events') {
-        const pred = compileCond(rule.where, settings)
+        const where = compileCond(rule.where, settings)
+        // a row whose value its regular expressions read only the start of reaches the rule, which counts it
+        const long = longRegexValue(rule)
+        const pred = long ? (r: Row) => where(r) || long(r) : where
         rows = await subset(key, ruleEventIds(rule.where), pred)
         if (rule.then?.where) {
           const thenPred = compileCond(rule.then.where, settings)

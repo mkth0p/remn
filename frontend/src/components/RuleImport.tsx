@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { apiPostForm } from '../api/client'
 import { getDb } from '../db/schema'
 import { toast, useStore } from '../state/store'
+import { fmtNum } from '../util/format'
 import { Modal, Spinner } from './ui'
 
 interface ConvertedRule {
@@ -24,7 +25,8 @@ const KINDS = {
     title: 'Sigma import',
     endpoint: '/api/rules/convert/sigma',
     hint: 'SigmaHQ / Chainsaw / Hayabusa rules: one .yml or a .zip of the rules folder',
-    blurb: 'A skipped rule is one whose detection cannot be expressed without changing what it matches (base64 / utf16 modifiers, aggregations, non-Windows sources).',
+    blurb:
+      'A skipped rule is one whose detection cannot be expressed without changing what it matches (aggregations and time frames, correlation rules, fieldref and time-part modifiers, non-Windows sources); base64 and utf16 values are expanded into the strings they can appear as.',
   },
   sublime: {
     label: 'import Sublime',
@@ -35,6 +37,9 @@ const KINDS = {
       'Rules relying on Sublime-only features (ML classifiers, link analysis, sender profiles, file explosion, screenshots) are skipped rather than weakened; approximations are listed as warnings.',
   },
 } as const
+
+/** rows the dialog lists; the add button takes every converted rule, listed or not */
+const LISTED_MAX = 300
 
 /** "Import Sigma" / "Import Sublime" buttons: convert through the backend, keep the exact translations as custom rules. */
 export function RuleImport({ kind }: { kind: keyof typeof KINDS }) {
@@ -73,7 +78,8 @@ export function RuleImport({ kind }: { kind: keyof typeof KINDS }) {
     useStore.getState().bumpRules()
   }
 
-  const listed = res ? res.rules.filter((r) => (showSkipped ? !r.ok : r.ok)).slice(0, 300) : []
+  const matching = res ? res.rules.filter((r) => (showSkipped ? !r.ok : r.ok)) : []
+  const listed = matching.slice(0, LISTED_MAX)
   return (
     <>
       <input ref={fileRef} type="file" accept=".yml,.yaml,.zip" data-import={kind} style={{ display: 'none' }} onChange={(e) => pick(e.target.files?.[0])} />
@@ -124,6 +130,12 @@ export function RuleImport({ kind }: { kind: keyof typeof KINDS }) {
               </tbody>
             </table>
           </div>
+          {matching.length > listed.length && (
+            <div className="muted small" style={{ marginTop: 4 }}>
+              showing the first {fmtNum(listed.length)} of {fmtNum(matching.length)}
+              {showSkipped ? '' : `; all ${fmtNum(matching.length)} are added`}
+            </div>
+          )}
           <div className="row" style={{ marginTop: 12, gap: 8 }}>
             <span className="spacer" />
             <button className="btn" onClick={() => setRes(null)}>

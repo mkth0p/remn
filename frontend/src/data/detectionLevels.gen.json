@@ -1,0 +1,33 @@
+{
+  "measured": "2026-09-25",
+  "machines": 7,
+  "levels": [
+    {
+      "level": 1,
+      "alone": 12,
+      "lines": 63
+    },
+    {
+      "level": 2,
+      "alone": 38,
+      "lines": 81
+    },
+    {
+      "level": 3,
+      "alone": 158,
+      "lines": 176
+    },
+    {
+      "level": 4,
+      "alone": 308,
+      "lines": 321
+    },
+    {
+      "level": 5,
+      "alone": 581,
+      "lines": 581
+    }
+  ],
+  "mediumUp": 235,
+  "fewerLines": 65
+}

@@ -23,11 +23,12 @@ from forensic.access import permission
 from forensic.build import build_id
 from services.analysis import hayabusa
 from services.common import ndjson_line, sha256_chunks
-from services.ingest import isolation
+from services.ingest import isolation, staging
 from services.ingest.isolation import ParseStopped
 from services.ingest.package import request_budget
 from services.ingest.pipeline import DeadlineExceeded, detect_mail_format, iter_mbox_fileobj
 from services.ingest.staging import member_ceiling
+from services.parsers import m365
 from services.parsers.mail import pst as pst_mod
 from services.parsers.mail.common import ParseContext
 
@@ -174,6 +175,16 @@ def _ctx_from_request(request: HttpRequest) -> ParseContext:
     )
 
 
+def _dates(request: HttpRequest) -> tuple[dict[str, str] | None, JsonResponse | None]:
+    """The date order and time zone the analyst set for the evidence (the "dates" field, JSON), for
+    the cloud exports in it, or a 400 saying why it cannot be used."""
+    try:
+        setting = m365.date_setting(request.POST.get("dates"))
+    except ValueError as exc:
+        return None, JsonResponse({"error": str(exc)}, status=400)
+    return (setting.to_dict() if setting is not None else None), None
+
+
 # ---------------------------------------------------------------------------
 # EVTX (single file or zip/tar of EVTX files)
 # ---------------------------------------------------------------------------
@@ -181,6 +192,9 @@ def _ctx_from_request(request: HttpRequest) -> ParseContext:
 @require_POST
 def ingest_evtx(request: HttpRequest):
     if (err := _too_large(request)) is not None:
+        return err
+    dates, err = _dates(request)
+    if err is not None:
         return err
     src = _Source(request)
     if src.error is not None:
@@ -196,7 +210,7 @@ def ingest_evtx(request: HttpRequest):
         # closes this generator at a yield, and a yield in a finally then aborts the cleanup below it.
         try:
             engines = hayabusa.engines() if request.POST.get("engines", "1") != "0" else []
-            options = {"include_raw": include_raw, "max_member": _max_member(), "engines": bool(engines)}
+            options = {"include_raw": include_raw, "max_member": _max_member(), "engines": bool(engines), "dates": dates}
             parse = isolation.start("evtx", name=src.name, path=src.path, data=src.data, tmp_dir=tmp_dir, options=options, deadline=deadline)
             yield ndjson_line(
                 {
@@ -340,6 +354,9 @@ def analyze_single_attachment(request: HttpRequest):
 def ingest_package(request: HttpRequest):
     if (err := _too_large(request)) is not None:
         return err
+    dates, err = _dates(request)
+    if err is not None:
+        return err
     src = _Source(request)
     if src.error is not None:
         return src.error
@@ -351,6 +368,7 @@ def ingest_package(request: HttpRequest):
         "package_id": src.sha256,
         "engines": engines,
         "filesystem": request.POST.get("filesystem") == "1",
+        "dates": dates,
     }
     tmp_dir = str(settings.FILE_UPLOAD_TEMP_DIR)
 
@@ -358,9 +376,11 @@ def ingest_package(request: HttpRequest):
         deadline = _deadline()
         parse = None
         stopped = None
+        budget = None
         try:
+            budget = request_budget(claim=True)
             parse = isolation.start(
-                "package", name=source_name, path=src.path, data=src.data, tmp_dir=tmp_dir, options={**options, "budget": request_budget()}, deadline=deadline
+                "package", name=source_name, path=src.path, data=src.data, tmp_dir=tmp_dir, options={**options, "budget": budget}, deadline=deadline
             )
             yield ndjson_line({"type": "meta", "format": parse.format, "name": src.name, "size": src.size, "sha256": src.sha256, "engines": engines})
             try:
@@ -387,6 +407,8 @@ def ingest_package(request: HttpRequest):
         finally:
             if parse is not None:
                 parse.close()
+            if budget is not None:
+                staging.release(budget["claim"])
             src.cleanup()
 
     return _stream(gen())

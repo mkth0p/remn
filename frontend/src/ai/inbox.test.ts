@@ -117,6 +117,30 @@ describe('the approval inbox', () => {
     expect(JSON.parse(ledger.find((e) => e.kind === 'proposal' && e.text.endsWith('after a long body'))!.data)).toMatchObject({ unchecked: true })
   })
 
+  it('holds a decision that lowers a severity, leaves an item out of the report or dismisses it, whatever the check found', async () => {
+    const decide = (title: string, decision: NonNullable<Parameters<typeof propose>[1]['decision']>) => propose(1, { ...base, kind: 'decision', title, target: `finding:${title}`, decision })
+    const escalate = await decide('escalate', { decision: 'escalated', severity: 'high', from: 'medium' })
+    const raise = await decide('raise', { severity: 'critical', from: 'high' })
+    const lower = await decide('lower', { decision: 'reviewed', severity: 'low', from: 'high' })
+    const blind = await decide('blind', { decision: 'reviewed', severity: 'medium' })
+    const omit = await decide('omit', { decision: 'escalated', include: false })
+    const fp = await decide('fp', { decision: 'false_positive' })
+    const benign = await decide('benign', { decision: 'benign' })
+    // none of them read anything flagged
+    for (const p of [escalate, raise, lower, blind, omit, fp, benign]) expect(p.exposed ?? p.unchecked).toBeUndefined()
+    expect(heldForReview(escalate)).toBeNull()
+    expect(heldForReview(raise)).toBeNull()
+    expect(heldForReview(lower)).toBe('it would lower the severity from high to low')
+    expect(heldForReview(blind)).toBe('it would set the severity to medium, and the severity it replaces was not recorded')
+    expect(heldForReview(omit)).toBe('it would leave the item out of the report')
+    expect(heldForReview(fp)).toBe('it would mark the item a false positive')
+    expect(heldForReview(benign)).toBe('it would mark the chain benign')
+    // accept all tries the two that raise (their invented findings are not in the case) and leaves the five
+    const r = await acceptAll(kase)
+    expect(r.held).toBe(5)
+    expect(r.failed.map((f) => f.id).sort()).toEqual([escalate.id, raise.id].sort())
+  })
+
   it('says why a decision cannot be applied when its item is gone', async () => {
     const p = await propose(1, { ...base, kind: 'decision', title: 'x', target: 'finding:99', decision: { decision: 'escalated' } })
     const r = await acceptProposals(kase, [p.id])

@@ -9,7 +9,8 @@ frontend/src/rules/parity.test.ts runs the browser engine on the same rows and f
 over the same events (services/store/queries.stack) go to stacks.json for
 frontend/src/data/stack.parity.test.ts, which stacks them in the browser store. A few rules past
 their finding cap run on rows of their own, and cap.json records which findings the SQL engine kept
-and what it said about the cut.
+and what it said about the cut. A few rules read values longer than their regular expressions read
+(RE_VALUE_MAX), and long.json records what the SQL engine found and how many rows it said it read in part.
 
     .venv\\Scripts\\python.exe tools\\parity_fixture.py        # rewrite the fixture after changing an engine or a rule
 """
@@ -52,6 +53,13 @@ STACKS: list[tuple[str, dict[str, Any] | None, str]] = [
     ("providerEventId", None, "rare"),
     ("processName", {"text": "powershell"}, "rare"),
 ]
+M365_EXPORTS = (
+    "entra-risk-detections.graph.json",
+    "entra-risky-users.graph.json",
+    "entra-directory-audits.graph.json",
+    "exo-messagetrace.get-messagetrace.csv",
+    "exo-messagetrace.extended.csv",
+)
 SETTINGS: dict[str, Any] = {
     "internal_domains": ["contoso.com", "interne.fr"],
     "expected_countries": ["FR"],
@@ -72,6 +80,10 @@ def events() -> list[dict[str, Any]]:
         rows.append(m365.ual_row(r))
     for s in make_m365.entra_signins():
         rows.append(m365.entra_row(s))
+    # ID Protection, directory audits and the message trace, as the import reads the test exports
+    for name in M365_EXPORTS:
+        data = (ROOT / "tests" / "fixtures" / "m365" / name).read_bytes()
+        rows.extend(m365.iter_records(None, data, m365.detect_format(name, data) or "", include_raw=False))
     rows.sort(key=lambda r: r.get("ts") or 0)
     return rows
 
@@ -204,6 +216,7 @@ def main() -> None:
     for e in res["errors"]:
         print("  error", e)
     cap_case()
+    long_case()
 
 
 # Rules past their cap, each a different way of choosing what to keep. The rows are invented: first
@@ -302,6 +315,87 @@ def cap_case() -> None:
         encoding="utf-8",
     )
     print(f"{len(CAP_RULES)} rules past their cap: {', '.join(f'{k} left out {v["dropped"]}' for k, v in sorted(cuts.items()))}")
+
+
+# Rules whose regular expressions read values longer than RE_VALUE_MAX characters, on rows of their
+# own: a match past the characters read, one before them, one on the last of them, and a value as
+# long in characters but longer in UTF-16 units (the browser's count of a string). A long text is
+# written as pieces and how many times each repeats ({"repeat": [[piece, times], ...]}), so the
+# fixture stays small; frontend/src/rules/parity.test.ts expands it the same way.
+LONG_MAX = R.RE_VALUE_MAX
+LONG_SPEC: list[dict[str, Any]] = [
+    {"computer": "WS01", "commandLine": "cmd /c evil.bat"},
+    {"computer": "WS02", "commandLine": {"repeat": [["a", LONG_MAX], [" evil", 1]]}},
+    {"computer": "WS03", "commandLine": {"repeat": [["evil ", 1], ["a", LONG_MAX]]}},
+    {"computer": "WS04", "commandLine": {"repeat": [["a", LONG_MAX - 5], [" evil", 1]]}},
+    {"computer": "WS05", "commandLine": {"repeat": [["a", LONG_MAX - 6], ["\U0001d400", 1], [" evil", 1]]}},
+]
+LONG_RULES: list[dict[str, Any]] = [
+    {"id": "long-re", "title": "evil", "severity": "low", "source": "events", "where": {"eventId": 4688, "commandLine|re": r"\bevil\b"}},
+    {"id": "long-not-re", "title": "not evil", "severity": "low", "source": "events", "where": {"eventId": 4688, "commandLine|not_re": "evil"}},
+    {"id": "long-re-cs", "title": "ends evil", "severity": "low", "source": "events", "where": {"eventId": 4688, "commandLine|re_cs": "evil$"}},
+    {
+        "id": "long-nested",
+        "title": "evil batch or evil first",
+        "severity": "low",
+        "source": "events",
+        "where": {"eventId": 4688, "any_of": [{"commandLine|re": r"evil\.bat"}, {"commandLine|re": "^evil"}]},
+        "exclude": {"commandLine|re": "a{3}$"},
+    },
+    {
+        "id": "long-collapsed",
+        "title": "evil anywhere",
+        "severity": "low",
+        "source": "events",
+        "where": {"eventId": 4688, "commandLine|re": "evil"},
+        "entities": ["computer"],
+        "collapse_after": 2,
+    },
+]
+
+
+def expand(v: Any) -> Any:
+    if isinstance(v, dict) and isinstance(v.get("repeat"), list):
+        return "".join(piece * times for piece, times in v["repeat"])
+    return v
+
+
+def long_case() -> None:
+    spec = [{"eventId": 4688, "ts": CAP_T0 + i * 1000, **r} for i, r in enumerate(LONG_SPEC)]
+    rows = [{k: expand(v) for k, v in r.items()} for r in spec]
+    with tempfile.TemporaryDirectory() as tmp:
+        reg = StoreRegistry()
+        reg.configure(Path(tmp) / "cases")
+        store = reg.get(str(uuid.uuid4()))
+        try:
+            w = EventWriter(store, 1)
+            for r in rows:
+                w.add(dict(r))
+            w.flush()
+            with store.lock:
+                stored = store._con.execute('SELECT id, "commandLine" FROM events ORDER BY id').fetchall()
+            res = R.run_rules(store, LONG_RULES, {})
+        finally:
+            reg.close_all()
+    assert [x[0] for x in stored] == list(range(1, len(rows) + 1)), "event ids are not sequential"
+    assert [x[1] for x in stored] == [r["commandLine"] for r in rows], "the store cut a value"
+    for i, r in enumerate(spec, 1):
+        r["id"] = i
+    findings: dict[str, list[str]] = {r["id"]: [] for r in LONG_RULES}
+    for f in res["findings"]:
+        findings[f["ruleId"]].append(f["key"])
+    cuts = {d["ruleId"]: {"detail": d["detail"], "longValues": d["longValues"]} for d in res["diagnostics"] if d["reason"] == "values_cut"}
+    assert not res["errors"] and set(cuts) == {r["id"] for r in LONG_RULES}, (res["errors"], cuts)
+    (OUT / "long.json").write_text(
+        json.dumps(
+            {"max": LONG_MAX, "rows": spec, "rules": LONG_RULES, "findings": {k: sorted(v) for k, v in findings.items()}, "cuts": cuts},
+            indent=1,
+            sort_keys=True,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    print(f"{len(LONG_RULES)} rules on long values: {', '.join(f'{k} found {len(v)}' for k, v in sorted(findings.items()))}")
 
 
 if __name__ == "__main__":

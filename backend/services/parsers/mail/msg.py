@@ -50,18 +50,41 @@ def _headers_from_msg(msg: Any) -> tuple[list[Header], bool]:
     return headers, synthetic
 
 
+def _internet_encoding(msg: Any) -> str | None:
+    """The encoding of a message's 8-bit strings when only its internet code page names it.
+
+    extract-msg reads such strings in the message code page (PR_MESSAGE_CODEPAGE) and, without
+    one, as ISO-8859-15. Outlook does not always write that property: a message in Chinese saved
+    with only PR_INTERNET_CPID set came out with its subject and sender in mojibake.
+    """
+    try:
+        if msg.areStringsUnicode or "3FFD0003" in msg.props or "3FDE0003" not in msg.props:
+            return None
+        from extract_msg.encoding import lookupCodePage
+
+        return lookupCodePage(int(msg.getPropertyVal("3FDE0003")))
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def parse_msg_bytes(data: bytes, ctx: ParseContext, folder: str = "", depth: int = 0) -> dict[str, Any]:
     import extract_msg
 
-    msg = (
-        extract_msg.openMsg(
+    def open_msg(**encoding: str) -> Any:
+        if not hasattr(extract_msg, "enums"):
+            return extract_msg.openMsg(data, **encoding)
+        return extract_msg.openMsg(
             data,
             delayAttachments=False,
             attachmentErrorBehavior=getattr(extract_msg.enums, "ErrorBehavior", None) and extract_msg.enums.ErrorBehavior.SUPPRESS_ALL,
+            **encoding,
         )
-        if hasattr(extract_msg, "enums")
-        else extract_msg.openMsg(data)
-    )
+
+    msg = open_msg()
+    encoding = _internet_encoding(msg)
+    if encoding:
+        msg.close()
+        msg = open_msg(overrideEncoding=encoding)
     try:
         headers, synthetic = _headers_from_msg(msg)
         try:

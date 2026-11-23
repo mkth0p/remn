@@ -1,7 +1,9 @@
 /*
  * REMN theme. Tokens only: light is the default, dark redefines the same tokens under
  * [data-theme="dark"] (index.html applies the stored choice before first paint).
- * Colour is reserved for severity, status and the one accent; surfaces stay neutral.
+ * Colour is reserved for severity, status and the one accent; surfaces stay neutral. Every colour
+ * text is written in reads at 4.5:1 or more on every surface of its theme (WCAG AA), which
+ * ui/theme.contrast.test.ts computes.
  */
 @font-face {
   font-family: 'Gulax';
@@ -24,28 +26,28 @@
   --fg: #23303d;
   --fg-1: #111820;
   --fg-2: #5b6876;
-  --fg-3: #8a95a3;
-  --accent: #1b7f66;
+  --fg-3: #626d7c;
+  --accent: #1a7961;
   --accent-2: #15654f;
   /* the fragment of the REMN mark (components/RemnMark.tsx) */
   --remn-mark-accent: #2f5f93;
   --accent-fg: #ffffff;
-  --accent-dim: rgba(27, 127, 102, 0.1);
-  --accent-line: rgba(27, 127, 102, 0.35);
-  --ok: #1b7f66;
-  --warn: #b7791f;
-  --danger: #d1403f;
+  --accent-dim: rgba(26, 121, 97, 0.1);
+  --accent-line: rgba(26, 121, 97, 0.35);
+  --ok: #1a7961;
+  --warn: #936119;
+  --danger: #c73130;
   --violet: #6b5bd2;
   --sev-critical: #a8231f;
-  --sev-high: #d1403f;
-  --sev-medium: #d9822b;
-  --sev-low: #2f6fdb;
-  --sev-info: #8a95a3;
+  --sev-high: #c73130;
+  --sev-medium: #995a1c;
+  --sev-low: #2566d5;
+  --sev-info: #5e6978;
   --sev-critical-bg: rgba(168, 35, 31, 0.1);
-  --sev-high-bg: rgba(209, 64, 63, 0.1);
-  --sev-medium-bg: rgba(217, 130, 43, 0.12);
-  --sev-low-bg: rgba(47, 111, 219, 0.1);
-  --sev-info-bg: rgba(138, 149, 163, 0.14);
+  --sev-high-bg: rgba(199, 49, 48, 0.1);
+  --sev-medium-bg: rgba(153, 90, 28, 0.12);
+  --sev-low-bg: rgba(37, 102, 213, 0.1);
+  --sev-info-bg: rgba(94, 105, 120, 0.14);
   --mono: 'JetBrains Mono Variable', 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
   --sans: 'Inter Variable', Inter, 'Segoe UI', system-ui, -apple-system, sans-serif;
   --display: 'Gulax', 'Inter Variable', Inter, system-ui, sans-serif;
@@ -68,7 +70,7 @@
   --fg: #d3dae3;
   --fg-1: #f1f4f8;
   --fg-2: #9aa6b5;
-  --fg-3: #6b7786;
+  --fg-3: #85909d;
   --accent: #2fbf8f;
   --accent-2: #27a67b;
   --remn-mark-accent: #7ea6d4;
@@ -77,15 +79,15 @@
   --accent-line: rgba(47, 191, 143, 0.4);
   --ok: #2fbf8f;
   --warn: #e0a83a;
-  --danger: #ef5a5a;
+  --danger: #f06161;
   --violet: #9b8cf0;
   --sev-critical: #ff5a52;
-  --sev-high: #ef5a5a;
+  --sev-high: #f06161;
   --sev-medium: #e0a83a;
   --sev-low: #5fa3ff;
   --sev-info: #8a96a6;
   --sev-critical-bg: rgba(255, 90, 82, 0.14);
-  --sev-high-bg: rgba(239, 90, 90, 0.14);
+  --sev-high-bg: rgba(240, 97, 97, 0.14);
   --sev-medium-bg: rgba(224, 168, 58, 0.14);
   --sev-low-bg: rgba(95, 163, 255, 0.14);
   --sev-info-bg: rgba(138, 150, 166, 0.16);
@@ -165,6 +167,11 @@ select,
 textarea {
   font: inherit;
   color: inherit;
+}
+/* where the keyboard focus is, for a keyboard user only: a mouse press draws no ring */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 ::-webkit-scrollbar {
   width: 10px;
@@ -768,6 +775,7 @@ label.field > span {
   position: relative;
   width: 32px;
   height: 18px;
+  padding: 0;
   background: var(--line-2);
   border-radius: 9px;
   border: 0;
@@ -1183,6 +1191,21 @@ label.field > span {
 .vtable-head .sort {
   color: var(--accent);
 }
+.vtable-sort {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: left;
+  cursor: pointer;
+}
 .vtable-body {
   flex: 1;
   overflow: auto;
@@ -1205,6 +1228,10 @@ label.field > span {
 }
 .vrow.selected {
   background: var(--accent-dim);
+}
+/* inside the scrolling body an outline outside the row would be clipped */
+.vrow:focus-visible {
+  outline-offset: -2px;
 }
 .vrow.sev-critical,
 .vrow.sev-high,
@@ -1524,6 +1551,9 @@ label.field > span {
   z-index: 100;
 }
 .toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-left: 3px solid var(--accent);
@@ -1534,6 +1564,18 @@ label.field > span {
   max-width: 440px;
   font-size: 12px;
   color: var(--fg-1);
+}
+.toast > span {
+  flex: 1;
+}
+.toast-x {
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--fg-2);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
 }
 .toast.err {
   border-left-color: var(--danger);
@@ -2082,6 +2124,14 @@ label.field > span {
   max-height: 88vh;
   display: flex;
   flex-direction: column;
+}
+/* a dialog, a page and its heading take the focus from a script so a screen reader says where the
+   person is (components/dialogFocus.ts, viewFocus.ts); they are not controls and get no focus ring */
+.modal:focus,
+.ld-modal:focus,
+.main:focus,
+h1[tabindex='-1']:focus {
+  outline: none;
 }
 .modal-h {
   padding: 12px 16px;
