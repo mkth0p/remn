@@ -310,11 +310,15 @@ way (`undated`), since it is not on the timeline.
 The date order and the time zone can be set for an evidence file where its exports cannot
 say. The detail of such a file on the Evidence page says how its dates were read and what was
 guessed or assumed, and sets an order and a zone for it: the original file is dropped again,
-checked against the SHA-256 recorded when it was imported, and the evidence is removed and
-the file imported again with the setting (its analyst note is kept; its findings are cleared
-until the rules run again). The console says which setting each import used. The import
-request takes it as the `dates` field: `{"order": "day-first" | "month-first", "zone": "UTC"
-| "+02:00" | "Europe/Paris"}`. The order set is used for every numeric date of the file's
+checked against the SHA-256 recorded when it was imported, and imported again with the
+setting as a new evidence beside the old one. The old evidence is removed only once that read
+has succeeded (its analyst note is kept; its findings are cleared until the rules run again).
+A read that fails or is cancelled is removed instead, the old evidence stays as it was, and the
+console and the message say why. While both are in the case, the records of the old one are
+not taken for records the case already holds, so the new read keeps them all. The console says
+which setting each import used. The import request takes it as the `dates` field:
+`{"order": "day-first" | "month-first", "zone": "UTC" | "+02:00" | "Europe/Paris"}`, and the
+evidence a reading again replaces as `replaces`. The order set is used for every numeric date of the file's
 Entra and message trace exports in place of the order the file shows; a date that cannot be
 read in it but can the other way is counted (`dateOrderContradicted`) and left without a
 time. The zone set

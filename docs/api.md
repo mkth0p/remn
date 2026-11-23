@@ -287,7 +287,9 @@ derived from it. Response `{"deleted": {...counts per table}}`.
 **`POST /api/store/<key>/ingest`.** Parses a completed chunked upload into the store as a
 background job: `{"uploadId", "kind": "evtx" | "mail" | "package", "evidence": {"id", "name",
 "sha256Client", "addedAt"}, "options": {"settings", "includeRaw", "keepBodies",
-"fileSystem", "dates"}}`. Response `{"jobId"}`. The job's result holds `count`, `stats`,
+"fileSystem", "dates", "replaces"}}`. `replaces` is the id of the evidence a file read again
+stands in for: the records that evidence holds are written again rather than counted as already
+in the case, and the browser removes that evidence once the job is done. Response `{"jobId"}`. The job's result holds `count`, `stats`,
 `sha256Server`, `integrity` (`verified` when the browser's and the server's digests agree,
 `mismatch` when they differ), Hayabusa's `findings` and `engineSummaries`. 409 (`evidenceId`)
 when the case already holds another file under that evidence number.
