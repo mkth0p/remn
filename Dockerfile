@@ -28,7 +28,7 @@ RUN npm run build
 # from its own image, so the process that parses hostile files never serves the page visitors run.
 # Built with --target static; the default build below is unchanged. The licence and the notices of
 # the packages the build holds go with it, as they go with the default image, and are served beside it.
-FROM caddy:2-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f AS static
+FROM caddy:2-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0 AS static
 COPY --from=frontend /src/frontend/dist /srv/remn
 COPY LICENSE THIRD_PARTY_NOTICES.md /srv/remn/
 
