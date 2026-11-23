@@ -110,6 +110,12 @@ nothing it acts on) is marked "partial"; one whose note only says how a file rea
 (records without a time, values cut at their length limit, rows repaired, an encoding) is marked
 "with notes".
 
+Each browser numbers the files it adds. In a server case, which members fill from several
+browsers, a new file takes the next number above the highest the server holds for the case, so
+it does not take a number another browser already gave. Two files added from two browsers in the
+same moment can still be given one number; the server refuses the second (409), and its error
+says to add the file again, which then takes the next free number.
+
 ## Events and Mails
 
 Events and Mails share one query bar (search, time range, conditions, business hours,

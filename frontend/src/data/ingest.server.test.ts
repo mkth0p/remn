@@ -3,6 +3,7 @@ import { RemnDB, setDb, type Case } from '../db/schema'
 import { useStore } from '../state/store'
 import { chunkedUpload } from './upload'
 import { waitForJob, type JobInfo } from './jobs'
+import { apiGet, apiPost } from '../api/client'
 
 // invented server answers: one upload, one ingest job, two engine findings
 vi.mock('./upload', () => ({ chunkedUpload: vi.fn(async () => ({ uploadId: 'u1', sha256Client: 'ab', sha256Server: 'ab', size: 10 })), forgetUpload: vi.fn(async () => false) }))
@@ -46,6 +47,8 @@ describe('an import into the server store', () => {
     vi.mocked(waitForJob).mockReset()
     vi.mocked(waitForJob).mockResolvedValue(done)
     vi.mocked(chunkedUpload).mockClear()
+    vi.mocked(apiGet).mockReset()
+    vi.mocked(apiPost).mockClear()
     fetchMock.mockClear()
     vi.stubGlobal('fetch', fetchMock)
   })
@@ -117,5 +120,31 @@ describe('an import into the server store', () => {
     expect(chunkedUpload).toHaveBeenCalledTimes(1)
     expect(await db.evidence.count()).toBe(0)
     expect(useStore.getState().console.map((l) => l.text)).toContain('import cancelled: 2 more file(s) of this drop were not imported')
+  })
+
+  it('numbers the file above the highest evidence number the server holds, so another browser’s file is not refused', async () => {
+    const { ingestToServer } = await import('./ingest')
+    // invented case summary: another browser added evidence #7 and #12 to the case
+    vi.mocked(apiGet).mockResolvedValue({ evidence: [{ id: 7 }, { id: 12 }] })
+    await db.evidence.add({ caseId: 2, name: 'other-case.evtx', size: 1, kind: 'evtx', integrity: 'verified', addedAt: 1, status: 'done', count: 0 })
+    const id = await ingestToServer(file, kase, 'evtx')
+    expect(id).toBe(13)
+    expect(vi.mocked(apiGet).mock.calls[0][0]).toBe(`/api/store/${kase.serverKey}`)
+    const sent = vi.mocked(apiPost).mock.calls.find(([url]) => url.endsWith('/ingest'))![1] as { evidence: { id: number } }
+    expect(sent.evidence.id).toBe(13)
+    expect((await db.evidence.get(13))?.name).toBe('host-a-security.evtx')
+    // the browser's own numbering goes on above it
+    vi.mocked(apiGet).mockResolvedValue({ evidence: [{ id: 7 }, { id: 12 }, { id: 13 }] })
+    expect(await ingestToServer(evtx('host-b-security.evtx'), kase, 'evtx')).toBe(14)
+  })
+
+  it('keeps the browser’s own number when it is already above the server’s, or the server’s list cannot be read', async () => {
+    const { ingestToServer } = await import('./ingest')
+    await db.evidence.bulkAdd([20, 21].map((id) => ({ id, caseId: 2, name: `other-${id}.evtx`, size: 1, kind: 'evtx', integrity: 'verified', addedAt: 1, status: 'done', count: 0 }) as never))
+    vi.mocked(apiGet).mockResolvedValue({ evidence: [{ id: 3 }] })
+    expect(await ingestToServer(file, kase, 'evtx')).toBe(22)
+    vi.mocked(apiGet).mockRejectedValue(new Error('no store for this case yet'))
+    expect(await ingestToServer(evtx('host-b-security.evtx'), kase, 'evtx')).toBe(23)
+    expect(await db.evidence.where('caseId').equals(1).count()).toBe(2)
   })
 })

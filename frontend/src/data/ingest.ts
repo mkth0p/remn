@@ -268,7 +268,12 @@ async function dropCancelledImport(file: File, kase: Case, evidenceId: number, j
   }
 }
 
-async function createEvidence(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package', importLock?: string, dates?: DateSetting): Promise<number> {
+/**
+ * The evidence row of a file being added. Each browser numbers the evidence it adds; for a server
+ * case the number must also be above every number the server holds (`above`), since the server
+ * refuses a number another browser already gave a different file of the case.
+ */
+async function createEvidence(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package', importLock?: string, dates?: DateSetting, above = 0): Promise<number> {
   const evidence: Evidence = {
     caseId: kase.id!,
     name: file.webkitRelativePath || file.name,
@@ -283,7 +288,32 @@ async function createEvidence(file: File, kase: Case, kind: 'evtx' | 'mail' | 'p
     importLock,
     ...(dates ? { dates } : {}),
   }
-  return getDb().evidence.add(evidence)
+  const db = getDb()
+  return db.transaction('rw', db.evidence, async () => {
+    const id = await db.evidence.add(evidence)
+    if (id > above) return id
+    // the browser's next number is one the server already holds: take the one above the server's
+    // highest instead, which is also above every number this browser has used
+    await db.evidence.delete(id)
+    return db.evidence.add({ ...evidence, id: above + 1 })
+  })
+}
+
+/**
+ * The highest evidence number the server holds for a case, read from its summary; 0 when the case
+ * has no store on the server yet or the summary cannot be read, and the server's refusal then
+ * still stands between two files with one number. A file another browser is uploading this
+ * moment is not on the server yet either: when both take the same number the second is refused
+ * with "add the file again", and the next try reads the first's number here.
+ */
+async function serverEvidenceHighest(kase: Case): Promise<number> {
+  try {
+    const summary = await getSource(kase).summary()
+    const listed = Array.isArray(summary?.evidence) ? (summary.evidence as { id?: unknown }[]) : []
+    return Math.max(0, ...listed.map((e) => Number(e.id)).filter(Number.isFinite))
+  } catch {
+    return 0
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -291,7 +321,7 @@ async function createEvidence(file: File, kase: Case, kind: 'evtx' | 'mail' | 'p
 // ---------------------------------------------------------------------------
 export async function ingestToServer(file: File, kase: Case, kind: 'evtx' | 'mail' | 'package', ctrl = new AbortController(), dates?: DateSetting): Promise<number> {
   const db = getDb()
-  const evidenceId = await createEvidence(file, kase, kind, undefined, dates)
+  const evidenceId = await createEvidence(file, kase, kind, undefined, dates, await serverEvidenceHighest(kase))
   const jobId = jobSeq++
   imports.set(jobId, ctrl)
   const s = useStore.getState()
