@@ -111,6 +111,37 @@ def test_an_export_in_utf_16_without_a_byte_order_mark_is_read(tmp_path, encodin
     assert src.stats.errors == 0 and [r["user"] for r in rows] == [s["userPrincipalName"] for s in signins]
 
 
+@pytest.mark.parametrize("indent", [None, 2])
+def test_a_graph_export_whose_last_page_links_to_a_next_one_says_the_pages_after_it_are_missing(tmp_path, indent):
+    """A Graph page that ends with @odata.nextLink is one page of a longer list. An export that
+    stops there was read as if it were whole: the records of the pages after it are not in the
+    case, and the file now says so. A file whose last page has no link is whole, whatever its
+    earlier pages say; the links are invented."""
+    link = "https://graph.microsoft.com/v1.0/auditLogs/signIns?$skiptoken=invented"
+    signins = make_m365.entra_signins()[:4]
+    pages = [
+        {"@odata.context": "https://graph.microsoft.com/v1.0/$metadata#auditLogs/signIns", "@odata.nextLink": link, "value": signins[:2]},
+        {"@odata.context": "https://graph.microsoft.com/v1.0/$metadata#auditLogs/signIns", "value": signins[2:], "@odata.nextLink": link},
+    ]
+    sep = "\n" if indent is None else "\n\n"
+    cut = sep.join(json.dumps(p, indent=indent) for p in pages).encode()
+    stats = Stats()
+    rows = list(m365.iter_records(None, cut, "entra-signin-json", stats=stats))
+    assert len(rows) == 4 and stats.errors == 0 and stats.to_dict()["nextPage"] == 1
+    assert m365.note(m365.counts(stats)) == (
+        "1 file(s) end with a Graph page that links to a next one (@odata.nextLink): the pages after it were not downloaded, and their records are not in the case"
+    )
+    whole = sep.join(json.dumps(p, indent=indent) for p in [pages[0], {k: v for k, v in pages[1].items() if k != "@odata.nextLink"}]).encode()
+    stats = Stats()
+    assert len(list(m365.iter_records(None, whole, "entra-signin-json", stats=stats))) == 4 and "nextPage" not in stats.to_dict()
+    # a directory audit page, in a package: the member says it
+    audits = json.loads((FIXTURES / "entra-directory-audits.graph.json").read_text())
+    audits["@odata.nextLink"] = "https://graph.microsoft.com/v1.0/auditLogs/directoryAudits?$skiptoken=invented"
+    rows, stats = _package(tmp_path, "audit.zip", _zip({"tenant/AuditLogs.json": json.dumps(audits, indent=indent).encode()}))
+    (member,) = stats["files"]
+    assert len(rows) == len(audits["value"]) and member["status"] == "parsed" and "@odata.nextLink" in member["note"]
+
+
 def test_sign_ins_written_in_utf_16_are_read_as_json_and_as_csv(tmp_path):
     signins = make_m365.entra_signins()[:4]
     data = json.dumps(signins, indent=2).encode("utf-16")

@@ -173,9 +173,13 @@ counted as not read. The risks of service principals (`ServicePrincipalRiskEvent
 
 Not read, each for the reason given further down: ID Protection reports downloaded from the admin
 centre whose fields are not the Graph property names; the Exchange admin centre's "Export
-results" of the message trace shown on screen. A Graph page that ends with `@odata.nextLink`
-is one page of a longer list: REMN reads the records it holds and does not say that more pages
-exist.
+results" of the message trace shown on screen.
+
+A Graph page that links to a next one (`@odata.nextLink`) is one page of a longer list. REMN
+reads the records it holds; a file whose last page has such a link stops before the end of the
+list, and the records of the pages after it are not in the case. Such a file is counted in the
+evidence's statistics (`nextPage`), said on its member of an archive or a package, and carries a
+"gaps" badge on the Evidence page, as an export cut at its limit does.
 
 Each export may be written in UTF-8, or in UTF-16 or UTF-32 with a byte order mark, as
 Windows PowerShell's `Export-Csv -Encoding Unicode` and `Out-File` write it. The `#TYPE`

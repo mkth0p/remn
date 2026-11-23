@@ -1779,6 +1779,8 @@ class _JsonStream:
 
     def __init__(self, fh: io.TextIOBase, stats: Any = None) -> None:
         self.fh, self.stats, self.buf, self.pos, self.eof, self.count = fh, stats, "", 0, False, 0
+        # whether the last document read is a Graph page that links to a next one
+        self.next_link = False
 
     def _more(self) -> bool:
         if self.eof:
@@ -1846,6 +1848,7 @@ class _JsonStream:
         while (c := self._peek()) != "":
             if c == "[":
                 self.pos += 1
+                self.next_link = False
                 yield from self._items()
             elif c == "{":
                 # a Graph page {"value": [...]} gives its records as the array is read; any other
@@ -1868,6 +1871,7 @@ class _JsonStream:
                         break
                     self.pos += 1
                 self._take("}")
+                self.next_link = paged and _links_on(obj)
                 if not paged:
                     self.count += 1
                     yield obj
@@ -1893,8 +1897,11 @@ def _iter_json_objects(fh: io.TextIOBase, stats: Any = None) -> Iterator[Any]:
     except ValueError:
         lines = False  # the first line is not an object on its own: an indented document
     if not lines:
-        yield from _JsonStream(fh, stats).records()
+        stream = _JsonStream(fh, stats)
+        yield from stream.records()
+        _cut_short(stats, stream.next_link)
         return
+    next_link = False
     while line := fh.readline(MAX_RECORD_CHARS + 1):
         if len(line) > MAX_RECORD_CHARS:
             # longer than any record: counted, and passed over to the end of its line
@@ -1912,12 +1919,27 @@ def _iter_json_objects(fh: io.TextIOBase, stats: Any = None) -> Iterator[Any]:
             if stats is not None:
                 stats.errors += 1
             continue
-        items = obj["value"] if isinstance(obj, dict) and isinstance(obj.get("value"), list) else [obj]  # a Graph page {"value": [...]}
+        paged = isinstance(obj, dict) and isinstance(obj.get("value"), list)
+        next_link = paged and _links_on(obj)
+        items = obj["value"] if paged else [obj]  # a Graph page {"value": [...]}
         for x in items:
             if isinstance(x, dict):
                 yield x
             elif stats is not None:
                 stats.errors += 1  # a line or an element that is not a record
+    _cut_short(stats, next_link)
+
+
+def _links_on(page: dict[str, Any]) -> bool:
+    """Whether a Graph page links to a next one (@odata.nextLink): the list goes on past it."""
+    return any(str(k).lower().endswith("odata.nextlink") and v for k, v in page.items())
+
+
+def _cut_short(stats: Any, next_link: bool) -> None:
+    """Count a file whose last Graph page links to a next one: the pages after it were not
+    downloaded, so the file holds only the start of the list it was taken from."""
+    if next_link and stats is not None:
+        stats.next_page = getattr(stats, "next_page", 0) + 1
 
 
 # Graph audit log query records (auditLogRecord, Microsoft-Extractor-Suite Get-UALGraph) carry
@@ -2095,6 +2117,10 @@ _NOTES = (
     ("zone_set", "{:,} record(s) were read in {zone}, the time zone set for the evidence: their times say none"),
     ("zone_assumed", "{:,} record(s) were read as UTC: their times say no time zone, and none is set for the evidence"),
     ("repeats_unchecked", "{:,} record(s) were read once the ids held to find repeats were full, and were not compared with one another"),
+    (
+        "next_page",
+        "{:,} file(s) end with a Graph page that links to a next one (@odata.nextLink): the pages after it were not downloaded, and their records are not in the case",
+    ),
 )
 
 
