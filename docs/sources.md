@@ -168,21 +168,21 @@ record, and its category says what it is: it gives the row its Graph form gives,
 time taken from the envelope's `time` when it has none. A file of them is of the category of
 its first record, as a JSON file is of the kind of its first record, except that a file whose
 first records include a sign-in is read as sign-ins; a record of another category in it is
-counted as not read. The
-risks of service principals (`ServicePrincipalRiskEvents`, `RiskyServicePrincipals`) are not
-read.
+counted as not read. The risks of service principals (`ServicePrincipalRiskEvents`,
+`RiskyServicePrincipals`) are not read.
 
 Not read, each for the reason given further down: ID Protection reports downloaded from the admin
 centre whose fields are not the Graph property names; the Exchange admin centre's "Export
-results" of the message trace shown on screen; a UTF-16 file without a byte order mark. A
-Graph page that ends with `@odata.nextLink` is one page of a longer list: REMN reads the
-records it holds and does not say that more pages exist.
+results" of the message trace shown on screen. A Graph page that ends with `@odata.nextLink`
+is one page of a longer list: REMN reads the records it holds and does not say that more pages
+exist.
 
 Each export may be written in UTF-8, or in UTF-16 or UTF-32 with a byte order mark, as
 Windows PowerShell's `Export-Csv -Encoding Unicode` and `Out-File` write it. The `#TYPE`
 line `Export-Csv` writes above the header without `-NoTypeInformation` is passed over, and a
 date `ConvertTo-Json` wrote as `\/Date(milliseconds)\/` is read. A UTF-16 file without a
-byte order mark is not recognised.
+byte order mark is read too: the NUL beside each character of the text an export starts with
+says that it is UTF-16, and in which byte order.
 
 Outside the Azure Monitor records, whose category says what they are, a record is read as a
 sign-in only when it carries a time (`createdDateTime`), a client address (`ipAddress`) and

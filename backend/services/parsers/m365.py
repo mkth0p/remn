@@ -146,11 +146,24 @@ _BOMS = (
 )
 
 
+# how many of an export's first bytes say how it is written when no byte order mark does
+ENCODING_SAMPLE = 4096
+
+
 def encoding_of(head: bytes) -> str:
-    """The encoding an export's byte order mark names; UTF-8 when it has none."""
+    """The encoding an export's byte order mark names. Without one, UTF-16 shows itself in the
+    text an export starts with (a bracket, a brace, column names, all ASCII): a NUL beside every
+    character, on the side that says the byte order. UTF-8 otherwise."""
     for bom, encoding in _BOMS:
         if head.startswith(bom):
             return encoding
+    sample = head[:ENCODING_SAMPLE]
+    if len(sample) >= 4:
+        odd, even = sample[1::2].count(0), sample[0::2].count(0)
+        if odd > len(sample) * 0.4 and even < len(sample) * 0.05:
+            return "utf-16-le"
+        if even > len(sample) * 0.4 and odd < len(sample) * 0.05:
+            return "utf-16-be"
     return "utf-8-sig"
 
 
@@ -158,7 +171,7 @@ def head_text(head: bytes) -> str:
     """The first bytes of an export as text, in the encoding its byte order mark names. A head cut
     inside a character loses that character only."""
     encoding = encoding_of(head)
-    width = 4 if encoding == "utf-32" else 2 if encoding == "utf-16" else 1
+    width = 4 if encoding == "utf-32" else 2 if encoding.startswith("utf-16") else 1
     return head[: len(head) - len(head) % width].decode(encoding, "replace")
 
 
@@ -1745,9 +1758,9 @@ def _open_text(path: str | None, data: bytes | None) -> io.TextIOBase:
     """An export as text, in the encoding its byte order mark names, the mark itself not read."""
     if path:
         with open(path, "rb") as raw:
-            encoding = encoding_of(raw.read(4))
+            encoding = encoding_of(raw.read(ENCODING_SAMPLE))
         return open(path, encoding=encoding, errors="replace", newline="")
-    return io.TextIOWrapper(io.BytesIO(data or b""), encoding=encoding_of((data or b"")[:4]), errors="replace", newline="")
+    return io.TextIOWrapper(io.BytesIO(data or b""), encoding=encoding_of((data or b"")[:ENCODING_SAMPLE]), errors="replace", newline="")
 
 
 # The longest record a JSON export may hold (a sign-in is a few kilobytes, an audit record rarely

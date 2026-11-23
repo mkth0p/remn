@@ -93,6 +93,24 @@ def test_an_audit_log_csv_written_in_utf_16_or_utf_32_is_read(tmp_path, encoding
     assert rows[0]["operation"] == records[0]["Operation"]
 
 
+@pytest.mark.parametrize("encoding", ["utf-16-le", "utf-16-be"])
+def test_an_export_in_utf_16_without_a_byte_order_mark_is_read(tmp_path, encoding):
+    """.NET's Encoding.Unicode written without its preamble, and a file cut from a longer one, are
+    UTF-16 with nothing declaring it. Read as UTF-8 such an export was not recognised; the NUL
+    beside each character of its text says how it is written."""
+    records = make_m365.ual_records()[:4]
+    data = _ual_csv(records).encode(encoding)
+    assert data[:2] not in (b"\xff\xfe", b"\xfe\xff")
+    assert detect_evtx_format("audit.csv", data[:65536]) == "m365-ual-csv"
+    rows, src = _source(tmp_path, "audit.csv", data)
+    assert src.stats.errors == 0 and [r["recordKey"] for r in rows] == [m365.record_key("ual", r["Id"]) for r in records]
+    signins = make_m365.entra_signins()[:3]
+    data = json.dumps(signins).encode(encoding)
+    assert detect_evtx_format("SignIns.json", data[:65536]) == "entra-signin-json"
+    rows, src = _source(tmp_path, "SignIns.json", data)
+    assert src.stats.errors == 0 and [r["user"] for r in rows] == [s["userPrincipalName"] for s in signins]
+
+
 def test_sign_ins_written_in_utf_16_are_read_as_json_and_as_csv(tmp_path):
     signins = make_m365.entra_signins()[:4]
     data = json.dumps(signins, indent=2).encode("utf-16")
