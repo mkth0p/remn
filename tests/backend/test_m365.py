@@ -381,7 +381,7 @@ def test_the_store_ingest_route_reads_a_file_again_beside_the_evidence_it_names(
     key = str(uuid.uuid4())
     path = Path(exports["ual_json"])
     monkeypatch.setattr("api.views.store.registry", reg)
-    monkeypatch.setattr("api.views.store.get_upload", lambda _: (path, {"name": path.name, "size": path.stat().st_size, "sha256": "a" * 64}))
+    monkeypatch.setattr("api.views.store.get_upload", lambda *_: (path, {"name": path.name, "size": path.stat().st_size, "sha256": "a" * 64}))
     monkeypatch.setattr("api.views.store.discard_upload", lambda _: None)
     results = []
 
