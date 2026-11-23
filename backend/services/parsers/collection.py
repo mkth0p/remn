@@ -799,6 +799,11 @@ DEFENDER_TERMS = (
 )
 
 
+# The time MPLog starts each line with, in UTC, written with or without its zone. A line of another
+# Defender log that starts with one is dated only when it says its zone.
+DEFENDER_LINE_TIME = re.compile(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?)(Z|[+-]\d{2}:\d{2})?(?!\S)")
+
+
 def _defender_signal(line: str) -> bool:
     low = line.lower()
     return any(term in low for term in DEFENDER_TERMS)
@@ -1358,6 +1363,13 @@ def _normalize(
         found = THREAT_NAME.search(row["message"])
         if found:
             row["threatName"] = found.group(1)
+        stamped = DEFENDER_LINE_TIME.match(row["message"])
+        if stamped and stamped.group(2):
+            row["ts"] = timestamp(stamped.group(0))
+        elif stamped and PurePosixPath(name.replace("\\", "/")).name.lower().startswith("mplog"):
+            row["ts"] = timestamp_utc(stamped.group(1))
+        if row["ts"] is not None:
+            row["recordKind"] = "event"
     if kind == "account":
         row["targetUser"] = row.get("targetUser") or get("Name")
         row["memberName"] = get("MemberName", "Member")
