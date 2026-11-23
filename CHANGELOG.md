@@ -335,6 +335,24 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
   parsed into who, what and from where, in the server and the browser parser alike. The rules
   catch 27 files of EVTX-to-MITRE-Attack the default rules missed and fire on none of the
   evtx-baseline machines.
+- A server that a small team shares can give each person an account. `backend/manage.py accounts`
+  creates, lists, disables, enables and rotates accounts, revokes their tokens, changes their
+  roles and sets who may open a case. The accounts live in `accounts.json` in the data directory,
+  written whole and readable by the server's account only; each token is random, shown once and
+  kept as a salted digest. While that file holds no account nothing changes: no token on one's own
+  machine, or the one shared `FORENSIC_AUTH_TOKEN`, which stays as the single-user mode. Once it
+  holds one, every request needs a personal token. An admin sees every case and the audit log, an
+  analyst creates cases and works on the ones it owns or is a member of, and a viewer reads its
+  cases and changes nothing. A case records its owner and members, its key alone no longer opens
+  it, and the case and job listings show each account only what it may read. Every route declares
+  what it needs, and a test fails on one that does not. Every change, every upload, import and
+  export, every refused request and every failed sign-in is appended to `audit.log` in an HMAC
+  chain under `FORENSIC_AUDIT_KEY` (or a key in `audit.key`); an admin checks the chain with
+  `manage.py audit verify` or `GET /api/audit/verify`, and it does not protect against whoever
+  holds the key. The page asks for the personal token, shows the account and its role, and
+  disables a viewer's changes with the reason; a case's owner adds members in Settings. Findings,
+  notes and decisions stay in each browser. A file added from a second browser under an evidence
+  number the case already uses is refused instead of mixed with the first.
 - PowerShell 4103 and 800 events now carry the command they record, rebuilt from its parameter
   bindings or taken as typed, with the user and the script, in the server and the browser parser
   alike. Twelve rules read those commands (`rules/windows/powershell-commands.yaml`):

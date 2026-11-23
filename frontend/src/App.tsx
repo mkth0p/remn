@@ -38,6 +38,8 @@ import {
 } from './components/Icons'
 import { ConsolePanel, Toasts } from './components/ConsolePanel'
 import { TokenGate } from './components/TokenGate'
+import { SharedCases } from './components/CaseAccess'
+import { signOut, viewerReason } from './data/access'
 import { RemnMark } from './components/RemnMark'
 import { DataNotice } from './components/DataNotice'
 import { EntityPanel } from './components/EntityPanel'
@@ -138,7 +140,7 @@ export default function App() {
 
   useEffect(() => {
     const db = getDb()
-    onAuthError(() => useStore.getState().setAuthRequired(true))
+    onAuthError((accounts) => useStore.getState().setAuthRequired(true, accounts))
     const tokenReady = db.kv.get('apiToken').then((tok) => {
       if (typeof tok?.value === 'string' && tok.value) setApiToken(tok.value)
     })
@@ -379,6 +381,8 @@ export default function App() {
   const isServer = kase.storage === 'server'
   const browserOnly = health?.mode === 'browser-only'
   const canConvert = !isServer && !browserOnly
+  // on a server with accounts, a viewer changes nothing; the server refuses it too
+  const viewer = viewerReason(health)
   const dep = deployment(health)
   const acknowledgeNotice = async () => {
     if (!pending) return
@@ -449,6 +453,15 @@ export default function App() {
             <span className={`status-dot ${isServer ? 'ok' : ''}`} />
             store {isServer ? 'server' : 'browser'}
           </div>
+          {health?.account && (
+            <div title={`signed in with a personal token as ${health.account.name}, role ${health.account.role}${viewer ? `. ${viewer}` : ''}`}>
+              <span className="status-dot ok" />
+              <span className="mono">{health.account.name}</span> · {health.account.role}{' '}
+              <button className="btn ghost xs" onClick={() => void signOut()} title="forget this browser's token and ask for one again">
+                sign out
+              </button>
+            </div>
+          )}
           <button className="btn ghost xs" style={{ justifyContent: 'flex-start' }} onClick={() => setShowConsole(!showConsole)} title="console">
             <IconTerminal />
             <span className="label"> console {busy ? '●' : ''}</span>
@@ -550,17 +563,29 @@ export default function App() {
               </span>
             </label>
             {!browserOnly && (
-              <label className="checkbox">
-                <input type="radio" name="storage" checked={newCase.storage === 'server'} onChange={() => setNewCase({ ...newCase, storage: 'server' })} />{' '}
+              <label className="checkbox" title={viewer ?? undefined}>
+                <input type="radio" name="storage" disabled={!!viewer} checked={newCase.storage === 'server'} onChange={() => setNewCase({ ...newCase, storage: 'server' })} />{' '}
                 <span>
                   <b>Server store</b>{' '}
                   <span className="muted small">
                     — rows go to a DuckDB file on this machine ({health?.store?.casesDir ?? 'backend/data/cases'}); the browser keeps findings and notes. For gigabytes of EVTX / mailboxes.
+                    {health?.accounts ? ' You own the case; add members in Settings.' : ''}
                   </span>
                 </span>
               </label>
             )}
           </div>
+          {viewer && <div className="hint">{viewer}</div>}
+          {health?.accounts && (
+            <SharedCases
+              onOpen={async (id) => {
+                setCases(await getDb().cases.toArray())
+                await switchCase(id)
+                setNewCase(null)
+                setView('evidence')
+              }}
+            />
+          )}
           <div className="col" style={{ gap: 4 }}>
             <b className="small">Detection level</b>
             <DetectionLevelPicker value={newCase.level} onChange={(level) => setNewCase({ ...newCase, level })} />

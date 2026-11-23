@@ -11,6 +11,7 @@ import { safeHref } from '../util/safe'
 import { exportCsv, exportJson, iocsToStix } from '../util/export'
 import { IconShield } from '../components/Icons'
 import { refreshCounts } from '../data/ingest'
+import { viewerReason } from '../data/access'
 
 const PAGE = 2000
 
@@ -98,6 +99,8 @@ export function IocsView() {
   const configured = health?.providers.filter((p) => p.configured) ?? []
   // browser-only: the server refuses lookups (403), so none are offered
   const browserOnly = health?.mode === 'browser-only'
+  // a lookup sends an indicator out on the case's behalf: the server refuses a viewer
+  const viewer = viewerReason(health)
   const uncheckedCount = rows.filter((i) => !i.checkedAt && ['ip', 'domain', 'url', 'hash'].includes(i.kind)).length
   return (
     <div className="view">
@@ -123,10 +126,10 @@ export function IocsView() {
         )}
         {!browserOnly && (
           <>
-            <button className="btn primary sm" disabled={!!progress} onClick={() => check(rows.filter((i) => !i.checkedAt))}>
+            <button className="btn primary sm" disabled={!!progress || !!viewer} title={viewer ?? undefined} onClick={() => check(rows.filter((i) => !i.checkedAt))}>
               <IconShield /> check unchecked ({uncheckedCount})
             </button>
-            <button className="btn sm" disabled={!!progress} onClick={() => check(rows)}>
+            <button className="btn sm" disabled={!!progress || !!viewer} title={viewer ?? undefined} onClick={() => check(rows)}>
               re-check shown
             </button>
           </>
@@ -220,7 +223,7 @@ export function IocsView() {
               <button className="btn sm" onClick={() => pivot(selected.value, undefined, 'mails')}>
                 mails mentioning it
               </button>
-              <button className="btn sm primary" onClick={() => check([selected])}>
+              <button className="btn sm primary" disabled={!!viewer} title={viewer ?? undefined} onClick={() => check([selected])}>
                 check reputation
               </button>
             </div>

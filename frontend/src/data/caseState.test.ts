@@ -127,6 +127,26 @@ describe('deleting a case', () => {
   })
 })
 
+describe('removing a shared server case from this browser only', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('leaves its server store for its owner and the other members', async () => {
+    const shared: Case = { id: 4, name: 'Shared', storage: 'server', serverKey: 'k4', createdAt: 4, updatedAt: 4, settings: defaultSettings() }
+    await db.cases.bulkAdd([shared, kase])
+    await db.findings.add({ ...finding('f-4'), caseId: 4 } as never)
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { next, serverCleared } = await removeCase(shared, { keepServer: true })
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(serverCleared).toBe(true)
+    expect(next.id).toBe(1)
+    expect(await db.cases.get(4)).toBeUndefined()
+    expect(await db.findings.where('caseId').equals(4).count()).toBe(0)
+  })
+})
+
 describe('what removing one evidence file takes with it', () => {
   it('keeps the engine findings of the other files, which no rule run could bring back', async () => {
     await db.evidence.bulkAdd([{ id: 5, caseId: 1, name: 'a.evtx' } as never, { id: 6, caseId: 1, name: 'b.evtx' } as never])
