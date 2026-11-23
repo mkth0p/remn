@@ -9,6 +9,7 @@ out agree on what fits.
 from __future__ import annotations
 
 import itertools
+import json
 import os
 import shutil
 import stat
@@ -98,28 +99,57 @@ def capacity() -> tuple[int, str]:
     )
 
 
+def pending_bytes() -> int:
+    """What the unfinished chunked uploads have announced but not yet sent. staged_bytes() only sees
+    what is on disk, so without this a burst of inits each passes the budget before any chunk lands."""
+    total = 0
+    try:
+        for p in (root() / "uploads").glob("*.json"):
+            try:
+                meta = json.loads(p.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if not meta.get("complete"):
+                total += max(0, int(meta.get("size", 0)) - int(meta.get("received", 0)))
+    except OSError:
+        pass
+    return total
+
+
 # The room set aside for the package parses running now, by claim. staged_bytes() sees only what a
 # parse has written so far, so without this two parses that begin together were each given the
 # same free room. What a parse has written counts both here and on disk, which errs towards
 # refusing a member rather than towards filling the area.
 _claims: dict[int, int] = {}
-_claims_lock = threading.Lock()
 _claim_ids = itertools.count(1)
+# One ledger of the room: an upload's announcement (upload init) and a parse's claim are each decided
+# and recorded under this lock, so an upload and a parse that ask together are not both promised the
+# same free room.
+ledger = threading.RLock()
 
 
 def claimed_bytes() -> int:
-    with _claims_lock:
+    with ledger:
         return sum(_claims.values())
+
+
+def held_bytes() -> int:
+    """What the staging area holds or has promised: what is on disk, what unfinished chunked uploads
+    have announced and not yet sent, and the room set aside for the parses running now. A caller that
+    goes on to promise room holds the ledger lock from this count until its promise is recorded."""
+    with ledger:
+        return staged_bytes() + pending_bytes() + sum(_claims.values())
 
 
 def parse_room(claim: bool = False) -> tuple[int, int | None]:
     """The room one package parse may hold in the staging area, and the claim that sets it aside
-    (None without `claim`): what the area has free and no running parse has set aside. A claim is
-    at most half the area, so that a parse that begins while it runs still finds room; the server
-    claims for each parse, and gives the claim back with release() when the parse ends."""
-    with _claims_lock:
+    (None without `claim`): what the area has free that no unfinished upload has announced and no
+    running parse has set aside. A claim is at most half the area, so that a parse that begins while
+    it runs still finds room; the server claims for each parse, and gives the claim back with
+    release() when the parse ends."""
+    with ledger:
         total = capacity()[0]
-        room = max(0, total - staged_bytes() - sum(_claims.values()))
+        room = max(0, total - held_bytes())
         if not claim:
             return room, None
         room = min(room, total // 2)
@@ -129,7 +159,7 @@ def parse_room(claim: bool = False) -> tuple[int, int | None]:
 
 
 def release(token: int | None) -> None:
-    with _claims_lock:
+    with ledger:
         _claims.pop(token, None)
 
 

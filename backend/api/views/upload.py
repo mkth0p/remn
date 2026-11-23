@@ -25,7 +25,7 @@ from django.views.decorators.http import require_http_methods, require_POST
 from api.params import BadParameter, whole_number
 from forensic.access import permission
 from services.ingest import staging
-from services.ingest.staging import DIRECTORY_SUFFIXES, size_text, staged_bytes
+from services.ingest.staging import DIRECTORY_SUFFIXES, held_bytes, size_text
 
 log = logging.getLogger(__name__)
 _ID = re.compile(r"^[a-f0-9]{32}$")
@@ -42,27 +42,6 @@ def upload_dir() -> Path:
     except OSError:
         pass
     return d
-
-
-def pending_bytes() -> int:
-    """What the unfinished chunked uploads have announced but not yet sent. staged_bytes() only sees
-    what is on disk, so without this a burst of inits each passes the budget before any chunk lands."""
-    total = 0
-    try:
-        for p in upload_dir().glob("*.json"):
-            try:
-                meta = json.loads(p.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                continue
-            if not meta.get("complete"):
-                total += max(0, int(meta.get("size", 0)) - int(meta.get("received", 0)))
-    except OSError:
-        pass
-    return total
-
-
-# init checks the budget and then records its reservation; two inits must not both pass on the same room
-_reserve = threading.Lock()
 
 
 def _paths(upload_id: str) -> tuple[Path, Path]:
@@ -214,8 +193,9 @@ def init(request: HttpRequest):
         return JsonResponse({"error": f"size must be between 1 byte and {limit // 1024**2:,} MB"}, status=400)
     # Refuse rather than accept an upload the disk cannot take. Sweep first, so a burst of
     # abandoned uploads does not lock out a legitimate one for the rest of the retention window.
-    # What is announced counts as taken: the room an upload will need is reserved when it starts.
-    with _reserve:
+    # What is announced counts as taken: the room an upload will need is reserved when it starts,
+    # in the ledger a parse's claim is decided in, so the two are never promised the same room.
+    with staging.ledger:
         budget, decided_by = staging.capacity()
         if size > budget:
             # larger than the staging area could hold even empty: waiting changes nothing, so the
@@ -227,9 +207,9 @@ def init(request: HttpRequest):
                 },
                 status=413,
             )
-        if staged_bytes() + pending_bytes() + size > budget:
+        if held_bytes() + size > budget:
             cleanup_stale()
-            held = staged_bytes() + pending_bytes()
+            held = held_bytes()
             if held + size > budget:
                 return JsonResponse(
                     {

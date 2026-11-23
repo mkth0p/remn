@@ -201,8 +201,8 @@ route reads it by its `uploadId`. An unfinished upload is removed after
 
 **`POST /api/upload/init`.** Body `{"name", "size"}`. Reserves room in the staging area.
 Response `{"uploadId", "chunkSize"}`. Refused with 413 (`staging-too-small`) when the file is
-larger than the staging area could hold even empty, and with 507 (`staging-full`) when it holds
-too much of other uploads now; both messages give the sizes.
+larger than the staging area could hold even empty, and with 507 (`staging-full`) when other
+uploads and running parses hold or have set aside too much of it now; both messages give the sizes.
 
 **`PUT /api/upload/<upload_id>/chunk?offset=<n>`** (or `POST`). The raw bytes of the next
 chunk, at most 64 MiB, at the offset the server has received so far. Response
