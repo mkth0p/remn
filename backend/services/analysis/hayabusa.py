@@ -46,6 +46,8 @@ SEVERITY = {
 # "2026-08-19 01:34:26.123 +00:00" by default; ISO with a Z or T when asked for UTC
 STAMP = re.compile(r"^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2}(?:\.\d+)?)\s*([+-]\d{2}:?\d{2}|Z)?$")
 TECHNIQUE = re.compile(r"\bT\d{4}(?:\.\d{3})?\b", re.I)
+# a rule's id as Sigma writes it: Hayabusa keeps the Sigma id of a SigmaHQ rule it converted unchanged
+RULE_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 # What a finding on one event names, as REMN's own rules name it (services/store/rules.py
 # _default_entities), so that the two engines' findings on one event are filed under the same user,
 # host or address; and `user`, where the parser keeps the account Hayabusa calls "User".
@@ -202,7 +204,7 @@ def to_finding(obj: dict[str, Any]) -> dict[str, Any] | None:
     }
     entities.update(_event_entities(obj))
     ref_key = f"{computer}|{channel}|{record}"
-    return {
+    finding: dict[str, Any] = {
         "ruleId": rule_id,
         "key": f"{rule_id}|{ref_key}",
         "title": title,
@@ -218,6 +220,12 @@ def to_finding(obj: dict[str, Any]) -> dict[str, Any] | None:
         "engine": ENGINE,
         "refKeys": [ref_key],
     }
+    sigma_id = str(obj.get("RuleID") or "").strip()
+    if RULE_UUID.match(sigma_id):
+        # the page keeps one finding when REMN's own conversion of the same rule (sigma-<id>) fired on
+        # the same record; the ids are compared as they are, so a rule Hayabusa split under new ids stays apart
+        finding["sigmaId"] = sigma_id
+    return finding
 
 
 def parse(lines: Iterator[str]) -> Iterator[dict[str, Any]]:
