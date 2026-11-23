@@ -10,12 +10,15 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import threading
 import time
 from pathlib import Path
 
 from django.test import Client, override_settings
 
-from api.views.upload import cleanup_stale, staged_bytes, start_sweeper, upload_dir
+from api.views.upload import cleanup_stale, start_sweeper, upload_dir
+from services.ingest import staging
+from services.ingest.staging import staged_bytes
 
 HDR = {"HTTP_X_FORENSIC_CLIENT": "1"}
 GIB = 1024**3
@@ -91,6 +94,70 @@ def test_health_gives_the_chunked_ceiling_the_staging_area_can_really_take(tmp_p
     with override_settings(FILE_UPLOAD_TEMP_DIR=tmp_path, FORENSIC_TMP_MAX_GB=4, FORENSIC_MAX_CHUNKED_GB=64, FORENSIC_BROWSER_ONLY=False):
         assert _init(Client(), size=4 * GIB).status_code == 200
         assert _init(Client(), size=4 * GIB + 1).status_code == 413
+
+
+def test_an_upload_is_not_promised_the_room_a_running_parse_has_set_aside(tmp_path, monkeypatch):
+    _disk(monkeypatch, total_gib=500, free_gib=200)
+    with override_settings(FILE_UPLOAD_TEMP_DIR=tmp_path, FORENSIC_TMP_MAX_GB=8, FORENSIC_MAX_CHUNKED_GB=64, FORENSIC_BROWSER_ONLY=False):
+        room, claim = staging.parse_room(claim=True)
+        try:
+            # the parse holds half the 8 GiB area, so 4 GiB is left
+            assert room == 4 * GIB
+            refused = _init(Client(), size=5 * GIB)
+            assert refused.status_code == 507 and refused.json()["code"] == "staging-full", refused.content[:300]
+            assert "4.0 GiB" in refused.json()["error"]
+            assert _init(Client(), size=4 * GIB).status_code == 200
+        finally:
+            staging.release(claim)
+
+
+def test_a_parse_is_not_given_the_room_an_unfinished_upload_has_announced(tmp_path, monkeypatch):
+    _disk(monkeypatch, total_gib=500, free_gib=200)
+    with override_settings(FILE_UPLOAD_TEMP_DIR=tmp_path, FORENSIC_TMP_MAX_GB=8, FORENSIC_MAX_CHUNKED_GB=64, FORENSIC_BROWSER_ONLY=False):
+        assert _init(Client(), size=6 * GIB).status_code == 200
+        room, claim = staging.parse_room(claim=True)
+        staging.release(claim)
+        # 6 GiB of the 8 is announced and not yet sent; the upload's small record is on disk
+        assert room == 2 * GIB - staged_bytes()
+
+
+def test_an_upload_and_a_parse_that_ask_together_are_not_promised_the_same_room(tmp_path, monkeypatch):
+    """Upload init and a parse's claim each read the free room under a lock of its own, so one could
+    be promised the room the other was being promised at the same moment."""
+    _disk(monkeypatch, total_gib=500, free_gib=200)
+    real = staging.staged_bytes
+    # each of the two waits here, on its first look at the area, for the other to look too: when they
+    # decide one after the other, the first stops waiting after half a second and the second does not wait
+    together = threading.Barrier(2, timeout=0.5)
+    waited: set[int] = set()
+
+    def staged() -> int:
+        if threading.get_ident() not in waited:
+            waited.add(threading.get_ident())
+            try:
+                together.wait()
+            except threading.BrokenBarrierError:
+                pass
+        return real()
+
+    monkeypatch.setattr(staging, "staged_bytes", staged)
+    promised: dict[str, int] = {}
+
+    def upload() -> None:
+        promised["upload"] = 6 * GIB if _init(Client(), size=6 * GIB).status_code == 200 else 0
+
+    def parse() -> None:
+        promised["parse"], promised["claim"] = staging.parse_room(claim=True)
+
+    with override_settings(FILE_UPLOAD_TEMP_DIR=tmp_path, FORENSIC_TMP_MAX_GB=8, FORENSIC_MAX_CHUNKED_GB=64, FORENSIC_BROWSER_ONLY=False):
+        threads = [threading.Thread(target=upload), threading.Thread(target=parse)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(10)
+        staging.release(promised.get("claim"))
+    assert set(promised) == {"upload", "parse", "claim"}
+    assert promised["upload"] + promised["parse"] <= 8 * GIB, promised
 
 
 def test_an_abandoned_upload_is_removed_without_waiting_for_a_restart(tmp_path):

@@ -165,6 +165,10 @@ the one shared `FORENSIC_AUTH_TOKEN`. Once it holds one:
   says why. The case listing (`GET /api/store`) and the job routes show each account only the
   cases it may read. A store written before accounts were turned on has no record: only an admin
   opens it until an owner is given (`manage.py accounts case <key> --owner <name>`).
+- **A staged upload belongs to the account that started it.** Only that account or an admin sends
+  its chunks, finishes it, reads how far it got, cancels it or parses it, in the browser or into a
+  server case; any other account gets the 404 an unknown upload id gets. An upload started before
+  accounts were turned on is an admin's alone.
 - **The page follows the server.** When the server asks for a personal token the page says so;
   once signed in, the sidebar shows the account and its role, with **sign out**. A viewer's
   controls that would change something (adding or removing evidence, lookups, enrichment,
@@ -286,18 +290,22 @@ finishes.
   less a tenth of that disk (at most 10 GiB) kept for the case stores and the system. A configured
   total is never taken as more than that disk can hold. A file larger than the whole budget is
   refused with 413 and a message naming what sets the budget, since waiting cannot change it. A
-  new upload that fits the budget but not what other uploads hold now triggers a sweep and is
-  then refused with 507, saying how much is held and how much is free, so a stream of abandoned
-  uploads cannot fill the disk however short the lifetime is. One archive member copied out for
-  parsing may take at most half the budget, and never more than 4 GiB.
+  new upload that fits the budget but not what other uploads and parses hold now triggers a sweep
+  and is then refused with 507, saying how much is held and how much is free, so a stream of
+  abandoned uploads cannot fill the disk however short the lifetime is. What is held counts the
+  files on disk, the bytes unfinished uploads have announced and not yet sent, and the room set
+  aside for the package parses running now; an upload and a parse are given room from this one
+  count, one after the other, so two of them are never promised the same free space. One archive
+  member copied out for parsing may take at most half the budget, and never more than 4 GiB.
 - **Private to the server account.** The staging directory is 0700 and each staged file 0600, so
   evidence in transit is not readable by other accounts on the host.
 - **A ceiling on what one parse holds.** A package parse holds artifacts back to decode them in
   groups, and that hold is capped per request rather than per archive, so nesting cannot multiply
   it. Everything a package parse holds in the staging area at once, the member being read at each
-  nesting level, an expanded 7z and a decoded cabinet included, stays within what the area had
-  room for when the parse began. An archive expands to at most 200 times its own size, and never
-  less than 64 MiB; that counts what a compressed tar decompresses to pass over a member and what
+  nesting level, an expanded 7z and a decoded cabinet included, stays within the room set aside
+  for it when the parse began: what the area had free that no unfinished upload had announced and
+  no other parse had set aside, and at most half the area. An archive expands to at most 200
+  times its own size, and never less than 64 MiB; that counts what a compressed tar decompresses to pass over a member and what
   a 7z decompresses to reach one, and the members past it are listed as skipped with the reason.
   A client that disconnects mid-parse releases everything the parse was holding rather than
   stranding it for the sweeper to find later.
@@ -353,7 +361,8 @@ lines: requests refused, sweeps, the engine's state. A failure in the parsing co
 or in the web server is logged by exception type and place (`UnicodeDecodeError at common.py:104`),
 never with the exception's text, which is often a piece of the input or a path on the server. This
 holds in every mode, and for an error nothing caught in the parse process, which writes to the
-server's own stderr; `FORENSIC_DEBUG=1` keeps the text and the traceback for a developer on their
+server's own stderr; that process then ends at once with exit status 1, which the analyst is told
+as the parse process ending unexpectedly. `FORENSIC_DEBUG=1` keeps the text and the traceback for a developer on their
 own machine, and has no such effect in browser-only mode. In browser-only mode the log also never
 names a file, member or attachment. `docker-compose.public.yml` rotates the log (three files of
 10 MB) rather than keeping it for the life of the container.

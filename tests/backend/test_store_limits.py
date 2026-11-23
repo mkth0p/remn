@@ -241,6 +241,64 @@ def test_cancelling_a_rule_run_stops_the_rule_that_is_running(server_registry, s
     assert job["status"] == "cancelled", job
     # the rule that was stopped is neither counted nor reported as failed, and the next one did not run
     assert job["result"]["byRule"] == {} and job["result"]["errors"] == []
+    # the run says how many of its rules did not run: the one stopped and the one after it
+    assert job["result"]["notRun"] == 2
+
+
+def test_a_cancelled_rule_run_counts_the_enabled_rules_it_did_not_run(tmp_path):
+    reg = StoreRegistry()
+    reg.configure(tmp_path)
+    st = reg.get(str(uuid.uuid4()))
+    try:
+        w = EventWriter(st, 1)
+        for i in range(5):
+            w.add({"recordId": i, "ts": T0 + i, "eventId": 4625, "computer": "WS01"})
+        w.flush()
+        rules = [
+            {"id": "invented-first", "source": "events", "where": {"eventId": 4625}},
+            {"id": "invented-second", "source": "events", "where": {"eventId": 4625}},
+            {"id": "invented-off", "source": "events", "where": {"eventId": 4625}, "enabled": False},
+            {"id": "invented-third", "source": "events", "where": {"eventId": 4625}},
+        ]
+        done: list[str] = []
+        out = R.run_rules(st, rules, {}, progress=lambda p: done.append(p["ruleId"]), cancelled=lambda: len(done) >= 1)
+        assert out["byRule"] == {"invented-first": 5}
+        # the second and third did not run; the one turned off is not counted
+        assert out["notRun"] == 2
+        assert R.run_rules(st, rules, {})["notRun"] == 0
+    finally:
+        reg.close_all()
+
+
+def test_a_mail_rescore_that_reads_a_store_past_the_query_time_limit_is_stopped_and_says_why(server_registry, settings):
+    settings.FORENSIC_STORE_QUERY_MAX_S = 0.2
+    key = str(uuid.uuid4())
+    st = server_registry.get(key)
+    _endless_mails(st)
+    t0 = time.time()
+    with _Guard(st):
+        r = Client().post("/api/enrich/mails/rescore", data=json.dumps({"storeKey": key, "settings": {}}), content_type="application/json", **HDR)
+        assert r.status_code == 202, r.content
+        job = _wait_for(key, r.json()["jobId"])
+    assert time.time() - t0 < 10
+    assert job["status"] == "error", job
+    assert "stopped after 0.2 s" in job["error"] and "FORENSIC_STORE_QUERY_MAX_S" in job["error"] and "ref" not in job["error"]
+    # the store is still there for the next query
+    assert Client().post(f"/api/store/{key}/count", data=json.dumps({"source": "events"}), content_type="application/json", **HDR).json() == {"count": 0}
+
+
+def test_each_read_of_a_mail_rescore_is_held_to_the_query_time_limit(server_registry, monkeypatch):
+    from services.analysis import baseline, rescore
+    from services.store.casestore import QueryStopped, TimeLimit
+
+    st = server_registry.get(str(uuid.uuid4()))
+    _endless_mails(st)
+    # past the sender history read, the rescore reads the mails in pages
+    monkeypatch.setattr(baseline, "enrich_store", lambda store, settings: {})
+    t0 = time.time()
+    with _Guard(st), pytest.raises(QueryStopped, match="invented limit"):
+        rescore.store(st, {}, limit=lambda: TimeLimit(0.2, "invented limit"))
+    assert time.time() - t0 < 10
 
 
 def test_a_rule_run_has_no_time_limit_unless_one_is_given(tmp_path):

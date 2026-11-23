@@ -325,10 +325,11 @@ Packages allow 20,000 archive entries and 16 GiB read out of their archives in a
 may be at most 4 GiB and at most half what the staging area may hold (see
 [security](security.md)). What a package holds in the staging area at once, the member being read
 at each nesting level, an expanded 7z, a decoded cabinet and the artifacts held back below, is
-at most what the area had room for when the parse began. An archive may expand to 200 times its
-own size, and never less than 64 MiB: a zip or 7z member past that is not read, and a compressed
-tar, which has to decompress a member to pass over it, stops its walk there and lists the rest as
-one `(rest of archive)` member. A 7z also counts what it decompresses to reach the members wanted,
+at most the room set aside for the parse when it began: what the area had free that no unfinished
+upload had announced and no other parse had set aside, and at most half the area. An archive may
+expand to 200 times its own size, and never less than 64 MiB: a zip or 7z member past that is not
+read, and a compressed tar, which has to decompress a member to pass over it, stops its walk
+there and lists the rest as one `(rest of archive)` member. A 7z also counts what it decompresses to reach the members wanted,
 which in a solid archive include the members before them; one that passes the allowance that way
 is reported as an error with its members listed as not read. Every member these limits
 leave out is listed as skipped with the reason, and the inventory is marked incomplete where the

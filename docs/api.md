@@ -197,12 +197,14 @@ PDF actions, archives, YARA). Multipart `file`, at most 200 MB. Response:
 
 A file too large for one request goes up in chunks, then a parse route or the store's ingest
 route reads it by its `uploadId`. An unfinished upload is removed after
-`FORENSIC_UPLOAD_MAX_AGE_S` (six hours, thirty minutes in browser-only mode).
+`FORENSIC_UPLOAD_MAX_AGE_S` (six hours, thirty minutes in browser-only mode). With accounts, an
+upload is sent, finished, read, cancelled and parsed only by the account that started it or an
+admin; any other account is answered 404, as for an unknown `uploadId`.
 
 **`POST /api/upload/init`.** Body `{"name", "size"}`. Reserves room in the staging area.
 Response `{"uploadId", "chunkSize"}`. Refused with 413 (`staging-too-small`) when the file is
-larger than the staging area could hold even empty, and with 507 (`staging-full`) when it holds
-too much of other uploads now; both messages give the sizes.
+larger than the staging area could hold even empty, and with 507 (`staging-full`) when other
+uploads and running parses hold or have set aside too much of it now; both messages give the sizes.
 
 **`PUT /api/upload/<upload_id>/chunk?offset=<n>`** (or `POST`). The raw bytes of the next
 chunk, at most 64 MiB, at the offset the server has received so far. Response
@@ -259,7 +261,9 @@ write back.
 
 **`POST /api/enrich/mails/rescore`.** Scores mails again with the current calibration:
 `{"storeKey", "settings"}` starts a job on a server case (202 with `jobId`; 409 while another
-job of the case runs); `{"mails", "settings"}` scores at most 200 posted rows and answers them.
+job of the case runs); each read of the case runs at most `FORENSIC_STORE_QUERY_MAX_S` seconds,
+and a read past it ends the job with an error naming the limit and no score changed.
+`{"mails", "settings"}` scores at most 200 posted rows and answers them.
 
 ## Server store
 
@@ -336,9 +340,10 @@ of the case (addresses, domains, URLs, hashes) with their reputation. Response `
 
 **`POST /api/store/<key>/rules/run`.** Runs rules on the store as a background job: `{"rules":
 [rule objects], "settings"}`. Response `{"jobId"}`. The job's result: `findings`, `byRule`,
-`errors`, `diagnostics` (why a rule found nothing, or that it was cut at its finding cap) and
-`total`. A rule past `FORENSIC_STORE_RULE_MAX_S` is stopped and named in `errors`. It writes
-nothing to the store, so a viewer may run it.
+`errors`, `diagnostics` (why a rule found nothing, or that it was cut at its finding cap),
+`total` and `notRun` (the enabled rules a cancel kept from running, 0 for a run that finished). A
+rule past `FORENSIC_STORE_RULE_MAX_S` is stopped and named in `errors`. It writes nothing to the
+store, so a viewer may run it.
 
 **`POST /api/store/<key>/sql`.** One read-only SELECT on the case's tables: `{"sql", "limit"}`
 (200 by default, 2,000 at most). Response `{"rows", "truncated", "columns"}`. Statements that

@@ -223,7 +223,7 @@ def ingest(request: HttpRequest, key: str):
         return JsonResponse({"error": str(exc)}, status=400)
     dates = date_setting.to_dict() if date_setting is not None else None
     try:
-        path, meta = get_upload(upload_id)
+        path, meta = get_upload(upload_id, getattr(request, "account", None))
     except (FileNotFoundError, ValueError):
         return JsonResponse({"error": "upload not found or incomplete"}, status=404)
     try:

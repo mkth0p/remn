@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from typing import Any
 
 import pyarrow as pa
@@ -28,21 +30,44 @@ def batch(rows: list[dict[str, Any]], settings: dict[str, Any]) -> dict[str, Any
     return {"rows": changes, "summary": summary}
 
 
-def store(store: Any, settings: dict[str, Any], job: Any = None) -> dict[str, Any]:
-    """Atomic score/attachment update; baseline is a separate non-destructive pass."""
+def _read(
+    store: Any, limit: Callable[[], AbstractContextManager[Any]], sql: str, params: list[Any], json_columns: tuple[str, ...] = ()
+) -> list[dict[str, Any]]:
+    """One read of the store under its own limit, on a cursor of its own: a read stopped at its limit
+    is interrupted there, never on the connection that holds the update."""
+    with limit():
+        cur = store.cursor()
+        try:
+            cur.execute(sql, params)
+            return rows_to_dicts(cur, json_columns)
+        finally:
+            cur.close()
+
+
+def store(store: Any, settings: dict[str, Any], job: Any = None, limit: Callable[[], AbstractContextManager[Any]] = nullcontext) -> dict[str, Any]:
+    """Atomic score/attachment update; baseline is a separate non-destructive pass. Each read of the
+    store runs within its own limit() (a casestore.TimeLimit), which stops it with QueryStopped."""
     summary = batch([], settings)["summary"]
     with store.lock:
-        baseline.enrich_store(store, settings)
+        with limit():
+            baseline.enrich_store(store, settings)
         con = store._con
-        total, last_id = con.execute("SELECT count(*), coalesce(max(id), 0) FROM mails").fetchone()
+        (span,) = _read(store, limit, "SELECT count(*) AS total, coalesce(max(id), 0) AS last FROM mails", [])
+        total, last_id = span["total"], span["last"]
         cursor_id = -1
         con.execute("BEGIN TRANSACTION")
         try:
             while cursor_id < last_id:
                 if job:
                     job.check()
-                con.execute("SELECT * FROM mails WHERE id > ? AND id <= ? ORDER BY id LIMIT 200", [cursor_id, last_id])
-                rows = rows_to_dicts(con, ("auth", "attachments", "keywordHits", "assessment"))
+                # rows past the cursor are not yet updated, so a read outside the update's transaction sees them as it would
+                rows = _read(
+                    store,
+                    limit,
+                    "SELECT * FROM mails WHERE id > ? AND id <= ? ORDER BY id LIMIT 200",
+                    [cursor_id, last_id],
+                    ("auth", "attachments", "keywordHits", "assessment"),
+                )
                 if not rows:
                     break
                 cursor_id = rows[-1]["id"]
