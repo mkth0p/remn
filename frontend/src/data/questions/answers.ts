@@ -16,6 +16,7 @@ import { recordLabel, recordRef } from '../recordKeys'
 import type { DataSource } from '../source'
 import { scenarioViews } from './catalog'
 import { coverage, type EvidenceProfile } from './coverage'
+import { EN, type ReportText } from '../reportText'
 
 export type AnswerStatus = QuestionAnswer['status']
 export const ANSWER_STATUSES: { id: AnswerStatus; label: string }[] = [
@@ -142,6 +143,8 @@ export async function resolveCitation(c: QuestionCitation, source: DataSource, e
 
 export interface ReportQuestion {
   id: string
+  /** DFIQ's own, printed as DFIQ writes it, or REMN's, which the report writes in its language */
+  origin: 'dfiq' | 'remn'
   name: string
   status: AnswerStatus
   text: string
@@ -160,24 +163,29 @@ export interface ReportQuestions {
   uncovered: number
 }
 
-/** The chosen scenarios with every question's answer, for the report; undefined when no scenario is chosen. */
-export function questionsForReport(scenarioIds: string[], answers: Map<string, QuestionAnswer>, profile?: EvidenceProfile | null): ReportQuestions | undefined {
+/**
+ * The chosen scenarios with every question's answer, for the report; undefined when no scenario is
+ * chosen. REMN's own scenarios, facets and questions, and what the evidence covers, are in the words
+ * of the report's language; DFIQ's are as DFIQ writes them.
+ */
+export function questionsForReport(scenarioIds: string[], answers: Map<string, QuestionAnswer>, profile?: EvidenceProfile | null, t: ReportText = EN): ReportQuestions | undefined {
   const views = scenarioViews(scenarioIds)
   if (!views.length) return undefined
   const counts: Record<AnswerStatus, number> = { open: 0, answered: 0, cannot: 0 }
   const seen = new Set<string>()
   let uncovered = 0
+  const named = (x: { id: string; name: string }) => t.question.catalog[x.id] ?? x.name
   const scenarios = views.map((v) => ({
     id: v.scenario.id,
-    name: v.scenario.name,
+    name: named(v.scenario),
     origin: v.scenario.origin,
     facets: v.facets.map((f) => ({
       id: f.facet.id,
-      name: f.facet.name,
+      name: named(f.facet),
       questions: f.questions.map((q): ReportQuestion => {
         const a = answers.get(q.id)
         const status: AnswerStatus = a?.status ?? 'open'
-        const cov = profile ? coverage(q, profile) : null
+        const cov = profile ? coverage(q, profile, undefined, t) : null
         if (!seen.has(q.id)) {
           seen.add(q.id)
           counts[status]++
@@ -185,7 +193,8 @@ export function questionsForReport(scenarioIds: string[], answers: Map<string, Q
         }
         return {
           id: q.id,
-          name: q.name,
+          origin: q.origin,
+          name: named(q),
           status,
           text: a?.text ?? '',
           citations: (a?.citations ?? []).map((c) => ({ label: c.label, source: c.source, ts: c.ts })),

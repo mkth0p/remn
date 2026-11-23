@@ -180,25 +180,34 @@ Each pack directory holds the rules grouped by log source (`process_creation.yam
 `registry_set.yaml`, …) or by Sublime rule family, a `pack.json` manifest with the
 upstream repository, the exact commit, the licence and the counts, the upstream
 `LICENSE` verbatim, and `skipped.json` naming every upstream rule that was not converted
-and why. A SigmaHQ rule converted with a caveat (an unknown service matched by channel name,
-`cased` on an equality) carries it in its YAML under `sigma.warnings`, and `pack.json` counts
-them. A rule is skipped rather than weakened: `fieldref`, `expand` and the time-part
+and why. A rule converted with a caveat carries it in its YAML, under `sigma.warnings` (an
+unknown service matched by channel name, `cased` on an equality) or `sublime.warnings` (a URL
+path matched inside the full URL, a Sublime list approximated with REMN's own), and
+`pack.json` counts them. A rule is skipped rather than weakened: `fieldref`, `expand` and the time-part
 modifiers, a `timeframe`, any modifier outside the Sigma 2.1 list, `file_access` sources, Sublime ML
 classifiers, `file.explode`, link analysis, and so on. One translation is looser than the
-original and is not reported on the rule: a Sublime `any()` with several conditions on one
-collection (attachments, links) matches when each condition holds for some member rather than
-all of them for the same one; it makes a rule match more, never less. What translates exactly is
+original: a Sublime `any()` with several conditions on one collection (attachments, links)
+matches when each condition holds for some member rather than all of them for the same one; it
+makes a rule match more, never less, and the rule's warnings say so. What translates exactly is
 translated: `base64`, `base64offset` and `utf16`/`wide` values become the literal strings
 the encoded value can appear as (all three alignments), matched case-sensitively; `neq`
 becomes a negated equality; `cased` selects the case-sensitive operators; a regex keeps its
 case (`re_cs`) unless `|i` is given, and the flags `m` and `s` travel as an inline group;
+MQL's `strings.contains`, `starts_with`, `ends_with`, `regex.contains` and `regex.match` keep
+case on a text field (`contains_cs`, `startswith_cs`, `endswith_cs`, `re_cs`); three upstream
+patterns whose time grows with the cube of the value in the browser engine (two SigmaHQ
+admin-share command lines and a Sublime sender name) are written in a linear form that matches
+the same values (docs/rules.md);
 keywords, searched in the event's JSON text, are written as that text holds them (a quote as
 `\"`, a backslash as `\\`); IPv6 CIDRs translate when they name one address or
 a prefix within the first group (`::1/128`, `fe80::/10`, `fc00::/7`). The SigmaHQ rules are
 redistributed under the Detection Rule License 1.1, the Sublime rules under MIT. That licence
-asks that a match keeps the rule's author: each converted rule keeps it under `sigma.author`, and
-the report prints it beside the rule's findings. The Findings page, the CSV and STIX exports and
-Hayabusa's detections do not carry it yet.
+asks that a match keeps the rule's author: each converted rule keeps it under `sigma.author`, the
+report prints it beside the rule's findings, the finding's flyout shows it under About, the
+findings CSV export carries it in a `ruleAuthor` column, and each action of a story's Attack Flow
+names its rule and the author in its external references. Hayabusa's detections have none to
+carry: REMN reads Hayabusa's verbose profile, whose output has no RuleAuthor column, so each of
+those places says the author was not recorded by Hayabusa instead of leaving it blank.
 
 The Rules page lists the packs with a toggle each. `/api/meta` only carries the
 manifests; a pack's rules are fetched once per session from
@@ -221,7 +230,12 @@ a chain of `lower(col) LIKE ?` (5.6 s per rule down to 0.04 s).
 branch heads on GitHub, fetches those exact commits, converts them with the same code as
 the import buttons and rewrites the pack directories in place (stable order, no YAML
 aliases), so an update is one reviewable commit. `--zip <archive> --sha <commit>` works
-offline from a downloaded archive.
+offline from a downloaded archive. `sublime --from-pack` converts the Sublime pack again from
+the MQL source and metadata each of its rules keeps, for a converter change when the upstream
+archive cannot be fetched: the upstream commit and `skipped.json` stay as they were, so a rule
+the earlier converter skipped is not tried again, and `pack.json` records the date under
+`upstream.reconverted`. The pack shipped now was converted that way on 2026-11-23 from the
+commit fetched on 2026-09-05.
 
 **Importing other collections** ("import Sigma" and "import Sublime" in the Rules page)
 converts one `.yml` or a `.zip` through `POST /api/rules/convert/sigma` and
@@ -566,7 +580,17 @@ finding's key, severity, count and escalation under `tests/fixtures/parity/`;
 any difference. Regenerate the fixture after
 changing an engine or a rule, and review the diff. The same script records the Events
 page's stacks of a few fields in `stacks.json`, and `frontend/src/data/stack.parity.test.ts`
-stacks the rows in the browser store and compares.
+stacks the rows in the browser store and compares. It also runs the Sublime pack on the mails and
+on a few of its own, built so that the rules that keep case and the sender name written in a
+linear form fire on one mail and not on the next (`sublime.json`), and a few rules on the paths a
+large case takes (`scale.json`): a per-row rule collapsed past 200 rows, a group whose host
+differs from row to row, and bursts, on rows with ties in time and rows without one. There the
+test compares each finding's host, times and the rows it cites, in order, and folds the findings
+of both engines as a detection level that raises none of them does. Both engines give grouped
+findings in the same order (the largest or rarest group first, then by its fields; bursts by their
+fields, then in time), cite a group's rows in time order, rows of the same time by id and rows
+without a time last, take a group's times from its rows that have one, and leave a row without a
+time out of every burst.
 
 The server store keeps every field the parser writes on a row (a guard test checks the
 parser's field map against the store's columns; a store written before a column existed

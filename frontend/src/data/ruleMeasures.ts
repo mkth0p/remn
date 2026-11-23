@@ -7,6 +7,7 @@
  * what it finds may be benign.
  */
 import { fmtNum } from '../util/format'
+import { EN, type ReportText } from './reportText'
 
 export interface RuleMeasure {
   /** the rule's logic has changed since it was measured */
@@ -122,20 +123,19 @@ export function readMeasure(m: RuleMeasure | undefined, origin?: 'bundled' | 'pa
 /** A finding from a rule not shown to detect what it looks for. */
 export const isLead = (r: MeasureReading) => r.verdict === 'lead' || r.verdict === 'misses'
 
-/** What the rules were measured on, in a sentence. */
-export function measuredOn(s: MeasureSources | null | undefined): string {
+/** What the rules were measured on, in a sentence in the words of a report's language. */
+export function measuredOn(s: MeasureSources | null | undefined, t: ReportText = EN): string {
   if (!s?.sources) return ''
   const { sigma, attackSamples, attackData, attackDataWindows, evtxToMitre, baseline } = s.sources
+  const w = t.measuredOn
   const recorded = [
-    sigma?.recordings ? `${fmtNum(sigma.recordings)} SigmaHQ regression samples` : '',
-    attackSamples?.recordings ? `${fmtNum(attackSamples.recordings)} EVTX-ATTACK-SAMPLES recordings` : '',
-    attackData?.recordings ? `${fmtNum(attackData.recordings)} Microsoft 365 and Entra ID datasets of Splunk attack_data` : '',
-    attackDataWindows?.recordings ? `${fmtNum(attackDataWindows.recordings)} Windows event-log datasets of Splunk attack_data` : '',
-    evtxToMitre?.recordings ? `${fmtNum(evtxToMitre.recordings)} EVTX-to-MITRE-Attack recordings` : '',
+    sigma?.recordings ? w.sigma(sigma.recordings) : '',
+    attackSamples?.recordings ? w.attackSamples(attackSamples.recordings) : '',
+    attackData?.recordings ? w.attackData(attackData.recordings) : '',
+    attackDataWindows?.recordings ? w.attackDataWindows(attackDataWindows.recordings) : '',
+    evtxToMitre?.recordings ? w.evtxToMitre(evtxToMitre.recordings) : '',
   ].filter(Boolean)
-  const list = recorded.length > 1 ? `${recorded.slice(0, -1).join(', ')} and ${recorded[recorded.length - 1]}` : (recorded[0] ?? '')
-  const clean = baseline?.machines ? `, and on the logs of ${fmtNum(baseline.machines)} clean Windows machines of evtx-baseline ${baseline.tag} (${fmtNum(baseline.events)} events)` : ''
-  return `Measured on ${s.measured}${list ? ` on ${list}` : ''}${clean}.`
+  return w.sentence(s.measured, recorded, baseline?.machines ? { machines: baseline.machines, tag: baseline.tag, events: baseline.events } : null)
 }
 
 /** How far a finding can be believed from its rule's measure (mirror of stories._PRECISION). */

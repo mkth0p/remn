@@ -1,20 +1,20 @@
 import type { Evidence } from '../db/schema'
+import { EN, type ReportText } from './reportText'
 
-export function packageCoverageIssues(evidence: Evidence): string[] {
+/** What an investigation package did not read or account for, in the words of a report's language (the interface reads them in English). */
+export function packageCoverageIssues(evidence: Evidence, t: ReportText = EN): string[] {
   if (evidence.kind !== 'package' || !evidence.stats) return []
   const stats = evidence.stats
+  const w = t.packageIssue
   const messages: string[] = []
-  for (const [key, label] of [
-    ['errors', 'failed members'],
-    ['unsupported', 'unsupported members'],
-    ['skipped', 'skipped members'],
-  ] as const) {
-    if (Number(stats[key] ?? 0)) messages.push(`${stats[key]} ${label}`)
+  for (const key of ['errors', 'unsupported', 'skipped'] as const) {
+    const n = Number(stats[key] ?? 0)
+    if (n) messages.push(w[key](n))
   }
-  if (stats.inventoryComplete === false) messages.push('incomplete member inventory')
+  if (stats.inventoryComplete === false) messages.push(w.inventory)
   const checks = Array.isArray(stats.reconciliation) ? stats.reconciliation : []
   const discrepancies = checks.filter((c) => c && typeof c === 'object' && c.status !== 'matched').length
-  if (discrepancies) messages.push(`${discrepancies} collection summary discrepancies or unresolved entries`)
+  if (discrepancies) messages.push(w.discrepancies(discrepancies))
   return messages
 }
 

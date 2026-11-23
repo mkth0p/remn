@@ -3,6 +3,7 @@ import { renderGraphPng } from '../../components/graphDrawing'
 import type { Chain } from '../../data/chains'
 import { loadReportClaims, type ReportClaims } from '../../data/claims'
 import { questionsForReport } from '../../data/questions/answers'
+import { reportText } from '../../data/reportText'
 import type { EvidenceProfile } from '../../data/questions/coverage'
 import { chainSeverity, selectForReport, type ChainReview, type ReportSettings } from '../../data/review'
 import { settingsForRules } from '../../data/rules'
@@ -43,7 +44,9 @@ export function useReportContents({
 }) {
   /** the printed findings and texts read back against the rows they cite */
   const [claims, setClaims] = useState<ReportClaims | undefined>(undefined)
-  const questions = useMemo(() => questionsForReport(questionScenarios, answers, profile), [questionScenarios, answers, profile])
+  // the page shows only how many questions are open; the report prints them in its own language
+  const language = settings?.language ?? 'en'
+  const questions = useMemo(() => questionsForReport(questionScenarios, answers, profile, reportText(language)), [questionScenarios, answers, profile, language])
   const selection = useMemo(() => (settings ? selectForReport(findings, chains, reviews, settings) : { findings: [], chains: [] }), [findings, chains, reviews, settings])
   const printedStories = useMemo(
     () =>

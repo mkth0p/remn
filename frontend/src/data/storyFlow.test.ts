@@ -112,10 +112,26 @@ describe('a story as an Attack Flow', () => {
     expect(path.map((a) => a.tactic_id)).toEqual(['initial-access', 'initial-access', 'credential-access', 'persistence', 'lateral-movement', 'persistence'])
     // strong ties 90, the medium one (the task, tied by the name on its record) 70
     expect(path.map((a) => a.confidence)).toEqual([90, 90, 90, 70, 90, 90])
-    expect(path[2].external_references).toEqual([{ source_name: 'mitre-attack', external_id: 'T1003.001', url: 'https://attack.mitre.org/techniques/T1003/001/' }])
+    expect(path[2].external_references).toEqual([
+      { source_name: 'mitre-attack', external_id: 'T1003.001', url: 'https://attack.mitre.org/techniques/T1003/001/' },
+      { source_name: 'remn-rule', external_id: 'win-lsass-dump-comsvcs', description: 'LSASS dumped with comsvcs' },
+    ])
     expect(path[5].effect_refs).toBeUndefined()
     // the steps off the spine are not in the flow
     expect(actions.some((a) => String(a.description).includes('AnyDesk') || String(a.description).includes('whoami'))).toBe(false)
+  })
+
+  it('names the rule each action is read by and its author, and says when Hayabusa recorded none', async () => {
+    const authors: Record<string, string> = { 'win-lsass-dump-comsvcs': 'A. Rule-Writer' }
+    const story = spinedStory()
+    // the RDP logon read by a Hayabusa detection instead of REMN's rule
+    for (const s of story.steps) for (const x of s.findings) if (x.ruleId === 'win-rdp-logon-external') x.ruleId = 'engine:hayabusa:RDP Logon'
+    const path = walk((await storyAttackFlow(story, { ...ctx, attackOf: () => [], authors })) as Bundle)
+    const rule = (a: Obj) => (a.external_references as { source_name: string; external_id: string; description: string }[]).find((r) => r.source_name === 'remn-rule')
+    expect(rule(path[2])).toEqual({ source_name: 'remn-rule', external_id: 'win-lsass-dump-comsvcs', description: 'LSASS dumped with comsvcs; rule author: A. Rule-Writer' })
+    expect(rule(path[1])?.description).toBe('RDP logon from a non-internal address; rule author: not recorded by Hayabusa, whose output REMN reads does not carry it')
+    // a rule of REMN's own names no author
+    expect(rule(path[0])).toEqual({ source_name: 'remn-rule', external_id: 'mail-credential-phishing', description: 'Credential phishing link' })
   })
 
   it('names the hosts, accounts and addresses the steps touch as assets', async () => {

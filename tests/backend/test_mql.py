@@ -336,3 +336,36 @@ def test_case_sensitive_string_functions_keep_their_case(store):
     assert refs({"subject|startswith_cs": "RE:"}) == [3] and refs({"subject|startswith_cs": "re:"}) == []
     assert refs({"subject|endswith_cs": ["/a", "HELLO"]}) == [1, 2]
     assert refs({"urls.url|contains_cs": "hTTPs://"}) == [2]  # child table
+
+
+def test_a_case_sensitive_regex_keeps_its_case_on_a_text_column(store):
+    # regex.contains and regex.match are case-sensitive in MQL, regex.icontains and regex.imatch are not
+    r = _rule(
+        "type.inbound and regex.contains(subject.subject, 'Wire [0-9]+') and regex.icontains(sender.display_name, 'payroll') and regex.match(subject.subject, 'RE: .*')"
+    )
+    assert r["ok"], r
+    w = r["rule"]["where"]
+    assert w == {"all_of": [{"subject|re_cs": "Wire [0-9]+"}, {"fromName|re": "payroll"}, {"subject|re_cs": "^(?:RE: .*)$"}]}
+    assert r["warnings"] == []
+    compile_cond(w, Ctx(source="mails"))
+    ctx = ParseContext(internal_domains=["interne.fr"])
+    wri = MailWriter(store, 1)
+    for subject in ("Wire 42 today", "wire 42 today", "RE: Wire 7"):
+        headers = [
+            ("From", "Payroll <a@ext.example>"),
+            ("To", "<u@interne.fr>"),
+            ("Subject", subject),
+            ("Date", "Tue, 1 Sep 2026 11:00:00 +0200"),
+            ("Message-ID", f"<{uuid.uuid4()}@x>"),
+        ]
+        wri.add(build_row(headers, subject, None, [], ctx, folder="Inbox", size=None, extra={}))
+    wri.flush()
+
+    def refs(where):
+        return sorted(
+            ref for h in R.run_rule(store, {"id": "cs", "title": "cs", "severity": "low", "source": "mails", "where": where}, {}) for ref in h["refs"]
+        )
+
+    assert refs({"subject|re_cs": "Wire [0-9]+"}) == [1, 3]
+    assert refs({"subject|re": "Wire [0-9]+"}) == [1, 2, 3]
+    assert refs({"subject|re_cs": "^(?:RE: .*)$"}) == [3]

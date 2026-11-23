@@ -40,6 +40,7 @@ import yaml
 
 from services.common import load_untrusted_yaml_all
 from services.parsers.evtx_parser import FIELD_MAP
+from services.rules.linear import linear
 
 LEVELS = {"informational": "info", "info": "info", "low": "low", "medium": "medium", "high": "high", "critical": "critical"}
 
@@ -200,7 +201,8 @@ def _glob_to_regex(value: str, anchor_start: bool, anchor_end: bool, literal: Ca
         else:
             out.append(re.escape(literal(c)))
         i += 1
-    return ("^" if anchor_start else "") + "".join(out) + ("$" if anchor_end else "")
+    # a pattern that grows with the cube of the value is written in its linear form (services/rules/linear.py)
+    return linear(("^" if anchor_start else "") + "".join(out) + ("$" if anchor_end else ""))
 
 
 def _has_wildcard(value: str) -> bool:
@@ -431,7 +433,8 @@ def compile_field(raw_field: str, value: Any, aliases: dict[str, list[str]], war
         # a Sigma regex is case-sensitive unless |i says otherwise; m / s travel as an inline group
         op = "re" if "i" in mods else "re_cs"
         flags = "".join(f for f in ("m", "s") if f in mods)
-        pats = [_with_flags(str(v), flags) for v in values]
+        # a pattern that grows with the cube of the value is written in its linear form (services/rules/linear.py)
+        pats = [_with_flags(linear(str(v)), flags) for v in values]
         if keywords:
             warnings.append("regex keyword: matched against the event's JSON text, where quotes and backslashes are escaped")
         if all_mode:

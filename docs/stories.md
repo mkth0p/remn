@@ -603,7 +603,10 @@ schema 2.0.0, its definition in the bundle), one `attack-flow` of scope `inciden
 the first in the flow's `start_refs`. An action is named by its step's worst finding (one with
 an ATT&CK technique first), with its technique (`technique_id`, from the finding's ATT&CK tags;
 none when the rule has none), its tactic (`tactic_id`, the step's phase), its time, why it is in
-the story, and the confidence of its tie: strong 90, medium 70. The hosts, accounts and
+the story, and the confidence of its tie: strong 90, medium 70. Its `external_references` name
+the rule as well (`source_name` `remn-rule`, the rule id, and in the description the finding's
+title and the author the rule names, or, for a Hayabusa detection, that Hayabusa did not record
+one; a rule of REMN's own names none). The hosts, accounts and
 addresses a step touches are `attack-asset`s; an account's refers to an `identity` (individual,
 or system for a service account), an address's to `infrastructure` that consists of the address
 (`ipv4-addr` or `ipv6-addr`, with STIX's own id for it). The flow's description is the spine's

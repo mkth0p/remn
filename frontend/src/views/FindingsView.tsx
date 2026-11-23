@@ -9,6 +9,7 @@ import { runEnabledRules } from '../data/findingsState'
 import { resetFindingSeverityOverrides } from '../data/findingReviews'
 import { getDb, type Finding, type Severity } from '../db/schema'
 import { buildIncidents, type Incident } from '../rules/incidents'
+import { ruleAuthorOf, ruleAuthors } from '../rules/authors'
 import { toast, useStore } from '../state/store'
 import { useRouteItem } from '../state/route'
 import { fmtNum, fmtTs } from '../util/format'
@@ -45,6 +46,8 @@ export function FindingsView() {
   }
   const data = useFindingsData(kase)
   const { all, rules, lastRun, previous, stale, otherCases, sources, chooseSource, reload } = data
+  // the author each rule names, shown with its findings and carried in the CSV export
+  const authors = useMemo(() => ruleAuthors(rules.filter((r) => !r.error).map((r) => r.rule)), [rules])
   const [filters, setFilters] = useState<QueueFilters>({ sev: '', status: '', source: '', q: '', showFp: false, group: 'incident', sort: 'priority' })
   const setFilter = (patch: Partial<QueueFilters>) => setFilters((f) => ({ ...f, ...patch }))
   const { sev, status, showFp, group } = filters
@@ -217,6 +220,7 @@ export function FindingsView() {
                 severityOverride: f.severityOverride,
                 title: f.title,
                 ruleId: f.ruleId,
+                ruleAuthor: ruleAuthorOf(f.ruleId, authors),
                 entities: JSON.stringify(f.entities),
                 count: f.count,
                 first: f.ts ? new Date(f.ts).toISOString() : '',
@@ -371,6 +375,7 @@ export function FindingsView() {
                 all={all}
                 priority={scores.get(selected.key)}
                 readings={readings}
+                author={ruleAuthorOf(selected.ruleId, authors)}
                 lastRun={lastRun}
                 cuts={cuts}
                 tab={flyTab}

@@ -308,6 +308,10 @@ export function buildChainGraph(chain: Chain): Graph {
 
 export interface CampaignInsight {
   text: string
+  /** what the node is (sender, attacker address, link domain, ip, host), its label and how many chains share it: the report says it in its own language */
+  what: string
+  label: string
+  chains: number
   entity?: GNode['entity']
 }
 
@@ -387,9 +391,9 @@ export function buildCampaignGraph(chains: Chain[]): Graph & { insights: Campaig
     n.degree = deg
     if (deg >= 2) {
       n.linked = true
-      insights.push({ text: `${n.sub ?? n.kind} ${n.label} appears in ${deg} chains`, entity: n.entity })
+      insights.push({ text: `${n.sub ?? n.kind} ${n.label} appears in ${deg} chains`, what: n.sub ?? n.kind, label: n.label, chains: deg, entity: n.entity })
     }
   }
-  insights.sort((a, b) => Number(/appears in (\d+)/.exec(b.text)?.[1]) - Number(/appears in (\d+)/.exec(a.text)?.[1]))
+  insights.sort((a, b) => b.chains - a.chains)
   return { nodes, edges, columns: chains.length, insights }
 }

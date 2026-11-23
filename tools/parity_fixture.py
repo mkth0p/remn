@@ -11,6 +11,10 @@ frontend/src/data/stack.parity.test.ts, which stacks them in the browser store. 
 their finding cap run on rows of their own, and cap.json records which findings the SQL engine kept
 and what it said about the cut. A few rules read values longer than their regular expressions read
 (RE_VALUE_MAX), and long.json records what the SQL engine found and how many rows it said it read in part.
+A few rules take the paths a large case takes (more rows than a per-row rule keeps apart, groups
+whose other entities differ from row to row, bursts), and scale.json records every field of their
+findings that the detection level's folding reads, so that a server case folds as a browser case
+does. The Sublime pack runs on the mails and on a few of their own (sublime.json).
 
     .venv\\Scripts\\python.exe tools\\parity_fixture.py        # rewrite the fixture after changing an engine or a rule
 """
@@ -37,6 +41,7 @@ from mail_calibration import examples, message  # noqa: E402
 from api.views.meta import load_rules  # noqa: E402
 from services.parsers import m365  # noqa: E402
 from services.parsers.mail.common import ParseContext, RawAttachment, build_row  # noqa: E402
+from services.rules import packs  # noqa: E402
 from services.store import queries as Q  # noqa: E402
 from services.store import rules as R  # noqa: E402
 from services.store.casestore import StoreRegistry  # noqa: E402
@@ -217,6 +222,8 @@ def main() -> None:
         print("  error", e)
     cap_case()
     long_case()
+    scale_case()
+    sublime_case(ml_rows)
 
 
 # Rules past their cap, each a different way of choosing what to keep. The rows are invented: first
@@ -396,6 +403,170 @@ def long_case() -> None:
         encoding="utf-8",
     )
     print(f"{len(LONG_RULES)} rules on long values: {', '.join(f'{k} found {len(v)}' for k, v in sorted(findings.items()))}")
+
+
+# Rules on the paths a large case takes, on rows of their own: a per-row rule matching more rows
+# than COLLAPSE_AFTER with none of its own (collapsed into one finding per entity combination), a
+# grouped rule whose other entities differ from row to row, and bursts. The rows are invented, with
+# ties in time and rows without a time, so that the order of the rows a finding cites is tested.
+SCALE_ROWS = 250
+SCALE_RULES: list[dict[str, Any]] = [
+    {"id": "scale-collapsed", "title": "logon", "severity": "low", "source": "events", "where": {"eventId": 4624}, "entities": ["computer", "targetUser"]},
+    {
+        "id": "scale-grouped",
+        "title": "logons by account",
+        "severity": "low",
+        "source": "events",
+        "where": {"eventId": 4624},
+        "group_by": ["targetUser"],
+        "entities": ["targetUser", "computer", "ipAddress"],
+    },
+    {
+        "id": "scale-bursts",
+        "title": "logon bursts by address",
+        "severity": "medium",
+        "source": "events",
+        "where": {"eventId": 4624},
+        "group_by": ["ipAddress"],
+        "window": "30s",
+        "threshold": ">= 4",
+        "entities": ["ipAddress", "computer"],
+    },
+]
+# what a finding carries that the folding of the detection level reads (frontend/src/data/detectionLevel.ts)
+SCALE_FIELDS = ("key", "ruleId", "title", "severity", "count", "escalation", "ts", "tsEnd", "entities", "refs")
+
+
+def scale_rows() -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for i in range(SCALE_ROWS):
+        row = {
+            "eventId": 4624,
+            "computer": ("WS01", "ws02", "WS03")[i % 3],
+            "targetUser": ("amy", "bob", "cat", "dan")[i * 7 % 4],
+            "ipAddress": f"192.0.2.{i % 5 + 1}",
+        }
+        # two rows a second, and every fiftieth row without a time
+        if i % 50 != 7:
+            row["ts"] = CAP_T0 + (i // 2) * 1000
+        rows.append(row)
+    return rows
+
+
+def scale_case() -> None:
+    rows = scale_rows()
+    with tempfile.TemporaryDirectory() as tmp:
+        reg = StoreRegistry()
+        reg.configure(Path(tmp) / "cases")
+        store = reg.get(str(uuid.uuid4()))
+        try:
+            w = EventWriter(store, 1)
+            for r in rows:
+                w.add(dict(r))
+            w.flush()
+            with store.lock:
+                stored = [x[0] for x in store._con.execute("SELECT id FROM events ORDER BY id").fetchall()]
+            res = R.run_rules(store, SCALE_RULES, {})
+        finally:
+            reg.close_all()
+    assert stored == list(range(1, len(rows) + 1)), "event ids are not sequential"
+    assert SCALE_ROWS > R.COLLAPSE_AFTER and not res["errors"], res["errors"]
+    for i, r in enumerate(rows, 1):
+        r["id"] = i
+    # in the order the engine gives them, which is the order a server case's findings are folded in
+    findings: dict[str, list[dict[str, Any]]] = {r["id"]: [] for r in SCALE_RULES}
+    for f in res["findings"]:
+        findings[f["ruleId"]].append({k: f.get(k) for k in SCALE_FIELDS})
+    (OUT / "scale.json").write_text(
+        json.dumps(
+            {"collapseAfter": R.COLLAPSE_AFTER, "maxRefs": R.MAX_REFS, "rows": rows, "rules": SCALE_RULES, "findings": findings},
+            indent=1,
+            sort_keys=True,
+            default=str,
+        ),
+        encoding="utf-8",
+    )
+    print(f"{len(SCALE_RULES)} rules on the paths of a large case: {', '.join(f'{k} found {len(v)}' for k, v in sorted(findings.items()))}")
+
+
+# Mails of their own for the Sublime pack, besides the parity mails: the rules whose matching keeps
+# case (an iOS mailer string, the paths and fragments of links) and the sender name the converter
+# writes in a linear form, each on a mail that matches and on one that differs only in case or by
+# the token that makes it match. All invented.
+def _links(*urls: str) -> str:
+    return "<html><body>" + " ".join(f'<a href="{u}">link</a>' for u in urls) + "</body></html>"
+
+
+SUBLIME_MAILS: list[tuple[list[tuple[str, str]], str, str | None]] = [
+    ([("X-Mailer", "iPhone Mail (3A101)")], "Sent from my phone.", None),
+    ([("X-Mailer", "iphone mail (3A101)")], "Sent from my phone.", None),
+    ([("X-Mailer", "iPad Mail (21B101)")], "Sent from my tablet.", None),
+    ([("From", "Talent Team | Careers <talent@news.example.test>"), ("X-Sender", "bounce@s7.exacttarget.com")], "We are hiring.", None),
+    ([("From", "Talent Team | careers <talent@news.example.test>"), ("X-Sender", "bounce@s7.exacttarget.com")], "We are hiring.", None),
+    ([("From", "Talent Team Careers <talent@news.example.test>"), ("X-Sender", "bounce@s7.exacttarget.com")], "We are hiring.", None),
+    ([], "Open the file.", _links("https://storage.googleapis.com/ab12-cd34-20260901-0f9e/doc.html", "https://files.example.test/page.html#x-ab101010")),
+    ([], "Open the file.", _links("https://storage.googleapis.com/ab12-cd34-20260901-0f9e/doc.html", "https://files.example.test/page.html#x-AB101010")),
+    ([], "Open the file.", _links("https://files.example.test/view.html#a.html/?0a.1b.2c.3d.4e.5f.6a.7b.8c.9d.0e.1f.2a.x")),
+    ([], "Open the file.", _links("https://files.example.test/view.html#a.html/?0A.1B.2C.3D.4E.5F.6A.7B.8C.9D.0E.1F.2A.x")),
+]
+
+
+def sublime_mails() -> list[dict[str, Any]]:
+    ctx = ParseContext(internal_domains=["contoso.com", "interne.fr"], brands=["contoso"], vip_names=["lefevre marie", "alice martin"])
+    base = [
+        ("From", "Notifications <notify@news.example.test>"),
+        ("To", "Alice <alice@contoso.com>"),
+        ("Subject", "Update"),
+        ("Date", "Wed, 2 Sep 2026 10:00:00 +0000"),
+        ("Received", "from mta.news.example.test ([198.51.100.40]) by mx.contoso.com; Wed, 2 Sep 2026 10:00:01 +0000"),
+    ]
+    rows = []
+    for i, (headers, text, html) in enumerate(SUBLIME_MAILS):
+        names = {k for k, _ in headers}
+        own = [(k, v) for k, v in base if k not in names] + headers + [("Message-ID", f"<sublime-{i}@news.example.test>")]
+        row = build_row(own, text, html, [], ctx)
+        row.pop("id", None)
+        rows.append(row)
+    return rows
+
+
+def sublime_case(ml_rows: list[dict[str, Any]]) -> None:
+    pack = [r["rule"] for r in packs.load_pack("sublime")["rules"] if "rule" in r]
+    extra = sublime_mails()
+    rows = [dict(r) for r in ml_rows] + extra
+    with tempfile.TemporaryDirectory() as tmp:
+        reg = StoreRegistry()
+        reg.configure(Path(tmp) / "cases")
+        store = reg.get(str(uuid.uuid4()))
+        try:
+            mw = MailWriter(store, 2)
+            for r in rows:
+                r.pop("id", None)
+                mw.add(dict(r))
+            mw.flush()
+            with store.lock:
+                stored = [x[0] for x in store._con.execute("SELECT id FROM mails ORDER BY id").fetchall()]
+            res = R.run_rules(store, pack, SETTINGS)
+        finally:
+            reg.close_all()
+    assert stored == list(range(1, len(rows) + 1)), "mail ids are not sequential"
+    for i, r in enumerate(extra, len(ml_rows) + 1):
+        r["id"] = i
+    findings: dict[str, list[dict[str, Any]]] = {}
+    for f in res["findings"]:
+        findings.setdefault(f["ruleId"], []).append({"key": f["key"], "severity": f["severity"], "count": f["count"], "escalation": f.get("escalation")})
+    for v in findings.values():
+        v.sort(key=lambda f: f["key"])
+    (OUT / "sublime.json").write_text(
+        json.dumps(
+            {"rules": sorted(r["id"] for r in pack), "rows": extra, "errors": res["errors"], "findings": findings},
+            indent=1,
+            sort_keys=True,
+            default=str,
+        ),
+        encoding="utf-8",
+    )
+    print(f"the Sublime pack, {len(pack)} rules on {len(rows)} mails: {len(findings)} fired, {sum(len(v) for v in findings.values())} findings")
 
 
 if __name__ == "__main__":

@@ -1,15 +1,23 @@
-import { fmtBytes, fmtNum, fmtUtc } from '../util/format'
-import { STORY_VERDICT_LABEL } from './storyDecisions'
-import { ANSWER_LABEL } from './questions/answers'
+import { fmtBytes, fmtDuration, fmtNum, fmtUtc } from '../util/format'
+import type { IncidentAbout } from '../rules/incidents'
+import type { ClaimWhy, TextAbout } from './claims'
+import type { ExportSource, GapSay, GapWhere } from './evidenceGaps'
+import type { RecordPlace } from './recordKeys'
 
 /**
  * The words of the printed report, one dictionary per language, and the firm's logo it carries. The HTML and the Word report take
  * every label, heading and sentence of their own from here, with the numbers, times and sizes
  * written the way the language writes them. The interface stays English; only the report changes.
  *
- * What the analysis itself writes (the limits of the evidence, the reasons a claim does not hold,
- * the basis of a story's spine, rule titles, the questions of DFIQ) and what the analyst writes are
- * printed as they are, whatever the language.
+ * What REMN writes elsewhere and the report prints is written from here too, from values: an
+ * incident's line, the limits of the evidence, the reasons a claim does not hold, the cuts of a
+ * story or chain build, what an investigation package left out, REMN's own questions and what the
+ * evidence covers of them. The interface reads the English. This module imports no other at run
+ * time, so those modules can.
+ *
+ * Printed as they are, whatever the language: what the analyst writes, what a model drafted (and
+ * labelled as such), the evidence, rule titles, DFIQ's questions, and the steps, ties and phases of
+ * the stories and chains the server builds, which the French report says are in English.
  */
 
 export type ReportLanguage = 'en' | 'fr'
@@ -21,6 +29,112 @@ export const REPORT_LANGUAGES: { id: ReportLanguage; label: string }[] = [
 const pad = (x: number) => String(x).padStart(2, '0')
 /** in English the plural takes an s past one; the callers say which word */
 const s = (k: number) => (k === 1 ? '' : 's')
+/** a list the way English writes it: a, b and c */
+const enList = (xs: string[], join: string) => (xs.length <= 2 ? xs.join(` ${join} `) : `${xs.slice(0, -1).join(', ')} ${join} ${xs[xs.length - 1]}`)
+/** what a cloud record is, by the prefix of its key (services/parsers/m365.py) */
+const EN_CLOUD: Record<string, string> = {
+  ual: 'audit record',
+  entra: 'sign-in',
+  'entra-audit': 'directory audit',
+  'entra-risk': 'risk detection',
+  'entra-riskyuser': 'risky user',
+  'exo-trace': 'message trace',
+}
+const enRecord = (at: RecordPlace): string => {
+  switch (at.kind) {
+    case 'message':
+      return `message ${fmtNum(at.n)}`
+    case 'message-id':
+      return `Message-ID ${at.id}`
+    case 'cloud':
+      return `${EN_CLOUD[at.what] ?? 'record'} ${at.id}`
+    case 'record':
+      return `record ${fmtNum(at.n)}${at.channel && at.computer ? ` (${at.channel} on ${at.computer})` : ''}`
+    default:
+      return `row ${typeof at.n === 'number' ? fmtNum(at.n) : at.n}`
+  }
+}
+const enWhere = (w: GapWhere) =>
+  w.channel && w.computer
+    ? `${w.channel} on ${w.computer} (${w.file})`
+    : w.channels != null || w.computers != null
+      ? `${w.file} (${fmtNum(w.channels ?? 1)} channel${s(w.channels ?? 1)} from ${fmtNum(w.computers ?? 1)} computer${s(w.computers ?? 1)})`
+      : w.file
+const EN_CAPS: Record<ExportSource, { records: string; limits: Record<number, string>; missing: string }> = {
+  ual: { records: 'Unified Audit Log records', limits: { 5000: 'the most one Search-UnifiedAuditLog call returns', 50000: 'the most a large-set search returns' }, missing: 'Records' },
+  'message-trace': {
+    records: 'message trace rows',
+    limits: { 1000: 'as many as Get-MessageTrace and Get-MessageTraceV2 return unless told otherwise', 5000: 'the most Get-MessageTraceV2 returns' },
+    missing: 'Messages',
+  },
+  'entra-audit': { records: 'directory audit records', limits: { 250000: 'the most the Entra admin centre downloads in one file' }, missing: 'Records' },
+}
+const enGap = (g: GapSay): string => {
+  switch (g.kind) {
+    case 'record-holes': {
+      const floor = g.floor ? 'at least ' : ''
+      const [a, b] = g.largest
+      return (
+        `${enWhere(g.where)}: ${floor}${fmtNum(g.missing)} record${s(g.missing)} missing from its numbering, in ${floor}${fmtNum(g.gaps)} gap${s(g.gaps)} ` +
+        `between record ${fmtNum(g.first)} and ${fmtNum(g.last)} (the largest: ${fmtNum(a)}${b > a ? `–${fmtNum(b)}` : ''}). ` +
+        'Records deleted from the log, or in a part that could not be read.'
+      )
+    }
+    case 'checksum-data':
+      return `${g.file}: ${fmtNum(g.bad)} of ${fmtNum(g.chunks)} chunk${s(g.chunks)} fail their checksum. Their records were changed after Windows wrote them, or damaged; they were read all the same.`
+    case 'checksum-header':
+      return `${g.file}: ${[g.headers ? `${fmtNum(g.headers)} chunk header${s(g.headers)}` : '', g.fileHeader ? 'the file header' : ''].filter(Boolean).join(' and ')} fail${g.headers + (g.fileHeader ? 1 : 0) === 1 ? 's' : ''} its checksum: the file's structure was changed after it was written.`
+    case 'clock-logs':
+      return `On ${g.computer}, ${fmtNum(g.logs)} logs step back together at ${fmtUtc(g.from)}, by up to ${fmtDuration(g.from - g.to)}: its clock was set back, and no log collected records the change. Events stamped between ${fmtUtc(g.to)} and ${fmtUtc(g.from)} may have happened before or after it, so their times do not give their order.`
+    case 'clock-set':
+      return `The clock of ${g.computer} was set back ${fmtDuration(g.from - g.to)} at ${fmtUtc(g.from)}, to ${fmtUtc(g.to)}: events stamped between those two times may have happened before or after the change, so their times do not give their order.`
+    case 'time-backwards':
+      return (
+        `${enWhere(g.where)}: write times step back ${fmtNum(g.steps)} time${s(g.steps)} between consecutive records with no clock change or log service start in the evidence to explain ${g.steps === 1 ? 'it' : 'them'} ` +
+        `(the largest ${fmtDuration(g.largest)}, at record ${fmtNum(g.record)}${g.unread ? `; ${fmtNum(g.unread)} more steps were not examined` : ''}). ` +
+        'A record was put in later, or the clock changed where no log collected records it (System and Security record clock changes).'
+      )
+    case 'missing-between-files':
+      return `${g.channel} on ${g.computer}: ${g.from === g.to ? `record ${fmtNum(g.from)} is` : `records ${fmtNum(g.from)}–${fmtNum(g.to)} are`} in none of the files read (${g.before} ends at record ${fmtNum(g.beforeLast)}, ${g.after} starts at ${fmtNum(g.afterFirst)}): an archive or export is missing.`
+    case 'log-starts-late':
+      return `On ${g.computer}, ${g.count === 1 ? 'one log starts' : `${g.count} logs start`} after the first finding (${fmtUtc(g.start)}): ${g.logs.map(([channel, ts]) => `${channel} at ${fmtUtc(ts)}`).join(', ')}${g.count > g.logs.length ? ` and ${g.count - g.logs.length} more` : ''}. Earlier events there were overwritten or not collected.`
+    case 'export-cap': {
+      const cap = EN_CAPS[g.source]
+      return `${g.file}: exactly ${fmtNum(g.records)} ${cap.records}, ${cap.limits[g.records] ?? ''}. ${cap.missing} after that point in its time window are probably missing.`
+    }
+    case 'xml-export':
+      return (
+        `${g.file}: ${fmtNum(g.records)} event record${s(g.records)} exported as XML. An export holds what its query selected and not the log file's own record numbering, ` +
+        'so a record deleted from the log before the export cannot be told from one the export left out; the log file itself (wevtutil epl) can be checked for that.'
+      )
+    case 'parse-limit':
+      return `${g.file}: read up to the parse limit and no further (${fmtNum(g.kept)} row${s(g.kept)} kept). Records after that point in the file are not in the case.`
+    case 'read-in-part':
+      return `${g.file}: read in part (${g.note}). What the file holds after that point is not in the case.`
+    case 'mail-throttled':
+      return `MailItemsAccessed for ${g.user} was throttled from ${fmtUtc(g.from)}: for the 24 hours after it, the mailbox's item reads were not recorded one by one, so which messages were read then cannot be listed.`
+    case 'signins-start-late':
+      return `Entra sign-ins start at ${fmtUtc(g.first)}, after the first finding (${fmtUtc(g.start)}): earlier sign-ins are not in the evidence. Entra keeps them 7 days without a P1 or P2 licence, 30 days with one.`
+  }
+}
+const enClaim = (w: ClaimWhy): string => {
+  switch (w.kind) {
+    case 'no-rows':
+      return 'it cites no row'
+    case 'rows-missing':
+      return `${fmtNum(w.missing)} of the ${fmtNum(w.checked)} row${s(w.checked)} it cites ${w.missing === 1 ? 'is' : 'are'} not in the case: removed, or numbered anew when evidence was added again`
+    case 'no-match':
+      return `${w.records.map((r) => `${r.file} ${enRecord(r.at)}`).join(' and ')}${w.more ? ` and ${fmtNum(w.more)} more` : ''} no longer ${w.records.length + w.more === 1 ? 'matches' : 'match'} the rule`
+    case 'value-absent':
+      return `it names ${w.field} ${w.values.join(', ')}, which none of its rows holds`
+    case 'time':
+      return `its time, ${fmtUtc(w.ts)}, is not its first row's (${fmtUtc(w.first)})`
+    case 'text-absent':
+      return `it names ${w.values.join(', ')}${w.more ? ` and ${fmtNum(w.more)} more` : ''}, which none of its ${fmtNum(w.rows)} row${s(w.rows)} holds`
+    case 'text-absent-case':
+      return `it names ${w.values.join(', ')}${w.more ? ` and ${fmtNum(w.more)} more` : ''}, which no row of the evidence holds`
+  }
+}
 
 const en = {
   /** the language of the HTML document and of the Word document */
@@ -36,12 +150,31 @@ const en = {
   andMore: (k: number) => `and ${fmtNum(k)} more`,
   plusMore: (k: number) => `+${fmtNum(k)} more`,
   noEventTime: 'no event time',
+  /** a span of time, as the limits of the evidence state it */
+  dur: (ms: number) => fmtDuration(ms),
+  /** a record's place in its file */
+  record: enRecord,
+  /** a limit of the evidence (data/evidenceGaps.ts) */
+  gap: enGap,
+  /** why a finding or a text does not hold against its rows, and what the text is (data/claims.ts) */
+  claim: {
+    reason: enClaim,
+    about: (a: TextAbout): string =>
+      a.kind === 'chain'
+        ? `the narrative of chain "${a.title}"`
+        : a.kind === 'incident'
+          ? `the notes on "${a.title}"`
+          : a.kind === 'story'
+            ? `the note on the story "${a.title}"`
+            : 'the executive summary',
+  },
 
   sev: { critical: 'critical', high: 'high', medium: 'medium', low: 'low', info: 'info' } as Record<string, string>,
   status: { new: 'not reviewed', reviewed: 'reviewed', escalated: 'confirmed', false_positive: 'false positive' } as Record<string, string>,
   chainVerdict: { confirmed: 'confirmed', unsure: 'unsure', benign: 'benign' } as Record<string, string>,
-  storyVerdict: STORY_VERDICT_LABEL as Record<string, string>,
-  answer: ANSWER_LABEL as Record<string, string>,
+  /** the Stories page's and the Questions page's own words (STORY_VERDICTS, ANSWER_STATUSES) */
+  storyVerdict: { open: 'open', reviewed: 'reviewed', confirmed: 'confirmed incident', benign: 'benign', false_positive: 'false positive' } as Record<string, string>,
+  answer: { open: 'open', answered: 'answered', cannot: 'cannot answer from this evidence' } as Record<string, string>,
   /** the completeness of the review, and a story's confidence */
   level: { high: 'high', medium: 'medium', low: 'low' } as Record<string, string>,
   /** the analyst's own confidence in the conclusion */
@@ -81,6 +214,22 @@ const en = {
     exfil: 'Exfiltration',
     impact: 'Impact',
     unwanted: 'Unwanted software',
+  } as Record<string, string>,
+  /** the two letters over each tactic on the cover, from its name in the report's language */
+  tacticCode: {
+    'initial-access': 'IA',
+    execution: 'EX',
+    persistence: 'PE',
+    privilege: 'PR',
+    'defense-evasion': 'DE',
+    credential: 'CA',
+    discovery: 'DI',
+    lateral: 'LM',
+    collection: 'CO',
+    c2: 'C2',
+    exfil: 'EF',
+    impact: 'IM',
+    unwanted: 'PU',
   } as Record<string, string>,
   transport: {
     browser: 'Ollama on the analyst’s machine',
@@ -205,6 +354,8 @@ const en = {
     ledgerBrokenWhy: ': an entry was changed or removed after it was written',
     ledgerScope:
       "The chain shows an entry changed after it was written, an entry removed from among later ones, and a gap in the numbering. It does not show the newest entries removed, nor the chain written again, from any entry onward, by whoever holds the case: no key protects it, and it is kept in the browser's database and in the exported case. The head is printed whole: a later copy of the case whose ledger still holds an entry with this hash has every entry up to it as it was when this report was made.",
+    /** what a proposal was about (ai/inbox.ts ProposalKind) */
+    kind: { decision: 'decision', note: 'note', row_mark: 'row mark', rule: 'rule', summary: 'summary' } as Record<string, string>,
   },
 
   chain: {
@@ -241,6 +392,9 @@ const en = {
     campaignCaption: 'People in the middle, the senders and domains that reached them on the left, the machines and IPs they touched on the right.',
     nothingShared: 'no sender, domain, IP or host is shared between the chains',
     graphsInHtml: 'The chain graphs are in the HTML report.',
+    /** a sender, domain, address or host the printed chains share (data/chainGraph.ts) */
+    appears: (what: string, label: string, chains: number) => `${what} ${label} appears in ${chains} chains`,
+    node: { sender: 'sender', 'attacker address': 'attacker address', 'link domain': 'link domain', ip: 'ip', host: 'host' } as Record<string, string>,
   },
 
   story: {
@@ -300,12 +454,29 @@ const en = {
     ruleHeadDocx: ['severity', 'rule', 'findings · rows', 'when (UTC)', 'status', 'ATT&CK', 'what matched'],
     ruleSeverity: (sev: string) => `rule: ${sev}`,
     by: (author: string) => `by ${author}`,
+    noAuthor: 'author not recorded by Hayabusa',
     authors: 'The Sigma rules are the work of the authors named beside them, shared by SigmaHQ under the Detection Rule License 1.1.',
     intro: 'Every printed finding, one line per rule: how many findings and rows, when, and the values matched. The incidents above carry the same findings in context.',
     none: 'No finding passes the severity floor.',
   },
 
   incident: {
+    /** the line under an incident's title (rules/incidents.ts) */
+    subtitle: (a: IncidentAbout): string => {
+      const found = (k: number, rules: number) => `${k} finding${s(k)} from ${rules} rule${s(rules)}`
+      switch (a.kind) {
+        case 'chain':
+          return `score ${a.score} · ${a.steps} step${s(a.steps)} · ${a.linked} linked finding${s(a.linked)}`
+        case 'mail':
+          return `${a.from ? `from ${a.from} · ` : ''}${found(a.findings, a.rules)}`
+        case 'entity':
+          return `${a.lead} · ${found(a.findings, a.rules)}${a.seenAs.length ? ` · also seen as ${a.seenAs.join(', ')}` : ''}`
+        case 'group':
+          return a.entities.map(([k, v]) => `${k}=${v}`).join(' · ') || `${a.rows} row(s)`
+        default:
+          return found(a.findings, a.rules)
+      }
+    },
     rows: (k: number) => `${fmtNum(k)} row(s)`,
     noteByAi: 'note drafted by the model during triage',
     noteByAiDocx: 'Note drafted by the model during triage.',
@@ -383,6 +554,18 @@ const en = {
   },
 
   question: {
+    /** REMN's own scenarios, facets and questions by id, where the language writes them otherwise than the catalog */
+    catalog: {} as Record<string, string>,
+    /** the kinds of evidence by id, where the language writes them otherwise than the catalog */
+    evidenceKind: {} as Record<string, string>,
+    /** whether the case holds the evidence a question lists (data/questions/coverage.ts) */
+    coverage: (held: { label: string; count: number }[], missing: string[]) =>
+      held.length
+        ? `covered by the ${enList(
+            held.map((x) => `${x.label} (${fmtNum(x.count)} ${x.count === 1 ? 'row' : 'rows'})`),
+            'and',
+          )}`
+        : `not covered: no ${enList(missing, 'or')} in this case`,
     finding: 'finding',
     noCitation: 'no record cited',
     unanswered: 'unanswered',
@@ -531,6 +714,84 @@ const en = {
     textsUnsupported: (k: number) => `${k} text(s) naming values their rows do not hold`,
     claimsOk: (k: number, texts: number) => `${k} finding(s) and ${texts} text(s) read back against their rows`,
   },
+
+  /** what a story build could not read (data/stories.ts storyCoverageWarnings), with its caps */
+  storyCut: {
+    flagged: (cap: number, left: number) => `More than ${fmtNum(cap)} records carry findings: the stories read the first ${fmtNum(cap)}${left ? ` and left ${fmtNum(left)} out` : ''}.`,
+    refs: (k: number, cap: number) => `${k ? fmtNum(k) : 'Some'} finding(s) cite more than ${fmtNum(cap)} records: the stories read the first ${fmtNum(cap)} of each.`,
+    identities: (cap: number) =>
+      `The records naming the flagged people passed ${fmtNum(cap)}: the stories read the tasks, services and account changes among them first, then those nearest the flags.`,
+    addresses: (cap: number) =>
+      `The records from the flagged addresses passed ${fmtNum(cap)}: the stories read the tasks, services and account changes among them first, then those nearest the flags.`,
+    hosts: (cap: number) =>
+      `The logons, processes and services on the flagged hosts passed ${fmtNum(cap)}: the stories read the tasks, services and account changes among them first, then those nearest the flags.`,
+    context: (cap: number, people: number, addresses: number, hosts: number) => {
+      const left = [
+        people ? `${fmtNum(people)} naming the flagged people` : '',
+        addresses ? `${fmtNum(addresses)} from the flagged addresses` : '',
+        hosts ? `${fmtNum(hosts)} on the flagged hosts` : '',
+      ].filter(Boolean)
+      return `The records around the flags passed ${fmtNum(cap)}, which a browser case reads under one cap for the flagged people, addresses and hosts together: the stories read the tasks, services and account changes among them first, then those nearest the flags${left.length ? ` and left out ${left.join(', ')}` : ''}.`
+    },
+    flaggedMails: (cap: number, left: number) => `More than ${fmtNum(cap)} mails carry findings: the stories read the first ${fmtNum(cap)}${left ? ` and left ${fmtNum(left)} out` : ''}.`,
+    seeds: (left: number, cap: number, risk: number) => `${left ? fmtNum(left + cap) : `More than ${cap}`} mails score a risk of ${risk} or more: the stories read the ${cap} riskiest.`,
+    undated: (k: number) => `${k ? fmtNum(k) : 'Some'} flagged or high-risk mail(s) carry no date: no story can place them, so none reads them.`,
+    windows: (k: number, most: number) =>
+      `The flags fall in ${k ? fmtNum(k) : `more than ${most}`} separate periods: the stories read one period from the first flag to the last instead, where the caps are reached sooner.`,
+    replies: (cap: number) => `Only ${fmtNum(cap)} of the mails the flagged people sent were read, those nearest the flags.`,
+    dns: (cap: number) => `The DNS answers on the flagged hosts passed ${fmtNum(cap)}: the addresses they give to hosts come from those nearest the flags.`,
+    dhcp: (cap: number) => `The DHCP leases passed ${fmtNum(cap)}: the addresses they give to hosts come from the first ones.`,
+    dc: (cap: number) =>
+      `The domain controllers' Kerberos and NTLM records of the flagged people, hosts and addresses passed ${fmtNum(cap)}: the stories read those naming a flagged account or host first, then those nearest the flags, so a hop may miss the ticket that names its source.`,
+    nameKeys: 'The flagged records name more than 2,000 accounts: the stories read the records of the 2,000 they name most.',
+    hostKeys: 'More than 500 hosts carry flags: the stories read the logons, processes and services of the 500 with the most.',
+    addressKeys: 'The flags name more than 500 outside addresses: the stories read the records from the 500 they name most.',
+    trimmed: (mib: number, k: number, to: number) =>
+      `The rows of the build passed ${mib} MiB, more than the server takes in one request: the long text of ${fmtNum(k)} record(s) (command lines, script blocks, summaries) was cut to ${fmtNum(to)} characters.`,
+    size: (mib: number, k: number) => `The rows of the build passed ${mib} MiB even so: ${fmtNum(k)} of them were left out, the records around the flags first.`,
+    accounts: (cap: number) => `The case writes its accounts in more than ${fmtNum(cap)} ways: who is who reads the most frequent ones and those of the records the stories read.`,
+    identityRows:
+      'Who is who was read from the records this build read, not the whole case: a bare account name is joined to the only account of that name among them, though the case may hold another.',
+    storiesTruncated: 'Only the highest-scoring 200 stories are kept: the flags of the others are listed with those in no story.',
+    noWayIn: 'No record of the story shows how it started: initial access is not in the evidence it reads.',
+  },
+
+  /** why a story build no longer reads the case as it is (data/stories.ts storiesStaleness) */
+  storyStale: {
+    unknown: 'they were built before REMN kept what a build reads, so they may not match the findings',
+    findings: 'the findings changed since they were built (a rule run, a false positive or a severity set by hand)',
+    evidence: 'the evidence changed since they were built',
+    settings: "the case's settings changed since they were built",
+  },
+
+  /** what a chain build could not read (data/chains.ts chainCoverageWarnings), by the stat that says so */
+  chainCut: {
+    eventsTruncated: 'Mail correlation: only the first 50,000 matching events were considered.',
+    authEventsTruncated: 'Authentication campaigns: only the first 50,000 authentication events were considered.',
+    seedsTruncated: 'Mail seed selection reached its limit (300 seeds or 500 finding references).',
+    repliesTruncated: 'Only the first 5,000 matching replies were considered.',
+    chainsTruncated: 'Only the highest-scoring chains are displayed.',
+  } as Record<string, string>,
+
+  /** what an investigation package did not read or account for (data/packageCoverage.ts) */
+  packageIssue: {
+    errors: (k: number) => `${k} failed members`,
+    unsupported: (k: number) => `${k} unsupported members`,
+    skipped: (k: number) => `${k} skipped members`,
+    inventory: 'incomplete member inventory',
+    discrepancies: (k: number) => `${k} collection summary discrepancies or unresolved entries`,
+  },
+
+  /** what the rules were measured on (data/ruleMeasures.ts measuredOn) */
+  measuredOn: {
+    sigma: (k: number) => `${fmtNum(k)} SigmaHQ regression samples`,
+    attackSamples: (k: number) => `${fmtNum(k)} EVTX-ATTACK-SAMPLES recordings`,
+    attackData: (k: number) => `${fmtNum(k)} Microsoft 365 and Entra ID datasets of Splunk attack_data`,
+    attackDataWindows: (k: number) => `${fmtNum(k)} Windows event-log datasets of Splunk attack_data`,
+    evtxToMitre: (k: number) => `${fmtNum(k)} EVTX-to-MITRE-Attack recordings`,
+    sentence: (on: string, recorded: string[], clean: { machines: number; tag: string; events: number } | null) =>
+      `Measured on ${on}${recorded.length ? ` on ${enList(recorded, 'and')}` : ''}${clean ? `, and on the logs of ${fmtNum(clean.machines)} clean Windows machines of evtx-baseline ${clean.tag} (${fmtNum(clean.events)} events)` : ''}.`,
+  },
 }
 
 export type ReportText = typeof en
@@ -555,6 +816,194 @@ const frBytes = (b: number | null | undefined) => {
 }
 const FR_SEV: Record<string, string> = { critical: 'critique', high: 'haute', medium: 'moyenne', low: 'basse', info: 'info' }
 const frSev = (sev: string) => FR_SEV[sev] ?? sev
+/** a date the analyst entered (yyyy-mm-dd) as French writes it; anything else is printed as written */
+const frDay = (iso: string) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso.trim())
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : iso
+}
+/** a list the way French writes it: a, b et c */
+const frList = (xs: string[], join: string) => (xs.length <= 2 ? xs.join(` ${join} `) : `${xs.slice(0, -1).join(', ')} ${join} ${xs[xs.length - 1]}`)
+const frDur = (ms: number) => {
+  if (!Number.isFinite(ms)) return ''
+  const sec = Math.round(ms / 1000)
+  if (sec < 60) return `${sec} s`
+  const m = Math.floor(sec / 60)
+  if (m < 60) return `${m} min ${sec % 60} s`
+  const h = Math.floor(m / 60)
+  if (h < 48) return `${h} h ${m % 60} min`
+  return `${Math.floor(h / 24)} j ${h % 24} h`
+}
+const FR_CLOUD: Record<string, string> = {
+  ual: "enregistrement d'audit",
+  entra: 'connexion',
+  'entra-audit': "audit de l'annuaire",
+  'entra-risk': 'détection de risque',
+  'entra-riskyuser': 'utilisateur à risque',
+  'exo-trace': 'suivi de message',
+}
+const frRecord = (at: RecordPlace): string => {
+  switch (at.kind) {
+    case 'message':
+      return `message ${frNum(at.n)}`
+    case 'message-id':
+      return `Message-ID ${at.id}`
+    case 'cloud':
+      return `${FR_CLOUD[at.what] ?? 'enregistrement'} ${at.id}`
+    case 'record':
+      return `enregistrement ${frNum(at.n)}${at.channel && at.computer ? ` (${at.channel} sur ${at.computer})` : ''}`
+    default:
+      return `ligne ${typeof at.n === 'number' ? frNum(at.n) : at.n}`
+  }
+}
+const frWhere = (w: GapWhere) =>
+  w.channel && w.computer
+    ? `${w.channel} sur ${w.computer} (${w.file})`
+    : w.channels != null || w.computers != null
+      ? `${w.file} (${frNum(w.channels ?? 1)} ${p(w.channels ?? 1, 'canal', 'canaux')} de ${frNum(w.computers ?? 1)} ${p(w.computers ?? 1, 'ordinateur', 'ordinateurs')})`
+      : w.file
+const FR_CAPS: Record<ExportSource, { records: string; limits: Record<number, string>; missing: string }> = {
+  ual: {
+    records: "enregistrements du journal d'audit unifié",
+    limits: { 5000: 'le maximum que renvoie un appel à Search-UnifiedAuditLog', 50000: 'le maximum que renvoie une recherche en grand volume' },
+    missing: 'Les enregistrements',
+  },
+  'message-trace': {
+    records: 'lignes de suivi des messages',
+    limits: { 1000: 'le nombre que Get-MessageTrace et Get-MessageTraceV2 renvoient par défaut', 5000: 'le maximum que renvoie Get-MessageTraceV2' },
+    missing: 'Les messages',
+  },
+  'entra-audit': { records: "enregistrements d'audit de l'annuaire", limits: { 250000: "le maximum que le centre d'administration Entra télécharge en un fichier" }, missing: 'Les enregistrements' },
+}
+const frGap = (g: GapSay): string => {
+  switch (g.kind) {
+    case 'record-holes': {
+      const floor = g.floor ? 'au moins ' : ''
+      const [a, b] = g.largest
+      return (
+        `${frWhere(g.where)} : ${floor}${frNum(g.missing)} ${p(g.missing, 'enregistrement manque', 'enregistrements manquent')} dans sa numérotation, en ${floor}${frNum(g.gaps)} ${p(g.gaps, 'trou', 'trous')} ` +
+        `entre l'enregistrement ${frNum(g.first)} et l'enregistrement ${frNum(g.last)} (le plus grand : ${frNum(a)}${b > a ? `–${frNum(b)}` : ''}). ` +
+        "Des enregistrements ont été supprimés du journal, ou se trouvent dans une partie qui n'a pas pu être lue."
+      )
+    }
+    case 'checksum-data':
+      return `${g.file} : ${frNum(g.bad)} ${p(g.bad, 'bloc', 'blocs')} sur ${frNum(g.chunks)} ${p(g.bad, 'échoue', 'échouent')} au contrôle de somme. Leurs enregistrements ont été modifiés après leur écriture par Windows, ou endommagés ; ils ont été lus malgré tout.`
+    case 'checksum-header':
+      return `${g.file} : ${[g.headers ? `${frNum(g.headers)} ${p(g.headers, 'en-tête de bloc', 'en-têtes de bloc')}` : '', g.fileHeader ? "l'en-tête du fichier" : ''].filter(Boolean).join(' et ')} ${g.headers + (g.fileHeader ? 1 : 0) > 1 ? 'échouent' : 'échoue'} au contrôle de somme : la structure du fichier a été modifiée après son écriture.`
+    case 'clock-logs':
+      return `Sur ${g.computer}, ${frNum(g.logs)} journaux reculent ensemble à ${frTs(g.from)}, de ${frDur(g.from - g.to)} au plus : son horloge a été retardée, et aucun journal collecté n'enregistre ce changement. Les événements horodatés entre ${frTs(g.to)} et ${frTs(g.from)} peuvent s'être produits avant ou après, leurs heures n'en donnent donc pas l'ordre.`
+    case 'clock-set':
+      return `L'horloge de ${g.computer} a été retardée de ${frDur(g.from - g.to)} à ${frTs(g.from)}, pour indiquer ${frTs(g.to)} : les événements horodatés entre ces deux heures peuvent s'être produits avant ou après le changement, leurs heures n'en donnent donc pas l'ordre.`
+    case 'time-backwards':
+      return (
+        `${frWhere(g.where)} : les heures d'écriture reculent ${frNum(g.steps)} fois entre des enregistrements consécutifs, sans changement d'horloge ni démarrage du service de journalisation dans les éléments de preuve pour ${g.steps === 1 ? "l'expliquer" : 'les expliquer'} ` +
+        `(le plus grand recul : ${frDur(g.largest)}, à l'enregistrement ${frNum(g.record)}${g.unread ? ` ; ${frNum(g.unread)} autres reculs n'ont pas été examinés` : ''}). ` +
+        "Un enregistrement a été inséré après coup, ou l'horloge a changé sans qu'un journal collecté ne l'enregistre (System et Security enregistrent les changements d'horloge)."
+      )
+    case 'missing-between-files':
+      return `${g.channel} sur ${g.computer} : ${g.from === g.to ? `l'enregistrement ${frNum(g.from)} ne figure` : `les enregistrements ${frNum(g.from)}–${frNum(g.to)} ne figurent`} dans aucun des fichiers lus (${g.before} s'arrête à l'enregistrement ${frNum(g.beforeLast)}, ${g.after} commence à l'enregistrement ${frNum(g.afterFirst)}) : une archive ou un export manque.`
+    case 'log-starts-late':
+      return `Sur ${g.computer}, ${g.count === 1 ? 'un journal commence' : `${frNum(g.count)} journaux commencent`} après la première détection (${frTs(g.start)}) : ${g.logs.map(([channel, ts]) => `${channel} à ${frTs(ts)}`).join(', ')}${g.count > g.logs.length ? ` et ${frNum(g.count - g.logs.length)} de plus` : ''}. Les événements antérieurs y ont été écrasés ou n'ont pas été collectés.`
+    case 'export-cap': {
+      const cap = FR_CAPS[g.source]
+      return `${g.file} : exactement ${frNum(g.records)} ${cap.records}, ${cap.limits[g.records] ?? ''}. ${cap.missing} postérieurs à ce point de sa période manquent probablement.`
+    }
+    case 'xml-export':
+      return (
+        `${g.file} : ${frNum(g.records)} ${g.records < 2 ? "enregistrement d'événement exporté" : "enregistrements d'événements exportés"} en XML. Un export contient ce que sa requête a sélectionné, sans la numérotation propre du fichier journal : ` +
+        "un enregistrement supprimé du journal avant l'export ne se distingue pas d'un enregistrement que l'export a laissé de côté ; le fichier journal lui-même (wevtutil epl) permet de le vérifier."
+      )
+    case 'parse-limit':
+      return `${g.file} : lu jusqu'à la limite d'analyse et pas au-delà (${frNum(g.kept)} ${p(g.kept, 'ligne conservée', 'lignes conservées')}). Les enregistrements situés après ce point du fichier ne sont pas dans le dossier.`
+    case 'read-in-part':
+      return `${g.file} : lu en partie (${g.note}). Ce que le fichier contient après ce point n'est pas dans le dossier.`
+    case 'mail-throttled':
+      return `MailItemsAccessed a été limité pour ${g.user} à partir de ${frTs(g.from)} : pendant les 24 heures suivantes, les lectures d'éléments de la boîte n'ont pas été enregistrées une à une, la liste des messages lus pendant cette période ne peut donc pas être établie.`
+    case 'signins-start-late':
+      return `Les connexions Entra commencent à ${frTs(g.first)}, après la première détection (${frTs(g.start)}) : les connexions antérieures ne sont pas dans les éléments de preuve. Entra les conserve 7 jours sans licence P1 ou P2, 30 jours avec.`
+  }
+}
+const frClaim = (w: ClaimWhy): string => {
+  switch (w.kind) {
+    case 'no-rows':
+      return 'aucune ligne citée'
+    case 'rows-missing':
+      return `${frNum(w.missing)} des ${frNum(w.checked)} ${p(w.checked, 'ligne citée', 'lignes citées')} ${w.missing < 2 ? "n'est plus" : 'ne sont plus'} dans le dossier : ${p(w.missing, 'supprimée, ou renumérotée', 'supprimées, ou renumérotées')} quand des éléments de preuve ont été ajoutés à nouveau`
+    case 'no-match':
+      return `${w.records.map((r) => `${r.file} ${frRecord(r.at)}`).join(' et ')}${w.more ? ` et ${frNum(w.more)} de plus` : ''} ${w.records.length + w.more === 1 ? 'ne correspond plus' : 'ne correspondent plus'} à la règle`
+    case 'value-absent':
+      return `elle indique ${w.field} ${w.values.join(', ')}, qu'aucune de ses lignes ne contient`
+    case 'time':
+      return `son heure, ${frTs(w.ts)}, n'est pas celle de sa première ligne (${frTs(w.first)})`
+    case 'text-absent':
+      return `${w.values.join(', ')}${w.more ? ` et ${frNum(w.more)} de plus` : ''} ${w.values.length + w.more === 1 ? "n'apparaît" : "n'apparaissent"} dans aucune de ses ${frNum(w.rows)} ${p(w.rows, 'ligne', 'lignes')}`
+    case 'text-absent-case':
+      return `${w.values.join(', ')}${w.more ? ` et ${frNum(w.more)} de plus` : ''} ${w.values.length + w.more === 1 ? "n'apparaît" : "n'apparaissent"} dans aucune ligne des éléments de preuve`
+  }
+}
+/** REMN's own scenarios, facets and questions (tools/dfiq_remn.yaml), as the French report writes them */
+const FR_CATALOG: Record<string, string> = {
+  S0001: "Durée de présence (première et dernière activité de l'attaquant)",
+  S0002: 'Exposition à une compromission de messagerie (BEC)',
+  F0001: "Quand l'attaquant est-il entré pour la première fois ?",
+  F0002: "Quand l'attaquant a-t-il été actif pour la dernière fois, et est-ce terminé ?",
+  F0003: 'Que manque-t-il aux éléments de preuve entre la première et la dernière activité ?',
+  F0004: "Le compte a-t-il été pris en main par l'attaquant ?",
+  F0005: "L'attaquant a-t-il laissé quelque chose dans la boîte aux lettres ou le tenant ?",
+  F0006: "Qu'est-ce que l'attaquant a lu ou emporté ?",
+  F0007: "L'attaquant a-t-il envoyé des messages depuis le compte ou atteint d'autres personnes ?",
+  Q0001: "Quelle est la première activité liée à l'attaquant ?",
+  Q0002: "Comment l'attaquant est-il entré (hameçonnage, compte valide, service exposé) ?",
+  Q0003: "Les journaux remontent-ils avant la première activité de l'attaquant ?",
+  Q0004: "Quelle est la dernière activité liée à l'attaquant ?",
+  Q0005: "Les comptes de l'attaquant ont-ils été désactivés ou leurs mots de passe réinitialisés, et l'activité s'est-elle arrêtée ensuite ?",
+  Q0006: "Existe-t-il une persistance qui survivrait à l'endiguement ?",
+  Q0007: "Quels hôtes et quels comptes l'attaquant a-t-il touchés ?",
+  Q0008: "Les journaux présentent-ils des trous pendant la période de l'attaque ?",
+  Q0009: 'Y a-t-il eu des connexions réussies depuis des pays, des adresses ou des clients inattendus ?',
+  Q0010: "L'authentification multifacteur a-t-elle été contournée ou modifiée, ou une nouvelle méthode d'authentification enregistrée ?",
+  Q0011: 'Le compte a-t-il été visé par une pulvérisation de mots de passe ou une attaque par force brute ?',
+  Q0012: 'Des règles de boîte de réception ont-elles été créées ou modifiées pour transférer, masquer ou supprimer des messages ?',
+  Q0013: "Des messages ont-ils été transférés hors de l'organisation (transfert de boîte aux lettres, règles de transport) ?",
+  Q0014: 'Des applications ont-elles reçu un consentement, des identifiants ont-ils été ajoutés à une application ou un accès délégué accordé ?',
+  Q0015: "À quels éléments de messagerie l'attaquant a-t-il accédé ?",
+  Q0016: 'Des boîtes aux lettres ont-elles été fouillées ou exportées ?',
+  Q0017: 'Des fichiers ont-ils été téléchargés depuis SharePoint ou OneDrive ?',
+  Q0018: "L'attaquant a-t-il envoyé des messages depuis le compte ?",
+  Q0019: "Des changements de coordonnées de paiement ou bancaires ont-ils été demandés, dans un sens ou dans l'autre ?",
+  Q0020: "La même campagne a-t-elle atteint d'autres personnes de l'organisation ?",
+}
+/** the kinds of evidence a question lists (tools/dfiq_remn.yaml evidence), with the article French puts before them */
+const FR_EVIDENCE: Record<string, string> = {
+  security: 'le journal Security',
+  system: 'le journal System',
+  application: 'le journal Application',
+  sysmon: 'le journal Sysmon',
+  powershell: "les journaux ou l'historique PowerShell",
+  'task-scheduler': 'le journal du Planificateur de tâches',
+  defender: 'le journal de Defender',
+  print: "le journal du service d'impression",
+  'dns-client': 'le journal du client DNS',
+  rdp: 'les journaux du Bureau à distance',
+  smb: 'les journaux ou sessions SMB',
+  'm365-audit': "le journal d'audit unifié",
+  'm365-exchange': "les enregistrements d'audit Exchange",
+  'm365-files': "les enregistrements d'audit SharePoint et OneDrive",
+  'm365-directory': "les enregistrements d'audit de l'annuaire Entra",
+  'entra-signin': 'les journaux de connexion Entra',
+  'entra-risk': "les détections de risque et utilisateurs à risque d'Entra ID Protection",
+  'message-trace': "le suivi des messages d'Exchange Online",
+  mail: 'les boîtes aux lettres',
+  browser: "l'historique de navigation",
+  files: 'les enregistrements du système de fichiers (MFT, USN, LNK, listes de raccourcis)',
+  execution: "les artefacts d'exécution (Prefetch, Amcache, ShimCache, BAM, UserAssist)",
+  processes: 'la liste des processus',
+  programs: 'les programmes installés',
+  autoruns: 'les autoruns et le registre',
+  services: 'la liste des services',
+  tasks: 'la liste des tâches planifiées',
+  accounts: 'la liste des utilisateurs et des groupes',
+  network: 'les connexions réseau et SRUM',
+}
 
 const fr: ReportText = {
   lang: 'fr',
@@ -562,14 +1011,19 @@ const fr: ReportText = {
   num: frNum,
   ts: frTs,
   bytes: frBytes,
-  day: (iso: string) => {
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso.trim())
-    return m ? `${m[3]}/${m[2]}/${m[1]}` : iso
-  },
+  day: frDay,
   to: 'au',
   andMore: (k: number) => `et ${frNum(k)} de plus`,
   plusMore: (k: number) => `+${frNum(k)} de plus`,
   noEventTime: "pas d'horodatage",
+  dur: frDur,
+  record: frRecord,
+  gap: frGap,
+  claim: {
+    reason: frClaim,
+    about: (a: TextAbout): string =>
+      a.kind === 'chain' ? `le récit de la chaîne « ${a.title} »` : a.kind === 'incident' ? `les notes sur « ${a.title} »` : a.kind === 'story' ? `la note sur le récit « ${a.title} »` : 'la synthèse',
+  },
 
   sev: FR_SEV,
   status: { new: 'non examiné', reviewed: 'examiné', escalated: 'confirmé', false_positive: 'faux positif' },
@@ -611,6 +1065,21 @@ const fr: ReportText = {
     exfil: 'Exfiltration',
     impact: 'Impact',
     unwanted: 'Logiciel indésirable',
+  },
+  tacticCode: {
+    'initial-access': 'AI',
+    execution: 'EX',
+    persistence: 'PE',
+    privilege: 'EP',
+    'defense-evasion': 'CD',
+    credential: 'ID',
+    discovery: 'DC',
+    lateral: 'ML',
+    collection: 'CO',
+    c2: 'C2',
+    exfil: 'EF',
+    impact: 'IM',
+    unwanted: 'LI',
   },
   transport: {
     browser: "Ollama sur le poste de l'analyste",
@@ -734,6 +1203,7 @@ const fr: ReportText = {
     ledgerIntact: (entries: number) => `registre : ${frNum(entries)} ${p(entries, 'entrée', 'entrées')}, chaîne intacte, tête`,
     ledgerBroken: (entries: number, at: number) => `registre : ${frNum(entries)} ${p(entries, 'entrée', 'entrées')}, chaîne rompue à l'entrée ${frNum(at)}`,
     ledgerBrokenWhy: ' : une entrée a été modifiée ou supprimée après son écriture',
+    kind: { decision: 'décision', note: 'note', row_mark: 'marque de ligne', rule: 'règle', summary: 'synthèse' },
     ledgerScope:
       "La chaîne révèle une entrée modifiée après son écriture, une entrée supprimée parmi des entrées plus récentes et un trou dans la numérotation. Elle ne révèle ni la suppression des entrées les plus récentes, ni une chaîne réécrite, à partir de n'importe quelle entrée, par quiconque détient le dossier : aucune clé ne la protège, et elle est conservée dans la base de données du navigateur et dans l'export du dossier. La tête est imprimée en entier : une copie ultérieure du dossier dont le registre contient encore une entrée portant cette empreinte a toutes ses entrées jusqu'à celle-ci telles qu'elles étaient à l'établissement de ce rapport.",
   },
@@ -743,8 +1213,9 @@ const fr: ReportText = {
     campaignKey: ['personne, colorée selon la chaîne', 'expéditeur ou domaine partagé', 'machine ou IP partagée', 'dans une seule chaîne'],
     scoreParts: { seed: 'amorce', links: 'liens', steps: 'étapes', findings: 'détections', sources: 'sources', score: 'score' },
     score: (score: number, cap?: number | null) => `score ${score}${cap ? ` (plafonné à ${cap})` : ''}`,
-    narrativeByAi: 'récit rédigé par le modèle pendant le tri',
-    narrativeByAiDocx: "Récit rédigé par le modèle d'analyse.",
+    // the model's words are quoted as it wrote them, in whatever language that was: the mark says so
+    narrativeByAi: "récit rédigé par le modèle pendant le tri, cité tel qu'il l'a écrit, sans traduction",
+    narrativeByAiDocx: "Récit rédigé par le modèle d'analyse, cité tel qu'il l'a écrit, sans traduction.",
     seed: (kind: 'event' | 'mail', subject: string, from: string, at: string, risk: number) =>
       `Amorce : ${kind === 'event' ? 'événement' : 'message'} « ${subject} » de ${from} le ${at} (risque ${risk})`,
     steps: (k: number, from: string, to: string) => `${k} ${p(k, 'étape', 'étapes')} du ${from} au ${to}`,
@@ -759,20 +1230,22 @@ const fr: ReportText = {
     left: (k: number) => `${k} ${p(k, "ligne d'étape non imprimée", "lignes d'étapes non imprimées")} (la liste complète est dans la chaîne, dans REMN)`,
     hidden: (k: number, detail: string) => `${k} ${p(k, 'étape routinière non imprimée', 'étapes routinières non imprimées')} au niveau de détail « ${detail} »`,
     members: (k: number) => `${k} ${p(k, 'détection liée', 'détections liées')} à cette chaîne, ${p(k, 'décidée', 'décidées')} avec elle`,
-    triage: (reason: string) => `Note de tri (modèle) : ${reason}`,
+    triage: (reason: string) => `Note de tri (modèle, citée telle qu'il l'a écrite) : ${reason}`,
     fallbackTitle: 'chaîne',
     verdict: (v: string) => `verdict ${v}`,
     noVerdict: 'sans verdict',
     stepCount: (k: number) => `${frNum(k)} ${p(k, 'étape', 'étapes')}`,
     intro:
-      "Une chaîne part d'un message suspect et suit ce que les comptes et les machines du destinataire ont fait ensuite ; son score tient compte de l'amorce, des liens avec le message, des étapes, des détections et des sources en jeu. Les faits, dans l'ordre. Les détections dont les lignes sont des étapes d'une chaîne sont décidées avec elle.",
+      "Une chaîne part d'un message suspect et suit ce que les comptes et les machines du destinataire ont fait ensuite ; son score tient compte de l'amorce, des liens avec le message, des étapes, des détections et des sources en jeu. Les faits, dans l'ordre. Les détections dont les lignes sont des étapes d'une chaîne sont décidées avec elle. Les intitulés des étapes et le résumé automatique sont écrits en anglais par l'analyse des chaînes.",
     introDocx:
-      "Une chaîne part d'un message suspect et suit ce que les comptes et les machines du destinataire ont fait ensuite ; son score tient compte de l'amorce, des liens avec le message, des étapes, des détections et des sources en jeu. Les détections dont les lignes sont des étapes d'une chaîne sont décidées avec elle.",
+      "Une chaîne part d'un message suspect et suit ce que les comptes et les machines du destinataire ont fait ensuite ; son score tient compte de l'amorce, des liens avec le message, des étapes, des détections et des sources en jeu. Les détections dont les lignes sont des étapes d'une chaîne sont décidées avec elle. Les intitulés des étapes et le résumé automatique sont écrits en anglais par l'analyse des chaînes.",
     shared: 'Éléments partagés entre chaînes',
     campaignAlt: 'graphe de campagne',
     campaignCaption: 'Les personnes au centre, les expéditeurs et domaines qui les ont atteintes à gauche, les machines et IP touchées à droite.',
     nothingShared: "aucun expéditeur, domaine, IP ou hôte n'est partagé entre les chaînes",
     graphsInHtml: 'Les graphes des chaînes figurent dans le rapport HTML.',
+    appears: (what: string, label: string, chains: number) => `${what} ${label} : présent dans ${chains} chaînes`,
+    node: { sender: 'expéditeur', 'attacker address': "adresse de l'attaquant", 'link domain': 'domaine de lien', ip: 'IP', host: 'hôte' },
   },
 
   story: {
@@ -807,7 +1280,7 @@ const fr: ReportText = {
       `${frNum(k)} autre${p(k, '', 's')} de ses récits ${p(k, "n'est pas imprimé", 'ne sont pas imprimés')} : sous le seuil de gravité, sans note, ou au-delà des vingt premiers.`,
     cut: (k: number) => `${frNum(k)} ${p(k, 'autre récit lié en est écarté', 'autres récits liés en sont écartés')} : un incident compte au plus vingt récits.`,
     intro:
-      "Un récit décrit ce qui est arrivé à une personne, ou sur un hôte, au cours d'un incident : les enregistrements autour de ce qui a déclenché une alerte, lus selon les tactiques ATT&CK dans l'ordre où ils se sont produits, chacun rattaché au récit par son compte, sa session, son accès à l'hôte ou le processus qui l'a lancé. La décision de l'analyste y figure : un récit confirmé compte dans le verdict comme un incident confirmé, un récit jugé bénin ou faux positif n'est pas imprimé, et une étape contestée par l'analyste est exclue des phases et de la gravité du récit et listée sous celui-ci. Chacun indique où s'arrêtent ses preuves.",
+      "Un récit décrit ce qui est arrivé à une personne, ou sur un hôte, au cours d'un incident : les enregistrements autour de ce qui a déclenché une alerte, lus selon les tactiques ATT&CK dans l'ordre où ils se sont produits, chacun rattaché au récit par son compte, sa session, son accès à l'hôte ou le processus qui l'a lancé. La décision de l'analyste y figure : un récit confirmé compte dans le verdict comme un incident confirmé, un récit jugé bénin ou faux positif n'est pas imprimé, et une étape contestée par l'analyste est exclue des phases et de la gravité du récit et listée sous celui-ci. Chacun indique où s'arrêtent ses preuves. Les intitulés des étapes, ce qui les rattache au récit, ce qui marque chaque phase, la trame et le résumé automatique sont écrits en anglais par l'analyse des récits.",
     stale: (why: string) => `Périmés : ${why}. Ces récits reflètent le dossier tel qu'il était : reconstruisez-les sur la page Stories avant de vous y fier.`,
     cutBuild: (why: string) => `Incomplets : ${why} Une étape ou un récit absent n'est pas un résultat négatif.`,
     orphanedNotes: (k: number) =>
@@ -833,6 +1306,7 @@ const fr: ReportText = {
     ruleHeadDocx: ['gravité', 'règle', 'détections · lignes', 'quand (UTC)', 'statut', 'ATT&CK', 'valeurs relevées'],
     ruleSeverity: (sev: string) => `règle : ${frSev(sev)}`,
     by: (author: string) => `auteur : ${author}`,
+    noAuthor: 'auteur non transmis par Hayabusa',
     authors: "Les règles Sigma sont l'œuvre des auteurs cités à côté d'elles, publiées par SigmaHQ sous la Detection Rule License 1.1.",
     intro:
       'Chaque détection imprimée, une ligne par règle : combien de détections et de lignes, quand, et les valeurs relevées. Les incidents ci-dessus présentent les mêmes détections dans leur contexte.',
@@ -840,9 +1314,24 @@ const fr: ReportText = {
   },
 
   incident: {
+    subtitle: (a: IncidentAbout): string => {
+      const found = (k: number, rules: number) => `${k} ${p(k, 'détection', 'détections')} de ${rules} ${p(rules, 'règle', 'règles')}`
+      switch (a.kind) {
+        case 'chain':
+          return `score ${a.score} · ${a.steps} ${p(a.steps, 'étape', 'étapes')} · ${a.linked} ${p(a.linked, 'détection liée', 'détections liées')}`
+        case 'mail':
+          return `${a.from ? `de ${a.from} · ` : ''}${found(a.findings, a.rules)}`
+        case 'entity':
+          return `${a.lead} · ${found(a.findings, a.rules)}${a.seenAs.length ? ` · aussi vu comme ${a.seenAs.join(', ')}` : ''}`
+        case 'group':
+          return a.entities.map(([k, v]) => `${k}=${v}`).join(' · ') || `${a.rows} ${p(a.rows, 'ligne', 'lignes')}`
+        default:
+          return found(a.findings, a.rules)
+      }
+    },
     rows: (k: number) => `${frNum(k)} ${p(k, 'ligne', 'lignes')}`,
-    noteByAi: 'note rédigée par le modèle pendant le tri',
-    noteByAiDocx: 'Note rédigée par le modèle pendant le tri.',
+    noteByAi: "note rédigée par le modèle pendant le tri, citée telle qu'il l'a écrite, sans traduction",
+    noteByAiDocx: "Note rédigée par le modèle pendant le tri, citée telle qu'il l'a écrite, sans traduction.",
     intro:
       "Les détections portant sur un même message, ou sur un même utilisateur, hôte ou IP à moins de six heures d'intervalle, forment un incident. Chaque tableau regroupe les détections de l'incident par règle : une ligne par règle, avec le nombre, la période et les valeurs relevées.",
     introDocx:
@@ -863,8 +1352,8 @@ const fr: ReportText = {
   },
 
   summary: {
-    byAi: "rédigé par le modèle d'analyse à partir des éléments examinés ; les décisions sur lesquelles il s'appuie sont celles de l'analyste",
-    byAiDocx: "Rédigé par le modèle d'analyse à partir des éléments examinés ; les décisions sur lesquelles il s'appuie sont celles de l'analyste.",
+    byAi: "rédigé par le modèle d'analyse à partir des éléments examinés et cité tel qu'il l'a écrit, sans traduction ; les décisions sur lesquelles il s'appuie sont celles de l'analyste",
+    byAiDocx: "Rédigé par le modèle d'analyse à partir des éléments examinés et cité tel qu'il l'a écrit, sans traduction ; les décisions sur lesquelles il s'appuie sont celles de l'analyste.",
     stale: 'rédigé avant la dernière modification des détections : les chiffres et identifiants cités peuvent décrire un état antérieur du dossier',
     staleDocx: 'Rédigé avant la dernière modification des détections : les chiffres et identifiants cités peuvent décrire un état antérieur du dossier.',
   },
@@ -921,12 +1410,23 @@ const fr: ReportText = {
   },
 
   question: {
+    catalog: FR_CATALOG,
+    evidenceKind: FR_EVIDENCE,
+    coverage: (held: { label: string; count: number }[], missing: string[]) =>
+      held.length
+        ? `couvert par ${frList(
+            held.map((x) => `${x.label} (${frNum(x.count)} ${p(x.count, 'ligne', 'lignes')})`),
+            'et',
+          )}`
+        : missing.length === 1
+          ? `non couvert : ce dossier ne contient pas ${missing[0]}`
+          : `non couvert : ce dossier ne contient ni ${missing.join(' ni ')}`,
     finding: 'détection',
     noCitation: 'aucun enregistrement cité',
     unanswered: 'sans réponse',
     evidence: (coverage: string) => `Preuves : ${coverage}`,
     intro: (answered: number, cannot: number, open: number, uncovered: number) =>
-      `Les questions auxquelles l'investigation devait répondre, issues des scénarios choisis pour le dossier (DFIQ, dfiq.org, et ceux de REMN, dont les identifiants commencent par 0). Chacune porte la réponse de l'analyste et les enregistrements ou détections sur lesquels elle repose. ${frNum(answered)} ${p(answered, 'répondue', 'répondues')}, ${frNum(cannot)} sans réponse possible avec ces preuves, ${frNum(open)} encore ${p(open, 'ouverte', 'ouvertes')}${uncovered ? `, dont ${frNum(uncovered)} pour lesquelles aucune preuve du dossier ne permet de répondre` : ''}.`,
+      `Les questions auxquelles l'investigation devait répondre, issues des scénarios choisis pour le dossier (DFIQ, dfiq.org, et ceux de REMN, dont les identifiants commencent par 0). Les questions de DFIQ sont citées en anglais, telles que DFIQ les publie ; celles de REMN sont traduites. Chacune porte la réponse de l'analyste et les enregistrements ou détections sur lesquels elle repose. ${frNum(answered)} ${p(answered, 'répondue', 'répondues')}, ${frNum(cannot)} sans réponse possible avec ces preuves, ${frNum(open)} encore ${p(open, 'ouverte', 'ouvertes')}${uncovered ? `, dont ${frNum(uncovered)} pour lesquelles aucune preuve du dossier ne permet de répondre` : ''}.`,
   },
 
   client: {
@@ -1065,6 +1565,85 @@ const fr: ReportText = {
     unsupported: (k: number) => `${k} ${p(k, 'détection dont les lignes ne sont', 'détections dont les lignes ne sont')} pas toutes dans le dossier`,
     textsUnsupported: (k: number) => `${k} ${p(k, 'texte citant', 'textes citant')} des valeurs absentes de leurs lignes`,
     claimsOk: (k: number, texts: number) => `${k} ${p(k, 'détection', 'détections')} et ${texts} ${p(texts, 'texte', 'textes')} relus par rapport à leurs lignes`,
+  },
+
+  storyCut: {
+    flagged: (cap: number, left: number) =>
+      `Plus de ${frNum(cap)} enregistrements portent des détections : les récits lisent les ${frNum(cap)} premiers${left ? ` et en écartent ${frNum(left)}` : ''}.`,
+    refs: (k: number, cap: number) =>
+      `${k ? `${frNum(k)} ${p(k, 'détection cite', 'détections citent')}` : 'Des détections citent'} plus de ${frNum(cap)} enregistrements : les récits lisent les ${frNum(cap)} premiers de chacune.`,
+    identities: (cap: number) =>
+      `Les enregistrements qui nomment les personnes signalées dépassent ${frNum(cap)} : les récits lisent d'abord les tâches, services et modifications de comptes parmi eux, puis les plus proches des alertes.`,
+    addresses: (cap: number) =>
+      `Les enregistrements venant des adresses signalées dépassent ${frNum(cap)} : les récits lisent d'abord les tâches, services et modifications de comptes parmi eux, puis les plus proches des alertes.`,
+    hosts: (cap: number) =>
+      `Les ouvertures de session, processus et services des hôtes signalés dépassent ${frNum(cap)} : les récits lisent d'abord les tâches, services et modifications de comptes parmi eux, puis les plus proches des alertes.`,
+    context: (cap: number, people: number, addresses: number, hosts: number) => {
+      const left = [
+        people ? `${frNum(people)} qui nomment les personnes signalées` : '',
+        addresses ? `${frNum(addresses)} venant des adresses signalées` : '',
+        hosts ? `${frNum(hosts)} sur les hôtes signalés` : '',
+      ].filter(Boolean)
+      return `Les enregistrements autour des alertes dépassent ${frNum(cap)}, plafond qu'un dossier du navigateur applique ensemble aux personnes, adresses et hôtes signalés : les récits lisent d'abord les tâches, services et modifications de comptes parmi eux, puis les plus proches des alertes${left.length ? `, et en écartent ${left.join(', ')}` : ''}.`
+    },
+    flaggedMails: (cap: number, left: number) => `Plus de ${frNum(cap)} messages portent des détections : les récits lisent les ${frNum(cap)} premiers${left ? ` et en écartent ${frNum(left)}` : ''}.`,
+    seeds: (left: number, cap: number, risk: number) =>
+      `${left ? frNum(left + cap) : `Plus de ${frNum(cap)}`} messages ont un score de risque de ${risk} ou plus : les récits lisent les ${frNum(cap)} plus risqués.`,
+    undated: (k: number) =>
+      `${k ? `${frNum(k)} ${p(k, 'message signalé ou à risque élevé ne porte', 'messages signalés ou à risque élevé ne portent')}` : 'Des messages signalés ou à risque élevé ne portent'} aucune date : aucun récit ne peut les placer, aucun ne les lit donc.`,
+    windows: (k: number, most: number) =>
+      `Les alertes se répartissent sur ${k ? frNum(k) : `plus de ${most}`} périodes distinctes : les récits lisent à la place une seule période, de la première alerte à la dernière, où les plafonds sont atteints plus tôt.`,
+    replies: (cap: number) => `Seuls ${frNum(cap)} des messages envoyés par les personnes signalées ont été lus, les plus proches des alertes.`,
+    dns: (cap: number) => `Les réponses DNS des hôtes signalés dépassent ${frNum(cap)} : les adresses qu'elles attribuent aux hôtes viennent des plus proches des alertes.`,
+    dhcp: (cap: number) => `Les baux DHCP dépassent ${frNum(cap)} : les adresses qu'ils attribuent aux hôtes viennent des premiers.`,
+    dc: (cap: number) =>
+      `Les enregistrements Kerberos et NTLM des contrôleurs de domaine concernant les personnes, hôtes et adresses signalés dépassent ${frNum(cap)} : les récits lisent d'abord ceux qui nomment un compte ou un hôte signalé, puis les plus proches des alertes ; un rebond peut donc manquer le ticket qui en nomme la source.`,
+    nameKeys: 'Les enregistrements signalés nomment plus de 2 000 comptes : les récits lisent les enregistrements des 2 000 les plus cités.',
+    hostKeys: 'Plus de 500 hôtes portent des alertes : les récits lisent les ouvertures de session, processus et services des 500 qui en portent le plus.',
+    addressKeys: 'Les alertes nomment plus de 500 adresses extérieures : les récits lisent les enregistrements des 500 les plus citées.',
+    trimmed: (mib: number, k: number, to: number) =>
+      `Les lignes de la construction dépassent ${frNum(mib)} Mio, plus que le serveur n'accepte en une requête : le texte long de ${frNum(k)} ${p(k, 'enregistrement', 'enregistrements')} (lignes de commande, blocs de script, résumés) a été coupé à ${frNum(to)} caractères.`,
+    size: (mib: number, k: number) =>
+      `Les lignes de la construction dépassent malgré tout ${frNum(mib)} Mio : ${frNum(k)} d'entre elles ont été écartées, en commençant par les enregistrements autour des alertes.`,
+    accounts: (cap: number) =>
+      `Le dossier écrit ses comptes de plus de ${frNum(cap)} façons : l'identification des personnes lit les plus fréquentes et celles des enregistrements que lisent les récits.`,
+    identityRows:
+      "L'identification des personnes a été faite à partir des enregistrements lus par cette construction, non du dossier entier : un nom de compte seul est rattaché au seul compte de ce nom parmi eux, alors que le dossier peut en contenir un autre.",
+    storiesTruncated: 'Seuls les 200 récits au score le plus élevé sont conservés : les alertes des autres sont listées avec celles qui ne figurent dans aucun récit.',
+    noWayIn: "Aucun enregistrement du récit ne montre comment il a commencé : l'accès initial ne figure pas dans les preuves qu'il lit.",
+  },
+
+  storyStale: {
+    unknown: "ils ont été construits avant que REMN ne conserve ce qu'une construction lit, ils peuvent donc ne pas correspondre aux détections",
+    findings: 'les détections ont changé depuis leur construction (exécution des règles, faux positif ou gravité fixée à la main)',
+    evidence: 'les éléments de preuve ont changé depuis leur construction',
+    settings: 'les paramètres du dossier ont changé depuis leur construction',
+  },
+
+  chainCut: {
+    eventsTruncated: 'Corrélation des messages : seuls les 50 000 premiers événements correspondants ont été pris en compte.',
+    authEventsTruncated: "Campagnes d'authentification : seuls les 50 000 premiers événements d'authentification ont été pris en compte.",
+    seedsTruncated: "La sélection des messages d'amorce a atteint sa limite (300 amorces ou 500 références de détections).",
+    repliesTruncated: 'Seules les 5 000 premières réponses correspondantes ont été prises en compte.',
+    chainsTruncated: 'Seules les chaînes au score le plus élevé sont affichées.',
+  },
+
+  packageIssue: {
+    errors: (k: number) => `${frNum(k)} ${p(k, 'membre en échec', 'membres en échec')}`,
+    unsupported: (k: number) => `${frNum(k)} ${p(k, 'membre non pris en charge', 'membres non pris en charge')}`,
+    skipped: (k: number) => `${frNum(k)} ${p(k, 'membre ignoré', 'membres ignorés')}`,
+    inventory: 'inventaire des membres incomplet',
+    discrepancies: (k: number) => `${frNum(k)} ${p(k, 'écart ou entrée non résolue', 'écarts ou entrées non résolues')} dans le résumé de collecte`,
+  },
+
+  measuredOn: {
+    sigma: (k: number) => `${frNum(k)} ${p(k, 'échantillon', 'échantillons')} de régression de SigmaHQ`,
+    attackSamples: (k: number) => `${frNum(k)} ${p(k, 'enregistrement', 'enregistrements')} d'EVTX-ATTACK-SAMPLES`,
+    attackData: (k: number) => `${frNum(k)} ${p(k, 'jeu', 'jeux')} de données Microsoft 365 et Entra ID de Splunk attack_data`,
+    attackDataWindows: (k: number) => `${frNum(k)} ${p(k, 'jeu', 'jeux')} de journaux d'événements Windows de Splunk attack_data`,
+    evtxToMitre: (k: number) => `${frNum(k)} ${p(k, 'enregistrement', 'enregistrements')} d'EVTX-to-MITRE-Attack`,
+    sentence: (on: string, recorded: string[], clean: { machines: number; tag: string; events: number } | null) =>
+      `Mesuré le ${frDay(on)}${recorded.length ? ` sur ${frList(recorded, 'et')}` : ''}${clean ? `, et sur les journaux de ${frNum(clean.machines)} machines Windows saines d'evtx-baseline ${clean.tag} (${frNum(clean.events)} événements)` : ''}.`,
   },
 }
 

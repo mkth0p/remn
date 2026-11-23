@@ -340,6 +340,8 @@ def run_rule(
     where = _where_sql(rule, settings, ctx, ts_field)
 
     if not window:
+        # a group cites its rows in time order, rows of the same time by id and rows without a time
+        # last, as the browser engine does: the order is what a folded finding keeps of them
         select = (
             gkeys
             + [f"any_value({e})" for _, e in gexprs]
@@ -348,7 +350,7 @@ def run_rule(
                 f"count(DISTINCT {dexpr})" if dexpr else "count(*)",
                 f"min({q(ts_field)})",
                 f"max({q(ts_field)})",
-                f"list(id ORDER BY {q(ts_field)})[1:{MAX_REFS}]",
+                f"list(id ORDER BY {q(ts_field)} NULLS LAST, id)[1:{MAX_REFS}]",
                 f"list_distinct(list({dexpr}))[1:8]" if dexpr else "[]",
                 f"bool_or({any_sql})" if any_sql else "TRUE",
             ]
@@ -417,7 +419,8 @@ def run_rule(
         select = ["id", q(ts_field)] + gkeys + [e for _, e in gexprs] + ([dexpr] if dexpr else []) + ([any_sql] if any_sql else []) + [e for _, e in eexprs]
         if then_flags and source == "mails":
             select.append("flags")
-        order = ", ".join(gkeys + [q(ts_field)]) if gkeys else q(ts_field)
+        # rows of the same time by id, so that a burst cites its rows in the browser engine's order
+        order = ", ".join(gkeys + [q(ts_field), "id"])
         cur.execute(f"SELECT {', '.join(select)} FROM {source} WHERE {where} AND {q(ts_field)} IS NOT NULL ORDER BY {order}", ctx.params)
         ng = len(gexprs)
         thr = threshold or (">=", 1)

@@ -198,8 +198,9 @@ is stored, and setting an incident's status sets every member. Flat, rule, entit
 source views keep the per-rule detail. Severity tiles show the change since the last run,
 and the flyouts carry About, Investigation (entity pages, referenced rows), Insights
 (prevalence of the entities in the case, related chains, false-positive history of the
-rule) and Notes. The ATT&CK tab counts techniques observed against the enabled rules that
-map to them. A finding of a rule never seen to detect what it looks for on a recorded attack
+rule) and Notes; About names the author the finding's rule gives, or says Hayabusa did not
+record one for its detections. The ATT&CK tab counts techniques observed against the enabled
+rules that map to them. A finding of a rule never seen to detect what it looks for on a recorded attack
 is marked "lead" in the list, and the flyout says what the rule's measure shows: the
 recorded attacks it fires on, and how often it fires on the logs of clean machines (see
 [measured rules](detection.md#measured-rules)). An engine's finding that names the Sigma rule
@@ -244,7 +245,7 @@ never leaves the browser. Reviewed and false-positive findings sort below the ot
 the score and the reasons that moved it ("1 of 40 hosts", "+2 rules, 1 tactic", "rule
 dismissed 2x", "false positive before"), its tooltip and the finding flyout say each in a sentence ("marked false
 positive in case Acme on 2026-08-14"), an incident ranks by its first finding to look at, and
-the CSV export carries the score.
+the CSV export carries the score and the rule's author.
 
 Findings with a saved review severity override show an asterisk and the original rule
 severity in their detail, and the incident uses the review severity too. "Reset to rule
@@ -580,12 +581,19 @@ The same panel sets the language and the firm. The report, HTML and Word, is wri
 or in French; the Report page itself stays English. Every heading, label and sentence the report
 writes itself comes from the dictionary of that language, dates and numbers are written the way
 it writes them (01/03/2026 08:00:00 UTC, 12 345, 1,50 Ko in French), and the HTML document and
-the Word document say their language. What the analysis states and what the analyst writes are
-printed as they are: the limits of the evidence, the reasons a claim does not hold, a story's
-spine, rule and incident titles, and the questions of DFIQ stay in English. A firm name, a cover
-line and a logo (PNG or JPEG, 200 KB at most; the panel says so and refuses a larger file) take
-the place of REMN's wordmark on the cover, at the foot and in the title; the logo is embedded in
-the HTML report and in the Word file. With none of them set the report looks as it always has.
+the Word document say their language. That includes what REMN works out in the browser: the
+limits of the evidence, the reasons a claim does not hold and where its rows are, what each
+incident groups, the coverage of each question, REMN's own scenarios and questions, what the
+stories and chains could not read, the codes of the ATT&CK tactics on the cover and the kinds of
+the model's proposals. The Report page keeps its English from the same values. What others wrote
+is printed as they wrote it, and the French report says which parts those are: rule and finding
+titles, the questions of DFIQ (quoted as DFIQ publishes them), the step titles, ties, phase bases,
+spine and automatic summaries the server's story and chain analysis writes in English, and the
+model's text, marked as quoted without translation. What the analyst writes is printed as written.
+A firm name, a cover line and a logo (PNG or JPEG, 200 KB at most; the panel says so and refuses a
+larger file) take the place of REMN's wordmark on the cover, at the foot and in the title; the
+logo is embedded in the HTML report and in the Word file. With none of them set the report looks
+as it always has.
 Printed from a Chromium browser, every page past the cover carries a running header (the firm or
 REMN, the case, the marking) and every page its number and the page count; other browsers print
 without them. The Word report numbers its pages in its footer.

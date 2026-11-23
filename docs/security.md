@@ -86,10 +86,11 @@ pack importer download from their sources on request, never during an investigat
   rules keep a pattern that a crafted value slows down, in the rules worker rather than the
   page. Both engines give a rule's regular expression the first 65,536 characters of a
   value and count the rows read in part (docs/rules.md), which holds such a pattern to
-  seconds; three converted patterns (two SigmaHQ admin-share command lines and a Sublime
-  sender name) take a time that grows with the cube of the value and stay slow within that
-  bound. A bundled rule bounds the text between two tokens instead (`[^\n]{0,1000}`), which
-  RE2 also reads.
+  seconds. Three upstream patterns (two SigmaHQ admin-share command lines and a Sublime
+  sender name) took a time that grows with the cube of the value; the converters write them
+  in a linear form that matches the same values (`backend/services/rules/linear.py`). A
+  bundled rule bounds the text between two tokens instead (`[^\n]{0,1000}`), which RE2 also
+  reads.
 - The browser application carries a Content Security Policy (no inline script, scripts
   and workers from the app origin only, WebAssembly allowed for hashing, frames only for
   the sandboxed mail and report documents, no object or base tags) as a `<meta>` tag in
