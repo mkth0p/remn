@@ -26,8 +26,11 @@ const RULES = join(__dirname, '../../../rules')
 const SHORT = 24 // units of the first try: a pattern that backtracks without end takes long here already
 const SHORT_MS = 20
 const SCREEN = 4_000 // characters of the quick try
-const SCREEN_MS = 2 // past this, the run is tried again at twice the length
-const GROWTH = 3 // a linear pattern takes twice as long at twice the length
+const SCREEN_MS = 2 // past this, the run is tried again at four times the length
+// at four times the length a linear pattern takes four times as long and a quadratic one sixteen:
+// 8 lies between them with room for a busy machine (at twice the length, 4 against a bound of 3
+// let one slowed quick try hide a quadratic pattern on a shared CI runner)
+const GROWTH = 8
 const SUSPECT_MS = 50 // a quick try this slow is suspect whatever its growth
 const LENGTH = 100_000 // characters of the decisive try
 const BUDGET_MS = 250 // time the decisive try may take
@@ -358,7 +361,7 @@ function suspect(site: Pattern): Shape | null {
     if (run(shape.head + shape.unit.repeat(SHORT) + shape.tail) > SHORT_MS) return shape
     const quick = run(text(shape, SCREEN))
     if (quick < SCREEN_MS) continue
-    if (quick > SUSPECT_MS || run(text(shape, 2 * SCREEN)) > GROWTH * quick) return shape
+    if (quick > SUSPECT_MS || run(text(shape, 4 * SCREEN)) > GROWTH * quick) return shape
   }
   return null
 }
