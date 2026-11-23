@@ -11,6 +11,7 @@ from typing import Any
 
 from api.errors import failure
 from services.ingest.isolation import ParseStopped
+from services.store.casestore import QueryStopped
 
 log = logging.getLogger(__name__)
 
@@ -101,9 +102,9 @@ class JobManager:
                     job.status = "cancelled" if job.cancelled else "done"
                 except JobCancelled:
                     job.status = "cancelled"
-                except ParseStopped as exc:
-                    # a parse stopped at a limit is told as it is: what stopped it, and that the rows
-                    # read before it are kept
+                except (ParseStopped, QueryStopped) as exc:
+                    # a parse or a store read stopped at a limit is told as it is: what stopped it,
+                    # and what was kept
                     job.error = str(exc)
                     job.status = "error"
                 except Exception as exc:  # noqa: BLE001

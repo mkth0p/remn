@@ -259,7 +259,9 @@ write back.
 
 **`POST /api/enrich/mails/rescore`.** Scores mails again with the current calibration:
 `{"storeKey", "settings"}` starts a job on a server case (202 with `jobId`; 409 while another
-job of the case runs); `{"mails", "settings"}` scores at most 200 posted rows and answers them.
+job of the case runs); each read of the case runs at most `FORENSIC_STORE_QUERY_MAX_S` seconds,
+and a read past it ends the job with an error naming the limit and no score changed.
+`{"mails", "settings"}` scores at most 200 posted rows and answers them.
 
 ## Server store
 
@@ -336,9 +338,10 @@ of the case (addresses, domains, URLs, hashes) with their reputation. Response `
 
 **`POST /api/store/<key>/rules/run`.** Runs rules on the store as a background job: `{"rules":
 [rule objects], "settings"}`. Response `{"jobId"}`. The job's result: `findings`, `byRule`,
-`errors`, `diagnostics` (why a rule found nothing, or that it was cut at its finding cap) and
-`total`. A rule past `FORENSIC_STORE_RULE_MAX_S` is stopped and named in `errors`. It writes
-nothing to the store, so a viewer may run it.
+`errors`, `diagnostics` (why a rule found nothing, or that it was cut at its finding cap),
+`total` and `notRun` (the enabled rules a cancel kept from running, 0 for a run that finished). A
+rule past `FORENSIC_STORE_RULE_MAX_S` is stopped and named in `errors`. It writes nothing to the
+store, so a viewer may run it.
 
 **`POST /api/store/<key>/sql`.** One read-only SELECT on the case's tables: `{"sql", "limit"}`
 (200 by default, 2,000 at most). Response `{"rows", "truncated", "columns"}`. Statements that
