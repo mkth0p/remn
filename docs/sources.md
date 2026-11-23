@@ -221,7 +221,9 @@ The admin centre's CSV download writes the date, service, category, activity and
 columns in the language of the portal, so those five are read by their place, first and third
 to sixth; the other columns are named in English in every language. It holds at most three
 targets with five modified properties each and six additional details, which is all REMN can
-read of a record from it, and no record id, so a record downloaded twice is in the case twice.
+read of a record from it, and no record id. A row that repeats another exactly, as a record
+downloaded twice does, is the same record: it is kept once, and the evidence's statistics
+(`duplicates`) and its member list say how many repeats were dropped.
 `Get-MgAuditLogDirectoryAudit | Export-Csv` writes the initiator, the targets and the details
 as .NET type names, so its rows say what was done and when but not by whom; the JSON from
 the same cmdlet holds them. The admin centre downloads at most 250,000 audit records a file:

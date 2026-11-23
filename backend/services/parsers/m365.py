@@ -2258,6 +2258,11 @@ def _iter_rows(path: str | None, data: bytes | None, fmt: str, stats: Any, inclu
                 if row is None:
                     _not_read(stats)
                     continue
+                if portal and not row["recordKey"]:
+                    # the download has no record id: a row that repeats another exactly, as a
+                    # record downloaded twice does, is the same record
+                    whole = json.dumps(sorted(obj.items()), ensure_ascii=False)
+                    row["recordKey"] = "entra-audit-row:" + hashlib.sha256(whole.encode()).hexdigest()
                 yield _finish(row, obj, stats, include_raw, row.pop("_marks", ()))
         else:
             raise ValueError(f"unknown M365 format {fmt}")

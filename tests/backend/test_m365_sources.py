@@ -410,6 +410,25 @@ def test_the_portal_downloads_are_read_as_graph_records_are(tmp_path):
     assert sorted(seen(r) for r in again) == sorted(seen(r) for r in rows)
 
 
+def test_a_row_the_portal_download_repeats_exactly_is_kept_once_and_counted(tmp_path):
+    """The admin centre's audit log CSV has no record id, so a record downloaded twice, in one file
+    or in two downloads of overlapping days, was in the case twice. A row that repeats another
+    exactly is the same record: it is kept once, and the duplicates are counted."""
+    text = (FIXTURES / "entra-directory-audits.portal.csv").read_bytes().decode("utf-8")
+    head, rest = text.split("\r\n", 1)
+    lines = [line for line in rest.split("\r\n") if line]
+    doubled = "\r\n".join([head, *lines, lines[0], lines[2]]) + "\r\n"
+    rows, src = _fixture(tmp_path, "audit.csv", doubled.encode("utf-8"))
+    assert src.format == "entra-audit-csv" and len(rows) == 6 and src.stats.duplicates == 2 and src.stats.errors == 0
+    # two downloads of the same days in one archive: each record once, the repeats counted on the member
+    rows, stats = _package(tmp_path, "audit.zip", _zip({"a/audit.csv": text.encode("utf-8"), "b/audit.csv": text.encode("utf-8")}))
+    assert len(rows) == 6 and [f.get("duplicates", 0) for f in stats["files"]] == [0, 6] and stats["duplicates"] == 6
+    # a row that differs in any value is another record
+    changed = "\r\n".join([head, *lines, lines[0].replace("success", "failure", 1)]) + "\r\n"
+    rows, src = _fixture(tmp_path, "audit.csv", changed.encode("utf-8"))
+    assert len(rows) == 7 and src.stats.duplicates == 0
+
+
 def test_directory_audits_written_by_export_csv_are_read_without_what_it_could_not_write():
     """Get-MgAuditLogDirectoryAudit | Export-Csv writes the initiator, the targets and the details
     as .NET type names: the rows say what was done and when, and keep the columns REMN does not know."""
