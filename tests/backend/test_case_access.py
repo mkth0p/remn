@@ -202,3 +202,33 @@ def test_a_file_added_from_another_browser_under_a_number_the_case_already_uses_
     assert held[0] == "invented-ana.evtx"
     # the same file again (a retry) is not another file
     assert ingest("a" * 64).status_code == 200 and len(started) == 1
+
+
+def test_a_staged_upload_is_sent_finished_or_cancelled_only_by_the_account_that_started_it_or_an_admin(team, monkeypatch, settings):  # noqa: F811
+    from api.views import store as store_views
+
+    settings.FILE_UPLOAD_TEMP_DIR = team.folder / "staging"
+    started = []
+    monkeypatch.setattr(store_views.manager, "submit", lambda *a, **k: started.append(a) or type("J", (), {"id": "job"})())
+    data = b"invented evidence bytes"
+    uid = team.post("ana", "/api/upload/init", {"name": "invented-ana.evtx", "size": len(data)}).json()["uploadId"]
+
+    def chunk(name: str):
+        return Client().generic("PUT", f"/api/upload/{uid}/chunk?offset=0", data, content_type="application/octet-stream", **team.headers(name))
+
+    # another analyst is answered as for an id nobody uses, whatever it tries
+    assert chunk("ben").status_code == 404
+    assert chunk("ana").status_code == 200
+    assert team.post("ben", f"/api/upload/{uid}/complete").status_code == 404
+    assert team.post("ana", f"/api/upload/{uid}/complete").status_code == 200
+    assert team.get("ben", f"/api/upload/{uid}").status_code == 404
+    assert team.delete("ben", f"/api/upload/{uid}").status_code == 404
+    # nor does it parse the file into a case of its own, on the server or in its browser
+    key = str(uuid.uuid4())
+    r = team.post("ben", f"/api/store/{key}/ingest", {"uploadId": uid, "kind": "evtx", "evidence": {"id": 1, "name": "invented-ana.evtx"}})
+    assert r.status_code == 404 and not started
+    assert Client().post("/api/ingest/evtx", {"uploadId": uid, "engines": "0"}, **team.headers("ben")).status_code == 404
+    # the file is still there for the account that sent it, and an admin may cancel it
+    assert team.get("ana", f"/api/upload/{uid}").json()["complete"] is True
+    assert team.delete("root", f"/api/upload/{uid}").json() == {"ok": True}
+    assert team.get("ana", f"/api/upload/{uid}").status_code == 404

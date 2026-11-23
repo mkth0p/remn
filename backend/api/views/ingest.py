@@ -63,7 +63,7 @@ class _Source:
         upload_id = request.POST.get("uploadId") or request.GET.get("uploadId")
         if upload_id:
             try:
-                path, meta = get_upload(upload_id)
+                path, meta = get_upload(upload_id, getattr(request, "account", None))
             except (FileNotFoundError, ValueError):
                 self.error = JsonResponse({"error": "upload not found or incomplete"}, status=404)
                 return

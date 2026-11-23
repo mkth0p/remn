@@ -197,7 +197,9 @@ PDF actions, archives, YARA). Multipart `file`, at most 200 MB. Response:
 
 A file too large for one request goes up in chunks, then a parse route or the store's ingest
 route reads it by its `uploadId`. An unfinished upload is removed after
-`FORENSIC_UPLOAD_MAX_AGE_S` (six hours, thirty minutes in browser-only mode).
+`FORENSIC_UPLOAD_MAX_AGE_S` (six hours, thirty minutes in browser-only mode). With accounts, an
+upload is sent, finished, read, cancelled and parsed only by the account that started it or an
+admin; any other account is answered 404, as for an unknown `uploadId`.
 
 **`POST /api/upload/init`.** Body `{"name", "size"}`. Reserves room in the staging area.
 Response `{"uploadId", "chunkSize"}`. Refused with 413 (`staging-too-small`) when the file is

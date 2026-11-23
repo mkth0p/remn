@@ -24,6 +24,7 @@ from django.views.decorators.http import require_http_methods, require_POST
 
 from api.params import BadParameter, whole_number
 from forensic.access import permission
+from forensic.accounts import Account
 from services.ingest import staging
 from services.ingest.staging import DIRECTORY_SUFFIXES, held_bytes, size_text
 
@@ -63,11 +64,23 @@ def _save_meta(upload_id: str, meta: dict[str, Any]) -> None:
     mp.write_text(json.dumps(meta), encoding="utf-8")
 
 
-def get_upload(upload_id: str) -> tuple[Path, dict[str, Any]]:
-    """Return (data path, meta) for a completed upload, or raise FileNotFoundError."""
+def may_use(account: Account | None, meta: dict[str, Any]) -> bool:
+    """Whether `account` may send, finish, read, cancel or parse a staged upload. On a server with
+    accounts: the account that started it, or an admin; an upload started before accounts were on
+    names none, so only an admin. Without accounts (None): whoever has its id."""
+    return account is None or account.role == "admin" or meta.get("account") == account.name
+
+
+def _account(request: HttpRequest) -> Account | None:
+    return getattr(request, "account", None)
+
+
+def get_upload(upload_id: str, account: Account | None = None) -> tuple[Path, dict[str, Any]]:
+    """Return (data path, meta) for a completed upload `account` may use (may_use), or raise
+    FileNotFoundError: an upload of another account is not told apart from one that does not exist."""
     meta = _meta(upload_id)
     dp, _ = _paths(upload_id)
-    if not meta or not dp.exists() or not meta.get("complete"):
+    if not meta or not dp.exists() or not meta.get("complete") or not may_use(account, meta):
         raise FileNotFoundError(upload_id)
     return dp, meta
 
@@ -230,7 +243,20 @@ def init(request: HttpRequest):
             dp.chmod(0o600)
         except OSError:
             pass
-        _save_meta(upload_id, {"id": upload_id, "name": name, "size": size, "received": 0, "complete": False, "created": int(time.time() * 1000)})
+        account = _account(request)
+        _save_meta(
+            upload_id,
+            {
+                "id": upload_id,
+                "name": name,
+                "size": size,
+                "received": 0,
+                "complete": False,
+                "created": int(time.time() * 1000),
+                # with accounts on, only this account or an admin sends, finishes, cancels or parses it
+                "account": account.name if account is not None else None,
+            },
+        )
     return JsonResponse({"uploadId": upload_id, "chunkSize": settings.FORENSIC_CHUNK_MB * 1024 * 1024})
 
 
@@ -242,7 +268,7 @@ def chunk(request: HttpRequest, upload_id: str):
         meta = _meta(upload_id)
     except ValueError:
         return JsonResponse({"error": "bad upload id"}, status=400)
-    if not meta:
+    if not meta or not may_use(_account(request), meta):
         return JsonResponse({"error": "unknown upload"}, status=404)
     if meta.get("complete"):
         return JsonResponse({"error": "upload already completed"}, status=409)
@@ -281,7 +307,7 @@ def complete(request: HttpRequest, upload_id: str):
         meta = _meta(upload_id)
     except ValueError:
         return JsonResponse({"error": "bad upload id"}, status=400)
-    if not meta:
+    if not meta or not may_use(_account(request), meta):
         return JsonResponse({"error": "unknown upload"}, status=404)
     if meta["received"] != meta["size"]:
         return JsonResponse({"error": "incomplete upload", "received": meta["received"], "size": meta["size"]}, status=409)
@@ -306,6 +332,9 @@ def status(request: HttpRequest, upload_id: str):
         meta = _meta(upload_id)
     except ValueError:
         return JsonResponse({"error": "bad upload id"}, status=400)
+    if meta and not may_use(_account(request), meta):
+        # the upload of another account: answered as an id nobody uses, and left as it is
+        return JsonResponse({"error": "unknown upload"}, status=404)
     if request.method == "DELETE":
         discard_upload(upload_id)
         return JsonResponse({"ok": True})

@@ -165,6 +165,10 @@ the one shared `FORENSIC_AUTH_TOKEN`. Once it holds one:
   says why. The case listing (`GET /api/store`) and the job routes show each account only the
   cases it may read. A store written before accounts were turned on has no record: only an admin
   opens it until an owner is given (`manage.py accounts case <key> --owner <name>`).
+- **A staged upload belongs to the account that started it.** Only that account or an admin sends
+  its chunks, finishes it, reads how far it got, cancels it or parses it, in the browser or into a
+  server case; any other account gets the 404 an unknown upload id gets. An upload started before
+  accounts were turned on is an admin's alone.
 - **The page follows the server.** When the server asks for a personal token the page says so;
   once signed in, the sidebar shows the account and its role, with **sign out**. A viewer's
   controls that would change something (adding or removing evidence, lookups, enrichment,
