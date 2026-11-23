@@ -576,7 +576,17 @@ finding's key, severity, count and escalation under `tests/fixtures/parity/`;
 any difference. Regenerate the fixture after
 changing an engine or a rule, and review the diff. The same script records the Events
 page's stacks of a few fields in `stacks.json`, and `frontend/src/data/stack.parity.test.ts`
-stacks the rows in the browser store and compares.
+stacks the rows in the browser store and compares. It also runs the Sublime pack on the mails and
+on a few of its own, built so that the rules that keep case and the sender name written in a
+linear form fire on one mail and not on the next (`sublime.json`), and a few rules on the paths a
+large case takes (`scale.json`): a per-row rule collapsed past 200 rows, a group whose host
+differs from row to row, and bursts, on rows with ties in time and rows without one. There the
+test compares each finding's host, times and the rows it cites, in order, and folds the findings
+of both engines as a detection level that raises none of them does. Both engines give grouped
+findings in the same order (the largest or rarest group first, then by its fields; bursts by their
+fields, then in time), cite a group's rows in time order, rows of the same time by id and rows
+without a time last, take a group's times from its rows that have one, and leave a row without a
+time out of every burst.
 
 The server store keeps every field the parser writes on a row (a guard test checks the
 parser's field map against the store's columns; a store written before a column existed

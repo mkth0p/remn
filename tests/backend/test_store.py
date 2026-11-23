@@ -426,6 +426,31 @@ def test_rules_past_the_finding_cap_keep_the_rarest_groups_and_say_so(store, mon
     assert cut["rare"]["detail"] == "2 of 5 findings left out past the cap of 3; kept the 3 rarest groups"
 
 
+def test_a_group_and_a_burst_cite_their_rows_by_time_then_id_with_rows_without_a_time_last(store):
+    # the browser engine's order (frontend/src/rules/parity.test.ts): a folded finding keeps the
+    # rows its findings cite in that order, so a server case must cite them the same way
+    w = EventWriter(store, 1)
+    # three rows a second, every tenth row without a time
+    times: list[int | None] = [None if i % 10 == 3 else T0 + (i // 3) * 1000 for i in range(60)]
+    for i, ts in enumerate(times):
+        row = _event(i, eventId=4625, targetUser="amy", ipAddress="192.0.2.1")
+        if ts is None:
+            row.pop("ts")
+        else:
+            row["ts"] = ts
+        w.add(row)
+    w.flush()
+    group = {"id": "group", "title": "g", "severity": "low", "source": "events", "where": {"eventId": 4625}, "group_by": ["targetUser"]}
+    burst = {**group, "id": "burst", "group_by": ["ipAddress"], "window": "1m", "threshold": ">= 2"}
+    found = {f["ruleId"]: f for f in R.run_rules(store, [group, burst], {})["findings"]}
+    ids = range(1, len(times) + 1)
+    timed = sorted((i for i in ids if times[i - 1] is not None), key=lambda i: (times[i - 1], i))
+    assert found["group"]["refs"] == timed + [i for i in ids if times[i - 1] is None]
+    assert (found["group"]["ts"], found["group"]["tsEnd"]) == (T0, T0 + 19_000)
+    # a row without a time is in no burst
+    assert found["burst"]["refs"] == timed
+
+
 def test_a_rule_keeps_its_own_max_findings_and_the_default_cap_on_the_server(store):
     w = EventWriter(store, 1)
     # 2,001 accounts failing once, and three hosts with a burst of three failures each

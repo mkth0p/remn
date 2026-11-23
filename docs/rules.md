@@ -258,7 +258,7 @@ virtual environment's interpreter: `.venv/bin/python` on Linux and macOS,
 | --- | --- |
 | `tests/backend/test_rules_yaml.py` | Every file parses with no duplicate key; ids are unique and well formed; operators exist; thresholds and windows parse; ATT&CK ids are current; no rule asks for what the engines refuse. |
 | `tests/backend/test_own_rule_logic.py` | Each own rule fires on the event its description names, and not on the near miss. |
-| `tests/fixtures/parity/` with `parity.test.ts` | Both engines give the same findings for every bundled rule, including the findings kept past a cap. |
+| `tests/fixtures/parity/` with `parity.test.ts` | Both engines give the same findings for every bundled rule and every rule of the Sublime pack, including the findings kept past a cap; on the paths a large case takes (a rule collapsed past 200 rows, a group, bursts) each finding has the same host, times and rows, and the detection level folds a server case's findings as it folds a browser case's. |
 | `frontend/src/test/regexTiming.test.ts` | Every pattern of the own rules answers a hostile value of 100,000 characters within 250 ms in the browser engine (see [the last section](#patterns-that-backtrack-in-the-browser-engine)). |
 | `tests/fixtures/evtx-attack-samples/expected.json` | The rules reviewed as identifying each file of EVTX-ATTACK-SAMPLES still fire on it, on both engines (`tools/evtx_attack_samples.py`, the attack samples job of CI). |
 | `rules/measures-detail.json` with `.github/workflows/measure-rules.yml` | No rule loses a detection, and no high or critical rule raises more findings on a clean machine. |
