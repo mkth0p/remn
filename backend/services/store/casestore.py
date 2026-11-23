@@ -816,12 +816,17 @@ class CaseStore:
                 con.unregister("_batch")
         return len(rows)
 
-    def existing_record_keys(self, keys: list[str]) -> set[str]:
-        """The keys of ``keys`` some event of the case already carries."""
+    def existing_record_keys(self, keys: list[str], other_than: int | None = None) -> set[str]:
+        """The keys of ``keys`` some event of the case already carries, outside evidence ``other_than``."""
         if not keys:
             return set()
+        sql = 'SELECT DISTINCT "recordKey" FROM events WHERE "recordKey" IN (SELECT unnest(?::VARCHAR[]))'
+        params: list[Any] = [keys]
+        if other_than is not None:
+            sql += ' AND "evidenceId" IS DISTINCT FROM ?'
+            params.append(other_than)
         with self.lock:
-            rows = self._con.execute('SELECT DISTINCT "recordKey" FROM events WHERE "recordKey" IN (SELECT unnest(?::VARCHAR[]))', [keys]).fetchall()
+            rows = self._con.execute(sql, params).fetchall()
         return {r[0] for r in rows}
 
     def upsert_evidence(self, ev: dict[str, Any]) -> None:

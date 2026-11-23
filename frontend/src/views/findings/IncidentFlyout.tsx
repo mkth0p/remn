@@ -1,5 +1,5 @@
 import { AddToTimeline } from '../../components/AddToTimeline'
-import { entityKind } from '../../components/EntityPanel'
+import { entityKind } from '../../components/entityKind'
 import { Badge, Flyout, Sev } from '../../components/ui'
 import type { MeasureReading } from '../../data/ruleMeasures'
 import type { Priority } from '../../data/findingPriority'

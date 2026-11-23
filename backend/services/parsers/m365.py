@@ -16,12 +16,15 @@ inside zip/tar archives):
     m365-ual-json       JSON array / NDJSON of AuditData objects, or of {..., "AuditData": "<json>"} rows
     entra-signin-json   JSON array / NDJSON of Graph signIn objects (Get-EntraSignInLogs, Goose)
     entra-signin-csv    Entra portal CSV export or a Graph-property CSV
-    entra-audit-json    Graph directoryAudit objects (auditLogs/directoryAudits, the portal's JSON download)
+    entra-audit-json    Graph directoryAudit objects (auditLogs/directoryAudits, the portal's JSON download,
+                        or under "properties" of Azure Monitor records of the AuditLogs category)
     entra-audit-csv     the portal's audit log CSV download, or directoryAudit properties as columns
-    entra-riskdetection-json  Graph riskDetection objects (identityProtection/riskDetections)
+    entra-riskdetection-json  Graph riskDetection objects (identityProtection/riskDetections, or
+                              Azure Monitor records of the UserRiskEvents category)
     entra-riskdetection-csv   riskDetection properties as columns (Get-MgRiskDetection | Export-Csv,
                               Microsoft-Extractor-Suite Get-RiskyDetections)
-    entra-riskyuser-json      Graph riskyUser objects (identityProtection/riskyUsers)
+    entra-riskyuser-json      Graph riskyUser objects (identityProtection/riskyUsers, or Azure
+                              Monitor records of the RiskyUsers category)
     entra-riskyuser-csv       riskyUser properties as columns (Get-MgRiskyUser | Export-Csv, Get-RiskyUsers)
     exo-messagetrace-csv         Get-MessageTrace / Get-MessageTraceV2 | Export-Csv
     exo-messagetrace-report-csv  the Exchange admin centre's enhanced summary or extended report
@@ -143,11 +146,24 @@ _BOMS = (
 )
 
 
+# how many of an export's first bytes say how it is written when no byte order mark does
+ENCODING_SAMPLE = 4096
+
+
 def encoding_of(head: bytes) -> str:
-    """The encoding an export's byte order mark names; UTF-8 when it has none."""
+    """The encoding an export's byte order mark names. Without one, UTF-16 shows itself in the
+    text an export starts with (a bracket, a brace, column names, all ASCII): a NUL beside every
+    character, on the side that says the byte order. UTF-8 otherwise."""
     for bom, encoding in _BOMS:
         if head.startswith(bom):
             return encoding
+    sample = head[:ENCODING_SAMPLE]
+    if len(sample) >= 4:
+        odd, even = sample[1::2].count(0), sample[0::2].count(0)
+        if odd > len(sample) * 0.4 and even < len(sample) * 0.05:
+            return "utf-16-le"
+        if even > len(sample) * 0.4 and odd < len(sample) * 0.05:
+            return "utf-16-be"
     return "utf-8-sig"
 
 
@@ -155,7 +171,7 @@ def head_text(head: bytes) -> str:
     """The first bytes of an export as text, in the encoding its byte order mark names. A head cut
     inside a character loses that character only."""
     encoding = encoding_of(head)
-    width = 4 if encoding == "utf-32" else 2 if encoding == "utf-16" else 1
+    width = 4 if encoding == "utf-32" else 2 if encoding.startswith("utf-16") else 1
     return head[: len(head) - len(head) % width].decode(encoding, "replace")
 
 
@@ -189,10 +205,13 @@ def detect_format(name: str, head: bytes) -> str | None:
         # sign-in is under "properties", past the head
         if any(f'"category": "{c}"' in low or f'"category":"{c}"' in low for c in _SIGNIN_CATEGORIES):
             return "entra-signin-json"
-        # Azure Monitor records of the other categories hold an audit or risk record under
-        # "properties" in a schema Microsoft says may differ from Graph's: they are not read
-        if _MONITOR_CATEGORY_RE.search(low):
-            return None
+        # Azure Monitor records of the other categories hold a directory audit or a risk record
+        # under "properties": the first one's category says the file's kind, unless a Graph record
+        # comes before it
+        monitor = _MONITOR_CATEGORY_RE.search(low)
+        graph = [i for i in (low.find('"createddatetime"'), *(low.find(f'"{k}"') for k in _KIND_KEY.values())) if i >= 0]
+        if monitor and (not graph or monitor.start() < min(graph)):
+            return _MONITOR_FORMATS.get(monitor.group(1))
         return f"entra-{kind}-json" if kind else None
     header = _header_line(text)
     if "auditdata" in header.lower():
@@ -228,7 +247,14 @@ def is_signin(keys: Iterable[Any]) -> bool:
     return "createddatetime" in low and "ipaddress" in low and bool(low & _SIGNIN_WHO)
 
 
-_MONITOR_CATEGORY_RE = re.compile(r'"category"\s*:\s*"(?:auditlogs|riskyusers|userriskevents|serviceprincipalriskevents|riskyserviceprincipals)"')
+# the Azure Monitor categories of Entra's logs other than the sign-ins, and the format a file whose
+# first record is of each is read as; the risks of service principals are not read
+_MONITOR_CATEGORY_RE = re.compile(r'"category"\s*:\s*"(auditlogs|riskyusers|userriskevents|serviceprincipalriskevents|riskyserviceprincipals)"')
+_MONITOR_FORMATS = {
+    "auditlogs": "entra-audit-json",
+    "riskyusers": "entra-riskyuser-json",
+    "userriskevents": "entra-riskdetection-json",
+}
 
 
 def trace_kind(columns: Iterable[Any]) -> str | None:
@@ -951,6 +977,31 @@ def _signin_of(obj: Any) -> dict[str, Any] | None:
     # the envelope's time, when the sign-in itself has none
     if not props.get("createdDateTime") and obj.get("time"):
         props["createdDateTime"] = obj["time"]
+    return props
+
+
+# The Azure Monitor categories whose records hold, under "properties", a directory audit, a risky
+# user or a risk detection with the Graph record's names, by the kind entra_kind gives it; and the
+# fields that take the record's time from the envelope when it has none, the first one set
+_MONITOR_KINDS = {"auditlogs": "audit", "riskyusers": "riskyuser", "userriskevents": "riskdetection"}
+_MONITOR_TIME = {"audit": ("activityDateTime",), "riskyuser": ("riskLastUpdatedDateTime",), "riskdetection": ("detectedDateTime", "activityDateTime")}
+
+
+def _monitor_record(obj: Any, kind: str) -> dict[str, Any] | None:
+    """The record of this kind an exported object holds: a Graph record as it is, or the
+    "properties" of an Azure Monitor record of the category that holds that kind. None for an
+    Azure Monitor record of another category, or for something that is not an object."""
+    if not isinstance(obj, dict):
+        return None
+    category = str(obj.get("category") or "").lower()
+    if not isinstance(obj.get("properties"), dict) or (category not in _MONITOR_KINDS and category not in _SIGNIN_CATEGORIES):
+        return obj
+    if _MONITOR_KINDS.get(category) != kind:
+        return None
+    props = dict(obj["properties"])
+    fields = _MONITOR_TIME[kind]
+    if obj.get("time") and not any(v for k, v in props.items() if str(k).lower() in {f.lower() for f in fields}):
+        props[fields[0]] = obj["time"]
     return props
 
 
@@ -1707,9 +1758,9 @@ def _open_text(path: str | None, data: bytes | None) -> io.TextIOBase:
     """An export as text, in the encoding its byte order mark names, the mark itself not read."""
     if path:
         with open(path, "rb") as raw:
-            encoding = encoding_of(raw.read(4))
+            encoding = encoding_of(raw.read(ENCODING_SAMPLE))
         return open(path, encoding=encoding, errors="replace", newline="")
-    return io.TextIOWrapper(io.BytesIO(data or b""), encoding=encoding_of((data or b"")[:4]), errors="replace", newline="")
+    return io.TextIOWrapper(io.BytesIO(data or b""), encoding=encoding_of((data or b"")[:ENCODING_SAMPLE]), errors="replace", newline="")
 
 
 # The longest record a JSON export may hold (a sign-in is a few kilobytes, an audit record rarely
@@ -1728,6 +1779,8 @@ class _JsonStream:
 
     def __init__(self, fh: io.TextIOBase, stats: Any = None) -> None:
         self.fh, self.stats, self.buf, self.pos, self.eof, self.count = fh, stats, "", 0, False, 0
+        # whether the last document read is a Graph page that links to a next one
+        self.next_link = False
 
     def _more(self) -> bool:
         if self.eof:
@@ -1795,6 +1848,7 @@ class _JsonStream:
         while (c := self._peek()) != "":
             if c == "[":
                 self.pos += 1
+                self.next_link = False
                 yield from self._items()
             elif c == "{":
                 # a Graph page {"value": [...]} gives its records as the array is read; any other
@@ -1817,6 +1871,7 @@ class _JsonStream:
                         break
                     self.pos += 1
                 self._take("}")
+                self.next_link = paged and _links_on(obj)
                 if not paged:
                     self.count += 1
                     yield obj
@@ -1842,8 +1897,11 @@ def _iter_json_objects(fh: io.TextIOBase, stats: Any = None) -> Iterator[Any]:
     except ValueError:
         lines = False  # the first line is not an object on its own: an indented document
     if not lines:
-        yield from _JsonStream(fh, stats).records()
+        stream = _JsonStream(fh, stats)
+        yield from stream.records()
+        _cut_short(stats, stream.next_link)
         return
+    next_link = False
     while line := fh.readline(MAX_RECORD_CHARS + 1):
         if len(line) > MAX_RECORD_CHARS:
             # longer than any record: counted, and passed over to the end of its line
@@ -1861,12 +1919,27 @@ def _iter_json_objects(fh: io.TextIOBase, stats: Any = None) -> Iterator[Any]:
             if stats is not None:
                 stats.errors += 1
             continue
-        items = obj["value"] if isinstance(obj, dict) and isinstance(obj.get("value"), list) else [obj]  # a Graph page {"value": [...]}
+        paged = isinstance(obj, dict) and isinstance(obj.get("value"), list)
+        next_link = paged and _links_on(obj)
+        items = obj["value"] if paged else [obj]  # a Graph page {"value": [...]}
         for x in items:
             if isinstance(x, dict):
                 yield x
             elif stats is not None:
                 stats.errors += 1  # a line or an element that is not a record
+    _cut_short(stats, next_link)
+
+
+def _links_on(page: dict[str, Any]) -> bool:
+    """Whether a Graph page links to a next one (@odata.nextLink): the list goes on past it."""
+    return any(str(k).lower().endswith("odata.nextlink") and v for k, v in page.items())
+
+
+def _cut_short(stats: Any, next_link: bool) -> None:
+    """Count a file whose last Graph page links to a next one: the pages after it were not
+    downloaded, so the file holds only the start of the list it was taken from."""
+    if next_link and stats is not None:
+        stats.next_page = getattr(stats, "next_page", 0) + 1
 
 
 # Graph audit log query records (auditLogRecord, Microsoft-Extractor-Suite Get-UALGraph) carry
@@ -1878,6 +1951,9 @@ _GRAPH_ENVELOPE = (
     ("ClientIP", "clientIp"),
     ("Workload", "service"),
 )
+
+
+_AUDIT_DATA_KEYS = ("AuditData", "auditdata", "Auditdata", "auditData")
 
 
 def _audit_from_row(obj: dict[str, Any]) -> tuple[dict[str, Any] | None, Any]:
@@ -2041,6 +2117,10 @@ _NOTES = (
     ("zone_set", "{:,} record(s) were read in {zone}, the time zone set for the evidence: their times say none"),
     ("zone_assumed", "{:,} record(s) were read as UTC: their times say no time zone, and none is set for the evidence"),
     ("repeats_unchecked", "{:,} record(s) were read once the ids held to find repeats were full, and were not compared with one another"),
+    (
+        "next_page",
+        "{:,} file(s) end with a Graph page that links to a next one (@odata.nextLink): the pages after it were not downloaded, and their records are not in the case",
+    ),
 )
 
 
@@ -2091,20 +2171,18 @@ def _iter_rows(path: str | None, data: bytes | None, fmt: str, stats: Any, inclu
     # rows are counted by the caller once it knows they are kept; errors are counted here
     fh = _open_text(path, data)
     try:
-        if fmt == "m365-ual-csv":
-            for rec in _csv_rows(fh, stats):
-                ad, rtype = _audit_from_row(rec)
-                if ad is None:
-                    if stats is not None:
-                        stats.errors += 1
-                    continue
-                yield _finish(ual_row(ad, rtype), ad, stats, include_raw)
-        elif fmt == "m365-ual-json":
-            for obj in _iter_json_objects(fh, stats):
+        if fmt in ("m365-ual-csv", "m365-ual-json"):
+            for obj in _csv_rows(fh, stats) if fmt == "m365-ual-csv" else _iter_json_objects(fh, stats):
                 ad, rtype = _audit_from_row(obj)
                 if ad is None:
-                    if stats is not None:
-                        stats.errors += 1
+                    # a row of the CSV or a record with audit data that cannot be read is a broken
+                    # audit record; a record with none is of another kind (a sign-in, a record of
+                    # some other export) and not read
+                    if fmt == "m365-ual-csv" or any(k in obj for k in _AUDIT_DATA_KEYS):
+                        if stats is not None:
+                            stats.errors += 1
+                    else:
+                        _not_read(stats)
                     continue
                 yield _finish(ual_row(ad, rtype), ad, stats, include_raw)
         elif fmt == "entra-signin-json":
@@ -2124,16 +2202,19 @@ def _iter_rows(path: str | None, data: bytes | None, fmt: str, stats: Any, inclu
         elif fmt == "entra-audit-json":
             when = _Dates(dates)
             for obj in _iter_json_objects(fh, stats):
-                row = audit_row(obj, when)
+                record = _monitor_record(obj, "audit")
+                row = audit_row(record, when) if record is not None else None
                 if row is None:
                     _not_read(stats)
                     continue
                 yield _finish(row, obj, stats, include_raw, row.pop("_marks", ()))
         elif fmt in ("entra-riskdetection-json", "entra-riskyuser-json"):
             read = risk_detection_row if fmt == "entra-riskdetection-json" else risky_user_row
+            kind = "riskdetection" if fmt == "entra-riskdetection-json" else "riskyuser"
             when = _Dates(dates)
             for obj in _iter_json_objects(fh, stats):
-                row = read(obj, when)
+                record = _monitor_record(obj, kind)
+                row = read(record, when) if record is not None else None
                 if row is None:
                     _not_read(stats)
                     continue
@@ -2177,6 +2258,11 @@ def _iter_rows(path: str | None, data: bytes | None, fmt: str, stats: Any, inclu
                 if row is None:
                     _not_read(stats)
                     continue
+                if portal and not row["recordKey"]:
+                    # the download has no record id: a row that repeats another exactly, as a
+                    # record downloaded twice does, is the same record
+                    whole = json.dumps(sorted(obj.items()), ensure_ascii=False)
+                    row["recordKey"] = "entra-audit-row:" + hashlib.sha256(whole.encode()).hexdigest()
                 yield _finish(row, obj, stats, include_raw, row.pop("_marks", ()))
         else:
             raise ValueError(f"unknown M365 format {fmt}")

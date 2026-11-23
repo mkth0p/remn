@@ -223,6 +223,24 @@ def test_an_ndjson_line_that_does_not_parse_is_counted():
     assert len(rows) == 1 and stats.errors == 1
 
 
+def test_a_record_that_is_not_an_audit_record_in_a_unified_audit_log_is_counted_not_read():
+    """A sign-in among audit records is not a broken audit record: it is of another kind and not
+    read, as the other readers say of such a record. An audit record whose AuditData is not JSON
+    is still a broken one."""
+    from services.parsers.evtx_parser import Stats
+
+    ual = make_m365.ual_records()[:2]
+    for fmt, data in (
+        ("m365-ual-json", "\n".join(json.dumps(r) for r in [*ual, make_m365.entra_signins()[0], {"AuditData": "{not json"}]).encode()),
+        ("m365-ual-json", json.dumps([{"AuditData": json.dumps(r)} for r in ual] + [make_m365.entra_signins()[0], {"AuditData": "{not json"}]).encode()),
+    ):
+        stats = Stats()
+        assert m365.detect_format("audit.json", data) == fmt
+        rows = list(m365.iter_records(None, data, fmt, stats=stats))
+        assert len(rows) == 2 and stats.errors == 2 and stats.to_dict()["notRead"] == 1
+        assert m365.note(m365.counts(stats)) == "1 record(s) are not of the kind the file holds and were not read"
+
+
 def _update_inbox_rules(actions: list[dict], condition: dict) -> dict:
     return m365.ual_row(
         {
@@ -327,6 +345,65 @@ def test_a_record_already_in_the_case_is_not_written_again(exports, store):
     # the indicators of the records not written are not counted a second time
     ip = store.cursor().execute("SELECT sum(count) FROM iocs WHERE kind = 'ip' AND value = ?", [make_m365.RU_IP]).fetchone()[0]
     assert ip == sum(1 for r in rows if r["ipAddress"] == make_m365.RU_IP)
+
+
+def test_a_file_read_again_is_written_whole_beside_the_evidence_it_replaces(exports, store):
+    rows, _ = _rows(exports["ual_json"])
+    first = EventWriter(store, 1)
+    for r in rows:
+        first.add(r)
+    first.flush()
+    # the evidence a file read again replaces is removed once that read succeeds: its records are
+    # not records the case keeps, so none of them is taken for one already held
+    again = EventWriter(store, 2, replaces=1)
+    for r in rows:
+        again.add(r)
+    again.flush()
+    assert again.count == len(rows) and again.duplicates == 0
+    store.delete_evidence(1)
+    n = store.cursor().execute('SELECT count(*), count(DISTINCT "recordKey"), min("evidenceId") FROM events').fetchone()
+    assert n == (len(rows), len(rows), 2)
+    ip = store.cursor().execute("SELECT sum(count) FROM iocs WHERE kind = 'ip' AND value = ?", [make_m365.RU_IP]).fetchone()[0]
+    assert ip == sum(1 for r in rows if r["ipAddress"] == make_m365.RU_IP)
+    # another evidence of the same records is still a repeat
+    other = EventWriter(store, 3)
+    for r in rows:
+        other.add(r)
+    other.flush()
+    assert other.count == 0 and other.duplicates == len(rows)
+
+
+def test_the_store_ingest_route_reads_a_file_again_beside_the_evidence_it_names(exports, tmp_path, monkeypatch):
+    from api.jobs import Job
+
+    reg = StoreRegistry()
+    reg.configure(tmp_path / "cases")
+    key = str(uuid.uuid4())
+    path = Path(exports["ual_json"])
+    monkeypatch.setattr("api.views.store.registry", reg)
+    monkeypatch.setattr("api.views.store.get_upload", lambda *_: (path, {"name": path.name, "size": path.stat().st_size, "sha256": "a" * 64}))
+    monkeypatch.setattr("api.views.store.discard_upload", lambda _: None)
+    results = []
+
+    def submit(kind, case_key, fn, label, account=None):
+        job = Job(kind, case_key, label, account)
+        results.append(fn(job))
+        return job
+
+    monkeypatch.setattr("api.views.store.manager.submit", submit)
+
+    def ingest(evidence_id: int, options: dict):
+        body = {"uploadId": "invented-upload", "kind": "evtx", "evidence": {"id": evidence_id, "name": path.name, "sha256Client": "a" * 64}, "options": options}
+        return Client().post(f"/api/store/{key}/ingest", json.dumps(body), content_type="application/json", **HDR)
+
+    try:
+        assert ingest(1, {}).status_code == 200
+        assert ingest(2, {"replaces": 1}).status_code == 200
+        assert results[0]["count"] == results[1]["count"] > 0 and not results[1]["stats"].get("duplicates")
+        r = ingest(3, {"replaces": "one"})
+        assert r.status_code == 400 and "replaces" in r.json()["error"]
+    finally:
+        reg.close_all()
 
 
 def test_the_messages_a_record_read_or_deleted_are_named():

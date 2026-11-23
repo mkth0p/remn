@@ -5,10 +5,13 @@ format) into one analysed row. Attachment bytes are analysed, never returned.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import email
 import logging
+import quopri
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from email import policy
 from email.message import Message
@@ -714,14 +717,48 @@ def _decode_part(part: Message) -> str:
             return payload.decode("utf-8", "replace")
 
 
+def _is_attached_message(part: Message) -> bool:
+    ctype = (part.get_content_type() or "").lower()
+    return ctype == "message/rfc822" or (ctype.startswith("message/") and bool(part.get_content_disposition()))
+
+
+def _parts(msg: Message, root: bool = True) -> Iterator[Message]:
+    """Every MIME part, as Message.walk gives them, except that an attached message is given whole
+    and not entered: its text and attachments are its own, not those of the message it is in."""
+    yield msg
+    if msg.is_multipart() and (root or not _is_attached_message(msg)):
+        for sub in msg.get_payload():
+            yield from _parts(sub, False)
+
+
+def _attached_message_bytes(part: Message) -> bytes:
+    payload = part.get_payload()
+    inner = payload[0] if isinstance(payload, list) and payload else None
+    if inner is None:
+        return part.get_payload(decode=True) or b""
+    data = inner.as_bytes()
+    cte = str(part.get("Content-Transfer-Encoding") or "").strip().lower()
+    try:
+        # RFC 2046 does not allow an encoded message/rfc822, but some clients write one (GroupWise
+        # does, in base64): the parser then reads the encoded text as a message with no headers
+        if cte == "base64":
+            return base64.b64decode(data)
+        if cte == "quoted-printable":
+            return quopri.decodestring(data)
+    except (binascii.Error, ValueError):
+        pass
+    return data
+
+
 def split_message(msg: Message) -> tuple[str | None, str | None, list[RawAttachment]]:
     """Return (text, html, attachments) walking every MIME part."""
     texts: list[str] = []
     htmls: list[str] = []
     attachments: list[RawAttachment] = []
-    for part in msg.walk():
+    for part in _parts(msg):
         ctype = (part.get_content_type() or "").lower()
-        if part.is_multipart():
+        attached_message = part is not msg and _is_attached_message(part)
+        if part.is_multipart() and not attached_message:
             continue
         disp = (part.get_content_disposition() or "").lower()
         filename = part.get_filename()
@@ -730,11 +767,9 @@ def split_message(msg: Message) -> tuple[str | None, str | None, list[RawAttachm
         except Exception:  # noqa: BLE001
             pass
         cid = (part.get("Content-ID") or "").strip("<> ") or None
-        if ctype == "message/rfc822" or (ctype.startswith("message/") and disp):
+        if attached_message:
             try:
-                payload = part.get_payload()
-                inner = payload[0] if isinstance(payload, list) and payload else None
-                data = inner.as_bytes() if inner is not None else (part.get_payload(decode=True) or b"")
+                data = _attached_message_bytes(part)
             except Exception:  # noqa: BLE001
                 data = part.get_payload(decode=True) or b""
             attachments.append(RawAttachment(filename or "forwarded.eml", data, "message/rfc822", False, cid))

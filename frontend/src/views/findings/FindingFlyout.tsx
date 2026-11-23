@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AddToTimeline } from '../../components/AddToTimeline'
-import { usePivot } from '../../components/Detail'
-import { entityKind } from '../../components/EntityPanel'
+import { usePivot } from '../../components/usePivot'
+import { entityKind } from '../../components/entityKind'
 import { IconArrowLeft } from '../../components/Icons'
 import { Badge, Flyout, JsonView, Tabs } from '../../components/ui'
 import { isLead, measuredOn, type MeasureReading } from '../../data/ruleMeasures'
@@ -16,6 +16,7 @@ import { attackHref } from '../../util/safe'
 import { REFS_OPEN, relatedChains, STATUSES, STATUS_LABEL, type LastRun, type Status } from './model'
 import { FindingSeverity, OverrideLabel, SeverityOverrideNotice, StatusBadge } from './parts'
 import { pressable } from '../../components/pressable'
+import { ENGINE_NAME } from '../../data/engineDuplicates'
 
 export type FlyTab = 'overview' | 'table' | 'json'
 
@@ -26,6 +27,7 @@ export function FindingFlyout({
   all,
   priority,
   readings,
+  author,
   lastRun,
   cuts,
   tab,
@@ -47,6 +49,8 @@ export function FindingFlyout({
   all: Finding[]
   priority?: Priority
   readings: Map<string, MeasureReading>
+  /** the author its rule names, or that Hayabusa did not record one (rules/authors.ts); empty for a rule that names none */
+  author: string
   lastRun: LastRun | null
   cuts: RuleDiag[]
   tab: FlyTab
@@ -177,6 +181,7 @@ export function FindingFlyout({
           <div className="section">
             <h3>About</h3>
             <div>{selected.description || <span className="muted">the rule has no description</span>}</div>
+            {author && <div className="small">rule author: {author}</div>}
             <div className="row wrap" style={{ gap: 6 }}>
               {selected.attack.map((t) =>
                 attackHref(t) ? (
@@ -198,6 +203,12 @@ export function FindingFlyout({
                 escalated by: {selected.escalation}
               </div>
             )}
+            {selected.alsoBy?.length ? (
+              <div className="small" data-also-by>
+                Also found on the same record by {selected.alsoBy.map((a) => `${ENGINE_NAME[a.engine] ?? a.engine} ("${a.title}", ${a.severity})`).join(' and ')}, which ran the same Sigma rule: one
+                finding is kept for both.
+              </div>
+            ) : null}
             {lastRun?.errors?.some((e) => e.startsWith(selected.ruleId)) && (
               <div className="small" style={{ color: 'var(--warn)' }}>
                 this rule reported an error in the last run; the finding may be from an earlier run

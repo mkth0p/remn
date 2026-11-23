@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Badge } from './ui'
 import { fmtBytes, fmtNum } from '../util/format'
-import { coverageMembers } from '../data/packageCoverage'
+import { coverageMembers, noteLeavesOut } from '../data/packageCoverage'
 
 export function PackageCoverage({ stats, archive = false }: { stats: Record<string, unknown>; archive?: boolean }) {
   const [query, setQuery] = useState('')
@@ -77,9 +77,13 @@ export function PackageCoverage({ stats, archive = false }: { stats: Record<stri
                   <div className="small mono muted">{String(m.sha256 ?? 'hash unavailable')}</div>
                 </td>
                 <td>
-                  <Badge sev={m.note ? 'medium' : m.status === 'parsed' || m.status === 'metadata' ? 'ok' : 'medium'}>
+                  {/* "partial" only where the note says part of the file was not read: a note that only counts undated records or values cut at their limit is about a file read whole */}
+                  <Badge
+                    sev={m.note ? (noteLeavesOut(m.note) ? 'medium' : 'info') : m.status === 'parsed' || m.status === 'metadata' ? 'ok' : 'medium'}
+                    title={m.note ? (noteLeavesOut(m.note) ? 'part of the file was not read: see the note' : 'the file was read whole: the note says how') : undefined}
+                  >
                     {String(m.status)}
-                    {m.note ? ' (partial)' : ''}
+                    {m.note ? (noteLeavesOut(m.note) ? ' (partial)' : ' (with notes)') : ''}
                   </Badge>
                 </td>
                 <td>

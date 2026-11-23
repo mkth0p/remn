@@ -9,7 +9,8 @@ import { draftExecutiveSummary } from '../data/reportSummary'
 import { buildCampaignGraph } from '../data/chainGraph'
 import { saveReportIssue, type ReportIssue } from '../data/reportPreflight'
 import { measuredOn } from '../data/ruleMeasures'
-import { buildStories } from '../data/stories'
+import { buildStories, storiesStaleness } from '../data/stories'
+import { chainCoverageWarnings } from '../data/chains'
 import { ClientPanel } from './report/ClientPanel'
 import { reportFigures } from './report/model'
 import { ReportBars, ReportHeader } from './report/ReportHeader'
@@ -34,7 +35,8 @@ export function ReportView() {
     storyNotes,
     storyDecisions,
     storiesStale,
-    coverageWarnings,
+    storyNow,
+    chainStats,
     reviews,
     relationships,
     settings,
@@ -136,7 +138,8 @@ export function ReportView() {
     evidence,
     chains: selection.chains,
     reviews,
-    coverageWarnings,
+    // the page reads these in English; the report says them in its own language
+    coverageWarnings: chainCoverageWarnings(chainStats, words),
     relationships,
     membersOf,
     graphs,
@@ -144,7 +147,7 @@ export function ReportView() {
       settings.includeGraphs && selection.chains.length > 1
         ? buildCampaignGraph(selection.chains)
             .insights.slice(0, 8)
-            .map((x) => x.text)
+            .map((x) => words.chain.appears(words.chain.node[x.what] ?? x.what, x.label, x.chains))
         : [],
     incidents,
     findings: shown,
@@ -162,13 +165,13 @@ export function ReportView() {
     ai: aiUsage,
     gaps,
     measures,
-    measuredOn: measuredOn(measureSources),
+    measuredOn: measuredOn(measureSources, words),
     claims,
     stories: printedStories.stories,
     storiesLeft: printedStories.left,
     storyIncidents: storyResult?.incidents,
     storyStats: storyResult?.stats,
-    storiesStale,
+    storiesStale: storyResult && storyNow ? storiesStaleness(storyResult, storyNow, words) : [],
     storyNotesOrphaned: printedStories.orphans,
     decidedStories: printedStories.decided,
     storiesDismissed: printedStories.dismissed,

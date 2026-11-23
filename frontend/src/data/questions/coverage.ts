@@ -8,8 +8,8 @@
  */
 import type { Finding } from '../../db/schema'
 import { effectiveSeverity } from '../../rules/incidents'
-import { fmtNum } from '../../util/format'
 import type { DataSource } from '../source'
+import { EN, type ReportText } from '../reportText'
 import { CATALOG, type EvidenceKind, type Question } from './catalog'
 
 /** What the case holds: event counts by channel and by category, and its mails. */
@@ -66,27 +66,22 @@ export function heldCount(kind: EvidenceKind, profile: EvidenceProfile): number 
   return sum(profile.channels, kind.channels, kind.channelPrefixes) + sum(profile.categories, kind.categories, kind.categoryPrefixes) + (kind.mails ? profile.mails : 0)
 }
 
-const list = (labels: string[], join: string) => (labels.length <= 2 ? labels.join(` ${join} `) : `${labels.slice(0, -1).join(', ')} ${join} ${labels[labels.length - 1]}`)
-
-export function coverage(q: Pick<Question, 'evidence'>, profile: EvidenceProfile, kinds: Record<string, EvidenceKind> = CATALOG.evidence): Coverage {
+/** Whether the case holds the evidence a question lists, said in the words of a report's language (the interface reads it in English). */
+export function coverage(q: Pick<Question, 'evidence'>, profile: EvidenceProfile, kinds: Record<string, EvidenceKind> = CATALOG.evidence, t: ReportText = EN): Coverage {
   const held: HeldEvidence[] = []
   const missing: { id: string; label: string }[] = []
   for (const id of q.evidence) {
     const kind = kinds[id]
     if (!kind) continue
+    const label = t.question.evidenceKind[id] ?? kind.label
     const count = heldCount(kind, profile)
-    if (count > 0) held.push({ id, label: kind.label, count })
-    else missing.push({ id, label: kind.label })
+    if (count > 0) held.push({ id, label, count })
+    else missing.push({ id, label })
   }
-  const text = held.length
-    ? `covered by the ${list(
-        held.map((h) => `${h.label} (${fmtNum(h.count)} ${h.count === 1 ? 'row' : 'rows'})`),
-        'and',
-      )}`
-    : `not covered: no ${list(
-        missing.map((m) => m.label),
-        'or',
-      )} in this case`
+  const text = t.question.coverage(
+    held,
+    missing.map((m) => m.label),
+  )
   return { covered: held.length > 0, held, missing, text }
 }
 

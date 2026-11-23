@@ -133,3 +133,31 @@ def test_a_defender_line_yields_its_threat_name(tmp_path):
 
     names = [r.get("threatName") for r in rows]
     assert names == [None, "Trojan:Win32/Synthetic.A!ml", "PUA:Win32/Presenoker", None, None]
+
+
+def test_an_mplog_line_is_dated_at_the_utc_time_it_starts_with(tmp_path):
+    """MPLog starts each line it writes with the time, in UTC. The rows had no time, so a detection
+    was on no timeline. A line without a time of its own (the rest of a resource-scan block) stays
+    an observation, and a time in another Defender log is believed only when it says its zone. The
+    lines are invented."""
+    body = (
+        "\n".join(
+            [
+                "2026-08-19T01:34:26.112Z Begin Resource Scan",
+                "Threat Name:Trojan:Win32/Synthetic.A!ml",
+                "2026-08-19T03:34:26.113+02:00 DETECTION_ADD PUA:Win32/Presenoker file:C:\\Users\\Public\\tool.exe",
+                "2026-08-19T01:40:00.000 Engine:Config:Default MpEngine config loaded",
+            ]
+        )
+        + "\n"
+    ).encode()
+
+    rows, _ = parse(tmp_path, body, "WdSupportLogs/MPLog-20260819.log")
+
+    at = 1_787_103_266_112  # 2026-08-19T01:34:26.112Z
+    assert [r["ts"] for r in rows] == [at, None, at + 1, at + 333_888]
+    assert [r["recordKind"] for r in rows] == ["event", "observation", "event", "event"]
+
+    # outside MPLog, a time without a zone is not taken to be UTC
+    rows, _ = parse(tmp_path, body, "WdSupportLogs/MpCmdRun.log")
+    assert [r["ts"] for r in rows] == [at, None, at + 1, None]

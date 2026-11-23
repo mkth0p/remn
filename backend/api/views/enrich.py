@@ -15,9 +15,19 @@ from api.views.store import REFUSED, _limit, _stopped, refused
 from forensic.access import permission
 from services.analysis import baseline
 from services.analysis import rescore as calibration
-from services.store.casestore import QueryStopped, registry
+from services.store.casestore import QueryStopped, TimeLimit, registry
 
 log = logging.getLogger(__name__)
+
+RESCORE_STOPPED = (
+    "one read of the case was stopped after {seconds} s, the most FORENSIC_STORE_QUERY_MAX_S allows one query on a server store, "
+    "so the mail scores were left as they were. Ask the operator to raise the limit."
+)
+
+
+def _read_limit() -> TimeLimit:
+    """The time one read of a rescore job may take: a job has no request to answer 504, so it says the limit in its error."""
+    return TimeLimit(conf.FORENSIC_STORE_QUERY_MAX_S, RESCORE_STOPPED)
 
 
 @permission("write", case="body")
@@ -46,7 +56,9 @@ def rescore(request: HttpRequest):
         if any(j["status"] in ("queued", "running") for j in manager.list(st.key)):
             return JsonResponse({"error": "Wait for this case's current jobs to finish before rescoring."}, status=409)
         account = getattr(request, "account", None)
-        job = manager.submit("rescore_mails", st.key, lambda j: calibration.store(st, settings, j), "Rescore mails", account=account.name if account else None)
+        job = manager.submit(
+            "rescore_mails", st.key, lambda j: calibration.store(st, settings, j, limit=_read_limit), "Rescore mails", account=account.name if account else None
+        )
         return JsonResponse({"jobId": job.id}, status=202)
     rows = body.get("mails")
     if not isinstance(rows, list) or len(rows) > 200 or any(not isinstance(r, dict) or not isinstance(r.get("id"), int) for r in rows):

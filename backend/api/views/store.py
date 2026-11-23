@@ -222,8 +222,13 @@ def ingest(request: HttpRequest, key: str):
     except ValueError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
     dates = date_setting.to_dict() if date_setting is not None else None
+    # a file read again names the evidence it replaces; the browser removes that evidence once this
+    # read has succeeded, so its records are not taken for ones the case already holds
+    replaces = options.get("replaces")
+    if replaces is not None and (isinstance(replaces, bool) or not isinstance(replaces, int)):
+        return JsonResponse({"error": "options.replaces must be the id of an evidence of this case"}, status=400)
     try:
-        path, meta = get_upload(upload_id)
+        path, meta = get_upload(upload_id, getattr(request, "account", None))
     except (FileNotFoundError, ValueError):
         return JsonResponse({"error": "upload not found or incomplete"}, status=404)
     try:
@@ -297,7 +302,7 @@ def ingest(request: HttpRequest, key: str):
         else:
             parse_options = {"ctx": ctx}
         try:
-            ew = EventWriter(st, evidence_id, include_raw=include_raw) if kind in ("evtx", "package") else None
+            ew = EventWriter(st, evidence_id, include_raw=include_raw, replaces=replaces) if kind in ("evtx", "package") else None
             mw = MailWriter(st, evidence_id, keep_bodies=keep_bodies) if kind in ("mail", "package") else None
             # the evidence is read in a process of its own; the rows come back here to be written
             parse = isolation.start(

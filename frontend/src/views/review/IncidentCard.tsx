@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { AddToTimeline } from '../../components/AddToTimeline'
-import { entityKind } from '../../components/EntityPanel'
+import { entityKind } from '../../components/entityKind'
 import { IconAi, IconArrowLeft, IconCheck } from '../../components/Icons'
 import { Sev, Spinner, Toggle } from '../../components/ui'
 import { SEVERITIES, type ReportSettings } from '../../data/review'
@@ -11,6 +11,7 @@ import { classNames, fmtNum, fmtTs } from '../../util/format'
 import { Facts } from './Facts'
 import { DECISIONS, STATUS_LABEL, type Status } from './model'
 import { pressable } from '../../components/pressable'
+import { askAbout } from '../../ai/evidence'
 
 /** An incident to decide: what was seen, the decision and what it does to the verdict, its severity, whether the report carries it, and its note. */
 export function IncidentCard({
@@ -79,7 +80,13 @@ export function IncidentCard({
             .map(([k, v]) => {
               const kind = entityKind(k)
               return (
-                <span key={k} className={classNames('pill', kind && 'click')} onClick={() => kind && setEntity({ kind, value: String(v) })} title={kind ? 'open the entity page' : k}>
+                <span
+                  key={k}
+                  {...(kind ? pressable : {})}
+                  className={classNames('pill', kind && 'click')}
+                  onClick={() => kind && setEntity({ kind, value: String(v) })}
+                  title={kind ? 'open the entity page' : k}
+                >
                   <span className="muted">{k}</span> {String(v)}
                 </span>
               )
@@ -173,11 +180,14 @@ export function IncidentCard({
         <button
           className="btn sm"
           onClick={() => {
-            useStore
-              .getState()
-              .setAiPrompt(
-                `Assess this incident for the report: read its findings and rows with get_finding, then queue your proposal with propose_decision, citing the rows. "${inc.title}" (${inc.severity}), findings: ${inc.findings.map((f) => `finding:${f.id} ${f.severity} ${f.title}`).join('; ')}. Entities: ${JSON.stringify(inc.entities)}.`,
-              )
+            useStore.getState().setAiPrompt(
+              askAbout('Assess this incident for the report: read its findings and rows with get_finding, then queue your proposal with propose_decision, citing the rows.', 'incident', {
+                title: inc.title,
+                severity: inc.severity,
+                findings: inc.findings.map((f) => `finding:${f.id} ${f.severity} ${f.title}`),
+                entities: inc.entities,
+              }),
+            )
             setView('ai')
           }}
         >

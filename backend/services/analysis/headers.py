@@ -162,18 +162,102 @@ def first_header(headers: Iterable[Header], name: str) -> str | None:
     return vals[0] if vals else None
 
 
+# the address in angle brackets that ends a mailbox, or in the parentheses Outlook writes after a
+# contact's name; [^<>] and [^()] stop each try at the next bracket
+_ANGLE_ADDR_RE = re.compile(r"<([^<>]*)>\s*$")
+_PAREN_ADDR_RE = re.compile(r"\(([^()]*)\)\s*$")
+_ADDR_SPEC_RE = re.compile(r"[^\s<>()\[\]\\\",;:@]+@[^\s<>()\[\]\\\",;:@]+")
+
+
+def _lenient_mailbox(text: str) -> tuple[str, str]:
+    """A mailbox read without the strict parser, for a display name that holds "@": Outlook keeps
+    an address as the name of a contact who has none and shows a contact as "Name (address)", and
+    a lure shows a trusted address there. The address is the one in angle brackets, never one in
+    the name; without brackets, an address alone or in the closing parentheses."""
+    m = _ANGLE_ADDR_RE.search(text)
+    if m:
+        return text[: m.start()].strip().strip('"').strip(), m.group(1).strip()
+    text = text.strip().strip('"').strip()
+    if _ADDR_SPEC_RE.fullmatch(text):
+        return "", text
+    m = _PAREN_ADDR_RE.search(text)
+    if m and _ADDR_SPEC_RE.fullmatch(m.group(1).strip()):
+        return text[: m.start()].strip().strip('"').strip(), m.group(1).strip()
+    return text, ""
+
+
+def _mailbox(text: str) -> tuple[str, str]:
+    """Python's strict parser refuses a display name that holds "@" without quotes, and reads
+    "Name (address)" as the address "Name": the lenient reading is taken when it finds an address
+    the strict one did not."""
+    name, addr = parseaddr(text)
+    if "@" not in addr:
+        lenient = _lenient_mailbox(text)
+        if "@" in lenient[1]:
+            return lenient
+    return name, addr
+
+
+def _split_list(value: str) -> list[str]:
+    """The entries of an address list, split at the commas and at the semicolons that extract-msg
+    and PST display lists write between recipients, outside quotes, comments and angle brackets."""
+    entries: list[str] = []
+    start, quoted, comment, angle, escaped = 0, False, 0, False, False
+    for i, c in enumerate(value):
+        if escaped:
+            escaped = False
+        elif c == "\\":
+            escaped = True
+        elif quoted:
+            quoted = c != '"'
+        elif c == "(":
+            comment += 1
+        elif c == ")":
+            comment = max(0, comment - 1)
+        elif comment:
+            continue
+        elif c == '"':
+            quoted = True
+        elif c == "<":
+            angle = True
+        elif c == ">":
+            angle = False
+        elif c in ",;" and not angle:
+            entries.append(value[start:i])
+            start = i + 1
+    entries.append(value[start:])
+    return [e.strip() for e in entries if e.strip()]
+
+
 def parse_address(value: str | None) -> tuple[str, str]:
     """Return (display name, address) with MIME decoding applied."""
     if not value:
         return "", ""
-    name, addr = parseaddr(decode_mime(value))
+    name, addr = _mailbox(decode_mime(value))
     return name.strip().strip('"'), addr.strip().lower()
 
 
 def parse_addresses(values: Iterable[str]) -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
-    decoded = [decode_mime(v) for v in values if v]
-    for name, addr in getaddresses(decoded):
+    pairs: list[tuple[str, str]] = []
+    for value in values:
+        text = decode_mime(value) if value else ""
+        if not text.strip():
+            continue
+        read = getaddresses([text])
+        # the strict parser gives one empty pair for a value it will not read at all, so one entry
+        # it refuses takes the whole list with it: such a list is read entry by entry, and so is
+        # one where it found an entry without "@", which may be a "Name (address)"
+        refused = read == [("", "")]
+        if refused or any("@" not in addr for _, addr in read):
+            read = []
+            for entry in _split_list(text):
+                name, addr = _mailbox(entry)
+                # in a refused list, a name alone is not read as an address
+                if "@" in addr or (addr and (not refused or "<" in entry)):
+                    read.append((name, addr))
+        pairs.extend(read)
+    for name, addr in pairs:
         addr = addr.strip().lower()
         if addr or name:
             out.append({"name": name.strip().strip('"'), "addr": addr, "domain": addr.split("@")[-1] if "@" in addr else ""})

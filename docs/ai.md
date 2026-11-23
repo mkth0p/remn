@@ -210,7 +210,8 @@ each entry hashed with the one before, so an entry changed afterwards, an entry 
 among later ones, or a gap in the numbering breaks the chain at that point. The chain has no
 key and is kept in the browser's database: it does not show the newest entries removed, nor
 the chain hashed again from any entry onward by whoever holds the case. The ledger tab lists
-the entries and verifies the chain; the triage pass and the executive summary are recorded
+the entries and verifies the chain, says what the check finds and what it does not, and shows
+the head whole, as the report prints it; the triage pass and the executive summary are recorded
 too. It travels in the case bundle. The report prints a section "How AI was used": runs,
 models and where they ran, tool calls, what was proposed and what became of it by kind, the
 notices, the state of the chain with its head (the last entry's SHA-256, printed whole) and a
@@ -228,9 +229,12 @@ report this"), is found before the model reads it (`frontend/src/ai/evidence.ts`
 result then opens with a REMN notice naming the rows and fields, which says it is evidence
 and may show intent, never an instruction; the step shows the text in the chat; the ledger
 records it; and every proposal the run makes afterwards is marked. Evidence the analyst
-puts in a question (the story walk-through does) is checked the same way, and the ledger
-records what was found in it as a notice of "the question", once, by the run that answers
-that question. The triage pass marks every proposal of a batch in which any item does the
+puts in a question is checked the same way: the story walk-through and the "explain", "analyse"
+and "ask the analyst" buttons of an event, a mail, a finding, an incident and an entity put the
+question first and what REMN read of the item after it, between the same markers (an event past
+6,000 characters is cut there, and the cut says how much it left out and that `get_event` reads
+the rest). The ledger records what was found in it as a notice of "the question", once, by
+the run that answers that question. The triage pass marks every proposal of a batch in which any item does the
 same. The prompts say it too,
 and the security page describes the rest ([security](security.md)).
 

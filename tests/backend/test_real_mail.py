@@ -99,6 +99,19 @@ def test_a_groupwise_message_gives_its_sender_subject_date_and_text_attachment(t
     assert text["sha256"] == hashlib.sha256(b"s" * 22).hexdigest()
 
 
+def test_a_groupwise_message_keeps_its_attached_message_as_an_attachment_and_out_of_its_body(tmp_path):
+    rows = read(tmp_path, MAIL / "testGroupWiseEml.eml", analyze_attachments=True)
+    # Tika: two attachments, the message test.eml (written in base64) and the text file
+    assert rows[0]["attachmentCount"] == 2
+    assert sorted(a["name"] for a in rows[0]["attachments"]) == ["Neues Textdokument.txt", "test.eml"]
+    # the outer message's own text is "test"; the attached message's is "test2" and stays in it
+    assert rows[0]["bodyText"].strip() == "test"
+    attached = next(a for a in rows[0]["attachments"] if a["name"] == "test.eml")
+    assert "nested_mail" in attached["flags"]
+    assert attached["details"]["mail"]["subject"] == "test2"
+    assert attached["details"]["mail"]["date"] == ms("2013-06-27T11:27:12+00:00")
+
+
 def test_an_mbox_of_one_outlook_message_gives_one_message(tmp_path):
     rows = read(tmp_path, MAIL / "testMBOX_complex.mbox")
     # Tika: one message. Its text part says "body 1" and its HTML part "body 2"; Tika shows the

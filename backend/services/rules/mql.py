@@ -37,6 +37,7 @@ from services.analysis.urls import FILE_HOSTING, SHORTENERS, SUSPICIOUS_TLDS
 from services.common import load_untrusted_yaml_all
 from services.reference.brand_domains import BRAND_OWNED_DOMAINS
 from services.reference.notification_senders import NOTIFICATION_SENDERS
+from services.rules.linear import linear
 
 
 class Unsupported(Exception):
@@ -905,7 +906,8 @@ class Translator:
         # strings.contains / starts_with / ends_with are case-sensitive in MQL. On a plain text column the
         # DSL's *_cs operators keep that exactly ("hTTPs://" must not match every https link); derived
         # kinds (local part, TLD, headers blob) only have case-insensitive matching, so they fall back.
-        cs = f.kind == "text" and name in ("strings.contains", "strings.starts_with", "strings.ends_with")
+        # regex.contains and regex.match are case-sensitive as well: re_cs keeps the pattern's case there
+        cs = f.kind == "text" and name in ("strings.contains", "strings.starts_with", "strings.ends_with", "regex.contains", "regex.match")
         if name in ("strings.contains", "strings.starts_with", "strings.ends_with", "strings.like", "regex.contains", "regex.match") and not cs:
             self.warn(f"{name} is case-sensitive in MQL; REMN matches case-insensitively")
         if name in ("strings.icontains", "strings.contains"):
@@ -928,9 +930,10 @@ class Translator:
                 return self.cond(f, op, vals if len(vals) > 1 else vals[0])
             return _any_of([self.cond(f, op, v) for op, v in parsed])
         if name in ("regex.icontains", "regex.contains", "regex.imatch", "regex.match"):
-            pats = strs
+            # a pattern that grows with the cube of the value is written in its linear form (services/rules/linear.py)
+            pats = [linear(p) for p in strs]
             if name.endswith("match"):
-                pats = [f"^(?:{p})$" for p in pats]
+                pats = [f"^(?:{p})$" for p in strs]
             for p in pats:
                 try:
                     with warnings.catch_warnings():
@@ -938,7 +941,7 @@ class Translator:
                         re.compile(p)
                 except re.error as exc:
                     raise Unsupported(f"regex {p[:40]!r}: {exc}") from None
-            return self.cond(f, "re", pats if len(pats) > 1 else pats[0])
+            return self.cond(f, "re_cs" if cs else "re", pats if len(pats) > 1 else pats[0])
         raise Unsupported(f"{name}()")
 
 

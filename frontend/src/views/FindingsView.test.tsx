@@ -11,6 +11,7 @@ vi.mock('../components/RescoreButton', () => ({ RescoreButton: () => null }))
 vi.mock('../data/ingest', () => ({ refreshCounts: vi.fn(async () => undefined) }))
 
 import { FindingsView } from './FindingsView'
+import { evidenceBlocks } from '../ai/evidence'
 
 const WAIT = { timeout: 8000 }
 const TEST_TIMEOUT = 30_000 // jsdom + fake-indexeddb are slow on first render
@@ -352,6 +353,34 @@ describe('FindingsView', () => {
   )
 
   it(
+    'says on a finding that Hayabusa found the same record with the same Sigma rule',
+    async () => {
+      await db.findings.clear()
+      await db.findings.add(
+        f({
+          ruleId: 'sigma-0d3c4a5b-0000-4000-8000-000000000001',
+          severity: 'medium',
+          title: 'Suspicious Process Creation In Downloads',
+          source: 'events',
+          refs: [42],
+          alsoBy: [{ engine: 'hayabusa', ruleId: 'engine:hayabusa:proc-creation-win-susp-downloads-exec', title: 'Suspicious Process Creation In Downloads', severity: 'high' }],
+        }),
+      )
+      await act(async () => {
+        render(<FindingsView />)
+      })
+      await waitFor(() => expect(sub()).toContain('1 finding(s)'), WAIT)
+      fireEvent.click(screen.getByRole('button', { name: 'flat' }))
+      fireEvent.keyDown(window, { key: 'j' })
+      await waitFor(() => expect(document.querySelector('.flyout')).toBeTruthy(), WAIT)
+      expect(document.querySelector('[data-also-by]')?.textContent).toBe(
+        'Also found on the same record by Hayabusa ("Suspicious Process Creation In Downloads", high), which ran the same Sigma rule: one finding is kept for both.',
+      )
+    },
+    TEST_TIMEOUT,
+  )
+
+  it(
     'asks the analyst about a finding, and opens its rows on the page of its source',
     async () => {
       await db.findings.clear()
@@ -366,8 +395,9 @@ describe('FindingsView', () => {
       await waitFor(() => expect(document.querySelector('.flyout')).toBeTruthy(), WAIT)
       fireEvent.click(screen.getByRole('button', { name: 'ask the analyst' }))
       expect(useStore.getState().view).toBe('ai')
-      expect(useStore.getState().aiPrompt).toContain('Rule win-log-cleared (critical): Security audit log cleared.')
-      expect(useStore.getState().aiPrompt).toContain('ids 42, 43')
+      // the finding travels as evidence, between the markers a tool result has, its rows as citations
+      const [block] = evidenceBlocks(useStore.getState().aiPrompt ?? '')
+      expect(JSON.parse(block)).toMatchObject({ rule: 'win-log-cleared', severity: 'critical', title: 'Security audit log cleared', refs: ['ev:42', 'ev:43'] })
       useStore.setState({ view: 'findings' })
       fireEvent.click(screen.getByRole('button', { name: 'open 2 row(s)' }))
       expect(useStore.getState().view).toBe('events')

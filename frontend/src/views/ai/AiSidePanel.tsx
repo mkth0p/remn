@@ -3,7 +3,7 @@ import type { Case } from '../../db/schema'
 import type { AiLedgerEntry } from '../../db/schema'
 import { toast } from '../../state/store'
 import { fmtTs } from '../../util/format'
-import { Badge } from '../../components/ui'
+import { Badge, CopyButton } from '../../components/ui'
 import { addNote } from '../../data/caseNotes'
 import type { AgentRun } from '../../ai/chat'
 import { refKey } from '../../ai/evidence'
@@ -327,18 +327,30 @@ function LedgerTab({ kase }: { kase: Case }) {
   return (
     <div className="col" style={{ gap: 8 }}>
       <div className="small dim">
-        Every run, tool call (with a hash of its result), proposal and your decision on it, chained by hash: an entry changed afterwards breaks the chain. The report prints the summary.
+        Every run, tool call (with a hash of its result), proposal and your decision on it, each entry hashed with the one before. The check finds an entry changed after it was written, an entry
+        removed from among later ones and a gap in the numbering. It does not find the newest entries removed, nor the chain written again from any entry onward by whoever holds the case: no key
+        protects it. The report prints the summary and the head.
       </div>
       <div className="row" style={{ gap: 6 }}>
         <button className="btn xs" onClick={() => verifyLedger(kase.id!).then(setCheck)}>
           verify the chain
         </button>
         {check && (
-          <span className={`small ${check.intact ? '' : 'warn-inline'}`}>
-            {check.intact ? `✓ intact · ${check.entries} entries · head ${check.head?.slice(0, 12) ?? '—'}` : `✗ broken at entry ${check.brokenAt} of ${check.entries}`}
+          <span className={`small ${check.intact ? '' : 'warn-inline'}`} role="status">
+            {check.intact ? `✓ intact · ${check.entries} entries` : `✗ broken at entry ${check.brokenAt} of ${check.entries}`}
           </span>
         )}
       </div>
+      {check?.head && (
+        // the head whole, as the report prints it: a later copy of the ledger that still holds an entry with this hash has every entry up to it unchanged
+        <div className="row small" style={{ gap: 6 }}>
+          <span className="dim">head</span>
+          <code className="mono" style={{ overflowWrap: 'anywhere' }} title="the SHA-256 of the newest entry">
+            {check.head}
+          </code>
+          <CopyButton text={check.head} label="copy" />
+        </div>
+      )}
       {entries.map((e) => (
         <div key={e.seq} className="ai-ledger-row">
           <span className="dim mono">{e.seq}</span> <span className="dim">{fmtTs(e.at)}</span> <b>{e.kind}</b> <span className="ellipsis">{e.text}</span>

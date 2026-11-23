@@ -1108,6 +1108,17 @@ def _uncaught(kind: type[BaseException], exc: BaseException | None, tb: Any) -> 
         log.critical("the parse process stopped on an error nothing in it caught", exc_info=(kind, exc, tb))
 
 
+def _uncaught_in_main(kind: type[BaseException], exc: BaseException | None, tb: Any) -> None:
+    """An exception that stops the child's main thread: logged as above, and then the process ends at
+    once. Its inbox thread is still reading stdin, and the interpreter's shutdown would stop on the
+    lock that read holds and abort ("Fatal Python error: _enter_buffered_busy ... possibly due to
+    daemon threads"), on the server's stderr."""
+    _uncaught(kind, exc, tb)
+    with contextlib.suppress(Exception):
+        sys.stderr.flush()
+    os._exit(1)
+
+
 def child_main(kinds: dict[str, type[_Work]] | None = None) -> None:
     """The child: read the job, lock down, parse, report, exit."""
     # Until the server's logging configuration replaces it, a handler with the same filter is the
@@ -1117,7 +1128,7 @@ def child_main(kinds: dict[str, type[_Work]] | None = None) -> None:
     early = logging.StreamHandler()
     early.addFilter(RedactEvidence())
     logging.getLogger().addHandler(early)
-    sys.excepthook = _uncaught
+    sys.excepthook = _uncaught_in_main
     threading.excepthook = lambda args: _uncaught(args.exc_type, args.exc_value, args.exc_traceback)
     # the protocol gets the real stdout; anything a library prints goes to stderr instead
     out = os.fdopen(os.dup(1), "wb")

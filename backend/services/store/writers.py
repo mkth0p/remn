@@ -142,11 +142,14 @@ def mail_iocs(row: dict[str, Any], batch: IocBatch) -> None:
 
 
 class EventWriter:
-    def __init__(self, store: CaseStore, evidence_id: int, include_raw: bool = True, preserve_ids: bool = False) -> None:
+    def __init__(self, store: CaseStore, evidence_id: int, include_raw: bool = True, preserve_ids: bool = False, replaces: int | None = None) -> None:
         self.store = store
         self.evidence_id = evidence_id
         self.include_raw = include_raw
         self.preserve_ids = preserve_ids
+        # a file read again is written beside the evidence it replaces, which is removed once the
+        # read succeeds: the records of that evidence are not records the case keeps
+        self.replaces = replaces
         self.batch: list[dict[str, Any]] = []
         self.iocs = IocBatch(evidence_id)
         self.count = 0
@@ -179,7 +182,7 @@ class EventWriter:
 
     def flush(self) -> None:
         if self.keyed:
-            have = self.store.existing_record_keys(list({r["recordKey"] for r in self.keyed}))
+            have = self.store.existing_record_keys(list({r["recordKey"] for r in self.keyed}), other_than=self.replaces)
             if have:
                 kept = [r for r in self.batch if r.get("recordKey") not in have]
                 self.duplicates += len(self.batch) - len(kept)

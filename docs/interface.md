@@ -68,9 +68,15 @@ The Review page adds `r`, `e`, `f` and `x` for its decisions. The tables of Even
 Findings and Indicators are tables to a screen reader, with their row count, and take the
 keyboard: Tab enters on the row last used, the arrows, Page Up, Page Down, Home and End move
 between rows, Enter opens one and Space selects it where the table selects rows; a sortable
-column header is a button. A switch is a button that Space flips. The items of the other
-lists and the values that open something (stories, steps, chains, evidence, facets, an entity's
-value) are reached with Tab and pressed with Enter or Space, and the focus shows as a ring.
+column header is a button. A value in a row that filters on a press (an event id, a host, a
+user, an address) is a button inside its cell: the right and left arrows move from the row to
+its values and back, and Enter or Space presses one. The bars of the histogram above the Events
+and Mails tables that hold records are buttons in one Tab stop: the left and right arrows, Home
+and End move between them, and Enter or Space narrows the time range to one. A switch is a
+button that Space flips. The items of the other lists and the values that open something
+(stories, steps, chains, evidence, facets, an entity's value, a hop's address or a link's
+domain in a mail, the citations of the AI analyst's answers) are reached with Tab and pressed
+with Enter or Space, and the focus shows as a ring.
 
 Opening another page moves the keyboard focus to its heading, or to the page itself where it
 has none, so a screen reader names the page and the next Tab starts in it. A dialog takes the
@@ -97,7 +103,18 @@ Microsoft 365 or Entra export whose dates did not say their order or zone shows 
 were read, and reads the file again with a date order and a time zone set for that evidence
 ([data sources](sources.md#microsoft-365-and-entra-exports)). An import still running has
 a "cancel" button on its line in the jobs list, which stops it and removes what it had
-written, as described on the [storage page](storage.md#uploads-and-jobs).
+written, as described on the [storage page](storage.md#uploads-and-jobs). In the coverage table
+of a package or archive, a member whose note says part of the file was not read (lines past a
+limit, records past a cap, records not of the file's kind, the lines of a Defender log that name
+nothing it acts on) is marked "partial"; one whose note only says how a file read whole was read
+(records without a time, values cut at their length limit, rows repaired, an encoding) is marked
+"with notes".
+
+Each browser numbers the files it adds. In a server case, which members fill from several
+browsers, a new file takes the next number above the highest the server holds for the case, so
+it does not take a number another browser already gave. Two files added from two browsers in the
+same moment can still be given one number; the server refuses the second (409), and its error
+says to add the file again, which then takes the next free number.
 
 ## Events and Mails
 
@@ -181,11 +198,19 @@ is stored, and setting an incident's status sets every member. Flat, rule, entit
 source views keep the per-rule detail. Severity tiles show the change since the last run,
 and the flyouts carry About, Investigation (entity pages, referenced rows), Insights
 (prevalence of the entities in the case, related chains, false-positive history of the
-rule) and Notes. The ATT&CK tab counts techniques observed against the enabled rules that
-map to them. A finding of a rule never seen to detect what it looks for on a recorded attack
+rule) and Notes; About names the author the finding's rule gives, or says Hayabusa did not
+record one for its detections. The ATT&CK tab counts techniques observed against the enabled
+rules that map to them. A finding of a rule never seen to detect what it looks for on a recorded attack
 is marked "lead" in the list, and the flyout says what the rule's measure shows: the
 recorded attacks it fires on, and how often it fires on the logs of clean machines (see
-[measured rules](detection.md#measured-rules)).
+[measured rules](detection.md#measured-rules)). An engine's finding that names the Sigma rule
+it ran (`sigmaId`), on the record a finding of REMN's conversion of the same SigmaHQ rule
+(`sigma-<id>`) cites, is kept inside REMN's finding, whose flyout names both: the ids must be
+the same, so a rule Hayabusa split into parts under new ids stays a finding of its own, and so
+does an engine finding the analyst already decided on. It stands on its own again when REMN's
+finding goes (its rule turned off, or the rules cleared by an evidence removal) and goes with
+its evidence. The server takes `sigmaId` from the `RuleID` Hayabusa writes, when it is a rule's
+UUID.
 
 The queue is sorted by priority unless the sort control says severity or newest: what to look
 at first, deterministic and explained, in the way THOR and Cyber Triage rank what they find
@@ -220,7 +245,7 @@ never leaves the browser. Reviewed and false-positive findings sort below the ot
 the score and the reasons that moved it ("1 of 40 hosts", "+2 rules, 1 tactic", "rule
 dismissed 2x", "false positive before"), its tooltip and the finding flyout say each in a sentence ("marked false
 positive in case Acme on 2026-08-14"), an incident ranks by its first finding to look at, and
-the CSV export carries the score.
+the CSV export carries the score and the rule's author.
 
 Findings with a saved review severity override show an asterisk and the original rule
 severity in their detail, and the incident uses the review severity too. "Reset to rule
@@ -352,7 +377,9 @@ ledger with a check of its hash chain. Past investigations are listed on the lef
 The Review page is where a case gets cleared. It walks the analyst through every attack
 chain (by score) and then every incident (by severity), one card at a time, with `j` and
 `k` to move and `r`, `e`, `f` and `x` for reviewed, confirmed, false positive and
-in-or-out of the report.
+in-or-out of the report. The verdict bar above them shows what the report's cover will
+print: the verdict, the completeness of the review (how complete it is, not how sure its
+conclusion is), how many items are decided, and the threat profile.
 
 A chain card takes a verdict (confirmed, unsure, benign), a severity, an inclusion switch
 and a narrative that replaces the automatic summary in the report; "draft with the
@@ -554,12 +581,19 @@ The same panel sets the language and the firm. The report, HTML and Word, is wri
 or in French; the Report page itself stays English. Every heading, label and sentence the report
 writes itself comes from the dictionary of that language, dates and numbers are written the way
 it writes them (01/03/2026 08:00:00 UTC, 12 345, 1,50 Ko in French), and the HTML document and
-the Word document say their language. What the analysis states and what the analyst writes are
-printed as they are: the limits of the evidence, the reasons a claim does not hold, a story's
-spine, rule and incident titles, and the questions of DFIQ stay in English. A firm name, a cover
-line and a logo (PNG or JPEG, 200 KB at most; the panel says so and refuses a larger file) take
-the place of REMN's wordmark on the cover, at the foot and in the title; the logo is embedded in
-the HTML report and in the Word file. With none of them set the report looks as it always has.
+the Word document say their language. That includes what REMN works out in the browser: the
+limits of the evidence, the reasons a claim does not hold and where its rows are, what each
+incident groups, the coverage of each question, REMN's own scenarios and questions, what the
+stories and chains could not read, the codes of the ATT&CK tactics on the cover and the kinds of
+the model's proposals. The Report page keeps its English from the same values. What others wrote
+is printed as they wrote it, and the French report says which parts those are: rule and finding
+titles, the questions of DFIQ (quoted as DFIQ publishes them), the step titles, ties, phase bases,
+spine and automatic summaries the server's story and chain analysis writes in English, and the
+model's text, marked as quoted without translation. What the analyst writes is printed as written.
+A firm name, a cover line and a logo (PNG or JPEG, 200 KB at most; the panel says so and refuses a
+larger file) take the place of REMN's wordmark on the cover, at the foot and in the title; the
+logo is embedded in the HTML report and in the Word file. With none of them set the report looks
+as it always has.
 Printed from a Chromium browser, every page past the cover carries a running header (the firm or
 REMN, the case, the marking) and every page its number and the page count; other browsers print
 without them. The Word report numbers its pages in its footer.

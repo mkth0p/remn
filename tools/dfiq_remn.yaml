@@ -38,7 +38,7 @@ evidence:
   message-trace: { label: Exchange Online message trace, categories: [Exchange message trace] }
   mail: { label: mailboxes, mails: true }
   browser: { label: browser history, categories: ['collection:browser-history', 'collection:browser-download'] }
-  files: { label: file system records (MFT, USN, LNK, jump lists), categories: ['collection:file', 'collection:shellbag'] }
+  files: { label: 'file system records (MFT, USN, LNK, jump lists)', categories: ['collection:file', 'collection:shellbag'] }
   execution:
     label: execution artefacts (Prefetch, Amcache, ShimCache, BAM, UserAssist)
     categories: ['collection:prefetch', 'collection:amcache', 'collection:shimcache', 'collection:bam', 'collection:userassist']

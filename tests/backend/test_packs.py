@@ -11,7 +11,7 @@ import pytest
 import yaml
 from django.test import Client
 
-from services.rules import packs
+from services.rules import mql, packs
 from services.store import rules as R
 from services.store.casestore import StoreRegistry
 from services.store.sqlfilter import Ctx, compile_cond
@@ -52,12 +52,37 @@ def test_manifests_licences_and_counts_agree():
         assert all("yaml" not in r for r in rules)  # the client re-dumps; no duplicated text on the wire
         skipped = json.loads((d / "skipped.json").read_text(encoding="utf-8"))
         assert len(skipped) == p["counts"]["skipped"] and all(s["reason"] for s in skipped)
-        if p["id"].startswith("sigma-"):
-            # every conversion caveat counted is on the rule it concerns
-            carried = sum(len((r["rule"].get("sigma") or {}).get("warnings") or []) for r in rules)
-            assert carried == p["counts"]["warnings"], p["id"]
+        # every conversion caveat counted is on the rule it concerns
+        carried = sum(len((r["rule"].get("sigma") or r["rule"].get("sublime") or {}).get("warnings") or []) for r in rules)
+        assert carried == p["counts"]["warnings"], p["id"]
         assert packs.load_pack(p["id"]) is data  # cached until a file changes
     assert packs.load_pack("nope") is None and packs.load_pack("../windows") is None and packs.license_text("..") is None
+
+
+def test_the_sublime_pack_is_what_the_converter_writes_from_the_mql_each_rule_keeps():
+    # a Sublime rule keeps its upstream MQL and metadata, so the pack can be held to the converter
+    # in this tree (and converted again with --from-pack when the upstream archive is out of reach)
+    stale = []
+    for path in sorted((COMMUNITY / "sublime").glob("*.yaml")):
+        for doc in yaml.safe_load_all(path.read_text(encoding="utf-8")):
+            if not isinstance(doc, dict):
+                continue
+            kept = {k: v for k, v in doc["sublime"].items() if k != "warnings"}
+            upstream = {
+                "name": doc["title"],
+                "type": "rule",
+                "severity": doc["severity"],
+                "description": doc.get("description"),
+                "references": doc.get("references"),
+                **kept,
+            }
+            again = mql.convert_rule(upstream)
+            assert again["ok"], (doc["id"], again["error"])
+            if again["warnings"]:
+                again["rule"]["sublime"]["warnings"] = again["warnings"]
+            if again["rule"] != doc:
+                stale.append(doc["id"])
+    assert stale == []
 
 
 def test_every_pack_rule_compiles_on_the_sql_engine_with_unique_ids():

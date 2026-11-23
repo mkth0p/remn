@@ -130,6 +130,15 @@ def test_a_detection_becomes_a_finding_that_names_its_row():
     assert hayabusa.to_finding({**DETECTION, "Level": "informational"})["severity"] == "info"
 
 
+def test_a_detection_names_the_sigma_rule_hayabusa_ran_so_the_page_can_pair_it_with_remns_own():
+    # the browser keeps one finding when this id is the one REMN's own conversion carries (sigma-<id>)
+    # on the same record; an id that is not a rule's UUID names nothing REMN converted
+    assert hayabusa.to_finding(DETECTION)["sigmaId"] == "0d3c4a5b-0000-4000-8000-000000000001"
+    assert "sigmaId" not in hayabusa.to_finding({k: v for k, v in DETECTION.items() if k != "RuleID"})
+    assert "sigmaId" not in hayabusa.to_finding({**DETECTION, "RuleID": "not a rule id"})
+    assert "sigmaId" not in hayabusa.to_finding({**DETECTION, "RuleID": ""})
+
+
 def test_without_the_binary_nothing_runs(monkeypatch):
     monkeypatch.setattr(hayabusa, "binary", lambda: None)
     assert hayabusa.available() is False and hayabusa.engines() == []

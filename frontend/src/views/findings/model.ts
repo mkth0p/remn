@@ -3,6 +3,7 @@ import type { Finding, Severity } from '../../db/schema'
 import type { Incident } from '../../rules/incidents'
 import type { RuleDiag } from '../../rules/engine'
 import type { Staleness } from '../../data/findingsState'
+import { askAbout } from '../../ai/evidence'
 
 export const ORDER: Severity[] = ['critical', 'high', 'medium', 'low', 'info']
 export const STATUSES = ['new', 'reviewed', 'escalated', 'false_positive'] as const
@@ -48,15 +49,39 @@ export function staleParts(stale: Staleness | null, findings: number): string[] 
   return parts
 }
 
+/** Row ids as the analyst's citations name them (ev:42, mail:7), where the source says which. */
+const asRefs = (source: string, ids: number[]) => ids.slice(0, 20).map((id) => (source === 'events' ? `ev:${id}` : source === 'mails' ? `mail:${id}` : id))
+
 /** The prompt that asks the AI analyst about one finding. */
 export function explainFindingPrompt(f: Finding): string {
-  return `Explain this finding and propose the next investigation steps. Rule ${f.ruleId} (${f.severity}): ${f.title}. ${f.description ?? ''} Entities: ${JSON.stringify(f.entities)}. ${f.count} matching row(s) in ${f.source}, first ${f.ts ? new Date(f.ts).toISOString() : 'n/a'}. Use the tools to look at the referenced rows (ids ${f.refs.slice(0, 20).join(', ')}).`
+  return askAbout(`Explain finding finding:${f.id} and propose the next investigation steps. Use the tools to look at the rows it cites.`, 'finding', {
+    rule: f.ruleId,
+    severity: f.severity,
+    title: f.title,
+    description: f.description ?? null,
+    entities: f.entities,
+    rows: f.count,
+    source: f.source,
+    first: f.ts ? new Date(f.ts).toISOString() : null,
+    refs: asRefs(f.source, f.refs),
+    refsNotShown: Math.max(0, f.refs.length - 20),
+  })
 }
 
 /** The prompt that asks the AI analyst about one incident. */
 export function explainIncidentPrompt(i: Incident): string {
-  return `Assess this incident and propose the next investigation steps. ${i.kind === 'mail' ? 'Mail' : 'Entity'} "${i.title}" (${i.severity}), ${i.findings.length} finding(s) from ${i.rules.length} rule(s), ${i.ts ? new Date(i.ts).toISOString() : 'n/a'} to ${i.tsEnd ? new Date(i.tsEnd).toISOString() : 'n/a'}. Entities: ${JSON.stringify(i.entities)}. Findings: ${i.findings
-    .slice(0, 20)
-    .map((f) => `${f.severity} ${f.ruleId}: ${f.title}`)
-    .join(' | ')}. Referenced rows (${i.source}): ${i.refs.slice(0, 20).join(', ')}.`
+  return askAbout('Assess this incident and propose the next investigation steps.', 'incident', {
+    kind: i.kind,
+    title: i.title,
+    severity: i.severity,
+    rules: i.rules.length,
+    from: i.ts ? new Date(i.ts).toISOString() : null,
+    to: i.tsEnd ? new Date(i.tsEnd).toISOString() : null,
+    entities: i.entities,
+    findings: i.findings.slice(0, 20).map((f) => `${f.severity} ${f.ruleId}: ${f.title}`),
+    findingsNotShown: Math.max(0, i.findings.length - 20),
+    source: i.source,
+    refs: asRefs(i.source, i.refs),
+    refsNotShown: Math.max(0, i.refs.length - 20),
+  })
 }

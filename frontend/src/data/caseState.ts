@@ -2,6 +2,7 @@ import { API_HEADERS } from '../api/client'
 import { defaultSettings, deleteCase, deleteCaseData, getDb, type Case } from '../db/schema'
 import { DEFAULT_DETECTION_LEVEL } from './detectionLevel'
 import { rememberReviews } from './findingReviews'
+import { forgetHeld, heldKey, reconcileEngineDuplicates } from './engineDuplicates'
 
 /**
  * Derived state of a case that is only valid for the evidence it was computed from: findings,
@@ -13,7 +14,7 @@ import { rememberReviews } from './findingReviews'
 
 export async function clearDerivedState(caseId: number, removedEvidenceId?: number): Promise<{ findings: number; chains: number }> {
   const db = getDb()
-  return db.transaction('rw', [db.findings, db.kv, db.facets], async () => {
+  const cleared = await db.transaction('rw', [db.findings, db.kv, db.facets], async () => {
     const all = await db.findings.where('caseId').equals(caseId).toArray()
     // An engine's findings (Hayabusa) are made once, at ingest, per evidence file, and point at that
     // file's own rows. Those of the files that stay are still valid, and no rule run could bring them
@@ -25,9 +26,16 @@ export async function clearDerivedState(caseId: number, removedEvidenceId?: numb
     await db.findings.bulkDelete(findings.map((f) => f.id!))
     const chains = ((await db.kv.get(`chains-${caseId}`))?.value as { chains?: unknown[] } | undefined)?.chains?.length ?? 0
     await db.kv.bulkDelete([`chains-${caseId}`, `stories-${caseId}`, `ruleDiags-${caseId}`, `relationship-cache-${caseId}`, `relationship-stories-${caseId}`])
+    // the engine findings that went, those of the removed file or all of them, go from inside REMN's too
+    if (removedEvidenceId == null) await db.kv.delete(heldKey(caseId))
+    else await forgetHeld(caseId, removedEvidenceId)
     await db.facets.where('caseId').equals(caseId).delete()
     return { findings: findings.length, chains }
   })
+  // the engine's findings of the files that stay, kept inside REMN's findings just cleared, stand alone
+  // again until the next rule run; those of the removed file go with it
+  await reconcileEngineDuplicates(caseId)
+  return cleared
 }
 
 /**

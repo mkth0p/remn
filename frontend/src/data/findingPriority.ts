@@ -50,10 +50,10 @@ export const PRIORITY = {
   falsePositiveBefore: 0.25,
   /**
    * what a finding keeps per finding of its rule an analyst marked false positive in this case, on
-   * the same host and on another one. Measured on 2,184 merged attack cases (three libraries,
-   * cross-fit by machine): it cut the findings reviewed before the first real one by 24 to 27% on
-   * attack_data and EVTX-to-MITRE-Attack and 12% on EVTX-ATTACK-SAMPLES, against the same queue
-   * without it; 0.3 to 0.7 on the same host and 0.6 to 1 elsewhere all did about as well.
+   * the same host and on another one. The two weights are a judgement: they were chosen on cases
+   * built from clean hosts with one attack recording merged in, but the script and the cases of that
+   * comparison are not in the repository, so nothing here can reproduce a figure from it
+   * (docs/interface.md says the same).
    */
   dismissedSameHost: 0.5,
   dismissedOtherHost: 0.8,

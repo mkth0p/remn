@@ -340,6 +340,8 @@ def run_rule(
     where = _where_sql(rule, settings, ctx, ts_field)
 
     if not window:
+        # a group cites its rows in time order, rows of the same time by id and rows without a time
+        # last, as the browser engine does: the order is what a folded finding keeps of them
         select = (
             gkeys
             + [f"any_value({e})" for _, e in gexprs]
@@ -348,7 +350,7 @@ def run_rule(
                 f"count(DISTINCT {dexpr})" if dexpr else "count(*)",
                 f"min({q(ts_field)})",
                 f"max({q(ts_field)})",
-                f"list(id ORDER BY {q(ts_field)})[1:{MAX_REFS}]",
+                f"list(id ORDER BY {q(ts_field)} NULLS LAST, id)[1:{MAX_REFS}]",
                 f"list_distinct(list({dexpr}))[1:8]" if dexpr else "[]",
                 f"bool_or({any_sql})" if any_sql else "TRUE",
             ]
@@ -417,7 +419,8 @@ def run_rule(
         select = ["id", q(ts_field)] + gkeys + [e for _, e in gexprs] + ([dexpr] if dexpr else []) + ([any_sql] if any_sql else []) + [e for _, e in eexprs]
         if then_flags and source == "mails":
             select.append("flags")
-        order = ", ".join(gkeys + [q(ts_field)]) if gkeys else q(ts_field)
+        # rows of the same time by id, so that a burst cites its rows in the browser engine's order
+        order = ", ".join(gkeys + [q(ts_field), "id"])
         cur.execute(f"SELECT {', '.join(select)} FROM {source} WHERE {where} AND {q(ts_field)} IS NOT NULL ORDER BY {order}", ctx.params)
         ng = len(gexprs)
         thr = threshold or (">=", 1)
@@ -749,7 +752,8 @@ def run_rules(
     rule_max_s: float = 0,
 ) -> dict[str, Any]:
     """Every enabled rule on the store. diagnose=False leaves out why a rule found nothing (a second scan per such rule), for a caller that only wants the findings.
-    rule_max_s stops a rule that runs longer (0: no limit); the run says so in its errors and goes on with the next rule."""
+    rule_max_s stops a rule that runs longer (0: no limit); the run says so in its errors and goes on with the next rule.
+    A cancel stops the rule that is running, which is then neither counted nor listed; notRun is the number of enabled rules that did not run."""
     all_findings: list[dict[str, Any]] = []
     by_rule: dict[str, int] = {}
     errors: list[dict[str, str]] = []
@@ -769,8 +773,11 @@ def run_rules(
         # held to a rule's limit and stopped by a cancel, as the rules are: a stopped scan cannot tell (None)
         with TimeLimit(rule_max_s, RULE_STOPPED, cancelled):
             long_fields[source] = fields_with_long_values(store, source, fields, settings) if fields else set()
+    # where a cancel stopped the run: the rule from which on the enabled rules did not run
+    stopped_at = len(rules)
     for i, rule in enumerate(rules):
         if cancelled and cancelled():
+            stopped_at = i
             break
         if rule.get("enabled") is False:
             continue
@@ -791,6 +798,7 @@ def run_rules(
         except QueryStopped as exc:
             if cancelled and cancelled():
                 # stopped by the cancel, not by the limit: the rule did not finish and is not counted
+                stopped_at = i
                 break
             errors.append({"ruleId": rule.get("id", "?"), "error": str(exc)})
             found = []
@@ -831,6 +839,8 @@ def run_rules(
                     diagnostics.append(diagnose_zero(store, rule, settings))
             except Exception as exc:  # noqa: BLE001
                 if cancelled and cancelled():
+                    # the rule ran and is counted; only the reason it found nothing was not looked for
+                    stopped_at = i + 1
                     break
                 diagnostics.append(
                     {
@@ -844,4 +854,5 @@ def run_rules(
                 )
         if progress:
             progress({"index": i + 1, "total": len(rules), "ruleId": rule.get("id"), "findings": len(found), "ms": int((time.time() - t0) * 1000)})
-    return {"findings": all_findings, "byRule": by_rule, "errors": errors, "diagnostics": diagnostics, "total": len(all_findings)}
+    not_run = sum(1 for r in rules[stopped_at:] if r.get("enabled") is not False)
+    return {"findings": all_findings, "byRule": by_rule, "errors": errors, "diagnostics": diagnostics, "total": len(all_findings), "notRun": not_run}

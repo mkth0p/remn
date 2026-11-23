@@ -9,7 +9,8 @@
  * - chunks that fail the EVTX checksum (records changed after Windows wrote them, or damaged);
  * - record numbers in none of the files read between two files of one log (a missing archive);
  * - logs that start after the first finding (overwritten, or not collected);
- * - Unified Audit Log exports cut at a service limit (exactly 5,000 or 50,000 records);
+ * - Unified Audit Log exports cut at a service limit (exactly 5,000 or 50,000 records), and Graph
+ *   exports whose last page links to a next one that was not downloaded;
  * - MailItemsAccessed throttled (item reads not recorded for 24 hours);
  * - Entra sign-ins that start after the first finding (Entra keeps them 7 or 30 days);
  * - package members read only in part: an export past the parse limit, a text log past its line
@@ -21,8 +22,8 @@
  */
 import { getDb, type Evidence, type Finding } from '../db/schema'
 import { effectiveSeverity } from '../rules/incidents'
-import { fmtDuration, fmtNum, fmtUtc } from '../util/format'
 import type { AggGroup, DataSource } from './source'
+import { EN } from './reportText'
 
 /** One EVTX file's record numbering and checksums, as the parser reports it. */
 export interface FileSequenceStats {
@@ -67,10 +68,45 @@ export type GapKind =
   | 'mail-throttled'
   | 'signins-start-late'
 
+/** Where in the evidence a statement is: one log of one computer, a file of several, or a file. */
+export interface GapWhere {
+  file: string
+  channel?: string
+  computer?: string
+  channels?: number
+  computers?: number
+}
+
+/** The export a cap belongs to (EXPORT_CAPS), named in the words of the report's language. */
+export type ExportSource = 'ual' | 'message-trace' | 'entra-audit'
+
+/**
+ * What a statement says, as values: the interface reads it in English (text), the report in its
+ * own language from the same values (data/reportText.ts gap).
+ */
+export type GapSay =
+  | { kind: 'record-holes'; where: GapWhere; floor: boolean; missing: number; gaps: number; first: number; last: number; largest: [number, number] }
+  | { kind: 'checksum-data'; file: string; bad: number; chunks: number }
+  | { kind: 'checksum-header'; file: string; headers: number; fileHeader: boolean }
+  | { kind: 'clock-logs'; computer: string; logs: number; from: number; to: number }
+  | { kind: 'clock-set'; computer: string; from: number; to: number }
+  | { kind: 'time-backwards'; where: GapWhere; steps: number; largest: number; record: number; unread: number }
+  | { kind: 'missing-between-files'; channel: string; computer: string; from: number; to: number; before: string; beforeLast: number; after: string; afterFirst: number }
+  | { kind: 'log-starts-late'; computer: string; start: number; logs: [string, number][]; count: number }
+  | { kind: 'export-cap'; file: string; records: number; source: ExportSource }
+  | { kind: 'export-next-page'; file: string }
+  | { kind: 'xml-export'; file: string; records: number }
+  | { kind: 'parse-limit'; file: string; kept: number }
+  | { kind: 'read-in-part'; file: string; note: string }
+  | { kind: 'mail-throttled'; user: string; from: number }
+  | { kind: 'signins-start-late'; first: number; start: number }
+
 export interface GapStatement {
   kind: GapKind
   severity: 'high' | 'medium' | 'low'
+  /** the statement in English, as the interface prints it */
   text: string
+  say: GapSay
   /** the evidence file it is about, when it is about one */
   evidenceId?: number
 }
@@ -94,20 +130,10 @@ type Located = FileSequenceStats & { evidenceId: number }
  * (250,000 records a file). The admin centre's message trace reports are not counted: they are
  * cut elsewhere, or not at all.
  */
-const EXPORT_CAPS: { formats: string[]; records: string; limits: Record<number, string>; missing: string }[] = [
-  {
-    formats: ['m365-ual-csv', 'm365-ual-json'],
-    records: 'Unified Audit Log records',
-    limits: { 5000: 'the most one Search-UnifiedAuditLog call returns', 50000: 'the most a large-set search returns' },
-    missing: 'Records',
-  },
-  {
-    formats: ['exo-messagetrace-csv'],
-    records: 'message trace rows',
-    limits: { 1000: 'as many as Get-MessageTrace and Get-MessageTraceV2 return unless told otherwise', 5000: 'the most Get-MessageTraceV2 returns' },
-    missing: 'Messages',
-  },
-  { formats: ['entra-audit-csv', 'entra-audit-json'], records: 'directory audit records', limits: { 250000: 'the most the Entra admin centre downloads in one file' }, missing: 'Records' },
+const EXPORT_CAPS: { formats: string[]; source: ExportSource; limits: number[] }[] = [
+  { formats: ['m365-ual-csv', 'm365-ual-json'], source: 'ual', limits: [5000, 50000] },
+  { formats: ['exo-messagetrace-csv'], source: 'message-trace', limits: [1000, 5000] },
+  { formats: ['entra-audit-csv', 'entra-audit-json'], source: 'entra-audit', limits: [250000] },
 ]
 const ENTRA_CHANNEL = 'Entra SignIn'
 /** a log that starts within this of the first finding is not said to start after it */
@@ -123,7 +149,23 @@ const CLOCK_LOGS = 3
 /** a clock set back by less than this does not blur the order of events that matters */
 const SET_BACK_REPORT_MS = 5 * 60_000
 
-const plural = (n: number, one: string, many = `${one}s`) => (n === 1 ? one : many)
+/** A statement from what it says: its English text is written from the same values the report reads. */
+const said = (severity: GapStatement['severity'], say: GapSay, evidenceId?: number): GapStatement => ({
+  kind:
+    say.kind === 'checksum-data' || say.kind === 'checksum-header'
+      ? 'checksum'
+      : say.kind === 'clock-logs' || say.kind === 'clock-set'
+        ? 'clock-set-back'
+        : say.kind === 'parse-limit'
+          ? 'read-in-part'
+          : say.kind === 'export-next-page'
+            ? 'export-cap'
+            : say.kind,
+  severity,
+  text: EN.gap(say),
+  say,
+  ...(evidenceId != null ? { evidenceId } : {}),
+})
 
 function records(stats: Record<string, unknown> | undefined): Record<string, unknown>[] {
   const files = stats?.files
@@ -148,48 +190,30 @@ export function fileSequences(evidence: Evidence[]): Located[] {
 /** One log from one computer: a file forwarded from several machines or holding several channels has no single name. */
 const homogeneous = (s: FileSequenceStats) => !!s.channel && !!s.computer && (s.channels ?? 1) <= 1 && (s.computers ?? 1) <= 1
 
-function where(s: FileSequenceStats): string {
-  if (homogeneous(s)) return `${s.channel} on ${s.computer} (${s.file})`
-  if ((s.channels ?? 0) > 1 || (s.computers ?? 0) > 1)
-    return `${s.file} (${fmtNum(s.channels ?? 1)} ${plural(s.channels ?? 1, 'channel')} from ${fmtNum(s.computers ?? 1)} ${plural(s.computers ?? 1, 'computer')})`
-  return s.file
+function where(s: FileSequenceStats): GapWhere {
+  if (homogeneous(s)) return { file: s.file, channel: s.channel, computer: s.computer }
+  if ((s.channels ?? 0) > 1 || (s.computers ?? 0) > 1) return { file: s.file, channels: s.channels ?? 1, computers: s.computers ?? 1 }
+  return { file: s.file }
 }
 
 function fileStatements(s: Located): GapStatement[] {
   const out: GapStatement[] = []
-  const at = { evidenceId: s.evidenceId }
   if (s.missing && s.holes?.length) {
-    const count = s.holeCount ?? s.holes.length
     const largest = s.holes.reduce((a, b) => (b[1] - b[0] > a[1] - a[0] ? b : a))
-    const floor = s.overflow ? 'at least ' : ''
-    out.push({
-      kind: 'record-holes',
-      severity: 'high',
-      text:
-        `${where(s)}: ${floor}${fmtNum(s.missing)} ${plural(s.missing, 'record')} missing from its numbering, in ${floor}${fmtNum(count)} ${plural(count, 'gap')} ` +
-        `between record ${fmtNum(s.first)} and ${fmtNum(s.last)} (the largest: ${fmtNum(largest[0])}${largest[1] > largest[0] ? `–${fmtNum(largest[1])}` : ''}). ` +
-        'Records deleted from the log, or in a part that could not be read.',
-      ...at,
-    })
+    out.push(
+      said(
+        'high',
+        { kind: 'record-holes', where: where(s), floor: !!s.overflow, missing: s.missing, gaps: s.holeCount ?? s.holes.length, first: s.first ?? 0, last: s.last ?? 0, largest },
+        s.evidenceId,
+      ),
+    )
   }
   const c = s.checksums
   if (c) {
     const bad = c.badDataCount ?? c.badData?.length ?? 0
     const badHeader = c.badHeaderCount ?? c.badHeader?.length ?? 0
-    if (bad)
-      out.push({
-        kind: 'checksum',
-        severity: 'high',
-        text: `${s.file}: ${fmtNum(bad)} of ${fmtNum(c.chunks)} ${plural(c.chunks, 'chunk')} fail their checksum. Their records were changed after Windows wrote them, or damaged; they were read all the same.`,
-        ...at,
-      })
-    if (badHeader || c.fileHeader === false)
-      out.push({
-        kind: 'checksum',
-        severity: 'medium',
-        text: `${s.file}: ${[badHeader ? `${fmtNum(badHeader)} chunk ${plural(badHeader, 'header')}` : '', c.fileHeader === false ? 'the file header' : ''].filter(Boolean).join(' and ')} fail${badHeader + (c.fileHeader === false ? 1 : 0) === 1 ? 's' : ''} its checksum: the file's structure was changed after it was written.`,
-        ...at,
-      })
+    if (bad) out.push(said('high', { kind: 'checksum-data', file: s.file, bad, chunks: c.chunks }, s.evidenceId))
+    if (badHeader || c.fileHeader === false) out.push(said('medium', { kind: 'checksum-header', file: s.file, headers: badHeader, fileHeader: c.fileHeader === false }, s.evidenceId))
   }
   return out
 }
@@ -297,28 +321,14 @@ function timeStatements(seqs: Located[]): GapStatement[] {
     }
   }
   for (const b of setBacks.sort((x, y) => x.from - y.from))
-    out.push({
-      kind: 'clock-set-back',
-      severity: 'low',
-      text: b.logs
-        ? `On ${b.computer}, ${fmtNum(b.logs)} logs step back together at ${fmtUtc(b.from)}, by up to ${fmtDuration(b.from - b.to)}: its clock was set back, and no log collected records the change. Events stamped between ${fmtUtc(b.to)} and ${fmtUtc(b.from)} may have happened before or after it, so their times do not give their order.`
-        : `The clock of ${b.computer} was set back ${fmtDuration(b.from - b.to)} at ${fmtUtc(b.from)}, to ${fmtUtc(b.to)}: events stamped between those two times may have happened before or after the change, so their times do not give their order.`,
-    })
+    out.push(said('low', b.logs ? { kind: 'clock-logs', computer: b.computer, logs: b.logs, from: b.from, to: b.to } : { kind: 'clock-set', computer: b.computer, from: b.from, to: b.to }))
 
   const perFile = new Map<Located, Step[]>()
   for (const step of alone) if (step.from - step.to >= STEP_REPORT_MS) perFile.set(step.seq, [...(perFile.get(step.seq) ?? []), step])
   for (const [s, steps] of perFile) {
     const largest = steps.reduce((a, b) => (b.from - b.to > a.from - a.to ? b : a))
     const unread = Math.max(0, (s.backwards ?? 0) - (s.steps?.length ?? 0))
-    out.push({
-      kind: 'time-backwards',
-      severity: 'medium',
-      text:
-        `${where(s)}: write times step back ${fmtNum(steps.length)} ${plural(steps.length, 'time')} between consecutive records with no clock change or log service start in the evidence to explain ${steps.length === 1 ? 'it' : 'them'} ` +
-        `(the largest ${fmtDuration(largest.from - largest.to)}, at record ${fmtNum(largest.rid)}${unread ? `; ${fmtNum(unread)} more steps were not examined` : ''}). ` +
-        'A record was put in later, or the clock changed where no log collected records it (System and Security record clock changes).',
-      evidenceId: s.evidenceId,
-    })
+    out.push(said('medium', { kind: 'time-backwards', where: where(s), steps: steps.length, largest: largest.from - largest.to, record: largest.rid, unread }, s.evidenceId))
   }
   return out
 }
@@ -338,12 +348,19 @@ function betweenFiles(seqs: Located[]): GapStatement[] {
     let reach = sorted[0]
     for (const next of sorted.slice(1)) {
       if (next.first! > reach.last! + 1) {
-        const [a, b] = [reach.last! + 1, next.first! - 1]
-        out.push({
-          kind: 'missing-between-files',
-          severity: 'medium',
-          text: `${next.channel} on ${next.computer}: ${a === b ? `record ${fmtNum(a)} is` : `records ${fmtNum(a)}–${fmtNum(b)} are`} in none of the files read (${reach.file} ends at record ${fmtNum(reach.last)}, ${next.file} starts at ${fmtNum(next.first)}): an archive or export is missing.`,
-        })
+        out.push(
+          said('medium', {
+            kind: 'missing-between-files',
+            channel: next.channel!,
+            computer: next.computer!,
+            from: reach.last! + 1,
+            to: next.first! - 1,
+            before: reach.file,
+            beforeLast: reach.last!,
+            after: next.file,
+            afterFirst: next.first!,
+          }),
+        )
       }
       if (next.last! > reach.last!) reach = next
     }
@@ -364,34 +381,32 @@ function startsLate(seqs: Located[], incidentStart: number): GapStatement[] {
   for (const [computer, channels] of first) {
     const late = [...channels].filter(([, ts]) => ts > incidentStart + LATE_MS).sort((a, b) => a[1] - b[1])
     if (!late.length) continue
-    const shown = late.slice(0, 4).map(([channel, ts]) => `${channel} at ${fmtUtc(ts)}`)
-    const more = late.length > 4 ? ` and ${late.length - 4} more` : ''
-    out.push({
-      kind: 'log-starts-late',
-      severity: 'medium',
-      text: `On ${computer}, ${late.length === 1 ? 'one log starts' : `${late.length} logs start`} after the first finding (${fmtUtc(incidentStart)}): ${shown.join(', ')}${more}. Earlier events there were overwritten or not collected.`,
-    })
+    out.push(said('medium', { kind: 'log-starts-late', computer, start: incidentStart, logs: late.slice(0, 4), count: late.length }))
   }
   return out
 }
 
-/** Cloud exports that hold exactly as many records as their source returns at most. */
+/**
+ * Cloud exports that hold exactly as many records as their source returns at most, and Graph exports
+ * whose last page links to a next one (@odata.nextLink): the parser counts such a file (nextPage) and
+ * says so on its member of an archive or a package.
+ */
 function exportCaps(evidence: Evidence[]): GapStatement[] {
   const out: GapStatement[] = []
+  const linked = (e: Evidence, file: string) => out.push(said('high', { kind: 'export-next-page', file }, e.id))
   const check = (e: Evidence, file: string, format: unknown, count: unknown, duplicates: unknown) => {
     const cap = EXPORT_CAPS.find((c) => c.formats.includes(String(format)))
     const n = Number(count ?? 0) + Number(duplicates ?? 0)
-    if (!cap?.limits[n]) return
-    out.push({
-      kind: 'export-cap',
-      severity: 'high',
-      text: `${file}: exactly ${fmtNum(n)} ${cap.records}, ${cap.limits[n]}. ${cap.missing} after that point in its time window are probably missing.`,
-      evidenceId: e.id,
-    })
+    if (!cap?.limits.includes(n)) return
+    out.push(said('high', { kind: 'export-cap', file, records: n, source: cap.source }, e.id))
   }
   for (const e of evidence) {
     check(e, e.name, e.format, e.stats?.count, e.stats?.duplicates)
-    for (const f of records(e.stats)) if (f.status === 'parsed') check(e, String(f.name ?? e.name), f.format, f.count, f.duplicates)
+    const members = records(e.stats)
+    for (const f of members) if (f.status === 'parsed') check(e, String(f.name ?? e.name), f.format, f.count, f.duplicates)
+    const cut = members.filter((f) => typeof f.note === 'string' && f.note.includes('@odata.nextLink'))
+    for (const f of cut) linked(e, String(f.name ?? e.name))
+    if (!cut.length && Number(e.stats?.nextPage ?? 0) > 0) linked(e, e.name)
   }
   return out
 }
@@ -401,15 +416,7 @@ function xmlExports(evidence: Evidence[]): GapStatement[] {
   const out: GapStatement[] = []
   const check = (e: Evidence, file: string, format: unknown, count: unknown) => {
     if (String(format) !== 'event-xml') return
-    const n = Number(count ?? 0)
-    out.push({
-      kind: 'xml-export',
-      severity: 'low',
-      text:
-        `${file}: ${fmtNum(n)} event ${plural(n, 'record')} exported as XML. An export holds what its query selected and not the log file's own record numbering, ` +
-        'so a record deleted from the log before the export cannot be told from one the export left out; the log file itself (wevtutil epl) can be checked for that.',
-      evidenceId: e.id,
-    })
+    out.push(said('low', { kind: 'xml-export', file, records: Number(count ?? 0) }, e.id))
   }
   for (const e of evidence) {
     check(e, e.name, e.format, e.stats?.count)
@@ -431,20 +438,8 @@ function readInPart(evidence: Evidence[]): GapStatement[] {
       const reason = typeof f.reason === 'string' ? f.reason : ''
       const note = typeof f.note === 'string' ? f.note : ''
       const kept = Number(f.count ?? 0)
-      if (f.status === 'error' && /parse limit/.test(reason))
-        out.push({
-          kind: 'read-in-part',
-          severity: 'high',
-          text: `${file}: read up to the parse limit and no further (${fmtNum(kept)} ${plural(kept, 'row')} kept). Records after that point in the file are not in the case.`,
-          evidenceId: e.id,
-        })
-      else if (/kept the first [\d,]+ lines|the cap for this artifact/.test(note))
-        out.push({
-          kind: 'read-in-part',
-          severity: 'medium',
-          text: `${file}: read in part (${note}). What the file holds after that point is not in the case.`,
-          evidenceId: e.id,
-        })
+      if (f.status === 'error' && /parse limit/.test(reason)) out.push(said('high', { kind: 'parse-limit', file, kept }, e.id))
+      else if (/kept the first [\d,]+ lines|the cap for this artifact/.test(note)) out.push(said('medium', { kind: 'read-in-part', file, note }, e.id))
     }
   }
   return out
@@ -453,13 +448,7 @@ function readInPart(evidence: Evidence[]): GapStatement[] {
 function throttledStatements(throttled: { user: string; ts: number }[]): GapStatement[] {
   const first = new Map<string, number>()
   for (const t of throttled) first.set(t.user, Math.min(first.get(t.user) ?? Infinity, t.ts))
-  return [...first]
-    .sort((a, b) => a[1] - b[1])
-    .map(([user, ts]) => ({
-      kind: 'mail-throttled' as const,
-      severity: 'high' as const,
-      text: `MailItemsAccessed for ${user} was throttled from ${fmtUtc(ts)}: for the 24 hours after it, the mailbox's item reads were not recorded one by one, so which messages were read then cannot be listed.`,
-    }))
+  return [...first].sort((a, b) => a[1] - b[1]).map(([user, ts]) => said('high', { kind: 'mail-throttled', user, from: ts }))
 }
 
 const ORDER = { high: 0, medium: 1, low: 2 }
@@ -472,12 +461,7 @@ export function evidenceGaps(input: GapInput): GapStatement[] {
   if (start != null) {
     out.push(...startsLate(seqs, start))
     const entra = input.channels?.find((g) => g.value === ENTRA_CHANNEL)
-    if (entra?.first != null && entra.first > start + LATE_MS)
-      out.push({
-        kind: 'signins-start-late',
-        severity: 'medium',
-        text: `Entra sign-ins start at ${fmtUtc(entra.first)}, after the first finding (${fmtUtc(start)}): earlier sign-ins are not in the evidence. Entra keeps them 7 days without a P1 or P2 licence, 30 days with one.`,
-      })
+    if (entra?.first != null && entra.first > start + LATE_MS) out.push(said('medium', { kind: 'signins-start-late', first: entra.first, start }))
   }
   out.push(...throttledStatements(input.throttled ?? []))
   return out.sort((a, b) => ORDER[a.severity] - ORDER[b.severity])

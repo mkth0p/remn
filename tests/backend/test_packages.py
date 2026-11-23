@@ -358,7 +358,7 @@ def test_server_package_ingestion_job_routes_both_record_types(tmp_path, registr
     path.write_bytes(blob)
     digest = hashlib.sha256(blob).hexdigest()
     monkeypatch.setattr("api.views.store.registry", registry)
-    monkeypatch.setattr("api.views.store.get_upload", lambda _: (path, {"name": path.name, "size": len(blob), "sha256": digest}))
+    monkeypatch.setattr("api.views.store.get_upload", lambda *_: (path, {"name": path.name, "size": len(blob), "sha256": digest}))
     discarded = []
     monkeypatch.setattr("api.views.store.discard_upload", discarded.append)
     results = []
@@ -392,7 +392,7 @@ def test_a_server_package_job_sets_its_staging_room_aside_until_it_ends(tmp_path
     path = tmp_path / "input.zip"
     path.write_bytes(blob)
     monkeypatch.setattr("api.views.store.registry", registry)
-    monkeypatch.setattr("api.views.store.get_upload", lambda _: (path, {"name": path.name, "size": len(blob), "sha256": hashlib.sha256(blob).hexdigest()}))
+    monkeypatch.setattr("api.views.store.get_upload", lambda *_: (path, {"name": path.name, "size": len(blob), "sha256": hashlib.sha256(blob).hexdigest()}))
     monkeypatch.setattr("api.views.store.discard_upload", lambda _: None)
     monkeypatch.setattr("api.views.store.manager.submit", lambda kind, case_key, fn, label, **_: fn(Job(kind, case_key, label)) and Job(kind, case_key, label))
     seen = []

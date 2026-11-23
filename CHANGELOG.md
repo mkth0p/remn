@@ -5,6 +5,66 @@ and a `vX.Y.Z` tag on `main` makes a GitHub release with a built archive.
 
 ## Unreleased
 
+- Server limits hold in more places, and a staged upload belongs to whoever started it. Each read
+  of a mail rescore job runs within `FORENSIC_STORE_QUERY_MAX_S`; a read past it ends the job with
+  an error that names the limit, and the mail scores are left as they were. A cancelled server
+  rule run gives in `notRun` the number of enabled rules that did not run. Upload init and the
+  room a package parse sets aside are decided from one count, under one lock: the files on disk,
+  the bytes unfinished uploads have announced and the room running parses hold. An upload and a
+  parse that ask together are no longer both promised the same free space. A parse process stopped
+  by an error nothing caught logs it through the log filter and exits with status 1, instead of
+  aborting with "Fatal Python error: _enter_buffered_busy" on the server's stderr. With accounts
+  on, a staged upload is sent, finished, read, cancelled and parsed only by the account that
+  started it or an admin; any other account gets the 404 an unknown upload id gets.
+- Mail and cloud exports are read more completely, and reading a file again no longer puts the
+  evidence at risk. A message attached to a mail (message/rfc822, also when GroupWise writes it in
+  base64) is now an attachment of its own, analysed as a nested mail, rather than text in the
+  outer message's body. A lure forwarded as an attachment therefore scores as an attachment, with
+  its own risk in the attachment's details, and not as the forwarder's words. An Outlook message
+  without transport headers keeps its recipients and sender when their display names hold an
+  address, and such a name is read as a name. Defender MPLog lines are dated at the UTC time they
+  start with. In a Unified Audit Log file, a record of another kind is counted as not read rather
+  than as an error. Entra audit, risky user and risk detection records exported through Azure
+  Monitor are read as their Graph records, and exports written in UTF-16 without a byte order mark
+  are read. A Graph export whose last page links to a next one (@odata.nextLink) is counted
+  (`nextPage`), named in its member note and shown as a gap on the Evidence page. A row that the
+  admin centre's directory audit CSV repeats exactly is kept once and counted (`duplicates`).
+  Reading a file again with another date order or time zone imports it beside the evidence and
+  removes the old evidence only once that read has succeeded; a read that fails or is cancelled is
+  removed instead, and the evidence stays as it was.
+- The keyboard reaches the bars of the Events and Mails histogram (one Tab stop; the arrows, Home
+  and End move between them), the values in table cells that filter on a press, a mail hop's
+  address, a link's domain, an incident's entities and the citation chips of the AI analyst's
+  answers. A package member is marked "partial" only when its note says part of the file was not
+  read; a member read whole whose note only says how is marked "with notes". The explain, analyse
+  and "ask the analyst" buttons of an event, a mail, a finding, an incident and an entity put what
+  REMN read of the item between evidence markers, so text in it addressed to a model is caught and
+  recorded in the ledger. An event over 6,000 characters is cut, and the cut says so. The ledger
+  tab shows the chain's head whole, with a copy button, and says what its check finds and what it
+  does not. The verdict bar and the Review page call the review's rating completeness. When
+  Hayabusa and REMN's conversion of the same Sigma rule fire on the same record, one finding is
+  kept and its flyout names both, matched only on an exact Sigma id, which the server now sends
+  with each Hayabusa finding (`sigmaId`, from the `RuleID` Hayabusa writes). A new file in a
+  server case is numbered above the highest evidence number the server holds, so a second
+  browser's file is no longer refused for a number another browser already gave.
+- A French report is in French from its first word to its last, rule authors go with their
+  findings, and the two rule engines agree on more. A French report wrote REMN's own sentences
+  (evidence gaps, claims, record names, story and chain lines, coverage, rule measures, DFIQ
+  answers) in English; every sentence the report builds is now written from
+  `frontend/src/data/reportText.ts` in the report's language, and what the model wrote is marked
+  as quoted without translation. The rule author, which the Detection Rule License asks to keep,
+  is shown in the finding's flyout, in a `ruleAuthor` column of the findings CSV and in the
+  external references of a story's Attack Flow; a Hayabusa detection says its author was not
+  recorded by Hayabusa. The Sublime converter keeps the case of `regex.contains` and `regex.match`
+  (`re_cs`), and the Sublime pack, converted again from the MQL each rule keeps
+  (`tools/import_community_rules.py sublime --from-pack`), carries each rule's conversion
+  warnings. Two SigmaHQ admin-share patterns and a Sublime sender-name pattern, whose time grew
+  with the cube of the value in the browser, are written in a linear form that matches the same
+  values; the two Sigma rules measure as before. The browser engine no longer makes a burst at
+  1970 of rows without a time, and cites a group's rows and orders grouped findings as the SQL
+  engine does; the SQL engine breaks ties in time by row id; so a server case folds its findings
+  at a detection level as a browser case does. The parity fixture now covers the Sublime pack and
+  the paths of a large case.
 - A fresh install works again and stays the same install. `backend/requirements.txt` had lower
   bounds only, so DuckDB 2.0 and pypdf 7.0 broke every import into the server store and 21 test
   files on the day they were released. The store now runs on DuckDB 1.5 and 2 (the new lambda

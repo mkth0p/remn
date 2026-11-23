@@ -422,6 +422,14 @@ describe('the authors of the rules', () => {
     // a report whose rules name no author says nothing of the licence
     expect(section(buildReportHtml(data()), 'findings')).not.toContain('Detection Rule License')
   })
+
+  it('says beside a Hayabusa detection that Hayabusa does not record the author, rather than leave it blank', () => {
+    const hayabusa = f({ ruleId: 'engine:hayabusa:Encoded PowerShell', title: 'Encoded PowerShell (Hayabusa)', status: 'escalated' })
+    const d = data({}, { findings: [hayabusa], incidents: buildIncidents([hayabusa]), ruleAuthors: ruleAuthors([sigmaRule, ownRule]) })
+    expect(section(buildReportHtml(d), 'findings')).toContain('<code>engine:hayabusa:Encoded PowerShell</code> · author not recorded by Hayabusa')
+    expect(reportDocumentXml(d)).toContain('engine:hayabusa:Encoded PowerShell · author not recorded by Hayabusa')
+    expect(section(buildReportHtml({ ...d, settings: { ...d.settings, language: 'fr' } }), 'findings')).toContain('auteur non transmis par Hayabusa')
+  })
 })
 
 describe('the AI ledger in the report', () => {

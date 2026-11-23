@@ -880,6 +880,8 @@ class Stats:
         # cloud exports only: records of a recognised export that are not of its kind (a directory
         # audit in a sign-in file), counted among the errors too
         self.not_read = 0
+        # cloud exports only: files whose last Graph page links to a next one that was not downloaded
+        self.next_page = 0
         # cloud exports read with the date order and time zone the analyst set for the evidence
         # (dates): records dated in that order, records whose date cannot be read in it but can
         # the other way, and records whose time says no zone, read in the zone set or as UTC
@@ -936,6 +938,7 @@ class Stats:
             **({"dateOrderGuessed": self.date_order_guessed} if self.date_order_guessed else {}),
             **({"repeatsUnchecked": self.repeats_unchecked} if self.repeats_unchecked else {}),
             **({"notRead": self.not_read} if self.not_read else {}),
+            **({"nextPage": self.next_page} if self.next_page else {}),
             **({"dates": dict(self.dates)} if self.dates else {}),
             **({"dateOrderSet": self.date_order_set} if self.date_order_set else {}),
             **({"dateOrderContradicted": self.date_order_contradicted} if self.date_order_contradicted else {}),

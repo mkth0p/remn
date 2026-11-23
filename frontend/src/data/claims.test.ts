@@ -138,7 +138,7 @@ describe('values named in a text', () => {
 
   it('has nothing to check in a text that names no address, account or hash, and does not call it borne out', () => {
     const rows = [logon(1)]
-    expect(checkText('The attacker exfiltrated the mailbox.', rows, ['DC01'])).toEqual({ status: 'nothing_to_check', named: [], reasons: [] })
+    expect(checkText('The attacker exfiltrated the mailbox.', rows, ['DC01'])).toEqual({ status: 'nothing_to_check', named: [], reasons: [], why: [] })
   })
 
   it('counts the sentences of an answer by what the check found in each', async () => {
@@ -187,7 +187,7 @@ it('finds the summary’s values among the indicators first, and in the rows’ 
   const c = await checkTextInCase('From 203.0.113.7, alice@northstar.example wrote to mallory@evil.example.', source)
   expect(c).toMatchObject({ status: 'unsupported', reasons: ['it names mallory@evil.example, which no row of the evidence holds'] })
   expect(searched).toEqual(['alice@northstar.example', 'mallory@evil.example'])
-  expect(await checkTextInCase('The intrusion was contained within the day.', source)).toEqual({ status: 'nothing_to_check', named: [], reasons: [] })
+  expect(await checkTextInCase('The intrusion was contained within the day.', source)).toEqual({ status: 'nothing_to_check', named: [], reasons: [], why: [] })
 })
 
 it('reads the cited rows back through the data source, in batches, and a missing id is missing', async () => {

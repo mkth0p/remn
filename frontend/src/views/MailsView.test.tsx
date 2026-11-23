@@ -47,7 +47,8 @@ vi.mock('../util/export', () => ({
   exportJson: (name: string, rows: unknown[]) => exported.push({ name, rows }),
 }))
 
-const { MailsView, riskSev } = await import('./MailsView')
+const { MailsView } = await import('./MailsView')
+const { riskSev } = await import('./mailRisk')
 const { useStore } = await import('../state/store')
 
 let db: RemnDB

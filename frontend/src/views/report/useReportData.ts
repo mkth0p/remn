@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { summariseLedger } from '../../ai/ledger'
 import { listNotes } from '../../data/caseNotes'
-import { chainCoverageWarnings, loadChains, type Chain } from '../../data/chains'
+import { loadChains, type Chain, type ChainResult } from '../../data/chains'
 import { loadEvidenceGaps, type GapStatement } from '../../data/evidenceGaps'
 import { findingsStaleness } from '../../data/findingsState'
 import { loadAnswers, loadScenarioChoice } from '../../data/questions/answers'
@@ -13,7 +13,7 @@ import { effectiveSeverity, loadChainReviews, loadReportSettings, type ChainRevi
 import { readMeasure, type MeasureReading } from '../../data/ruleMeasures'
 import { loadRules } from '../../data/rules'
 import { getSource } from '../../data/source'
-import { loadStories, loadStoryNotes, storiesStaleness, storyInputs, type StoryNotes, type StoryResult } from '../../data/stories'
+import { loadStories, loadStoryNotes, storiesStaleness, storyInputs, type StoryInputs, type StoryNotes, type StoryResult } from '../../data/stories'
 import { loadStoryDecisions, type StoryDecisions } from '../../data/storyDecisions'
 import { getDb, type Case, type CaseNote, type Evidence, type Finding, type Ioc, type QuestionAnswer } from '../../db/schema'
 import type { Rule } from '../../rules/engine'
@@ -39,7 +39,10 @@ export function useReportData(kase: Case | null) {
   /** the analyst's decisions on the stories (data/storyDecisions.ts), applied to them as the Stories page applies them */
   const [storyDecisions, setStoryDecisions] = useState<StoryDecisions>({})
   const [storiesStale, setStoriesStale] = useState<string[]>([])
-  const [coverageWarnings, setCoverageWarnings] = useState<string[]>([])
+  /** what the stories would read now, so the report can say in its own language why they are stale */
+  const [storyNow, setStoryNow] = useState<StoryInputs | null>(null)
+  /** what the chain build could not read, which the report says in its own language */
+  const [chainStats, setChainStats] = useState<ChainResult['stats'] | undefined>(undefined)
   const [reviews, setReviews] = useState<Record<string, ChainReview>>({})
   const [relationships, setRelationships] = useState<RelationshipReview[]>([])
   const [settings, setSettings] = useState<ReportSettings | null>(null)
@@ -110,11 +113,13 @@ export function useReportData(kase: Case | null) {
     loadAnswers(kase.id).then(setAnswers)
     loadChains(kase.id).then((r) => {
       setChains(r?.chains ?? [])
-      setCoverageWarnings(chainCoverageWarnings(r?.stats))
+      setChainStats(r?.stats)
     })
     loadStories(kase.id).then(async (r) => {
       setStoryResult(r)
-      setStoriesStale(r ? storiesStaleness(r, await storyInputs(kase)) : [])
+      const now = r ? await storyInputs(kase) : null
+      setStoryNow(now)
+      setStoriesStale(r && now ? storiesStaleness(r, now) : [])
     })
     loadStoryNotes(kase.id).then(setStoryNotes)
     loadStoryDecisions(kase.id).then(setStoryDecisions)
@@ -140,7 +145,8 @@ export function useReportData(kase: Case | null) {
     storyNotes,
     storyDecisions,
     storiesStale,
-    coverageWarnings,
+    storyNow,
+    chainStats,
     reviews,
     relationships,
     settings,

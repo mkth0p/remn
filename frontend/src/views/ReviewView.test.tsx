@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultSettings, RemnDB, setDb, type Case, type Finding } from '../db/schema'
 import { useStore } from '../state/store'
@@ -136,6 +137,10 @@ describe('ReviewView', () => {
         WAIT,
       )
       expect(screen.getByText('print the report')).toBeTruthy()
+      // the bar and the done panel rate how complete the review is, as the cover does, not how sure it is
+      expect(document.querySelector('.verdict-bar .conf b')?.textContent).toMatch(/^completeness (high|medium|low)$/)
+      expect(document.querySelector('.review-done')?.textContent).toMatch(/, completeness (high|medium|low)\./)
+      expect(document.querySelector('.verdict-bar')?.textContent).not.toMatch(/confidence/)
       // the persistence badge is filled now that a confirmed item carries T1053
       expect(document.querySelector('.verdict-badges .hex.confirmed')).toBeTruthy()
     },
@@ -406,6 +411,21 @@ describe('ReviewView', () => {
       await waitFor(async () => expect((await db.findings.get(1))?.status).toBe('false_positive'), WAIT)
       // the proposal leaves its item once applied
       await waitFor(() => expect(document.querySelector('.suggestion')).toBeNull(), WAIT)
+    },
+    TEST_TIMEOUT,
+  )
+
+  it(
+    'opens the page of an entity of the incident from the keyboard, and offers nothing to press on a value that has none',
+    async () => {
+      const user = userEvent.setup()
+      await openReview()
+      const host = await screen.findByRole('button', { name: 'computer WS-1' }, WAIT)
+      host.focus()
+      await user.keyboard('{Enter}')
+      expect(useStore.getState().entity).toEqual({ kind: 'host', value: 'WS-1' })
+      // a task name opens no page: it is a label, not a button
+      expect(screen.queryByRole('button', { name: /taskName/ })).toBeNull()
     },
     TEST_TIMEOUT,
   )

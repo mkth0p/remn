@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { defaultSettings, RemnDB, setDb, type Case, type EventRow, type MailRow } from '../db/schema'
 import { useStore } from '../state/store'
@@ -150,6 +151,25 @@ describe('the mail detail', () => {
     expect(within(rows[2]).getByText('-40s').getAttribute('style')).toContain('var(--danger)')
     fireEvent.click(screen.getByRole('button', { name: 'accounts@supplier.example' }))
     expect(useStore.getState().entity).toEqual({ kind: 'address', value: 'accounts@supplier.example' })
+  })
+
+  it('opens the page of the address of a hop and of the domain of a link from the keyboard', async () => {
+    const user = userEvent.setup()
+    const urls = [
+      { url: 'https://lure.example/pay', normalized: 'https://lure.example/pay', defanged: 'hxxps://lure[.]example/pay', host: 'lure.example', domain: 'lure.example', text: 'pay here', flags: [] },
+    ]
+    render(<MailDetail row={{ ...MAIL, urls, urlCount: 1 }} onClose={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: /^Hops/ }))
+    const ip = within(document.querySelector('table')!).getByRole('button', { name: '203.0.113.50' })
+    ip.focus()
+    await user.keyboard('{Enter}')
+    expect(useStore.getState().entity).toEqual({ kind: 'ip', value: '203.0.113.50' })
+    // the hop without an address offers nothing to press
+    expect(within(document.querySelector('table')!).getAllByRole('button')).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: /^URLs/ }))
+    within(document.querySelector('table')!).getByRole('button', { name: 'hxxps://lure[.]example/pay' }).focus()
+    await user.keyboard(' ')
+    expect(useStore.getState().entity).toEqual({ kind: 'domain', value: 'lure.example' })
   })
 
   it('finds the audit records that name the message, and the events of its recipient around delivery', async () => {

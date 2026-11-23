@@ -358,7 +358,11 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
     if (tp && !tp(row)) continue
     matches.push(row)
   }
-  matches.sort((a, b) => (Number(a[tsField]) || 0) - (Number(b[tsField]) || 0))
+  const idOf = (r: Row) => Number(r[idField])
+  // rows without a time last and rows of the same time by id, as the SQL engine orders them: a
+  // finding's first row, its times and the order of the rows it cites are the same on a server case
+  const time = (r: Row) => (r[tsField] == null || Number.isNaN(Number(r[tsField])) ? Infinity : Number(r[tsField]))
+  matches.sort((a, b) => time(a) - time(b) || idOf(a) - idOf(b))
   // never silent: the rows whose values its regular expressions read only the start of
   if (nLong) opts.onDiag?.({ ruleId: rule.id, reason: 'values_cut', detail: valuesCutDetail(nLong), matched: nWhere, afterExclude: nExcl, afterTime: matches.length, longValues: nLong })
   const findings: Omit<Finding, 'caseId' | 'createdAt' | 'status'>[] = []
@@ -404,7 +408,6 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
     }
     return { severity, escalation, refs }
   }
-  const idOf = (r: Row) => Number(r[idField])
   // Past the cap the findings kept are the ones the SQL engine keeps, and the cut is reported with
   // the same words: how many were found, how many left out, which were kept.
   const reportCut = (found: number, how: string) => {
@@ -431,8 +434,7 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
       return out
     }
     // one finding per matching row; past the cap the first in time order, a row without a time last, then by id
-    const time = (r: Row) => (r[tsField] == null || Number.isNaN(Number(r[tsField])) ? Infinity : Number(r[tsField]))
-    const kept = matches.length > maxFindings ? [...matches].sort((a, b) => time(a) - time(b) || idOf(a) - idOf(b)).slice(0, maxFindings) : matches
+    const kept = matches.length > maxFindings ? matches.slice(0, maxFindings) : matches
     for (const row of kept) {
       let sev = rule.severity
       let escalation: string | undefined
@@ -480,7 +482,8 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
       if (threshold && !threshold(n)) continue
       if (!threshold && n < 1) continue
       const first = rows[0]
-      const last = rows[rows.length - 1]
+      // the group's times are those of its rows that have one (the SQL engine's min and max)
+      const timed = rows.filter((r) => time(r) !== Infinity)
       const ent = entitiesOf(first, entityFields)
       if (rule.distinct)
         ent[rule.distinct] = Array.from(new Set(rows.map((r) => str(getPath(r, rule.distinct!))).filter(Boolean)))
@@ -490,8 +493,8 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
         ...base(),
         ...escalationFor(rows),
         key: `${rule.id}|${groupKey(first, groupBy)}`,
-        ts: (first[tsField] as number) ?? null,
-        tsEnd: (last[tsField] as number) ?? null,
+        ts: timed.length ? (timed[0][tsField] as number) : null,
+        tsEnd: timed.length ? (timed[timed.length - 1][tsField] as number) : null,
         entities: ent,
         // the number the threshold tested: distinct values when the rule counts them
         count: n,
@@ -499,13 +502,14 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
       rank.set(findings[findings.length - 1], { rows: rows.length, key: groupKey(first, groupBy), ts: 0 })
       continue
     }
-    // sliding window: detect bursts
-    let open: { rows: Row[]; start: number; last: number } | null = null
+    // sliding window: detect bursts; a row without a time is in none, as in the SQL engine
+    let open: { rows: Row[]; start: number; last: number; at: Row } | null = null
     const win: Row[] = []
     for (const row of rows) {
-      const t = Number(row[tsField]) || 0
+      const t = time(row)
+      if (t === Infinity) continue
       win.push(row)
-      while (win.length && t - (Number(win[0][tsField]) || 0) > windowMs) win.shift()
+      while (win.length && t - time(win[0]) > windowMs) win.shift()
       if (open) {
         if (t - open.last <= windowMs) {
           open.rows.push(row)
@@ -518,15 +522,16 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
       }
       const n = distinctOf(win)
       if (threshold ? threshold(n) : n >= 1) {
-        open = { rows: [...win], start: Number(win[0][tsField]) || 0, last: t }
+        open = { rows: [...win], start: time(win[0]), last: t, at: row }
       }
     }
     if (open) findings.push(makeBurst(open))
   }
 
-  function makeBurst(b: { rows: Row[]; start: number; last: number }) {
+  function makeBurst(b: { rows: Row[]; start: number; last: number; at: Row }) {
     const first = b.rows[0]
-    const ent = entitiesOf(first, entityFields)
+    // the entities of the row that made it a burst, as the SQL engine takes them
+    const ent = entitiesOf(b.at, entityFields)
     if (rule.distinct)
       ent[rule.distinct] = Array.from(new Set(b.rows.map((r) => str(getPath(r, rule.distinct!))).filter(Boolean)))
         .slice(0, 8)
@@ -536,16 +541,18 @@ export function runRule(rule: Rule, opts: RunOptions): Omit<Finding, 'caseId' | 
     return burst
   }
 
+  // bursts in the order of the grouped fields, then in time; groups by size (largest for a rule
+  // counting up to a threshold, rarest otherwise), then by key: the order the SQL engine gives them
+  // in, which is the order findings are folded in, and past the cap the ones kept
+  const largest = keepsLargest(rule.threshold)
+  const by = (f: object) => rank.get(f)!
+  const order = windowMs
+    ? (a: object, b: object) => (by(a).key < by(b).key ? -1 : by(a).key > by(b).key ? 1 : by(a).ts - by(b).ts)
+    : (a: object, b: object) => (largest ? by(b).rows - by(a).rows : by(a).rows - by(b).rows) || (by(a).key < by(b).key ? -1 : by(a).key > by(b).key ? 1 : 0)
+  findings.sort(order)
   if (findings.length > maxFindings) {
-    // bursts in the order of the grouped fields, then in time; groups by size (largest for a rule
-    // counting up to a threshold, rarest otherwise), then by key
-    const largest = keepsLargest(rule.threshold)
-    const by = (f: object) => rank.get(f)!
-    const order = windowMs
-      ? (a: object, b: object) => (by(a).key < by(b).key ? -1 : by(a).key > by(b).key ? 1 : by(a).ts - by(b).ts)
-      : (a: object, b: object) => (largest ? by(b).rows - by(a).rows : by(a).rows - by(b).rows) || (by(a).key < by(b).key ? -1 : by(a).key > by(b).key ? 1 : 0)
     const found = findings.length
-    findings.sort(order).splice(maxFindings)
+    findings.splice(maxFindings)
     reportCut(
       found,
       windowMs ? `first ${maxFindings.toLocaleString('en-US')} bursts in the order of the grouped fields` : `${maxFindings.toLocaleString('en-US')} ${largest ? 'largest' : 'rarest'} groups`,

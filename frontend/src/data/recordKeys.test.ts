@@ -42,6 +42,7 @@ describe('recordRef', () => {
     expect(ref).toEqual({
       file: 'logs.zip › Security.evtx',
       record: 'record 4,200 (Security on DC-01)',
+      at: { kind: 'record', n: 4200, channel: 'Security', computer: 'DC-01' },
       sha256: 'm'.repeat(64),
       duplicateKey: 'dc-01|security|4200',
       key: `${'m'.repeat(64)}:Security.evtx#dc-01|security|4200`,
@@ -51,13 +52,13 @@ describe('recordRef', () => {
 
   it('names the upload alone when the member is the upload, and prefers the server hash to the browser hash', () => {
     const ref = recordRef({ sourceFile: 'logs.zip', recordId: 7 }, 'events', evidence)
-    expect(ref).toEqual({ file: 'logs.zip', record: 'record 7', sha256: 's'.repeat(64), duplicateKey: undefined, key: `${'s'.repeat(64)}:#7` })
+    expect(ref).toEqual({ file: 'logs.zip', record: 'record 7', at: { kind: 'record', n: 7 }, sha256: 's'.repeat(64), duplicateKey: undefined, key: `${'s'.repeat(64)}:#7` })
     expect(recordRef({ recordId: 7 }, 'events', { ...evidence, sha256Server: undefined }).sha256).toBe('c'.repeat(64))
   })
 
   it('names the evidence by number when it is not known, and keys by the upload name without a hash', () => {
     const ref = recordRef({ evidenceId: 5, recordId: 7 }, 'events')
-    expect(ref).toEqual({ file: 'evidence #5', record: 'record 7', sha256: undefined, duplicateKey: undefined, key: 'evidence #5:#7' })
+    expect(ref).toEqual({ file: 'evidence #5', record: 'record 7', at: { kind: 'record', n: 7 }, sha256: undefined, duplicateKey: undefined, key: 'evidence #5:#7' })
     expect(recordRef({ recordId: 7 }, 'events').file).toBe('evidence #?')
   })
 
@@ -77,6 +78,7 @@ describe('recordRef', () => {
     expect(recordRef({ id: 2, sourceIndex: 0, messageId: '<A1@Mail.Example.Test>' }, 'mails', evidence)).toEqual({
       file: 'logs.zip',
       record: 'message 1',
+      at: { kind: 'message', n: 1 },
       sha256: 's'.repeat(64),
       duplicateKey: 'mid:<a1@mail.example.test>',
       key: `${'s'.repeat(64)}:#m0`,

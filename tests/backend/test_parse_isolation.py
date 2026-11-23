@@ -294,6 +294,21 @@ def test_an_error_in_the_parse_process_start_reaches_the_server_log_without_its_
     assert "ValueError at hostile_parsers.py" in said, said
 
 
+def test_a_parse_process_stopped_by_an_error_nothing_caught_ends_without_a_fatal_error(tmp_path, hostile, capfd):
+    """The parse process reads the server's messages on a thread of its own, and the shutdown of the
+    interpreter after an error nothing caught stopped on the lock that read holds and aborted, with
+    "Fatal Python error: _enter_buffered_busy" on the server's stderr."""
+    hostile("start_fails")
+    parse = start(tmp_dir=str(tmp_path))
+    with pytest.raises(ParseStopped) as stopped:
+        list(parse)
+    parse.close()
+    said = capfd.readouterr().err
+    assert "Fatal Python error" not in said and "_enter_buffered_busy" not in said, said
+    assert "ValueError at hostile_parsers.py" in said, said
+    assert "exit status 1)" in str(stopped.value), stopped.value
+
+
 def test_a_cancelled_job_stops_its_parse_process(tmp_path, hostile):
     hostile("silent")
 

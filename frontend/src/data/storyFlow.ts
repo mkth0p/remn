@@ -15,6 +15,8 @@ import { getDb } from '../db/schema'
 import type { Case, Finding } from '../db/schema'
 import { canonical, exportJson, REMN_NS, STIX_SCO_NS, stixObservable, TLP_AMBER, uuid5 } from '../util/export'
 import { uuid4 } from '../util/uuid'
+import { ruleAuthorOf, ruleAuthors } from '../rules/authors'
+import { loadRules } from './rules'
 import type { Campaign, Confidence, Identity, Story, StoryConfidence, StoryFinding, StoryStep } from './stories'
 
 /** What a spine was anchored on and where it starts (stories._spine_basis). */
@@ -104,6 +106,8 @@ export interface ExportContext {
   /** the ATT&CK tags of a step's finding (Finding.attack), by its key or rule */
   attackOf: (f: StoryFinding) => string[]
   identities: Identity[]
+  /** the author each rule names, by rule id (rules/authors.ts): the Detection Rule License of the Sigma rules asks that a match keeps it */
+  authors?: Record<string, string>
   /** the objects' created and modified time; now when not given */
   now?: number
 }
@@ -205,6 +209,12 @@ async function addFlow(o: Objects, story: Story): Promise<string> {
     }
     const { f, techniques } = stepFinding(step, ctx)
     const where = [step.host, step.ip].filter(Boolean).join(', ')
+    // the rule the action is read by, with its author, or that Hayabusa did not record one
+    const author = f ? ruleAuthorOf(f.ruleId, ctx.authors ?? {}) : ''
+    const refs = [
+      ...techniques.map((t) => ({ source_name: 'mitre-attack', external_id: t, url: techniqueUrl(t) })),
+      ...(f ? [{ source_name: 'remn-rule', external_id: f.ruleId, description: `${f.title}${author ? `; rule author: ${author}` : ''}` }] : []),
+    ]
     actions.push({
       key: `${story.id}:${step.id}`,
       id: await o.idOf('attack-action', `${story.id}:${step.id}`),
@@ -217,7 +227,7 @@ async function addFlow(o: Objects, story: Story): Promise<string> {
         execution_start: iso(step.ts),
         ...(step.tsEnd > step.ts ? { execution_end: iso(step.tsEnd) } : {}),
         ...(assets.length ? { asset_refs: [...new Set(assets)] } : {}),
-        ...(techniques.length ? { external_references: techniques.map((t) => ({ source_name: 'mitre-attack', external_id: t, url: techniqueUrl(t) })) } : {}),
+        ...(refs.length ? { external_references: refs } : {}),
       },
     })
   }
@@ -300,12 +310,17 @@ const slug = (s: string) =>
     .replace(/^_+|(?<!_)_+$/g, '')
     .slice(0, 60) || 'story'
 
+/** The author each of the case's rules names, for the actions of a flow. */
+async function caseAuthors(kase: Case): Promise<Record<string, string>> {
+  return ruleAuthors((await loadRules(kase.id!)).filter((r) => !r.error).map((r) => r.rule))
+}
+
 export async function downloadAttackFlow(kase: Case, story: Story, identities: Identity[]): Promise<void> {
-  const bundle = await storyAttackFlow(story, { caseName: kase.name, attackOf: await attackTags(kase), identities })
+  const bundle = await storyAttackFlow(story, { caseName: kase.name, attackOf: await attackTags(kase), identities, authors: await caseAuthors(kase) })
   exportJson(`attack-flow-${slug(story.title)}.json`, bundle)
 }
 
 export async function downloadCampaignGrouping(kase: Case, campaign: Campaign, stories: Story[], identities: Identity[]): Promise<void> {
-  const bundle = await campaignGrouping(campaign, stories, { caseName: kase.name, attackOf: await attackTags(kase), identities })
+  const bundle = await campaignGrouping(campaign, stories, { caseName: kase.name, attackOf: await attackTags(kase), identities, authors: await caseAuthors(kase) })
   exportJson(`stix-grouping-${slug(campaign.label)}.json`, bundle)
 }

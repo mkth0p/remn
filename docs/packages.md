@@ -173,6 +173,11 @@ such as MPRegistry, MPStateInfo and MPDetection, are kept whole however long the
 are. The member records how many lines were read and how many were kept; the file
 itself is inventoried and hashed in full either way.
 
+MPLog starts each line it writes with the time, in UTC, and a line that does is an event
+at that time on the timeline. A line without a time of its own, such as the rest of a
+resource-scan block, stays an observation. In the other Defender logs a time at the start
+of a line is used only when it states its zone (`Z` or an offset).
+
 Collected artifacts are mapped into the fields the rules read, and a few export shapes
 needed specific handling before any rule could reach them. `schtasks /fo csv` writes
 its headers in the host's language and carries the command under "Task To Run", so
@@ -325,10 +330,11 @@ Packages allow 20,000 archive entries and 16 GiB read out of their archives in a
 may be at most 4 GiB and at most half what the staging area may hold (see
 [security](security.md)). What a package holds in the staging area at once, the member being read
 at each nesting level, an expanded 7z, a decoded cabinet and the artifacts held back below, is
-at most what the area had room for when the parse began. An archive may expand to 200 times its
-own size, and never less than 64 MiB: a zip or 7z member past that is not read, and a compressed
-tar, which has to decompress a member to pass over it, stops its walk there and lists the rest as
-one `(rest of archive)` member. A 7z also counts what it decompresses to reach the members wanted,
+at most the room set aside for the parse when it began: what the area had free that no unfinished
+upload had announced and no other parse had set aside, and at most half the area. An archive may
+expand to 200 times its own size, and never less than 64 MiB: a zip or 7z member past that is not
+read, and a compressed tar, which has to decompress a member to pass over it, stops its walk
+there and lists the rest as one `(rest of archive)` member. A 7z also counts what it decompresses to reach the members wanted,
 which in a solid archive include the members before them; one that passes the allowance that way
 is reported as an error with its members listed as not read. Every member these limits
 leave out is listed as skipped with the reason, and the inventory is marked incomplete where the

@@ -38,6 +38,8 @@ export interface IngestRequest {
   parseInBrowser?: boolean
   /** the date order and time zone set for the evidence, for the Microsoft 365 and Entra exports in it */
   dates?: DateSetting
+  /** the evidence a file read again replaces: it is removed once this read succeeds */
+  replaces?: number
 }
 export interface HashRequest {
   cmd: 'hash'
@@ -309,7 +311,8 @@ async function ingest(req: IngestRequest): Promise<void> {
     )
   }
   post({ type: 'hash', sha256 })
-  const duplicate = await duplicateEvidence(caseId, evidenceId, req.sourceName ?? file.name, kind, sha256)
+  // a file read again is the file of the evidence it replaces, and is read whatever that holds
+  const duplicate = req.replaces == null ? await duplicateEvidence(caseId, evidenceId, req.sourceName ?? file.name, kind, sha256) : undefined
   if (duplicate) {
     await db.evidence.delete(evidenceId)
     // an engine that was skipped then (busy, over a limit) did not look at this file: say which
@@ -366,14 +369,10 @@ async function ingest(req: IngestRequest): Promise<void> {
     batch = []
     const keyed = rows.filter((r) => r.recordKey)
     if (keyed.length) {
-      const held = new Set(
-        (
-          await db.events
-            .where('[caseId+recordKey]')
-            .anyOf(keyed.map((r) => [caseId, r.recordKey!]))
-            .keys()
-        ).map((k) => (k as unknown as [number, string])[1]),
-      )
+      const found = db.events.where('[caseId+recordKey]').anyOf(keyed.map((r) => [caseId, r.recordKey!]))
+      // the records of the evidence a file read again replaces are not records the case keeps
+      const replaces = req.replaces
+      const held = new Set(((await (replaces == null ? found : found.filter((e) => e.evidenceId !== replaces)).keys()) as unknown as [number, string][]).map((k) => k[1]))
       if (held.size) {
         const before = rows.length
         rows = rows.filter((r) => !r.recordKey || !held.has(r.recordKey))

@@ -258,7 +258,7 @@ virtual environment's interpreter: `.venv/bin/python` on Linux and macOS,
 | --- | --- |
 | `tests/backend/test_rules_yaml.py` | Every file parses with no duplicate key; ids are unique and well formed; operators exist; thresholds and windows parse; ATT&CK ids are current; no rule asks for what the engines refuse. |
 | `tests/backend/test_own_rule_logic.py` | Each own rule fires on the event its description names, and not on the near miss. |
-| `tests/fixtures/parity/` with `parity.test.ts` | Both engines give the same findings for every bundled rule, including the findings kept past a cap. |
+| `tests/fixtures/parity/` with `parity.test.ts` | Both engines give the same findings for every bundled rule and every rule of the Sublime pack, including the findings kept past a cap; on the paths a large case takes (a rule collapsed past 200 rows, a group, bursts) each finding has the same host, times and rows, and the detection level folds a server case's findings as it folds a browser case's. |
 | `frontend/src/test/regexTiming.test.ts` | Every pattern of the own rules answers a hostile value of 100,000 characters within 250 ms in the browser engine (see [the last section](#patterns-that-backtrack-in-the-browser-engine)). |
 | `tests/fixtures/evtx-attack-samples/expected.json` | The rules reviewed as identifying each file of EVTX-ATTACK-SAMPLES still fire on it, on both engines (`tools/evtx_attack_samples.py`, the attack samples job of CI). |
 | `rules/measures-detail.json` with `.github/workflows/measure-rules.yml` | No rule loses a detection, and no high or critical rule raises more findings on a clean machine. |
@@ -317,9 +317,13 @@ skipped as enrichment. The ids become `sigma-<Sigma id>`.
 
 The Sublime converter takes MQL rules over mail. A rule that relies on Sublime's own services
 (classifiers, link analysis, sender profiles, file explosion, screenshots, WHOIS) or compares
-two fields is skipped. A rule converted with an approximation (the whole body read for the
-current thread, several predicates inside one `any()` matched independently) is kept with a
-warning, which the import dialog lists. The ids become
+two fields is skipped. MQL's `strings.contains`, `starts_with`, `ends_with`, `regex.contains`
+and `regex.match` keep case, and so do the operators they become on a text field
+(`contains_cs`, `startswith_cs`, `endswith_cs`, `re_cs`); on a derived field (an address part,
+the raw headers) they match without regard to case, with a warning. A rule converted with an
+approximation (the whole body read for the current thread, several predicates inside one
+`any()` matched independently) is kept with a warning, which the import dialog lists and a
+bundled pack rule carries under `sublime.warnings`. The ids become
 `sublime-<Sublime id>`.
 
 The bundled packs are refreshed with the same converters, from a pinned upstream commit:
@@ -327,7 +331,12 @@ The bundled packs are refreshed with the same converters, from a pinned upstream
 ```
 python tools/import_community_rules.py all --download
 python tools/import_community_rules.py sigma --zip sigma-master.zip --sha <commit>
+python tools/import_community_rules.py sublime --from-pack
 ```
+
+The last converts the Sublime pack again from the MQL source each of its rules keeps, when the
+converter changed and the upstream archive cannot be fetched; the upstream commit and
+`skipped.json` stay as they were.
 
 Each pack is written under `rules/community/<pack>/` with `pack.json` (upstream repository,
 commit, licence, counts, skip reasons), the upstream `LICENSE`, and `skipped.json`. A refresh is
@@ -372,6 +381,17 @@ this shape bounds it, so no own rule keeps it. The browser runs rules in a worke
 value delays the run of the rules, not the page. A new rule of this shape is bounded the same
 way or written as `contains_all`; one that cannot be is listed in the timing test with its
 reason.
+
+Three upstream patterns of the community packs have this shape with three tokens, so their time
+grows with the cube of the value: SigmaHQ's `\ \\\\.*\\.*\$` and `\\\\.*\\.*\$` (an admin
+share in a command line) and Sublime's `.*\|.*(Manager|Careers|Recruitment|Specialist|Global)` (a
+sender name), which took more than a second on a few thousand characters. The converters write
+them in a linear form (`backend/services/rules/linear.py`): the value is read line by line from
+its start, and on a line the first occurrence of each token is taken through classes that give
+each character one way to match. It matches the values the upstream pattern matches in the
+store, where `.` is any character but a newline; the browser engine also stopped `.` at a
+carriage return and at the Unicode line and paragraph separators, and now matches such a value
+as the store does. Each runs in under a second on 65,536 hostile characters in both engines.
 
 Other points that keep a pattern linear and portable:
 

@@ -163,8 +163,29 @@ describe('Word report against the HTML report', () => {
       storiesDismissed: 1,
       measures: { 'ps-enc': readMeasure({ of: 3, fires: 1, clean: { findings: 4, events: 4, machines: 1, scope: 10_000, of: 7 } }, 'bundled') },
       claims: {
-        findings: { [id]: { status: 'contradicted', cited: 3, checked: 3, reasons: ['record 9 no longer matches the rule'], records: [{ file: 'Security.evtx', record: 'record 9', key: 'k' }] } },
-        texts: [{ key: 'summary', what: 'the executive summary', check: { status: 'unsupported', named: ['198.51.100.9'], reasons: ['it names 198.51.100.9, which no row of the evidence holds'] } }],
+        findings: {
+          [id]: {
+            status: 'contradicted',
+            cited: 3,
+            checked: 3,
+            reasons: ['Security.evtx record 9 no longer matches the rule'],
+            why: [{ kind: 'no-match', records: [{ file: 'Security.evtx', record: 'record 9', at: { kind: 'record', n: 9 }, key: 'k' }], more: 0 }],
+            records: [{ file: 'Security.evtx', record: 'record 9', at: { kind: 'record', n: 9 }, key: 'k' }],
+          },
+        },
+        texts: [
+          {
+            key: 'summary',
+            what: 'the executive summary',
+            about: { kind: 'summary' },
+            check: {
+              status: 'unsupported',
+              named: ['198.51.100.9'],
+              reasons: ['it names 198.51.100.9, which no row of the evidence holds'],
+              why: [{ kind: 'text-absent-case', values: ['198.51.100.9'], more: 0 }],
+            },
+          },
+        ],
       },
       relationships: [
         {
@@ -195,7 +216,15 @@ describe('Word report against the HTML report', () => {
           updatedAt: 1,
         },
       ],
-      gaps: [{ kind: 'record-holes', severity: 'high', text: 'Security on DC01: 3 records missing from its numbering.', evidenceId: 1 }],
+      gaps: [
+        {
+          kind: 'record-holes',
+          severity: 'high',
+          text: 'Security on DC01 (dc.evtx): 3 records missing from its numbering, in 1 gap between record 4 and 8 (the largest: 5–7). Records deleted from the log, or in a part that could not be read.',
+          say: { kind: 'record-holes', where: { file: 'dc.evtx', channel: 'Security', computer: 'DC01' }, floor: false, missing: 3, gaps: 1, first: 4, last: 8, largest: [5, 7] },
+          evidenceId: 1,
+        },
+      ],
     }
   }
 
@@ -224,7 +253,7 @@ describe('Word report against the HTML report', () => {
     expect(doc).toContain('1 story decided benign or false positive by the analyst is not printed.')
     // the rule line: a lead, rows that disagree and where they are
     expect(doc).toContain('LEAD')
-    expect(doc).toContain('rows disagree · Security.evtx record 9 and 2 more: record 9 no longer matches the rule')
+    expect(doc).toContain('rows disagree · Security.evtx record 9 and 2 more: Security.evtx record 9 no longer matches the rule')
     expect(doc).toContain('Checked against its rows: it names 198.51.100.9')
     // the records a relationship rests on
     expect(doc).toContain('processes.csv')

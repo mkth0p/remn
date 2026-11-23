@@ -6,7 +6,7 @@ import { spineBasis, spineSteps } from './storyFlow'
 import type { ChainReview, ClientReport, ReportSettings } from './review'
 import { chainSeverity, effectiveSeverity, stepVisible } from './review'
 import { HOST_FIELDS, USER_FIELDS, type Incident } from '../rules/incidents'
-import type { Rule } from '../rules/engine'
+import { ruleAuthorOf, ruleAuthors } from '../rules/authors'
 import type { RelationshipReview } from './relationshipReviews'
 import { packageCoverageIssues } from './packageCoverage'
 import { defang, escapeHtml, isPublicIp, renderMarkdown } from '../util/format'
@@ -123,19 +123,8 @@ export interface ReportData {
   ruleAuthors?: Record<string, string>
 }
 
-/**
- * The author each rule names, by rule id. A rule converted from SigmaHQ keeps its Sigma header,
- * author included; REMN's own rules name none.
- */
-export function ruleAuthors(rules: Iterable<Rule>): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const rule of rules) {
-    const sigma = 'sigma' in rule ? rule.sigma : undefined
-    const author = sigma && typeof sigma === 'object' && 'author' in sigma ? sigma.author : undefined
-    if (typeof author === 'string' && author.trim()) out[rule.id] = author.trim()
-  }
-  return out
-}
+// kept here as well, where the Report page has always read it
+export { ruleAuthors }
 
 /** The model's part in the case, as the report prints it. */
 export interface AiUsage {
@@ -162,7 +151,7 @@ export function aiTexts(a: AiUsage, t: ReportText = EN): { intro: string; facts:
   return {
     intro: t.ai.intro,
     facts: t.ai.facts(a.runs, a.toolCalls, a.first && a.last ? `${t.ts(a.first)} ${t.to} ${t.ts(a.last)}` : '', a.models, where),
-    rows: Object.entries(a.byProposalKind).map(([k, v]) => [k.replace('_', ' '), t.num(v.proposed), t.num(v.accepted), t.num(v.rejected)]),
+    rows: Object.entries(a.byProposalKind).map(([k, v]) => [t.ai.kind[k] ?? k.replace('_', ' '), t.num(v.proposed), t.num(v.accepted), t.num(v.rejected)]),
     none: t.ai.none,
     decisions: t.ai.decisions(a.accepted, a.rejected, a.undone, a.notices),
     ledger,
@@ -360,7 +349,7 @@ export function computeConfidence(d: ReportData, t: ReportText = EN): Confidence
   if (d.undecided) reasons.push(w.undecided(d.undecided))
   const unverified = d.evidence.filter((e) => e.integrity !== 'verified').length
   if (unverified) reasons.push(w.unverified(unverified))
-  const issues = d.evidence.filter((e) => e.kind === 'package').flatMap((e) => packageCoverageIssues(e))
+  const issues = d.evidence.filter((e) => e.kind === 'package').flatMap((e) => packageCoverageIssues(e, t))
   if (issues.length) reasons.push(w.packages(issues.length))
   // a parse that failed, stopped at a limit, or skipped members read less than the file holds
   const incomplete = d.evidence.filter((e) => e.kind !== 'package' && evidenceIssue(e)).length
@@ -724,7 +713,7 @@ export function spineStartingPoint(stories: ReportStory[], t: ReportText = EN): 
 const HEX = '<svg viewBox="0 0 100 100" aria-hidden="true"><polygon points="50,3 92,26.5 92,73.5 50,97 8,73.5 8,26.5"/></svg>'
 const badge = (t: ReportText, b: BadgeState) => {
   const label = t.tactic[b.def.id] ?? b.def.label
-  return `<div class="hex ${b.state}" title="${h(t.cover.badgeTitle(label, b.findings))}${b.techniques.length ? ' · ' + h(b.techniques.join(', ')) : ''}">${HEX}<span class="code">${h(b.def.code)}</span><span class="lbl">${h(label)}</span><span class="n">${b.state === 'none' ? '' : t.num(b.findings)}</span></div>`
+  return `<div class="hex ${b.state}" title="${h(t.cover.badgeTitle(label, b.findings))}${b.techniques.length ? ' · ' + h(b.techniques.join(', ')) : ''}">${HEX}<span class="code">${h(t.tacticCode[b.def.id] ?? b.def.code)}</span><span class="lbl">${h(label)}</span><span class="n">${b.state === 'none' ? '' : t.num(b.findings)}</span></div>`
 }
 
 /** The seal on the cover: a hexagon with the verdict, coloured by what it says. */
@@ -956,7 +945,7 @@ export const storyPart = (dec: ReportStory['decisions'], t: ReportText = EN): st
 
 function storyCard(t: ReportText, { story: s, key, note, decisions: dec }: ReportStory, d: ReportData): string {
   // the build's own limits are printed once, above the stories
-  const gaps = storyOwnGaps(s)
+  const gaps = storyOwnGaps(s, t)
   const w = storyWhere(s, t)
   const where = [w.hosts ? `${h(t.story.hosts)} <code>${h(w.hosts)}</code>${w.hostsMore ? ` +${w.hostsMore}` : ''}` : '', w.from ? `${h(t.story.from)} <code>${h(w.from)}</code>` : ''].filter(Boolean)
   return `<div class="card chain ${h(s.severity)}">
@@ -1013,7 +1002,7 @@ export function incidentBases(items: ReportStory[], t: ReportText = EN): string[
 /** What the reader of the Stories section must know before any story: that they are out of date, and where the build stopped. */
 export function storiesCaveatTexts(d: ReportData, t: ReportText = EN): { warn: boolean; text: string }[] {
   const stale = d.storiesStale ?? []
-  const cut = storyCoverageWarnings(d.storyStats)
+  const cut = storyCoverageWarnings(d.storyStats, t)
   const orphaned = d.storyNotesOrphaned ?? 0
   const lostDecisions = d.storyDecisionsOrphaned ?? 0
   return [
@@ -1119,7 +1108,13 @@ export function claimLine(ids: number[], claims?: ReportClaims, t: ReportText = 
   const worst = cs.find((c) => c.status === 'contradicted') ?? cs.find((c) => c.status === 'unsupported') ?? cs[0]
   const rec = cs.find((c) => c.records.length)?.records[0]
   const cited = cs.reduce((t, c) => t + c.cited, 0)
-  return { status: worst.status, word: t.claimWord[worst.status] ?? worst.status, where: rec ? `${rec.file} ${rec.record}` : '', more: rec && cited > 1 ? cited - 1 : 0, reasons: worst.reasons }
+  return {
+    status: worst.status,
+    word: t.claimWord[worst.status] ?? worst.status,
+    where: rec ? `${rec.file} ${t.record(rec.at)}` : '',
+    more: rec && cited > 1 ? cited - 1 : 0,
+    reasons: worst.why.map(t.claim.reason),
+  }
 }
 
 function claimNote(t: ReportText, ids: number[], claims?: ReportClaims): string {
@@ -1134,7 +1129,7 @@ export function textCheck(key: string, claims?: ReportClaims, t: ReportText = EN
   const x = claims?.texts.find((y) => y.key === key)
   if (!x || x.check.status === 'verified') return null
   if (x.check.status === 'nothing_to_check') return { status: 'nothing_to_check', text: t.finding.nothingToCheck }
-  return { status: x.check.status, text: t.finding.checked(x.check.reasons.join(' ')) }
+  return { status: x.check.status, text: t.finding.checked(x.check.why.map(t.claim.reason).join(' ')) }
 }
 
 function textNote(t: ReportText, key: string, claims?: ReportClaims): string {
@@ -1143,7 +1138,13 @@ function textNote(t: ReportText, key: string, claims?: ReportClaims): string {
 }
 
 /** After a rule's id: who wrote it, when the rule says. */
-const authorMark = (t: ReportText, author: string | undefined) => (author ? ` · ${h(t.finding.by(author))}` : '')
+/** the author beside a rule's findings: the one it names, or that Hayabusa did not record one; nothing for REMN's own rules */
+export const authorWords = (t: ReportText, ruleId: string, authors: Record<string, string> = {}) =>
+  authors[ruleId] ? t.finding.by(authors[ruleId]) : ruleAuthorOf(ruleId, authors, t.finding.noAuthor)
+const authorMark = (t: ReportText, ruleId: string, authors?: Record<string, string>) => {
+  const said = authorWords(t, ruleId, authors)
+  return said ? ` · ${h(said)}` : ''
+}
 
 function groupedFindings(
   t: ReportText,
@@ -1158,7 +1159,7 @@ function groupedFindings(
     t.finding.groupHead,
     groups.map((g) => [
       pill(t, g.severity) + (g.severity !== g.ruleSeverity ? `<span class="sub">${h(t.finding.ruleSeverity(g.ruleSeverity))}</span>` : ''),
-      `${h(g.title)}<span class="sub"><code>${h(g.ruleId)}</code>${authorMark(t, authors[g.ruleId])}${measureMark(t, measures[g.ruleId])}${g.escalations.length ? ' · ' + h(g.escalations.slice(0, 2).join(' · ')) : ''}</span>${claimNote(t, g.ids, claims)}`,
+      `${h(g.title)}<span class="sub"><code>${h(g.ruleId)}</code>${authorMark(t, g.ruleId, authors)}${measureMark(t, measures[g.ruleId])}${g.escalations.length ? ' · ' + h(g.escalations.slice(0, 2).join(' · ')) : ''}</span>${claimNote(t, g.ids, claims)}`,
       `<span class="nowrap">${t.num(g.findings)} · ${t.num(g.rows)}</span>`,
       `<span class="nowrap">${span(t, g.first, g.last)}</span>`,
       g.attack
@@ -1179,7 +1180,7 @@ function incidentCard(t: ReportText, i: Incident, measures: Record<string, Measu
   const decidedByAi = i.lead.decidedBy === 'ai'
   return `<div class="card inc ${h(i.severity)}">
 <div class="card-head">${pill(t, i.severity)}<h3>${h(i.title)}</h3><span class="stamp st-${h(i.status)}">${h(t.status[i.status] ?? i.status)}</span></div>
-<div class="card-meta">${h(i.subtitle)} · ${span(t, i.ts, i.tsEnd)} · ${h(t.incident.rows(i.refs.length))}${
+<div class="card-meta">${h(t.incident.subtitle(i.about))} · ${span(t, i.ts, i.tsEnd)} · ${h(t.incident.rows(i.refs.length))}${
     Object.keys(i.entities).length
       ? ' · ' +
         Object.entries(i.entities)
@@ -1520,7 +1521,7 @@ export function producedLines(d: ReportData, v: Verdict, t: ReportText = EN): st
  */
 export function limitLines(d: ReportData, conf: Confidence, t: ReportText = EN): string[] {
   const w = t.limit
-  const issues = d.evidence.filter((e) => e.kind === 'package').flatMap((e) => packageCoverageIssues(e))
+  const issues = d.evidence.filter((e) => e.kind === 'package').flatMap((e) => packageCoverageIssues(e, t))
   const leadFindings = d.findings.filter((f) => {
     const m = d.measures?.[f.ruleId]
     return !!m && isLead(m)
@@ -1533,16 +1534,16 @@ export function limitLines(d: ReportData, conf: Confidence, t: ReportText = EN):
       .sort((a, b) => (a[1].status === 'contradicted' ? 0 : 1) - (b[1].status === 'contradicted' ? 0 : 1))
       .map(([id, c]) => {
         const f = byId.get(Number(id))!
-        return w.findingClaim(f.title, f.ruleId, c.status === 'contradicted', c.reasons.join('; '))
+        return w.findingClaim(f.title, f.ruleId, c.status === 'contradicted', c.why.map(t.claim.reason).join('; '))
       }),
-    ...texts.filter((x) => x.check.status === 'unsupported').map((x) => w.textClaim(x.what, x.check.reasons.join('; '))),
+    ...texts.filter((x) => x.check.status === 'unsupported').map((x) => w.textClaim(t.claim.about(x.about), x.check.why.map(t.claim.reason).join('; '))),
   ]
   const issue = d.issue
   return [
     ...(issue?.status === 'draft' ? [w.draft(issue.open.map((c) => `${c.label.toLowerCase()} (${c.detail})`).join('; '))] : []),
     ...(issue?.waived ?? []).map((x) => w.waived(x.label.toLowerCase(), x.reason)),
     ...clientLimits(d, computeVerdict(d, t), t),
-    ...(d.gaps ?? []).map((g) => g.text),
+    ...(d.gaps ?? []).map((g) => t.gap(g.say)),
     ...(d.questions?.counts.open ? [w.questionsOpen(d.questions.counts.open, d.questions.uncovered)] : []),
     ...(d.questions?.counts.cannot ? [w.questionsCannot(d.questions.counts.cannot)] : []),
     ...claimLimits.slice(0, 12),
@@ -1552,7 +1553,7 @@ export function limitLines(d: ReportData, conf: Confidence, t: ReportText = EN):
     w.snapshots,
     ...(d.coverageWarnings ?? []).map((x) => w.chains(x)),
     ...(d.stories?.length && d.storiesStale?.length ? [w.storiesStale(d.storiesStale.join('; '))] : []),
-    ...(d.stories?.length ? storyCoverageWarnings(d.storyStats).map((x) => w.storiesCut(x)) : []),
+    ...(d.stories?.length ? storyCoverageWarnings(d.storyStats, t).map((x) => w.storiesCut(x)) : []),
     ...issues.slice(0, 6).map((x) => w.packages(x)),
     d.iocsChecked ? w.iocsChecked(d.iocsChecked, d.iocsTotal ?? d.iocsChecked) : w.iocsNone,
     ...(d.rules && d.rules.lastRun == null ? [w.rulesNotRun] : []),
@@ -1972,7 +1973,7 @@ export function buildReportHtml(d: ReportData): string {
               t.evidence.head,
               d.evidence.map((e) => {
                 // the digest says the file is the one received; this says whether all of it was read
-                const issue = e.kind === 'package' ? packageCoverageIssues(e).join('; ') : evidenceIssue(e, t)
+                const issue = e.kind === 'package' ? packageCoverageIssues(e, t).join('; ') : evidenceIssue(e, t)
                 return [
                   h(e.name),
                   h(e.format || e.kind),
@@ -1989,7 +1990,7 @@ export function buildReportHtml(d: ReportData): string {
         (packages.length
           ? `<h4 class="mono dim" style="margin:10px 0 4px;letter-spacing:.14em;text-transform:uppercase;font-size:9.5px">${h(t.evidence.packages)}</h4>${table(
               t.evidence.packageHead,
-              packages.map((e) => [h(e.name), h(packageCoverageIssues(e).join('; ') || t.evidence.noIssues)]),
+              packages.map((e) => [h(e.name), h(packageCoverageIssues(e, t).join('; ') || t.evidence.noIssues)]),
             )}`
           : ''),
     })
@@ -2061,7 +2062,7 @@ export function buildReportHtml(d: ReportData): string {
           t.finding.ruleHead,
           groups.map((g) => [
             pill(t, g.severity),
-            `${h(g.title)}<span class="sub"><code>${h(g.ruleId)}</code>${authorMark(t, d.ruleAuthors?.[g.ruleId])}${measureMark(t, d.measures?.[g.ruleId])}${g.attack.length ? ' · ' + h(g.attack.slice(0, 4).join(' ')) : ''}</span>${claimNote(t, g.ids, d.claims)}`,
+            `${h(g.title)}<span class="sub"><code>${h(g.ruleId)}</code>${authorMark(t, g.ruleId, d.ruleAuthors)}${measureMark(t, d.measures?.[g.ruleId])}${g.attack.length ? ' · ' + h(g.attack.slice(0, 4).join(' ')) : ''}</span>${claimNote(t, g.ids, d.claims)}`,
             `<span class="nowrap">${t.num(g.findings)} · ${t.num(g.rows)}</span>`,
             `<span class="nowrap">${span(t, g.first, g.last)}</span>`,
             Object.entries(g.statuses)

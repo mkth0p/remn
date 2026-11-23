@@ -1,0 +1,3144 @@
+{
+ "collapseAfter": 200,
+ "findings": {
+  "scale-bursts": [
+   {
+    "count": 50,
+    "entities": {
+     "computer": "WS01",
+     "ipAddress": "192.0.2.1"
+    },
+    "escalation": null,
+    "key": "scale-bursts|192.0.2.1|29805000",
+    "refs": [
+     1,
+     6,
+     11,
+     16,
+     21,
+     26,
+     31,
+     36,
+     41,
+     46,
+     51,
+     56,
+     61,
+     66,
+     71,
+     76,
+     81,
+     86,
+     91,
+     96,
+     101,
+     106,
+     111,
+     116,
+     121,
+     126,
+     131,
+     136,
+     141,
+     146,
+     151,
+     156,
+     161,
+     166,
+     171,
+     176,
+     181,
+     186,
+     191,
+     196,
+     201,
+     206,
+     211,
+     216,
+     221,
+     226,
+     231,
+     236,
+     241,
+     246
+    ],
+    "ruleId": "scale-bursts",
+    "severity": "medium",
+    "title": "logon bursts by address",
+    "ts": 1788300000000,
+    "tsEnd": 1788300122000
+   },
+   {
+    "count": 50,
+    "entities": {
+     "computer": "ws02",
+     "ipAddress": "192.0.2.2"
+    },
+    "escalation": null,
+    "key": "scale-bursts|192.0.2.2|29805000",
+    "refs": [
+     2,
+     7,
+     12,
+     17,
+     22,
+     27,
+     32,
+     37,
+     42,
+     47,
+     52,
+     57,
+     62,
+     67,
+     72,
+     77,
+     82,
+     87,
+     92,
+     97,
+     102,
+     107,
+     112,
+     117,
+     122,
+     127,
+     132,
+     137,
+     142,
+     147,
+     152,
+     157,
+     162,
+     167,
+     172,
+     177,
+     182,
+     187,
+     192,
+     197,
+     202,
+     207,
+     212,
+     217,
+     222,
+     227,
+     232,
+     237,
+     242,
+     247
+    ],
+    "ruleId": "scale-bursts",
+    "severity": "medium",
+    "title": "logon bursts by address",
+    "ts": 1788300000000,
+    "tsEnd": 1788300123000
+   },
+   {
+    "count": 45,
+    "entities": {
+     "computer": "ws02",
+     "ipAddress": "192.0.2.3"
+    },
+    "escalation": null,
+    "key": "scale-bursts|192.0.2.3|29805000",
+    "refs": [
+     3,
+     13,
+     18,
+     23,
+     28,
+     33,
+     38,
+     43,
+     48,
+     53,
+     63,
+     68,
+     73,
+     78,
+     83,
+     88,
+     93,
+     98,
+     103,
+     113,
+     118,
+     123,
+     128,
+     133,
+     138,
+     143,
+     148,
+     153,
+     163,
+     168,
+     173,
+     178,
+     183,
+     188,
+     193,
+     198,
+     203,
+     213,
+     218,
+     223,
+     228,
+     233,
+     238,
+     243,
+     248
+    ],
+    "ruleId": "scale-bursts",
+    "severity": "medium",
+    "title": "logon bursts by address",
+    "ts": 1788300001000,
+    "tsEnd": 1788300123000
+   },
+   {
+    "count": 50,
+    "entities": {
+     "computer": "WS01",
+     "ipAddress": "192.0.2.4"
+    },
+    "escalation": null,
+    "key": "scale-bursts|192.0.2.4|29805000",
+    "refs": [
+     4,
+     9,
+     14,
+     19,
+     24,
+     29,
+     34,
+     39,
+     44,
+     49,
+     54,
+     59,
+     64,
+     69,
+     74,
+     79,
+     84,
+     89,
+     94,
+     99,
+     104,
+     109,
+     114,
+     119,
+     124,
+     129,
+     134,
+     139,
+     144,
+     149,
+     154,
+     159,
+     164,
+     169,
+     174,
+     179,
+     184,
+     189,
+     194,
+     199,
+     204,
+     209,
+     214,
+     219,
+     224,
+     229,
+     234,
+     239,
+     244,
+     249
+    ],
+    "ruleId": "scale-bursts",
+    "severity": "medium",
+    "title": "logon bursts by address",
+    "ts": 1788300001000,
+    "tsEnd": 1788300124000
+   },
+   {
+    "count": 50,
+    "entities": {
+     "computer": "ws02",
+     "ipAddress": "192.0.2.5"
+    },
+    "escalation": null,
+    "key": "scale-bursts|192.0.2.5|29805000",
+    "refs": [
+     5,
+     10,
+     15,
+     20,
+     25,
+     30,
+     35,
+     40,
+     45,
+     50,
+     55,
+     60,
+     65,
+     70,
+     75,
+     80,
+     85,
+     90,
+     95,
+     100,
+     105,
+     110,
+     115,
+     120,
+     125,
+     130,
+     135,
+     140,
+     145,
+     150,
+     155,
+     160,
+     165,
+     170,
+     175,
+     180,
+     185,
+     190,
+     195,
+     200,
+     205,
+     210,
+     215,
+     220,
+     225,
+     230,
+     235,
+     240,
+     245,
+     250
+    ],
+    "ruleId": "scale-bursts",
+    "severity": "medium",
+    "title": "logon bursts by address",
+    "ts": 1788300002000,
+    "tsEnd": 1788300124000
+   }
+  ],
+  "scale-collapsed": [
+   {
+    "count": 20,
+    "entities": {
+     "computer": "ws02",
+     "targetUser": "cat"
+    },
+    "escalation": "collapsed: 250 matching rows",
+    "key": "scale-collapsed|ws02\u0001cat",
+    "refs": [
+     11,
+     23,
+     35,
+     47,
+     59,
+     71,
+     83,
+     95,
+     107,
+     119,
+     131,
+     143,
+     155,
+     167,
+     179,
+     191,
+     203,
+     215,
+     227,
+     239
+    ],
+    "ruleId": "scale-collapsed",
+    "severity": "low",
+    "title": "logon",
+    "ts": 1788300005000,
+    "tsEnd": 1788300119000
+   },
+   {
+    "count": 20,
+    "entities": {
+     "computer": "WS03",
+     "targetUser": "bob"
+    },
+    "escalation": "collapsed: 250 matching rows",
+    "key": "scale-collapsed|ws03\u0001bob",
+    "refs": [
+     12,
+     24,
+     36,
+     48,
+     60,
+     72,
+     84,
+     96,
+     120,
+     132,
+     144,
+     156,
+     168,
+     180,
+     192,
+     204,
+     216,
+     228,
+     240,
+     108
+    ],
+    "ruleId": "scale-collapsed",
+    "severity": "low",
+    "title": "logon",
+    "ts": 1788300005000,
+    "tsEnd": 1788300119000
+   },
+   {
+    "count": 21,
+    "entities": {
+     "computer": "WS01",
+     "targetUser": "amy"
+    },
+    "escalation": "collapsed: 250 matching rows",
+    "key": "scale-collapsed|ws01\u0001amy",
+    "refs": [
+     1,
+     13,
+     25,
+     37,
+     49,
+     61,
+     73,
+     85,
+     97,
+     109,
+     121,
+     133,
+     145,
+     157,
+     169,
+     181,
+     193,
+     205,
+     217,
+     229,
+     241
+    ],
+    "ruleId": "scale-collapsed",
+    "severity": "low",
+    "title": "logon",
+    "ts": 1788300000000,
+    "tsEnd": 1788300120000
+   },
+   {
+    "count": 21,
+    "entities": {
+     "computer": "WS01",
+     "targetUser": "bob"
+    },
+    "escalation": "collapsed: 250 matching rows",
+    "key": "scale-collapsed|ws01\u0001bob",
+    "refs": [
+     4,
+     16,
+     28,
+     40,
+     52,
+     64,
+     76,
+     88,
+     100,
+     112,
+     124,
+     136,
+     148,
+     160,
+     172,
+     184,
+     196,
+     220,
+     232,
+     244,
+     208
+    ],
+    "ruleId": "scale-collapsed",
+    "severity": "low",
+    "title": "logon",
+    "ts": 1788300001000,
+    "tsEnd": 1788300121000
+   },
+   {
+    "count": 21,
+    "entities": {
+     "computer": "WS01",
+     "targetUser": "cat"
+    },
+    "escalation": "collapsed: 250 matching rows",
+    "key": "scale-collapsed|ws01\u0001cat",
+    "refs": [
+     7,
+     19,
+     31,
+     43,
+     55,
+     67,
+     79,
+     91,
+     103,
+     115,
+     127,
+     139,
+     151,
+     163,
+     175,
+     187,
+     199,
+     211,
+     223,
+     235,
+     247
+    ],
+    "ruleId": "scale-collapsed",
+    "severity": "low",
+    "title": "logon",
+    "ts": 1788300003000,
+    "tsEnd": 1788300123000
+   },
+   {
+    "count": 21,
+    "entities": {
+     "computer": "WS01",
+     "targetUser": "dan"
+    },
+    "escalation": "collapsed: 250 matching rows",
+    "key": "scale-collapsed|ws01\u0001dan",
+    "refs": [
+     10,
+     22,
+     34,
+     46,
+     70,
+     82,
+     94,
+     106,
+     118,
+     130,
+     142,
+     154,
+     166,
+     178,
+     190,
+     202,
+     214,
+     226,
+     238,
+     250,
+     58
+    ],
+    "ruleId": "scale-collapsed",
+    "severity": "low",
+    "title": "logon",
+    "ts": 1788300004000,
+    "tsEnd": 1788300124000
+   },
+   {
+    "count": 21,
+    "entities": {
+     "computer": "ws02",
+     "targetUser": "amy"
+    },
+    "escalation": "collapsed: 250 matching rows",
+    "key": "scale-collapsed|ws02\u0001amy",
+    "refs": [
+     5,
+     17,
+     29,
+     41,
+     53,
+     65,
+     77,
+     89,
+     101,
+     113,
+     125,
+     137,
+     149,
+     161,
+     173,
+     185,
+     197,
+     209,
+     221,
+     233,
+     245
+    ],
+    "ruleId": "scale-collapsed",
+    "severity": "low",
+    "title": "logon",
+    "ts": 1788300002000,
+    "tsEnd": 1788300122000
+   },
+   {
+    "count": 21,
+    "entities": {
+     "computer": "ws02",
+     "targetUser": "bob"
+    },
+    "escalation": "collapsed: 250 matching rows",
+    "key": "scale-collapsed|ws02\u0001bob",
+    "refs": [
+     20,
+     32,
+     44,
+     56,
+     68,
+     80,
+     92,
+     104,
+     116,
+     128,
+     140,
+     152,
+     164,
+     176,
+     188,
+     200,
+     212,
+     224,
+     236,
+     248,
+     8
+    ],
+    "ruleId": "scale-collapsed",
+    "severity": "low",
+    "title": "logon",
+    "ts": 1788300009000,
+    "tsEnd": 1788300123000
+   },
+   {
+    "count": 21,
+    "entities": {
+     "computer": "ws02",
+     "targetUser": "dan"
+    },
+    "escalation": "collapsed: 250 matching rows",
+    "key": "scale-collapsed|ws02\u0001dan",
+    "refs": [
+     2,
+     14,
+     26,
+     38,
+     50,
+     62,
+     74,
+     86,
+     98,
+     110,
+     122,
+     134,
+     146,
+     170,
+     182,
+     194,
+     206,
+     218,
+     230,
+     242,
+     158
+    ],
+    "ruleId": "scale-collapsed",
+    "severity": "low",
+    "title": "logon",
+    "ts": 1788300000000,
+    "tsEnd": 1788300120000
+   },
+   {
+    "count": 21,
+    "entities": {
+     "computer": "WS03",
+     "targetUser": "amy"
+    },
+    "escalation": "collapsed: 250 matching rows",
+    "key": "scale-collapsed|ws03\u0001amy",
+    "refs": [
+     9,
+     21,
+     33,
+     45,
+     57,
+     69,
+     81,
+     93,
+     105,
+     117,
+     129,
+     141,
+     153,
+     165,
+     177,
+     189,
+     201,
+     213,
+     225,
+     237,
+     249
+    ],
+    "ruleId": "scale-collapsed",
+    "severity": "low",
+    "title": "logon",
+    "ts": 1788300004000,
+    "tsEnd": 1788300124000
+   },
+   {
+    "count": 21,
+    "entities": {
+     "computer": "WS03",
+     "targetUser": "cat"
+    },
+    "escalation": "collapsed: 250 matching rows",
+    "key": "scale-collapsed|ws03\u0001cat",
+    "refs": [
+     3,
+     15,
+     27,
+     39,
+     51,
+     63,
+     75,
+     87,
+     99,
+     111,
+     123,
+     135,
+     147,
+     159,
+     171,
+     183,
+     195,
+     207,
+     219,
+     231,
+     243
+    ],
+    "ruleId": "scale-collapsed",
+    "severity": "low",
+    "title": "logon",
+    "ts": 1788300001000,
+    "tsEnd": 1788300121000
+   },
+   {
+    "count": 21,
+    "entities": {
+     "computer": "WS03",
+     "targetUser": "dan"
+    },
+    "escalation": "collapsed: 250 matching rows",
+    "key": "scale-collapsed|ws03\u0001dan",
+    "refs": [
+     6,
+     18,
+     30,
+     42,
+     54,
+     66,
+     78,
+     90,
+     102,
+     114,
+     126,
+     138,
+     150,
+     162,
+     174,
+     186,
+     198,
+     210,
+     222,
+     234,
+     246
+    ],
+    "ruleId": "scale-collapsed",
+    "severity": "low",
+    "title": "logon",
+    "ts": 1788300002000,
+    "tsEnd": 1788300122000
+   }
+  ],
+  "scale-grouped": [
+   {
+    "count": 62,
+    "entities": {
+     "computer": "WS01",
+     "ipAddress": "192.0.2.4",
+     "targetUser": "bob"
+    },
+    "escalation": null,
+    "key": "scale-grouped|bob",
+    "refs": [
+     4,
+     12,
+     16,
+     20,
+     24,
+     28,
+     32,
+     36,
+     40,
+     44,
+     48,
+     52,
+     56,
+     60,
+     64,
+     68,
+     72,
+     76,
+     80,
+     84,
+     88,
+     92,
+     96,
+     100,
+     104,
+     112,
+     116,
+     120,
+     124,
+     128,
+     132,
+     136,
+     140,
+     144,
+     148,
+     152,
+     156,
+     160,
+     164,
+     168,
+     172,
+     176,
+     180,
+     184,
+     188,
+     192,
+     196,
+     200,
+     204,
+     212,
+     216,
+     220,
+     224,
+     228,
+     232,
+     236,
+     240,
+     244,
+     248,
+     8,
+     108,
+     208
+    ],
+    "ruleId": "scale-grouped",
+    "severity": "low",
+    "title": "logons by account",
+    "ts": 1788300001000,
+    "tsEnd": 1788300123000
+   },
+   {
+    "count": 62,
+    "entities": {
+     "computer": "WS03",
+     "ipAddress": "192.0.2.3",
+     "targetUser": "cat"
+    },
+    "escalation": null,
+    "key": "scale-grouped|cat",
+    "refs": [
+     3,
+     7,
+     11,
+     15,
+     19,
+     23,
+     27,
+     31,
+     35,
+     39,
+     43,
+     47,
+     51,
+     55,
+     59,
+     63,
+     67,
+     71,
+     75,
+     79,
+     83,
+     87,
+     91,
+     95,
+     99,
+     103,
+     107,
+     111,
+     115,
+     119,
+     123,
+     127,
+     131,
+     135,
+     139,
+     143,
+     147,
+     151,
+     155,
+     159,
+     163,
+     167,
+     171,
+     175,
+     179,
+     183,
+     187,
+     191,
+     195,
+     199,
+     203,
+     207,
+     211,
+     215,
+     219,
+     223,
+     227,
+     231,
+     235,
+     239,
+     243,
+     247
+    ],
+    "ruleId": "scale-grouped",
+    "severity": "low",
+    "title": "logons by account",
+    "ts": 1788300001000,
+    "tsEnd": 1788300123000
+   },
+   {
+    "count": 63,
+    "entities": {
+     "computer": "WS01",
+     "ipAddress": "192.0.2.1",
+     "targetUser": "amy"
+    },
+    "escalation": null,
+    "key": "scale-grouped|amy",
+    "refs": [
+     1,
+     5,
+     9,
+     13,
+     17,
+     21,
+     25,
+     29,
+     33,
+     37,
+     41,
+     45,
+     49,
+     53,
+     57,
+     61,
+     65,
+     69,
+     73,
+     77,
+     81,
+     85,
+     89,
+     93,
+     97,
+     101,
+     105,
+     109,
+     113,
+     117,
+     121,
+     125,
+     129,
+     133,
+     137,
+     141,
+     145,
+     149,
+     153,
+     157,
+     161,
+     165,
+     169,
+     173,
+     177,
+     181,
+     185,
+     189,
+     193,
+     197,
+     201,
+     205,
+     209,
+     213,
+     217,
+     221,
+     225,
+     229,
+     233,
+     237,
+     241,
+     245,
+     249
+    ],
+    "ruleId": "scale-grouped",
+    "severity": "low",
+    "title": "logons by account",
+    "ts": 1788300000000,
+    "tsEnd": 1788300124000
+   },
+   {
+    "count": 63,
+    "entities": {
+     "computer": "ws02",
+     "ipAddress": "192.0.2.2",
+     "targetUser": "dan"
+    },
+    "escalation": null,
+    "key": "scale-grouped|dan",
+    "refs": [
+     2,
+     6,
+     10,
+     14,
+     18,
+     22,
+     26,
+     30,
+     34,
+     38,
+     42,
+     46,
+     50,
+     54,
+     62,
+     66,
+     70,
+     74,
+     78,
+     82,
+     86,
+     90,
+     94,
+     98,
+     102,
+     106,
+     110,
+     114,
+     118,
+     122,
+     126,
+     130,
+     134,
+     138,
+     142,
+     146,
+     150,
+     154,
+     162,
+     166,
+     170,
+     174,
+     178,
+     182,
+     186,
+     190,
+     194,
+     198,
+     202,
+     206,
+     210,
+     214,
+     218,
+     222,
+     226,
+     230,
+     234,
+     238,
+     242,
+     246,
+     250,
+     58,
+     158
+    ],
+    "ruleId": "scale-grouped",
+    "severity": "low",
+    "title": "logons by account",
+    "ts": 1788300000000,
+    "tsEnd": 1788300124000
+   }
+  ]
+ },
+ "maxRefs": 5000,
+ "rows": [
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 1,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "amy",
+   "ts": 1788300000000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 2,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "dan",
+   "ts": 1788300000000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 3,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "cat",
+   "ts": 1788300001000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 4,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "bob",
+   "ts": 1788300001000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 5,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "amy",
+   "ts": 1788300002000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 6,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "dan",
+   "ts": 1788300002000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 7,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "cat",
+   "ts": 1788300003000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 8,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "bob"
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 9,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "amy",
+   "ts": 1788300004000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 10,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "dan",
+   "ts": 1788300004000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 11,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "cat",
+   "ts": 1788300005000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 12,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "bob",
+   "ts": 1788300005000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 13,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "amy",
+   "ts": 1788300006000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 14,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "dan",
+   "ts": 1788300006000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 15,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "cat",
+   "ts": 1788300007000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 16,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "bob",
+   "ts": 1788300007000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 17,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "amy",
+   "ts": 1788300008000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 18,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "dan",
+   "ts": 1788300008000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 19,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "cat",
+   "ts": 1788300009000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 20,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "bob",
+   "ts": 1788300009000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 21,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "amy",
+   "ts": 1788300010000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 22,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "dan",
+   "ts": 1788300010000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 23,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "cat",
+   "ts": 1788300011000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 24,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "bob",
+   "ts": 1788300011000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 25,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "amy",
+   "ts": 1788300012000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 26,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "dan",
+   "ts": 1788300012000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 27,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "cat",
+   "ts": 1788300013000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 28,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "bob",
+   "ts": 1788300013000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 29,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "amy",
+   "ts": 1788300014000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 30,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "dan",
+   "ts": 1788300014000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 31,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "cat",
+   "ts": 1788300015000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 32,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "bob",
+   "ts": 1788300015000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 33,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "amy",
+   "ts": 1788300016000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 34,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "dan",
+   "ts": 1788300016000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 35,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "cat",
+   "ts": 1788300017000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 36,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "bob",
+   "ts": 1788300017000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 37,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "amy",
+   "ts": 1788300018000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 38,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "dan",
+   "ts": 1788300018000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 39,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "cat",
+   "ts": 1788300019000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 40,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "bob",
+   "ts": 1788300019000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 41,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "amy",
+   "ts": 1788300020000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 42,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "dan",
+   "ts": 1788300020000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 43,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "cat",
+   "ts": 1788300021000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 44,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "bob",
+   "ts": 1788300021000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 45,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "amy",
+   "ts": 1788300022000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 46,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "dan",
+   "ts": 1788300022000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 47,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "cat",
+   "ts": 1788300023000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 48,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "bob",
+   "ts": 1788300023000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 49,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "amy",
+   "ts": 1788300024000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 50,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "dan",
+   "ts": 1788300024000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 51,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "cat",
+   "ts": 1788300025000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 52,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "bob",
+   "ts": 1788300025000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 53,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "amy",
+   "ts": 1788300026000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 54,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "dan",
+   "ts": 1788300026000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 55,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "cat",
+   "ts": 1788300027000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 56,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "bob",
+   "ts": 1788300027000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 57,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "amy",
+   "ts": 1788300028000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 58,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "dan"
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 59,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "cat",
+   "ts": 1788300029000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 60,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "bob",
+   "ts": 1788300029000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 61,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "amy",
+   "ts": 1788300030000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 62,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "dan",
+   "ts": 1788300030000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 63,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "cat",
+   "ts": 1788300031000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 64,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "bob",
+   "ts": 1788300031000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 65,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "amy",
+   "ts": 1788300032000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 66,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "dan",
+   "ts": 1788300032000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 67,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "cat",
+   "ts": 1788300033000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 68,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "bob",
+   "ts": 1788300033000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 69,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "amy",
+   "ts": 1788300034000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 70,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "dan",
+   "ts": 1788300034000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 71,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "cat",
+   "ts": 1788300035000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 72,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "bob",
+   "ts": 1788300035000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 73,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "amy",
+   "ts": 1788300036000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 74,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "dan",
+   "ts": 1788300036000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 75,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "cat",
+   "ts": 1788300037000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 76,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "bob",
+   "ts": 1788300037000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 77,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "amy",
+   "ts": 1788300038000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 78,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "dan",
+   "ts": 1788300038000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 79,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "cat",
+   "ts": 1788300039000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 80,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "bob",
+   "ts": 1788300039000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 81,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "amy",
+   "ts": 1788300040000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 82,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "dan",
+   "ts": 1788300040000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 83,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "cat",
+   "ts": 1788300041000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 84,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "bob",
+   "ts": 1788300041000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 85,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "amy",
+   "ts": 1788300042000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 86,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "dan",
+   "ts": 1788300042000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 87,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "cat",
+   "ts": 1788300043000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 88,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "bob",
+   "ts": 1788300043000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 89,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "amy",
+   "ts": 1788300044000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 90,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "dan",
+   "ts": 1788300044000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 91,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "cat",
+   "ts": 1788300045000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 92,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "bob",
+   "ts": 1788300045000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 93,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "amy",
+   "ts": 1788300046000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 94,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "dan",
+   "ts": 1788300046000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 95,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "cat",
+   "ts": 1788300047000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 96,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "bob",
+   "ts": 1788300047000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 97,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "amy",
+   "ts": 1788300048000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 98,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "dan",
+   "ts": 1788300048000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 99,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "cat",
+   "ts": 1788300049000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 100,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "bob",
+   "ts": 1788300049000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 101,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "amy",
+   "ts": 1788300050000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 102,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "dan",
+   "ts": 1788300050000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 103,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "cat",
+   "ts": 1788300051000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 104,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "bob",
+   "ts": 1788300051000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 105,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "amy",
+   "ts": 1788300052000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 106,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "dan",
+   "ts": 1788300052000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 107,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "cat",
+   "ts": 1788300053000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 108,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "bob"
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 109,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "amy",
+   "ts": 1788300054000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 110,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "dan",
+   "ts": 1788300054000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 111,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "cat",
+   "ts": 1788300055000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 112,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "bob",
+   "ts": 1788300055000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 113,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "amy",
+   "ts": 1788300056000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 114,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "dan",
+   "ts": 1788300056000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 115,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "cat",
+   "ts": 1788300057000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 116,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "bob",
+   "ts": 1788300057000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 117,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "amy",
+   "ts": 1788300058000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 118,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "dan",
+   "ts": 1788300058000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 119,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "cat",
+   "ts": 1788300059000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 120,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "bob",
+   "ts": 1788300059000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 121,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "amy",
+   "ts": 1788300060000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 122,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "dan",
+   "ts": 1788300060000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 123,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "cat",
+   "ts": 1788300061000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 124,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "bob",
+   "ts": 1788300061000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 125,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "amy",
+   "ts": 1788300062000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 126,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "dan",
+   "ts": 1788300062000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 127,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "cat",
+   "ts": 1788300063000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 128,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "bob",
+   "ts": 1788300063000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 129,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "amy",
+   "ts": 1788300064000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 130,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "dan",
+   "ts": 1788300064000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 131,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "cat",
+   "ts": 1788300065000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 132,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "bob",
+   "ts": 1788300065000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 133,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "amy",
+   "ts": 1788300066000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 134,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "dan",
+   "ts": 1788300066000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 135,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "cat",
+   "ts": 1788300067000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 136,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "bob",
+   "ts": 1788300067000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 137,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "amy",
+   "ts": 1788300068000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 138,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "dan",
+   "ts": 1788300068000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 139,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "cat",
+   "ts": 1788300069000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 140,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "bob",
+   "ts": 1788300069000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 141,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "amy",
+   "ts": 1788300070000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 142,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "dan",
+   "ts": 1788300070000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 143,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "cat",
+   "ts": 1788300071000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 144,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "bob",
+   "ts": 1788300071000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 145,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "amy",
+   "ts": 1788300072000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 146,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "dan",
+   "ts": 1788300072000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 147,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "cat",
+   "ts": 1788300073000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 148,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "bob",
+   "ts": 1788300073000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 149,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "amy",
+   "ts": 1788300074000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 150,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "dan",
+   "ts": 1788300074000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 151,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "cat",
+   "ts": 1788300075000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 152,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "bob",
+   "ts": 1788300075000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 153,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "amy",
+   "ts": 1788300076000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 154,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "dan",
+   "ts": 1788300076000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 155,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "cat",
+   "ts": 1788300077000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 156,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "bob",
+   "ts": 1788300077000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 157,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "amy",
+   "ts": 1788300078000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 158,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "dan"
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 159,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "cat",
+   "ts": 1788300079000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 160,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "bob",
+   "ts": 1788300079000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 161,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "amy",
+   "ts": 1788300080000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 162,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "dan",
+   "ts": 1788300080000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 163,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "cat",
+   "ts": 1788300081000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 164,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "bob",
+   "ts": 1788300081000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 165,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "amy",
+   "ts": 1788300082000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 166,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "dan",
+   "ts": 1788300082000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 167,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "cat",
+   "ts": 1788300083000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 168,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "bob",
+   "ts": 1788300083000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 169,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "amy",
+   "ts": 1788300084000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 170,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "dan",
+   "ts": 1788300084000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 171,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "cat",
+   "ts": 1788300085000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 172,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "bob",
+   "ts": 1788300085000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 173,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "amy",
+   "ts": 1788300086000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 174,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "dan",
+   "ts": 1788300086000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 175,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "cat",
+   "ts": 1788300087000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 176,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "bob",
+   "ts": 1788300087000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 177,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "amy",
+   "ts": 1788300088000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 178,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "dan",
+   "ts": 1788300088000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 179,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "cat",
+   "ts": 1788300089000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 180,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "bob",
+   "ts": 1788300089000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 181,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "amy",
+   "ts": 1788300090000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 182,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "dan",
+   "ts": 1788300090000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 183,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "cat",
+   "ts": 1788300091000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 184,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "bob",
+   "ts": 1788300091000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 185,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "amy",
+   "ts": 1788300092000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 186,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "dan",
+   "ts": 1788300092000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 187,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "cat",
+   "ts": 1788300093000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 188,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "bob",
+   "ts": 1788300093000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 189,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "amy",
+   "ts": 1788300094000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 190,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "dan",
+   "ts": 1788300094000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 191,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "cat",
+   "ts": 1788300095000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 192,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "bob",
+   "ts": 1788300095000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 193,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "amy",
+   "ts": 1788300096000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 194,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "dan",
+   "ts": 1788300096000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 195,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "cat",
+   "ts": 1788300097000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 196,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "bob",
+   "ts": 1788300097000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 197,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "amy",
+   "ts": 1788300098000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 198,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "dan",
+   "ts": 1788300098000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 199,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "cat",
+   "ts": 1788300099000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 200,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "bob",
+   "ts": 1788300099000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 201,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "amy",
+   "ts": 1788300100000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 202,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "dan",
+   "ts": 1788300100000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 203,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "cat",
+   "ts": 1788300101000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 204,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "bob",
+   "ts": 1788300101000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 205,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "amy",
+   "ts": 1788300102000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 206,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "dan",
+   "ts": 1788300102000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 207,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "cat",
+   "ts": 1788300103000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 208,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "bob"
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 209,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "amy",
+   "ts": 1788300104000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 210,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "dan",
+   "ts": 1788300104000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 211,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "cat",
+   "ts": 1788300105000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 212,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "bob",
+   "ts": 1788300105000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 213,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "amy",
+   "ts": 1788300106000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 214,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "dan",
+   "ts": 1788300106000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 215,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "cat",
+   "ts": 1788300107000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 216,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "bob",
+   "ts": 1788300107000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 217,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "amy",
+   "ts": 1788300108000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 218,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "dan",
+   "ts": 1788300108000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 219,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "cat",
+   "ts": 1788300109000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 220,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "bob",
+   "ts": 1788300109000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 221,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "amy",
+   "ts": 1788300110000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 222,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "dan",
+   "ts": 1788300110000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 223,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "cat",
+   "ts": 1788300111000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 224,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "bob",
+   "ts": 1788300111000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 225,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "amy",
+   "ts": 1788300112000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 226,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "dan",
+   "ts": 1788300112000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 227,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "cat",
+   "ts": 1788300113000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 228,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "bob",
+   "ts": 1788300113000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 229,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "amy",
+   "ts": 1788300114000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 230,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "dan",
+   "ts": 1788300114000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 231,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "cat",
+   "ts": 1788300115000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 232,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "bob",
+   "ts": 1788300115000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 233,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "amy",
+   "ts": 1788300116000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 234,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "dan",
+   "ts": 1788300116000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 235,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "cat",
+   "ts": 1788300117000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 236,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "bob",
+   "ts": 1788300117000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 237,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "amy",
+   "ts": 1788300118000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 238,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "dan",
+   "ts": 1788300118000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 239,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "cat",
+   "ts": 1788300119000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 240,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "bob",
+   "ts": 1788300119000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 241,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "amy",
+   "ts": 1788300120000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 242,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "dan",
+   "ts": 1788300120000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 243,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "cat",
+   "ts": 1788300121000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 244,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "bob",
+   "ts": 1788300121000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 245,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "amy",
+   "ts": 1788300122000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 246,
+   "ipAddress": "192.0.2.1",
+   "targetUser": "dan",
+   "ts": 1788300122000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 247,
+   "ipAddress": "192.0.2.2",
+   "targetUser": "cat",
+   "ts": 1788300123000
+  },
+  {
+   "computer": "ws02",
+   "eventId": 4624,
+   "id": 248,
+   "ipAddress": "192.0.2.3",
+   "targetUser": "bob",
+   "ts": 1788300123000
+  },
+  {
+   "computer": "WS03",
+   "eventId": 4624,
+   "id": 249,
+   "ipAddress": "192.0.2.4",
+   "targetUser": "amy",
+   "ts": 1788300124000
+  },
+  {
+   "computer": "WS01",
+   "eventId": 4624,
+   "id": 250,
+   "ipAddress": "192.0.2.5",
+   "targetUser": "dan",
+   "ts": 1788300124000
+  }
+ ],
+ "rules": [
+  {
+   "entities": [
+    "computer",
+    "targetUser"
+   ],
+   "id": "scale-collapsed",
+   "severity": "low",
+   "source": "events",
+   "title": "logon",
+   "where": {
+    "eventId": 4624
+   }
+  },
+  {
+   "entities": [
+    "targetUser",
+    "computer",
+    "ipAddress"
+   ],
+   "group_by": [
+    "targetUser"
+   ],
+   "id": "scale-grouped",
+   "severity": "low",
+   "source": "events",
+   "title": "logons by account",
+   "where": {
+    "eventId": 4624
+   }
+  },
+  {
+   "entities": [
+    "ipAddress",
+    "computer"
+   ],
+   "group_by": [
+    "ipAddress"
+   ],
+   "id": "scale-bursts",
+   "severity": "medium",
+   "source": "events",
+   "threshold": ">= 4",
+   "title": "logon bursts by address",
+   "where": {
+    "eventId": 4624
+   },
+   "window": "30s"
+  }
+ ]
+}

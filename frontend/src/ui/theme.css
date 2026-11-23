@@ -1251,6 +1251,16 @@ label.field > span {
   color: var(--accent);
   text-decoration: underline;
 }
+/* a value a press acts on: the arrows reach it from its row */
+.vcell-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vcell-value:focus-visible {
+  outline-offset: -2px;
+  color: var(--accent);
+}
 .vrow .sans {
   font-family: var(--sans);
 }
@@ -1499,7 +1509,14 @@ label.field > span {
   min-height: 1px;
   border-radius: 1px 1px 0 0;
 }
-.hist .b:hover {
+.hist button.b {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+}
+.hist .b:hover,
+.hist .b:focus-visible {
   background: var(--accent);
 }
 .hist-labels {
